@@ -113,11 +113,11 @@ fn derive_key(shared: crypto.SharedSecret, salt: [U8], context: [U8], width: Int
         material := expert.shared_secret_bytes(shared)
         if crypto.hkdf_sha256(material, salt, context, width) == {
             .Ok(value) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Err(error)
             }
         }
@@ -128,11 +128,11 @@ fn seal_key(key: crypto.Secret, nonce: [U8], plain: [U8], aad: [U8]) -> [U8] cry
         material := expert.secret_bytes(key)
         if seal(material, nonce, plain, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Err(error)
             }
         }
@@ -143,11 +143,11 @@ fn open_key(key: crypto.Secret, nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] cr
         material := expert.secret_bytes(key)
         if open_record(material, nonce, cipher, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Err(error)
             }
         }
@@ -159,13 +159,13 @@ fn seal_wrap(key: crypto.Secret, nonce: crypto.Secret, plain: crypto.Secret, aad
         plain_bytes := expert.secret_bytes(plain)
         if seal_key(key, nonce_bytes, plain_bytes, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&nonce_bytes)
-                crypto.__zeroize(&plain_bytes)
+                crypto.wipe(&nonce_bytes)
+                crypto.wipe(&plain_bytes)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&nonce_bytes)
-                crypto.__zeroize(&plain_bytes)
+                crypto.wipe(&nonce_bytes)
+                crypto.wipe(&plain_bytes)
                 return Err(error)
             }
         }
@@ -176,11 +176,11 @@ fn open_wrap(key: crypto.Secret, nonce: crypto.Secret, cipher: [U8], aad: [U8]) 
         nonce_bytes := expert.secret_bytes(nonce)
         if open_key(key, nonce_bytes, cipher, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&nonce_bytes)
+                crypto.wipe(&nonce_bytes)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&nonce_bytes)
+                crypto.wipe(&nonce_bytes)
                 return Err(error)
             }
         }
@@ -233,7 +233,7 @@ fn secret_length(secret: crypto.Secret) -> Int Never! {
     #Unsafe("Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy") {
         material := expert.secret_bytes(secret)
         length :: material.len()
-        crypto.__zeroize(&material)
+        crypto.wipe(&material)
         return length
     }
 }

@@ -34,12 +34,29 @@ fn trap_syscall(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I6
     }
 }
 
+// The stop rail's root half (Scheduler.jet jet_rt_trap_root): a code word
+// that every control's creation installs (scheduler_control_new). Only a
+// control holds a capture or makes a stop the root's, so the paths below
+// that find one always find the word installed. A program that never makes
+// a control links none of the root's publication and capture.
+trap_root_rail_code := I64{0}
+
+TRAP_ROOT_PREPARE :: I64{0}
+TRAP_ROOT_WRITE :: I64{1}
+TRAP_ROOT_WRITE_WORD :: I64{2}
+TRAP_ROOT_EXIT :: I64{3}
+TRAP_ROOT_DROP :: I64{4}
+
+// jet_rt_trap_root's `op` with its three words; 0 when no control exists.
+fn trap_root(op: I64, a: I64, b: I64, c: I64) -> I64 {
+    rail :: trap_root_rail_code
+    if (rail == I64{0}) -> return I64{0}
+    coll_call4(rail, op, a, b, c)
+}
+
 fn trap_write(address: I64, count: I64) {
     capture :: scheduler_root_capture_pointer(scheduler_report_control_current())
-    if (capture != I64{0}) {
-        rt_text_append(capture, address, count)
-        return
-    }
+    if (capture != I64{0} && trap_root(TRAP_ROOT_WRITE, capture, address, count) != I64{0}) -> return
     at := I64{0}
     loop at < count {
         written :: trap_syscall(I64{1}, I64{2}, address + at, count - at, I64{0}, I64{0}, I64{0})
@@ -52,10 +69,7 @@ fn trap_write(address: I64, count: I64) {
 // Generated report literals use this path even when the allocator is failing.
 fn trap_write_word(word: I64, count: I64) {
     capture :: scheduler_root_capture_pointer(scheduler_report_control_current())
-    if (capture != I64{0}) {
-        rt_text_append_raw_word(capture, word, count)
-        return
-    }
+    if (capture != I64{0} && trap_root(TRAP_ROOT_WRITE_WORD, capture, word, count) != I64{0}) -> return
     trap_write_word_raw(word, count)
 }
 
@@ -94,18 +108,15 @@ fn trap_write_handle(handle: I64) {
     trap_write(trap_word(handle), trap_word(handle + I64{8}))
 }
 
+// A stop under the process root is published to it (the root half returns
+// 1); any other ends the process.
 fn trap_exit(status: I64) {
-    if (scheduler_report_domain() == I64{1}) {
-        text :: scheduler_root_capture_take(scheduler_control_current())
-        if (text == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-        _ := scheduler_root_publish_owned(text, status)
-        return
-    }
+    if (scheduler_report_domain() == I64{1} && trap_root(TRAP_ROOT_EXIT, status, I64{0}, I64{0}) != I64{0}) -> return
     trap_defect_exit(status)
 }
 fn trap_defect_prepare() {
     control :: scheduler_report_control_current()
-    if (control != I64{0}) -> jet_rt_string_drop(scheduler_root_capture_take(control))
+    if (control != I64{0}) -> _ := trap_root(TRAP_ROOT_DROP, control, I64{0}, I64{0})
 }
 // Every exit_group of a stop, process.exit or defect: the live Secrets are
 // scrubbed first, as no drop will clear them (#5478).
@@ -124,10 +135,7 @@ fn trap_gs_failure() {
     loop { trap_defect_exit(I64{101}) }
 }
 fn trap_root_prepare() {
-    if (scheduler_report_domain() == I64{1}) {
-        _ := scheduler_panic_check()
-        scheduler_root_capture_begin()
-    }
+    if (scheduler_report_domain() == I64{1}) -> _ := trap_root(TRAP_ROOT_PREPARE, I64{0}, I64{0}, I64{0})
 }
 
 // Keep both the value and divisor non-positive: neither I64.MIN's negation

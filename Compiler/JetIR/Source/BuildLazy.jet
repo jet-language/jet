@@ -600,6 +600,102 @@ fn ir_lazy_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, 
     Val(ir_lazy_route(&m, p, &b, symbol, ty, operands, span))
 }
 
+// Iter builtins lowered over the List under them rather than through an
+// Iter: `xs.last_index_of(item)` scans the List from its end
+// (ir_list_route), and `xs.cycle(n).to_list()` on a List of scalars fills
+// the List in place (ir_lazy_cycle_list). None for any other builtin.
+fn ir_lazy_fused(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TBuiltinOp, args: [Int], span: Span) -> Int? Never! {
+    if operation == .IterLastIndexOf && args.len() == 1 && ir_body_node(p, b, receiver).kind == .BuiltinMethod(list_value, lazy_operation, _) {
+        if lazy_operation == .ListLazy && ir_untag(ir_ty(p, b, list_value)) == .List(element) && ir_type_size(&m, p, element) > 0 {
+            list :: ir_expr(&m, p, &b, list_value)
+            if ir_failed(b) -> return Val(-1)
+            needle :: ir_expr(&m, p, &b, args[0])
+            if ir_failed(b) -> return Val(-1)
+            return ir_route_inline(&m, p, &b, "jet_list_last_index_of", [Int]{list, needle}, ty, span)
+        }
+    }
+    if (operation == .IterToList || operation == .IterCollect) && args.len() == 0 && ir_body_node(p, b, receiver).kind == .BuiltinMethod(cycled, cycle_operation, cycle_args) {
+        if cycle_operation == .IterCycle && cycle_args.len() == 1 && ir_body_node(p, b, cycled).kind == .BuiltinMethod(source_list, source_operation, _) {
+            if source_operation == .ListLazy && ir_untag(ir_ty(p, b, source_list)) == .List(item) && ir_untag(ty) == .List(_) && ir_lazy_scalar(&m, p, item) {
+                return Val(ir_lazy_cycle_list(&m, p, &b, source_list, cycle_args[0], item, ty, span))
+            }
+        }
+    }
+    None
+}
+
+// Whether values of `ty` are scalars: copies no drop can observe.
+fn ir_lazy_scalar(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    row :: ir_value_type(&m, p, ty) ?? return false
+    kind :: m.types[row].kind
+    kind == .Bool || kind == .Int || kind == .Word || kind == .Float || kind == .Float32 || kind == .Char
+}
+
+// `xs.cycle(n).to_list()`: the first max(n, 0) elements of xs repeated, none
+// when xs is empty, copied into one buffer of exactly that many elements. A
+// count past what memory holds asks for 2^62 bytes, which fails as the
+// Iter's growing buffer would.
+fn ir_lazy_cycle_list(m: &IRModule, p: IRProgram, b: &IRBuilder, list_value: Int, count_value: Int, element: Type, ty: Type, span: Span) -> Int Never! {
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    row :: ir_value_type(&m, p, element) ?? return ir_type_fail(&b, span, element)
+    list :: ir_expr(&m, p, &b, list_value)
+    if ir_failed(b) -> return -1
+    counted :: ir_expr(&m, p, &b, count_value)
+    if ir_failed(b) -> return -1
+    count :: ir_lazy_count(&m, &b, counted, span)
+    if ir_failed(b) -> return -1
+    stride :: ir_list_stride(m, row)
+    word_row :: ir_word_row(&m)
+    length :: ir_list_length(&m, &b, list)
+    source :: ir_list_data(&m, &b, list)
+    zero :: ir_word_const(&m, &b, 0)
+    total :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, total, 0, -1, -1, b.line)
+    some :: ir_bool_op(&m, &b, IROp.Lt, zero, length)
+    ir_open_if(&b.f, some, b.line)
+    positive :: ir_bool_op(&m, &b, IROp.Lt, zero, count)
+    ir_open_if(&b.f, positive, b.line)
+    ir_emit(&b.f, IROp.Copy, total, count, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    out :: ir_list_empty(&m, &b, result_row)
+    data :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, data, 0, -1, -1, b.line)
+    filled :: ir_bool_op(&m, &b, IROp.Ne, total, zero)
+    ir_open_if(&b.f, filled, b.line)
+    bytes :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, bytes, 1 << 62, -1, -1, b.line)
+    limit :: ir_word_const(&m, &b, (1 << 62) /% stride)
+    fits :: ir_bool_op(&m, &b, IROp.Le, total, limit)
+    ir_open_if(&b.f, fits, b.line)
+    width :: ir_word_const(&m, &b, stride)
+    wanted :: ir_word_op(&m, &b, IROp.Mul, total, width)
+    ir_emit(&b.f, IROp.Copy, bytes, wanted, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    eight :: ir_word_const(&m, &b, 8)
+    storage :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    ir_emit(&b.f, IROp.Copy, data, storage, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_route_list_header(&m, &b, out, 0, data, total)
+    at :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, at, 0, -1, -1, b.line)
+    index :: ir_count_open(&m, &b, total)
+    from :: ir_element_address(&m, &b, source, at, stride)
+    item :: ir_load_at(&m, &b, from, 0, row)
+    duplicate :: ir_copy_value(&m, p, &b, item, span)
+    to :: ir_element_address(&m, &b, data, index, stride)
+    ir_store_at(&m, p, &b, to, 0, duplicate)
+    one :: ir_word_const(&m, &b, 1)
+    ir_emit(&b.f, IROp.Add, at, at, one, IR_OVERFLOW_WRAP, b.line)
+    wrapped :: ir_bool_op(&m, &b, IROp.Eq, at, length)
+    ir_open_if(&b.f, wrapped, b.line)
+    ir_emit(&b.f, IROp.Const, at, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_count_close(&m, &b, index)
+    ir_release(&m, &b, list)
+    out
+}
+
 // An Iter route over evaluated operands, the source first. Every route takes
 // the source Iter over; other owned operands go by value when fresh, borrowed
 // ones are released afterwards.

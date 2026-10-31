@@ -49,8 +49,9 @@ const manifest = 'Compiler/JetRuntime/sources.list';
 const sources = readFileSync(join(repo, manifest), 'utf8').split('\n').map(row => row.trim()).filter(row => row && !row.startsWith('#'));
 const source = inventory([manifest, 'Compiler/JetRuntime/package.jet', ...sources]);
 // The runtime object's producer: the IR builder/optimizer/selector and the
-// x86-64 encoder, object writer and linker it uses.
-const backend = inventory([...jetFiles('Compiler/JetIR/Source'), ...jetFiles('Compiler/JetBackend/Source')]);
+// x86-64 encoder, object writer and linker it uses, and the WebAssembly
+// selector and encoder of its web partition.
+const backend = inventory([...jetFiles('Compiler/JetIR/Source'), ...jetFiles('Compiler/JetBackend/Source'), ...jetFiles('Compiler/JetWeb/Source'), ...jetFiles('Compiler/JetWasm/Source')]);
 const lifecycle = inventory(['Compiler/JetRuntime/lifecycle.list']);
 const platformInputs = platform.map(path => ({ path, sha256: sha256(readFileSync(path)), language: 'C', role: 'platform' }));
 const compilerSha256 = sha256(readFileSync(jet));
@@ -164,6 +165,9 @@ if (existsSync(join(out, 'native.key'))) {
     noRust(join(out, cached.key, 'jet_runtime_jet.o'));
     noRust(join(out, cached.key, 'jet_runtime.pack.o'));
     noRust(join(out, cached.key, 'jet_runtime.image'));
+    for (const name of ['jet_runtime.wasm', 'jet_runtime.wasm.tsv']) {
+      if (!existsSync(join(out, cached.key, name))) throw Error(`no ${name}`);
+    }
     publishPlatform();
     console.log(join(out, cached.key, 'jet_runtime.pack.o'));
     process.exit(0);
@@ -188,12 +192,15 @@ try {
   const pack = join(work, 'jet_runtime.pack.o');
   // The pack prelinked at the run base, which `jet run` binds programs to.
   const image = join(work, 'jet_runtime.image');
+  // The runtime partition of a web build (JetWeb Build.jet) and its receipt.
+  const web = join(work, 'jet_runtime');
   const policy = {
     JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix,
     JET_FRONT_LIBRARY_LIFECYCLE: join(repo, 'Compiler/JetRuntime/lifecycle.list'),
     JET_FRONT_RUNTIME_PACK_OUTPUT: pack,
     JET_FRONT_RUNTIME_IMAGE_OUTPUT: image,
     JET_FRONT_RUNTIME_PLATFORM_INPUTS: platform.join('\n'),
+    JET_FRONT_RUNTIME_WEB_OUTPUT: web,
   };
   // The runtime-library seam in the hosted source loader (Request.jet
   // jet_cli_compile_prepared) under `jet doc` (the checked program stopped
@@ -223,13 +230,15 @@ try {
   copyFileSync(prefix + '.exports', join(directory, 'runtime.exports'));
   copyFileSync(pack, join(directory, 'jet_runtime.pack.o'));
   copyFileSync(image, join(directory, 'jet_runtime.image'));
+  copyFileSync(web + '.wasm', join(directory, 'jet_runtime.wasm'));
+  copyFileSync(web + '.wasm.tsv', join(directory, 'jet_runtime.wasm.tsv'));
   for (const library of built) {
     const target = join(directory, 'foreign', library.name);
     mkdirSync(target, { recursive: true });
     copyFileSync(library.archive, join(target, `lib${library.name}.a`));
     for (const notice of ['LICENSE', 'VERSION']) if (existsSync(join(library.source, notice))) copyFileSync(join(library.source, notice), join(target, notice));
   }
-  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), imageSha256: sha256(readFileSync(image)), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, vendoredC: { recipeSha256: vendorRecipeSha256, archives: vendoredArchives }, compilerSha256, recipeSha256 };
+  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), imageSha256: sha256(readFileSync(image)), webSha256: sha256(readFileSync(web + '.wasm')), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, vendoredC: { recipeSha256: vendorRecipeSha256, archives: vendoredArchives }, compilerSha256, recipeSha256 };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   publishPlatform();

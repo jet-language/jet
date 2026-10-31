@@ -184,8 +184,13 @@ prints the command palette and exits 0: every canonical command under its
 category (Build & Run, Projects & Environments, Packages, Jetos, Development
 Server, Reference), then the Error Codes row and a pointer to `jet help`. The
 palette is the same static text with or without a terminal and never opens
-`/dev/tty`. Only `jet repl` starts the REPL; it reports E2104 until the REPL is
-built. `?` is not a command: `jet ?` gets the unknown-command E2101.
+`/dev/tty`. Only `jet repl` starts the REPL: a line session that checks each
+input against the session so far, then builds and runs it after the earlier
+statements; `:help` lists its meta-commands. Raw-terminal keys, `--console`,
+`:rerun`, `:history` and `?name` docs for names the session did not define
+report E2104 until they are built (#6195). `jet eval <expression>` runs one REPL
+turn and prints its value. `?` is not a command: `jet ?` gets the
+unknown-command E2101.
 
 The root index below mirrors `jet help` from this checkout's compiler. It lists
 the most used commands first, in the order `node Tools/cli-census/census.mjs`
@@ -780,6 +785,25 @@ size, kind}`. A source that does not check reports its diagnostics on stderr
 is the memory-ledger audit; the dependency audit is refused with E2104
 until it is ported.
 
+`jet audit foreign [--json] [<entry.jet>]` (also `jet inspect audit foreign`)
+reports the foreign code of an executable entry, chosen as `audit copies`
+chooses it. It checks the entry and links its image in memory as `jet run`
+does; the image is never written or run. The text form has one line per fact:
+`foreign declarations:` (`none`, or a count followed by one
+`  <path>:<line>  <language>  <name> -> <symbol>` row per `#Import(<lang>)` or
+`#FFI(<lang>)` declaration), `FFI effects reached:`, `C libraries linked:`,
+`dynamic loader:` (the ELF interpreter, or `none (static ELF, no needed
+libraries)`), `needed libraries:` when the image names any, and
+`host effects:`, the effects the entry asks of its host, which Jet's runtime
+serves through system calls. The last line, `foreign code: none`, appears only
+when the declarations, `FFI` effects, C libraries and loader needs are all
+empty; otherwise it reads `foreign code: present`. `--json` emits the
+`audit.foreign` status envelope with `declarations` (`{path, line, language,
+name, symbol}`), `ffi_effects`, `c_libraries`, `loader` (`{interpreter,
+dynamic, needed}`), `host_effects` and `foreign_free`. The exit code is 0
+whenever the report runs; a source that does not check reports its
+diagnostics as `audit copies` does, with exit 1.
+
 The Jet-hosted `lint --a11y` and `lint --complexity` leaves use the checked
 compiler diagnostics. Accessibility findings exit 1 and go to stderr, as
 diagnostic JSON Lines under `--json`; a clean machine invocation emits no
@@ -973,6 +997,13 @@ covers (`loop <function> <file>:<line>`): the proved extent and element type,
 the aliasing, early-exit, effect and cross-iteration verdicts, how many list
 accesses sema proved in bounds and how many of them the build lowered with no
 bounds check. Each loop lowers one scalar round per index.
+Last it names the program's `main:`. A program gets `program-owned` when none
+of its stop edges cleans up anything (each edge only returns or frees memory)
+and every runtime route it calls behaves the same with no process root. It
+then runs under a main of its own with no stop points. A stop writes the same
+report and exits with the same code as under the root. Any other program
+gets `process root:` and the first function, route or stop edge that needs
+the root.
 
 Live inspection consumes only the runtime's private snapshot. The runtime writes
 raw records: little-endian words, and texts as a byte length then the bytes.
@@ -994,8 +1025,8 @@ Text and JSON output share the same validated snapshot, including published
 rendered values and sorted shape identities. No process memory is read.
 
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
-fields, and the unbuilt functions and the loop proofs (`loop_proofs`) as text
-rows.
+fields, the unbuilt functions and the loop proofs (`loop_proofs`) as text
+rows, and the program's main (`main`) as text.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,

@@ -41,7 +41,7 @@ fn booking_distributions() -> [testing.HistoryDistribution] {
 }
 
 fn booking_operation(
-    index: testing.Count,
+    index: Int,
     name: String,
     argument: testing.HandleID?,
     creates: testing.HandleID?,
@@ -97,7 +97,7 @@ fn booking_operation(
             )
         }
     }
-    depends_on :: if index == 0 -> [testing.Count]{} else -> [testing.Count]{index - 1}
+    depends_on :: if index == 0 -> [Int]{} else -> [Int]{index - 1}
     testing.HistoryOperation{
         index: index,
         name: name,
@@ -111,7 +111,7 @@ fn booking_operation(
     }
 }
 
-fn booking_schedule(index: testing.Count, name: String) -> testing.HistoryScheduleChoice {
+fn booking_schedule(index: Int, name: String) -> testing.HistoryScheduleChoice {
     task_id :: testing.TaskID{value: index % 2}
     event :: testing.EventID{value: index + 1}
     choice :: if name == "timeout" -> "deliver-late" else -> "fifo"
@@ -319,7 +319,7 @@ fn booking_valid(candidate: testing.TypedHistoryCase<BookingCommand>) -> Bool {
                 if operation.depends_on.len() != 0 -> return false
             }
             else -> {
-                expected_depends :: [testing.Count]{index - 1}
+                expected_depends :: [Int]{index - 1}
                 if operation.depends_on != expected_depends -> return false
                 previous_task :: testing.TaskID{value: (index - 1) % 2}
                 previous_event :: testing.EventID{value: index}
@@ -407,8 +407,8 @@ fn booking_rebuild(
 // uses the supplied deterministic RNG for bounded extension choices.
 fn booking_generate(
     rng: testing.HistoryRNG,
-    case_index: testing.Count,
-    max_steps: testing.Count,
+    case_index: Int,
+    max_steps: Int,
 ) -> testing.TypedHistoryCase<BookingCommand>? {
     if max_steps < 3 -> return None
     case_seed :: rng.next_u64()

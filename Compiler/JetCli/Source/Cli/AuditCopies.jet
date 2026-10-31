@@ -27,11 +27,18 @@ struct JetCLICopySite {
     end: Int
 }
 
-// main.rs `"audit"`: `copies [file]` and a `.jet` argument audit copies.
-// `words` is the argv after `copies` (flags included); the target is its first
-// non-flag word, else the project around the working directory, and a
-// directory resolves to its stock entry as `jet lint` resolves one.
-fn jet_cli_audit_copies_plan(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+// The entry-based `jet audit` subjects.
+enum JetCLIAuditSubject {
+    Copies
+    Foreign
+}
+
+// main.rs `"audit"`: `copies [file]` and a `.jet` argument audit copies;
+// `foreign [file]` audits foreign code. `words` is the argv after the subject
+// (flags included); the target is its first non-flag word, else the project
+// around the working directory, and a directory resolves to its stock entry
+// as `jet lint` resolves one.
+fn jet_cli_audit_entry_plan(subject: JetCLIAuditSubject, words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     target := ""
     loop word in words {
         if target == "" && !word.starts_with("-") -> target = word
@@ -52,6 +59,7 @@ fn jet_cli_audit_copies_plan(words: [String], color: Bool, json: Bool) -[FS, Env
         }
     }
     source :: cli_files.read(file) ?? return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)}", JET_DRIVER_EXIT_USER_ERROR)
+    if subject == .Foreign -> return JetCLIPlan.AuditForeign{file: file, source: source, color: color, json: json, notice: notice}
     JetCLIPlan.AuditCopies{file: file, source: source, color: color, json: json, notice: notice}
 }
 

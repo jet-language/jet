@@ -34,6 +34,9 @@ use core.text.runtime.kernel_text_width as text_width
 use core.text.runtime.unicode_assets as text_asset
 use core.text.runtime.top_unicode_tables as text_tables
 use core.text.runtime.assets.unicode_name_index as text_unicode_name_index
+use __core_text_collation_table as collation_table
+use core.text.runtime.kernel_text_normal as text_normal
+use core.text.runtime.assets.unicode_ccc as text_ccc
 
 /// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
 struct Cursor {
@@ -1106,4 +1109,216 @@ fn unicode_name(cp: Int) -> String Never! {
     name := [U8]{}
     loop at in span.start..<(span.start + span.length) -> &name.push(names[at])
     String.from_bytes(name) ?? "UNASSIGNED"
+}
+
+// D-TEXT-COLLATE1=A: Unicode's default collation order. This is UTS #10 over
+// the CLDR 48 root table for Unicode 17.0.0 (Core/Text/CollationTable.jet),
+// and English uses it untailored. Variable weighting is non-ignorable. Levels
+// 1-3 are followed by an identical level on the NFD scalars, so `collate` is
+// Equal only for canonically equivalent text. String `<` and sort() keep byte
+// order, which is LC_COLLATE=C order.
+
+/// Compares `left` and `right` in Unicode's default collation order, the
+/// order English speakers read (`apple` < `Banana` < `éclair` < `zebra`).
+fn collate(left: String, right: String) -> Ordering Never! {
+    compare_collation_keys(collation_key(left), collation_key(right))
+}
+
+/// The bytes whose byte order is `collate` order: sort by
+/// `collation_key(value)` to build one key per item instead of comparing
+/// with `collate` at every step.
+fn collation_key(value: String) -> [U8] Never! {
+    scalars :: decode_scalars(text_normal.normalize(value, false, false))
+    elements :: collation_elements(scalars)
+    key := [U8]{}
+    loop level in 0..<3 {
+        width :: if level == 2 -> 1 else -> 2
+        at := level
+        loop at < elements.len() {
+            weight :: elements[at]
+            if weight != 0 -> push_collation_weight(&key, weight, width)
+            at += 3
+        }
+        push_collation_weight(&key, 0, width)
+    }
+    loop scalar in scalars -> push_collation_weight(&key, scalar, 3)
+    key
+}
+
+fn compare_collation_keys(left: [U8], right: [U8]) -> Ordering Never! {
+    at := 0
+    loop at < left.len() && at < right.len() {
+        if left[at] != right[at] -> return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
+        at += 1
+    }
+    left.len() <=> right.len()
+}
+
+fn push_collation_weight(key: &[U8], weight: Int, width: Int) Never! {
+    loop at in 0..<width -> &key.push(U8{(weight >> (8 * (width - 1 - at))).bit_and(Int{255})})
+}
+
+COLLATION_ABSENT :: 16777215
+
+// UTS #10 S2: the collation elements of NFD scalars as flat (primary,
+// secondary, tertiary) triples. Each step takes the longest contiguous table
+// key, then extends it with unblocked non-starters (discontiguous contraction).
+fn collation_elements(scalars: [Int]) -> [Int] Never! {
+    // #4318/#4392: bind each asset once and keep its views in this scope.
+    elements_asset :: collation_table.COLLATION_ELEMENTS
+    contractions_asset :: collation_table.COLLATION_CONTRACTIONS
+    ideographs_asset :: collation_table.COLLATION_UNIFIED_IDEOGRAPHS
+    ccc_asset :: text_ccc.UNICODE_CCC
+    assert(text_asset.valid(elements_asset, 9, 7), "invalid collation asset schema/version/extent")
+    assert(text_asset.valid(contractions_asset, 10, 13), "invalid collation asset schema/version/extent")
+    assert(text_asset.valid(ideographs_asset, 2, 6), "invalid collation asset schema/version/extent")
+    assert(text_asset.valid(ccc_asset, 3, 7), "invalid Unicode asset schema/version/extent")
+    elements_bytes :: elements_asset[0..<elements_asset.len()]
+    contractions_bytes :: contractions_asset[0..<contractions_asset.len()]
+    ideographs_bytes :: ideographs_asset[0..<ideographs_asset.len()]
+    ccc_bytes :: ccc_asset[0..<ccc_asset.len()]
+    singles :: elements_asset[40..<text_asset.uint(elements_bytes, 28, 4)]
+    pool :: elements_asset[text_asset.uint(elements_bytes, 28, 4)..<elements_asset.len()]
+    contractions :: contractions_asset[40..<text_asset.uint(contractions_bytes, 28, 4)]
+    ideographs :: ideographs_asset[40..<text_asset.uint(ideographs_bytes, 28, 4)]
+    ccc :: ccc_asset[40..<text_asset.uint(ccc_bytes, 28, 4)]
+    out := [Int]{}
+    taken := [Bool]{}
+    loop _scalar in scalars -> &taken.push(false)
+    at := 0
+    loop at < scalars.len() {
+        if taken[at] {
+            at += 1
+            next
+        }
+        key := [Int]{scalars[at]}
+        row := -1
+        next_at := at + 1
+        loop next_at < scalars.len() && key.len() < 3 && !taken[next_at] {
+            found :: collation_contraction_row(contractions, key, scalars[next_at])
+            if found < 0 -> break
+            &key.push(scalars[next_at])
+            row = found
+            next_at += 1
+        }
+        // S2.1.1-S2.1.3: a non-starter is unblocked when every skipped scalar
+        // between it and the key has a lower combining class.
+        skipped_class := 0
+        probe := next_at
+        loop probe < scalars.len() && key.len() < 3 {
+            class :: text_asset.range_tag(ccc, scalars[probe], 0)
+            if class == 0 -> break
+            if !taken[probe] {
+                found :: if class > skipped_class -> collation_contraction_row(contractions, key, scalars[probe]) else -> -1
+                if found >= 0 {
+                    &key.push(scalars[probe])
+                    taken[probe] = true
+                    row = found
+                } else {
+                    skipped_class = class
+                }
+            }
+            probe += 1
+        }
+        if row >= 0 {
+            first :: text_asset.uint(contractions, row + 9, 3)
+            count :: text_asset.uint(contractions, row + 12, 1)
+            collation_push_elements(&out, pool, first, count)
+        } else {
+            collation_single_elements(&out, singles, pool, ideographs, scalars[at])
+        }
+        at = next_at
+    }
+    out
+}
+
+// The byte offset of the contraction row for `key` + `scalar`, or -1.
+fn collation_contraction_row(contractions: View<U8>, key: [Int], scalar: Int) -> Int Never! {
+    target :: collation_rank(key, scalar)
+    low := 0
+    high := contractions.len() /% 13
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 13
+        rank :: collation_row_rank(contractions, row)
+        if {
+            rank < target -> low = mid + 1
+            rank > target -> high = mid
+            else -> return row
+        }
+    }
+    -1
+}
+
+// Keys order as the generator sorted them: three 21-bit places, the first
+// scalar as is and later ones plus one, with zero past the key's end.
+fn collation_rank(key: [Int], scalar: Int) -> Int Never! {
+    rank := 0
+    used := 0
+    loop part in key {
+        rank = rank * 2097152 + (if used == 0 -> part else -> part + 1)
+        used += 1
+    }
+    rank = rank * 2097152 + scalar + 1
+    used += 1
+    loop _pad in used..<3 -> rank *= 2097152
+    rank
+}
+
+fn collation_row_rank(contractions: View<U8>, row: Int) -> Int Never! {
+    rank := text_asset.uint(contractions, row, 3)
+    loop place in 1..<3 {
+        scalar :: text_asset.uint(contractions, row + place * 3, 3)
+        rank = rank * 2097152 + (if scalar == COLLATION_ABSENT -> 0 else -> scalar + 1)
+    }
+    rank
+}
+
+fn collation_push_elements(out: &[Int], pool: View<U8>, first: Int, count: Int) Never! {
+    loop index in first..<first + count {
+        at :: index * 5
+        &out.push(text_asset.uint(pool, at, 2))
+        &out.push(text_asset.uint(pool, at + 2, 2))
+        &out.push(text_asset.uint(pool, at + 4, 1))
+    }
+}
+
+// A single scalar's table elements, or its UTS #10 section 10.1.3 implicit
+// weights when the table does not list it.
+fn collation_single_elements(out: &[Int], singles: View<U8>, pool: View<U8>, ideographs: View<U8>, scalar: Int) Never! {
+    low := 0
+    high := singles.len() /% 7
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 7
+        found :: text_asset.uint(singles, row, 3)
+        if {
+            found < scalar -> low = mid + 1
+            found > scalar -> high = mid
+            else -> {
+                collation_push_elements(&out, pool, text_asset.uint(singles, row + 3, 3), text_asset.uint(singles, row + 6, 1))
+                return
+            }
+        }
+    }
+    implicit :: collation_implicit(ideographs, scalar)
+    &out.push(implicit.base)
+    &out.push(32)
+    &out.push(2)
+    &out.push(implicit.trail)
+    &out.push(0)
+    &out.push(0)
+}
+
+// UTS #10 (UCA 17.0.0) section 10.1.3: [.AAAA.0020.0002][.BBBB.0000.0000].
+fn collation_implicit(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: Int) Never! {
+    if (scalar >= 94208 && scalar <= 100351) || (scalar >= 101632 && scalar <= 101759) -> return (base: 64256, trail: (scalar - 94208).bit_or(32768))
+    if (scalar >= 100352 && scalar <= 101119) || (scalar >= 101760 && scalar <= 101887) -> return (base: 64257, trail: (scalar - 100352).bit_or(32768))
+    if scalar >= 110960 && scalar <= 111359 -> return (base: 64258, trail: (scalar - 110960).bit_or(32768))
+    if scalar >= 101120 && scalar <= 101631 -> return (base: 64259, trail: (scalar - 101120).bit_or(32768))
+    trail :: scalar.bit_and(32767).bit_or(32768)
+    if !text_asset.contains(ideographs, scalar) -> return (base: 64448 + (scalar >> 15), trail: trail)
+    // Core Han: the CJK Unified Ideographs and CJK Compatibility Ideographs blocks.
+    core_han :: (scalar >= 19968 && scalar <= 40959) || (scalar >= 63744 && scalar <= 64255)
+    (base: (if core_han -> 64320 else -> 64384) + (scalar >> 15), trail: trail)
 }

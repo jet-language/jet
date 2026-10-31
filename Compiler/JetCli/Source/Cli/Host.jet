@@ -113,6 +113,7 @@ use jet_ir.[
     ir_build_program,
     ir_checks_of,
     ir_checks_stock,
+    ir_entry_own,
     ir_module_new,
     ir_program_new,
     ir_build_tests,
@@ -737,10 +738,17 @@ fn jet_cli_runtime_exports_compare(bytes: [U8], start: Int, end: Int, row: [U8])
     }
 }
 
-// `ir.build`, `ir.opt`, `ir.x64` and `ir.object` of jet_cli_native_executable.
-// The object lays out the functions `hot` names first (ir_x64_hot_order);
-// `--trace` counts the names that name none (`ir.object.hot_missing`).
-fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, hot: [String]) -[FS, Env]> JetCLINativeObject Never! {
+// The IR module of a native or web route: `ir.build` of every checked
+// function the entry reaches (the selected tests under `harness`), the
+// program's literal plugin artifacts, each runtime call the runtime must
+// export, IR Lint and `ir.opt` at the options' level. Each fault is an ICE row
+// of `census` and traps its function (jet_cli_ice_trap).
+struct JetCLINativeProgram {
+    program: IRModule
+    failure: JetCLINativeFailure?
+}
+
+fn jet_cli_native_program(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String) -[FS, Env]> JetCLINativeProgram Never! {
     trace_sink :: result.trace_sink
     level :: jet_cli_native_level(options)
     checked := ^inputs
@@ -768,9 +776,12 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     }
     // Each literal plugin artifact becomes this program's own code (JetPlugin).
     jet_plugin_link(&built.program, root)
+    // A program whose stops need no process root owns its main (JetIR
+    // EntryOwned.jet): its stop points go before Lint and the optimizer.
+    if harness == None -> _ := ir_entry_own(&built.program)
     // A runtime call the runtime does not export would fail the whole link;
     // its function fails here instead, like any construct the builder rejects.
-    if runtime.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
+    if runtime.failure == .Val(failure) -> return JetCLINativeProgram{program: ir_module_new(), failure: Val(failure)}
     // Each runtime call the C closure doesn't define, true once the runtime's
     // exports name it: one walk over the thousands of exports looks up only
     // the few names the program calls. The calls are read by name row, so
@@ -823,13 +834,28 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
         if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
     }
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
-    if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
     // A field move shares the module's rows with `built`, which would keep
-    // them until this returns and free them all there, after the object is
-    // written; a fresh module in its place leaves the compile their one owner
+    // them until the caller's object is written and free them all there; a
+    // fresh module in its place leaves the route their one owner
     // (ir_x64_object frees them beside the object write).
     program := ^built.program
     built.program = ir_module_new()
+    JetCLINativeProgram{program: ^program, failure: None}
+}
+
+// `ir.build`, `ir.opt` (jet_cli_native_program), `ir.x64` and `ir.object` of
+// jet_cli_native_executable. The object lays out the functions `hot` names
+// first (ir_x64_hot_order); `--trace` counts the names that name none
+// (`ir.object.hot_missing`).
+fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String, hot: [String]) -[FS, Env]> JetCLINativeObject Never! {
+    trace_sink :: result.trace_sink
+    built := jet_cli_native_program(result, ^inputs, harness, options, runtime, &census, file, root)
+    if built.failure == .Val(failure) -> return jet_cli_native_object_failure(failure)
+    program := ^built.program
+    built.program = ir_module_new()
+    function_count :: program.functions.len()
+    threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
     compiled := ir_x64_compile_module(^program, threads)
     if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
     // ir_x64_object hands a selection's findings back as its own: each is one row.
@@ -1078,7 +1104,8 @@ fn jet_cli_present_shown(result: JetDriverCompileResult, snapshot: JetDriverAuth
 
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // (under `json`, one failed `diagnostics` status on stderr), check the
-// application authority, then write the executable.
+// application authority, then write the executable, or under `os: web` the
+// web build (jet_cli_build_web).
 fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
@@ -1089,6 +1116,7 @@ fn jet_cli_build_result(file: String, name: String, source: String, color: Bool,
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if jet_cli_authority_check(file, source, color, false, "build", invocation, result) == .Val(refusal) -> return refusal
+    if build_options_value(options, "os") == "web" -> return jet_cli_build_web(file, color, options, result, ^inputs, snapshot)
     if jet_cli_build_binary(file, name, "build", color, options, result, ^inputs, snapshot) == {
         .Failed(failure) -> return failure
         .Image(_, _) -> {}
@@ -2544,6 +2572,8 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Fill(target, json, color) -> output = jet_cli_compile_fill(target, json, color)
         .Structural(argv, command, json) -> output = jet_cli_structural(argv, command, json)
         .Review(argv, json, color) -> output = jet_cli_review(argv, json, color)
+        .Keygen(registry, force, color) -> output = jet_cli_keygen(registry, force, color)
+        .KeyBackup(registry, dest, color) -> output = jet_cli_key_backup(registry, dest, color)
         .Lint(file, source, color, notice, category, raw, json) -> {
             jet_cli_write_notice(notice)
             output = if category == "complexity" -> jet_cli_lint_complexity(file, source, raw, color, json) else if category == "cost" -> jet_cli_lint_cost(file, source, color, json) else -> jet_cli_lint_a11y(file, source, color, json)
@@ -2582,7 +2612,14 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             jet_cli_write_notice(notice)
             output = jet_cli_audit_copies(file, source, color, json)
         }
+        .AuditForeign(file, source, color, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_audit_foreign(file, source, color, json)
+        }
         .CompilerService(op) -> output = jet_cli_compiler_service(op)
+        .Repl(project, preload, invocation, color) -> output = jet_cli_repl(project, preload, invocation, color)
+        .ReplChild(session, invocation) -> output = jet_cli_repl_child(session, invocation)
+        .EvalExpression(source, color, json) -> output = jet_cli_eval_expression(source, color, json)
     }
     output
 }

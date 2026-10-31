@@ -162,6 +162,18 @@ fn rt_main_stopped_address() -> I64 {
     I64{0}
 }
 
+// The start of a program that owns its main (JetIR EntryOwned.jet,
+// JetBackend Image/Object.jet x64_object_main): what jet_rt_main does before
+// the entry, less the process root and what only a root's program links.
+// The entry then runs with no root, so a stop writes its report straight to
+// fd 2 and exits with its code (Trap.jet).
+#Export(c) fn jet_rt_main_owned_start() {
+    // JET_CHECKED_ALLOC=1 never runs a program built without the checker.
+    alloc_check_require()
+    // Fatal signals print the fault report (Fault.jet), stack overflow too.
+    fault_start()
+}
+
 // SysV int32 callers observe eax only: Image/Object.jet:70-80 returns it to
 // libc main; Image/Loader.jet x64_image_exec explicitly truncates/sign-normalizes it.
 // Returning an I64 low word needs no ABI thunk or new I32 export admission.

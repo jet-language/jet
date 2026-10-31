@@ -16,22 +16,21 @@ fn run() {
     retention :: Duration.seconds(86400) ?? panic("retention")
     runtime := service.runtime(delivery_path, retention: retention)
     tree := service.tree("durable-retry")
-    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state :: service.state_store(state_path) ?? panic("state")
-    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
-    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
-    tree.start() ?? panic("start")
+    &tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: &tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("start")
 
-    receipt :: tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
-    id :: receipt_id(receipt)
-    print("first:{tree.receive(endpoint) ?? panic("first")}")
-    duplicate :: tree.receive(endpoint)
-    if duplicate == {
+    receipt :: &tree.send_durable(endpoint, "once", key: "once") ?? panic("send")
+    id :: receipt_id(^receipt)
+    print("first:{&tree.receive(endpoint) ?? panic("first")}")
+    if &tree.receive(endpoint) == {
         .Ok(_) -> { print("duplicate:accepted") }
         .Err(_) -> { print("duplicate:rejected") }
     }
     retry :: runtime.retry(id) ?? panic("retry")
-    print("retry:{tree.receive(endpoint) ?? panic("retry receive")}")
+    print("retry:{&tree.receive(endpoint) ?? panic("retry receive")}")
     runtime.commit(retry) ?? panic("commit")
-    tree.stop() ?? panic("stop")
+    &tree.stop() ?? panic("stop")
 }

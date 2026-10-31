@@ -1430,6 +1430,7 @@ fn read_needed_text() -[FS]> [GeneratedFile] GeneratorError! {
 STOP_EXPORTS_TARGET_PATH :: "Compiler/JetFoundation/Source/Registry/RuntimeStopExports.jet"
 RUNTIME_SOURCE_DIRECTORY :: "Compiler/JetRuntime/Source"
 PANIC_PUBLICATION_ROOT :: "scheduler_panic_publish_record"
+BUILD_LIBRARY_PATH :: "Compiler/JetIR/Source/BuildLibrary.jet"
 
 fn code_at(code: [U8], at: Int) -> Int Never! {
     if at >= 0 && at < code.len() -> Int.from_u8(code[at]) else -> 0 - 1
@@ -1625,9 +1626,10 @@ fn bound_names(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [S
 }
 
 // The direct named calls of `code[from..<to]`: identifiers followed on the same
-// line by `(`, except member calls (`.name(`).
+// line by `(`, except member calls (`.name(`). `open` is the offset after `(`.
 struct NamedCall {
     name: String
+    open: Int
 }
 
 fn named_calls(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Never! {
@@ -1647,9 +1649,97 @@ fn named_calls(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Neve
         before := start
         loop before > from && is_space_byte(Int.from_u8(code[before - 1])) -> before -= 1
         if before > from && Int.from_u8(code[before - 1]) == 46 -> next
-        &calls.push(NamedCall{name: byte_slice(text, start, at)})
+        &calls.push(NamedCall{name: byte_slice(text, start, at), open: cursor + 1})
     }
     calls
+}
+
+// The identifier starting at the first non-space byte from `at`, below `to`;
+// "" when none does.
+fn word_after(text: String, code: [U8], at: Int, to: Int) -> String Never! {
+    start :: skip_spaces(code, at)
+    if start >= to || !is_name_start_byte(Int.from_u8(code[start])) -> return ""
+    end := start
+    loop end < to && is_name_byte(Int.from_u8(code[end])) -> end += 1
+    byte_slice(text, start, end)
+}
+
+// A stop rail behind a hook: a code word named `<name>_rail_code` that
+// holds a checked function address (JetIR BuildLibrary.jet's FunctionAddress
+// rows). `<word> = rt_x_address()` installs it, and a function that calls
+// through the word (`coll_callN(word, ...)` or `os_callN`, directly or
+// through a local bound to it) calls every export installed there: those
+// calls are named edges too, so a rail behind a hook keeps its callers'
+// stop facts. Other code words stay callback effects, outside the graph.
+struct RailInstall {
+    word: String
+    address: String
+}
+
+fn rail_installs(text: String, code: [U8]) -> [RailInstall] Never! {
+    installs := [RailInstall]{}
+    at := 0
+    loop at < code.len() {
+        if !is_name_byte(Int.from_u8(code[at])) {
+            at += 1
+            next
+        }
+        start :: at
+        loop at < code.len() && is_name_byte(Int.from_u8(code[at])) -> at += 1
+        if !is_name_start_byte(Int.from_u8(code[start])) -> next
+        word :: byte_slice(text, start, at)
+        if !word.ends_with("_rail_code") -> next
+        equals :: skip_spaces(code, at)
+        if code_at(code, equals) != 61 || code_at(code, equals + 1) == 61 -> next
+        address_at :: skip_spaces(code, equals + 1)
+        address :: word_after(text, code, address_at, code.len())
+        if !address.starts_with("rt_") || !address.ends_with("_address") -> next
+        open :: skip_spaces(code, address_at + byte_len(address))
+        if code_at(code, open) != 40 || code_at(code, skip_spaces(code, open + 1)) != 41 -> next
+        &installs.push(RailInstall{word: word, address: address})
+    }
+    installs
+}
+
+// The `_rail_code` word the local `name` is bound to (`name :: word` or
+// `name := word`) in `code[from..<to]`, or "".
+fn rail_binding(text: String, code: [U8], from: Int, to: Int, name: String) -> String Never! {
+    at := from
+    loop at < to {
+        if !is_name_byte(Int.from_u8(code[at])) {
+            at += 1
+            next
+        }
+        start :: at
+        loop at < to && is_name_byte(Int.from_u8(code[at])) -> at += 1
+        if !is_name_start_byte(Int.from_u8(code[start])) || byte_slice(text, start, at) != name -> next
+        colon :: skip_spaces(code, at)
+        if colon + 1 >= to || code_at(code, colon) != 58 || (code_at(code, colon + 1) != 58 && code_at(code, colon + 1) != 61) -> next
+        bound :: word_after(text, code, colon + 2, to)
+        if bound.ends_with("_rail_code") -> return bound
+    }
+    ""
+}
+
+// JetIR BuildLibrary.jet's checked function addresses: `rt_x_address` -> the
+// export it resolves to.
+fn runtime_function_addresses(source: String) -> [String:String] Never! {
+    addresses := [String:String]{}
+    name_marker :: "{{name: \""
+    symbol_marker :: ".FunctionAddress{{symbol: \""
+    loop line in source.split("\n") {
+        trimmed :: line.trim()
+        if !trimmed.starts_with("{name_marker}rt_") -> next
+        rest :: byte_tail(trimmed, byte_len(name_marker))
+        name_end :: rest.find("\"")
+        symbol_at :: rest.find(symbol_marker)
+        if name_end < 0 || symbol_at < 0 -> next
+        symbol :: byte_tail(rest, symbol_at + byte_len(symbol_marker))
+        symbol_end :: symbol.find("\"")
+        if symbol_end < 0 -> next
+        addresses[byte_slice(rest, 0, name_end)] = byte_slice(symbol, 0, symbol_end)
+    }
+    addresses
 }
 
 // The index of the byte that closes the group opened just before `from`
@@ -1668,12 +1758,16 @@ fn group_end(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int Ne
 }
 
 // The sorted #Export(c) symbols whose named-call closure reaches the panic
-// publication root; every unreadable source is reported at once.
-fn runtime_stop_exports(sources: [RuntimeSource]) -> [String] GeneratorError! {
+// publication root; every unreadable source is reported at once. Calls
+// through a stop rail's hook (RailInstall) are named calls of every export
+// installed there; `addresses` resolves the installs.
+fn runtime_stop_exports(sources: [RuntimeSource], addresses: [String:String]) -> [String] GeneratorError! {
     problems := [String]{}
     exports := [String]{}
     order := [String]{}
     functions := [String: [String]]{}
+    installed := [String: [String]]{}
+    rail_calls := [String: [String]]{}
     loop source in sources {
         path :: source.path
         text :: if code_only(source.text) == {
@@ -1685,6 +1779,16 @@ fn runtime_stop_exports(sources: [RuntimeSource]) -> [String] GeneratorError! {
         }
         code :: text.bytes()
         loop problem in unsupported_calls(code, path) -> &problems.push(problem)
+        loop install in rail_installs(text, code) {
+            symbol :: addresses.get(install.address) ?? ""
+            if symbol == "" {
+                &problems.push("unknown runtime function address {install.address} installed in {install.word}")
+                next
+            }
+            symbols := installed.get(install.word) ?? [String]{}
+            if !symbols.contains(symbol) -> &symbols.push(symbol)
+            installed[install.word] = symbols
+        }
         parsed :: runtime_exports(text, path)
         loop problem in parsed.problems -> &problems.push(problem)
         loop export in parsed.exports {
@@ -1727,19 +1831,35 @@ fn runtime_stop_exports(sources: [RuntimeSource]) -> [String] GeneratorError! {
             bound := bound_names(text, code, head.end + 1, parameters_end - 1, false)
             loop name in bound_names(text, code, body_start, body_end - 1, true) -> &bound.push(name)
             calls := [String]{}
+            words := [String]{}
             loop call in named_calls(text, code, body_start, body_end - 1) {
                 if bound.contains(call.name) {
                     &problems.push("{path}: unsupported bound-value call {call.name} in {head.name}")
                     next
                 }
                 &calls.push(call.name)
+                if !call.name.starts_with("coll_call") && !call.name.starts_with("os_call") -> next
+                argument :: word_after(text, code, call.open, body_end - 1)
+                word :: if argument.ends_with("_rail_code") -> argument else -> rail_binding(text, code, body_start, body_end - 1, argument)
+                if word != "" && !words.contains(word) -> &words.push(word)
             }
+            if words.len() > 0 -> rail_calls[head.name] = words
             &order.push(head.name)
             functions[head.name] = calls
         }
     }
     if !functions.has_key(PANIC_PUBLICATION_ROOT) -> &problems.push("missing runtime panic publication root")
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    loop name in order {
+        words :: rail_calls.get(name) ?? [String]{}
+        if words.len() == 0 -> next
+        calls := functions.get(name) ?? [String]{}
+        loop word in words {
+            symbols :: installed.get(word) ?? [String]{}
+            loop symbol in symbols -> &calls.push(symbol)
+        }
+        functions[name] = calls
+    }
     callers := [String: [String]]{}
     loop name in order {
         seen := [String]{}
@@ -1774,7 +1894,7 @@ fn render_stop_registry(symbols: [String]) -> String Never! {
     lines := [String]{
         "// Generated by Tools/agent/RuntimeGenerators.jet; do not edit.",
         "// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.",
-        "// Direct named calls only; foreign/dynamic callback effects are separate.",
+        "// Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.",
         "// Both compiler halves consume these Panic stop facts, not returned Results.",
         "// The symbols land as literal data: no compile-time execution host is needed.",
         "RUNTIME_STOP_EXPORTS :: comptime {{ [String]{{",
@@ -1797,14 +1917,15 @@ fn read_stop_registry() -[FS]> String GeneratorError! {
         text :: files.read("{RUNTIME_SOURCE_DIRECTORY}/{name}") ?? return Err(generator_fail("cannot read {RUNTIME_SOURCE_DIRECTORY}/{name}: {err}"))
         &sources.push(RuntimeSource{path: name, text: text})
     }
-    symbols :: runtime_stop_exports(sources) ?? return Err(err)
+    library :: files.read(BUILD_LIBRARY_PATH) ?? return Err(generator_fail("cannot read {BUILD_LIBRARY_PATH}: {err}"))
+    symbols :: runtime_stop_exports(sources, runtime_function_addresses(library)) ?? return Err(err)
     Ok(render_stop_registry(symbols))
 }
 
 STOP_FIXTURE_ROOT :: "fn scheduler_panic_publish_record(record: I64) -> Bool {{ false }}\nfn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {{ scheduler_panic_publish_record(message) }}\n"
 
 fn stop_closure(source: String) -> [String] GeneratorError! {
-    runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}})
+    runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}}, [String:String]{})
 }
 
 fn closure_text(source: String) -> String Never! {
@@ -1849,7 +1970,7 @@ fn closure_text(source: String) -> String Never! {
         RuntimeSource{path: "Root.jet", text: "{STOP_FIXTURE_ROOT}fn helper() {{\n    value :: I64{{0}}\n    rt_task_panic_publish(value, value, value)\n}}"},
         RuntimeSource{path: "Caller.jet", text: "#Export(c) fn caller() {{ if true {{ helper() }} }}"},
     }
-    symbols :: runtime_stop_exports(sources) ?? panic("the closure failed: {err.message}")
+    symbols :: runtime_stop_exports(sources, [String:String]{}) ?? panic("the closure failed: {err.message}")
     assert_eq(symbols.join(","), "caller")
 }
 
@@ -1860,7 +1981,7 @@ fn closure_text(source: String) -> String Never! {
 
 #Test("generated registry is the exact literal symbol list") {
     symbols :: stop_closure("#Export(c) fn stopped() {{ rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}}) }}") ?? panic("the closure failed: {err.message}")
-    expected :: "// Generated by Tools/agent/RuntimeGenerators.jet; do not edit.\n// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.\n// Direct named calls only; foreign/dynamic callback effects are separate.\n// Both compiler halves consume these Panic stop facts, not returned Results.\n// The symbols land as literal data: no compile-time execution host is needed.\nRUNTIME_STOP_EXPORTS :: comptime {{ [String]{{\n    \"stopped\",\n}} }}\n\nfn runtime_export_can_stop(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_STOP_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n"
+    expected :: "// Generated by Tools/agent/RuntimeGenerators.jet; do not edit.\n// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.\n// Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.\n// Both compiler halves consume these Panic stop facts, not returned Results.\n// The symbols land as literal data: no compile-time execution host is needed.\nRUNTIME_STOP_EXPORTS :: comptime {{ [String]{{\n    \"stopped\",\n}} }}\n\nfn runtime_export_can_stop(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_STOP_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n"
     assert_eq(render_stop_registry(symbols), expected)
 }
 
@@ -1876,7 +1997,7 @@ fn closure_text(source: String) -> String Never! {
 }
 
 #Test("missing publication root or malformed source fails instead of emitting incomplete facts") {
-    if runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Missing.jet", text: "#Export(c) fn ordinary() {{}}"}}) == {
+    if runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Missing.jet", text: "#Export(c) fn ordinary() {{}}"}}, [String:String]{}) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error.message.contains("missing runtime panic publication root"))
     }
@@ -1894,6 +2015,19 @@ fn closure_text(source: String) -> String Never! {
     assert_eq(closure_text("#Export(c) fn foreign_member() {{ foreign.rt_task_panic_publish() }}"), "")
     assert_eq(closure_text("#Export(c) fn arms() {{ if {{\n true -> rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n (true) -> rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n }} }}"), "arms")
     assert_eq(closure_text("fn ordinary(left: I64, right: I64) -> Bool {{\n if left != right -> return (left ^ I64{{1}}) < (right ^ I64{{1}}){cr}\n (left ^ I64{{0}}) < (right ^ I64{{0}})\n }}"), "")
+}
+
+#Test("a stop-rail hook is a named edge to every export installed in it; other code words are not") {
+    source :: "\ntrap_root_rail_code := I64{{0}}\nprint_code := I64{{0}}\nfn coll_call3(code: I64, a: I64, b: I64, c: I64) -> I64 {{ I64{{0}} }}\nfn install() {{\n    trap_root_rail_code = rt_root_address()\n    print_code = rt_other_address()\n}}\n#Export(c) fn root_half(op: I64) -> I64 {{\n    rt_task_panic_publish(op, op, op)\n    I64{{1}}\n}}\n#Export(c) fn other_half(op: I64) -> I64 {{\n    rt_task_panic_publish(op, op, op)\n    I64{{1}}\n}}\n#Export(c) fn direct() {{ _ := coll_call3(trap_root_rail_code, I64{{0}}, I64{{0}}, I64{{0}}) }}\n#Export(c) fn bound() {{\n    rail :: trap_root_rail_code\n    _ := coll_call3(rail, I64{{0}}, I64{{0}}, I64{{0}})\n}}\n#Export(c) fn callback() {{ _ := coll_call3(print_code, I64{{0}}, I64{{0}}, I64{{0}}) }}\n"
+    addresses := [String:String]{}
+    addresses["rt_root_address"] = "root_half"
+    addresses["rt_other_address"] = "other_half"
+    sources :: [RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}}
+    symbols :: runtime_stop_exports(sources, addresses) ?? panic("the closure failed: {err.message}")
+    assert_eq(symbols.join(","), "bound,direct,other_half,root_half")
+    assert(closure_text(source).contains("unknown runtime function address rt_root_address installed in trap_root_rail_code"))
+    library :: "        {{name: \"rt_root_address\", shape: .FunctionAddress{{symbol: \"root_half\", arity: 1}}}},\n"
+    assert_eq(runtime_function_addresses(library).get("rt_root_address") ?? "", "root_half")
 }
 
 // The runtime pack's strerror text, from pinned musl 1.2.5 assets (never a

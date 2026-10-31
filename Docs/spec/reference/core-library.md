@@ -1783,6 +1783,25 @@ fn run() {
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
 
+Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
+to the running program, and the children it starts afterwards inherit them.
+Each getter returns `(soft:, hard:)`; `None` is unlimited. Sizes are bytes. The
+kernel counts CPU time in whole seconds, so a fractional `Duration` rounds up
+when set. Lowering a limit needs no privilege; raising a hard limit without
+privilege is `IOError.PermissionDenied`. A soft limit above the hard one, or a
+negative value, is `IOError.InvalidInput`. A target without these limits
+refuses with an `IOError`. Setting a limit changes the process tree, so setters
+need `Env, Exec`, as `fork()` does.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `cpu_time_limit()` / `set_cpu_time_limit(soft, hard)` | `(soft: Duration?, hard: Duration?) !IOError -[Env]>` / `!IOError -[Env, Exec]>` | CPU time (`RLIMIT_CPU`). |
+| `memory_limit()` / `set_memory_limit(soft, hard)` | `(soft: Int?, hard: Int?) !IOError -[Env]>` / `!IOError -[Env, Exec]>` | Address space (`RLIMIT_AS`), the limit `ProcessSpec.memory_limit` sets for one child. |
+| `open_file_limit()` / `set_open_file_limit(soft, hard)` | as above | Open descriptors (`RLIMIT_NOFILE`). |
+| `core_file_limit()` / `set_core_file_limit(soft, hard)` | as above | Core-file size (`RLIMIT_CORE`); `set_core_file_limit(0, hard)` turns off core dumps. |
+| `stack_limit()` / `set_stack_limit(soft, hard)` | as above | Stack size (`RLIMIT_STACK`). |
+| `usage(of: UsageOf{.Program})` | `ResourceUsage !IOError -[Env]>` | `getrusage`: `user` and `system` CPU time as `Duration`, `peak_memory` in bytes. `.Children` sums every child the program has waited for. |
+
 `usize_max()` is a pure `U64` constant derived at compile time from the
 selected target's pointer layout (#4483), not from the
 compiler process's environment or the inspected executable. Missing layouts
@@ -1886,6 +1905,7 @@ fn run() -[Exec, Time.Wait]> {
 | `process.shell(line)` | `ProcessSpec -[Exec, Env]>` | Explicit shell escape hatch: `sh -c` on Unix-like targets and `cmd /C` on Windows. |
 | `process.run_spec(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run a specification and return its receipt without treating a nonzero exit as a thrown error. |
 | `process.pipeline(steps)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run a sequence of specifications and return the pipeline receipt. |
+| `process.run_all(specs, jobs)` | `[Result<ProcessReceipt, IOError>] !IOError -[Exec, Time.Wait]>` | Run every specification through a bounded worker pool, at most `jobs` at once, and return one result per spec in input order. |
 | `process.call(spec)` | `Int !IOError -[Exec, Time.Wait]>` | Run a specification and return its exit code. |
 | `process.capture(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run with captured output. |
 | `process.check_call(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run and check the resulting status. |
@@ -1920,6 +1940,16 @@ for a missing program, `PermissionDenied` for one that may not be run,
 resource and the OS error code. An empty command (`process.cmd([])`) or an
 empty `process.pipeline([])` is `InvalidInput` naming that empty call. A
 program that starts and then exits nonzero, 127 included, is a receipt.
+
+`process.run_all(specs, jobs)` is the bounded worker pool. It runs the specs
+in one task group with at most `jobs` children alive at once and returns the
+results in input order, whatever order the children finish in. Each slot is
+independent: a nonzero exit is an `Ok` receipt, a spec that cannot start is
+an `Err` in its own slot, and a spec's own `.timeout(...)` is its per-job
+timeout (the receipt reports `timed_out`). Every child is marked to die with
+the calling process (Linux `PR_SET_PDEATHSIG`, `SIGKILL`), except a
+`.detached()` spec, which is meant to outlive it. `jobs` below 1 is
+`InvalidInput`.
 
 #### Building a process policy
 
@@ -2405,12 +2435,45 @@ resource loading requires the corresponding file and GPU authority.
 | `raylib.clear_background(color)` | `Unit -[GPU]>` | Set every canvas pixel to the color, alpha included. |
 | `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle, its canvas and every decoded texture; as in raylib, atlases loaded before the close draw nothing afterwards. |
 | `raylib.color(r, g, b, a)` | `RaylibColor` | Clamp each component to `0..255` and construct a color. |
+| `raylib.vector2(x, y)` / `raylib.rectangle(x, y, width, height)` | `RaylibVector2` / `RaylibRectangle` | Construct raylib's `Float` point and rectangle. Shapes that take them fill the pixels whose centers lie inside, with coordinates snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is inside, one on a right or bottom edge is not. |
 | `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Fill a rectangle, clipped to the canvas and blended src-over. |
 | `raylib.draw_line(start_x, start_y, end_x, end_y, color)` | `Unit -[GPU]>` | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
 | `raylib.draw_circle(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
 | `raylib.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | `Unit -[GPU]>` | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
+| `raylib.draw_pixel(x, y, color)` | `Unit -[GPU]>` | Blend one pixel. |
+| `raylib.draw_rectangle_rec(rec, color)` | `Unit -[GPU]>` | Fill a `RaylibRectangle`; an empty or negative side draws nothing. |
+| `raylib.draw_rectangle_lines(x, y, width, height, color)` | `Unit -[GPU]>` | Draw the rectangle's one-pixel border inside its bounds, each pixel once. |
+| `raylib.draw_rectangle_lines_ex(rec, line_thick, color)` | `Unit -[GPU]>` | Draw a border `line_thick` wide inside `rec` as raylib's four bands: top and bottom full width, the sides between them. A thickness past either side becomes half the shorter side. Bands are blended one after another. |
+| `raylib.draw_rectangle_gradient_v(x, y, width, height, top, bottom)` / `draw_rectangle_gradient_h(x, y, width, height, left, right)` | `Unit -[GPU]>` | Fill a rectangle shaded from the first color to the second, top to bottom or left to right. |
+| `raylib.draw_rectangle_gradient_ex(rec, top_left, bottom_left, bottom_right, top_right)` | `Unit -[GPU]>` | Fill a rectangle shaded between its four corner colors, given counter-clockwise from the top left. Each pixel's color is interpolated at its center across the two triangles split along the top-left to bottom-right diagonal, rounded half up per channel. |
+| `raylib.draw_rectangle_rounded(rec, roundness, segments, color)` | `Unit -[GPU]>` | Fill a rectangle whose corners are arcs of radius `roundness` (clamped to `1`) times half the shorter side, each arc a polygon of `segments` steps, or of raylib's automatic count when `segments` is below 4. A `roundness` of 0 or below, or a side below 1, fills the plain rectangle. |
+| `raylib.draw_rectangle_rounded_lines(rec, roundness, segments, color)` | `Unit -[GPU]>` | Draw the one-pixel band just outside the rounded rectangle, as raylib does. A `roundness` of 0 or below draws the one-pixel band around `rec`. |
+| `raylib.draw_circle_lines(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_circle`'s disc that touch a pixel outside it. |
+| `raylib.draw_ellipse(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Fill the pixels at offset `(dx, dy)` from the center with `(dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2`; a radius of 0 or below draws nothing. |
+| `raylib.draw_ellipse_lines(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ellipse`'s fill that touch a pixel outside it. |
+| `raylib.draw_ring(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Fill the ring between the radii from `start_angle` to `end_angle` (degrees), built of raylib's segments; with an inner radius of 0 or below it fills a circle sector. raylib's argument fixes apply: swapped radii and angles are reordered and an outer radius of 0 or below becomes 0.1. Each pixel is blended once. |
+| `raylib.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
+| `raylib.draw_poly(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
+| `raylib.draw_poly_lines(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
 | `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
+| `raylib.measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
 | `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
+| `raylib.check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
+| `raylib.check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
+| `raylib.check_collision_circle_rec(center, radius, rec)` / `check_collision_circle_line(center, radius, p1, p2)` | `Bool` | Whether a circle reaches a rectangle or the segment from `p1` to `p2`. |
+| `raylib.check_collision_point_triangle(point, p1, p2, p3)` / `check_collision_point_poly(point, points)` | `Bool` | Whether a point lies strictly inside a triangle, or inside a polygon by the even-odd rule; fewer than 3 points enclose nothing. |
+| `raylib.check_collision_point_line(point, p1, p2, threshold)` | `Bool` | Whether a point lies between `p1` and `p2` along the line's longer axis and within `threshold` pixels of the line, using raylib's cross-product test. |
+| `raylib.check_collision_lines(start1, end1, start2, end2)` | `RaylibVector2?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
+| `raylib.get_collision_rec(rec1, rec2)` | `RaylibRectangle` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
+| `raylib.gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `RaylibImage` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
+| `raylib.get_image_color(image, x, y)` | `RaylibColor` | The pixel at `(x, y)`, or a zero color outside the image. |
+| `raylib.image_clear_background(&image, color)` / `image_draw_pixel(&image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `raylib.image_draw_rectangle(&image, x, y, width, height, color)` / `image_draw_rectangle_rec(&image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
+| `raylib.image_crop(&image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
+| `raylib.image_resize_nn(&image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `raylib.image_flip_vertical(&image)` / `image_flip_horizontal(&image)` / `image_rotate_cw(&image)` / `image_rotate_ccw(&image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
+| `raylib.image_color_tint(&image, color)` / `image_color_invert(&image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `raylib.image_color_brightness(&image, amount)` / `image_color_replace(&image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
 | `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
 | `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
 | `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
@@ -2418,6 +2481,8 @@ resource loading requires the corresponding file and GPU authority.
 | `raylib.key_down(key)` / `gamepad_down(pad, button)` | `Bool -[GPU]>` | Read keyboard or gamepad button state. |
 | `raylib.gamepad_axis(pad, axis)` | `Float -[GPU]>` | Read a gamepad axis. |
 | `RaylibColor`, `RaylibWindow`, `RaylibTextureAtlas`, `RaylibSound` | types | Typed bridge handles; they are not interchangeable with ordinary strings or integers. |
+| `RaylibVector2`, `RaylibRectangle` | types | raylib's `Vector2` (`x`, `y`) and `Rectangle` (`x`, `y`, `width`, `height`), with `Float` fields. |
+| `RaylibImage` | type | An RGBA8 image held in memory: `width`, `height` and `pixels` (four `U8` per pixel, row by row). A width of 0 means no image. |
 
 ### `core.perf` — fidelity scaling
 
@@ -2467,6 +2532,8 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.scalars(value)` | `[String]` | Return decoded Unicode scalars. |
 | `text.lower(value)` / `upper(value)` / `casefold(value)` | `String` | Apply Unicode-aware scalar case mappings supported by the runtime. |
 | `text.caseless_eq(a, b)` | `Bool` | Compare after case folding. |
+| `text.collate(a, b)` | `Ordering Never!` | Compare in the Unicode default order (D-TEXT-COLLATE1=A): case and accents only break ties, so `apple` < `Banana` < `éclair` < `zebra` < `Zulu`. `Equal` only for canonically equivalent text. |
+| `text.collation_key(value)` | `[U8] Never!` | A sort key whose byte order is `text.collate` order; build one key per item to sort a long list. |
 | `text.nfc(value)` / `nfd(value)` / `nfkc(value)` / `nfkd(value)` | `String` | Apply the named normalization form. |
 | `text.graphemes(value)` / `words(value)` / `sentences(value)` | `[String]` | Return grapheme segments or Unicode 17.0.0 UAX #29 words/sentences. Words keep only segments containing an Alphabetic or Numeric scalar; sentences trim Unicode White_Space and drop empty segments. |
 | `text.char_indices(value)` | `[String]` | Return scalar strings with their UTF-8 byte indexes. |
@@ -2481,6 +2548,18 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.splitn(value, separator, limit)` / `rsplitn(value, separator, limit)` | `[String]` | Split from the left or right with a maximum part count. |
 | `text.inspect(value)` | `[String]` | Return each scalar as `U+XXXX NAME`, using pinned Unicode names (Unicode 1.0 names for controls, `UNASSIGNED` where no name is recorded). |
 | `text.Cursor` / `text.cursor(value)` / `text.cursor_advance(text, cursor)` | type / cursor | Construct and advance a text cursor. |
+
+`text.collate` is the Unicode Collation Algorithm (UTS #10) with the CLDR root
+table for Unicode 17.0.0, which is also English order. Variable weighting is
+non-ignorable, the CLDR default, so punctuation and spaces sort as characters
+before digits and letters. Levels 1 to 3 (base letter, accent, case) are
+followed by an identical level on the NFD scalars. Implicit weights for Han,
+Tangut, Nüshu, Khitan and unassigned code points are computed, not stored.
+`Tools/agent/CollationTable.jet` generates `Core/Text/CollationTable.jet` from
+the vendored, checksum-verified `tests/data/unicode/uca/allkeys_CLDR.txt`;
+the table is linked only into programs that collate. There is no
+locale-specific tailoring. String `<`, `<=>` and `sort()` keep byte order,
+which is code point order and the order `LC_COLLATE=C` gives.
 
 `String.len()` is the compiler-owned receiver-first method and counts Unicode
 scalars, the items `loop c in s.chars()` visits (S41); it means the same with
@@ -2881,7 +2960,8 @@ error is reported by the ordinary compile-time-stop diagnostic.
 `core.encoding.cbor` handles RFC 8949 integer, text, array, map, simple,
 and float16/32/64 values, including indefinite strings and containers.
 Dynamic `parse` rejects byte strings; typed `decode<[U8]>` preserves them.
-Tags and duplicate text map keys are unsupported. Canonical mode requires
+Tags other than the date-time tags 0 and 1 (which decode to `DateTime`) and
+duplicate text map keys are unsupported. Canonical mode requires
 shortest arguments and float widths, a canonical NaN, definite containers,
 and bytewise map-key order. Encoding uses the shortest exact float width.
 Whole-value parsing and preferred float-width checks share a sealed source
@@ -3367,6 +3447,7 @@ or golden file. The public source is
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
 | `test_suite() -> Test` | suite | Create the default suite record. |
 | `world(body: fn(DeterministicWorld))` | — | Run a body with deterministic world services. |
+| `histories<Command>(seed: Int, cases: Int, strategy: HistoryStrategy<Command>?, model: fn([Command]) -> Dyn, actual: fn([Command]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestComparison Err!` | comparison | Run a typed history campaign (`D-TEST-HISTORY1`, `D-TEST-STRATEGY1`): one `HistoryRNG` seeded by `seed` feeds every `generate`; invalid or out-of-bounds cases are discarded, a mismatch shrinks to a valid reduced case and fails with `history mismatch in case `<id>`: <op> -> <op> …`, whose cause carries the replayable `history-artifact {…}` JSON. Without `strategy`, the compiler derives one from an enum whose payloads are `Int`, `Bool` or `String`; any other command type is `unsupported`. The artifact's source, tool and target identities come from the compiler. `HistoryRNG` is a Core SplitMix64 generator whose copies share one stream; `next_u64()` and `below(bound)` return `Int` (`D-TEST-COUNT1`). |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
 
 `#Test` is the only test declaration syntax (`D-TESTKIT1`).
@@ -4395,6 +4476,7 @@ their service display preserves the existing field order and labels.
 display uses the raw panic reason, while Debug quotes and escapes that String.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
 original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
+`Delivery.show()` and `DeliveryReceipt.show()` return that same display text.
 
 Restart/delivery/state-empty selection and dead-letter draining enforce their
 original validation order. The signing key remains the exact 32 bytes decoded

@@ -79,8 +79,9 @@ fn parse_source(source: [U8]) -> ParseResult {
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
-// the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
-// loader's embedded-Core path parses this way; a user file never does.
+// the reserved `__name` namespace (Rust `Lexer::lex_generated`). The loader's
+// embedded-Core path and compiler-generated call arguments (core.testing
+// histories, #6410) parse this way; a user file never does.
 fn parse_generated_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }

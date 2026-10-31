@@ -220,14 +220,6 @@ function jet_testing_history_web_rng(handle) {
   };
 }
 
-function jet_testing_history_rng_next_u64(rng) {
-  return rng.next_u64();
-}
-
-function jet_testing_history_rng_below(rng, bound) {
-  return rng.below(bound);
-}
-
 // Rust invokes this import while it runs the Foundation history campaign. The
 // returned packed pointer/length identifies a temporary JSON response allocated
 // by the same WASM module; no history policy is implemented in this callback.

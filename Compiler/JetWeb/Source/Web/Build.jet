@@ -1,0 +1,74 @@
+// The two partitions of a web build (Module.jet). The runtime partition is
+// selected once, when the toolchain packages the runtime library; its
+// receipt (`layout`, `export` and `import` rows) is what the program
+// partition is placed and linked against at `jet build --target web`.
+
+use jet_ir.[IRLibraryExport, IRModule]
+
+struct WebRuntime {
+    bytes: [U8]
+    // The receipt: `layout\t<data end>\t<slots>`, then an `export\t<symbol>\t<sig>`
+    // row per export and an `import\t<space>\t<name>\t<sig>` row per import.
+    receipt: String
+    errors: [String]
+}
+
+// The runtime partition of the runtime library's lowered module `m` (JetIR
+// ir_x64_compile_module's program) and its exports and lifecycle hooks.
+fn web_runtime_partition(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime Never! {
+    rows := [String:Int]{}
+    hooks := [WebHook]{}
+    loop row in exports {
+        rows[row.symbol.copy()] = row.function
+        if row.init_priority >= 0 -> &hooks.push(WebHook{row: row.function, priority: row.init_priority, fini: false})
+        if row.fini_priority >= 0 -> &hooks.push(WebHook{row: row.function, priority: row.fini_priority, fini: true})
+    }
+    built := web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, web_host_functions(), rows, hooks)
+    lines := [String]{"layout\t{built.data_end}\t{built.slots}"}
+    loop row in built.exports -> &lines.push("export\t{row}")
+    loop row in built.imports -> &lines.push("import\t{row}")
+    &lines.push("")
+    WebRuntime{bytes: ^built.bytes, receipt: lines.join("\n"), errors: ^built.errors}
+}
+
+struct WebProgram {
+    bytes: [U8]
+    manifest: String
+    errors: [String]
+}
+
+// The program partition of built module `program` (its entry `program.entry`)
+// against the runtime partition's receipt `receipt`, and the manifest of the
+// two.
+fn web_program(program: ^IRModule, receipt: String) -> WebProgram Never! {
+    runtime_end := -1
+    runtime_slots := -1
+    runtime := [String:String]{}
+    loop line in receipt.split("\n").to_list() {
+        fields :: line.split("\t").to_list()
+        if fields.len() == 3 && fields[0] == "layout" {
+            runtime_end = Int.parse(fields[1]) ?? -1
+            runtime_slots = Int.parse(fields[2]) ?? -1
+        } else if fields.len() == 3 && fields[0] == "export" {
+            runtime[fields[1].copy()] = fields[2].copy()
+        }
+    }
+    if runtime_end < 0 || runtime_slots < 0 {
+        return WebProgram{bytes: [U8]{}, manifest: "", errors: [String]{"the runtime partition's receipt has no layout row"}}
+    }
+    m := ^program
+    web_lower(&m)
+    base :: web_align_up(runtime_end, 16)
+    built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, web_host_functions(), [String:Int]{}, [WebHook]{})
+    manifest :: web_manifest(runtime_end, runtime_slots, base, built.data_end, built.slots)
+    WebProgram{bytes: ^built.bytes, manifest: manifest, errors: ^built.errors}
+}
+
+// The generated host files of a web build: `app.js`, `jet_dom_runtime.js`.
+fn web_app_js() -> String Never! {
+    WEB_APP_JS
+}
+
+fn web_dom_runtime_js() -> String Never! {
+    WEB_DOM_RUNTIME_JS
+}

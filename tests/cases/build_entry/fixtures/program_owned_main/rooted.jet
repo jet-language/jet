@@ -1,0 +1,18 @@
+// The same stop must first run `resource`'s deferred close on `run`'s stop
+// edge, so the program keeps the process root.
+struct Resource {
+    name: String
+}
+
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn bump(a: U8, b: U8) -> U8 { a + b }
+
+fn run() {
+    resource := Resource{name: "resource"}
+    defer close(^resource)
+    print("body")
+    print(bump(U8{200}, U8{100}))
+}

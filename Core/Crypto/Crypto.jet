@@ -84,7 +84,7 @@ fn jetc_hash_update(hash: &JetcHash, data: [U8]) Never! {
         }
         if hash.pending.bytes.len() == 64 {
             sha256_block(&hash.state, hash.pending.bytes, 0)
-            core.crypto.__zeroize(&hash.pending.bytes)
+            core.crypto.wipe(&hash.pending.bytes)
             hash.pending.bytes = [U8]{}
         }
     }
@@ -103,7 +103,7 @@ fn jetc_hash_finish(hash: &JetcHash) -> [U8] Never! {
     loop hash.pending.bytes.len() %% 64 != 56 -> &hash.pending.bytes.push(U8{0})
     loop b in be64(hash.length * 8) -> &hash.pending.bytes.push(b)
     loop offset in 0..<hash.pending.bytes.len(), 64 -> sha256_block(&hash.state, hash.pending.bytes, offset)
-    core.crypto.__zeroize(&hash.pending.bytes)
+    core.crypto.wipe(&hash.pending.bytes)
     hash.pending.bytes = [U8]{}
     words_to_bytes(hash.state, 4)
 }
@@ -195,7 +195,7 @@ impl Secret.Decode {
 impl Secret.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -221,7 +221,7 @@ struct SigningKey {
 impl SigningKey.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -258,7 +258,7 @@ struct X25519SecretKey {
 impl X25519SecretKey.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -289,7 +289,7 @@ struct SharedSecret {
 impl SharedSecret.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 

@@ -1,0 +1,46 @@
+# #6328: a program whose stops clean up nothing and whose runtime routes don't
+# depend on the process root owns its main (JetIR EntryOwned.jet): no
+# jet_rt_main, no root, no stop points. Its stop still writes the same report
+# and exits with the same code on every tier. `owned` overflows a U8 with
+# nothing to clean up. `rooted` overflows the same way, but its deferred close
+# must run on the way out, so it keeps the root and prints the close first.
+fixture: fixtures/program_owned_main
+env: NO_COLOR=1
+step: jet inspect decisions owned.jet
+exit: 0
+stdout: ~ "main: program-owned" # no stop edge cleans up, every route is root-free
+step: jet inspect decisions rooted.jet
+exit: 0
+stdout: ~ "main: process root: " # the deferred close runs on a stop edge
+step: jet run owned.jet
+exit: 70
+stdout: = "body\n"
+stderr: ~ "Stop [E3010]" # the overflow's report, written with no root
+step: jet run --release owned.jet
+exit: 70
+stdout: = "body\n"
+stderr: ~ "Stop [E3010]" # the same at O2
+step: jet build owned.jet
+exit: 0
+file: .jet/build/owned !~ "jet_rt_root_begin" # the image links no process root
+file: .jet/build/owned ~ "jet_term_write_stdout_line_direct" # its print writes each line straight to fd 1
+step: {work}/.jet/build/owned
+exit: 70
+stdout: = "body\n"
+stderr: ~ "Stop [E3010]" # the built image stops the same way
+step: jet run rooted.jet
+exit: 70
+stdout: = "body\nclose resource\n"
+stderr: ~ "Stop [E3010]" # the close runs before the report
+step: jet run --release rooted.jet
+exit: 70
+stdout: = "body\nclose resource\n"
+stderr: ~ "Stop [E3010]" # the same at O2
+step: jet build rooted.jet
+exit: 0
+file: .jet/build/rooted ~ "jet_rt_root_begin" # the image runs the entry under the root
+file: .jet/build/rooted !~ "jet_term_write_stdout_line_direct" # its print keeps the buffered writer
+step: {work}/.jet/build/rooted
+exit: 70
+stdout: = "body\nclose resource\n"
+stderr: ~ "Stop [E3010]" # the built image runs the close too

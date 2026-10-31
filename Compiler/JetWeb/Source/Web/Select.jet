@@ -1,0 +1,1365 @@
+// WebAssembly instructions for one IR function, with the meaning the x86-64
+// selector (JetIR X64Select.jet) gives each instruction: the same runtime
+// symbols, the same exact-Int fast paths and big-integer routes, the same
+// fixed-width traps and their stop texts, and the same stop protocol.
+//
+// IR control flow is already structured, so Block, Loop, If/Else, End, Br and
+// BrIf map one to one. A stop point (`stopped := poll(); if stopped { edge }`)
+// keeps its If: the edge runs inline, and a return from inside it is a stop
+// return. A body's stop return leaves global WEB_GLOBAL_EDX 1, any other
+// return 0, as x86-64 leaves edx, so the stop point right after a call of a
+// body reads that global instead of calling the poll. The slow paths of the
+// instruction before a trap point set the `flag` local that point reads.
+
+use jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_kind_name, ir_op_name, ir_x64_overflow_message]
+use jet_foundation.[name_rows_value]
+use jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
+
+WEB_INT_MIN :: comptime { -9223372036854775807 - 1 }
+
+fn web_fail(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, message: String) Never! {
+    &st.errors.push("{f.name}: instruction {at} ({ir_op_name(f.op[at])}): {message}")
+    web_op(&e, 0x00)
+}
+
+fn web_align_up(value: Int, align: Int) -> Int Never! {
+    ((value + align - 1) /% align) * align
+}
+
+fn web_clamp(value: Int, low: Int, high: Int) -> Int Never! {
+    if value < low -> return low
+    if value > high -> return high
+    value
+}
+
+// The value type of signature letter `letter`, 0 for "" (none).
+fn web_result_type(letter: String) -> Int Never! {
+    bytes :: letter.bytes()
+    if bytes.len() == 0 -> return 0
+    wasm_sig_type(Int.from_u8(bytes[0]))
+}
+
+// The signature letter slot `slot` passes, "" for a Unit slot.
+fn web_slot_letter(e: WebEmitter, slot: Int) -> String Never! {
+    if e.locals[slot] < 0 -> return ""
+    web_type_letter(e.local_types[e.locals[slot]])
+}
+
+// Whether function `id` is a stop poll or trap.
+fn web_is_poll(m: IRModule, id: Int) -> Bool Never! {
+    if id < 0 || id >= m.functions.len() -> return false
+    key :: m.functions[id].key
+    key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY
+}
+
+// Whether function `id` is a selected body, whose return sets WEB_GLOBAL_EDX.
+fn web_reports_stop(m: IRModule, id: Int) -> Bool Never! {
+    if id < 0 || id >= m.functions.len() || m.functions[id].asm != None -> return false
+    !web_is_poll(m, id)
+}
+
+// Whether `at` starts a stop point: `stopped := poll()` then `if stopped`
+// with no Else.
+fn web_is_stop_point(st: WebState, f: IRFunction, at: Int) -> Bool Never! {
+    if at < 0 || at + 1 >= f.op.len() || f.op[at] != .Call || f.a[at] < 0 -> return false
+    if f.a[at] != st.poll && f.a[at] != st.trap -> return false
+    stopped :: f.dst[at]
+    stopped >= 0 && f.op[at + 1] == .If && f.a[at + 1] == stopped && f.b[at + 1] < 0
+}
+
+// ---------------------------------------------------------------------------
+// The function.
+
+// Per instruction, the frame storage it owns: a StackAddress's area and an
+// Aggregate result's storage for a call.
+fn web_layout_frame(e: &WebEmitter, m: IRModule, f: IRFunction) Never! {
+    size := 0
+    loop at in 0..<f.op.len() {
+        bytes := 0
+        align := 8
+        op :: f.op[at]
+        if op == .StackAddress {
+            bytes = if f.a[at] > 0 -> f.a[at] else -> 8
+            align = web_clamp(f.b[at], 1, 16)
+        } else if (op == .Call || op == .CallRuntime || op == .CallIndirect) && f.dst[at] >= 0 && web_slot_kind(m, f, f.dst[at]) == .Aggregate {
+            ty :: m.types[f.slot_type[f.dst[at]]]
+            bytes = if ty.size > 8 -> ty.size else -> 8
+            align = web_clamp(ty.align, 8, 16)
+        }
+        if bytes > 0 {
+            size = web_align_up(size, align)
+            e.areas[at] = size
+            size += bytes
+        }
+    }
+    e.frame_size = web_align_up(size, 16)
+}
+
+// Function row `row` of the module: a stop poll's body, an asm leaf's body,
+// or a selected body.
+fn web_select_function(st: &WebState, m: IRModule, tables: IRX64Tables, row: Int) -> WebBody Never! {
+    f :: m.functions[row]
+    if web_is_poll(m, row) -> return web_poll_body(&st, m, f)
+    if f.asm != None -> return web_leaf_body(&st, m, f)
+    web_select_body(&st, m, f, tables)
+}
+
+fn web_select_body(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables) -> WebBody Never! {
+    e := web_emitter(m, f)
+    web_layout_frame(&e, m, f)
+    frame_size :: e.frame_size
+    frame :: e.frame
+    if frame_size > 0 {
+        web_global_get(&e, WEB_GLOBAL_SP)
+        web_i64(&e, frame_size)
+        web_op(&e, 0x7d)
+        web_tee(&e, frame)
+        web_global_set(&e, WEB_GLOBAL_SP)
+    }
+    at := 0
+    loop at < f.op.len() {
+        if st.stop_points && e.pad_ends.len() == 0 {
+            resume :: web_stop_point(&e, &st, m, f, at)
+            if resume >= 0 {
+                at = resume
+                next
+            }
+        }
+        e.trap_next = st.stop_points && e.pad_ends.len() == 0 && web_is_stop_point(st, f, at + 1) && f.a[at + 1] == st.trap
+        e.wired = false
+        web_select(&e, &st, m, f, tables, at)
+        at += 1
+    }
+    if e.pad_ends.len() > 0 -> &st.errors.push("{f.name}: {e.pad_ends.len()} stop edges are never closed")
+    web_return(&e, st, m, f, -1)
+    web_finish(e)
+}
+
+// The stop point at `at`, if it is one: its check and the opened edge.
+// Returns where selection resumes (-1: not a stop point).
+fn web_stop_point(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) -> Int Never! {
+    if !web_is_stop_point(st, f, at) -> return -1
+    branch :: at + 1
+    stopped :: f.dst[at]
+    wired :: e.wired
+    flag :: e.flag
+    e.wired = false
+    if f.a[at] == st.trap {
+        // Nothing before it can publish a stop: the edge is never taken.
+        if !wired -> return f.c[branch] + 1
+        web_get(&e, flag)
+        web_op(&e, 0xad)
+        web_store(&e, stopped)
+        web_i32(&e, 0)
+        web_set(&e, flag)
+    } else if at > 0 && f.op[at - 1] == .Call && web_reports_stop(m, f.a[at - 1]) {
+        web_global_get(&e, WEB_GLOBAL_EDX)
+        web_op(&e, 0xad)
+        web_store(&e, stopped)
+    } else {
+        web_call(&e, f.a[at])
+        web_store(&e, stopped)
+    }
+    web_truth(&e, stopped)
+    web_if(&e)
+    &e.pad_ends.push(f.c[branch])
+    branch + 1
+}
+
+// Restores the stack pointer and sets the stop global (`stopped`).
+fn web_epilogue(e: &WebEmitter, st: WebState, stopped: Bool) Never! {
+    frame_size :: e.frame_size
+    frame :: e.frame
+    if frame_size > 0 {
+        web_get(&e, frame)
+        web_i64(&e, frame_size)
+        web_op(&e, 0x7c)
+        web_global_set(&e, WEB_GLOBAL_SP)
+    }
+    if st.app {
+        web_i32(&e, if stopped -> 1 else -> 0)
+        web_global_set(&e, WEB_GLOBAL_EDX)
+    }
+}
+
+// Returns slot `slot` (-1: none, the result's zero). A return inside a stop
+// edge is a stop return.
+fn web_return(e: &WebEmitter, st: WebState, m: IRModule, f: IRFunction, slot: Int) Never! {
+    sret :: e.sret
+    if slot >= 0 && sret >= 0 {
+        web_get(&e, sret)
+        web_wrap(&e)
+        web_load(&e, slot)
+        web_wrap(&e)
+        web_i32(&e, m.types[f.result].size)
+        web_memory_copy(&e)
+    }
+    stopped :: e.pad_ends.len() > 0
+    web_epilogue(&e, st, stopped)
+    if e.result != "" {
+        if slot >= 0 && e.sret < 0 && web_slot_letter(e, slot) == e.result {
+            web_load(&e, slot)
+        } else {
+            zero :: web_result_type(e.result)
+            web_zero(&e, zero)
+        }
+    }
+    web_op(&e, 0x0f)
+}
+
+// After a slow path published a stop: the trap point after this instruction
+// takes it (`flag`), else the body leaves by its stop return. A module with no
+// stop points traps.
+fn web_stop_action(e: &WebEmitter, st: WebState) Never! {
+    if !st.stop_points -> return web_op(&e, 0x00)
+    if e.trap_next {
+        web_i32(&e, 1)
+        flag :: e.flag
+        web_set(&e, flag)
+        e.wired = true
+        return
+    }
+    web_epilogue(&e, st, true)
+    zero :: web_result_type(e.result)
+    if zero != 0 -> web_zero(&e, zero)
+    web_op(&e, 0x0f)
+}
+
+// ---------------------------------------------------------------------------
+// Texts and runtime calls.
+
+// Pushes the address and byte length of selector text `text`.
+fn web_text(e: &WebEmitter, st: WebState, tables: IRX64Tables, text: String) Never! {
+    row :: tables.texts.get(text) ?? -1
+    if row < 0 {
+        web_i64(&e, 0)
+        web_i64(&e, 0)
+        return
+    }
+    web_i64(&e, st.data_at[row])
+    web_i64(&e, tables.lengths[row])
+}
+
+// Calls runtime symbol `symbol` with the values already pushed (`letters`),
+// leaving its result as `want` ("" none).
+fn web_runtime(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, symbol: String, letters: String, want: String) Never! {
+    resolved :: web_symbol(&st, symbol, "{letters}:{want}")
+    if web_sig_params(resolved.sig) != letters -> return web_fail(&e, &st, f, at, "`{symbol}` takes ({web_sig_params(resolved.sig)}), not ({letters})")
+    web_call(&e, resolved.callee)
+    have :: web_sig_result(resolved.sig)
+    if have == want -> return
+    if want == "" -> return web_op(&e, 0x1a)
+    if have == "" -> return web_zero(&e, web_result_type(want))
+    web_fail(&e, &st, f, at, "`{symbol}` returns {have}, not {want}")
+}
+
+// A numeric stop with `message` at instruction `at`, under the i32
+// condition on the stack.
+fn web_stop_if(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int, message: String) Never! {
+    web_if(&e)
+    web_numeric_stop(&e, &st, f, tables, at, message)
+    web_end(&e)
+}
+
+fn web_numeric_stop(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int, message: String) Never! {
+    web_text(&e, st, tables, f.source_file)
+    web_i64(&e, f.code_line[at])
+    web_text(&e, st, tables, message)
+    web_runtime(&e, &st, f, at, "jet_rt_numeric_stop", "lllll", "")
+    web_stop_action(&e, st)
+}
+
+// The located route `symbol`(left, right, path, length, line) into `dst`;
+// in a module with stop points a published stop leaves (web_stop_action)
+// without the store.
+fn web_located(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int, symbol: String, left: Int, right: Int, dst: Int) Never! {
+    web_get(&e, left)
+    web_get(&e, right)
+    web_text(&e, st, tables, f.source_file)
+    web_i64(&e, f.code_line[at])
+    web_runtime(&e, &st, f, at, symbol, "lllll", "l")
+    if !st.stop_points -> return web_set(&e, dst)
+    value :: e.t2
+    web_set(&e, value)
+    web_runtime(&e, &st, f, at, "jet_rt_session_propagate", "", "l")
+    web_op(&e, 0x50)
+    web_op(&e, 0x45)
+    web_if(&e)
+    web_stop_action(&e, st)
+    web_else(&e)
+    web_get(&e, value)
+    web_set(&e, dst)
+    web_end(&e)
+}
+
+// ---------------------------------------------------------------------------
+// One instruction.
+
+fn web_select(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables, at: Int) Never! {
+    op :: f.op[at]
+    dst :: f.dst[at]
+    if op == {
+        .Nop -> {}
+        .Const -> web_const(&e, f, at)
+        .ConstText -> {
+            if f.a[at] < 0 || f.a[at] >= tables.headers.len() || tables.headers[f.a[at]] < 0 -> return web_fail(&e, &st, f, at, "data row {f.a[at]} has no text header")
+            web_i64(&e, st.data_at[tables.headers[f.a[at]]])
+            web_store(&e, dst)
+        }
+        .ConstBigInt -> {
+            if f.a[at] < 0 || f.a[at] >= m.names.len() -> return web_fail(&e, &st, f, at, "name {f.a[at]} is not interned")
+            web_text(&e, st, tables, m.names[f.a[at]])
+            web_runtime(&e, &st, f, at, "jet_rt_int_from_static", "ll", "l")
+            web_store(&e, dst)
+        }
+        .Copy | .Move -> web_transfer(&e, &st, m, f, at)
+        .Drop | .Close -> web_drop(&e, &st, m, f, at)
+        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> web_binary(&e, &st, m, f, tables, at)
+        .Neg -> web_neg(&e, &st, m, f, tables, at)
+        .Not -> web_not(&e, &st, m, f, at)
+        .Sqrt -> {
+            kind :: web_slot_kind(m, f, f.a[at])
+            if kind != .Float && kind != .Float32 -> return web_fail(&e, &st, f, at, "no square root of {ir_kind_name(kind)}")
+            web_load(&e, f.a[at])
+            web_op(&e, if kind == .Float32 -> 0x91 else -> 0x9f)
+            web_store(&e, dst)
+        }
+        .IntBig -> web_int_big(&e, &st, m, f, at)
+        .Convert -> web_convert(&e, &st, m, f, at)
+        .Concat -> {
+            web_load(&e, f.a[at])
+            web_load(&e, f.b[at])
+            web_runtime(&e, &st, f, at, "jet_rt_string_concat", "ll", "l")
+            web_store(&e, dst)
+        }
+        .Call -> web_direct_call(&e, &st, m, f, at)
+        .CallRuntime -> {
+            if f.a[at] < 0 || f.a[at] >= m.names.len() -> return web_fail(&e, &st, f, at, "runtime name {f.a[at]} is not interned")
+            letters :: web_push_args(&e, m, f, at)
+            resolved :: web_symbol(&st, m.names[f.a[at]], "{letters}:{web_site_result(e, m, f, dst)}")
+            if web_sig_params(resolved.sig) != letters -> return web_fail(&e, &st, f, at, "`{m.names[f.a[at]]}` takes ({web_sig_params(resolved.sig)}), not ({letters})")
+            web_call(&e, resolved.callee)
+            web_call_result(&e, &st, m, f, at, web_sig_result(resolved.sig))
+        }
+        .CallIndirect -> {
+            letters :: web_push_args(&e, m, f, at)
+            site :: web_site_result(e, m, f, dst)
+            sig :: web_slot_sig("{letters}:{site}")
+            web_load(&e, f.a[at])
+            web_call_indirect(&e, &st, sig)
+            web_call_result(&e, &st, m, f, at, web_sig_result(sig))
+        }
+        .FunctionAddress -> {
+            if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return web_fail(&e, &st, f, at, "function {f.a[at]} is not in the module")
+            web_i64(&e, web_table_index(&st, f.a[at]))
+            web_store(&e, dst)
+        }
+        .DataAddress -> {
+            if f.a[at] < 0 || f.a[at] >= st.data_at.len() -> return web_fail(&e, &st, f, at, "data row {f.a[at]} is not in the module")
+            web_i64(&e, st.data_at[f.a[at]])
+            web_store(&e, dst)
+        }
+        .Load -> web_load_op(&e, m, f, at)
+        .Store -> web_store_op(&e, m, f, at)
+        .StackAddress -> {
+            area :: e.areas[at]
+            web_frame_address(&e, area)
+            web_store(&e, dst)
+        }
+        .Offset -> {
+            web_load(&e, f.a[at])
+            web_i64(&e, f.b[at])
+            web_op(&e, 0x7c)
+            web_store(&e, dst)
+        }
+        .CopyBytes -> {
+            web_load(&e, f.a[at])
+            web_wrap(&e)
+            web_load(&e, f.b[at])
+            web_wrap(&e)
+            web_i32(&e, f.c[at])
+            web_memory_copy(&e)
+        }
+        .Block -> {
+            web_op(&e, 0x02)
+            web_op(&e, WEB_VOID)
+        }
+        .Loop -> {
+            web_op(&e, 0x03)
+            web_op(&e, WEB_VOID)
+        }
+        .If -> {
+            web_truth(&e, f.a[at])
+            web_if(&e)
+        }
+        .Else -> web_else(&e)
+        .End -> {
+            web_end(&e)
+            count :: e.pad_ends.len()
+            if count > 0 && e.pad_ends[count - 1] == at -> _ := &e.pad_ends.pop()
+        }
+        .Br -> {
+            web_op(&e, 0x0c)
+            wasm_put_unsigned(&e.code, f.a[at])
+        }
+        .BrIf -> {
+            web_truth(&e, f.a[at])
+            web_op(&e, 0x0d)
+            wasm_put_unsigned(&e.code, f.b[at])
+        }
+        // A tail jump's Return: the Call before it already left.
+        .Return -> {
+            if f.b[at] != IR_TAIL_JUMP -> web_return(&e, st, m, f, f.a[at])
+        }
+        .Unreachable -> web_op(&e, 0x00)
+    }
+}
+
+fn web_const(e: &WebEmitter, f: IRFunction, at: Int) Never! {
+    dst :: f.dst[at]
+    local :: e.locals[dst]
+    if local < 0 -> return
+    ty :: e.local_types[local]
+    if ty == WASM_F64 {
+        web_i64(&e, f.a[at])
+        web_op(&e, 0xbf)
+    } else if ty == WASM_F32 {
+        web_i32(&e, f.a[at])
+        web_op(&e, 0xbe)
+    } else {
+        web_i64(&e, f.a[at])
+    }
+    web_set(&e, local)
+}
+
+// ---------------------------------------------------------------------------
+// Calls.
+
+// Pushes a call's arguments (an Aggregate result's storage first); returns
+// their signature letters.
+fn web_push_args(e: &WebEmitter, m: IRModule, f: IRFunction, at: Int) -> String Never! {
+    dst :: f.dst[at]
+    letters := ""
+    if dst >= 0 && web_slot_kind(m, f, dst) == .Aggregate {
+        area :: e.areas[at]
+        web_frame_address(&e, area)
+        letters = "l"
+    }
+    loop position in f.b[at]..<(f.b[at] + f.c[at]) {
+        slot :: f.args[position]
+        local :: e.locals[slot]
+        if local < 0 -> next
+        web_get(&e, local)
+        letters = "{letters}{web_slot_letter(e, slot)}"
+    }
+    letters
+}
+
+// The result letter a call site expects of its callee.
+fn web_site_result(e: WebEmitter, m: IRModule, f: IRFunction, dst: Int) -> String Never! {
+    if dst < 0 || web_slot_kind(m, f, dst) == .Aggregate -> return ""
+    web_slot_letter(e, dst)
+}
+
+// A call's result (letter `result`) into its dst: an Aggregate dst receives
+// its storage's address; a word is normalized to its carrier.
+fn web_call_result(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int, result: String) Never! {
+    dst :: f.dst[at]
+    if dst >= 0 && web_slot_kind(m, f, dst) == .Aggregate {
+        if result != "" -> web_op(&e, 0x1a)
+        area :: e.areas[at]
+        web_frame_address(&e, area)
+        return web_store(&e, dst)
+    }
+    if dst < 0 || e.locals[dst] < 0 {
+        if result != "" -> web_op(&e, 0x1a)
+        return
+    }
+    if result == "" {
+        zero :: e.local_types[e.locals[dst]]
+        web_zero(&e, zero)
+        return web_store(&e, dst)
+    }
+    holds :: web_slot_letter(e, dst)
+    if result != holds -> return web_fail(&e, &st, f, at, "the callee returns {result}, the destination holds {holds}")
+    if result == "l" -> web_normalize(&e, m.types[f.slot_type[dst]])
+    web_store(&e, dst)
+}
+
+fn web_direct_call(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) Never! {
+    callee :: f.a[at]
+    if callee < 0 || callee >= m.functions.len() -> return web_fail(&e, &st, f, at, "function {callee} is not in the module")
+    target :: m.functions[callee]
+    if target.asm != None && !web_is_poll(m, callee) {
+        args := [Int]{}
+        loop position in f.b[at]..<(f.b[at] + f.c[at]) {
+            slot :: f.args[position]
+            if web_slot_letter(e, slot) != "l" -> return web_fail(&e, &st, f, at, "asm leaf `{target.name}` takes machine words")
+            &args.push(e.locals[slot])
+        }
+        if !web_leaf(&e, &st, target.name, args, target.result >= 0) -> return web_fail(&e, &st, f, at, "the web target has no form of the asm leaf `{target.name}`")
+        return web_call_result(&e, &st, m, f, at, if target.result >= 0 -> "l" else -> "")
+    }
+    sig :: st.sigs[callee]
+    tail :: at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP
+    letters :: web_push_args(&e, m, f, at)
+    if letters != web_sig_params(sig) -> return web_fail(&e, &st, f, at, "`{target.name}` takes ({web_sig_params(sig)}), not ({letters})")
+    if tail {
+        if web_sig_result(sig) == e.result {
+            web_epilogue_frame(&e)
+            return web_return_call(&e, callee)
+        }
+        // The callee's result is not this function's: call, then return
+        // this result's zero; the callee's return set the stop global.
+        web_call(&e, callee)
+        if web_sig_result(sig) != "" -> web_op(&e, 0x1a)
+        web_epilogue_frame(&e)
+        zero :: web_result_type(e.result)
+        if zero != 0 -> web_zero(&e, zero)
+        return web_op(&e, 0x0f)
+    }
+    web_call(&e, callee)
+    web_call_result(&e, &st, m, f, at, web_sig_result(sig))
+}
+
+// Restores the stack pointer only (a tail call's callee sets the stop global).
+fn web_epilogue_frame(e: &WebEmitter) Never! {
+    frame_size :: e.frame_size
+    frame :: e.frame
+    if frame_size == 0 -> return
+    web_get(&e, frame)
+    web_i64(&e, frame_size)
+    web_op(&e, 0x7c)
+    web_global_set(&e, WEB_GLOBAL_SP)
+}
+
+// ---------------------------------------------------------------------------
+// Ownership.
+
+fn web_transfer(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) Never! {
+    src :: f.a[at]
+    dst :: f.dst[at]
+    ty :: m.types[f.slot_type[src]]
+    // An aggregate slot holds its storage's address: a Copy aliases it, as a
+    // box or function value's Copy does (its builder retained it).
+    if f.op[at] == .Copy && ty.drop != "" && ty.kind != .Aggregate && !ir_clone_shares(ty.clone) {
+        if ty.kind == .Int || ty.clone == "jet_rt_int_clone" -> return web_int_route(&e, &st, f, at, "jet_rt_int_clone", src, dst)
+        if ty.kind == .String {
+            web_load(&e, src)
+            web_runtime(&e, &st, f, at, "jet_rt_string_clone", "l", "l")
+            return web_store(&e, dst)
+        }
+        return web_fail(&e, &st, f, at, "Copy of {ir_kind_name(ty.kind)} with drop {ty.drop} has no clone route")
+    }
+    from :: e.locals[src]
+    to :: e.locals[dst]
+    if src == dst || from < 0 || to < 0 -> return
+    web_get(&e, from)
+    web_set(&e, to)
+}
+
+// An exact Int `src`: itself while inline, else `symbol`(src); into `dst`
+// (-1: the result is dropped).
+fn web_int_route(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, symbol: String, src: Int, dst: Int) Never! {
+    local :: e.locals[src]
+    web_inline_test(&e, local)
+    web_if(&e)
+    if dst >= 0 {
+        web_load(&e, src)
+        web_store(&e, dst)
+    }
+    web_else(&e)
+    web_load(&e, src)
+    web_runtime(&e, &st, f, at, symbol, "l", if dst >= 0 -> "l" else -> "")
+    if dst >= 0 -> web_store(&e, dst)
+    web_end(&e)
+}
+
+fn web_drop(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) Never! {
+    slot :: f.a[at]
+    if f.op[at] == .Close {
+        if f.b[at] < 0 || f.b[at] >= m.names.len() -> return web_fail(&e, &st, f, at, "Close without a close routine")
+        web_load(&e, slot)
+        letter :: web_slot_letter(e, slot)
+        return web_runtime(&e, &st, f, at, m.names[f.b[at]], letter, "")
+    }
+    ty :: m.types[f.slot_type[slot]]
+    if ty.drop == "" || e.locals[slot] < 0 -> return
+    if ty.kind == .Int || ty.drop == "jet_rt_int_drop" -> return web_int_route(&e, &st, f, at, ty.drop, slot, -1)
+    web_load(&e, slot)
+    // A drop routine the module builds itself (the ScopeGuard drop) is
+    // registered under its symbol.
+    if name_rows_value(m.function_rows, ty.drop) == .Val(id) {
+        web_call(&e, id)
+        if web_sig_result(st.sigs[id]) != "" -> web_op(&e, 0x1a)
+        return
+    }
+    letter :: web_slot_letter(e, slot)
+    web_runtime(&e, &st, f, at, ty.drop, letter, "")
+}
+
+// ---------------------------------------------------------------------------
+// Memory.
+
+fn web_load_op(e: &WebEmitter, m: IRModule, f: IRFunction, at: Int) Never! {
+    dst :: f.dst[at]
+    local :: e.locals[dst]
+    if local < 0 -> return
+    ty :: m.types[f.slot_type[dst]]
+    base :: e.locals[f.a[at]]
+    offset :: web_address(&e, base, f.b[at])
+    width :: web_value_width(ty)
+    op := 0x29
+    if ty.kind == .Float {
+        op = 0x2b
+    } else if ty.kind == .Float32 {
+        op = 0x2a
+    } else if width == 1 {
+        op = if ty.kind == .Word && ty.signed -> 0x30 else -> 0x31
+    } else if width == 2 {
+        op = if ty.kind == .Word && ty.signed -> 0x32 else -> 0x33
+    } else if width == 4 {
+        op = if ty.kind == .Word && ty.signed -> 0x34 else -> 0x35
+    }
+    web_mem(&e, op, offset)
+    web_set(&e, local)
+}
+
+fn web_store_op(e: &WebEmitter, m: IRModule, f: IRFunction, at: Int) Never! {
+    value :: f.c[at]
+    local :: e.locals[value]
+    if local < 0 -> return
+    ty :: m.types[f.slot_type[value]]
+    base :: e.locals[f.a[at]]
+    offset :: web_address(&e, base, f.b[at])
+    web_get(&e, local)
+    width :: web_value_width(ty)
+    op := 0x37
+    if ty.kind == .Float {
+        op = 0x39
+    } else if ty.kind == .Float32 {
+        op = 0x38
+    } else if width == 1 {
+        op = 0x3c
+    } else if width == 2 {
+        op = 0x3d
+    } else if width == 4 {
+        op = 0x3e
+    }
+    web_mem(&e, op, offset)
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic.
+
+fn web_binary(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables, at: Int) Never! {
+    ty :: m.types[f.slot_type[f.a[at]]]
+    if ty.kind == {
+        .Int -> {
+            if f.c[at] == IR_OVERFLOW_WRAP {
+                shape := ty.copy()
+                shape.kind = .Word
+                shape.signed = true
+                shape.bits = 64
+                return web_word_binary(&e, &st, m, f, tables, at, shape)
+            }
+            web_exact_binary(&e, &st, f, tables, at)
+        }
+        .Float | .Float32 -> web_float_binary(&e, &st, f, at, ty)
+        .String -> {
+            if web_is_compare(f.op[at]) -> return web_string_compare(&e, &st, f, at)
+            web_fail(&e, &st, f, at, "String operands take Concat or a comparison")
+        }
+        .Word | .Bool | .Char | .Pointer -> web_word_binary(&e, &st, m, f, tables, at, ty)
+        else -> web_fail(&e, &st, f, at, "no arithmetic on {ir_kind_name(ty.kind)}")
+    }
+}
+
+fn web_is_compare(op: IROp) -> Bool Never! {
+    op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
+}
+
+// The i64 comparison opcode of `op`.
+fn web_compare_op(op: IROp, unsigned: Bool) -> Int Never! {
+    if op == {
+        .Eq -> 0x51
+        .Ne -> 0x52
+        .Lt -> if unsigned -> 0x54 else -> 0x53
+        .Gt -> if unsigned -> 0x56 else -> 0x55
+        .Le -> if unsigned -> 0x58 else -> 0x57
+        else -> if unsigned -> 0x5a else -> 0x59
+    }
+}
+
+// Stores the i32 truth on the stack into Bool slot `dst`.
+fn web_store_truth(e: &WebEmitter, dst: Int) Never! {
+    web_op(&e, 0xad)
+    web_store(&e, dst)
+}
+
+// The i32 test that both slots hold inline Ints.
+fn web_both_inline(e: &WebEmitter, left: Int, right: Int) Never! {
+    web_inline_test(&e, left)
+    web_inline_test(&e, right)
+    web_op(&e, 0x71)
+}
+
+// Exact Int: two inline operands take the native operation when its result
+// stays inline; any other pair takes the runtime's big-integer route.
+fn web_exact_binary(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int) Never! {
+    op :: f.op[at]
+    left :: e.locals[f.a[at]]
+    right :: e.locals[f.b[at]]
+    dst :: f.dst[at]
+    if web_is_compare(op) {
+        web_both_inline(&e, left, right)
+        web_if_value(&e, WASM_I32)
+        web_get(&e, left)
+        web_get(&e, right)
+        web_op(&e, web_compare_op(op, false))
+        web_else(&e)
+        web_get(&e, left)
+        web_get(&e, right)
+        web_runtime(&e, &st, f, at, "jet_int_compare", "ll", "l")
+        web_i64(&e, 0)
+        web_op(&e, web_compare_op(op, false))
+        web_end(&e)
+        return web_store_truth(&e, dst)
+    }
+    if op == .Add || op == .Sub || op == .Mul {
+        symbol :: if op == .Add -> "jet_int_add" else if op == .Sub -> "jet_int_sub" else -> "jet_int_mul"
+        return web_exact_arithmetic(&e, &st, f, at, op, left, right, dst, symbol)
+    }
+    if op == .BitAnd || op == .BitOr || op == .BitXor {
+        symbol :: if op == .BitAnd -> "jet_int_bit_and" else if op == .BitOr -> "jet_int_bit_or" else -> "jet_int_bit_xor"
+        web_both_inline(&e, left, right)
+        web_if(&e)
+        web_get(&e, left)
+        web_get(&e, right)
+        web_op(&e, if op == .BitAnd -> 0x83 else if op == .BitOr -> 0x84 else -> 0x85)
+        web_store(&e, dst)
+        web_else(&e)
+        web_get(&e, left)
+        web_get(&e, right)
+        web_runtime(&e, &st, f, at, symbol, "ll", "l")
+        web_store(&e, dst)
+        web_end(&e)
+        return
+    }
+    if op == .Shl || op == .Shr -> return web_exact_shift(&e, &st, f, tables, at)
+    web_exact_division(&e, &st, f, tables, at)
+}
+
+// Exact `left op right` for Add, Sub, Mul (`left` -1: zero, for Neg).
+fn web_exact_arithmetic(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, op: IROp, left: Int, right: Int, dst: Int, symbol: String) Never! {
+    t0 :: e.t0
+    ok :: e.ok
+    target :: e.locals[dst]
+    if left >= 0 {
+        web_both_inline(&e, left, right)
+    } else {
+        web_inline_test(&e, right)
+    }
+    web_if(&e)
+    if left >= 0 -> web_get(&e, left) else -> web_i64(&e, 0)
+    web_get(&e, right)
+    web_op(&e, if op == .Add -> 0x7c else if op == .Sub -> 0x7d else -> 0x7e)
+    web_set(&e, t0)
+    web_inline_test(&e, t0)
+    if op == .Mul {
+        // The 64-bit product overflowed exactly when it does not divide
+        // back (an inline right operand is never the word's minimum).
+        web_get(&e, left)
+        web_op(&e, 0x50)
+        web_if_value(&e, WASM_I32)
+        web_i32(&e, 1)
+        web_else(&e)
+        web_get(&e, t0)
+        web_get(&e, left)
+        web_op(&e, 0x7f)
+        web_get(&e, right)
+        web_op(&e, 0x51)
+        web_end(&e)
+        web_op(&e, 0x71)
+    }
+    web_set(&e, ok)
+    web_else(&e)
+    web_i32(&e, 0)
+    web_set(&e, ok)
+    web_end(&e)
+    web_get(&e, ok)
+    web_if(&e)
+    web_get(&e, t0)
+    web_set(&e, target)
+    web_else(&e)
+    if left >= 0 -> web_get(&e, left) else -> web_i64(&e, 0)
+    web_get(&e, right)
+    web_runtime(&e, &st, f, at, symbol, "ll", "l")
+    web_set(&e, target)
+    web_end(&e)
+}
+
+// Exact Shl / Shr: an inline word by a count in 0..<63 (Shl, whose result
+// must shift back and stay inline) or 0..<64 (Shr), else the located route.
+fn web_exact_shift(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int) Never! {
+    left_shift :: f.op[at] == .Shl
+    left :: e.locals[f.a[at]]
+    right :: e.locals[f.b[at]]
+    dst :: e.locals[f.dst[at]]
+    t0 :: e.t0
+    ok :: e.ok
+    web_both_inline(&e, left, right)
+    web_get(&e, right)
+    web_i64(&e, if left_shift -> 63 else -> 64)
+    web_op(&e, 0x54)
+    web_op(&e, 0x71)
+    web_if(&e)
+    web_get(&e, left)
+    web_get(&e, right)
+    web_op(&e, if left_shift -> 0x86 else -> 0x87)
+    web_set(&e, t0)
+    if left_shift {
+        web_get(&e, t0)
+        web_get(&e, right)
+        web_op(&e, 0x87)
+        web_get(&e, left)
+        web_op(&e, 0x51)
+        web_inline_test(&e, t0)
+        web_op(&e, 0x71)
+    } else {
+        web_i32(&e, 1)
+    }
+    web_set(&e, ok)
+    web_else(&e)
+    web_i32(&e, 0)
+    web_set(&e, ok)
+    web_end(&e)
+    web_get(&e, ok)
+    web_if(&e)
+    web_get(&e, t0)
+    web_set(&e, dst)
+    web_else(&e)
+    web_located(&e, &st, f, tables, at, if left_shift -> "jet_int_shl" else -> "jet_int_shr", left, right, dst)
+    web_end(&e)
+}
+
+// The truncated quotient (t0) and remainder (t1) of `left` by `right`
+// (neither 0 nor -1), rounded toward negative infinity for FloorDiv and Mod.
+fn web_divide(e: &WebEmitter, op: IROp, left: Int, right: Int) Never! {
+    t0 :: e.t0
+    t1 :: e.t1
+    web_get(&e, left)
+    web_get(&e, right)
+    web_op(&e, 0x7f)
+    web_set(&e, t0)
+    web_get(&e, left)
+    web_get(&e, right)
+    web_op(&e, 0x81)
+    web_set(&e, t1)
+    if op != .FloorDiv && op != .Mod -> return
+    web_get(&e, t1)
+    web_i64(&e, 0)
+    web_op(&e, 0x52)
+    web_get(&e, t1)
+    web_get(&e, right)
+    web_op(&e, 0x85)
+    web_i64(&e, 0)
+    web_op(&e, 0x53)
+    web_op(&e, 0x71)
+    web_if(&e)
+    web_get(&e, t0)
+    web_i64(&e, 1)
+    web_op(&e, 0x7d)
+    web_set(&e, t0)
+    web_get(&e, t1)
+    web_get(&e, right)
+    web_op(&e, 0x7c)
+    web_set(&e, t1)
+    web_end(&e)
+}
+
+fn web_division_symbol(op: IROp) -> String Never! {
+    if op == {
+        .Div -> "jet_int_div"
+        .Rem -> "jet_int_rem"
+        .FloorDiv -> "jet_int_floor_div"
+        else -> "jet_int_mod"
+    }
+}
+
+// Exact Div, Rem, FloorDiv, Mod: two inline operands and a divisor other
+// than 0 and -1 divide natively; the located route keeps the zero stop and
+// the big quotient of the smallest inline word by -1.
+fn web_exact_division(e: &WebEmitter, st: &WebState, f: IRFunction, tables: IRX64Tables, at: Int) Never! {
+    op :: f.op[at]
+    left :: e.locals[f.a[at]]
+    right :: e.locals[f.b[at]]
+    dst :: e.locals[f.dst[at]]
+    web_both_inline(&e, left, right)
+    web_get(&e, right)
+    web_i64(&e, 1)
+    web_op(&e, 0x7c)
+    web_i64(&e, 1)
+    web_op(&e, 0x56)
+    web_op(&e, 0x71)
+    web_if(&e)
+    web_divide(&e, op, left, right)
+    quotient :: if op == .Rem || op == .Mod -> e.t1 else -> e.t0
+    web_get(&e, quotient)
+    web_set(&e, dst)
+    web_else(&e)
+    web_located(&e, &st, f, tables, at, web_division_symbol(op), left, right, dst)
+    web_end(&e)
+}
+
+// The i32 test that the i64 on top differs from its own narrowing to `ty`;
+// the value stays in t0.
+fn web_out_of_range(e: &WebEmitter, ty: IRType) Never! {
+    value :: e.t0
+    web_tee(&e, value)
+    web_narrow(&e, ty.signed, web_bits(ty))
+    web_get(&e, value)
+    web_op(&e, 0x52)
+}
+
+// Fixed-width (and wrapping Int) operations: wrapping, or (trap) stopping
+// with the type's overflow text when the result leaves its range.
+fn web_word_binary(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables, at: Int, ty: IRType) Never! {
+    op :: f.op[at]
+    left :: e.locals[f.a[at]]
+    right :: e.locals[f.b[at]]
+    dst :: f.dst[at]
+    if web_is_compare(op) {
+        web_get(&e, left)
+        web_get(&e, right)
+        web_op(&e, web_compare_op(op, web_unsigned(ty)))
+        return web_store_truth(&e, dst)
+    }
+    bits :: web_bits(ty)
+    trap :: f.c[at] != IR_OVERFLOW_WRAP
+    unsigned :: !ty.signed
+    if op == .Add || op == .Sub || op == .Mul {
+        operation :: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+        message :: ir_x64_overflow_message(operation)
+        web_get(&e, left)
+        web_get(&e, right)
+        web_op(&e, if op == .Add -> 0x7c else if op == .Sub -> 0x7d else -> 0x7e)
+        t0 :: e.t0
+        web_set(&e, t0)
+        if bits == 64 {
+            if trap {
+                web_word_overflow(&e, op, unsigned, left, right)
+                web_stop_if(&e, &st, f, tables, at, message)
+            }
+        } else if trap {
+            web_get(&e, t0)
+            web_out_of_range(&e, ty)
+            web_stop_if(&e, &st, f, tables, at, message)
+        } else {
+            web_get(&e, t0)
+            web_narrow(&e, ty.signed, bits)
+            web_set(&e, t0)
+        }
+        web_get(&e, t0)
+        return web_store(&e, dst)
+    }
+    if op == .Div || op == .Rem || op == .FloorDiv || op == .Mod {
+        return web_word_division(&e, &st, m, f, tables, at, ty)
+    }
+    if op == .Shl || op == .Shr {
+        checked := trap
+        if checked && f.b[at] >= 0 {
+            constant :: web_const_value(f, at, f.b[at])
+            if constant == .Val(count) {
+                if count >= 0 && count < bits -> checked = false
+            }
+        }
+        if checked {
+            web_get(&e, right)
+            web_i64(&e, bits)
+            web_op(&e, 0x5a)
+            web_if(&e)
+            web_i64(&e, if op == .Shl -> 0 else -> 1)
+            web_get(&e, right)
+            web_i64(&e, if unsigned -> 1 else -> 0)
+            web_i64(&e, bits)
+            web_text(&e, st, tables, f.source_file)
+            web_i64(&e, f.code_line[at])
+            web_runtime(&e, &st, f, at, "jet_rt_fixed_shift_stop", "lllllll", "")
+            web_stop_action(&e, st)
+            web_end(&e)
+        }
+        web_get(&e, left)
+        web_get(&e, right)
+        if op == .Shl {
+            web_op(&e, 0x86)
+            web_narrow(&e, ty.signed, bits)
+        } else {
+            web_op(&e, if ty.signed -> 0x87 else -> 0x88)
+        }
+        return web_store(&e, dst)
+    }
+    web_get(&e, left)
+    web_get(&e, right)
+    if op == {
+        .BitAnd -> web_op(&e, 0x83)
+        .BitOr -> web_op(&e, 0x84)
+        .BitXor -> web_op(&e, 0x85)
+        else -> return web_fail(&e, &st, f, at, "no fixed-width form")
+    }
+    web_store(&e, dst)
+}
+
+// The constant a slot holds when the instruction before `at` that last
+// wrote it, in straight-line code, is a Const.
+fn web_const_value(f: IRFunction, at: Int, slot: Int) -> Int? Never! {
+    index := at - 1
+    loop index >= 0 {
+        op :: f.op[index]
+        if op == .Block || op == .Loop || op == .If || op == .Else || op == .End -> return None
+        if f.dst[index] == slot {
+            if op == .Const -> return Val(f.a[index])
+            return None
+        }
+        index -= 1
+    }
+    None
+}
+
+// The i32 test that the 64-bit `op` result in t0 overflowed.
+fn web_word_overflow(e: &WebEmitter, op: IROp, unsigned: Bool, left: Int, right: Int) Never! {
+    t0 :: e.t0
+    if unsigned {
+        if op == .Add {
+            web_get(&e, t0)
+            web_get(&e, left)
+            web_op(&e, 0x54)
+        } else if op == .Sub {
+            web_get(&e, left)
+            web_get(&e, right)
+            web_op(&e, 0x54)
+        } else {
+            web_get(&e, right)
+            web_op(&e, 0x50)
+            web_if_value(&e, WASM_I32)
+            web_i32(&e, 0)
+            web_else(&e)
+            web_get(&e, t0)
+            web_get(&e, right)
+            web_op(&e, 0x80)
+            web_get(&e, left)
+            web_op(&e, 0x52)
+            web_end(&e)
+        }
+        return
+    }
+    if op == .Add {
+        web_get(&e, left)
+        web_get(&e, t0)
+        web_op(&e, 0x85)
+        web_get(&e, right)
+        web_get(&e, t0)
+        web_op(&e, 0x85)
+        web_op(&e, 0x83)
+        web_i64(&e, 0)
+        web_op(&e, 0x53)
+        return
+    }
+    if op == .Sub {
+        web_get(&e, left)
+        web_get(&e, right)
+        web_op(&e, 0x85)
+        web_get(&e, left)
+        web_get(&e, t0)
+        web_op(&e, 0x85)
+        web_op(&e, 0x83)
+        web_i64(&e, 0)
+        web_op(&e, 0x53)
+        return
+    }
+    // Signed product: 0 never overflows; -1 only by the minimum; else the
+    // product must divide back.
+    web_get(&e, left)
+    web_op(&e, 0x50)
+    web_if_value(&e, WASM_I32)
+    web_i32(&e, 0)
+    web_else(&e)
+    web_get(&e, left)
+    web_i64(&e, -1)
+    web_op(&e, 0x51)
+    web_if_value(&e, WASM_I32)
+    web_get(&e, right)
+    web_i64(&e, WEB_INT_MIN)
+    web_op(&e, 0x51)
+    web_else(&e)
+    web_get(&e, t0)
+    web_get(&e, left)
+    web_op(&e, 0x7f)
+    web_get(&e, right)
+    web_op(&e, 0x52)
+    web_end(&e)
+    web_end(&e)
+}
+
+// The smallest value of a signed type of `bits`.
+fn web_signed_min(bits: Int) -> Int Never! {
+    if bits >= 64 -> return WEB_INT_MIN
+    0 - (1 << (bits - 1))
+}
+
+// Fixed-width Div, Rem, FloorDiv, Mod. A divisor of an Int left operand was
+// proven positive (OptRange) and needs no checks; any other stops on zero,
+// and a signed -1 divisor gives the negation (out of range at the minimum)
+// and remainder 0 without dividing.
+fn web_word_division(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables, at: Int, ty: IRType) Never! {
+    op :: f.op[at]
+    left :: e.locals[f.a[at]]
+    right :: e.locals[f.b[at]]
+    dst :: e.locals[f.dst[at]]
+    bits :: web_bits(ty)
+    trap :: f.c[at] != IR_OVERFLOW_WRAP
+    remainder :: op == .Rem || op == .Mod
+    quotient :: if remainder -> e.t1 else -> e.t0
+    if web_slot_kind(m, f, f.a[at]) == .Int {
+        web_divide(&e, op, left, right)
+        web_get(&e, quotient)
+        return web_set(&e, dst)
+    }
+    web_get(&e, right)
+    web_op(&e, 0x50)
+    web_if(&e)
+    web_numeric_stop(&e, &st, f, tables, at, IR_X64_DIVIDED_BY_ZERO)
+    web_else(&e)
+    if !ty.signed {
+        web_get(&e, left)
+        web_get(&e, right)
+        web_op(&e, if remainder -> 0x82 else -> 0x80)
+        web_set(&e, dst)
+    } else {
+        web_get(&e, right)
+        web_i64(&e, -1)
+        web_op(&e, 0x51)
+        web_if(&e)
+        if remainder {
+            web_i64(&e, 0)
+            web_set(&e, dst)
+        } else {
+            if trap {
+                web_get(&e, left)
+                web_i64(&e, web_signed_min(bits))
+                web_op(&e, 0x51)
+                web_stop_if(&e, &st, f, tables, at, ir_x64_overflow_message("div"))
+            }
+            web_i64(&e, 0)
+            web_get(&e, left)
+            web_op(&e, 0x7d)
+            web_narrow(&e, true, bits)
+            web_set(&e, dst)
+        }
+        web_else(&e)
+        web_divide(&e, op, left, right)
+        web_get(&e, quotient)
+        web_set(&e, dst)
+        web_end(&e)
+    }
+    web_end(&e)
+}
+
+// Float and Float32: Wasm's IEEE operations and comparisons (ordered, NaN
+// false except Ne); `%` is the C library's fmod, floor division the
+// quotient's floor.
+fn web_float_binary(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int, ty: IRType) Never! {
+    op :: f.op[at]
+    single :: ty.kind == .Float32
+    dst :: f.dst[at]
+    web_load(&e, f.a[at])
+    web_load(&e, f.b[at])
+    if op == .Rem {
+        letters :: if single -> "ff" else -> "dd"
+        web_runtime(&e, &st, f, at, if single -> "fmodf" else -> "fmod", letters, if single -> "f" else -> "d")
+        return web_store(&e, dst)
+    }
+    if web_is_compare(op) {
+        code :: if op == {
+            .Eq -> 0x61
+            .Ne -> 0x62
+            .Lt -> 0x63
+            .Gt -> 0x64
+            .Le -> 0x65
+            else -> 0x66
+        }
+        web_op(&e, if single -> code - 0x0c else -> code)
+        return web_store_truth(&e, dst)
+    }
+    base :: if single -> 0x92 else -> 0xa0
+    if op == {
+        .Add -> web_op(&e, base)
+        .Sub -> web_op(&e, base + 1)
+        .Mul -> web_op(&e, base + 2)
+        .Div | .FloorDiv -> web_op(&e, base + 3)
+        else -> return web_fail(&e, &st, f, at, "no Float form")
+    }
+    if op == .FloorDiv -> web_op(&e, if single -> 0x8e else -> 0x9c)
+    web_store(&e, dst)
+}
+
+fn web_string_compare(e: &WebEmitter, st: &WebState, f: IRFunction, at: Int) Never! {
+    op :: f.op[at]
+    web_load(&e, f.a[at])
+    web_load(&e, f.b[at])
+    if op == .Eq || op == .Ne {
+        web_runtime(&e, &st, f, at, "jet_rt_string_eq", "ll", "l")
+        web_i64(&e, 255)
+        web_op(&e, 0x83)
+        if op == .Ne {
+            web_i64(&e, 1)
+            web_op(&e, 0x85)
+        }
+        return web_store(&e, f.dst[at])
+    }
+    // Ordering is the sign of the runtime's three-way order.
+    web_runtime(&e, &st, f, at, "jet_rt_string_compare", "ll", "l")
+    web_i64(&e, 0)
+    web_op(&e, web_compare_op(op, false))
+    web_store_truth(&e, f.dst[at])
+}
+
+fn web_neg(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables, at: Int) Never! {
+    ty :: m.types[f.slot_type[f.a[at]]]
+    dst :: f.dst[at]
+    value :: e.locals[f.a[at]]
+    if ty.kind == {
+        .Int -> web_exact_arithmetic(&e, &st, f, at, IROp.Sub, -1, value, dst, "jet_int_sub")
+        .Float | .Float32 -> {
+            // IEEE negation flips the sign bit only.
+            web_get(&e, value)
+            web_op(&e, if ty.kind == .Float32 -> 0x8c else -> 0x9a)
+            web_store(&e, dst)
+        }
+        .Word -> {
+            bits :: web_bits(ty)
+            trap :: f.c[at] != IR_OVERFLOW_WRAP
+            message :: ir_x64_overflow_message("sub")
+            if trap && !ty.signed {
+                web_get(&e, value)
+                web_op(&e, 0x50)
+                web_op(&e, 0x45)
+                web_stop_if(&e, &st, f, tables, at, message)
+            }
+            if trap && ty.signed {
+                if bits == 64 {
+                    web_get(&e, value)
+                    web_i64(&e, WEB_INT_MIN)
+                    web_op(&e, 0x51)
+                    web_stop_if(&e, &st, f, tables, at, message)
+                } else {
+                    web_i64(&e, 0)
+                    web_get(&e, value)
+                    web_op(&e, 0x7d)
+                    web_out_of_range(&e, ty)
+                    web_stop_if(&e, &st, f, tables, at, message)
+                }
+            }
+            web_i64(&e, 0)
+            web_get(&e, value)
+            web_op(&e, 0x7d)
+            web_narrow(&e, ty.signed, bits)
+            web_store(&e, dst)
+        }
+        else -> web_fail(&e, &st, f, at, "no negation of {ir_kind_name(ty.kind)}")
+    }
+}
+
+// Whether an exact Int is a big integer: bits 63 and 62 differ, the
+// negation of web_inline_test (the x64 selector's ir_x64_int_big).
+fn web_int_big(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) Never! {
+    kind :: web_slot_kind(m, f, f.a[at])
+    if kind != .Int -> return web_fail(&e, &st, f, at, "int_big of {ir_kind_name(kind)}")
+    web_inline_test(&e, e.locals[f.a[at]])
+    web_op(&e, 0x45)
+    web_store_truth(&e, f.dst[at])
+}
+
+fn web_not(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) Never! {
+    ty :: m.types[f.slot_type[f.a[at]]]
+    dst :: f.dst[at]
+    value :: e.locals[f.a[at]]
+    if ty.kind == {
+        .Bool -> {
+            web_get(&e, value)
+            web_i64(&e, 1)
+            web_op(&e, 0x85)
+            web_store(&e, dst)
+        }
+        .Word -> {
+            web_get(&e, value)
+            web_i64(&e, -1)
+            web_op(&e, 0x85)
+            // An unsigned narrow value flips only its own bits.
+            if !ty.signed -> web_narrow(&e, false, web_bits(ty))
+            web_store(&e, dst)
+        }
+        .Int -> {
+            // `not v` is `-v - 1`: an inline word flips in place and stays
+            // inline; a big integer takes the runtime's exact xor with -1.
+            web_inline_test(&e, value)
+            web_if(&e)
+            web_get(&e, value)
+            web_i64(&e, -1)
+            web_op(&e, 0x85)
+            web_store(&e, dst)
+            web_else(&e)
+            web_get(&e, value)
+            web_i64(&e, -1)
+            web_runtime(&e, &st, f, at, "jet_int_bit_xor", "ll", "l")
+            web_store(&e, dst)
+            web_end(&e)
+        }
+        else -> web_fail(&e, &st, f, at, "no `not` of {ir_kind_name(ty.kind)}")
+    }
+}
+
+// Convert by the slot types: a Float truncates into a Word (signed 64-bit;
+// NaN and out of range give the minimum, as cvttsd2si does), a Word read as
+// signed 64-bit rounds into a Float, and the Float widths convert.
+fn web_convert(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) Never! {
+    from :: m.types[f.slot_type[f.a[at]]]
+    to :: m.types[f.slot_type[f.dst[at]]]
+    value :: e.locals[f.a[at]]
+    dst :: f.dst[at]
+    float_from :: from.kind == .Float || from.kind == .Float32
+    float_to :: to.kind == .Float || to.kind == .Float32
+    if float_from && to.kind == .Word {
+        single :: from.kind == .Float32
+        web_get(&e, value)
+        if single -> web_f32_bits(&e, 0xdf000000) else -> web_f64_bits(&e, 0xc3e0000000000000)
+        web_op(&e, if single -> 0x60 else -> 0x66)
+        web_get(&e, value)
+        if single -> web_f32_bits(&e, 0x5f000000) else -> web_f64_bits(&e, 0x43e0000000000000)
+        web_op(&e, if single -> 0x5d else -> 0x63)
+        web_op(&e, 0x71)
+        web_if_value(&e, WASM_I64)
+        web_get(&e, value)
+        web_op(&e, if single -> 0xae else -> 0xb0)
+        web_else(&e)
+        web_i64(&e, WEB_INT_MIN)
+        web_end(&e)
+        web_normalize(&e, to)
+        return web_store(&e, dst)
+    }
+    if from.kind == .Word && float_to {
+        web_get(&e, value)
+        web_op(&e, if to.kind == .Float32 -> 0xb4 else -> 0xb9)
+        return web_store(&e, dst)
+    }
+    if float_from && float_to {
+        web_get(&e, value)
+        if from.kind == .Float32 && to.kind == .Float {
+            web_op(&e, 0xbb)
+        } else if from.kind == .Float && to.kind == .Float32 {
+            web_op(&e, 0xb6)
+        }
+        return web_store(&e, dst)
+    }
+    web_fail(&e, &st, f, at, "no conversion from {ir_kind_name(from.kind)} to {ir_kind_name(to.kind)}")
+}

@@ -81,6 +81,8 @@ struct DeliveryReceipt {
     generation: Int
     signature: String
 
+    fn show(self) -> String Never! { delivery_receipt_show(self) }
+
     impl Display {
         fn display(self) -> String { delivery_receipt_show(self) }
     }
@@ -583,8 +585,10 @@ struct Delivery {
     priv authority: String
     priv generation: Int
 
+    fn show(self) -> String Never! { "Delivery({self.id})" }
+
     impl Display {
-        fn display(self) -> String { "Delivery({self.id})" }
+        fn display(self) -> String { self.show() }
     }
 }
 
@@ -2233,7 +2237,7 @@ struct ServiceWorkflow {
     priv state: Shared<__TreeWorkflowState>
 
     impl Display {
-        fn display(self) -> String { "ServiceWorkflow({self.run_id})" }
+        fn display(self) -> String { "{self.run_id}" }
     }
 }
 

@@ -3,10 +3,11 @@
 // (jet_cli_native_level: O1, O2 under a release profile; the build option
 // flags over the profile), plus the functions the IR builder could not
 // build, each counted loop sema's loop proof covers as it lowered
-// (ir_loop_proof_rows) and the invocation's selected canonical-pass gaps.
+// (ir_loop_proof_rows), the main the build gives the program (JetIR
+// EntryOwned.jet) and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
 use jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
-use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
+use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_entry_root_need, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
 struct JetCLIDecisions {
@@ -16,6 +17,9 @@ struct JetCLIDecisions {
     unbuilt: [String]
     // ir_loop_proof_rows of the built program.
     loops: [String]
+    // The program's main: "program-owned", or why it runs under the process
+    // root (ir_entry_root_need).
+    main: String
 }
 
 // The build options `jet inspect decisions` optimizes under, as `jet build`
@@ -50,8 +54,10 @@ fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, build: BuildOptions, thre
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     loops :: ir_loop_proof_rows(built.program)
+    need :: ir_entry_root_need(built.program)
+    main :: if need == "" -> "program-owned" else -> "process root: {need}"
     report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(jet_cli_native_level(build), build), threads)
-    JetCLIDecisions{report: report, unbuilt: ^unbuilt, loops: loops}
+    JetCLIDecisions{report: report, unbuilt: ^unbuilt, loops: loops, main: main}
 }
 
 fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: String, profile: String, canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
@@ -60,6 +66,7 @@ fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: Str
         text := "decisions: scope={scope} source={file} profile={profile}\n{ir_opt_report_text(r)}\n"
         loop row in decisions.unbuilt -> text = "{text}unbuilt {row}\n"
         loop row in decisions.loops -> text = "{text}{row}\n"
+        text = "{text}main: {decisions.main}\n"
         if canonical_route_gaps.len() > 0 -> text = "{text}{jet_cli_canonical_route_gap_text(canonical_route_gaps)}"
         return text
     }
@@ -74,6 +81,7 @@ fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: Str
         jet_cli_status_field("aggregates_replaced", jet_cli_status_int(r.aggregates_replaced)),
         jet_cli_status_field("unbuilt", jet_cli_status_texts(decisions.unbuilt)),
         jet_cli_status_field("loop_proofs", jet_cli_status_texts(decisions.loops)),
+        jet_cli_status_field("main", jet_cli_status_text(decisions.main)),
     }
     // Explicit opt-in gaps are a separately labeled extension, never execution records.
     if canonical_route_gaps.len() > 0 -> &fields.push(jet_cli_status_field("canonical_route_gaps", jet_cli_status_array(jet_cli_canonical_route_gap_values(canonical_route_gaps))))

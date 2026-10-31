@@ -66,42 +66,132 @@ fn raylib_canvas_side(value: I64) -> I64 {
 // A run that spans whole canvas rows is one contiguous span, so a clear is
 // one bulk fill.
 #Export(c) fn jet_raylib_fill_rect(x: I64, y: I64, width: I64, height: I64, rgba: I64, replace: Bool) {
-    left :: jet_int_owned_to_i64(x)
-    top :: jet_int_owned_to_i64(y)
-    run_width :: jet_int_owned_to_i64(width)
-    run_height :: jet_int_owned_to_i64(height)
-    color :: jet_int_owned_to_i64(rgba)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return
-    alpha :: color.bit_and(I64{255})
-    if (raylib_canvas_pixels == I64{0} || run_width <= I64{0} || run_height <= I64{0} || (!replace && alpha == I64{0})) -> return
-    x0 :: if (left < I64{0}) -> I64{0} else -> left
-    y0 :: if (top < I64{0}) -> I64{0} else -> top
-    if (x0 >= raylib_canvas_width || y0 >= raylib_canvas_height) -> return
-    x1 :: if (left >= I64{0} && run_width > raylib_canvas_width - left) -> raylib_canvas_width else -> raylib_canvas_side_min(left + run_width, raylib_canvas_width)
-    y1 :: if (top >= I64{0} && run_height > raylib_canvas_height - top) -> raylib_canvas_height else -> raylib_canvas_side_min(top + run_height, raylib_canvas_height)
-    if (x1 <= x0 || y1 <= y0) -> return
-    whole_rows :: x0 == I64{0} && x1 == raylib_canvas_width
-    span := x1 - x0
-    rows := y1 - y0
-    if (whole_rows) {
-        span = rows * raylib_canvas_width
-        rows = I64{1}
+    if (raylib_inline_sign(x).bit_or(raylib_inline_sign(y)).bit_or(raylib_inline_sign(width)).bit_or(raylib_inline_sign(height)).bit_or(raylib_inline_sign(rgba)) >= I64{0}) {
+        raylib_fill(x, y, width, height, rgba, replace)
+        return
     }
-    stride :: raylib_canvas_width * I64{4}
-    at :: raylib_canvas_pixels + (y0 * raylib_canvas_width + x0) * I64{4}
-    stop :: at + rows * stride
-    if (replace || alpha == I64{255}) {
+    left :: raylib_native(x)
+    top :: raylib_native(y)
+    run_width :: raylib_native(width)
+    run_height :: raylib_native(height)
+    color :: raylib_native(rgba)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    raylib_fill(left, top, run_width, run_height, color, replace)
+}
+
+// A 1-bit glyph mask in one call: bit 8 * c + r (c < 7, r < 8) paints the
+// scale x scale cell at (x + c * scale, y + r * scale). Each column's set
+// rows paint as one run per stretch, top to bottom, blended as
+// jet_raylib_fill_rect blends. A scale below 1 or above 2^32 paints nothing,
+// and so does a pen beyond the inline Int range, which no cell can bring
+// back onto a canvas; within those bounds no cell offset overflows.
+#Export(c) fn jet_raylib_fill_mask(x: I64, y: I64, scale: I64, mask: I64, rgba: I64) {
+    bits :: raylib_native(mask)
+    color :: raylib_native(rgba)
+    if (!(int_inline(mask) && int_inline(rgba)) && jet_scheduler_native_propagate() != I64{0}) -> return
+    if (!(int_inline(x) && int_inline(y) && int_inline(scale)) || scale < I64{1} || scale > RAYLIB_MASK_CELL_MAX) -> return
+    column := I64{0}
+    loop column < (I64{7}) {
+        rows := (bits >> (column * I64{8})).bit_and(I64{255})
+        row := I64{0}
+        loop rows != (I64{0}) {
+            if (rows.bit_and(I64{1}) == I64{0}) {
+                rows = rows >> I64{1}
+                row += I64{1}
+                next
+            }
+            start :: row
+            loop rows.bit_and(I64{1}) != (I64{0}) {
+                rows = rows >> I64{1}
+                row += I64{1}
+            }
+            raylib_fill(x + column * scale, y + start * scale, scale, (row - start) * scale, color, false)
+        }
+        column += I64{1}
+    }
+}
+
+RAYLIB_MASK_CELL_MAX :: I64{4294967296}
+
+// An inline Int is its own machine word; only a big node takes the call,
+// which may raise a stop the caller then propagates.
+fn raylib_native(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    jet_int_owned_to_i64(value)
+}
+
+// Negative exactly when `value` is not an inline Int: bits 63 and 62 of an
+// inline one agree, so one sign test covers several values or-ed together.
+fn raylib_inline_sign(value: I64) -> I64 {
+    value.bit_xor(value << I64{1})
+}
+
+// No sum or product below can overflow: a clipped corner lies on the canvas
+// (each side at most 16384), and left + run_width is taken only when left is
+// negative or the sum stays within the canvas width (likewise for top). One
+// test per early return keeps each a single compare and branch.
+fn raylib_fill(left: I64, top: I64, run_width: I64, run_height: I64, color: I64, replace: Bool) {
+    alpha :: color.bit_and(I64{255})
+    pixels :: raylib_canvas_pixels
+    canvas_width :: raylib_canvas_width
+    canvas_height :: raylib_canvas_height
+    if (pixels == I64{0}) -> return
+    if (run_width <= I64{0}) -> return
+    if (run_height <= I64{0}) -> return
+    opaque := replace
+    if (alpha == I64{255}) {
+        opaque = true
+    }
+    if (alpha == I64{0}) {
+        if (!replace) -> return
+    }
+    x0 := left
+    x1 := canvas_width
+    if (left < I64{0}) {
+        x0 = I64{0}
+        x1 = raylib_canvas_side_min(wrapping(left + run_width), canvas_width)
+    } else {
+        if (left >= canvas_width) -> return
+        if (run_width < canvas_width - left) {
+            x1 = wrapping(left + run_width)
+        }
+    }
+    y0 := top
+    y1 := canvas_height
+    if (top < I64{0}) {
+        y0 = I64{0}
+        y1 = raylib_canvas_side_min(wrapping(top + run_height), canvas_height)
+    } else {
+        if (top >= canvas_height) -> return
+        if (run_height < canvas_height - top) {
+            y1 = wrapping(top + run_height)
+        }
+    }
+    if (x1 <= x0) -> return
+    if (y1 <= y0) -> return
+    span := wrapping(x1 - x0)
+    rows := wrapping(y1 - y0)
+    if (x0 == I64{0}) {
+        if (x1 == canvas_width) {
+            span = wrapping(rows * canvas_width)
+            rows = I64{1}
+        }
+    }
+    stride :: wrapping(canvas_width * I64{4})
+    at :: wrapping(pixels + wrapping(wrapping(wrapping(y0 * canvas_width) + x0) * I64{4}))
+    stop :: wrapping(at + wrapping(rows * stride))
+    if (opaque) {
         word :: raylib_canvas_word(color)
         raylib_fill_rows(at, stop, stride, span, word.bit_or(word << I64{32}))
         return
     }
     // The blend runs on 16-bit lanes: low lanes carry red and blue, high
-    // lanes green and alpha, each source term premultiplied with its +127.
+    // lanes green and alpha, each source term premultiplied with its +128.
     red :: (color >> I64{24}).bit_and(I64{255})
     green :: (color >> I64{16}).bit_and(I64{255})
     blue :: (color >> I64{8}).bit_and(I64{255})
-    low :: (red * alpha + I64{127}).bit_or((blue * alpha + I64{127}) << I64{16})
-    high :: (green * alpha + I64{127}).bit_or((alpha * alpha + I64{127}) << I64{16})
+    low :: (red * alpha + I64{128}).bit_or((blue * alpha + I64{128}) << I64{16})
+    high :: (green * alpha + I64{128}).bit_or((alpha * alpha + I64{128}) << I64{16})
     raylib_blend_rows(at, stop, stride, span, low.bit_or(low << I64{32}), high.bit_or(high << I64{32}), I64{255} - alpha)
 }
 
@@ -117,9 +207,12 @@ fn raylib_canvas_word(color: I64) -> I64 {
 
 // Paint count pixels from each row start in [at, stop), stride bytes apart,
 // with one word, two pixels per store. An odd count ends with a store
-// overlapping the previous pair, which writes the same bytes again. A long
-// row is one string store, which outruns the store loop past its startup.
+// overlapping the previous pair, which writes the same bytes again. A row of
+// at most 16 pixels is straight-line stores from both ends, overlapping in
+// the middle. A long row is one string store, which outruns the store loop
+// past its startup.
 RAYLIB_STRING_FILL :: I64{256}
+RAYLIB_SHORT_FILL :: I64{16}
 
 fn raylib_fill_rows(at: I64, stop: I64, stride: I64, count: I64, pair: I64) {
     #Unsafe("each row start in [at, stop) lends count writable canvas pixels of four bytes each, inside the live canvas") {
@@ -135,6 +228,10 @@ fn raylib_fill_rows(at: I64, stop: I64, stride: I64, count: I64, pair: I64) {
             return
         }
         tail :: count * I64{4} - I64{8}
+        if (count <= RAYLIB_SHORT_FILL) {
+            raylib_fill_short_rows(at, stop, stride, tail, pair)
+            return
+        }
         if (count >= RAYLIB_STRING_FILL) {
             words :: count >> I64{1}
             loop row < stop {
@@ -165,13 +262,55 @@ fn raylib_fill_rows(at: I64, stop: I64, stride: I64, count: I64, pair: I64) {
     }
 }
 
+// Rows of 2 to 16 pixels: the last store sits at tail bytes, 0 to 56.
+fn raylib_fill_short_rows(at: I64, stop: I64, stride: I64, tail: I64, pair: I64) {
+    #Unsafe("each row start in [at, stop) lends tail + 8 writable canvas bytes, inside the live canvas") {
+        row := at
+        if (tail >= I64{24}) {
+            back :: tail - I64{24}
+            loop row < stop {
+                os_store_i64(row, pair)
+                os_store_i64(wrapping(row + I64{8}), pair)
+                os_store_i64(wrapping(row + I64{16}), pair)
+                os_store_i64(wrapping(row + I64{24}), pair)
+                end :: wrapping(row + back)
+                os_store_i64(end, pair)
+                os_store_i64(wrapping(end + I64{8}), pair)
+                os_store_i64(wrapping(end + I64{16}), pair)
+                os_store_i64(wrapping(end + I64{24}), pair)
+                row = wrapping(row + stride)
+            }
+            return
+        }
+        if (tail >= I64{8}) {
+            back :: tail - I64{8}
+            loop row < stop {
+                os_store_i64(row, pair)
+                os_store_i64(wrapping(row + I64{8}), pair)
+                end :: wrapping(row + back)
+                os_store_i64(end, pair)
+                os_store_i64(wrapping(end + I64{8}), pair)
+                row = wrapping(row + stride)
+            }
+            return
+        }
+        loop row < stop {
+            os_store_i64(row, pair)
+            os_store_i64(wrapping(row + tail), pair)
+            row = wrapping(row + stride)
+        }
+    }
+}
+
 RAYLIB_LANES :: I64{0x00FF00FF00FF00FF}
-RAYLIB_LANE_ONES :: I64{0x0001000100010001}
+// RAYLIB_LANES << 8, 0xFF00FF00FF00FF00.
+RAYLIB_LANES_HIGH :: I64{-71777214294589696}
 
 // Blend count pixels in place from each row start in [at, stop), stride
 // bytes apart, two pixels per 64-bit word. Each 16-bit lane holds
-// x = s * a + 127 + d * (255 - a) <= 65152, and (x + 1 + (x >> 8)) >> 8 is
-// exactly x / 255 over that range, so no lane carries into the next.
+// y = s * a + 128 + d * (255 - a) <= 65153, and (y + (y >> 8)) >> 8 is
+// exactly (y - 1) / 255, the rounded s * a + d * (255 - a) over 255, over
+// that range, so no lane carries into the next.
 fn raylib_blend_rows(at: I64, stop: I64, stride: I64, count: I64, source_low: I64, source_high: I64, keep: I64) {
     #Unsafe("each row start in [at, stop) lends count readable and writable canvas pixels of four bytes each, inside the live canvas") {
         pairs :: (count - count.bit_and(I64{1})) * I64{4}
@@ -200,9 +339,10 @@ fn raylib_blend_rows(at: I64, stop: I64, stride: I64, count: I64, source_low: I6
 fn raylib_blend_word(word: I64, source_low: I64, source_high: I64, keep: I64) -> I64 {
     low :: wrapping(wrapping(word.bit_and(RAYLIB_LANES) * keep) + source_low)
     high :: wrapping(wrapping((word >> I64{8}).bit_and(RAYLIB_LANES) * keep) + source_high)
-    low_quotient :: (wrapping(wrapping(low + RAYLIB_LANE_ONES) + (low >> I64{8}).bit_and(RAYLIB_LANES)) >> I64{8}).bit_and(RAYLIB_LANES)
-    high_quotient :: (wrapping(wrapping(high + RAYLIB_LANE_ONES) + (high >> I64{8}).bit_and(RAYLIB_LANES)) >> I64{8}).bit_and(RAYLIB_LANES)
-    low_quotient.bit_or(high_quotient << I64{8})
+    low_quotient :: (wrapping(low + (low >> I64{8}).bit_and(RAYLIB_LANES)) >> I64{8}).bit_and(RAYLIB_LANES)
+    // The high quotients land in place: (q >> 8) << 8 keeps each lane's top byte.
+    high_quotient :: wrapping(high + (high >> I64{8}).bit_and(RAYLIB_LANES)).bit_and(RAYLIB_LANES_HIGH)
+    low_quotient.bit_or(high_quotient)
 }
 
 // One channel src-over with rounding, for sprite pixels whose source varies.

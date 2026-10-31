@@ -1,7 +1,8 @@
 # tests/services_runtime.rs::forged_rollout_generation_is_rejected_on_restart at tests/services_runtime.rs:612; hand-port
 # Claim: a write phase followed by a journal rewrite to generation 99 makes the recover phase exit nonzero (tests/services_runtime.rs:616-636)
-# Fixture migrated: worker passed as ^rollout_worker and receiver marked & (seed E0209/E0224)
-# Fixture migrated: the journal rewrite is a sh -c sed over the .rollout file (the Rust replace of generation:2/upgrade_to:2/worker_generation:2/directory_generation:2 becomes one sed with $-anchored patterns)
+# Fixture migrated: worker passed as the bare function item rollout_worker (a read argument takes no mark) and receiver marked & (D-CAP-RECEIVER1=D)
+# Fixture migrated: the journal rewrite is a sh -c sed over the .rollout file (the Rust replace of generation:2/upgrade_to:2/worker_generation:2/directory_generation:2 becomes one quoted sed with $-anchored patterns)
+# Fixture migrated: the forged journal makes `tree.start()` fail into `panic("start")`, a program-side stop, so the recover phase exits 70 (D-FAIL-EXIT1=A; the Rust check is only !ok)
 fixture: forged_rollout_generation_is_rejected_on_restart.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -18,4 +19,4 @@ exit: 0 # tests/services_runtime.rs:623-631 journal forge
 step: built
 env: JET_SERVICE_AUTH_STORE=rollout-forged.log
 env: JET_SERVICE_AUTH_PHASE=recover
-exit: 1 # tests/services_runtime.rs:633-636 expects failure
+exit: 70 # tests/services_runtime.rs:633-636 expects failure

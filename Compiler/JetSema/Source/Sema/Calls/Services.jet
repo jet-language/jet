@@ -20,6 +20,7 @@ use jet_foundation.[
     TGenericParam,
     StrPart,
     Type,
+    core_identity_is,
     core_source_owns_type,
     ast_empty_call_arg_flags,
     core_call,
@@ -344,10 +345,12 @@ fn sema_services_delivery_contract(method: String) -> SemaServiceCoreMethodContr
 // Rust `infer_method_call` (method_calls.rs) routes a service
 // method only when the receiver is that service handle (`handle_ty ==
 // "ServiceTree"`, …); a user type's `start`, `send` or `show` keeps its own
-// declaration. A canonical Core spelling names the same handle.
+// declaration. A canonical `core.service` identity names the same handle,
+// whether its nominal is source-owned or still has a carrier projection
+// (`ServiceRuntime`, `DeliveryState`).
 fn sema_services_receiver_is(ty: Type, owner: String) -> Bool Never! {
     if ty == {
-        .Named(name) -> name == owner || (core_source_owns_type(name) && name.ends_with("::{owner}"))
+        .Named(name) -> name == owner || core_identity_is(name, "core.service", owner)
         else -> false
     }
 }

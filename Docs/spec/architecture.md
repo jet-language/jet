@@ -398,9 +398,21 @@ checks, and each finding is one of its issue rows.
 | x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) | IR |
 | Comptime (`JetEval/Source/IR`): O0 machine code from the same selector | IR |
 | Phase trace: `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`, `ir.object` | IR |
+| WebAssembly selection (`JetWeb/Source/Web/*.jet`); phase trace `web.module` | IR |
 
-There is no web emitter on the IR: `jet build --target=web` is not part of
-the Jet-hosted CLI (E2104).
+The web target selects WebAssembly from the same IR. Runtime packaging
+selects the runtime library once into the runtime partition
+(`jet_runtime.wasm`), with a receipt of its data layout, table slots and
+exports (`jet_runtime.wasm.tsv`). `jet build --target web` selects the program
+into the program partition `app.wasm`, placed after the runtime's data and
+table slots. The program calls the runtime through imports from module `rt`
+named by runtime symbol (a `task` links `jet_rt_native_task_spawn`), and C
+library functions through module `c`. Both partitions import one memory, one
+table and the stack, thread and stop globals from `env`, and make Linux system
+calls through `host.syscall`. `web.manifest.json` records both partitions;
+the generated `jet_dom_runtime.js` owns the memory, table and globals and
+answers the system calls. The web host runs one thread: starting a runtime
+thread fails, so a program that starts a `task` stops with E3001.
 
 #### The read-only fact channel
 
@@ -718,6 +730,7 @@ packages live under `Jetpack/`.
 | `JetSema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `JetIR` | the slot IR: builder from the checked program, optimizer, x86-64 selection | **never** |
 | `JetWasm` | the plugin engine's WebAssembly front end: core module and Component Model data model, binary decoders, WAT reader, core validator | **never** (errors are load faults carried to run time) |
+| `JetWeb` | the web target: WebAssembly selection of the lowered slot IR into the runtime partition (at runtime packaging) and the program partition (`jet build --target web`), their manifest and the generated JS host | **never** (a selection finding is an ICE) |
 | `JetPlugin` | the plugin link step: translates each loaded Component into JetIR functions, canonical-ABI thunks and a descriptor | **never** (a failed translation becomes the load fault) |
 | `JetBackend` | native code generation, object and image writing | **never** (a failure is an ICE, R5) |
 | `JetEval` | in-process evaluator for comptime and the REPL | no user-facing surface by itself |

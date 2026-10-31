@@ -9,24 +9,23 @@ fn run() {
     tree := services.tree("rollout-restart")
     store :: services.state_store(store_path) ?? panic("state store")
     &tree.set_state_event_log(^store, "rollout-events", 1, "reversible") ?? panic("state")
-    endpoint :: &tree.worker("api", ^rollout_worker, capacity: 1) ?? panic("worker")
+    endpoint :: &tree.worker("api", rollout_worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     if phase == "write" {
         &tree.directory_register("api", endpoint.copy()) ?? panic("directory")
-        &tree.drain_worker(^endpoint) ?? panic("drain")
+        &tree.drain_worker(endpoint) ?? panic("drain")
         print("handoff:{&tree.handoff_generation() ?? panic("handoff")}")
     } else {
         current :: tree.directory_resolve("api") ?? panic("resolve")
         print("generation:{tree.directory_generation()}")
         print("current:{current.show()}")
         print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
-        stale :: tree.send(endpoint, "stale")
-        if stale == {
+        if &tree.send(endpoint, "stale") == {
             .Ok(_) -> { print("stale:accepted") }
             .Err(_) -> { print("stale:rejected") }
         }
         current.send("after") ?? panic("after send")
-        print("after:{tree.receive(current) ?? panic("after receive")}")
+        print("after:{&tree.receive(current) ?? panic("after receive")}")
     }
     &tree.stop() ?? panic("stop")
 }

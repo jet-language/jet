@@ -7,6 +7,7 @@
 use jet_foundation.[
     Symbol,
     Type,
+    TypeTupleField,
     type_identity_equal,
 ]
 
@@ -89,16 +90,52 @@ fn sema_registration_canonical_type(ty: Type, keys: [String:Type]) -> Type Never
         &actuals.push(resolved)
     }
     if found.len() == 0 -> return ty.copy()
-    sema_inference_substitute_type(ty, found, actuals)
+    sema_registration_canonical_heads(sema_inference_substitute_type(ty, found, actuals), keys)
 }
 
-// The alias-qualified `Named` types in `ty` (`alias.Name`; a canonical key
-// holds `::` and is already resolved).
+// `ty` with each alias-qualified generic head (`alias.Name<T>`, #6410)
+// spelled by the key its `Named` spelling resolves to; the arguments are
+// already canonical.
+fn sema_registration_canonical_heads(ty: Type, keys: [String:Type]) -> Type Never! {
+    if ty == {
+        .List(inner) -> Type.List{element: sema_registration_canonical_heads(inner, keys)}
+        // copy: `key_span` is a payload of read parameter `ty`; field `key_span` of the new Type.Map owns this one
+        .Map(key, key_span, value) -> Type.Map{key: sema_registration_canonical_heads(key, keys), key_span: key_span.copy(), value: sema_registration_canonical_heads(value, keys)}
+        .Shared(inner) -> Type.Shared{inner: sema_registration_canonical_heads(inner, keys)}
+        .Option(inner) -> Type.Option{inner: sema_registration_canonical_heads(inner, keys)}
+        .Result(ok, err) -> Type.Result{ok: sema_registration_canonical_heads(ok, keys), err: sema_registration_canonical_heads(err, keys)}
+        .Fn(params, ret, effects, contract, metadata, provenance) -> {
+            canonical :: loop param in params -> sema_registration_canonical_heads(param, keys)
+            canonical_ret :: if ret == .Val(declared) -> Val(sema_registration_canonical_heads(declared, keys)) else -> None
+            Type.Fn{params: canonical, ret: canonical_ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
+        }
+        .Apply(name, args) -> {
+            canonical :: loop arg in args -> sema_registration_canonical_heads(arg, keys)
+            head := name.copy()
+            if keys.get(name) == .Val(resolved) {
+                if resolved == .Named(key) -> head = key.copy()
+            }
+            Type.Apply{name: head, args: canonical}
+        }
+        .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_registration_canonical_heads(field.ty, keys)}}
+        // copy: `length` is a payload of read parameter `ty`; field `len` of the new Type.FixedList owns this one
+        .FixedList(element, length) -> Type.FixedList{elem: sema_registration_canonical_heads(element, keys), len: length.copy()}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_registration_canonical_heads(base, keys), lo: lo, hi: hi}
+        // copy: `marker` is a payload of read parameter `ty`; field `marker` of the new Type.Tagged owns this one
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_registration_canonical_heads(inner, keys)}
+        .Union(members) -> Type.Union{members: loop member in members -> sema_registration_canonical_heads(member, keys)}
+        // copy: `dimension` is a payload of read parameter `ty`; field `dimension` of the new Type.Quantity owns this one
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_registration_canonical_heads(base, keys), dimension: dimension.copy()}
+        else -> ty
+    }
+}
+
+// The alias-qualified type names in `ty`: `Named` types and generic heads
+// (`alias.Name`, `alias.Name<T>`; a canonical key holds `::` and is already
+// resolved).
 fn sema_registration_type_qualified_names(ty: Type, names: &[String]) Never! {
     if ty == {
-        .Named(name) -> {
-            if name.contains(".") && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) -> &names.push(name)
-        }
+        .Named(name) -> sema_registration_push_qualified_name(name, &names)
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_registration_type_qualified_names(inner, &names)
         .Map(key, _, value) -> {
             sema_registration_type_qualified_names(key, &names)
@@ -112,9 +149,16 @@ fn sema_registration_type_qualified_names(ty: Type, names: &[String]) Never! {
             loop param in params -> sema_registration_type_qualified_names(param, &names)
             if ret == .Val(declared) -> sema_registration_type_qualified_names(declared, &names)
         }
-        .Apply(_, args) -> loop arg in args -> sema_registration_type_qualified_names(arg, &names)
+        .Apply(name, args) -> {
+            sema_registration_push_qualified_name(name, &names)
+            loop arg in args -> sema_registration_type_qualified_names(arg, &names)
+        }
         .Tuple(fields) -> loop field in fields -> sema_registration_type_qualified_names(field.ty, &names)
         .Union(members) -> loop member in members -> sema_registration_type_qualified_names(member, &names)
         else -> {}
     }
+}
+
+fn sema_registration_push_qualified_name(name: String, names: &[String]) Never! {
+    if name.contains(".") && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) -> &names.push(name)
 }

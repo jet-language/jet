@@ -23,8 +23,9 @@ fn run() {
     &tree.group("api-group", ["api", "drained"]) ?? panic("group")
     &tree.start() ?? panic("start")
     &tree.append_event("before-partition") ?? panic("event")
-    &tree.directory_register("api", api) ?? panic("api directory")
-    &tree.directory_register("drained", drained) ?? panic("drained directory")
+    // copy: the partition, drain and send checks below still use both endpoints.
+    &tree.directory_register("api", api.copy()) ?? panic("api directory")
+    &tree.directory_register("drained", drained.copy()) ?? panic("drained directory")
 
     foreign := service.tree("outside")
     foreign_api :: &foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")

@@ -28,6 +28,9 @@
 //   Neg Not                                    dst  a=operand
 //   Sqrt         dst  a=operand                IEEE square root of a Float or
 //                                              Float32 (correctly rounded)
+//   IntBig       dst(Bool) a=Int slot          whether the exact Int is a big
+//                                              integer, not an inline word (a
+//                                              pass's guard; Build emits none)
 //   Convert      dst  a=operand                numeric conversion by the slot
 //                                              types: Float/Float32 to a Word
 //                                              truncates toward zero (signed
@@ -125,11 +128,16 @@ enum IROp {
     Return
     Unreachable
     Sqrt
+    IntBig
 }
 
 // Overflow policy of an arithmetic op on a fixed-width integer (`c`).
+// IR_OVERFLOW_OPERANDS marks an exact Int Add, Sub or Mul whose operands
+// are proven inline Ints but whose result may not be (OptRange.jet): only
+// the result is tested.
 IR_OVERFLOW_TRAP :: 0
 IR_OVERFLOW_WRAP :: 1
+IR_OVERFLOW_OPERANDS :: 2
 
 // The stop polls (Build.jet ir_stop_poll): after a call, and after a user
 // operation whose slow path can publish a numeric stop.
@@ -290,7 +298,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // payload key by concrete type identity (BuildTraits.jet ir_trait_key).
 // `stop_points`: calls that can deliver a
 // runtime stop are followed by a stop check (Build.jet ir_stop_check); the
-// runtime library manages its own stops and has none. `debug_directory`:
+// runtime library manages its own stops and has none, nor has a program that
+// owns its main. `owned_main`: the program's entry runs under a main of its
+// own, with no process root (EntryOwned.jet ir_entry_own). `debug_directory`:
 // the compilation directory the image's DWARF records ("": the working
 // directory), which relative source paths (a fault report's) resolve from.
 struct IRModule {
@@ -328,6 +338,7 @@ struct IRModule {
     helper_messages: [String]
     trait_keys: NameRows
     stop_points: Bool{false}
+    owned_main: Bool{false}
     debug_directory: String{""}
 }
 
@@ -590,6 +601,7 @@ fn ir_op_name(op: IROp) -> String Never! {
         .Return -> "return"
         .Unreachable -> "unreachable"
         .Sqrt -> "sqrt"
+        .IntBig -> "int_big"
     }
 }
 
@@ -646,6 +658,7 @@ fn ir_op_code(op: IROp) -> Int Never! {
         .Return -> 47
         .Unreachable -> 48
         .Sqrt -> 49
+        .IntBig -> 50
     }
 }
 

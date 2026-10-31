@@ -10,7 +10,8 @@
 //               only the arm it takes; the checked fixed-width conversion
 //               (jet_int_checked_fixed) of an Int masked by a constant,
 //               `x & c` with c >= 0 inside the kind, is a Move (an inline
-//               Int is its i64 bits)
+//               Int is its i64 bits); `(x /% k) * k` with k = 2^j >= 2, of
+//               an Int or a signed word, is `x & -k`
 //   unreachable everything after a Br, Return or Unreachable up to the end
 //               of its region
 //   fuse        `t = a <cmp> b; n = not t` becomes `n = a <inverse> b` when t
@@ -24,13 +25,14 @@
 //               reads t
 //   coalesce    `t = <op>; ...; x = move/copy t` writes x directly when t is a
 //               temporary read only there and nothing between touches x
-//   dead        an instruction without effects whose result nobody reads; the
-//               drop of an exact Int that holds an inline constant or a value
-//               masked by a nonnegative constant
+//   dead        an instruction without effects whose result nobody reads (a
+//               division or remainder by a positive constant among them);
+//               the drop of an exact Int that holds an inline constant or a
+//               value masked by a nonnegative constant
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
 
-use jet_foundation.[name_rows_value]
+use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
 
 IR_OPT_SIMPLIFY_ROUNDS :: 8
 
@@ -260,6 +262,11 @@ fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report:
             changed += 1
             next
         }
+        if op == .Mul && ir_opt_floor_multiple(&f, facts, at, ty) {
+            report.folded += 1
+            changed += 1
+            next
+        }
         if ir_opt_is_compare(op) || (ty.kind != .Int && ty.kind != .Word) -> next
         // Identities: the other operand's value (a copy), or zero. `& -1`
         // only where -1 is every bit (Int, signed words).
@@ -295,6 +302,48 @@ fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report:
         changed += 1
     }
     changed
+}
+
+// `(x /% k) * k` with k = 2^j >= 2, of an Int or a signed word, is `x & -k`:
+// the floored quotient times k is x with its low j bits cleared, in two's
+// complement (Int.jet int_bitwise) for a negative or big x too. The Mul at
+// `at` becomes that BitAnd when its other operand's one write is that
+// FloorDiv of x by the constant k, x keeps its value from there to the Mul,
+// and k's constant is read by the Mul only (it becomes -k). The FloorDiv,
+// then unread, goes as dead code. The BitAnd of an Int is exact
+// (OptRange.jet proves its operands inline); of a word it cannot overflow.
+fn ir_opt_floor_multiple(f: &IRFunction, facts: OptFacts, at: Int, ty: IRX64Shape) -> Bool Never! {
+    if ty.kind != .Int && !(ty.kind == .Word && ty.signed) -> return false
+    loop side in 0..<2 {
+        quotient :: if side == 0 -> f.a[at] else -> f.b[at]
+        factor :: if side == 0 -> f.b[at] else -> f.a[at]
+        k :: ir_opt_const_at(f, facts, factor, at) ?? next
+        if k < 2 || k.bit_and(k - 1) != 0 || facts.uses[factor] != 1 -> next
+        def :: ir_opt_reaching_def(f, facts, quotient, at)
+        if def < 0 || f.op[def] != .FloorDiv -> next
+        divisor :: ir_opt_const_at(f, facts, f.b[def], def) ?? next
+        x :: f.a[def]
+        if divisor != k || x == quotient || !ir_opt_unchanged(f, facts, x, def, at) -> next
+        f.a[facts.def_at[factor]] = 0 - k
+        f.op[at] = .BitAnd
+        f.a[at] = x
+        f.b[at] = factor
+        f.c[at] = if ty.kind == .Word -> IR_OVERFLOW_WRAP else -> IR_OVERFLOW_TRAP
+        return true
+    }
+    false
+}
+
+// Whether slot `x` holds at instruction `at` the value it had at `from`
+// (before `at`, in the same region): no instruction between them writes it.
+// A scalar slot changes only by an instruction writing it (a binding the
+// code takes the address of lives in a cell of its own).
+fn ir_opt_unchanged(f: IRFunction, facts: OptFacts, x: Int, from: Int, at: Int) -> Bool Never! {
+    if from >= at || facts.region[from] != facts.region[at] -> return false
+    loop between in (from + 1)..<at {
+        if ir_x64_write(f, between) == x -> return false
+    }
+    true
 }
 
 // The constant c >= 0 an Int `slot` is masked by at instruction `at`, when
@@ -483,7 +532,7 @@ fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROpt
 fn ir_opt_rename_reads(f: &IRFunction, at: Int, replace: [Int]) Never! {
     op :: f.op[at]
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .Convert | .Load | .Offset | .If | .BrIf -> f.a[at] = ir_opt_renamed(replace, f.a[at])
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf -> f.a[at] = ir_opt_renamed(replace, f.a[at])
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
             f.a[at] = ir_opt_renamed(replace, f.a[at])
             f.b[at] = ir_opt_renamed(replace, f.b[at])
@@ -593,7 +642,7 @@ fn ir_opt_coalesce(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int
 fn ir_opt_removable(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     op :: f.op[at]
     if op == {
-        .Const | .ConstText | .ConstBigInt | .DataAddress | .FunctionAddress | .StackAddress | .Offset | .Load | .Not | .Sqrt | .Convert | .Concat | .Copy | .Move -> return true
+        .Const | .ConstText | .ConstBigInt | .DataAddress | .FunctionAddress | .StackAddress | .Offset | .Load | .Not | .Sqrt | .IntBig | .Convert | .Concat | .Copy | .Move -> return true
         .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> return true
         .Add | .Sub | .Mul | .Neg | .BitAnd | .BitOr | .BitXor | .Div | .Shl | .Shr -> {
             kind :: ir_opt_type(m, f, f.a[at]).kind
@@ -637,11 +686,24 @@ fn ir_opt_dead_sweep(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never!
             next
         }
         dst :: f.dst[at]
-        if dst < 0 || facts.uses[dst] != 0 || !ir_opt_removable(m, f, at) -> next
+        if dst < 0 || facts.uses[dst] != 0 -> next
+        if !ir_opt_removable(m, f, at) && !ir_opt_quiet_division(m, f, facts, at) -> next
         ir_opt_kill(&f, at)
         removed += 1
     }
     removed
+}
+
+// A division or remainder of an Int or a word by a positive constant: it
+// cannot stop (no zero divisor, no MIN / -1), so unread it only writes its
+// result.
+fn ir_opt_quiet_division(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op != .Div && op != .Rem && op != .FloorDiv && op != .Mod -> return false
+    kind :: ir_opt_type(m, f, f.a[at]).kind
+    if kind != .Int && kind != .Word -> return false
+    divisor :: ir_opt_const_at(f, facts, f.b[at], at) ?? return false
+    divisor > 0
 }
 
 // ---------------------------------------------------------------------------
@@ -736,4 +798,44 @@ fn ir_opt_unwrap(f: &IRFunction) -> Int Never! {
         changed += 1
     }
     changed
+}
+
+// even(x) = x /% 2 * 2 == x over an Int: at O1 and O2 the product is
+// `x & -2`, and IR Lint finds nothing after any pass.
+#Test("A floored quotient times its power-of-two divisor is the dividend masked") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        exact :: ir_type_row(&m, Type.Int) ?? panic("no Int row")
+        flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        g := ir_function_new("even", "test:even.jet::even", "", "even.jet", 1)
+        x :: ir_slot(&g, exact, IRSlotKind.Param, ir_intern_name(&m, "x"), 1)
+        g.result = flag
+        two :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, two, 2, -1, -1, 2)
+        half :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.FloorDiv, half, x, two, IR_OVERFLOW_TRAP, 2)
+        factor :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, factor, 2, -1, -1, 2)
+        twice :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Mul, twice, half, factor, IR_OVERFLOW_TRAP, 2)
+        _ := ir_emit(&g, IROp.Drop, -1, half, -1, -1, 2)
+        same :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Eq, same, twice, x, -1, 2)
+        _ := ir_emit(&g, IROp.Drop, -1, twice, -1, -1, 2)
+        _ := ir_emit(&g, IROp.Return, -1, same, -1, -1, 2)
+        m.entry = 0
+        name_rows_set(&m.function_rows, g.key, 0)
+        &m.functions.push(g)
+        options := ir_opt_options(level)
+        options.verify = true
+        report :: ir_optimize_module(&m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        f :: m.functions[0]
+        masks := 0
+        loop at in 0..<f.op.len() {
+            assert(f.op[at] != .Mul)
+            if f.op[at] == .BitAnd && f.a[at] == x -> masks += 1
+        }
+        assert(masks > 0)
+    }
 }

@@ -8,7 +8,9 @@ license is the Unicode Data Files and Software License downloaded from
 
 Files under `uca/` are the CLDR 48 root collation data for Unicode 17.0.0,
 from `https://raw.githubusercontent.com/unicode-org/cldr/release-48/common/uca/`:
-`allkeys_CLDR.txt` (the DUCET with CLDR root's changes).
+`allkeys_CLDR.txt` (the DUCET with CLDR root's changes) and
+`CollationTest_CLDR_NON_IGNORABLE_SHORT.txt` (its UTS #10 conformance test,
+run by `tests/cases/text_unicode/collation-conformance.case`).
 
 `SHA256SUMS` records every vendored official input. The std-only generator
 verifies its required UCD inputs again before emitting either table copy:

@@ -1260,12 +1260,6 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
             return None
         }
     }
-    if record.module_name == "core.mem" && record.member == "__loader_new" {
-        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.data" {
-            &diagnostics.push(sema_error("E0510", span, "data loader construction is compiler-private", "the native loader constructor is restricted to checked Core data source", "use core.data.value"))
-            return None
-        }
-    }
     if record.module_name == "core.encoding" && (record.member == "__coerce_now" || record.member == "__coerce_emit") {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.json" || context.unsafe_depth == 0 {
             &diagnostics.push(sema_error("E0510", span, "JSON coercion host leaves are compiler-private", "the existing hidden Time/IO boundary is restricted to audited Core JSON source", "use the public JSON decoder"))
@@ -1470,6 +1464,7 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
     if sema_data_is_sys_decode(target, environment, program) {
         call_args = sema_data_sys_decode_args(args, type_args, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     }
+    if sema_call_histories_is_call(target, environment, program) -> call_args = sema_call_histories_args(args, type_args, span, environment, program)
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: call_args}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
     // Rust `record_call_result_views` composes every call's returned views
@@ -1492,14 +1487,6 @@ fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: Type
         result = sema_expr_expected(value, Val(required), environment, program, &diagnostics) ?? return None
     }
     sema_expr_expected(result, expected, environment, program, &diagnostics)
-}
-
-#Test("private loader constructor substitutes a user record return type") {
-    record :: core_call("core.mem", "__loader_new") ?? panic("loader constructor row")
-    user_record :: Type.Named{name: "UserRec"}
-    signature :: sema_call_core_typed_signature(record, 7, [AccessConvention]{}, [Type]{user_record}) ?? panic("loader constructor signature")
-    result :: sema_call_core_result_type(signature, [Type]{user_record}, [TExpr]{}) ?? panic("loader constructor result")
-    assert_eq(result, Type.Result{ok: Type.Apply{name: "DataLoader", args: [Type]{user_record}}, err: Type.Named{name: "DataError"}})
 }
 
 #Test("worker checked-function inference changes no other Core route") {

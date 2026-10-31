@@ -3889,13 +3889,18 @@ testing.histories<Command>(seed: 41, cases: 500,
     observe: public_state)
 ```
 
-`generate` receives `HistoryRng`, `case_index: Count`, and `max_steps: Count`,
+`generate` receives `HistoryRng`, `case_index: Int`, and `max_steps: Int`,
 and returns optional `TypedHistoryCase<Command>`. `rebuild` receives
 `HistoryCase` and returns optional `TypedHistoryCase<Command>`. `valid` receives
 `TypedHistoryCase<Command>` and returns `Bool`. These use the existing checked
 callback mechanism. `HistoryRng` exposes deterministic index and bounded-integer
 draws. The compiler supplies the lossless `Command` codec; users do not write
 a second codec.
+
+**D-TEST-COUNT1=A** *(ratified, #6410)*: a history count is a plain `Int`.
+Case indexes, step bounds, handle/task/event identity values, seeds, and
+distribution weights are `Int`, and `HistoryRng` draws return `Int`. There is
+no `Count` type.
 
 The public records project existing Foundation data, not another wire format:
 
@@ -7432,7 +7437,7 @@ every source-written double-underscore identifier is rejected. The namespace is
 reserved for compiler-generated binders, debugger and serializer metadata, and
 tools; user code has no escape spelling. The embedded first-party Core sources
 (`<corelib>/Core/**`) are vetted stdlib internals under the same trust boundary
-as I1, so they may call reserved Core adapters such as `core.crypto.__zeroize`.
+as I1, so they may call reserved Core adapters such as `core.crypto.__vault_wrapped_bytes`.
 The exception is decided by the embedded origin, not the path: a user file named
 `Core/...` still gets E0067.
 
@@ -9739,6 +9744,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-TERM-PROGRESS1` | A | `c0fjgzck` |
 | `D-TEST-AFFECTED1` | A | `c0lbh7qk` |
 | `D-TEST-COMPARE1` | A | `c01k0lti` |
+| `D-TEST-COUNT1` | A | `c088x0xr` |
 | `D-TEST-HISTORY1` | A | `c00nxpl5` |
 | `D-TEST-MCDC1` | A | `c082omr5` |
 | `D-TEST-STOPMSG1` | A | `c0kytic0` |

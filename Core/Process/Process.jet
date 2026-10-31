@@ -200,6 +200,46 @@ fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
+// D-CORE-PROCPOOL1=A: a bounded worker pool. At most `jobs` specs run at once
+// in one task group, and the results keep input order. A nonzero exit is an Ok
+// receipt (the caller checks `.success`); a spec that cannot start is an Err in
+// its own slot, so one bad spec never hides the others. Every child but a
+// detached one is marked to die with this process (Linux PR_SET_PDEATHSIG).
+fn run_all(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<ProcessReceipt, IOError>] IOError! {
+    if jobs < 1 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve, resource: Val("process.run_all"), os_code: None,
+            cause: Val("process.run_all needs jobs >= 1, got {jobs}"),
+        }))
+    }
+    results := [Result<ProcessReceipt, IOError>]{}
+    task.group pool(limit: jobs) {
+        handles :: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
+        loop handle in handles {
+            outcome :: ^handle.join() ?? (receipt: None, error: Val(run_all_cancelled()))
+            if outcome.receipt == {
+                .Val(receipt) -> &results.push(Ok(receipt))
+                .None -> &results.push(Err(outcome.error ?? run_all_cancelled()))
+            }
+        }
+    }
+    Ok(results)
+}
+
+fn run_all_job(spec: ProcessSpec) -[Exec, Time.Wait]> (receipt: ProcessReceipt?, error: IOError?) Never! {
+    if spec.run() == {
+        .Ok(receipt) -> (receipt: Val(receipt), error: None)
+        .Err(error) -> (receipt: None, error: Val(error))
+    }
+}
+
+fn run_all_cancelled() -> IOError Never! {
+    IOError.Cancelled(IOContext{
+        operation: .Resolve, resource: Val("process.run_all"), os_code: None,
+        cause: Val("the job was cancelled before it finished"),
+    })
+}
+
 // D-PROCESS-SESSION2=D: `ProcessSpec.abilities()`, the open keyed report of
 // what a terminal-backed launch can use. Stable keys are the checked
 // TerminalFact names; a preview fact is any other string key. Every host the

@@ -3,8 +3,9 @@
 // typed carriers, no-input defaults, and sprite transcript shape. Drawing
 // paints the same RGBA canvas as the native runtime (RouteAGame.jet): Core
 // scan-converts each primitive into clipped runs and jet_raylib_fill_rect
-// copies or src-over blends one run; sprites blit from the texture Core
-// decoded and bound to the atlas.
+// copies or src-over blends one run (jet_raylib_fill_mask paints a glyph's
+// runs in one call); sprites blit from the texture Core decoded and bound to
+// the atlas.
 
 const JET_RAYLIB_CANVAS_SIDE_MAX = 16384;
 const jet_raylib_canvas = { width: 0, height: 0, pixels: new Uint8Array(0) };
@@ -66,6 +67,33 @@ function jet_raylib_fill_rect(x, y, width, height, rgba, replace) {
       for (let channel = 0; channel < 4; channel += 1) {
         canvas.pixels[at + channel] = copy ? source[channel] : Math.floor((source[channel] * alpha + canvas.pixels[at + channel] * (255 - alpha) + 127) / 255);
       }
+    }
+  }
+}
+
+// A 1-bit glyph mask: bit 8 * c + r (c < 7, r < 8) paints the scale x scale
+// cell at (x + c * scale, y + r * scale), each column's stretches of set rows
+// as one run, as the native runtime paints them. A scale below 1 or above
+// 2^32 paints nothing.
+function jet_raylib_fill_mask(x, y, scale, mask, rgba) {
+  const cell = BigInt(scale);
+  if (cell < 1n || cell > 4294967296n) return;
+  const bits = BigInt(mask);
+  for (let column = 0n; column < 7n; column += 1n) {
+    let rows = (bits >> (column * 8n)) & 255n;
+    let row = 0n;
+    while (rows !== 0n) {
+      if ((rows & 1n) === 0n) {
+        rows >>= 1n;
+        row += 1n;
+        continue;
+      }
+      const start = row;
+      while ((rows & 1n) !== 0n) {
+        rows >>= 1n;
+        row += 1n;
+      }
+      jet_raylib_fill_rect(BigInt(x) + column * cell, BigInt(y) + start * cell, cell, (row - start) * cell, rgba, false);
     }
   }
 }

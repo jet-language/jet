@@ -127,7 +127,7 @@ IR_X64_READS_RESULT :: 6
 
 fn ir_x64_read_form(op: IROp) -> Int Never! {
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .Convert | .Load | .Offset | .If | .BrIf -> IR_X64_READS_A
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf -> IR_X64_READS_A
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> IR_X64_READS_AB
         .Call | .CallRuntime -> IR_X64_READS_ARGS
         .CallIndirect -> IR_X64_READS_A_ARGS
@@ -359,10 +359,14 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     }
 
     // Linear scan: the General slots over the callee-saved registers, the
-    // Float slots over xmm8-xmm15.
+    // Float slots over xmm8-xmm15. A General slot that starts with its
+    // write may take the register of one its writer reads last. A Float
+    // slot never does: a call reloads the xmm slots live across it after
+    // it returns.
     general :: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
     floating :: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float
-    regs := ir_x64_scan(starts, ends, weights, general, IR_X64_SLOT_REGISTERS)
+    fresh :: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot
+    regs := ir_x64_scan(starts, ends, weights, general, fresh, IR_X64_SLOT_REGISTERS)
     // A copy that may share its source's register (ir_x64_aliases) takes it
     // when the source has one; the register the scan gave the copy then
     // goes unused for the copy's range. Sources are written first, so a
@@ -377,7 +381,8 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             settled = false
         }
     }
-    xmms :: ir_x64_scan(starts, ends, weights, floating, IR_X64_XMM_REGISTERS)
+    stale :: loop _ in 0..<count -> false
+    xmms :: ir_x64_scan(starts, ends, weights, floating, stale, IR_X64_XMM_REGISTERS)
     xmm_slots := [Int]{}
     loop slot in 0..<count {
         if xmms[slot] >= 0 -> &xmm_slots.push(slot)
@@ -508,10 +513,13 @@ fn ir_x64_storage_size(f: IRFunction, at: Int) -> Int Never! {
 
 // Linear scan of the `eligible` slots over the registers of `pool`, by start
 // then slot: one sort of the keys (start + 1) * count + slot (a parameter
-// starts at -1). When every register is taken, the range with the least
-// spill weight (the one ending last among equals) stays in its home. Per
-// slot: its register, -1 for none.
-fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], pool: [Int]) -> [Int] Never! {
+// starts at -1). A range whose first reference writes it (`fresh`) may take
+// the register of one whose last reference is that same instruction:
+// selection reads every operand of an instruction before it writes the
+// result. When every register is taken, the range with the least spill
+// weight (the one ending last among equals) stays in its home. Per slot:
+// its register, -1 for none.
+fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fresh: [Bool], pool: [Int]) -> [Int] Never! {
     count :: starts.len()
     regs := [Int]{}
     loop _ in 0..<count -> &regs.push(-1)
@@ -530,9 +538,12 @@ fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], poo
             owner :: owners[row]
             if owner >= 0 && ends[owner] < start -> owners[row] = -1
         }
+        // A fresh range may also take a register whose range ends where it
+        // starts.
+        shares :: fresh[slot] && start >= 0
         free := -1
         loop row in 0..<pool.len() {
-            if free < 0 && owners[row] < 0 -> free = row
+            if free < 0 && (owners[row] < 0 || (shares && ends[owners[row]] == start)) -> free = row
         }
         if free >= 0 {
             owners[free] = slot
@@ -552,6 +563,40 @@ fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], poo
         }
     }
     regs
+}
+
+// f(x) = g(x - 1) + x: the Call is the last read of x - 1 and writes g's
+// result, which takes its register; the Add, the last read of both x and
+// that result, writes the sum into one of theirs. Two callee-saved
+// registers serve four slots.
+#Test("A result takes a register its instruction reads for the last time") {
+    m := ir_module_new()
+    word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    g := ir_function_new("g", "test:share.jet::g", "", "share.jet", 1)
+    v :: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "v"), 1)
+    g.result = word
+    _ := ir_emit(&g, IROp.Return, -1, v, -1, -1, 1)
+    g_row :: m.functions.len()
+    name_rows_set(&m.function_rows, g.key, g_row)
+    &m.functions.push(g)
+    f := ir_function_new("f", "test:share.jet::f", "", "share.jet", 3)
+    x :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "x"), 3)
+    f.result = word
+    one :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.Const, one, 1, -1, -1, 4)
+    less :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.Sub, less, x, one, IR_OVERFLOW_WRAP, 4)
+    args :: ir_args(&f, [Int]{less})
+    got :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.Call, got, g_row, args, 1, 4)
+    sum :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.Add, sum, got, x, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(&f, IROp.Return, -1, sum, -1, -1, 4)
+    al :: ir_x64_allocate(m, f)
+    assert(al.regs[less] >= 0 && al.regs[less] != al.regs[x])
+    assert_eq(al.regs[got], al.regs[less])
+    assert(al.regs[sum] == al.regs[x] || al.regs[sum] == al.regs[got])
+    assert_eq(al.saved.len(), 2)
 }
 
 // make(x) builds a Pair from a scalar: in the caller's storage. swap(p)

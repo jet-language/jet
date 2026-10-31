@@ -60,6 +60,7 @@ use jet_eval.[
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
 use jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
+use jet_web.[web_runtime_partition]
 
 // The production CLI's compile, under the driver's all-phases collector when
 // JET_KEEP_GOING=1. A diagnostic trap is a failed compile, never an artifact.
@@ -151,6 +152,18 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     }
     if issues.len() == 0 {
         compiled := ir_x64_compile_module(^library.program, threads)
+        // JET_FRONT_RUNTIME_WEB_OUTPUT: the runtime partition of a web build
+        // (JetWeb Build.jet), selected from the same lowered module, as
+        // `{prefix}.wasm` with its receipt `{prefix}.wasm.tsv`.
+        if cli_sys.get("JET_FRONT_RUNTIME_WEB_OUTPUT") == .Val(web_prefix) {
+            web := web_runtime_partition(compiled.program, library.exports)
+            if web.errors.len() > 0 {
+                cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
+                return jet_driver_compile_escaped_failure("the runtime's web partition failed; see {prefix}.issues")
+            }
+            cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web partition: {err}")
+            cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web receipt: {err}")
+        }
         object := ir_x64_library_object(^compiled, library.exports, true)
         if object.errors.len() == 0 {
             cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")

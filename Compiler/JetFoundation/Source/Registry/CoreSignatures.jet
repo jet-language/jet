@@ -158,10 +158,6 @@ fn core_call_parameter_contract(module_name: String, member: String) -> [CoreCal
             core_param_optional("strategy", ParamZone.LabelOnly, absent),
             core_param_required_either("model"), core_param_required_either("actual"), core_param_required_either("observe"),
         })
-        module_name == "core.testing" && member == "__histories_with_provenance" -> Val([CoreCallParameterContract]{
-            core_param_required_either("seed"), core_param_required_either("cases"), core_param_required_either("strategy"),
-            core_param_required_either("model"), core_param_required_either("actual"), core_param_required_either("observe"),
-        })
         module_name == "core.devtools" && member == "publish" -> Val([CoreCallParameterContract]{
             core_param_required_label("field"), core_param_required_label("value"),
         })
@@ -501,13 +497,13 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
         numeric :: Type.Union{members: [Type]{Type.Int, Type.Float}}
         return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(numeric, read), core_sig_positional(Type.Int, read)}, Val(Type.String)))
     }
-    if module_name == "core.testing" && core_sig_one_of(member, [String]{"histories", "__histories_with_provenance"}) {
+    if module_name == "core.testing" && member == "histories" {
         t :: core_sig_named("T")
         dyn_value :: core_sig_named("Dyn")
         strategy :: core_sig_apply("HistoryStrategy", t)
         command_callback :: core_sig_fn([Type]{Type.List{element: t}}, dyn_value)
         observe_callback :: core_sig_fn([Type]{dyn_value}, dyn_value)
-        strategy_parameter :: if member == "histories" -> core_sig_parameter("strategy", "strategy", ParamZone.LabelOnly, read, Type.Option{inner: strategy}, Val(CoreCallDefault.Absent)) else -> core_sig_parameter("strategy", "strategy", ParamZone.Either, read, Type.Option{inner: strategy}, None)
+        strategy_parameter :: core_sig_parameter("strategy", "strategy", ParamZone.LabelOnly, read, Type.Option{inner: strategy}, Val(CoreCallDefault.Absent))
         parameters := [CoreCallTypedParameter]{
             core_sig_param_type("seed", "seed", ParamZone.Either, Type.Int),
             core_sig_param_type("cases", "cases", ParamZone.Either, Type.Int),
@@ -517,7 +513,7 @@ fn core_sig_text_and_testing(request: CoreCallSignatureRequest) -> CoreTypedCall
             core_sig_param_type("observe", "observe", ParamZone.Either, observe_callback),
         }
         signature := core_sig_generic(module_name, member, parameters, Val(core_sig_result(core_sig_named("TestComparison"), Type.String)), core_sig_type_parameter("T", CoreCallTypeConstraint.Any))
-        signature.min_arity = if member == "histories" -> 5 else -> 6
+        signature.min_arity = 5
         return Val(signature)
     }
     None
@@ -573,17 +569,6 @@ fn core_sig_encoding_backing(request: CoreCallSignatureRequest) -> CoreTypedCall
     cause :: core_sig_named("EncodingCause")
     if module_name == "core.data.plot" && member == "__plot_aggregate_none" {
         return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_named("JetDataPlotAggregate"))))
-    }
-    if module_name == "core.mem" && member == "__loader_new" {
-        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{
-            core_sig_positional(core_sig_named("DataLoaderKind"), move),
-            core_sig_positional(Type.String, move),
-            core_sig_positional(Type.String, move),
-            core_sig_positional(Type.List{element: Type.String}, move),
-            core_sig_positional(core_sig_named("DataFormat"), move),
-            core_sig_positional(core_sig_named("DataLimits"), move),
-            core_sig_positional(core_sig_named("DataAuthority"), move),
-        }, Val(core_sig_result(core_sig_apply("DataLoader", core_sig_named("T")), core_sig_named("DataError"))), core_sig_type_parameter("T", CoreCallTypeConstraint.Any)))
     }
     if module_name == "core.mem" && core_sig_one_of(member, [String]{"__list_capacity", "__list_reserve_exact", "__type_size"}) {
         element :: core_sig_named("T")

@@ -52,12 +52,44 @@ fn scheduler_words_drop(header: I64) {
     jet_rt_free(header, I64{24}, I64{8})
 }
 
+// Every control starts here, so the stop rail's root half (Trap.jet
+// trap_root_rail_code) is installed before any control can hold a stop.
 fn scheduler_control_new() -> I64 {
+    if (trap_root_rail_code == I64{0}) -> trap_root_rail_code = rt_trap_root_address()
     control :: jet_rt_alloc(I64{128}, I64{8})
     thread_zero(control, I64{128})
     sync_store(control, I64{1})
     sync_store(control + I64{64}, sync_park_new())
     control
+}
+
+// Trap.jet trap_root's target: the root's half of a trap, which the trap
+// reaches only once it has found the control that holds its capture or owns
+// its stop. PREPARE begins a root stop's captured report. WRITE and
+// WRITE_WORD append `b` (an address or a word) of `c` bytes to the capture
+// `a`. EXIT publishes the captured report with status `a` to the root. DROP
+// discards the capture of control `a`. Each returns 1.
+#Export(c) fn jet_rt_trap_root(op: I64, a: I64, b: I64, c: I64) -> I64 {
+    if (op == TRAP_ROOT_PREPARE) {
+        _ := scheduler_panic_check()
+        scheduler_root_capture_begin()
+    } else if (op == TRAP_ROOT_EXIT) {
+        text :: scheduler_root_capture_take(scheduler_control_current())
+        if (text == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+        _ := scheduler_root_publish_owned(text, a)
+    } else if (op == TRAP_ROOT_DROP) {
+        jet_rt_string_drop(scheduler_root_capture_take(a))
+    } else if (op == TRAP_ROOT_WRITE) {
+        rt_text_append(a, b, c)
+    } else {
+        rt_text_append_raw_word(a, b, c)
+    }
+    I64{1}
+}
+
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_trap_root_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
 fn scheduler_control_retain(control: I64) {

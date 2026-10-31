@@ -108,6 +108,10 @@ enum JetCLIPlan {
     Structural(argv: [String], command: String, json: Bool)
     // `jet review ...` (Review.jet): `argv` starts at the command word.
     Review(argv: [String], json: Bool, color: Bool)
+    // `jet registry keygen` (SigningKey.jet): create `registry`'s package-signing key.
+    Keygen(registry: String, force: Bool, color: Bool)
+    // `jet registry key backup` (SigningKey.jet): copy `registry`'s secret key to `dest`.
+    KeyBackup(registry: String, dest: String, color: Bool)
     // `jet lint --a11y|--complexity <file>`: the accessibility lints or the
     // cognitive-complexity view of the entry (CmdDevTools.rs `run_lint_a11y`,
     // `run_lint_complexity`); `category` is `a11y` or `complexity`, `raw` is
@@ -181,9 +185,20 @@ enum JetCLIPlan {
     // `jet audit copies [<entry.jet>]` / `jet audit <file.jet>`
     // (AuditCopies.jet): the implicit copies of `file`'s checked package.
     AuditCopies(file: String, source: String, color: Bool, json: Bool, notice: String)
+    // `jet audit foreign [<entry.jet>]` (AuditForeign.jet): the foreign code
+    // of `file`'s program and the loader needs of its linked image.
+    AuditForeign(file: String, source: String, color: Bool, json: Bool, notice: String)
     // `jet __jetpack <op>` (JetpackService.jet): the internal compiler
     // service `jetpack` speaks over stdin/stdout; never in help.
     CompilerService(op: String)
+    // `jet repl [file.jet] [--project <dir>]` (Repl.jet): the line session;
+    // `preload` is its first positional.
+    Repl(project: String?, preload: String?, invocation: JetCLIInvocationAuthority?, color: Bool)
+    // `jet __jet_repl_run_stdin --session=<nonce>` (Repl.jet): one REPL turn's
+    // private child; never in help.
+    ReplChild(session: String, invocation: JetCLIInvocationAuthority?)
+    // `jet eval <expression>` (Repl.jet): one REPL turn.
+    EvalExpression(source: String, color: Bool, json: Bool)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).
@@ -845,6 +860,15 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
         }
     }
     loop flag in flags -> &written.push(flag)
+    // `jet build --target web` is the web build (BuildWeb.jet): its OS is web.
+    if command == "build" && jet_cli_target_flag(jet_argv) == .Named(target) {
+        if target == "web" {
+            loop flag in flags {
+                if flag.name == "os" && flag.value != "web" -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{flag.written}` and `--target web` disagree", jet_cli_why("E2104"), "pass one of them", color, JET_DRIVER_EXIT_USAGE)}
+            }
+            &written.push(BuildOptionChoice{name: "os", value: "web", layer: BuildOptionLayer.Flag, written: "--target web", site: "", pinned: false})
+        }
+    }
     if build_options_resolve(command, profile, written) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
         .Resolved(options, notes) -> {
@@ -962,7 +986,7 @@ fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFl
 }
 
 // `jet build <file>` under its build options (jet_cli_build_options). The
-// flags above and every `--target` machine are not ported yet. The words
+// flags above and every `--target` but `web` are not ported yet. The words
 // after `--` (`passthrough`) go to the package's `fn build` (`b.args()`).
 fn jet_cli_build(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     jet_cli_with_build_options(jet_cli_build_entry(jet_argv, args, passthrough, color, quiet, threads, json), jet_argv, quiet)
@@ -984,7 +1008,9 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]
     if jet_cli_target_flag(jet_argv) == {
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<triple>` or `--target <triple>` before the source file", color, JET_DRIVER_EXIT_USAGE)
-        .Named(name) -> return jet_cli_not_ported("build --target={name}", color)
+        .Named(name) -> {
+            if name != "web" -> return jet_cli_not_ported("build --target={name}", color)
+        }
     }
     // A package (no file given, or a directory): its `fn build(b: Build)` when it declares one,
     // otherwise the stock build of its run entry.
@@ -1400,7 +1426,7 @@ fn jet_cli_eval(raw: [String], args: [String], color: Bool, json: Bool) -[FS, En
         if argument.starts_with(":") {
             return jet_cli_fail("E2104", "`{argument}` is a jet command, not an expression", jet_cli_why("E2104"), "run `jet repl` for an interactive session, or pass an expression such as `1 + 2`", color, JET_DRIVER_EXIT_USAGE)
         }
-        return jet_cli_not_ported("eval <expression>", color)
+        return JetCLIPlan.EvalExpression{source: argument, color: color, json: json}
     }
     file := argument
     notice := ""
@@ -1538,6 +1564,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         if raw.len() != 2 -> return jet_cli_done("", jet_cli_report("E2104", "`jet {JET_COMPILER_SERVICE_VERB}` takes exactly one operation", jet_cli_why("E2104"), "`jet {JET_COMPILER_SERVICE_VERB}` is spoken by `jetpack`; run the jetpack command instead", false), JET_DRIVER_EXIT_USAGE)
         return JetCLIPlan.CompilerService{op: raw[1]}
     }
+    // A REPL turn's child (Repl.jet), started only by `jet repl`.
+    if raw.len() > 0 && raw[0] == JET_CLI_REPL_CHILD_VERB -> return jet_cli_repl_child_plan(raw)
     // Output flags, parsed once from the jet-owned prefix before `--`.
     owned :: jet_cli_owned_flags(raw)
     color := false
@@ -1754,6 +1782,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)
         "eval" -> return jet_cli_eval(argv, args, color, json)
+        "repl" -> return jet_cli_repl_plan(jet_argv, args, color)
         "fill" -> {
             if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fill"), JET_DRIVER_EXIT_USAGE)
             return JetCLIPlan.Fill{target: args[1], json: json, color: color}
@@ -1769,6 +1798,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             return JetCLIPlan.Structural{argv: jet_cli_tail(argv, start), command: command, json: json}
         }
         "review" -> return JetCLIPlan.Review{argv: jet_cli_command_first(argv, command), json: json, color: color}
+        "keygen" -> return jet_cli_keygen_plan(jet_argv, color)
+        "key" -> return jet_cli_key_plan(jet_argv, color, json)
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet, json)
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)

@@ -1,0 +1,12 @@
+// core-conformance: core.process.run_all
+use core.process as process
+
+fn run() {
+    specs :: [ProcessSpec]{process.cmd(["printf", "first"]), process.cmd(["sh", "-c", "exit 4"])}
+    results :: process.run_all(specs, 2) ?? panic("run_all")
+    print(results.len())
+    loop result in results {
+        receipt :: result ?? panic("a job did not start")
+        print("{receipt.code} {receipt.output}")
+    }
+}

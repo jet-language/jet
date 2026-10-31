@@ -454,6 +454,129 @@ fn times() -[Env]> [Float] Never! {
         Float{elapsed} / Float{ticks}}
 }
 
+/// Which processes `usage` measures: this program, or every child it has
+/// waited for (D-CORE-RLIMIT-NAME1).
+enum UsageOf { Program Children }
+
+/// CPU time in user code and in the kernel, and the peak resident memory in
+/// bytes on every platform (Linux reports KiB; Core converts once).
+struct ResourceUsage {
+    user: Duration
+    system: Duration
+    peak_memory: Int
+}
+
+// Linux RLIMIT_* numbers of the five limits core.sys reads and sets.
+// memory is the address-space limit, the one ProcessSpec.memory_limit sets.
+SYS_LIMIT_CPU :: 0
+SYS_LIMIT_STACK :: 3
+SYS_LIMIT_CORE :: 4
+SYS_LIMIT_NOFILE :: 7
+SYS_LIMIT_AS :: 9
+
+/// This program's CPU-time limit; None is unlimited. The kernel counts whole
+/// seconds, so a fractional Duration rounds up when set.
+fn cpu_time_limit() -[Env]> (soft: Duration?, hard: Duration?) IOError! {
+    row :: limit_read(SYS_LIMIT_CPU, "cpu_time_limit")
+    Ok((soft: limit_duration(row.soft), hard: limit_duration(row.hard)))
+}
+
+/// This program's address-space limit in bytes; None is unlimited.
+fn memory_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_AS, "memory_limit") }
+
+/// This program's open-file limit; None is unlimited.
+fn open_file_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_NOFILE, "open_file_limit") }
+
+/// This program's core-file size limit in bytes; None is unlimited.
+fn core_file_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_CORE, "core_file_limit") }
+
+/// This program's stack size limit in bytes; None is unlimited.
+fn stack_limit() -[Env]> (soft: Int?, hard: Int?) IOError! { limit_read(SYS_LIMIT_STACK, "stack_limit") }
+
+/// Set this program's CPU-time limit; children inherit it. None is unlimited.
+fn set_cpu_time_limit(soft: Duration?, hard: Duration?) IOError! -[Env, Exec]> {
+    low :: limit_seconds(soft, "set_cpu_time_limit")
+    high :: limit_seconds(hard, "set_cpu_time_limit")
+    limit_write(SYS_LIMIT_CPU, low, high, "set_cpu_time_limit")
+}
+
+/// Set this program's address-space limit in bytes; children inherit it.
+fn set_memory_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_AS, soft, hard, "set_memory_limit") }
+
+/// Set this program's open-file limit; children inherit it.
+fn set_open_file_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_NOFILE, soft, hard, "set_open_file_limit") }
+
+/// Set this program's core-file size limit in bytes; `(0, hard)` turns off
+/// core dumps for this program and the children it starts afterwards.
+fn set_core_file_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_CORE, soft, hard, "set_core_file_limit") }
+
+/// Set this program's stack size limit in bytes; children inherit it.
+fn set_stack_limit(soft: Int?, hard: Int?) IOError! -[Env, Exec]> { limit_write(SYS_LIMIT_STACK, soft, hard, "set_stack_limit") }
+
+/// CPU time and peak memory of this program, or the sum over every child it
+/// has waited for.
+fn usage(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError! {
+    who :: if of == {
+        .Program -> 0
+        .Children -> -1
+    }
+    row :: core.sys.__rusage(who)
+    if !row.available -> return Err(unsupported("usage"))
+    if row.errno != 0 -> return Err(limit_error(.Read, "usage", row.errno))
+    user :: Duration.microseconds(row.user) ?? return Err(syscall_input(.Read, Val("usage"), "user CPU time is outside Duration's range"))
+    system :: Duration.microseconds(row.system) ?? return Err(syscall_input(.Read, Val("usage"), "system CPU time is outside Duration's range"))
+    Ok(ResourceUsage{user: user, system: system, peak_memory: row.peak})
+}
+
+fn limit_read(resource: Int, operation: String) -[Env]> (soft: Int?, hard: Int?) IOError! {
+    row :: core.sys.__rlimit(resource)
+    if !row.available -> return Err(unsupported(operation))
+    if row.errno != 0 -> return Err(limit_error(.Read, operation, row.errno))
+    Ok((soft: limit_value(row.soft), hard: limit_value(row.hard)))
+}
+
+fn limit_write(resource: Int, soft: Int?, hard: Int?, operation: String) IOError! {
+    if (soft ?? 0) < 0 || (hard ?? 0) < 0 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
+            cause: Val("a limit cannot be negative; pass None for unlimited")}))
+    }
+    row :: core.sys.__set_rlimit(resource, soft ?? -1, hard ?? -1)
+    if !row.available -> return Err(unsupported(operation))
+    if row.value != 0 -> return Err(limit_error(.Write, operation, row.errno))
+    Ok()
+}
+
+// The route reads RLIM_INFINITY as -1.
+fn limit_value(raw: Int) -> Int? { if raw < 0 -> None else -> Val(raw) }
+
+// A CPU limit past Duration's range (about 292 years) is unlimited in effect.
+fn limit_duration(raw: Int?) -> Duration? {
+    seconds :: raw ?? return None
+    if Duration.seconds(seconds) == {
+        .Ok(span) -> Val(span)
+        .Err(_) -> None
+    }
+}
+
+fn limit_seconds(value: Duration?, operation: String) -> Int? IOError! {
+    span :: value ?? return Ok(None)
+    nanos :: span.in(.Nanoseconds) ?? 0
+    if nanos < 0 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(operation), os_code: None,
+            cause: Val("a CPU-time limit cannot be negative; pass None for unlimited")}))
+    }
+    Ok(Val(nanos /% 1000000000 + (if nanos % 1000000000 == 0 -> 0 else -> 1)))
+}
+
+// EPERM (raising a hard limit without privilege) and EINVAL (soft above
+// hard) get their own IOError kinds; the rest keep the errno text.
+fn limit_error(kind: IOOperation, operation: String, errno: Int) -> IOError {
+    context :: IOContext{operation: kind, resource: Val(operation), os_code: Val(errno), cause: Val(core.sys.__errno_text(errno))}
+    if errno == 1 -> return IOError.PermissionDenied(context)
+    if errno == 22 -> return IOError.InvalidInput(context)
+    IOError.Other(context)
+}
+
 fn getpgid(pid: Int) -[Env]> Int IOError! {
     #Unsafe("posix getpgid: inspect a process group") {
         return call_value(core.sys.__getpgid(pid), "getpgid", .Resolve, None)

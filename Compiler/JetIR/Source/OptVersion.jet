@@ -1,5 +1,11 @@
-// Loop versioning (O2, pass "version", just before the SSA round trip): a
-// counted loop whose bound is an Int the loop never writes runs as two
+// Versioning (O2, pass "version", just before the SSA round trip): code
+// that runs Int arithmetic is copied behind tests that its Ints are
+// inline, so that inside the copy OptRange (OptRange.jet) can prove the
+// arithmetic inline and give it the plain i64 instructions, and drop the
+// drops of inline Ints and the stop points nothing reaches; a big integer
+// runs the code as it was. Three forms.
+//
+// A counted loop whose bound is an Int the loop never writes runs as two
 // copies behind one test of that bound and of the index it starts from,
 //
 //     block
@@ -18,50 +24,69 @@
 //     end
 //
 // so that inside the first copy the bound and the index's start are inline
-// Ints and OptRange (OptRange.jet) can bound the index by them and the loop
-// test and give the arithmetic on it the plain i64 instructions; a
-// big-integer bound or start runs the loop as it was. Only an innermost
-// loop whose first two instructions are that test (an Int compare of the
-// index the loop writes with the bound it does not, then the BrIf on it)
-// and whose body has Int arithmetic that can still trap and that an inline
-// index keeps inline (ir_version_derives) is copied, when it fits
-// IR_VERSION_BODY instructions and the function's copies stay within
-// IR_VERSION_BUDGET. An index first named inside the copied region is not
-// tested (it has no start to test there).
+// Ints and OptRange can bound the index by them and the loop test. Only an
+// innermost loop whose first two instructions are that test (an Int
+// compare of the index the loop writes with the bound it does not, then the
+// BrIf on it) and whose body has Int arithmetic that can still trap and
+// that an inline index keeps inline (ir_version_derives) is copied this
+// way. An index first named inside the copied region is not tested (it has
+// no start to test there). A loop counts as innermost when the loops it
+// holds sit only in exit arms (ir_version_holds_loop), as a stop's cleanup
+// does, which no pass runs on into the rest of the loop.
+//
+// Any other innermost loop whose body reads an Int that comes in from
+// before it (the body's first naming of the slot reads it) in Int
+// arithmetic that can still trap or an Int comparison (ir_version_gain) is
+// guarded on up to IR_VERSION_GUARDS such Ints with IntBig: an Int the
+// loop never writes once before it, the others at the head of every pass,
+//
+//     block
+//       block
+//         br_if int_big(n), 0
+//         <the loop, its head first doing br_if int_big(x) to the inner
+//          block's End>
+//         br 1
+//       end
+//       <the loop as it was>
+//     end
+//
+// A pass whose Int has grown big leaves the copy for the loop as it was at
+// its head, which carries on from the same slots: the copy renames only
+// slots written once whose write reaches every read (a value that lives
+// within one pass).
+//
+// A function without loops whose body ends in a Return or Unreachable and
+// reads an Int parameter in such an operation is guarded the same way at
+// its entry, on up to IR_VERSION_GUARDS such parameters:
+//
+//     block
+//       br_if int_big(p), 0
+//       <the body, its slots but the parameters its own>
+//     end
+//     <the body as it was>
+//
+// This form runs once every body is final (ir_opt_version_entries), so a
+// caller that inlines the function takes its body as it was: the copy
+// would split the caller's code in two (an aggregate the body returns
+// stays in memory, built on two paths), and the caller's own versioning
+// already covers the inlined Ints.
+//
+// A copy fits IR_VERSION_BODY instructions and a function's loop copies
+// stay within IR_VERSION_BUDGET.
 
 IR_VERSION_BODY :: 160
 IR_VERSION_BUDGET :: 480
+IR_VERSION_GUARDS :: 4
 
 // The guard's bounds: OptRange reads a compare with an inline constant, so
 // `n < IR_VERSION_HIGH` and `n > IR_VERSION_LOW` leave n inline.
 IR_VERSION_HIGH :: 4611686018427387902
 IR_VERSION_LOW :: -4611686018427387903
 
-// Versions the loops of `f`; returns how many.
+// Versions the loops of `f`; returns how many copies it made.
 fn ir_opt_version_loops(m: IRModule, f: &IRFunction) -> Int Never! {
     ir_opt_compact(&f)
     facts :: ir_opt_facts(f)
-    starts := [Int]{}
-    lasts := [Int]{}
-    bounds := [Int]{}
-    budget := IR_VERSION_BUDGET
-    loop at in 0..<f.op.len() {
-        if f.op[at] != .Loop -> next
-        bound :: ir_version_bound(m, f, facts, at)
-        if bound < 0 -> next
-        end :: f.a[at]
-        // The Block a counted loop leaves by is copied with it.
-        wrapped :: at > 0 && f.op[at - 1] == .Block && f.a[at - 1] == end + 1
-        start :: if wrapped -> at - 1 else -> at
-        last :: if wrapped -> end + 1 else -> end
-        size :: last - start + 1
-        if size > IR_VERSION_BODY || size > budget -> next
-        budget -= size
-        &starts.push(start)
-        &lasts.push(last)
-        &bounds.push(bound)
-    }
-    if bounds.len() == 0 -> return 0
     // Per slot the first and last instruction naming it.
     first := [Int]{}
     latest := [Int]{}
@@ -80,6 +105,42 @@ fn ir_opt_version_loops(m: IRModule, f: &IRFunction) -> Int Never! {
             if k > latest[slot] -> latest[slot] = k
         }
     }
+    bool_row :: ir_version_bool_row(m, f)
+    starts := [Int]{}
+    lasts := [Int]{}
+    bounds := [Int]{}
+    // The IntBig guards of the guarded loops: the region each guards, its
+    // slot, and whether it tests at the head of every pass.
+    guard_region := [Int]{}
+    guard_slot := [Int]{}
+    guard_head := [Bool]{}
+    budget := IR_VERSION_BUDGET
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Loop -> next
+        // A loop inside one already copied goes with it.
+        if lasts.len() > 0 && at <= lasts[lasts.len() - 1] -> next
+        end :: f.a[at]
+        // The Block a loop leaves by is copied with it.
+        wrapped :: at > 0 && f.op[at - 1] == .Block && f.a[at - 1] == end + 1
+        start :: if wrapped -> at - 1 else -> at
+        last :: if wrapped -> end + 1 else -> end
+        size :: last - start + 1
+        bound :: ir_version_bound(m, f, facts, at)
+        guards := [Int]{}
+        if bound < 0 && bool_row >= 0 -> guards = ir_version_guarded(m, f, facts, first, start, at, end)
+        if bound < 0 && guards.len() == 0 -> next
+        if size > IR_VERSION_BODY || size > budget -> next
+        budget -= size
+        loop slot in guards {
+            &guard_region.push(starts.len())
+            &guard_slot.push(slot)
+            &guard_head.push(ir_version_writes(f, at, end, slot))
+        }
+        &starts.push(start)
+        &lasts.push(last)
+        &bounds.push(bound)
+    }
+    if starts.len() == 0 -> return 0
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     region := 0
     at := 0
@@ -89,59 +150,14 @@ fn ir_opt_version_loops(m: IRModule, f: &IRFunction) -> Int Never! {
             at += 1
             next
         }
-        start :: starts[region]
-        last :: lasts[region]
-        bound :: bounds[region]
-        line :: f.code_line[start]
-        int_row :: f.slot_type[bound]
-        // The loop test's Bool row and index (ir_version_bound checked the
-        // head).
-        head :: if f.op[start] == .Block -> start + 2 else -> start + 1
-        bool_row :: f.slot_type[f.dst[head]]
-        index :: if f.a[head] == bound -> f.b[head] else -> f.a[head]
-        high :: ir_slot(&f, int_row, .Temp, -1, line)
-        low :: ir_slot(&f, int_row, .Temp, -1, line)
-        inline_bound :: ir_slot(&f, int_row, .Temp, -1, line)
-        ir_opt_code_put(&code, .Block, -1, -1, -1, -1, line)
-        ir_opt_code_put(&code, .Const, high, IR_VERSION_HIGH, -1, -1, line)
-        ir_opt_code_put(&code, .Const, low, IR_VERSION_LOW, -1, -1, line)
-        // The bound, then the index the loop starts from when it is named
-        // before the loop (a constant start the ranges decide, and simplify
-        // drops its two Ifs).
-        guarded := [Int]{bound}
-        if index < f.param_count || first[index] < start -> &guarded.push(index)
-        loop value in guarded {
-            below :: ir_slot(&f, bool_row, .Temp, -1, line)
-            above :: ir_slot(&f, bool_row, .Temp, -1, line)
-            ir_opt_code_put(&code, .Lt, below, value, high, -1, line)
-            ir_opt_code_put(&code, .If, -1, below, -1, -1, line)
-            ir_opt_code_put(&code, .Gt, above, value, low, -1, line)
-            ir_opt_code_put(&code, .If, -1, above, -1, -1, line)
+        pre := [Int]{}
+        head := [Int]{}
+        loop k in 0..<guard_slot.len() {
+            if guard_region[k] != region -> next
+            if guard_head[k] -> &head.push(guard_slot[k]) else -> &pre.push(guard_slot[k])
         }
-        ir_opt_code_put(&code, .Copy, inline_bound, bound, -1, -1, line)
-        // The first copy reads the inline bound and has slots of its own for
-        // the values that live only in the loop, so that each copy's values
-        // stay in it (a register each, and a constant stays one).
-        names := [Int]{}
-        loop slot in 0..<first.len() {
-            own :: slot >= f.param_count && slot != bound && first[slot] >= start && latest[slot] <= last
-            &names.push(if own -> -2 else -> -1)
-        }
-        loop slot in 0..<names.len() {
-            if names[slot] != -2 -> next
-            ty :: f.slot_type[slot]
-            kind :: f.slot_kind[slot]
-            name :: f.slot_name[slot]
-            at_line :: f.slot_line[slot]
-            names[slot] = ir_slot(&f, ty, kind, name, at_line)
-        }
-        names[bound] = inline_bound
-        ir_version_copy(&f, &code, start, last, 1 + 2 * guarded.len(), names)
-        ir_opt_code_put(&code, .Br, -1, 2 * guarded.len(), -1, -1, line)
-        loop _ in 0..<(2 * guarded.len()) -> ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
-        ir_version_copy(&f, &code, start, last, 1, [Int]{})
-        ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
-        at = last + 1
+        if bounds[region] >= 0 -> ir_version_counted(&f, &code, first, latest, starts[region], lasts[region], bounds[region]) else -> ir_version_guarded_copy(&f, &code, facts, first, latest, starts[region], lasts[region], pre, head, bool_row)
+        at = lasts[region] + 1
         region += 1
     }
     f.op = ^code.op
@@ -151,7 +167,262 @@ fn ir_opt_version_loops(m: IRModule, f: &IRFunction) -> Int Never! {
     f.c = ^code.c
     f.code_line = ^code.line
     ir_opt_compact(&f)
-    bounds.len()
+    starts.len()
+}
+
+// The counted loop start..=last with bound `bound` behind its test
+// (the header comment's first form).
+fn ir_version_counted(f: &IRFunction, code: &IROptCode, first: [Int], latest: [Int], start: Int, last: Int, bound: Int) Never! {
+    line :: f.code_line[start]
+    int_row :: f.slot_type[bound]
+    // The loop test's Bool row and index (ir_version_bound checked the
+    // head).
+    head :: if f.op[start] == .Block -> start + 2 else -> start + 1
+    bool_row :: f.slot_type[f.dst[head]]
+    index :: if f.a[head] == bound -> f.b[head] else -> f.a[head]
+    high :: ir_slot(&f, int_row, .Temp, -1, line)
+    low :: ir_slot(&f, int_row, .Temp, -1, line)
+    inline_bound :: ir_slot(&f, int_row, .Temp, -1, line)
+    ir_opt_code_put(&code, .Block, -1, -1, -1, -1, line)
+    ir_opt_code_put(&code, .Const, high, IR_VERSION_HIGH, -1, -1, line)
+    ir_opt_code_put(&code, .Const, low, IR_VERSION_LOW, -1, -1, line)
+    // The bound, then the index the loop starts from when it is named
+    // before the loop (a constant start the ranges decide, and simplify
+    // drops its two Ifs).
+    guarded := [Int]{bound}
+    if index < f.param_count || first[index] < start -> &guarded.push(index)
+    loop value in guarded {
+        below :: ir_slot(&f, bool_row, .Temp, -1, line)
+        above :: ir_slot(&f, bool_row, .Temp, -1, line)
+        ir_opt_code_put(&code, .Lt, below, value, high, -1, line)
+        ir_opt_code_put(&code, .If, -1, below, -1, -1, line)
+        ir_opt_code_put(&code, .Gt, above, value, low, -1, line)
+        ir_opt_code_put(&code, .If, -1, above, -1, -1, line)
+    }
+    ir_opt_code_put(&code, .Copy, inline_bound, bound, -1, -1, line)
+    // The first copy reads the inline bound and has slots of its own for
+    // the values that live only in the loop, so that each copy's values
+    // stay in it (a register each, and a constant stays one).
+    names := [Int]{}
+    loop slot in 0..<first.len() {
+        own :: slot >= f.param_count && slot != bound && first[slot] >= start && latest[slot] <= last
+        &names.push(if own -> -2 else -> -1)
+    }
+    loop slot in 0..<names.len() {
+        if names[slot] != -2 -> next
+        names[slot] = ir_version_slot(&f, slot)
+    }
+    names[bound] = inline_bound
+    ir_version_copy(&f, &code, start, last, 1 + 2 * guarded.len(), names, 0)
+    ir_opt_code_put(&code, .Br, -1, 2 * guarded.len(), -1, -1, line)
+    loop _ in 0..<(2 * guarded.len()) -> ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
+    ir_version_copy(&f, &code, start, last, 1, [Int]{}, 0)
+    ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
+}
+
+// The loop start..=last behind its IntBig guards (the header comment's
+// second form): `pre` once before it, `head` at the head of every pass.
+fn ir_version_guarded_copy(f: &IRFunction, code: &IROptCode, facts: OptFacts, first: [Int], latest: [Int], start: Int, last: Int, pre: [Int], head: [Int], bool_row: Int) Never! {
+    line :: f.code_line[start]
+    loop_at :: if f.op[start] == .Block -> start + 1 else -> start
+    // The constructs of the region open at the loop's head: a head guard
+    // leaves them and goes to the inner block's End.
+    inner :: loop_at - start + 1
+    names :: ir_version_locals(&f, facts, first, latest, start, last)
+    ir_opt_code_put(&code, .Block, -1, -1, -1, -1, line)
+    ir_opt_code_put(&code, .Block, -1, -1, -1, -1, line)
+    loop slot in pre -> ir_version_guard(&f, &code, slot, 0, bool_row, line)
+    ir_version_copy(&f, &code, start, loop_at, 2, names, 0)
+    loop slot in head -> ir_version_guard(&f, &code, slot, inner, bool_row, line)
+    ir_version_copy(&f, &code, loop_at + 1, last, 2, names, inner)
+    ir_opt_code_put(&code, .Br, -1, 1, -1, -1, line)
+    ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
+    ir_version_copy(&f, &code, start, last, 1, [Int]{}, 0)
+    ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
+}
+
+// Versions `f` at its entry when it has no loops (the header comment's
+// third form); returns 1 when it is copied, else 0.
+fn ir_opt_version_entry(m: IRModule, f: &IRFunction) -> Int Never! {
+    loop op in f.op {
+        if op == .Loop -> return 0
+    }
+    ir_opt_compact(&f)
+    bool_row :: ir_version_bool_row(m, f)
+    ir_version_entry(m, &f, bool_row)
+}
+
+// A function without loops behind IntBig guards on its Int parameters;
+// returns 1 when it is copied, else 0.
+fn ir_version_entry(m: IRModule, f: &IRFunction, bool_row: Int) -> Int Never! {
+    count :: f.op.len()
+    if bool_row < 0 || count == 0 || count > IR_VERSION_BODY -> return 0
+    if f.op[count - 1] != .Return && f.op[count - 1] != .Unreachable -> return 0
+    params := [Int]{}
+    reads := [Int]{}
+    loop k in 0..<count {
+        if !ir_version_gain(m, f, k) -> next
+        ir_x64_reads_into(f, k, &reads)
+        loop slot in reads {
+            if slot < 0 || slot >= f.param_count || m.types[f.slot_type[slot]].kind != .Int || params.contains(slot) || params.len() >= IR_VERSION_GUARDS -> next
+            &params.push(slot)
+        }
+    }
+    if params.len() == 0 -> return 0
+    line :: f.code_line[0]
+    // Both copies run from the entry to a return, so the first has every
+    // slot but the parameters its own.
+    names := [Int]{}
+    loop _ in 0..<f.param_count -> &names.push(-1)
+    total :: f.slot_type.len()
+    loop slot in f.param_count..<total -> &names.push(ir_version_slot(&f, slot))
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ir_opt_code_put(&code, .Block, -1, -1, -1, -1, line)
+    loop slot in params -> ir_version_guard(&f, &code, slot, 0, bool_row, line)
+    ir_version_copy(&f, &code, 0, count - 1, 1, names, 0)
+    ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
+    ir_version_copy(&f, &code, 0, count - 1, 0, [Int]{}, 0)
+    f.op = ^code.op
+    f.dst = ^code.dst
+    f.a = ^code.a
+    f.b = ^code.b
+    f.c = ^code.c
+    f.code_line = ^code.line
+    ir_opt_compact(&f)
+    1
+}
+
+// `br_if int_big(slot), depth`.
+fn ir_version_guard(f: &IRFunction, code: &IROptCode, slot: Int, depth: Int, bool_row: Int, line: Int) Never! {
+    big :: ir_slot(&f, bool_row, .Temp, -1, line)
+    ir_opt_code_put(&code, .IntBig, big, slot, -1, -1, line)
+    ir_opt_code_put(&code, .BrIf, -1, big, depth, -1, line)
+}
+
+// A Bool type row: one of `f`'s slots', else the module's first; -1 when
+// there is none.
+fn ir_version_bool_row(m: IRModule, f: IRFunction) -> Int Never! {
+    loop row in f.slot_type {
+        if m.types[row].kind == .Bool -> return row
+    }
+    loop (row, ty) in m.types {
+        if ty.kind == .Bool -> return row
+    }
+    -1
+}
+
+// Whether instruction `k` is Int arithmetic that can still trap or an Int
+// comparison not yet proven inline: what inline operands turn into plain
+// i64 instructions.
+fn ir_version_gain(m: IRModule, f: IRFunction, k: Int) -> Bool Never! {
+    op :: f.op[k]
+    arithmetic :: op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
+    compare :: op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
+    if !arithmetic && !compare -> return false
+    if f.a[k] < 0 || m.types[f.slot_type[f.a[k]]].kind != .Int -> return false
+    f.c[k] != IR_OVERFLOW_WRAP
+}
+
+// The Int slots the innermost loop `at` (its End `end`; its region from
+// `start`) reads in an ir_version_gain operation and that come in from
+// before it: named before the region or a parameter, and first named in
+// the body by a read. Not a constant; up to IR_VERSION_GUARDS of them;
+// none when the loop holds another.
+fn ir_version_guarded(m: IRModule, f: IRFunction, facts: OptFacts, first: [Int], start: Int, at: Int, end: Int) -> [Int] Never! {
+    // Per slot: 0 not yet named in the body, 1 first read, 2 first written.
+    state := [Int]{}
+    loop _ in 0..<f.slot_type.len() -> &state.push(0)
+    out := [Int]{}
+    reads := [Int]{}
+    if ir_version_holds_loop(f, at, end) -> return [Int]{}
+    loop k in (at + 1)..<end {
+        ir_x64_reads_into(f, k, &reads)
+        gain :: ir_version_gain(m, f, k)
+        loop slot in reads {
+            if slot < 0 -> next
+            if state[slot] == 0 -> state[slot] = 1
+            if !gain || state[slot] != 1 || out.contains(slot) || out.len() >= IR_VERSION_GUARDS -> next
+            if slot >= f.param_count && first[slot] >= start -> next
+            if m.types[f.slot_type[slot]].kind != .Int || ir_version_constant(f, facts, slot) -> next
+            &out.push(slot)
+        }
+        written :: ir_x64_write(f, k)
+        if written >= 0 && state[written] == 0 -> state[written] = 2
+    }
+    out
+}
+
+// Whether the loop `at` (its End `end`) writes `slot`.
+fn ir_version_writes(f: IRFunction, at: Int, end: Int, slot: Int) -> Bool Never! {
+    loop k in (at + 1)..<end {
+        if ir_x64_write(f, k) == slot -> return true
+    }
+    false
+}
+
+// Whether the loop `at` (its End `end`) holds another Loop outside its exit
+// arms (ir_version_exit_arm).
+fn ir_version_holds_loop(f: IRFunction, at: Int, end: Int) -> Bool Never! {
+    k := at + 1
+    loop k < end {
+        op :: f.op[k]
+        if op == .Loop -> return true
+        // An If's then arm runs to its Else or End, an Else's arm to the End.
+        arm_end :: if op == {
+            .If -> if f.b[k] >= 0 -> f.b[k] else -> f.c[k]
+            .Else -> f.a[k]
+            else -> -1
+        }
+        k = if arm_end >= 0 && ir_version_exit_arm(f, k + 1, arm_end) -> arm_end else -> k + 1
+    }
+    false
+}
+
+// Whether the If or Else arm `from`..<`to` is an exit arm: it ends in a
+// Return or Unreachable and every Br and BrIf in it stays inside it, so
+// control that enters it never comes back out.
+fn ir_version_exit_arm(f: IRFunction, from: Int, to: Int) -> Bool Never! {
+    if to <= from || (f.op[to - 1] != .Return && f.op[to - 1] != .Unreachable) -> return false
+    open := 0
+    loop k in from..<to {
+        op :: f.op[k]
+        if op == .Block || op == .Loop || op == .If -> open += 1
+        if op == .End -> open -= 1
+        if op == .Br && f.a[k] >= open -> return false
+        if op == .BrIf && f.b[k] >= open -> return false
+    }
+    true
+}
+
+// Fresh names for the slots of the region start..=last whose one write is
+// their first naming there and reaches every read (ir_opt_reaching_def):
+// values that live within one pass of the region (-1: kept).
+fn ir_version_locals(f: &IRFunction, facts: OptFacts, first: [Int], latest: [Int], start: Int, last: Int) -> [Int] Never! {
+    own := [Bool]{}
+    loop slot in 0..<first.len() {
+        &own.push(slot >= f.param_count && first[slot] >= start && latest[slot] <= last && facts.defs[slot] == 1 && facts.def_at[slot] == first[slot])
+    }
+    reads := [Int]{}
+    loop k in start..<(last + 1) {
+        ir_x64_reads_into(f, k, &reads)
+        loop slot in reads {
+            if slot >= 0 && slot < own.len() && own[slot] && ir_opt_reaching_def(f, facts, slot, k) < 0 -> own[slot] = false
+        }
+    }
+    names := [Int]{}
+    loop slot in 0..<own.len() {
+        &names.push(if own[slot] -> ir_version_slot(&f, slot) else -> -1)
+    }
+    names
+}
+
+// A fresh slot like `slot`.
+fn ir_version_slot(f: &IRFunction, slot: Int) -> Int Never! {
+    ty :: f.slot_type[slot]
+    kind :: f.slot_kind[slot]
+    name :: f.slot_name[slot]
+    line :: f.slot_line[slot]
+    ir_slot(&f, ty, kind, name, line)
 }
 
 // The bound slot of the loop opened at `at` when it is one to version
@@ -166,10 +437,10 @@ fn ir_version_bound(m: IRModule, f: IRFunction, facts: OptFacts, at: Int) -> Int
     left :: f.a[head]
     right :: f.b[head]
     if left < 0 || right < 0 || m.types[f.slot_type[left]].kind != .Int || m.types[f.slot_type[right]].kind != .Int -> return -1
+    if ir_version_holds_loop(f, at, end) -> return -1
     left_written := false
     right_written := false
     loop k in head..<end {
-        if f.op[k] == .Loop -> return -1
         written :: ir_x64_write(f, k)
         if written == left -> left_written = true
         if written == right -> right_written = true
@@ -219,13 +490,14 @@ fn ir_version_constant(f: IRFunction, facts: OptFacts, slot: Int) -> Bool Never!
     slot >= f.param_count && facts.defs[slot] == 1 && facts.def_at[slot] >= 0 && f.op[facts.def_at[slot]] == .Const
 }
 
-// Appends instructions start..=last of `f` to `code`: each Br or BrIf that
-// leaves them goes `shift` constructs further out, and each slot with a
-// name in `names` (>= 0; an empty list renames none) is that slot instead,
-// read or written. Renamed call arguments go to fresh `args` rows (a row
-// is read by one instruction).
-fn ir_version_copy(f: &IRFunction, code: &IROptCode, start: Int, last: Int, shift: Int, names: [Int]) Never! {
-    open := 0
+// Appends instructions start..=last of `f` to `code`, `open` constructs of
+// the copied code already open at `start`: each Br or BrIf that leaves them
+// goes `shift` constructs further out, and each slot with a name in `names`
+// (>= 0; an empty list renames none) is that slot instead, read or written.
+// Renamed call arguments go to fresh `args` rows (a row is read by one
+// instruction).
+fn ir_version_copy(f: &IRFunction, code: &IROptCode, start: Int, last: Int, shift: Int, names: [Int], open_in: Int) Never! {
+    open := open_in
     loop k in start..<(last + 1) {
         op :: f.op[k]
         if op == .End -> open -= 1

@@ -218,3 +218,23 @@ fn host_print_capture_install(code: I64) { host_print_capture_code = code }
         _ := host_stdout_write(os_load_i64(value), os_load_i64(wrapping(value + I64{8})), true, flush != U8{0})
     }
 }
+
+// print in a program that owns its main (JetIR EntryOwned.jet): such a
+// program links no other stdout writer and runs no test capture, and print
+// flushes after every line, so nothing is ever buffered. The line and its
+// newline go straight to fd 1, with no buffer and no lock: the same bytes,
+// in the same order, as jet_term_write_stdout_line's flush writes. A failed
+// write is dropped, as there.
+#Export(c) fn jet_term_write_stdout_line_direct(value: I64, flush: U8) {
+    #Unsafe("value is a borrowed E4 JetCText header; writev borrows its bytes and its own LF until return") {
+        bytes :: os_load_i64(value)
+        length :: os_load_i64(wrapping(value + I64{8}))
+        at := I64{0}
+        loop at <= length {
+            count :: os_write_line_i64(I64{1}, wrapping(bytes + at), wrapping(length - at))
+            if (count == I64{-4}) { next }
+            if (count <= I64{0}) { return }
+            at = wrapping(at + count)
+        }
+    }
+}

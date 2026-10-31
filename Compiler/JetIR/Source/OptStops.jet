@@ -78,6 +78,128 @@ fn ir_opt_stops_drops(code: &IROptCode, f: IRFunction, start: Int, end: Int) Nev
     loop k in start..<end -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
 }
 
+// Stop facts (O1, O2, over the module once every body is optimized). A
+// body reports a stop to its caller (edx, X64Select ir_x64_stop_point) only
+// from a stop edge or a slow path that publishes a stop. A body that starts
+// none (ir_opt_stops_starts), whose calls of bodies all reach bodies that
+// report none either, never reports one: the stop points right after calls
+// of it go, so its callers neither test edx there nor lay out the edge.
+fn ir_opt_stop_facts(m: IRModule, functions: &[IRFunction]) Never! {
+    count :: functions.len()
+    keys := [String]{}
+    bodies := [Bool]{}
+    loop f in functions {
+        &keys.push(f.key.copy())
+        &bodies.push(f.asm == None && f.key != IR_STOP_POLL_KEY && f.key != IR_STOP_TRAP_KEY)
+    }
+    // Per body the bodies that call it, and whether it reports a stop.
+    callers := [[Int]]{}
+    reports := [Bool]{}
+    loop _ in 0..<count {
+        &callers.push([Int]{})
+        &reports.push(false)
+    }
+    work := [Int]{}
+    loop id in 0..<count {
+        if !bodies[id] -> next
+        loop at in 0..<functions[id].op.len() {
+            if functions[id].op[at] != .Call -> next
+            callee :: functions[id].a[at]
+            if callee >= 0 && callee < count && bodies[callee] -> &callers[callee].push(id)
+        }
+        if ir_opt_stops_starts(m, functions[id], keys, bodies) {
+            reports[id] = true
+            &work.push(id)
+        }
+    }
+    loop work.len() > 0 {
+        callee := &work.pop() ?? { break }
+        loop caller in callers[callee] {
+            if reports[caller] -> next
+            reports[caller] = true
+            &work.push(caller)
+        }
+    }
+    loop id in 0..<count {
+        if bodies[id] -> ir_opt_stops_unreported(&functions[id], keys, bodies, reports)
+    }
+}
+
+// Whether body `f` can start a stop: an instruction whose selection can
+// publish one (ir_opt_stops_quiet), or a poll that checks no direct call of
+// a body (a stop another task asked for, or one a runtime routine
+// published), counting a poll a tail call may move before its jump
+// (TailCalls.jet). A trap's stop point takes only the stops of the slow
+// paths before it, judged at their instructions. A body with no
+// instructions is not known.
+fn ir_opt_stops_starts(m: IRModule, f: IRFunction, keys: [String], bodies: [Bool]) -> Bool Never! {
+    if f.op.len() == 0 -> return true
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Call {
+            if !ir_opt_stops_quiet(m, f, at) -> return true
+            next
+        }
+        callee :: f.a[at]
+        if callee < 0 || callee >= keys.len() -> return true
+        if keys[callee] != IR_STOP_POLL_KEY -> next
+        if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) -> return true
+        if ir_opt_stops_tail(f, f.c[at + 1] + 1) -> return true
+    }
+    false
+}
+
+// Whether the poll at `at` follows a direct call of a body.
+fn ir_opt_stops_checks_body(f: IRFunction, bodies: [Bool], at: Int) -> Bool Never! {
+    if at == 0 || f.op[at - 1] != .Call -> return false
+    callee :: f.a[at - 1]
+    callee >= 0 && callee < bodies.len() && bodies[callee]
+}
+
+// Whether only Drops, Moves and Copies lie between `start` and a Return or
+// another call: the shape of a tail call (TailCalls.jet ir_tail_site).
+fn ir_opt_stops_tail(f: IRFunction, start: Int) -> Bool Never! {
+    at := start
+    loop at < f.op.len() && (f.op[at] == .Drop || f.op[at] == .Move || f.op[at] == .Copy || f.op[at] == .Nop) -> at += 1
+    at < f.op.len() && (f.op[at] == .Return || f.op[at] == .Call)
+}
+
+// Whether the selection of instruction `at` can publish no stop of its own
+// (X64Select: the slow paths that publish one belong to a trapping
+// fixed-width operation or negation, a division not proven to have an
+// inline dividend and a positive divisor, and a shift).
+fn ir_opt_stops_quiet(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op == {
+        .Add | .Sub | .Mul | .Neg -> {
+            kind :: ir_opt_stops_kind(m, f, f.a[at])
+            kind == .Int || kind == .Float || kind == .Float32 || f.c[at] == IR_OVERFLOW_WRAP
+        }
+        .Div | .Rem | .FloorDiv | .Mod -> {
+            kind :: ir_opt_stops_kind(m, f, f.a[at])
+            kind == .Float || kind == .Float32 || (kind == .Int && f.c[at] == IR_OVERFLOW_WRAP)
+        }
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .BitAnd | .BitOr | .BitXor | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Not | .Sqrt | .IntBig | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable -> true
+        else -> false
+    }
+}
+
+fn ir_opt_stops_kind(m: IRModule, f: IRFunction, slot: Int) -> IRTypeKind Never! {
+    if slot < 0 || slot >= f.slot_type.len() -> return IRTypeKind.Unit
+    m.types[f.slot_type[slot]].kind
+}
+
+// Removes from body `f` each stop point right after a call of a body that
+// reports no stop.
+fn ir_opt_stops_unreported(f: &IRFunction, keys: [String], bodies: [Bool], reports: [Bool]) Never! {
+    removed := false
+    loop at in 1..<f.op.len() {
+        if !ir_opt_stops_poll(f, keys, at) || !ir_opt_stops_checks_body(f, bodies, at) || reports[f.a[at - 1]] -> next
+        loop k in at..<(f.c[at + 1] + 1) -> f.op[k] = IROp.Nop
+        removed = true
+    }
+    if removed -> ir_opt_compact(&f)
+}
+
 // Polls folded into a later one (O1, O2, after inlining and again after the
 // other passes, before the stop points move after their calls). A poll
 // that checks no call (since the last check only an inlined body,

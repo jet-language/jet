@@ -10,6 +10,7 @@ package {
 }
 use core as core
 
+use core.files as core_files
 use core.files.[FileReader]
 use core.math as math
 use core.encoding as encoding
@@ -339,6 +340,15 @@ struct __CSVRowSource {
     records: CSVReader
     header: [String]
     started: Bool
+    row: Int
+}
+
+// The JSON event cursor behind `json_reader<T>`; the opening `[` is read on
+// the first pull and the closing `]` ends the stream.
+struct __JSONRowSource {
+    parser: encoding_stream.JSONPull
+    array_started: Bool
+    array_done: Bool
     row: Int
 }
 
@@ -1390,14 +1400,7 @@ fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
     payload := [U8]{}
     data_loader_render(&payload, value.encode())
     data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
-    kind := DataLoaderKind.Value
-    locator := "value"
-    member := ""
-    parameters := [String]{}
-    format := DataFormat.JSON
-    owned_limits := limits.copy()
-    authority := DataAuthority{scope: "local", revision: ""}
-    loader := core.mem.__loader_new<T>(^kind, ^locator, ^member, ^parameters, ^format, ^owned_limits, ^authority) ?? return Err(err)
+    loader := make_loader<T>(DataLoaderKind.Value, "value", "", [String]{}, "json", "local", limits) ?? return Err(err)
     loader.payload = Val(payload)
     Ok(loader)
 }
@@ -1495,12 +1498,7 @@ fn json<T: Decode>(text: String) -> [T] DataError! {
 // record names the fields, and every later record must carry exactly that
 // many. A row failure carries its 1-based data row and stays latched.
 fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
-    if !valid_encoding_limits(limits.encoding) {
-        return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "DataLimits"))
-    }
-    if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
-        return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "DataLimits"))
-    }
+    data_limits_check(limits) ?? return Err(err)
     records :: csv_codec.reader(^reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
     state :: shared __CSVRowSource{records: ^records, header: [String]{}, started: false, row: 0}
     source :: shared __StreamSource<T>{
@@ -1580,15 +1578,156 @@ fn data_from_encoding(operation: String, row: Int?, cause: EncodingError) -> Dat
     DataError{kind: kind, operation: operation, row: row, column: cause.column, index: None, reason: cause.reason.copy(), cause: Val(cause)}
 }
 
-fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
-    core.data.json_reader<T>(^reader, limits)
+// The checked `DataLimits` of a reader or snapshot (Rust
+// `jet_data_limits_validate`).
+fn data_limits_check(limits: DataLimits) DataError! {
+    if !valid_encoding_limits(limits.encoding) {
+        return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "DataLimits"))
+    }
+    if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
+        return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "DataLimits"))
+    }
+    Ok(())
 }
 
+// Typed rows of one top-level JSON array over a consumed file (Rust
+// `jet_data_json_reader` and the JSON arm of `jet_data_stream_scan`;
+// core-library.md `json_reader<T: Decode>(reader, limits)`). Numbers keep
+// their typed lexemes, each array element folds to one tree under the
+// reader's allocation budget, and a failure stays latched.
+fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+    data_limits_check(limits) ?? return Err(err)
+    parser := encoding_stream.json_reader(^reader, limits.encoding, false) ?? return Err(data_from_encoding("json_reader", None, err))
+    parser.typed_numbers = true
+    state :: shared __JSONRowSource{parser: ^parser, array_started: false, array_done: false, row: 0}
+    source :: shared __StreamSource<T>{
+        pull: () -> json_reader_next<T>(state),
+        max_output_rows: limits.max_output_rows,
+        ahead: [T]{},
+        ahead_index: 0,
+        terminal: None,
+        done: false,
+    }
+    Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
+}
+
+// One pull of `json_reader<T>`: the opening `[` on the first pull, then one
+// array element decoded to `T`; `None` at the closing `]` or end of input.
+fn json_reader_next<T: Decode>(state: Shared<__JSONRowSource>) -> T? DataError! {
+    cell := state.guard_edit()
+    if cell.value.array_done -> return Ok(None)
+    if !cell.value.array_started {
+        if &cell.value.parser.next() == {
+            .Ok(next) -> {
+                opened :: next ?? return Ok(None)
+                if opened != .ArrayStart {
+                    return Err(data_error(DataErrorKind.Decode, "typed JSON stream requires a top-level array of objects", "json_reader"))
+                }
+                cell.value.array_started = true
+            }
+            .Err(failure) -> return Err(data_from_encoding("json_reader", None, failure))
+        }
+    }
+    first :: if &cell.value.parser.next() == {
+        .Ok(next) -> next
+        .Err(failure) -> {
+            return Err(data_from_encoding("json_reader", Val(cell.value.row + 1), failure))
+        }
+    }
+    event :: first ?? {
+        cell.value.array_done = true
+        return Ok(None)
+    }
+    if event == .ArrayEnd {
+        cell.value.array_done = true
+        return Ok(None)
+    }
+    heap := encoding_stream.FoldBudget{decoded: 0, tracked: 0}
+    tree :: if &cell.value.parser.fold(^event, &heap) == {
+        .Ok(folded) -> folded
+        .Err(failure) -> {
+            cell.value.parser.allocation.release(heap.tracked)
+            return Err(data_from_encoding("json_reader", Val(cell.value.row + 1), failure))
+        }
+    }
+    cell.value.parser.allocation.release(heap.tracked)
+    cell.value.row = cell.value.row + 1
+    if tree.decode<T>() == {
+        .Ok(value) -> Ok(Val(value))
+        .Err(failures) -> {
+            error := data_decode_error(failures, "json_reader")
+            error.row = Val(cell.value.row)
+            Err(error)
+        }
+    }
+}
+
+// A typed snapshot of a loader's payload (Rust `jet_data_loader_snapshot`
+// with the Foundation `PreludeDataFlow` kernel; core-library.md
+// `snapshot(loader)`, line 3045). The payload
+// is the bound bytes, the offline/value last-good bytes, or the local file;
+// it parses by format, decodes to `T`, and commits as the new last-good
+// snapshot. Any failure is recorded in the loader status before it returns.
 fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
-        return Err(data_error(DataErrorKind.State, "loader was cancelled before snapshot", loader.source.locator))
+        return Err(data_loader_fail<T>(&loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before snapshot")))
     }
-    core.data.snapshot<T>(&loader)
+    data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
+    data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
+    payload :: data_loader_payload<T>(loader) ?? return Err(data_loader_fail<T>(&loader, err))
+    tree :: data_loader_tree(payload.data, loader.format, loader.limits) ?? return Err(data_loader_fail<T>(&loader, err))
+    value :: if data_loader_decode<T>(tree, loader.format == DataFormat.CSV) == {
+        .Ok(result) -> result
+        .Err(failures) -> {
+            reasons :: loop failure in failures -> if failure.path == "" -> failure.reason else -> "{failure.path}: {failure.reason}"
+            return Err(data_loader_fail<T>(&loader, data_loader_error(DataErrorKind.Decode, "data.loader", reasons.join("; "))))
+        }
+    }
+    canonical := [U8]{}
+    data_loader_render(&canonical, value.encode())
+    schema := data_loader_schema(tree, loader.format)
+    schema.identity = data_loader_digest(schema.identity.bytes())
+    provenance_source :: loader.source.copy()
+    provenance_authority :: loader.authority.copy()
+    provenance_format :: loader.format
+    provenance :: DataProvenance{source: provenance_source, format: provenance_format, authority: provenance_authority}
+    // PreludeDataFlow::commit_snapshot
+    data_loader_check_payload(loader.limits, canonical.len(), "data.snapshot") ?? return Err(data_loader_fail<T>(&loader, err))
+    content_id :: data_loader_digest(canonical)
+    source_material := ""
+    source_material = data_loader_identity_part(source_material, data_loader_kind_text(loader.source.kind))
+    source_material = data_loader_identity_part(source_material, loader.source.locator)
+    source_material = data_loader_identity_part(source_material, loader.source.member)
+    loop parameter in loader.source.parameters -> source_material = data_loader_identity_part(source_material, parameter)
+    source_material = data_loader_identity_part(source_material, loader.authority.scope)
+    source_material = data_loader_identity_part(source_material, loader.authority.revision)
+    source_id :: data_loader_digest(source_material.bytes())
+    snapshot_material := ""
+    snapshot_material = data_loader_identity_part(snapshot_material, source_id)
+    snapshot_material = data_loader_identity_part(snapshot_material, content_id)
+    snapshot_material = data_loader_identity_part(snapshot_material, schema.identity)
+    snapshot_material = data_loader_identity_part(snapshot_material, data_format_text(loader.format))
+    snapshot_id :: data_loader_digest(snapshot_material.bytes())
+    loader.status = DataLoaderStatus{
+        identity: "snapshot-{snapshot_id}",
+        freshness: if payload.offline -> DataFreshness.Offline else -> DataFreshness.Fresh,
+        invalidated_by: if payload.offline -> loader.status.invalidated_by.copy() else -> DataInvalidationCause.NoCause,
+        error: "",
+        cleanup: "retained",
+        buffered_bytes: 0,
+        backpressure: false,
+        last_good: true,
+    }
+    loader.last_good = Val(payload.data.copy())
+    loader.payload = None
+    identity :: DataSnapshotIdentity{
+        id: "snapshot-{snapshot_id}",
+        source: "source-{source_id}",
+        content: content_id,
+        schema: schema.identity.copy(),
+        format: loader.format,
+    }
+    Ok(DataSnapshot<T>{value: value, identity: identity, provenance: provenance, schema: schema, status: loader.status.copy(), content: canonical})
 }
 
 fn count<T>(rows: [T]) -> Int Never! { rows.len() }
@@ -2743,6 +2882,321 @@ fn data_loader_check_payload(limits: DataLimits, bytes: Int, operation: String) 
         if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
     }
     Ok(())
+}
+
+// Foundation `PreludeDataFlow` loader kernel, ported for `snapshot<T>`.
+
+// `bounded_text(value, MAX_STATUS_TEXT)`: at most 1024 bytes, cut on a UTF-8
+// boundary and marked `...<truncated>`.
+fn data_loader_bounded_text(value: String) -> String Never! {
+    raw :: value.bytes()
+    if raw.len() <= 1024 -> return value.copy()
+    end := 1024 - 14
+    loop end > 0 && raw[end] >= (U8{128}) && raw[end] < (U8{192}) -> end -= 1
+    prefix :: if end == 0 -> "" else -> String.from_bytes(raw[0..(end - 1)]) ?? ""
+    "{prefix}...<truncated>"
+}
+
+// `status_text`: a status message that carries credential material is
+// redacted whole.
+fn data_loader_status_text(value: String) -> String Never! {
+    lowered :: value.to_ascii_lower()
+    markers :: [String]{"password=", "password:", "passwd=", "passwd:", "secret=", "secret:", "token=", "token:", "credential=", "credential:", "authorization=", "authorization:", "api_key=", "api_key:", "access_key=", "access_key:", "cookie=", "cookie:", "session=", "session:", "bearer ", "basic ", "-----begin"}
+    loop marker in markers {
+        if lowered.contains(marker) -> return "<redacted>"
+    }
+    data_loader_bounded_text(value)
+}
+
+fn data_loader_error(kind: DataErrorKind, operation: String, reason: String) -> DataError Never! {
+    data_error(kind, data_loader_bounded_text(reason), operation)
+}
+
+fn data_loader_public_text_error(label: String) -> DataError Never! {
+    data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "{label} must be non-empty, contain no control characters, and be at most 4096 bytes")
+}
+
+// `fail`: the loader status records the failure; a non-value loader releases
+// its pending payload.
+fn data_loader_fail<T>(loader: &DataLoader<T>, error: DataError) -> DataError Never! {
+    cleanup := "payload-released"
+    if loader.source.kind == DataLoaderKind.Value {
+        cleanup = "retained"
+    } else {
+        loader.payload = None
+    }
+    loader.status = DataLoaderStatus{
+        identity: loader.status.identity.copy(),
+        freshness: if loader.cancelled -> DataFreshness.Cancelled else -> DataFreshness.Error,
+        invalidated_by: loader.status.invalidated_by.copy(),
+        error: data_loader_status_text("{error.operation}: {error.reason}"),
+        cleanup: cleanup,
+        buffered_bytes: 0,
+        backpressure: false,
+        last_good: loader.last_good != None,
+    }
+    error.copy()
+}
+
+// `validate_loader`: the public source identity and authority.
+fn data_loader_validate<T>(loader: DataLoader<T>) DataError! {
+    if !valid_public_text(loader.source.locator, false) -> return Err(data_loader_public_text_error("source identity locator"))
+    if loader.source.member.len() > 0 && !valid_public_text(loader.source.member, false) -> return Err(data_loader_public_text_error("source identity member"))
+    loop parameter in loader.source.parameters {
+        if !valid_public_text(parameter, true) -> return Err(data_loader_public_text_error("source identity parameter"))
+    }
+    if loader.source.kind != DataLoaderKind.File && loader.source.member.len() > 0 {
+        return Err(data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "only file loaders may carry an archive member identity"))
+    }
+    if !valid_public_text(loader.authority.scope, false) -> return Err(data_loader_public_text_error("authority scope"))
+    if !valid_public_text(loader.authority.revision, true) -> return Err(data_loader_public_text_error("authority revision"))
+    if !valid_authority(loader.authority.scope) || !valid_authority(loader.authority.revision) {
+        return Err(data_loader_error(DataErrorKind.InvalidArgument, "data.loader", "authority identity cannot carry credential material"))
+    }
+    Ok(())
+}
+
+// `payload` plus the local-file read of `jet_data_loader_payload`: bound
+// bytes, then offline/value last-good bytes, then the local file. Every
+// other source needs its provider to bind the payload.
+fn data_loader_payload<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bool) DataError! {
+    if loader.payload == .Val(bound) {
+        data_loader_check_payload(loader.limits, bound.len(), "data.loader") ?? return Err(err)
+        return Ok((data: bound.copy(), offline: loader.offline))
+    }
+    if loader.offline || loader.source.kind == DataLoaderKind.Value {
+        if loader.last_good == .Val(good) {
+            data_loader_check_payload(loader.limits, good.len(), "data.loader.offline") ?? return Err(err)
+            return Ok((data: good.copy(), offline: loader.offline))
+        }
+    }
+    local_file :: loader.source.kind == DataLoaderKind.File && loader.source.member.len() == 0
+    if loader.offline && !local_file {
+        return Err(data_loader_error(DataErrorKind.Bridge, "data.loader.offline", "offline mode has no last-good snapshot"))
+    }
+    if local_file {
+        read :: core_files.read_bytes(loader.source.locator) ?? return Err(data_loader_error(DataErrorKind.IO, "data.loader.file", "could not read `{loader.source.locator}`: {err}"))
+        data_loader_check_payload(loader.limits, read.len(), "data.loader.file") ?? return Err(err)
+        return Ok((data: read, offline: loader.offline))
+    }
+    operation :: if loader.source.kind == {
+        .URL -> "data.loader.url"
+        .Database -> "data.loader.database"
+        .File -> "data.loader.archive"
+        .Value -> "data.loader.value"
+    }
+    Err(data_loader_error(DataErrorKind.Bridge, operation, "provider payload is missing; core does not access remote authority"))
+}
+
+// The payload as one tree, by format (Rust `jet_data_loader_tree`).
+fn data_loader_tree(payload: [U8], format: DataFormat, limits: DataLimits) -> Dyn DataError! {
+    if format == DataFormat.Parquet {
+        // Parquet is read only through its provider bridge, which is not
+        // built yet (#6419).
+        return Err(data_loader_error(DataErrorKind.Bridge, "data.loader.parquet", "the Parquet provider bridge is not built"))
+    }
+    if format == DataFormat.Arrow {
+        return Err(data_loader_error(DataErrorKind.Bridge, "data.loader", "Arrow IPC has a separate provider boundary; Parquet is the registered reader"))
+    }
+    text :: String.from_bytes(payload) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader", "payload is not UTF-8"))
+    tree := Dyn.Null
+    if format == DataFormat.JSON {
+        if json_codec.parse(text) == {
+            .Ok(value) -> tree = value
+            .Err(failure) -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.json", data_loader_json_reason("invalid JSON", failure)))
+        }
+    } else if format == DataFormat.CSV {
+        tree = data_loader_csv_tree(text, limits) ?? return Err(err)
+    } else {
+        tree = data_loader_jsonl_tree(text, limits) ?? return Err(err)
+    }
+    if tree == .Array(rows) {
+        if rows.len() > limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader", "max_output_rows {limits.max_output_rows} exceeded"))
+    }
+    Ok(tree)
+}
+
+fn data_loader_json_reason(prefix: String, failure: EncodingError) -> String Never! {
+    if failure.line == .Val(line) -> return "{prefix} (line {line}): {failure.reason}"
+    "{prefix}: {failure.reason}"
+}
+
+// A CSV payload's cells are Text; they decode as typed cells, the scope
+// `csv_reader<T>` decodes its rows in.
+fn data_loader_decode<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]! {
+    if !text_cells {
+        if tree.decode<T>() == {
+            .Ok(value) -> {
+                return Ok(value)
+            }
+            .Err(failures) -> {
+                return Err(failures)
+            }
+        }
+    }
+    previous :: encoding.__text_cells_enter()
+    if tree.decode<T>() == {
+        .Ok(value) -> {
+            encoding.__text_cells_leave(previous)
+            return Ok(value)
+        }
+        .Err(failures) -> {
+            encoding.__text_cells_leave(previous)
+            return Err(failures)
+        }
+    }
+}
+
+// Header-named Text cells; a short row's missing cells are null.
+fn data_loader_csv_tree(text: String, limits: DataLimits) -> Dyn DataError! {
+    records :: csv_codec.rows(text, ",", false, false) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", err.reason))
+    if records.len() == 0 -> return Ok(Dyn.Array([Dyn]{}))
+    header :: records[0].fields
+    loop (index, name) in header {
+        if !valid_public_text(name, false) -> return Err(data_loader_public_text_error("CSV header"))
+        loop earlier in 0..<index {
+            if header[earlier] == name -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "duplicate CSV header `{name}`"))
+        }
+    }
+    values := [Dyn]{}
+    loop row in 1..<records.len() {
+        fields :: records[row].fields
+        if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.csv", "max_output_rows {limits.max_output_rows} exceeded"))
+        if fields.len() > header.len() -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
+        entries := [(key: String, value: Dyn)]{}
+        loop column in 0..<header.len() {
+            cell :: if column < fields.len() -> Dyn.Text(fields[column].copy()) else -> Dyn.Null
+            &entries.push((key: header[column].copy(), value: cell))
+        }
+        &values.push(encoding_stream.object_from_entries(^entries))
+    }
+    Ok(Dyn.Array(values))
+}
+
+// One JSON value per non-blank line.
+fn data_loader_jsonl_tree(text: String, limits: DataLimits) -> Dyn DataError! {
+    values := [Dyn]{}
+    loop (index, raw_line) in text.split("\n").to_list() {
+        line :: trim(raw_line)
+        if line.len() == 0 -> next
+        if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.jsonl", "max_output_rows {limits.max_output_rows} exceeded"))
+        if json_codec.parse(line) == {
+            .Ok(value) -> &values.push(value)
+            .Err(failure) -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.jsonl", data_loader_json_reason("invalid JSONL record at line {index + 1}", failure)))
+        }
+    }
+    Ok(Dyn.Array(values))
+}
+
+// `DataSchema::infer`: one column per field name across every row, sorted
+// by name. A null, a missing field, or any field after the first row is
+// nullable; Int and Float share `float`, other conflicts widen to `Any`.
+// The identity is the length-delimited format and column facts.
+fn data_loader_schema(tree: Dyn, format: DataFormat) -> DataSchema Never! {
+    fields := [(name: String, type_name: String, nullable: Bool)]{}
+    if tree == {
+        .Object(_) -> {
+            loop entry in encoding_stream.object_entries(tree) -> data_schema_absorb(&fields, entry.key, entry.value, entry.value == .Null)
+        }
+        .Array(values) -> {
+            rows_seen := 0
+            loop value in values {
+                if value == .Object(_) {
+                    entries :: encoding_stream.object_entries(value)
+                    loop entry in entries -> data_schema_absorb(&fields, entry.key, entry.value, rows_seen > 0 || entry.value == .Null)
+                    loop index in 0..<fields.len() {
+                        present := false
+                        loop entry in entries {
+                            if entry.key == fields[index].name -> present = true
+                        }
+                        if !present -> fields[index] = (name: fields[index].name.copy(), type_name: fields[index].type_name.copy(), nullable: true)
+                    }
+                } else {
+                    data_schema_absorb(&fields, "$", value, rows_seen > 0 || value == .Null)
+                }
+                rows_seen += 1
+            }
+        }
+        else -> data_schema_absorb(&fields, "$", tree, tree == .Null)
+    }
+    &fields.sort_by((left: (name: String, type_name: String, nullable: Bool), right: (name: String, type_name: String, nullable: Bool)) -> left.name <=> right.name)
+    format_name :: data_format_text(format)
+    identity := data_loader_identity_part("", format_name)
+    columns := [DataColumn]{}
+    loop (order, field) in fields {
+        column :: DataColumn{id: "column-{order}-{field.name}", name: field.name.copy(), type_name: field.type_name.copy(), nullable: field.nullable}
+        identity = data_loader_identity_part(identity, column.id)
+        identity = data_loader_identity_part(identity, column.name)
+        identity = data_loader_identity_part(identity, column.type_name)
+        identity = data_loader_identity_part(identity, if column.nullable -> "true" else -> "false")
+        &columns.push(column)
+    }
+    DataSchema{identity: identity, format: format, columns: columns, projection: None}
+}
+
+fn data_schema_absorb(fields: &[(name: String, type_name: String, nullable: Bool)], name: String, value: Dyn, nullable: Bool) Never! {
+    current :: data_schema_value_type(value)
+    loop index in 0..<fields.len() {
+        if fields[index].name == name {
+            merged :: data_schema_merge(fields[index].type_name, current)
+            fields[index] = (name: name.copy(), type_name: merged.type_name, nullable: fields[index].nullable || nullable || merged.nullable)
+            return
+        }
+    }
+    &fields.push((name: name.copy(), type_name: current, nullable: nullable || current == "null"))
+}
+
+fn data_schema_merge(left: String, right: String) -> (type_name: String, nullable: Bool) Never! {
+    if left == right {
+        known :: left == "null" || left == "bool" || left == "int" || left == "float" || left == "text" || left == "bytes" || left == "array" || left == "object"
+        return (type_name: if known -> left.copy() else -> "Any", nullable: left == "null")
+    }
+    if left == "null" -> return (type_name: right.copy(), nullable: true)
+    if right == "null" -> return (type_name: left.copy(), nullable: true)
+    if (left == "int" && right == "float") || (left == "float" && right == "int") -> return (type_name: "float", nullable: false)
+    (type_name: "Any", nullable: false)
+}
+
+fn data_schema_value_type(value: Dyn) -> String Never! {
+    #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
+        if value == .Number(_) -> return "float"
+        if value == .Bytes(_) -> return "bytes"
+    }
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Int(_) -> "int"
+        .Float(_) -> "float"
+        .Text(_) -> "text"
+        .DateTime(_) -> "datetime"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+        else -> panic("unknown native Dyn carrier")
+    }
+}
+
+fn data_loader_digest(bytes: [U8]) -> String Never! { "sha256-{sha256(bytes).hex()}" }
+
+// `identity_part`: one length-delimited `len:value;` fact.
+fn data_loader_identity_part(material: String, value: String) -> String Never! { "{material}{value.count_bytes()}:{value};" }
+
+fn data_loader_kind_text(kind: DataLoaderKind) -> String Never! {
+    if kind == {
+        .File -> "File"
+        .URL -> "URL"
+        .Database -> "Database"
+        .Value -> "Value"
+    }
+}
+
+fn data_format_text(format: DataFormat) -> String Never! {
+    if format == {
+        .CSV -> "csv"
+        .JSON -> "json"
+        .JSONL -> "jsonl"
+        .Parquet -> "parquet"
+        .Arrow -> "arrow"
+    }
 }
 
 #Encode

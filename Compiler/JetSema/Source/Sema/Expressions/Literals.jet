@@ -786,6 +786,12 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
+    // Tensor brackets are first-axis Range windows only (core-library.md
+    // "Tensor bracket write windows"); a scalar index has no one-axis result.
+    if is_compute_tensor_family(base_ty) {
+        &diagnostics.push(sema_error("E0505", expr_span(index), "Tensor indexes must be Range, not {sema_type_show(checked_index.ty)}", "Tensor brackets select a first-axis window with an inclusive or exclusive Range", "use `tensor[start..end]` or `tensor[window]`"))
+        return None
+    }
     // D-SIMD2: `v[i]` on a Core SIMD lane type reads its `lanes` fixed array,
     // so the read is the fixed-list index; a written literal must name a lane.
     if sema_call_math_lane_name(base_ty) == .Val(lane) {

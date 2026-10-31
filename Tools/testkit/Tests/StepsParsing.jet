@@ -106,6 +106,13 @@ fn kit_test_steps_env() -> KitEnv {
     files.remove_all(root) ?? panic("remove artifact scratch")
 }
 
+#Test("a web build's artifact is app.js whichever way the target is written") {
+    assert(kit_steps_web_build(kit_steps_parse("step: jet build --target web main.jet\n").steps[0]))
+    assert(kit_steps_web_build(kit_steps_parse("step: jet build --target=web main.jet\n").steps[0]))
+    assert(!kit_steps_web_build(kit_steps_parse("step: jet build main.jet\n").steps[0]))
+    assert(!kit_steps_web_build(kit_steps_parse("step: jet build --target linux main.jet\n").steps[0]))
+}
+
 #Test("default step hooks resolve built after an explicit successful CLI build") {
     root :: kit_test_core_scratch("steps-built")
     kit_exec_write(files.join(root, "hello.jet"), "fn run() {{ print(\"hello\") }}\n")

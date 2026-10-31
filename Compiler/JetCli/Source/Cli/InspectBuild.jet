@@ -113,6 +113,11 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
         }
     }
     selected_options :: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
+    // A web build is one entry's `app.*` files (BuildWeb.jet), so a package's
+    // build targets are built native only.
+    if build_options_value(selected_options, "os") == "web" {
+        return jet_cli_build_failed("`jet build` writes a web build of one entry file, not of a package's `fn build` targets", jet_cli_why("E2105"), "build the entry file with `jet build --target web <file>`", color)
+    }
     root :: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
     if build_options_value(selected_options, "write_generated") == "on" {
         loop source_file in generated {
