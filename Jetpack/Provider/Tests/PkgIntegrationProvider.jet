@@ -84,10 +84,12 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
     assert_eq(locked.reference, "web@catalog")
 }
 
-// Ported from pkg.rs:1040-1058.
+// Ported from pkg.rs:1040-1058. A SwiftPM v2 Package.resolved carries a
+// top-level `"version": 2` (swift-package-manager ResolvedPackagesStore.swift
+// `struct V2`); the Rust fixture omitted it.
 #Test("pkg integration swiftpm_v2_report_keeps_revision_and_native_bytes") {
     revision :: "0123456789abcdef0123456789abcdef01234567"
-    native :: "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}]}}"
+    native :: "{{\"pins\":[{{\"identity\":\"swift-log\",\"state\":{{\"revision\":\"{revision}\",\"version\":\"1.5.4\"}}}}],\"version\":2}}"
     report :: provider_normalize_document(ProviderFamily.SwiftPM, native)
     provider_test_valid(report, "SwiftPM v2 pin is lossless")
     shared :: report.shared_facts()

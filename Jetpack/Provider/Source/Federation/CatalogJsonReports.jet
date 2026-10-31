@@ -591,10 +591,8 @@ fn provider_graph_is_string_array(value: Dyn) -> Bool Never! {
 }
 
 fn provider_graph_is_non_negative_int(value: Dyn) -> Bool Never! {
-    if value == {
-        .Int(number) -> number >= 0
-        else -> false
-    }
+    number :: provider_graph_json_int(value) ?? return false
+    number >= 0
 }
 
 // Whether an optional field is absent or one of the allowed shapes.

@@ -6,9 +6,9 @@ use jet_foundation.[
     CtValue, Expr, Func, JET_CONFIG_VALUE_NAME, JetConfigOutcome, compiler_service_comptime_outcome,
     compiler_service_comptime_request, compiler_service_comptime_request_from,
     compiler_service_comptime_response, expr_span, foundation_parse_protocol_json,
-    jet_config_eval_diagnostic, jet_config_eval_placed, jet_config_program,
+    jet_config_eval_diagnostic, jet_config_eval_placed,
 ]
-use jet_parser.[parse_source]
+use jet_parser.[jet_config_program, parse_source]
 use jet_env_model.[envmodel_find_jet_binary]
 use jetpack_foundation.[BINARY_NAME]
 
@@ -44,6 +44,35 @@ fn envmodel_service_test_constant(source: String) -> (expr: Expr, funcs: [String
     fields :: compiler_service_comptime_request_from(request) ?? panic("the request reads back")
     assert_eq(fields.program, program)
     assert_eq(fields.base_dir, "/srv/project")
+}
+
+// A call's anchor span is its callee name; the program carries the whole
+// call, through the `)` that closes it.
+#Test("config value program carries a call operand through its closing paren") {
+    source :: "VALUE :: 1 + missing()\n"
+    fixture :: envmodel_service_test_constant(source)
+    program :: jet_config_program(fixture.expr, source, fixture.funcs, [String: CtValue]{}) ?? panic("the config value program builds: {err.diagnostic.what}")
+    assert_eq(program, "{JET_CONFIG_VALUE_NAME} :: comptime {{ 1 + missing() }}\n")
+}
+
+#Test("config value program closes a nested call past a string paren") {
+    source :: "fn g(x: Int) -> Int {{ x }}\nfn f(x: Int, label: String) -> Int {{ x }}\nVALUE :: f(g(X), \")\")\n"
+    fixture :: envmodel_service_test_constant(source)
+    globals := [String: CtValue]{}
+    globals["X"] = CtValue.Int{value: 1}
+    program :: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds: {err.diagnostic.what}")
+    assert(program.contains("JET_CONFIG_GLOBAL_0 :: 1"), program)
+    assert(program.contains("{JET_CONFIG_VALUE_NAME} :: comptime {{ f(g(JET_CONFIG_GLOBAL_0), \")\") }}\n"), program)
+}
+
+#Test("config value program ends a call at its paren, not at a comment") {
+    source :: "fn double(x: Int) -> Int {{ x * 2 }}\nVALUE :: double(PORT /* ) */) // (twice)\n"
+    fixture :: envmodel_service_test_constant(source)
+    globals := [String: CtValue]{}
+    globals["PORT"] = CtValue.Int{value: 21}
+    program :: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds: {err.diagnostic.what}")
+    assert(program.contains("{JET_CONFIG_VALUE_NAME} :: comptime {{ double(JET_CONFIG_GLOBAL_0 /* ) */) }}\n"), program)
+    assert(!program.contains("twice"), program)
 }
 
 #Test("compiler service refusal is placed on the config expression") {

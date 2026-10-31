@@ -2,7 +2,8 @@
 // binary. Jetpack links only the front end; a config value that needs the
 // comptime stage, or a project entry that needs the checker, is answered by
 // `jet __jetpack <op>` (one evaluator, one checker; I8). Both sides build the
-// same config-value program here, and both ends of the wire use these codecs:
+// same config-value program (JetParser ConfigProgram.jet, which reads the
+// expression's text off its lexed tokens), and both ends of the wire use these codecs:
 // one JSON request on stdin, one JSON response on stdout. The verb is internal
 // (absent from help and the command registry), like the engine side's
 // `--engine-protocol`.
@@ -71,49 +72,6 @@ fn jet_config_plain_literal(expr: Expr) -> CtValue? Never! {
         }
         else -> None
     }
-}
-
-// The typed program for one config value. Each global the expression reads
-// becomes one ALL_CAPS module constant, and each read is respelled to it.
-fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals: [String: CtValue]) -> String ComptimeEvalError! {
-    bytes :: source.bytes()
-    span :: expr_span(expr)
-    if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
-    sites := [ComptimeNameSite]{}
-    loop site in comptime_walk_identifiers(expr) {
-        if globals.get(site.name) == None -> next
-        if site.span.start < span.start || site.span.end > span.end -> return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
-        index := sites.len()
-        loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
-        &sites.insert(index, site)
-    }
-    constants := [String: String]{}
-    lines := [String]{}
-    loop name in funcs.keys() {
-        if funcs[name].span.start < 0 || funcs[name].span.end > bytes.len() -> next
-        &lines.push(String.from_bytes(bytes.slice(funcs[name].span.start, funcs[name].span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
-    }
-    text := [String]{}
-    cursor := span.start
-    loop site in sites {
-        if site.span.start < cursor -> next
-        constant := constants.get(site.name) ?? ""
-        if constant == "" {
-            constant = "JET_CONFIG_GLOBAL_{constants.len()}"
-            value :: globals[site.name]
-            literal :: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
-            constants[site.name] = constant
-            &lines.push("{constant} :: {literal}")
-        }
-        &text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
-        &text.push(constant)
-        cursor = site.span.end
-    }
-    &text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
-    body :: text.join("")
-    &lines.push("{JET_CONFIG_VALUE_NAME} :: comptime {{ {body} }}")
-    &lines.push("")
-    Ok(lines.join("\n"))
 }
 
 // The typed Jet literal spelling of a config value, or None for a value
@@ -211,9 +169,18 @@ fn compiler_service_text(value: Dyn, name: String) -> String? Never! {
 }
 
 fn compiler_service_int(value: Dyn, name: String) -> Int? Never! {
-    field :: compiler_service_get(value, name) ?? return None
-    if field == .Int(number) -> return Val(number)
-    None
+    compiler_service_whole(compiler_service_get(value, name) ?? return None)
+}
+
+// A whole wire number. core.encoding.json `parse` keeps every number as its
+// exact `Dyn.Number` lexeme (#4602), so the range check is this typed read;
+// a fraction, an exponent or an out-of-range lexeme is refused.
+fn compiler_service_whole(value: Dyn) -> Int? Never! {
+    if value == {
+        .Int(number) -> Val(number)
+        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
+        else -> None
+    }
 }
 
 fn compiler_service_array(value: Dyn, name: String) -> [Dyn]? Never! {
@@ -311,18 +278,9 @@ fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
     tagged :: compiler_service_tagged(value) ?? return None
     payload :: tagged.payload
     if tagged.label == {
-        "Int" -> {
-            if payload == .Int(number) -> return Val(CtValue.Int{value: number})
-            return None
-        }
-        "F32" -> {
-            if payload == .Int(bits) -> return Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(bits)}})
-            return None
-        }
-        "F64" -> {
-            if payload == .Int(bits) -> return Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(bits)}})
-            return None
-        }
+        "Int" -> Val(CtValue.Int{value: compiler_service_whole(payload) ?? return None})
+        "F32" -> Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(compiler_service_whole(payload) ?? return None)}})
+        "F64" -> Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(compiler_service_whole(payload) ?? return None)}})
         "Bool" -> {
             if payload == .Bool(flag) -> return Val(CtValue.Bool{value: flag})
             return None
@@ -343,10 +301,9 @@ fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
             items :: compiler_service_rows(payload) ?? return None
             bytes := [U8]{}
             loop item in items {
-                if item == .Int(number) {
-                    if number < 0 || number > 255 -> return None
-                    &bytes.push(U8{number})
-                } else { return None }
+                number :: compiler_service_whole(item) ?? return None
+                if number < 0 || number > 255 -> return None
+                &bytes.push(U8{number})
             }
             Val(CtValue.Bytes{value: bytes})
         }
@@ -425,10 +382,7 @@ fn compiler_service_key_from_wire(value: Dyn) -> CtKey? Never! {
     tagged :: compiler_service_tagged(value) ?? return None
     payload :: tagged.payload
     if tagged.label == {
-        "Int" -> {
-            if payload == .Int(number) -> return Val(CtKey.Int{value: number})
-            return None
-        }
+        "Int" -> Val(CtKey.Int{value: compiler_service_whole(payload) ?? return None})
         "BigInt" -> {
             if payload == .Text(text) -> return Val(CtKey.BigInt{decimal: text})
             return None

@@ -1,9 +1,9 @@
 
 // core.encoding.json — RFC 8259 JSON as Dyn.
 //
-// `parse` is the strict codec: objects keep insertion order, whole numbers
-// become `Dyn.Int` (exact `Int`, not binary64), fractions become
-// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
+// `parse` is the strict codec: objects keep insertion order, every number
+// stays its exact validated lexeme as `Dyn.Number` until a typed read
+// range-checks it (#4602), and `NaN` / `Infinity` are syntax errors. Untyped `decode`
 // applies the historical lenient coercion walk and emits an audit line for
 // each coercion. Typed `decode<T>` runs `__decode_typed`.
 //
@@ -1485,11 +1485,13 @@ fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     assert_eq(parse(wire) ?? panic("C0 decode"), Dyn.Text(controls))
 }
 
-#Test("strict JSON separates whole numbers, fractions, and exponents") {
-    assert_eq(parse("42") ?? panic("integer JSON"), Dyn.Int(42))
-    assert_eq(parse("1.5") ?? panic("fractional JSON"), Dyn.Float(1.5))
-    assert_eq(parse("1e2") ?? panic("exponent JSON"), Dyn.Float(100.0))
-    assert_eq(parse("-2E-1") ?? panic("signed exponent JSON"), Dyn.Float(-0.2))
+// #4602: strict parse keeps every number, whole or not, as its exact
+// `Dyn.Number` lexeme until a typed read range-checks it.
+#Test("strict JSON keeps each number as its exact lexeme") {
+    assert_eq(parse("42") ?? panic("integer JSON"), stream.typed_number("42"))
+    assert_eq(parse("1.5") ?? panic("fractional JSON"), stream.typed_number("1.5"))
+    assert_eq(parse("1e2") ?? panic("exponent JSON"), stream.typed_number("1e2"))
+    assert_eq(parse("-2E-1") ?? panic("signed exponent JSON"), stream.typed_number("-2E-1"))
 }
 
 #Test("JSON object patch returns ordered Object backing") {
