@@ -154,7 +154,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         loop reference in checked.name_references {
             payload :: payloads.get(reference.symbol.id.key) ?? next
             if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None -> next
-            sema_lifecycle_record(payload, graph_module.module_path, reference.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, graph_module.source_file, reference.span, edition, &result, &seen)
         }
         loop call in checked.call_facts {
             // A Core member carries its resolved marker; a declared function
@@ -165,7 +165,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             }
             payload :: call.lifecycle ?? declared ?? next
             if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
-            sema_lifecycle_record(payload, graph_module.module_path, call.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, graph_module.source_file, call.span, edition, &result, &seen)
         }
         sema_attach_diagnostic_source_locations(&result.diagnostics, start, graph_module.source_segments)
     }

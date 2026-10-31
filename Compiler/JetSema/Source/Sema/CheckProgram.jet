@@ -5771,10 +5771,12 @@ fn sema_name_parts_claimed(shared_state: Shared<SemaNameShared>, queue: Shared<S
 }
 
 // The structure facts the registration graph alone proves: one resolved
-// import edge per graph edge, in edge order. They exist before checking, so a
-// compile that fails later still reports them (Rust records these edges at
-// bundle completion, before Sema, and `jet inspect structure` prints them
-// ahead of the failure diagnostics).
+// import edge per graph edge, in edge order, named by the modules' display
+// paths (Rust `record_import_edge_facts`: `{source} -> {target}` over the
+// ledger's module paths). They exist before checking, so a compile that fails
+// later still reports them (Rust records these edges at bundle completion,
+// before Sema, and `jet inspect structure` prints them ahead of the failure
+// diagnostics).
 fn sema_name_structure_facts(graph: SemaRegistrationGraph) -> [StructureFact] Never! {
     facts := [StructureFact]{}
     module_indices := [String:Int]{}
@@ -5785,8 +5787,8 @@ fn sema_name_structure_facts(graph: SemaRegistrationGraph) -> [StructureFact] Ne
         target :: graph.modules[target_index]
         &facts.push(StructureFact{
             kind: StructureFactKind.ImportEdge,
-            subject: "{source.module_name} -> {target.module_name}",
-            source: source.module_path,
+            subject: "{source.source_file} -> {target.source_file}",
+            source: source.source_file,
             span: graph.edges[edge_index].declaration.span,
             status: "resolved",
             detail: "resolved import edge",

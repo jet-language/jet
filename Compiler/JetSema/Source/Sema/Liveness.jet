@@ -229,7 +229,7 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
             if edge.foreign_binding == .Val(binding) -> &foreign_aliases.push(binding.alias)
         }
         sema_liveness_inline_asm_gate_aliases(module_row, &foreign_aliases)
-        sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.module_path, &verdicts)
+        sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.source_file, &verdicts)
         loop function in module_row.functions {
             symbol :: function.symbol
             row :: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
@@ -239,16 +239,16 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
             if candidate.private {
                 edit :: if sema_liveness_removable(function.declaration) -> TextEdit{span: function.declaration.span, new_text: ""} else -> TextEdit{span: symbol.span, new_text: "_{name}"}
                 diagnostic :: sema_lint("L0104", symbol.span, "Private function `{name}` is never called or used as a value.", "A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.", "Remove the function, or rename `{name}` to `_{name}` when it is intentional.")
-                sema_liveness_verdict("L0104", name, module_row.module_path, symbol.span, "private function is never reached", diagnostic_with_edit(diagnostic, edit), &verdicts)
+                sema_liveness_verdict("L0104", name, module_row.source_file, symbol.span, "private function is never reached", diagnostic_with_edit(diagnostic, edit), &verdicts)
             } else {
-                sema_liveness_unreachable_export(name, module_row.module_path, symbol.span, &verdicts)
+                sema_liveness_unreachable_export(name, module_row.source_file, symbol.span, &verdicts)
             }
         }
         loop constant in module_row.constants {
             symbol :: constant.symbol
             row :: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
             if candidates.rows[row].module_index != module_index || candidates.reached[row] -> next
-            sema_liveness_unreachable_export(sema_inline_member_source_name(symbol.name), module_row.module_path, symbol.span, &verdicts)
+            sema_liveness_unreachable_export(sema_inline_member_source_name(symbol.name), module_row.source_file, symbol.span, &verdicts)
         }
         sema_liveness_unreachable_reexports(graph, module_index, &verdicts)
         loop position in start..<verdicts.len() {
@@ -305,7 +305,7 @@ fn sema_liveness_unreachable_reexports(graph: SemaRegistrationGraph, module_inde
                     } ?? false
                     if found -> break true
                 } ?? false
-                if !consumed -> sema_liveness_unreachable_export(local, module_row.module_path, span, &verdicts)
+                if !consumed -> sema_liveness_unreachable_export(local, module_row.source_file, span, &verdicts)
             }
         }
     }
