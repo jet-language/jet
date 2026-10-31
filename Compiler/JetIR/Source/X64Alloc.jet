@@ -229,6 +229,78 @@ fn ir_x64_one_shot(f: IRFunction, depths: [Int], around: [Int], bases: &[Int], h
     }
 }
 
+// The frame homes of the slots `homed` marks, as rbp displacements below
+// the `below` bytes the saved registers take (0 for every other slot). A
+// temporary shares a home with the others whose ranges (`starts`..`ends`,
+// loop-grown) lie wholly apart from its own, taken in order of first use; a
+// `named` slot keeps its home to itself, the place its variable lives over
+// the whole body (ir_x64_variables). The homes the most references (`refs`)
+// go through sit nearest rbp, where a displacement takes one byte (down to
+// rbp - 128) instead of four; ties keep first-use order.
+fn ir_x64_homes(starts: [Int], ends: [Int], refs: [Int], homed: [Bool], named: [Bool], below: Int) -> [Int] Never! {
+    count :: starts.len()
+    firsts := [Int]{}
+    loop slot in 0..<count {
+        if homed[slot] -> &firsts.push((starts[slot] + 1) * count + slot)
+    }
+    &firsts.sort()
+    // Per slot its home's index (-1 none); per home the references through
+    // it, the end of its last range, and whether a named slot keeps it.
+    home_of := loop _ in 0..<count -> -1
+    home_refs := [Int]{}
+    home_ends := [Int]{}
+    home_kept := [Bool]{}
+    loop key in firsts {
+        slot :: key % count
+        home := -1
+        if !named[slot] {
+            loop index in 0..<home_ends.len() {
+                if !home_kept[index] && home_ends[index] < starts[slot] {
+                    home = index
+                    break
+                }
+            }
+        }
+        if home < 0 {
+            home = home_ends.len()
+            &home_refs.push(0)
+            &home_ends.push(0)
+            &home_kept.push(named[slot])
+        }
+        home_of[slot] = home
+        home_refs[home] = home_refs[home] + refs[slot]
+        home_ends[home] = ends[slot]
+    }
+    total :: home_refs.len()
+    bound := 1
+    loop n in home_refs -> bound += n
+    order := [Int]{}
+    loop home in 0..<total -> &order.push((bound - home_refs[home]) * total + home)
+    &order.sort()
+    offsets := loop _ in 0..<total -> 0
+    loop (nth, key) in order -> offsets[key % total] = 0 - below - 8 * (nth + 1)
+    loop slot in 0..<count -> if home_of[slot] >= 0 -> offsets[home_of[slot]] else -> 0
+}
+
+// Five slots over two saved registers (16 bytes): 1 follows 0 and 4
+// follows 1 in one home; 3 overlaps 1, and 2 is named, so each has its own.
+// Most references first: 3's home (10), 2's (5), then the shared one (3);
+// 5 has no home.
+#Test("Temporaries whose ranges lie apart share a home, the busiest nearest rbp") {
+    starts :: [Int]{0, 3, 1, 4, 7, 0}
+    ends :: [Int]{2, 5, 6, 9, 8, 9}
+    refs :: [Int]{1, 1, 5, 10, 1, 4}
+    homed :: [Bool]{true, true, true, true, true, false}
+    named :: [Bool]{false, false, true, false, false, false}
+    homes :: ir_x64_homes(starts, ends, refs, homed, named, 16)
+    assert_eq(homes[0], -40)
+    assert_eq(homes[1], -40)
+    assert_eq(homes[2], -32)
+    assert_eq(homes[3], -24)
+    assert_eq(homes[4], -40)
+    assert_eq(homes[5], 0)
+}
+
 fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     count :: f.slot_type.len()
     starts := [Int]{}
@@ -288,10 +360,14 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     writes := [Int]{}
     last_write := [Int]{}
     weights := [Int]{}
+    // References per slot, as the code reads them: a frame home's count of
+    // rbp displacements (homes below).
+    refs := [Int]{}
     loop _ in 0..<count {
         &writes.push(0)
         &last_write.push(-1)
         &weights.push(0)
+        &refs.push(0)
     }
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, &reads)
@@ -303,6 +379,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             }
             if at > ends[slot] -> ends[slot] = at
             weights[slot] = weights[slot] + weight_at[at]
+            refs[slot] = refs[slot] + 1
         }
         written :: ir_x64_write(f, at)
         if written >= 0 && written < count {
@@ -313,6 +390,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             if at > ends[written] -> ends[written] = at
             writes[written] = writes[written] + 1
             weights[written] = weights[written] + weight_at[at]
+            refs[written] = refs[written] + 1
             last_write[written] = at
         }
     }
@@ -457,15 +535,12 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // Frame homes below the saved registers, for the referenced slots
     // without a callee-saved register or a constant (a Float slot in an xmm
     // register keeps its home across the calls it lives through).
+    homed :: loop slot in 0..<count -> regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty
+    named :: loop slot in 0..<count -> f.slot_name[slot] >= 0
+    homes :: ir_x64_homes(starts, ends, refs, homed, named, 8 * kept.len())
     depth := 8 * kept.len()
-    homes := [Int]{}
-    loop slot in 0..<count {
-        home := 0
-        if regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty {
-            depth += 8
-            home = 0 - depth
-        }
-        &homes.push(home)
+    loop home in homes {
+        if 0 - home > depth -> depth = 0 - home
     }
     result_home := 0
     if f.result >= 0 && m.types[f.result].kind == .Aggregate {

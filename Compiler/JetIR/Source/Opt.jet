@@ -135,9 +135,13 @@ struct IROptReport {
     reductions: [String]
     // Indices a versioned Loop writes (OptVersion.jet ir_version_step):
     // those guarded once before it (`stepped`), those guarded at its head
-    // (`steps_declined`), one note each (`steps`).
+    // (`steps_declined`); the factors of its Muls (ir_version_narrow):
+    // those guarded to the product width (`factors`), those it writes
+    // (`factors_declined`); one note each (`steps`).
     stepped: Int
     steps_declined: Int
+    factors: Int
+    factors_declined: Int
     steps: [String]
     // IROptOptions.dump: each dumped function's IR before and after its passes.
     dumps: [String]
@@ -145,12 +149,12 @@ struct IROptReport {
 }
 
 fn ir_opt_report(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, steps: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
+    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, factors: 0, factors_declined: 0, steps: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
 }
 
 fn ir_opt_report_text(r: IROptReport) -> String Never! {
     text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, short circuits {r.short_circuits}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
-    text = "{text}, stepped indices {r.stepped} (declined {r.steps_declined})"
+    text = "{text}, stepped indices {r.stepped} (declined {r.steps_declined}), factors {r.factors} (declined {r.factors_declined})"
     loop note in r.reductions -> text = "{text}\n{note}"
     loop note in r.steps -> text = "{text}\n{note}"
     loop dump in r.dumps -> text = "{text}\n{dump}"
@@ -179,6 +183,8 @@ fn ir_opt_report_add(total: &IROptReport, part: IROptReport) Never! {
     loop note in part.reductions -> &total.reductions.push(note)
     total.stepped += part.stepped
     total.steps_declined += part.steps_declined
+    total.factors += part.factors
+    total.factors_declined += part.factors_declined
     loop note in part.steps -> &total.steps.push(note)
     loop dump in part.dumps -> &total.dumps.push(dump)
     loop finding in part.lint -> &total.lint.push(finding)

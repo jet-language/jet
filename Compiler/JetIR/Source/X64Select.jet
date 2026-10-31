@@ -2184,20 +2184,34 @@ fn ir_x64_pick(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
 
 // Whether an exact Int is a big integer: bits 63 and 62 differ, so the
 // word doubled overflows (OF), fused into a following branch like a
-// comparison. Of a narrower width `bits` (b): whether the word times
-// 2^(64 - bits) overflows, which is so for every big integer as well.
+// comparison. Of a narrower width `bits` (b) from 33: whether the word
+// times 2^(64 - bits) overflows. Below 33, where that factor needs more
+// than an imm32: whether the word shifted right by bits - 1, plus 1, is
+// above 1 unsigned (it is 0 or 1 just when the word has `bits` signed
+// bits). Both are so for every big integer as well.
 fn ir_x64_int_big(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
     if ir_x64_type(m, f, f.a[at]).kind != .Int -> return ir_x64_fail(&e, f, at, "int_big of {ir_kind_name(ir_x64_type(m, f, f.a[at]).kind)}")
     bits :: f.b[at]
-    if bits < 33 || bits > IR_INT_INLINE_BITS -> return ir_x64_fail(&e, f, at, "int_big of width {bits}")
+    if bits < 2 || bits > IR_INT_INLINE_BITS -> return ir_x64_fail(&e, f, at, "int_big of width {bits}")
     reg :: ir_x64_use(&e, m, f, al, f.a[at], X64_RAX)
-    if bits == IR_INT_INLINE_BITS {
-        x64_mov_rr(&e.code, X64_RDX, reg)
-        x64_alu_rr(&e.code, X64Alu.Add, X64_RDX, X64_RDX)
-    } else {
-        x64_imul_rri(&e.code, X64_RDX, reg, 1 << (64 - bits))
+    if {
+        bits == IR_INT_INLINE_BITS -> {
+            x64_mov_rr(&e.code, X64_RDX, reg)
+            x64_alu_rr(&e.code, X64Alu.Add, X64_RDX, X64_RDX)
+            ir_x64_compare_result(&e, m, f, al, at, X64Cond.O)
+        }
+        bits >= 33 -> {
+            x64_imul_rri(&e.code, X64_RDX, reg, 1 << (64 - bits))
+            ir_x64_compare_result(&e, m, f, al, at, X64Cond.O)
+        }
+        else -> {
+            x64_mov_rr(&e.code, X64_RDX, reg)
+            x64_shift_ri(&e.code, X64Shift.Sar, X64_RDX, bits - 1)
+            x64_alu_ri(&e.code, X64Alu.Add, X64_RDX, 1)
+            x64_alu_ri(&e.code, X64Alu.Cmp, X64_RDX, 1)
+            ir_x64_compare_result(&e, m, f, al, at, X64Cond.A)
+        }
     }
-    ir_x64_compare_result(&e, m, f, al, at, X64Cond.O)
 }
 
 // Convert by the slot types: a Float or Float32 truncates into a Word
@@ -3021,18 +3035,22 @@ fn ir_x64_pad_local(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, slot: Int
 // that ends in a Return may always: nothing is read after it. One that
 // branches into the body runs on there for `other` too, so it must keep
 // every value the body holds over `other`: no temp of the tail may hold the
-// register of such a value, and no such value may be in an xmm register
-// (a call in the tail keeps only the xmm values live over `pad`).
+// register or the frame home of such a value (temps whose ranges lie apart
+// share homes, X64Alloc), and no such value may be in an xmm register (a
+// call in the tail keeps only the xmm values live over `pad`).
 fn ir_x64_share_safe(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, other: IRX64Pad) -> Bool Never! {
     if f.op[pad.end - 1] == .Return -> return true
     taken := [Int]{}
+    homes := [Int]{}
     reads := [Int]{}
     loop at in from..<pad.end {
         ir_x64_reads_into(f, at, &reads)
         written :: ir_x64_write(f, at)
         if written >= 0 -> &reads.push(written)
         loop slot in reads {
-            if slot >= 0 && ir_x64_pad_local(f, al, pad, slot) && al.regs[slot] >= 0 -> &taken.push(al.regs[slot])
+            if slot < 0 || !ir_x64_pad_local(f, al, pad, slot) -> next
+            if al.regs[slot] >= 0 -> &taken.push(al.regs[slot])
+            if al.homes[slot] != 0 -> &homes.push(al.homes[slot])
         }
     }
     loop slot in 0..<al.starts.len() {
@@ -3041,6 +3059,11 @@ fn ir_x64_share_safe(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: In
         if al.regs[slot] >= 0 {
             loop reg in taken {
                 if reg == al.regs[slot] -> return false
+            }
+        }
+        if al.homes[slot] != 0 {
+            loop home in homes {
+                if home == al.homes[slot] -> return false
             }
         }
     }

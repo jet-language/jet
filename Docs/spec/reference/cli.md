@@ -994,9 +994,12 @@ fused compares, short circuits branched, coalesced copies, removed dead and unre
 replaced aggregates) and names each function the IR builder could not build.
 At O2 it adds one row per sum, count or fill Loop the `reduce` pass handed to
 an asm leaf or declined (`<form> reduction <function>: vectorized` or
-`declined (<why>)`), and one row per index a versioned Loop writes
+`declined (<why>)`), one row per index a versioned Loop writes
 (`stepped index <function>: guarded before the Loop`, or `declined (<why>)`
-when that index is tested at the head of every pass).
+when that index is tested at the head of every pass), and one row per factor
+of a versioned Loop's Mul that is guarded or that the Loop writes
+(`factor <function>: guarded to 31 bits before the Loop`, so that the product
+needs no overflow test, or `declined (<why>)`).
 It also lists, as built before any pass, each counted loop sema's loop proof
 covers (`loop <function> <file>:<line>`): the proved extent and element type,
 the aliasing, early-exit, effect and cross-iteration verdicts, how many list
