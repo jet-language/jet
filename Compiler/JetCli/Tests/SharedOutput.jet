@@ -42,15 +42,15 @@ fn shared_output_term_error(term: [U8]) Never! {
     // copy: `term` stays with the caller (`term` is a read parameter: no move out of it, E0201) and
     // the new `Val` value owns its own.
     facts.term = Val(term.copy())
-    result :: jet_cli_output_profile(facts)
-    if result == .Err(error) {
-        if error == .InvalidTerm(value) {
-            shared_output_require(value == term, "typed TERM error preserves bytes")
-        } else {
-            panic("wrong typed TERM error")
+    if jet_cli_output_profile(facts) == {
+        .Err(error) -> {
+            if error == .InvalidTerm(value) {
+                shared_output_require(value == term, "typed TERM error preserves bytes")
+            } else {
+                panic("wrong typed TERM error")
+            }
         }
-    } else {
-        panic("invalid TERM accepted")
+        .Ok(_) -> panic("invalid TERM accepted")
     }
 }
 fn shared_output_profiles() Never! {
@@ -92,15 +92,15 @@ fn shared_output_profiles() Never! {
 
     facts = shared_output_facts()
     facts.width = Val(U64{0})
-    result :: jet_cli_output_profile(facts)
-    if result == .Err(error) {
-        if error == .InvalidWidth(value) {
-            shared_output_require(value == U64{0}, "typed width error")
-        } else {
-            panic("wrong width error")
+    if jet_cli_output_profile(facts) == {
+        .Err(error) -> {
+            if error == .InvalidWidth(value) {
+                shared_output_require(value == U64{0}, "typed width error")
+            } else {
+                panic("wrong width error")
+            }
         }
-    } else {
-        panic("zero width accepted")
+        .Ok(_) -> panic("zero width accepted")
     }
     shared_output_term_error("x\nterm".bytes())
     shared_output_term_error([U8]{})
@@ -121,15 +121,15 @@ fn shared_output_profiles() Never! {
         shared_output_require((jet_cli_color_request(spellings[index].bytes()) ?? panic("valid color refused")) == color, "exact color spellings")
     }
     bad :: "sometimes".bytes()
-    color_result :: jet_cli_color_request(bad)
-    if color_result == .Err(error) {
-        if error == .InvalidColorRequest(value) {
-            shared_output_require(value == bad, "typed color error")
-        } else {
-            panic("wrong color error")
+    if jet_cli_color_request(bad) == {
+        .Err(error) -> {
+            if error == .InvalidColorRequest(value) {
+                shared_output_require(value == bad, "typed color error")
+            } else {
+                panic("wrong color error")
+            }
         }
-    } else {
-        panic("invalid color accepted")
+        .Ok(_) -> panic("invalid color accepted")
     }
 }
 fn shared_output_grids() Never! {

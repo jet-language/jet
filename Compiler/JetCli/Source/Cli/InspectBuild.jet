@@ -12,7 +12,7 @@ use jet_foundation.[
     build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
     diagnostic_render_all,
 ]
-use core.build.[BuildGraphNode as InspectBuildGraphNode]
+use core.build.[BuildGraphNode]
 use core.files as build_files
 use core.math as build_math
 use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
@@ -360,7 +360,7 @@ struct JetCLICompileNodeObservation {
     object: ObjectHandle
 }
 
-fn jet_cli_build_compile_observation(executed: InspectBuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
+fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
     if executed.kind != "compile" -> return Err(jet_cli_read_error("native object production requires a compile node"))
     if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
     // CmdCompile15122-15129 names the first canonical input when a prior

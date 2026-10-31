@@ -3474,6 +3474,14 @@ fn sema_expr_inferred_new_owner(expected: Type?) -> Type? {
 // Query declaration identity before visibility, inference, or argument shape:
 // a rejected method call must never become a successful field call.
 fn sema_expr_function_field(receiver: Type, name: String, method_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    // D-COMPUTE-VJP1=A: `run.pull(seed)` calls the run's Fn-typed `pull`
+    // field (Rust core_generic_struct_field); `VJPRun` declares no methods.
+    if sema_expr_unwrap_tag(receiver) == .Apply(run_name, run_args) {
+        if run_name == "VJPRun" && run_args.len() == 1 {
+            run_field :: sema_expression_vjp_run_field(run_args[0], name) ?? return false
+            return sema_call_type_is_function(run_field)
+        }
+    }
     type_name :: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
     definition :: sema_serde_type_definition(environment, program, type_name) ?? return false
     callable := false

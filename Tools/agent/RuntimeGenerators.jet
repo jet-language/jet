@@ -884,7 +884,7 @@ fn skip_spaces(bytes: [U8], at: Int) -> Int Never! {
 }
 
 // The name, the text up to the body's `{` and the offset after that `{` of the
-// `#Export(c) [pub] fn name` declaration starting at byte `start`, or None when
+// `#Export(c) fn name` declaration starting at byte `start`, or None when
 // the line is not one (a `}` before the body's `{` also means it is not a
 // declaration head).
 struct ExportHead {
@@ -898,10 +898,6 @@ fn export_head(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
     spaced := skip_spaces(bytes, at)
     if spaced == at -> return None
     at = spaced
-    if bytes_at(bytes, at, "pub") {
-        after_pub :: skip_spaces(bytes, at + 3)
-        if after_pub > at + 3 -> at = after_pub
-    }
     if !bytes_at(bytes, at, "fn") -> return None
     spaced = skip_spaces(bytes, at + 2)
     if spaced == at + 2 -> return None
@@ -1158,7 +1154,7 @@ fn render_lifecycle_list() -[FS]> String GeneratorError! {
 }
 
 #Test("lifecycle rows come from the hook line directly above an export") {
-    source :: "// runtime-init: 04\n#Export(c) fn b_start() {{\n}}\n// runtime-fini: 2 when a_root,a_key\n#Export(c)\npub fn a_stop(handle: I64) -> Unit {{\n}}\n#Export(c) fn plain(x: I64) -> I64 {{ x }}\n// runtime-init: 1\n\n#Export(c) fn spaced() {{}}\n#Export(c) fn closed }} {{\n"
+    source :: "// runtime-init: 04\n#Export(c) fn b_start() {{\n}}\n// runtime-fini: 2 when a_root,a_key\n#Export(c)\nfn a_stop(handle: I64) -> Unit {{\n}}\n#Export(c) fn plain(x: I64) -> I64 {{ x }}\n// runtime-init: 1\n\n#Export(c) fn spaced() {{}}\n#Export(c) fn closed }} {{\n"
     parsed :: runtime_exports(source, "Fixture.jet")
     assert_eq(parsed.problems.len(), 0)
     assert_eq(parsed.exports.len(), 4)

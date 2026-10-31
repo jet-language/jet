@@ -15,6 +15,7 @@ use jet_foundation.[
     Item,
     DerivationMethod,
     NamedSpan,
+    NameVisibility,
     ParamZone,
     Span,
     Type,
@@ -120,6 +121,14 @@ struct StructuralOrdinalKey {
     slot: String
 }
 
+// A declaration's loaded display path and name span: the key LSP consumers
+// already hold for a definition (SymbolDef.def_span, SemanticSymbol.span).
+struct DeclarationKey {
+    module_path: String
+    start: Int
+    end: Int
+}
+
 // Rust SymbolDB (126–148): one consumer of the shared semantic-index build.
 struct SymbolDB {
     index: SemIndex
@@ -139,6 +148,9 @@ struct SymbolDB {
     slot_boundaries: [StructuralSlotBoundary]
     symbols: SemanticSymbolIndex
     structural_ordinals: [StructuralOrdinalKey:Int]
+    // Sema's checked declaration visibility, narrowed by every enclosing
+    // declaration (a member of a `priv module` is never Public).
+    visibility: [DeclarationKey:NameVisibility]
 }
 
 // Rust CallerFrame (150–154).
@@ -198,6 +210,7 @@ impl SymbolDB {
             slot_boundaries: [StructuralSlotBoundary]{},
             symbols: SemanticSymbolIndex.language(),
             structural_ordinals: [StructuralOrdinalKey:Int]{},
+            visibility: [DeclarationKey:NameVisibility]{},
         }
     }
 
@@ -336,6 +349,12 @@ impl SymbolDB {
             if self.inlay[index].module_path == path -> &matches.push(self.inlay_window(index))
         }
         matches
+    }
+
+    // Checked visibility of the declaration named at `span` in `module_path`;
+    // None when Sema published no declaration there.
+    fn declaration_visibility(self, module_path: String, span: SourceSpan) -> NameVisibility? Never! {
+        self.visibility.get(DeclarationKey{module_path: module_path.copy(), start: span.start, end: span.end})
     }
 }
 

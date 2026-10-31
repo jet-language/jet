@@ -707,6 +707,10 @@ fn sema_call_try_reflect_core_call(record: CoreCallRecord, args: [CallArg], span
 // `panic(message)` stops with one String message; the stop is a `Never`
 // value and its `__jet_panic__` reachability edge comes from the checked-tree walk.
 fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    // A direct panic is never a Tensor operation's failure route (Rust
+    // `check_panic_call`): autodiff rejects a differentiated function that
+    // reaches it.
+    sema_compute_note_panic(&context, false)
     complete := call.args.len() == 1
     if !complete -> &diagnostics.push(sema_error("E0103", call.name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "e.g. panic(\"something went wrong\")"))
     message := TExpr?{None}
@@ -1263,6 +1267,19 @@ fn sema_call_direct_target_abi(target: SemaCallDirectTarget, environment: SemaSc
     }
 }
 
+// Rust `check_direct_call` (L0202 shared_auto_clone): a bare `Shared` name
+// passed to a direct call inside a loop retains the handle once per pass.
+fn sema_call_lint_shared_loop_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if scopes.loop_depth <= 0 -> return
+    loop argument in args {
+        if argument.expr == .Ident(name, span, _) {
+            index :: sema_scope_resolve_index_at(scopes, name, span) ?? next
+            ty :: sema_scope_binding_type(environment, scopes, index) ?? next
+            if ty == .Shared(_) -> &diagnostics.push(sema_lint("L0202", span, "Auto-cloned `{name}` inside a loop; consider hoisting or caching", "Shared handles are cloned when used across a loop boundary", "Hoist `{name}` before the loop, or clone once outside"))
+        }
+    }
+}
+
 fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     candidate := target
     params := sema_call_params_from_type(candidate.signature) ?? {
@@ -1339,6 +1356,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     }
     abi :: sema_call_direct_target_abi(candidate, environment, program)
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    sema_call_lint_shared_loop_arguments(source_args, environment, scopes, &diagnostics)
     callee_facts :: sema_contract_function_facts(environment, program, candidate.symbol.id)
     if callee_facts == .Val(facts) {
         if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, resolved_binding.slots, source_args, scopes, &state, &diagnostics) -> return None

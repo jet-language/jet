@@ -15,7 +15,9 @@ fn run() {
     print("value_gradient_w:{compute.to_list(gradients.w)}")
 
     jvp :: compute.jvp(loss)
-    (jvp_value, jvp_tangent) :: jvp(w, x, tangent_w, tangent_x)
+    // S74 (syntax-decisions.md:982-983): tuple parentheses bind member names, never
+    // positions; `{ member: local }` renames.
+    { value: jvp_value, tangent: jvp_tangent } :: jvp(w, x, tangent_w, tangent_x)
     print("jvp_value:{compute.to_list(jvp_value)}")
     print("jvp_tangent:{compute.to_list(jvp_tangent)}")
 

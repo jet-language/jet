@@ -1045,19 +1045,20 @@ fn jet_cli_build_dir(build_dir: String, color: Bool) -[FS]> JetDriverVerbOutput?
 // The application authority check of a build or run with no errors: E1803
 // (rendered as the Rust host reports it, exit 1) when the policy denies or
 // leaves undecided a right the program requires (Authority.jet). A script
-// answers with the `-A` rows (`jet_cli_source_invocation`).
+// answers with the `-A` rows (`jet_cli_source_invocation`). `json` reports
+// it as `jet run --json` reports its problems (jet_cli_run_problems).
 // Traced as `cli.authority`.
-fn jet_cli_authority_check(file: String, source: String, color: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -> JetDriverVerbOutput? Never! {
+fn jet_cli_authority_check(file: String, source: String, color: Bool, json: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -[FS, Env]> JetDriverVerbOutput? Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
     authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, invocation))
     if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
-    jet_cli_authority_report(file, source, color, command, authority)
+    jet_cli_authority_report(file, source, color, json, command, authority)
 }
 
 // The E1803 report of `authority`, or None when it allows the program.
-fn jet_cli_authority_report(file: String, source: String, color: Bool, command: String, authority: JetCLIAuthority) -> JetDriverVerbOutput? Never! {
+fn jet_cli_authority_report(file: String, source: String, color: Bool, json: Bool, command: String, authority: JetCLIAuthority) -[FS, Env]> JetDriverVerbOutput? Never! {
     refusal :: jet_cli_authority_refusal(authority, file, command) ?? return None
-    Val(JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{refusal}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, [Diagnostic]{refusal}, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR})
 }
 
 // The diagnostics jet_driver_report_problems shows (all but the advisory
@@ -1084,7 +1085,7 @@ fn jet_cli_build_result(file: String, name: String, source: String, color: Bool,
     if errors.len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if jet_cli_authority_check(file, source, color, "build", invocation, result) == .Val(refusal) -> return refusal
+    if jet_cli_authority_check(file, source, color, false, "build", invocation, result) == .Val(refusal) -> return refusal
     if jet_cli_build_binary(file, name, "build", color, options, result, ^inputs, snapshot) == {
         .Failed(failure) -> return failure
         .Image(_, _) -> {}
@@ -1264,52 +1265,63 @@ fn jet_cli_launch_failed(why: String, color: Bool) -> JetDriverVerbOutput Never!
 // Under `--verbose`, the advisory lints (not a11y) of a compile with no
 // errors, written to stderr before the built program runs, so they precede
 // its output on the shared streams.
-fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, diagnostics: [Diagnostic]) {
+fn jet_cli_write_verbose_lints(file: String, source: String, color: Bool, json: Bool, diagnostics: [Diagnostic]) {
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
         if diagnostic.severity == DIAGNOSTIC_LINT && !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
     }
-    report :: jet_driver_report_problems(file, source, lints, color, true)
+    report :: jet_cli_run_problems(file, source, lints, color, json)
     if report.len() > 0 {
         stderr_handle := cli_term.stderr()
         &stderr_handle.write(report).drop("jet stderr")
     }
 }
 
+// The report of the problems a run shows, for stderr: the human report, or
+// under `--json` the `diagnostics` status `jet check --json` prints (`ok`
+// when none is an error), as the Rust host's `report_problems_with_summary`.
+// Stdout stays the program's, and the report never chooses the exit code.
+fn jet_cli_run_problems(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> String Never! {
+    if !json -> return jet_driver_report_problems(file, source, diagnostics, color, true)
+    if diagnostics.len() == 0 -> return ""
+    jet_cli_reports_status_json("diagnostics", jet_cli_errors(diagnostics).len() == 0, jet_cli_report_cwd(), file, source, diagnostics)
+}
+
 // `jet run <file>`'s build, as `jet build` does: problems with an error stop
 // it, and so does the application authority check; `run` hides advisory
-// lints unless `--verbose`. The image is linked to run from memory.
-fn jet_cli_run_build(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIBuilt {
+// lints unless `--verbose`, and `json` reports what it shows as JSON
+// (jet_cli_run_problems). The image is linked to run from memory.
+fn jet_cli_run_build(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIBuilt {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_cli_errors(result.diagnostics)
     if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
     if errors.len() > 0 {
-        return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+        return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     }
-    if jet_cli_authority_check(file, source, color, "run", invocation, result) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
-    if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
+    if jet_cli_authority_check(file, source, color, json, "run", invocation, result) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
+    if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))
     jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, ^inputs, snapshot)
 }
 
 // `jet run <file>`: build it (jet_cli_run_build), then hand its program to
 // the main thread (jet_cli_run_step).
-fn jet_cli_run_result(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIRunStep {
-    built := jet_cli_run_build(file, source, color, options, verbose, invocation, result, ^inputs, snapshot)
+fn jet_cli_run_result(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIRunStep {
+    built := jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, ^inputs, snapshot)
     if ^built == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
         .Image(executable, path) -> JetCLIRunStep.Launch{executable: ^executable, file: file, binary: path, program_args: program_args, options: options, invocation: invocation, verbose: verbose, color: color}
     }
 }
 
-fn jet_cli_compile_run(file: String, entry: String?, source: String, color: Bool, options: BuildOptions, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
+fn jet_cli_compile_run(file: String, entry: String?, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIRunStep {
     // A traced or verbose run reports its compile, so only a plain run may
     // reuse a kept program; one starting at a command function is never kept.
-    if !verbose && trace_sink == None && entry == None -> return jet_cli_compile_kept(file, source, color, options, threads, program_args, invocation)
+    if !verbose && trace_sink == None && entry == None -> return jet_cli_compile_kept(file, source, color, json, options, threads, program_args, invocation)
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
     if ^compiled == {
         .Refused(refusal) -> step = JetCLIRunStep.Output{output: refusal}
-        .Checked(result, inputs, snapshot) -> step = jet_cli_run_settled(jet_cli_run_result(file, source, color, options, verbose, program_args, invocation, result, ^inputs, snapshot))
+        .Checked(result, inputs, snapshot) -> step = jet_cli_run_settled(jet_cli_run_result(file, source, color, options, verbose, json, program_args, invocation, result, ^inputs, snapshot))
     }
     step
 }
@@ -1324,14 +1336,14 @@ fn jet_cli_run_settled(step: ^JetCLIRunStep) -> JetCLIRunStep {
 
 // A plain `jet run`: run the program kept for exactly these inputs, or
 // compile it, keep it, and run it (ScriptCache.jet).
-fn jet_cli_compile_kept(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
+fn jet_cli_compile_kept(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     held :: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
     keep :: if held == .Held(snapshot) -> jet_cli_script_keeper(options, snapshot) else -> None
     if keep == .Val(kept) {
         if held == .Held(snapshot) {
             binary :: "{jet_cli_build_dir_path(snapshot)}/{jet_cli_stem(file)}"
-            if jet_cli_script_kept_run(kept, file, source, binary, color, options, program_args, invocation) == .Val(ran) -> return ran
+            if jet_cli_script_kept_run(kept, file, source, binary, color, json, options, program_args, invocation) == .Val(ran) -> return ran
         }
     }
     prepared :: if ^held == {
@@ -1341,17 +1353,17 @@ fn jet_cli_compile_kept(file: String, source: String, color: Bool, options: Buil
     compiled := jet_cli_compile_executable(^prepared, None, options, jet_cli_script_input_log(keep), None, color)
     if ^compiled == {
         .Refused(refusal) -> step = JetCLIRunStep.Output{output: refusal}
-        .Checked(result, inputs, snapshot) -> step = jet_cli_run_settled(jet_cli_script_build_and_run(file, source, color, options, program_args, invocation, result, ^inputs, snapshot, keep))
+        .Checked(result, inputs, snapshot) -> step = jet_cli_run_settled(jet_cli_script_build_and_run(file, source, color, json, options, program_args, invocation, result, ^inputs, snapshot, keep))
     }
     step
 }
 
 // Build a compiled `jet run` file, keep the program under `keep`
 // (ScriptCache.jet), then hand it to the main thread.
-fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetCLIRunStep {
+fn jet_cli_script_build_and_run(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, keep: JetCLIScriptKeep?) -> JetCLIRunStep {
     // The kept program's authority is the compile's own.
     authority :: jet_cli_application_authority(result, None)
-    built := jet_cli_run_build(file, source, color, options, false, invocation, result, ^inputs, snapshot)
+    built := jet_cli_run_build(file, source, color, options, false, json, invocation, result, ^inputs, snapshot)
     if ^built == {
         .Failed(failure) -> JetCLIRunStep.Output{output: failure}
         .Image(executable, path) -> jet_cli_script_launch(keep, authority, ^executable, file, path, program_args, options, invocation, color)
@@ -1381,7 +1393,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if jet_cli_errors(result.diagnostics).len() > 0 {
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if verbose -> jet_cli_write_verbose_lints(file, source, color, jet_cli_present_shown(result, snapshot, true))
+    if verbose -> jet_cli_write_verbose_lints(file, source, color, false, jet_cli_present_shown(result, snapshot, true))
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing the tests of `{file}`")
     root :: snapshot.roots[0].canonical_path
@@ -2457,10 +2469,10 @@ fn jet_cli_compile_on_worker(plan: ^JetCLIPlan, trace: String?) -> JetDriverVerb
 // stops at the step the main thread finishes; every other verb at its output.
 fn jet_cli_execute_compiling(plan: ^JetCLIPlan, trace: String?) -> JetCLIRunStep {
     trace_sink :: jet_cli_trace_sink(trace)
-    if plan == .Run(file, source, color, options, verbose, threads, program_args, invocation, notice, watch, entry) {
+    if plan == .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) {
         if !watch {
             jet_cli_write_notice(notice)
-            return jet_cli_compile_run(file, entry, source, color, options, verbose, threads, program_args, invocation, trace_sink)
+            return jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink)
         }
     }
     JetCLIRunStep.Output{output: jet_cli_execute(^plan, trace_sink)}
@@ -2481,7 +2493,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -2510,9 +2522,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             jet_cli_write_notice(notice)
             output = jet_cli_build_package(file, color, options, build_args, threads, invocation, trace_sink)
         }
-        .Run(file, source, color, options, verbose, threads, program_args, invocation, notice, watch, entry) -> {
+        .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {
             jet_cli_write_notice(notice)
-            output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, threads, program_args, invocation, trace_sink))
+            output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
         .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
@@ -2582,7 +2594,7 @@ fn jet_cli_dev_config(file: String, source: String, color: Bool, threads: Int?) 
     }
 }
 
-fn jet_cli_dev_loop(file: String, entry: String?, color: Bool, options: BuildOptions, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_dev_loop(file: String, entry: String?, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     root :: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
     hot_noted := false
     loop {
@@ -2605,7 +2617,7 @@ fn jet_cli_dev_loop(file: String, entry: String?, color: Bool, options: BuildOpt
         compiled := jet_cli_compile_executable_file(file, entry, color, threads, options, trace_sink)
         if ^compiled == {
             .Refused(refusal) -> if configured -> cli_term.eprint(refusal.stderr)
-            .Checked(result, inputs, snapshot) -> if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, invocation, result, ^inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
+            .Checked(result, inputs, snapshot) -> if configured -> child = jet_cli_dev_start(jet_cli_run_build(file, source, color, options, verbose, json, invocation, result, ^inputs, snapshot), file, program_args, config.port, options, invocation, verbose, color)
         }
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
         loop jet_cli_dev_stamp(root, config.watch) == stamp -> cli_time.sleep(200ms)

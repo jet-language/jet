@@ -18,6 +18,7 @@ use jet_build_session.[
     build_session_finish, build_session_new,
 ]
 use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
+use core.math as build_math
 fn inspect_build_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }
@@ -36,10 +37,10 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_require(jet_cli_build_report(empty, None, false) == "default pipeline: no root fn build\n", "default pipeline human")
     inspect_build_require(jet_cli_build_report(empty, None, true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":null}}\n", "default pipeline JSON")
     policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
-    session :: build_session_new(101, "fixture", "compiler", policy)
-    action_reply :: build_session_call(&session, "action", [BuildSessionValue]{.Text("compile"), .List([BuildSessionValue]{.Text("main.jet")}), .List([BuildSessionValue]{.Text("out/app")}), .List([BuildSessionValue]{.Text("compiler"), .Text("main.jet")}), .List([])}, None, false, 1, 2)
+    session := build_session_new(101, "fixture", "compiler", policy)
+    action_reply :: build_session_call(&session, "action", [BuildSessionValue]{BuildSessionValue.Text{value: "compile"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "out/app"}}}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "compiler"}, BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{}}}, None, false, 1, 2)
     action :: if action_reply == {.Value(value) -> value else -> panic("checked action failed")}
-    target_reply :: build_session_call(&session, "add_executable", [BuildSessionValue]{.Text("app"), .List([BuildSessionValue]{.Text("main.jet")}), .List([BuildSessionValue]{action})}, None, false, 3, 4)
+    target_reply :: build_session_call(&session, "add_executable", [BuildSessionValue]{BuildSessionValue.Text{value: "app"}, BuildSessionValue.List{values: [BuildSessionValue]{BuildSessionValue.Text{value: "main.jet"}}}, BuildSessionValue.List{values: [BuildSessionValue]{action}}}, None, false, 3, 4)
     target :: if target_reply == {.Value(value) -> value else -> panic("checked target failed")}
     plan_reply :: build_session_call(&session, "plan", [BuildSessionValue]{target}, None, false, 5, 6)
     returned :: if plan_reply == {.Value(value) -> value else -> panic("checked plan failed")}
@@ -56,7 +57,8 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     files :: "[{{\"path\":\"main.jet\",\"owner\":null,\"consumers\":[0],\"targets\":[0]}},{{\"path\":\"out/app\",\"owner\":0,\"consumers\":[],\"targets\":[0]}}]"
     payload :: "{{\"schema_version\":1,\"default\":0,\"targets\":[{{\"id\":0,\"name\":\"app\",\"kind\":\"Executable\",\"deps\":[],\"actions\":[0],\"files\":[\"main.jet\"]}}],\"actions\":[{{\"id\":0,\"name\":\"compile\",\"inputs\":[\"main.jet\"],\"outputs\":[\"out/app\"],\"caps\":[],\"pools\":[\"cpu\"],\"toolchain\":\"host\",\"probes\":[],\"cache\":\"Cached\",\"cache_status\":\"unknown\",\"key\":\"{key}\",\"compiler_owned\":false,\"provenance\":[\"argv=compiler main.jet\",\"inputs=1\",\"outputs=1\",\"cache=Cached\"]}}],\"action_keys\":[{{\"action\":\"compile\",\"key\":\"{key}\"}}],\"cache_hits\":[],\"files\":{files},\"affected_files\":{files},\"toolchains\":[{{\"name\":\"host\",\"target\":\"host\"}}],\"probes\":[],\"generated\":[]}}"
     inspect_build_require(jet_driver_build_plan_json(plan) == payload, "canonical graph JSON exact fields and order")
-    inspect_build_require(machine == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n", "checked graph JSON exact envelope")
+    machine_expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":{payload}}}\n"
+    inspect_build_require(machine == machine_expected, "checked graph JSON exact envelope")
     inspect_build_require(jet_cli_build_report(query, Val("app"), false) == "app\n  kind=Executable\n  sources=1\n  deps=0\n  actions=1\n", "target explanation")
     inspect_build_require(jet_cli_build_report(query, Val("compile"), false) == "compile\n  argv=compiler main.jet\n  inputs=1\n  outputs=1\n  cache=Cached\n", "action explanation")
     inspect_build_require(jet_cli_build_report(query, Val("out/app"), false) == "out/app\n  owner=Some(ActionId(0))\n  consumers=[]\n  targets=[TargetId(0)]\n", "file ownership explanation")

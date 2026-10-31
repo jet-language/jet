@@ -1,0 +1,19 @@
+// D-COMPUTE-VJP1=A (syntax-decisions.md:6950-6954): a VJPRun has `.value`,
+// `.pull(seed)` and `.grads`, and destructures positionally as `(value, pull)`.
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
+
+fn run() {
+    w :: compute.ones([1]) ?? panic("w")
+    x :: compute.ones([1]) ?? panic("x")
+    seed :: compute.ones([1]) ?? panic("seed")
+    vjp_run :: compute.vjp(loss, w.copy(), x.copy())
+    print(compute.to_list(vjp_run.value))
+    print(compute.to_list(vjp_run.grads.x))
+    pulled :: vjp_run.pull(seed.copy())
+    print(compute.to_list(pulled.w))
+    (primal, pull_fn) :: compute.vjp(loss, w.copy(), x.copy())
+    print(compute.to_list(primal))
+    print(compute.to_list(pull_fn(seed).x))
+}

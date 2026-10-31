@@ -184,7 +184,7 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
 }
 
 #Test("incremental_lsp_query_diagnostics_match_fresh_check_bytes") {
-    before :: "pub fn alpha() -> Int {{ return 1 }}\npub fn beta() -> Int {{ return 2 }}\n"
+    before :: "fn alpha() -> Int {{ return 1 }}\nfn beta() -> Int {{ return 2 }}\n"
     snapshot :: lsp_diag_test_snapshot("lsp_incremental_diagnostic_parity.jet", before, [JetDriverAuthorizedSourceFile]{})
     doc := LSPDocument.new(lsp_diag_test_path("/lsp/lsp_incremental_diagnostic_parity.jet"), before.copy(), 1)
     state :: LSPDiagnosticState.new()
@@ -237,17 +237,17 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
 
 #Test("open_dependency_overlay_invalidates_importer") {
     main :: "module b\nfn run() -> Int {{ return b.value() }}\n"
-    snapshot :: lsp_diag_test_snapshot("main.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("b.jet", "pub fn value() -> Int {{ return 1 }}\n")})
+    snapshot :: lsp_diag_test_snapshot("main.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("b.jet", "fn value() -> Int {{ return 1 }}\n")})
     main_uri :: "file:///lsp/main.jet"
     dependency_uri :: "file:///lsp/b.jet"
     state := LSPDiagnosticState.new()
     state.docs[main_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/main.jet"), main.copy(), 1)
-    state.docs[dependency_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/b.jet"), "pub fn value() -> String {{ return \"unsaved\" }}\n", 1)
+    state.docs[dependency_uri] = LSPDocument.new(lsp_diag_test_path("/lsp/b.jet"), "fn value() -> String {{ return \"unsaved\" }}\n", 1)
     queries := JetDriverCompilerQueries.new()
     broken :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
     permit :: broken.guard_read()
     assert(permit.value.result.diagnostics.len() > 0)
-    &state.docs[dependency_uri].replace_text("pub fn value() -> Int {{ return 2 }}\n")
+    &state.docs[dependency_uri].replace_text("fn value() -> Int {{ return 2 }}\n")
     repaired :: lsp_check_with_bundle(state, &queries, snapshot, state.docs[main_uri])
     lsp_diag_test_clean(repaired)
     assert_eq(queries.recompute_count(QueryKey.for_file("checked.lsp", FileKey.new(lsp_diag_path.display(state.docs[main_uri].path)))), 2)
@@ -258,7 +258,7 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
     // The repairs/action documentChanges claims4007–4029 require their owner;
     // never offer a fake action in order to register the diagnostic subset.
     main :: "use \"scoring\"\nfn run() {{ print(scoring.letter(91)) }}\n"
-    scoring :: "pub fn letter(score: Int, offset: Int) -> String {{\n    adjusted = score + offset\n    return if {{\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }}\n}}\nfn repair_probe() {{\n    m :: [String:Int]{{}}\n    _ :: m.gett(\"a\")\n}}\n"
+    scoring :: "fn letter(score: Int, offset: Int) -> String {{\n    adjusted = score + offset\n    return if {{\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }}\n}}\nfn repair_probe() {{\n    m :: [String:Int]{{}}\n    _ :: m.gett(\"a\")\n}}\n"
     overlay :: "// unsaved 🚀\n\n{scoring}"
     snapshot :: lsp_diag_test_snapshot("run.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("package.jet", "name: \"reports\"\nversion: \"0.1.0\"\n"), lsp_diag_test_file("scoring.jet", scoring)})
     main_uri :: "file:///lsp/run.jet"
@@ -304,7 +304,7 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
 
 #Test("prior target clears distinguish still checked and retained elsewhere") {
     main :: "module b\nfn run() -> Int {{ return b.value() }}\n"
-    snapshot :: lsp_diag_test_snapshot("main.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("b.jet", "pub fn value() -> Int {{ return 1 }}\n")})
+    snapshot :: lsp_diag_test_snapshot("main.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("b.jet", "fn value() -> Int {{ return 1 }}\n")})
     uri :: "file:///lsp/main.jet"
     dependency :: "file:///lsp/b.jet"
     dropped :: "file:///unowned/dropped.jet"
@@ -346,8 +346,8 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
     // tests/lsp3376–3462 exact main/helper/other source corpus. This checks the
     // actual retained rows and newest overlay verdict. The request/notification
     // count and version4 wire transcript is gated on L19, not a memory sink.
-    helper_int :: "pub fn value() -> Int {{ return 1 }}\n"
-    helper_text :: "pub fn value() -> String {{ return \"one\" }}\n"
+    helper_int :: "fn value() -> Int {{ return 1 }}\n"
+    helper_text :: "fn value() -> String {{ return \"one\" }}\n"
     main :: "use \"helper\"\nfn run() {{ print(helper.value() + 1) }}\n"
     other :: "fn run() {{ print(2) }}\n"
     snapshot :: lsp_diag_test_snapshot("run.jet", main, [JetDriverAuthorizedSourceFile]{lsp_diag_test_file("package.jet", "name: \"sibling\"\nversion: \"0.1.0\"\n"), lsp_diag_test_file("helper.jet", helper_int), lsp_diag_test_file("other.jet", other)})

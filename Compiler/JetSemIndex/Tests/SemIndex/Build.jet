@@ -323,7 +323,7 @@ fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemI
 
 // lib.rs:762–816 (main.jet), exact equivalent generic applications.
 fn semindex_build_test_generic_source() -> String Never! {
-    "module boxed<T>(n: Int) {{ pub fn value() -> Int {{ return n }} }}\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {{}}\n"
+    "module boxed<T>(n: Int) {{ fn value() -> Int {{ return n }} }}\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {{}}\n"
 }
 fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index: SemIndex, path: String, json: String) {
     count := 0
@@ -355,7 +355,7 @@ fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_databa
 }
 
 // lib.rs:829–895, actual two-module import/receiver fixtures.
-fn semindex_build_test_reference_library_source() -> String Never! { "pub fn report() {{ print(\"library\") }}\n" }
+fn semindex_build_test_reference_library_source() -> String Never! { "fn report() {{ print(\"library\") }}\n" }
 fn semindex_build_test_reference_main_source() -> String Never! {
     "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
 }

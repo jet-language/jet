@@ -226,12 +226,15 @@ fn sema_compute_validate_autodiff_purity(modules: [SemaGraphModuleResult], work:
                     }
                     next
                 }
+                // The effect graph's display spelling (Effects/Checks.jet
+                // `display_key`), not the internal symbol key.
+                target_name :: "{target.module_name}::{target.name}"
                 &diagnostics.push(sema_error(
                     "E0112",
                     obligation.span,
                     "`compute.{obligation.method}` needs a pure Tensor function",
-                    "`{obligation.target}` reaches {sema_compute_effect_names(forbidden)}; autodiff records only pure Tensor operations",
-                    "remove the effectful operation from `{obligation.target}`, or differentiate a pure Tensor function",
+                    "`{target_name}` reaches {sema_compute_effect_names(forbidden)}; autodiff records only pure Tensor operations",
+                    "remove the effectful operation from `{target_name}`, or differentiate a pure Tensor function",
                 ))
             }
         }

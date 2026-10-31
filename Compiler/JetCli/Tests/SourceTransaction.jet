@@ -3,6 +3,9 @@ use jet_cli.[
     JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes, jet_cli_fix_log,
     jet_cli_fix_rewrite, jet_cli_transaction_relative, jet_cli_undo_source_changes,
 ]
+use core.sys as cli_sys
+use core.files as cli_files
+use core.process as cli_process
 
 struct JetCLITransactionFixtureRoot {
     path: String
@@ -26,7 +29,8 @@ impl JetCLITransactionFixtureRoot.Close {
     }
     log :: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{})
     path :: jet_cli_commit_source_changes(root, changes, "test.log.json", log) ?? panic("commit")
-    assert(path == "{root}/.jet/codemods/test.log.json")
+    expected_path :: "{root}/.jet/codemods/test.log.json"
+    assert(path == expected_path)
     first :: cli_files.read("{root}/first.jet") ?? panic("read first")
     second :: cli_files.read("{root}/second.jet") ?? panic("read second")
     assert(first == "updated first" && second == "updated second")

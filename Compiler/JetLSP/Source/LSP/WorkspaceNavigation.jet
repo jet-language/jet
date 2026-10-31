@@ -8,22 +8,12 @@ use core.files.host.retained_descriptor as lsp_workspace_fs
 use jet_semindex.[SymbolDB]
 
 fn lsp_merge_workspace_defs(server: LSPServer, current: LSPDocument, db: &SymbolDB) Never! -[FS, Env]> {
-    _ :: lsp_merge_workspace_defs_with_sources(server, current, &db)
-}
-
-fn lsp_merge_workspace_defs_with_sources(server: LSPServer, current: LSPDocument, db: &SymbolDB) -[FS, Env]> [String:String] {
-    sources := [String:String]{}
     loop row in lsp_workspace_sources(server, Val(current.path)) {
         if lsp_workspace_path.equals(row.path, current.path) -> next
-        sources[lsp_workspace_path.display(row.path)] = row.text.copy()
         shared_checked :: &server.queries.check_text_lsp(server.snapshot, row.path, row.text)
         permit :: shared_checked.guard_read()
         result :: permit.value.result
         if result.graph == None -> next
-        loop index in result.loaded_module_rows {
-            module_ref :: result.module_sources[index]
-            if !sources.has_key(module_ref.display) -> sources[module_ref.display] = module_ref.loaded_source.copy()
-        }
         other := lsp_build_symbol_db(result)
         loop symbol in other.symbols.symbols() -> &db.symbols.push(symbol.copy())
         loop definition in other.defs -> &db.defs.push(^definition)
@@ -31,8 +21,8 @@ fn lsp_merge_workspace_defs_with_sources(server: LSPServer, current: LSPDocument
         loop call in other.calls -> &db.calls.push(^call)
         loop hover in other.hover -> &db.hover.push(^hover)
         loop hint in other.inlay -> &db.inlay.push(^hint)
+        loop (key, visibility) in other.visibility -> db.visibility[key.copy()] = visibility
     }
-    sources
 }
 
 fn lsp_workspace_sources(server: LSPServer, root_hint: lsp_workspace_path.OSPath?) -[FS, Env]> [(path: lsp_workspace_path.OSPath, text: String)] {

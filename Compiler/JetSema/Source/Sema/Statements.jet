@@ -3920,13 +3920,17 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         }
         .Tuple(elements, pattern_span) -> {
             span = pattern_span
+            // D-COMPUTE-VJP1=A (syntax-decisions.md:6953-6954): a `VJPRun`
+            // destructures positionally as `(value, pull)`; it is the one
+            // carrier the S74 member-name law (syntax-decisions.md:982) exempts.
+            positional := false
             if ty == {
                 .Tuple(canonical) -> fields = canonical
                 .Apply(name, args) -> {
                     if name == "VJPRun" && args.len() == 1 && elements.len() == 2 {
-                    pull := Type.Fn{params: [Type]{Type.Named{name: "Tensor"}}, ret: Val(args[0]), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-                    fields = [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "pull", ty: pull}}
-                }
+                        fields = sema_stmt_vjp_run_positional_fields(args[0])
+                        positional = true
+                    }
                 }
                 else -> {}
             }
@@ -3945,7 +3949,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
             }
             // Tuples destructure by member name: each written name selects the
             // member it names, never a position.
-            if elements.len() == fields.len() {
+            if elements.len() == fields.len() && !positional {
                 by_name := [TypeTupleField]{}
                 loop element in elements {
                     found := TypeTupleField?{None}
@@ -3997,6 +4001,19 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         .List(_, _) -> Val(TStmt.ListDestructure{temp: temp, init: init, count: names.len(), line: sema_source_line_at(environment.source_segments, span) ?? 0, elements: locals, span: span})
         .Refutable(_, _, _, _) -> None
     }
+}
+
+// The ordered `(value, pull)` members a `VJPRun<G>` destructures into
+// (D-COMPUTE-VJP1=A), typed by the run's field rows.
+fn sema_stmt_vjp_run_positional_fields(gradient: Type) -> [TypeTupleField] {
+    members :: [String]{"value", "pull"}
+    fields := [TypeTupleField]{}
+    loop member in members {
+        if sema_expression_vjp_run_field(gradient, member) == .Val(field_ty) {
+            &fields.push(TypeTupleField{name: member, ty: field_ty})
+        }
+    }
+    fields
 }
 
 // A tuple destructure names its members; the first written name that is not a

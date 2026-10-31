@@ -242,7 +242,6 @@ fn sema_call_compute_tensor_value(argument: CallArg, environment: SemaScopeEnvir
 }
 
 fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    _ := sema_compute_record_core_call(record, span, &context)
     if args.len() == 0 {
         sema_call_compute_arity_error(member, 1, 0, span, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
@@ -311,10 +310,6 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     gradient_output := member == "gradient" && gradient_value_type != None
     if !is_compute_tensor_family(output) && !gradient_output {
         &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "the reverse and forward transforms have one Tensor output and keep Tensor storage law", "return a Tensor from the differentiated function"))
-        valid = false
-    }
-    if gradient_value_type != None && member != "gradient" {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "only a gradient transform can differentiate a named Tensor tuple; value and pull surfaces require one Tensor output", "return one Tensor from the differentiated function"))
         valid = false
     }
     invalid_parameter := false
@@ -455,7 +450,10 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
 // The caller owns route selection and invokes this helper before the generic
 // Core-call producer.
 fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    if record.module_name != "core.compute" -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
+    // D-COMPUTE-AUTODIFF1=D (Rust core_call.rs): every `core.compute` call is
+    // recorded before any route returns, so a source-owned member stays
+    // visible to the autodiff trace check exactly like a transform.
+    if !sema_compute_record_core_call(record, span, &context) -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
     if record.member == "gradient" || record.member == "value_and_gradient" || record.member == "vjp" || record.member == "jvp" {
         return sema_call_compute_transform(record, record.member, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }

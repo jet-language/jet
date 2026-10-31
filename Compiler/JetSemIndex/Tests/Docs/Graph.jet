@@ -93,8 +93,8 @@ fn doc_test_os_path(text: String) -> doc_os_path.OsPath? Never! {
 }
 
 #Test("doc_declaration_spans_use_utf8_bytes_and_original_brace_whitespace_rules") {
-    source :: "é\n  pub\tfn λ() 　-> Int {{ 42 }}"
-    assert_eq(doc_declaration_text(source, Span{start: 3, end: 200}), "pub fn λ() -> Int")
+    source :: "é\n  fn\tλ() 　-> Int {{ 42 }}"
+    assert_eq(doc_declaration_text(source, Span{start: 3, end: 200}), "fn λ() -> Int")
     assert_eq(doc_declaration_text("fn run()\n  -> 7", Span{start: 0, end: 200}), "fn run() -> 7")
     assert_eq(doc_declaration_text("abc", Span{start: 200, end: 0}), "")
     // Rust split('{') is intentionally not a string-aware parser.
@@ -218,14 +218,14 @@ fn doc_test_package_fixture_rejects_order_and_content_drift(first_ok: Bool, seco
     assert(second_ok)
     assert_eq(first, second)
     loop needle in [String]{
-        "\"summary\":\"Alpha API.\"", "\"signature\":\"pub fn alpha() -> Int -> 6\\nfailure: Int (implicit default !Err)\"",
-        "\"summary\":\"Zulu API.\"", "\"signature\":\"pub fn zulu() -> Int -> 7\\nfailure: Int (implicit default !Err)\"",
+        "\"summary\":\"Alpha API.\"", "\"signature\":\"fn alpha() -> Int -> 6\\nfailure: Int (implicit default !Err)\"",
+        "\"summary\":\"Zulu API.\"", "\"signature\":\"fn zulu() -> Int -> 7\\nfailure: Int (implicit default !Err)\"",
         "\"link\":\"ordered.jet#L7\"", "\"link\":\"ordered.jet#L4\"",
     } -> assert(first.contains(needle))
     doc_test_assert_item_order(first, [String]{"alpha", "run", "zulu"})
 }
 fn doc_test_nested_state_source() -> String Never! {
-    "pub struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
+    "struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
 }
 fn doc_test_nested_state_docs_stay_on_the_struct_item(ok: Bool, json_text: String) Never! {
     assert(ok)
@@ -234,7 +234,7 @@ fn doc_test_nested_state_docs_stay_on_the_struct_item(ok: Bool, json_text: Strin
     assert(!json_text.contains("\"kind\":\"state\""))
 }
 fn doc_test_checked_text_source() -> String Never! {
-    "#PubFile\n#Error\nenum PatternError {{ Bad }}\n\n/// A checked pattern.\nPattern :: distinct String\n\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n\n    fn check(text: String) PatternError! -[]> {{\n        return\n    }}\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\n\nfn run() {{}}\n"
+    "#Error\nenum PatternError {{ Bad }}\n\n/// A checked pattern.\nPattern :: distinct String\n\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n\n    fn check(text: String) PatternError! -[]> {{\n        return\n    }}\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\n\nfn run() {{}}\n"
 }
 fn doc_test_checked_text_contract_is_rendered_in_generated_docs(json_ok: Bool, json_text: String, local_ok: Bool, markdown: String, html: String) Never! {
     assert(json_ok)

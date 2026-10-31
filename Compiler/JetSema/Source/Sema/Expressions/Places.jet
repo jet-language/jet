@@ -433,6 +433,16 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     // for prepared-constant paths, which codegen folds to their values.
     reflection :: sema_fact_reflection_field(base, member, span, context)
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, &diagnostics)
+    // D-COMPUTE-VJP1=A (syntax-decisions.md:6950-6954): a `VJPRun` carries
+    // `.value`, `.pull(seed)` and `.grads` (Rust core_types.rs field_type);
+    // any other member falls through to the undeclared-field error below.
+    if owner_name == "VJPRun" && owner_args.len() == 1 {
+        if sema_expression_vjp_run_field(owner_args[0], member) == .Val(run_field_ty) {
+            run_reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: run_field_ty, boxed: false}
+            run_value :: sema_tree_node(run_field_ty, TExprKind.Field{receiver: base, field: run_reference}, span)
+            return sema_expr_expected_owned(^run_value, expected, environment, program, &diagnostics)
+        }
+    }
     // A builtin Core record (`ProcessReceipt.success`, `IOContext.operation`)
     // has no Jet declaration; its fields are the generated Core record rows.
     // A core_only field is private storage: outside Core source it does not
@@ -447,6 +457,16 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         }
     }
     &diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
+    None
+}
+
+// The `VJPRun<G>` members over gradient tuple `G` (D-COMPUTE-VJP1=A): `.value`
+// is the primal Tensor, `.pull` maps a seed Tensor to `G`, and `.grads` is the
+// unit-seed pull's `G`.
+fn sema_expression_vjp_run_field(gradient: Type, member: String) -> Type? {
+    if member == "value" -> return Val(Type.Named{name: "Tensor"})
+    if member == "pull" -> return Val(Type.Fn{params: [Type]{Type.Named{name: "Tensor"}}, ret: Val(gradient), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    if member == "grads" -> return Val(gradient)
     None
 }
 

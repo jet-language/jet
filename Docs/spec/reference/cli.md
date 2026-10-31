@@ -578,8 +578,10 @@ positional words after the file; under the shorthand every word after the
 file is the program's (a `--` right after it only separates), so a
 `#!/usr/bin/env jet` file runs as `./file.jet args`. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
-starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
+starts. `--json` reports the same problems as the standard `diagnostics` JSON
+status envelope on stderr, leaving stdout to the program; it never changes the
+exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
+`--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
 
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.

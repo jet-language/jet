@@ -34,10 +34,10 @@ tests/cases/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_th
 tests/cases/closures/parallel_adapters_reject_unsafe_boundaries_before_codegen.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/compiler_api/compiler_queries_precede_source_facades_for_module_and_nested_aliases.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
 tests/cases/compiler_api/compiler_query_argument_types_are_checked_before_evaluation.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/compute_extended/curried_autodiff_shapes_share_the_prelude_handle.case	#5454	verify-intent: ref build failed: E0112 `compute.value_and_gradient` needs a function returning `Tensor`
-tests/cases/compute_extended/f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle.case	#5454	verify-intent: ref build failed: E0112 `compute.jvp` needs a function returning `Tensor`
+tests/cases/compute_extended/curried_autodiff_shapes_share_the_prelude_handle.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.value_and_gradient/jvp/vjp (autodiff runtime tape waits on ballot)
+tests/cases/compute_extended/f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient/jvp (autodiff runtime tape waits on ballot)
 tests/cases/compute_parity/compute_cpu_oracle_aot_covers_storage_algebra_and_corruption.case	#5454	verify-intent: ref build failed: E0112 `matmul_f32_tile` wants `Tensor` for argument 1, but this is `Matrix`<1, 1>
-tests/cases/compute_parity/named_gradient_composes_into_second_derivative.case	#5454	verify-intent: ref build failed: E0112 `compute.gradient` needs a pure Tensor function
+tests/cases/compute_parity/named_gradient_composes_into_second_derivative.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient (autodiff runtime tape waits on ballot)
 tests/cases/core_crypto_api/a_user_secret_name_does_not_acquire_a_builtin_decoder.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/core_crypto_api/secret_decode_uses_the_source_owned_text_codec.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/core_crypto_api/source_secret_decode_does_not_enable_secret_encoding.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -385,7 +385,6 @@ tests/cases/memory_semantics/memory_denial_matches_web_lowering.case	#5454	E2104
 tests/cases/send_fn_lowering/app_handlers_lower_to_verified_ir.case	#5454	E2104 `jet build --target=web` is not built yet (#5201)
 tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case	#5454	`jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496)
 tests/cases/compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers.case	#5454	E0112: the checker types `compute.matrix(..)` as `Matrix<1, 1>`, and `matmul_f32_tile` then rejects it as not a `Tensor` (#5494)
-tests/cases/compute_cuda/cuda_public_precision_gate_is_identical_on_all_tiers.case	#5454	E2104: the Jet backend has no runtime route for `jet_compute_full` (#5495)
 tests/cases/gate_ledger/i9_number_grid_repl_keeps_the_inline_range_behavior.case	#5454	`jet repl` is not built yet (E2104) (#4891)
 tests/cases/gate_ledger/i9_number_grid_web_keeps_the_shared_runtime_behavior.case	#5454	`jet build --target=web` is not built yet (E2104) (#5201)
 tests/cases/net_tls/comptime_fetch_rejects_outside_files_and_private_networks.case	#5454	E1004: `core.net` has no item `fetch`, so compile-time `net.fetch` never reaches its E3414 destination check (#5493)
@@ -394,7 +393,6 @@ tests/cases/prove/prove_caught_property_stop_does_not_capture_later_unit_panic.c
 tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target.case	#5454	jet run of the new ui scaffold is E0108: ui.mount third argument is SizeConstraint but got ui.SizeConstraint; jet build --target web is E2104 (#5201) (#5521)
 tests/cases/web_scaffold/jet_new_web_scaffold_runs_from_new_to_browser.case	#5454	jet build --target web is E2104 `jet build --target=web` is not built yet (#5201)
 tests/cases/jetpack_acquisition/non_tty_download_without_yes_fails_before_realization.case	#5454	needs a Jet-built jetpack binary (#4589)
-tests/cases/diagnostic_gate/warnings_never_choose_execution_exit_code.case	#5454	E2104 the Jet backend can't build main.jet: core.http.client get (runtime route jet_http_client_get) (#5519)
 tests/cases/power_and_exclusive_or/exclusive_or_needs_matching_integer_widths.case	#5454	U8 bit_xor I8 reports E0108 and Float bit_xor reports E0311 (no bit_xor on Float), not E0109 (#5524)
 tests/cases/power_and_exclusive_or/infix_caret_teaches_pow.case	#5454	`12 ^ 2` reports E0003 Expected `,` between call arguments, not E0398 (#5525)
 tests/cases/run_entry/loose_top_level_statements_require_explicit_run.case	#5454	`limit :: 2` then `print(limit)` reports only E0357 Constant `limit` must be ALL_CAPS; no E0621 (#5527)

@@ -77,11 +77,13 @@ enum JetCLIPlan {
     BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
-    // before `--`) shows advisory lints.
+    // before `--`) shows advisory lints; `json` (`--json`) reports the shown
+    // diagnostics as the `diagnostics` status on stderr, leaving stdout to
+    // the program and the exit code to the build or the program.
     // `watch` (`jet dev`): rerun the program whenever a package source changes.
     // `entry` is the command function the program starts at (`fn dev` for a
     // `jet dev` that selected one); None starts at the package's own entry.
-    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?)
+    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?)
     // `jet test <file>`: compile the checked test harness and run it under
     // `options` (native O0 unless its build options say otherwise).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
@@ -872,11 +874,11 @@ fn jet_cli_with_build_options(plan: ^JetCLIPlan, jet_argv: [String], quiet: Bool
                 .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: ^file, color: color, options: ^options, build_args: ^build_args, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
             }
         }
-        .Run(file, source, color, _, verbose, threads, program_args, invocation, notice, watch, entry) -> {
+        .Run(file, source, color, _, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {
             command :: if watch -> "dev" else -> "run"
             if jet_cli_build_options(jet_argv, command, file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
-                .Selected(options, notes) -> return JetCLIPlan.Run{file: ^file, source: ^source, color: color, options: ^options, verbose: verbose, threads: threads, program_args: ^program_args, invocation: ^invocation, notice: "{notice}{notes}", watch: watch, entry: ^entry}
+                .Selected(options, notes) -> return JetCLIPlan.Run{file: ^file, source: ^source, color: color, options: ^options, verbose: verbose, json: json, threads: threads, program_args: ^program_args, invocation: ^invocation, notice: "{notice}{notes}", watch: watch, entry: ^entry}
             }
         }
         else -> {}
@@ -1024,7 +1026,7 @@ fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default"}
 
 // `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
 // makes it `jet dev`.
@@ -1071,7 +1073,7 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
             program_args :: passthrough ?? jet_cli_tail(args, 2)
             selects_dev :: watch && !jet_argv.contains("--show-default") && jet_cli_top_level_function_lines(source, "dev").len() > 0
             function :: if selects_dev -> String?{Val("dev")} else -> String?{None}
-            return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: keep_watching, entry: function}
+            return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, json: jet_argv.contains("--json"), threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: keep_watching, entry: function}
         }
         else -> {}
     }

@@ -129,8 +129,8 @@ use jet.SHA256.[sha256_hex]
     root :: Scratch.new("lsp-checked-rename")
     fs.write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap()
     main :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn shadow(letter: Int) {{ print(letter) }}\n"
-    scoring :: "pub fn letter(score: Int) -> String -> \"A\"\n"
-    util :: "pub fn letter(score: Int) -> String -> \"unrelated\"\n"
+    scoring :: "fn letter(score: Int) -> String -> \"A\"\n"
+    util :: "fn letter(score: Int) -> String -> \"unrelated\"\n"
     sources :: [(_0: "run.jet", _1: main), (_0: "scoring.jet", _1: scoring), (_0: "util.jet", _1: util)]
     loop (name, source) in sources -> fs.write(root.join(name), source).unwrap()
     file_uri :: (name: String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29")
@@ -151,7 +151,7 @@ use jet.SHA256.[sha256_hex]
     definition :: request(&stdin, &stdout, "textDocument/definition", params(""))
     definition_result :: json_object_field(definition, "result")
     assert_eq(json_str(json_object_field(definition_result, "uri")), scoring_uri)
-    expected_definition_range :: parse_json("{{\"start\":{{\"line\":2,\"character\":7}},\"end\":{{\"line\":2,\"character\":13}}}}").unwrap()
+    expected_definition_range :: parse_json("{{\"start\":{{\"line\":2,\"character\":3}},\"end\":{{\"line\":2,\"character\":9}}}}").unwrap()
     assert_json_values_equal("definition", json_object_field(definition_result, "range"), expected_definition_range)
     references :: request(&stdin, &stdout, "textDocument/references", params(",\"context\":{{\"includeDeclaration\":true}}"))
     references_result :: json_array_field(references, "result")
@@ -209,7 +209,7 @@ use jet.SHA256.[sha256_hex]
     root :: Scratch.new("lsp-imported-reports")
     fs.write(root.join("package.jet"), "name: \"reports\"\nversion: \"0.1.0\"\n").unwrap()
     main :: "use \"scoring\"\nfn run() {{ print(scoring.letter(91)) }}\n"
-    scoring :: "pub fn letter(score: Int, offset: Int) -> String {{\n    adjusted = score + offset\n    return if {{\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }}\n}}\nfn repair_probe() {{\n    m :: [String:Int]{{}}\n    _ :: m.gett(\"a\")\n}}\n"
+    scoring :: "fn letter(score: Int, offset: Int) -> String {{\n    adjusted = score + offset\n    return if {{\n        adjusted >= 90 -> \"A\"\n        adjusted >= 80 -> \"B\"\n        else -> \"C\"\n    }}\n}}\nfn repair_probe() {{\n    m :: [String:Int]{{}}\n    _ :: m.gett(\"a\")\n}}\n"
     file_uri :: (name: String) -> "file://{root.join(name).display()}".replace('%', "%25").replace(' ', "%20").replace('(', "%28").replace(')', "%29")
     main_uri :: file_uri("run.jet")
     scoring_uri :: file_uri("scoring.jet")
@@ -338,8 +338,8 @@ use jet.SHA256.[sha256_hex]
     root :: Scratch.new("lsp-definition-identity-collisions")
     fs.write(root.join("package.jet"), "name: \"definition-collisions\"\nversion: \"0.1.0\"\n").expect("write definition collision package manifest")
     main_source :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn local(letter: Int) {{\n    print(letter)\n}}\n"
-    scoring_source :: "pub fn letter(score: Int) -> String {{ \"A\" }}\n"
-    util_source :: "pub fn letter(score: Int) -> String {{ \"unrelated\" }}\n"
+    scoring_source :: "fn letter(score: Int) -> String {{ \"A\" }}\n"
+    util_source :: "fn letter(score: Int) -> String {{ \"unrelated\" }}\n"
     fs.write(root.join("run.jet"), main_source).expect("write definition collision root")
     fs.write(root.join("scoring.jet"), scoring_source).expect("write scoring module")
     fs.write(root.join("util.jet"), util_source).expect("write util module")
@@ -363,12 +363,12 @@ use jet.SHA256.[sha256_hex]
     scoring :: parse_json(definition(2, 3, 19)).expect("scoring definition JSON")
     scoring_result :: json_object_field(scoring, "result")
     assert_eq(json_str(json_object_field(scoring_result, "uri")), scoring_uri)
-    expected_scoring :: parse_json("{{\"start\":{{\"line\":0,\"character\":7}},\"end\":{{\"line\":0,\"character\":13}}}}").unwrap()
+    expected_scoring :: parse_json("{{\"start\":{{\"line\":0,\"character\":3}},\"end\":{{\"line\":0,\"character\":9}}}}").unwrap()
     assert_json_values_equal("qualified scoring definition", json_object_field(scoring_result, "range"), expected_scoring)
     util :: parse_json(definition(3, 4, 17)).expect("util definition JSON")
     util_result :: json_object_field(util, "result")
     assert_eq(json_str(json_object_field(util_result, "uri")), util_uri)
-    expected_util :: parse_json("{{\"start\":{{\"line\":0,\"character\":7}},\"end\":{{\"line\":0,\"character\":13}}}}").unwrap()
+    expected_util :: parse_json("{{\"start\":{{\"line\":0,\"character\":3}},\"end\":{{\"line\":0,\"character\":9}}}}").unwrap()
     assert_json_values_equal("qualified util definition", json_object_field(util_result, "range"), expected_util)
     local :: parse_json(definition(4, 7, 12)).expect("local definition JSON")
     local_result :: json_object_field(local, "result")

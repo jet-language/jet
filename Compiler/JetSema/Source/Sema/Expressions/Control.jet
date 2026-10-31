@@ -37,6 +37,7 @@ use jet_foundation.[
     diagnostic_with_detail,
     expr_span,
     failure_contract_of_function,
+    is_compute_tensor_family,
     symbol_id,
     checked_symbol_local,
     type_identity_equal,
@@ -1251,7 +1252,13 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     // instead of on copies of the whole table and state.
     fork :: sema_ownership_fork(&state)
     fallback_mark :: sema_scope_mark(&scopes)
+    // A `?? panic` on a checked core.compute Tensor operation is that
+    // operation's failure route, which autodiff admits (Rust fallible.rs
+    // `compute_failure_fallback`); the route reads and clears the flag.
+    saved_safe_panic_context :: context.autodiff_safe_panic_context
+    context.autodiff_safe_panic_context = is_compute_tensor_family(payload) && sema_control_is_core_compute_call(value, environment, program)
     route :: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.autodiff_safe_panic_context = saved_safe_panic_context
     sema_scope_rollback(&scopes, fallback_mark)
     fallback_path :: sema_ownership_fork_path(state, fork)
     checked_route :: route ?? {
@@ -1288,6 +1295,16 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     sema_expr_expected(result, expected, environment, program, &diagnostics)
 }
 
+// Rust `is_core_compute_call`: a method call on the `core.compute` import
+// alias, such as `compute.mul(w, x)`.
+fn sema_control_is_core_compute_call(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    return if value == {
+        .Paren(inner, _, _) -> sema_control_is_core_compute_call(inner, environment, program)
+        .MethodCall(receiver, _, _, _, _, _, _) -> if receiver == .Ident(alias, _, _) -> sema_expr_core_import_module(environment, program, alias) == (Val("core.compute")) else -> false
+        else -> false
+    }
+}
+
 struct SemaOrFallbackRoute {
     payload: Type
     value: TOrFallback?
@@ -1317,6 +1334,10 @@ fn sema_fallback_unit_call_name(value: Expr, scopes: SemaScopeTable) -> String? 
 fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_ty: Type, payload: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, fallback_state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaOrFallbackRoute? {
     fallback_payload := payload
     fallback_tree := TOrFallback?{None}
+    // Only the `panic` route itself is the operation's failure fallback; a
+    // panic nested in any other fallback form (or in the panic message) is not.
+    safe_compute_panic :: context.autodiff_safe_panic_context
+    context.autodiff_safe_panic_context = false
     // copy: `outer_return_type` restores scopes.return_type after the fallback frame, which
     // overwrites it. Jet has no exchange on a field of the write-borrowed `scopes`, so the old
     // value is copied out before it is overwritten.
@@ -1449,6 +1470,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                 &diagnostics.push(sema_error("E0103", name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "write `or panic(\"message\")`"))
                 return None
             }
+            sema_compute_note_panic(&context, safe_compute_panic)
             message :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
             location := sema_expression_panic_location(environment, program, scopes, name_span)
             location.locals = sema_expression_panic_locals(scopes, name_span)

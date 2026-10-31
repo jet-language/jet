@@ -72,10 +72,10 @@ fn semindex_hello_json_shape(index: SemIndex) {
 // Original tests/semindex.rs814–920: C4 checks these exact two fixtures under
 // the SAME identity_reorder.jet path before calling the assertions below.
 fn semindex_envelope_reorder_before_source() -> String Never! {
-    "\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+    "\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
 }
 fn semindex_envelope_reorder_after_source() -> String Never! {
-    "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+    "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
 }
 fn semindex_identity_stable_across_reorder(before: SemIndex, after: SemIndex) {
     before_ids := [String]{}

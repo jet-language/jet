@@ -14,7 +14,7 @@ fn registry_function(name: String, scope: JobScope, after: [String], parallel: I
     function
 }
 fn registry_items(functions: [Func]) -> [Item] Never! {
-    loop function in functions -> Item.Func(function)
+    loop function in functions -> Item.Func{value: function}
 }
 fn registry_names(rows: [View<JobFact>]) -> String Never! {
     names :: loop row in rows -> row[0].name
@@ -30,7 +30,7 @@ fn registry_validation_error(registry: JobRegistry) -> String Never! {
 }
 fn registry_param(name: String, ty: Type, default: Expr?, variadic: Bool) -> Param Never! {
     span :: Span{start: 0, end: 0}
-    Param{convention: .Read, root: false, name: name, name_span: span, public_label: None, zone: .Either, ty: ty, ty_span: span, default: default, variadic: variadic, variadic_bound_list: None, declared_view_from_names: None}
+    Param{convention: .Read, root: false, name: name, name_span: span, public_label: None, zone: .Either, ty: ty, ty_span: span, default: default, variadic: variadic, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}
 }
 fn registry_optional(value: String?, expected: String) -> Bool Never! {
     text :: value ?? return false
@@ -87,15 +87,15 @@ fn registry_optional(value: String?, expected: String) -> Bool Never! {
         registry_param("self", .Int, None, false),
         registry_param("required", .String, None, false),
         registry_param("flag", .Bool, None, false),
-        registry_param("optional", .Option(.String), None, false),
+        registry_param("optional", Type.Option{inner: .String}, None, false),
         registry_param("rest", .String, None, true),
-        registry_param("unknown_default", .Int, Val(.Ident("later", span, _)), false),
-        registry_param("wrapped", .Int, Val(.Paren(.Int(7, span, None, None, _), span, _)), false),
-        registry_param("narrow", .Float32, Val(.Float(0.1, span, true, None, _)), false),
-        registry_param("wide", .Float, Val(.Float(1.0, span, false, None, _)), false)
+        registry_param("unknown_default", .Int, Val(Expr.Ident{name: "later", span: span, id: 0}), false),
+        registry_param("wrapped", .Int, Val(Expr.Paren{value: Expr.Int{value: 7, span: span, width: None, raw: None, id: 0}, span: span, id: 0}), false),
+        registry_param("narrow", .Float32, Val(Expr.Float{value: 0.1, span: span, is_f32: true, raw: None, id: 0}), false),
+        registry_param("wide", .Float, Val(Expr.Float{value: 1.0, span: span, is_f32: false, raw: None, id: 0}), false)
     }
-    function.markers = [Marker]{Marker{name: "Doc", negated: false, name_span: span, args: [MarkerCallArg]{.Expr(.Str([StrPart]{.Lit("first doc")}, span, _))}, arg_labels: [jet_foundation.CallLabel?]{None}, span: span, ct: None}}
-    function.every = Val(EveryMarker{arg: .Duration(None, Val(1.0), "s", span), span: span, resolved: None})
+    function.markers = [Marker]{Marker{name: "Doc", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "first doc"}}, span: span, id: 0}}}, arg_labels: [jet_foundation.CallLabel?]{None}, span: span, ct: None}}
+    function.every = Val(EveryMarker{arg: EveryArg.Duration{int: None, float: Val(1.0), suffix: "s", suffix_span: span}, span: span, resolved: None})
     argument_registry :: JobRegistry.from_items(registry_items([Func]{function}))
     facts :: argument_registry.jobs()
     args :: facts[0].arguments
@@ -103,10 +103,10 @@ fn registry_optional(value: String?, expected: String) -> Bool Never! {
     assert(!args[4].required && args[4].default == None)
     assert(registry_optional(args[5].default, "7") && registry_optional(args[6].default, "0.1") && registry_optional(args[7].default, "1.0"))
     assert(registry_optional(facts[0].doc, "first doc") && registry_optional(facts[0].schedule, "1s"))
-    function.every = Val(EveryMarker{arg: .Duration(None, Val(0.0000001), "s", span), span: span, resolved: None})
+    function.every = Val(EveryMarker{arg: EveryArg.Duration{int: None, float: Val(0.0000001), suffix: "s", suffix_span: span}, span: span, resolved: None})
     tiny :: JobRegistry.from_items(registry_items([Func]{function}))
     assert(registry_optional(tiny.jobs()[0].schedule, "0.0000001s"))
-    function.every = Val(EveryMarker{arg: .WallClock("08:30", span), span: span, resolved: None})
+    function.every = Val(EveryMarker{arg: EveryArg.WallClock{text: "08:30", text_span: span}, span: span, resolved: None})
     daily :: JobRegistry.from_items(registry_items([Func]{function}))
     assert(registry_optional(daily.jobs()[0].schedule, "day 08:30"))
 }

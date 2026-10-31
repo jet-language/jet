@@ -74,7 +74,7 @@ use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_fiel
     loop field in [
         "\"title\":\"on_start\"",
         "\"function\":{{\"name\":\"on_start\"",
-        "\"signature\":\"pub fn on_start(limit: Int{{1}}) -> Int\"",
+        "\"signature\":\"fn on_start(limit: Int{{1}}) -> Int\"",
         "\"visibility\":\"public\"",
         "\"docs\":\"Starts the scene.\"",
         "\"returns\":\"Int\"",
@@ -324,7 +324,7 @@ use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_fiel
     fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
     // Bare jet budget check resolves canonical run.jet.
     entry :: dir.join("src/run.jet")
-    fs.write(entry, "module perf.package {{\n    budgets: [Budget{{\n        name: \"public-api\",\n        scope: .Package,\n        metric: .PublicApiItems,\n        comparison: .Absolute,\n        limit: .AtMost(10),\n    }}],\n}}\npub fn api() {{}}\nfn run() {{}}\n").unwrap()
+    fs.write(entry, "module perf.package {{\n    budgets: [Budget{{\n        name: \"public-api\",\n        scope: .Package,\n        metric: .PublicApiItems,\n        comparison: .Absolute,\n        limit: .AtMost(10),\n    }}],\n}}\nfn api() {{}}\nfn run() {{}}\n").unwrap()
     out :: Command.new(OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())).current_dir(dir).args(["budget", "check", "--json"]).output().unwrap()
     assert_eq(out.status.code(), Val(0), "{String.from_utf8_lossy(out.stderr)}")
     command :: String.from_utf8(out.stdout).unwrap()
@@ -414,13 +414,13 @@ use Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_fiel
     dir :: temp_dir("package_config_discovery_boundary")
     entry :: dir.join("main.jet")
     fs.write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap()
-    fs.write(dir.join("one.jet"), "pub dev :: Config{{ version: \"1\" }}\n").unwrap()
+    fs.write(dir.join("one.jet"), "dev :: Config{{ version: \"1\" }}\n").unwrap()
     fs.write(entry, "fn run() {{}}\n").unwrap()
     composed :: Canvas.project_json_for_entry(entry)
     assert(composed.contains("\"name\":\"demo\""), "{composed}")
     assert(composed.contains("\"version\":\"1\""), "{composed}")
     assert(composed.contains("one.jet"), "{composed}")
-    fs.write(dir.join("two.jet"), "pub dev :: Config{{ version: \"2\" }}\n").unwrap()
+    fs.write(dir.join("two.jet"), "dev :: Config{{ version: \"2\" }}\n").unwrap()
     ambiguous :: Canvas.project_json_for_entry(entry)
     assert(ambiguous.contains("\"code\":\"E1206\""), "{ambiguous}")
     assert(ambiguous.contains("Config `dev` is ambiguous"), "{ambiguous}")
