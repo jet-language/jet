@@ -2550,6 +2550,12 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     if !allowed -> return false
     callee := sema_expr_call_callee(program, checked.value)
     foreign_effect_root :: sema_expr_call_foreign_effect_root(program, callee)
+    // Rust `check_foreign_transaction_call`: a foreign call is a boundary of
+    // an authored `#Transact` block unless its binding declares `#Undo`.
+    if scopes.transaction_wall_depth > 0 && sema_expr_call_foreign_without_undo(program, callee) {
+        &diagnostics.push(sema_effect_transaction_wall_diagnostic(sema_effect_call_api(program, checked.value), "FFI", span))
+        return false
+    }
     &context.call_facts.push(SemaCallSiteFact{
         span: span,
         caller_key: sema_scope_function_owner_key(scopes),
@@ -2587,6 +2593,21 @@ fn sema_expr_call_foreign_effect_root(program: SemaProgramTables, callee: Symbol
         if abi.is_extern -> return abi.foreign_effect_root
     }
     None
+}
+
+// Whether `callee` is an extern body (`#FFI(<lang>)` function or foreign
+// row) whose binding declares no `#Undo(inverse)`.
+fn sema_expr_call_foreign_without_undo(program: SemaProgramTables, callee: SymbolID?) -> Bool {
+    symbol :: callee ?? return false
+    if program.registration_graph == .Val(graph) {
+        row :: sema_registration_callable_row(graph, symbol.key) ?? return false
+        if row == {
+            .Function(module_index, index) -> return graph.modules[module_index].functions[index].abi.is_extern && graph.modules[module_index].functions[index].declaration.undo == None
+            .Foreign(module_index, index) -> return graph.modules[module_index].foreign_functions[index].declaration.undo == None
+            else -> return false
+        }
+    }
+    false
 }
 
 // The name of an `#Unsafe` inline foreign callee (`#[Unsafe("…"), FFI(c)]`),
