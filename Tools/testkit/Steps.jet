@@ -1134,6 +1134,16 @@ fn kit_steps_web_build(step: KitStep) -> Bool {
     false
 }
 
+// `jet build --help` / `-h` prints the command help and builds nothing.
+fn kit_steps_help_request(step: KitStep) -> Bool {
+    loop i in 2..<step.argv.len() {
+        argument :: step.argv[i]
+        if argument == "--" -> return false
+        if argument == "--help" || argument == "-h" -> return true
+    }
+    false
+}
+
 fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
     state := previous
     if step.argv[0] == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step requires golden entry; cases use jet build")}
@@ -1141,7 +1151,7 @@ fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: Ki
     policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid process policy")
     overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
     state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay)
-    if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
+    if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && !kit_steps_help_request(step) && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
         cwd :: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
         entry := kit_steps_build_entry(step)
         if files.exists(files.join(files.join(cwd, entry), "run.jet")) -> entry = files.join(entry, "run.jet")

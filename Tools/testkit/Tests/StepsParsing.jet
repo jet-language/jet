@@ -113,6 +113,13 @@ fn kit_test_steps_env() -> KitEnv {
     assert(!kit_steps_web_build(kit_steps_parse("step: jet build --target linux main.jet\n").steps[0]))
 }
 
+#Test("a build help request expects no artifact") {
+    assert(kit_steps_help_request(kit_steps_parse("step: jet build --help\n").steps[0]))
+    assert(kit_steps_help_request(kit_steps_parse("step: jet build -h\n").steps[0]))
+    assert(!kit_steps_help_request(kit_steps_parse("step: jet build main.jet\n").steps[0]))
+    assert(!kit_steps_help_request(kit_steps_parse("step: jet build main.jet -- --help\n").steps[0]))
+}
+
 #Test("default step hooks resolve built after an explicit successful CLI build") {
     root :: kit_test_core_scratch("steps-built")
     kit_exec_write(files.join(root, "hello.jet"), "fn run() {{ print(\"hello\") }}\n")
