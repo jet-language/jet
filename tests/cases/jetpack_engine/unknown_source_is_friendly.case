@@ -1,7 +1,9 @@
 # HAND-PORT tests/jetpack_engine.rs:3948-3957 unknown_source_is_friendly
 # PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 env: NO_COLOR=1
-step: jetpack build wget@brew --no-color
+# `brew` is now a recognised tool provider (E1298), so the unknown source is spelled `nowhere`.
+step: jetpack use --prep wget@nowhere --no-color
 exit: 2
 stderr: ~ "not a known source" # original contains predicate
 

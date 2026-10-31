@@ -399,6 +399,21 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     left
 }
 
+// `s = ""` on a place that always holds a value: this owner is consumed. A
+// sole heap owner keeps its buffer, emptied (and its cache word cleared, as
+// rt_text_writable does), so refilling it reuses the capacity. A shared or
+// static `value` keeps its bytes: this owner is released and the result is
+// the static empty text.
+#Export(c) fn jet_rt_string_clear(value: I64) -> I64 {
+    if (!rt_text_immortal(value) && jet_rt_rc_unique(value - I64{8})) {
+        rt_text_store(value + I64{8}, I64{0})
+        rt_text_store(value + I64{24}, I64{0})
+        return value
+    }
+    jet_rt_string_drop(value)
+    rt_static_text("")
+}
+
 // Release one owner; the last owner frees the buffer and the block. Static
 // rt_static_text headers are immortal and never freed.
 #Export(c) fn jet_rt_string_drop(value: I64) {

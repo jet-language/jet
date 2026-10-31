@@ -44,6 +44,7 @@ use jet_foundation.[
     diagnostic_with_edit_grade,
     diagnostic_with_label,
     diagnostic_with_detail,
+    expr_source_span,
     expr_span,
     type_identity_equal,
     type_name,
@@ -135,6 +136,9 @@ struct SemaOwnershipMoveOrigin {
     // The moved binding's type when the move names a plain binding, so the
     // later use can say why a one-pass source has no copy to give.
     moved_ty: Type?{None}
+    // The whole `^place` of an exact move: the E0121 label covers the mark
+    // that moved the value, not only the place after it.
+    label_span: Span?{None}
 }
 
 // A lambda whose body takes a captured name with `^`.
@@ -2354,7 +2358,7 @@ fn sema_ownership_diag_moved(place: String, origin: SemaOwnershipMoveOrigin, spa
         "After a value moves somewhere else, its old name no longer gives access to it",
         "Stop using `{place}` after the move, or give {consumer} a copy with `{place}.copy()` where it moved.",
     )
-    labeled :: diagnostic_with_label(^diagnostic, origin.span, label)
+    labeled :: diagnostic_with_label(^diagnostic, origin.label_span ?? origin.span, label)
     if origin.moved_ty == .Val(ty) && sema_call_reflection_one_pass(ty) -> return diagnostic_with_detail(^labeled, sema_ownership_one_pass_note(place, ty))
     labeled
 }
@@ -3093,7 +3097,7 @@ fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr, sco
     // (#3714): `^place` is one exact move. The expression
     // check and the consuming position both reach it, so a place this very
     // mark already moved is the same move, not a use after it.
-    if expr == .Place(value, access, _, _) {
+    if expr == .Place(value, access, mark_span, _) {
         if access == PlaceAccess.Take {
             loop place in sema_ownership_places_from_expr_in_state(value, scopes, &state) {
                 if sema_ownership_place_moved(&state, place) == .Val(moved) {
@@ -3102,13 +3106,24 @@ fn sema_ownership_consume_expression(state: &SemaOwnershipState, expr: Expr, sco
             }
             if !sema_ownership_check_expression(&state, value, scopes, &diagnostics) -> return false
             // Exact projected takes enter the same recorder as whole roots.
-            if sema_ownership_places_from_expr_in_state(value, scopes, &state).len() > 0 -> return sema_ownership_mark_move(&state, value, scopes, consumer, &diagnostics)
+            if sema_ownership_places_from_expr_in_state(value, scopes, &state).len() > 0 {
+                if !sema_ownership_mark_move(&state, value, scopes, consumer, &diagnostics) -> return false
+                sema_ownership_label_moves(&state, expr_span(value), mark_span)
+            }
             return true
         }
     }
     if !sema_ownership_check_expression(&state, expr, scopes, &diagnostics) -> return false
     if sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0 -> return sema_ownership_mark_unmarked_move(&state, expr, scopes, consumer, &diagnostics)
     true
+}
+
+// Moves just recorded at `origin_span` show their E0121 label on `label_span`:
+// the whole `^place` of an exact move, or a field receiver's full place.
+fn sema_ownership_label_moves(state: &SemaOwnershipState, origin_span: Span, label_span: Span) {
+    loop index in 0..<state.moved.len() {
+        if sema_ownership_span_same(state.moved[index].origin.span, origin_span) -> state.moved[index].origin.label_span = Val(label_span)
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -3386,7 +3401,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
             if sema_ownership_argument_is_function_item(arg, scopes) -> next
             if take_lent {
                 accepted = false
-                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
+                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_source_span(arg.expr)))
                 next
             }
             // A name in two argument slots of one call has
@@ -3424,13 +3439,13 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
         // move the backend would find used after it was moved.
         if take_lent && sema_ownership_takes_projected_place(arg) {
             accepted = false
-            &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
+            &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_source_span(arg.expr)))
             next
         }
         if !mark_implicit_take && param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted && sema_ownership_unmarked_moves_name(arg.expr) {
             if take_lent {
                 accepted = false
-                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_span(arg.expr)))
+                &diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_source_span(arg.expr)))
                 next
             }
             if !sema_ownership_mark_move(&state, arg.expr, scopes, "`{callee}`", &diagnostics) -> accepted = false
@@ -3764,7 +3779,12 @@ fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: E
             capability -> sema_ownership_check_write(&state, receiver, "", scopes, &diagnostics)
             else -> sema_ownership_check_write_change(&state, receiver, "", scopes, &diagnostics)
         }
-        .Move -> sema_ownership_mark_move(&state, receiver, scopes, if consumer == "" -> "a consuming method call" else -> consumer, &diagnostics)
+        .Move -> {
+            if !sema_ownership_mark_move(&state, receiver, scopes, if consumer == "" -> "a consuming method call" else -> consumer, &diagnostics) -> return false
+            // A field receiver's own span is its name; the label covers the place.
+            sema_ownership_label_moves(&state, expr_span(receiver), expr_source_span(receiver))
+            true
+        }
         else -> sema_ownership_check_use(&state, receiver, scopes, &diagnostics)
     }
 }
@@ -3934,8 +3954,10 @@ fn sema_receiver_mark_finish(state: &SemaOwnershipState, receiver: Expr, scopes:
     if needed == "^" && receiver_last_use -> return
     verb :: if needed == "&" -> "writes" else -> "takes"
     place_name :: sema_ownership_place_name(places[0])
-    span :: expr_span(receiver)
-    &diagnostics.push(diagnostic_with_edit(sema_error("E0224", span, "this call {verb} `{place_name}`, but `{place_name}` has no `{needed}` mark", "the method's receiver convention {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments", "write `{needed}` before the place"), TextEdit{span: Span{start: span.start, end: span.start}, new_text: needed}))
+    // The whole receiver place (`holder.buf`), so the caret and the `^` edit
+    // sit where the mark belongs; a field's own span is only its name.
+    span :: expr_source_span(receiver)
+    &diagnostics.push(diagnostic_with_edit(sema_error("E0224", span, "this call {verb} `{place_name}`, but `{place_name}` has no `{needed}` mark", "the method is declared with `{needed}self`, so the call {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments", "write `{needed}{place_name}`"), TextEdit{span: Span{start: span.start, end: span.start}, new_text: needed}))
 }
 
 fn sema_ownership_check_method_call(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {

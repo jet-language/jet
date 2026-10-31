@@ -171,6 +171,7 @@ fn parser_take_pattern_text_hole(state: &JetParserState, part: StringPart) -> St
         if parser_aborting(&state) -> return StrMatchPart.Hole{name: name, ty: None, span: name_token.span}
         loop diagnostic in nested.diagnostics -> &state.diagnostics.push(diagnostic)
         state.abort_mark = state.diagnostics.len()
+        state.abort_position = state.position
         return StrMatchPart.Hole{name: name, ty: None, span: name_token.span}
     }
     span := name_token.span
@@ -240,7 +241,7 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
         }
     }
     if end < 2 || Int.from_u8(bytes[0]) != 85 {
-        parser_add_error_code(&state, "E1007", span, "`{spec}` is not a valid binary bit width", "a bit field uses `U` followed by a width from 1 through 64", "write `U4`, `U8`, `U16be`, or `U32le`")
+        parser_add_error_code(&state, "E1007", span, "`{spec}` isn't a valid bit width in a binary pattern", "a bit field is `U` followed by a width of 1 to 64 bits, optionally with a `be`/`le` byte order", "write e.g. `U4`, `U8`, `U16be`, or `U32le`")
         return BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
     }
     width := 0
@@ -254,7 +255,7 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
         index += 1
     }
     if digits == 0 || index != end || width < 1 || width > 64 {
-        parser_add_error_code(&state, "E1007", span, "`{spec}` is not a valid binary bit width", "a bit field uses `U` followed by a width from 1 through 64", "write `U4`, `U8`, `U16be`, or `U32le`")
+        parser_add_error_code(&state, "E1007", span, "`{spec}` isn't a valid bit width in a binary pattern", "a bit field is `U` followed by a width of 1 to 64 bits, optionally with a `be`/`le` byte order", "write e.g. `U4`, `U8`, `U16be`, or `U32le`")
         return BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
     }
     if {
@@ -358,7 +359,7 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
         loop part in body.parts {
             if part.kind != STRING_PART_INTERPOLATION || parser_pattern_hole_shape_ok(part) -> next
             bad_span :: if part.tokens.len() > 0 -> part.tokens[0].span else -> body.span
-            parser_add_error(&state, bad_span, "a `take_pattern` hole must be a bare name, optionally typed", "each hole binds a name or a typed, fallibly-parsed name, the same grammar an `if ==` pattern hole uses", "write `{{name}}` or `{{name:Type}}`")
+            parser_add_error(&state, bad_span, "a `take_pattern` hole must be a bare name, optionally typed", "each `{{hole}}` binds a name (`{{id}}`) or a typed, fallibly-parsed name (`{{id:Int}}`) — the same grammar an `if == {{}}` pattern hole uses", "write `{{name}}` or `{{name:Type}}`")
             return ParsedExpr{expr: Expr.Unit{span: body.span, id: parser_node_id(&state)}, span: body.span}
         }
         parts := parser_take_pattern_text_parts(&state, body.parts)

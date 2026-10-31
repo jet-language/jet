@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:3459-3486 run_dash_dash_executes_in_env_and_returns_status
 # PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+# Retargeted off the retired `jetpack run` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 env: NO_COLOR=1
 refused: hangar-verified-fixture
 # Verbatim original setup and ALL predicates; no passing substitute for the named seam.
@@ -36,7 +37,7 @@ mkdir: root
 mkdir: project
 mkdir: fixtures
 env: JETPACK_FIXTURES={work}/fixtures
-step: jetpack run greet@nixpkgs --no-color --offline -- greet
+step: jetpack use greet@jetpack --no-color --offline -- greet
 exit: 0
 stdout.trim: = run_dash_dash_executes_in_env_and_returns_status.expected # original compares trimmed output
 

@@ -13,6 +13,7 @@ use jet_foundation.[
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
+    type_identity_equal,
     type_name,
 ]
 
@@ -273,6 +274,14 @@ fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Dia
 
 fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    // Rust type_assign.rs:1430: a plain value offered to a `T?` slot is a payload mismatch (D-OPT-LIFT1=A).
+    if required == .Option(payload) {
+        offered_optional :: offered == .Option(_)
+        if !offered_optional {
+            fix :: if type_identity_equal(payload, offered) -> "this position does not lift a plain value; write `Val(...)`" else -> sema_type_fix_hint(payload, offered)
+            return sema_error("E0108", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "`{type_name(required)}` means a `{type_name(payload)}` or `None`", fix)
+        }
+    }
     required_name :: type_name(required)
     offered_name :: type_name(offered)
     // `/` of two whole numbers is an exact Fraction; storing it in an Int

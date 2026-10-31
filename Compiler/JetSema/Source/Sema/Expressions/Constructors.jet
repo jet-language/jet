@@ -1112,6 +1112,10 @@ fn sema_expression_compiler_unit_enum_literal(enum_name: String, variants: [Stri
 fn sema_expression_enum_payload_mismatch(enum_name: String, variant: String, field: String?, declared: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     required :: sema_expr_expected_type(declared, environment, program)
     actual :: sema_expr_expected_type(offered, environment, program)
+    // Rust CheckerItems.rs:4071: a hook decision's payload is checked against the hook's declared payload or error type.
+    if field == None && (enum_name == "HookDecision" || enum_name == "HookOutcome") && (variant == "Transform" || variant == "Continue" || variant == "Fail") {
+        return sema_error("E0108", span, "`{enum_name}.{variant}` needs {sema_type_show(required)}, not {sema_type_show(actual)}", "the decision payload must match the hook's declared payload or error type", sema_type_fix_hint(required, actual))
+    }
     slot :: if field == .Val(label) -> "field `{label}` of `{enum_name}.{variant}`" else -> "the payload of `{enum_name}.{variant}`"
     sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(actual)}", "a variant payload keeps the type its enum declaration gives it", sema_type_fix_hint(required, actual))
 }

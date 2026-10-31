@@ -185,12 +185,12 @@ fn cases_test_advanced(root: String, name: String, source: String) -> KitOutcome
     directory :: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "left.out"), "left")
     kit_exec_write(files.join(directory, "right.out"), "right")
-    source :: "spawn left: jet -c 'touch left; while [ ! -f right ]; do sleep 0.01; done; printf left'\nlimit: time=2 memory=65536\nspawn right: jet -c 'touch right; while [ ! -f left ]; do sleep 0.01; done; printf right'\nlimit: time=2 memory=65536\nwait left:\nstdout: = left.out\nstderr: empty\nwait right:\nstdout: = right.out\nstderr: empty\n"
+    source :: "spawn left: jet -c 'touch left; while [ ! -f right ]; do sleep 0.01; done; printf left'\nlimit: time=2 memory=65536\nspawn right: jet -c 'touch right; while [ ! -f left ]; do sleep 0.01; done; printf right'\nlimit: time=2 memory=65536\nwait left\nstdout: = left.out\nstderr: empty\nwait right\nstdout: = right.out\nstderr: empty\n"
     assert_eq(cases_test_advanced(root, "concurrent", source).verdict.status, "PASS")
-    loop invalid in ["spawn x: printf x\n", "spawn x: printf x\nspawn x: printf y\nwait x:\n", "wait unknown:\n", "spawn x: printf x\nwait x:\nwait x:\n"] {
+    loop invalid in ["spawn x: printf x\n", "spawn x: printf x\nspawn x: printf y\nwait x\n", "wait unknown\n", "spawn x: printf x\nwait x\nwait x\n"] {
         assert_eq(cases_test_advanced(root, "invalid", invalid).verdict.status, "REFUSED")
     }
-    failed :: "spawn sleeping: jet -c 'exec sleep 20'\nlimit: time=2\nstep: printf wrong\nstdout: = left.out\nwait sleeping:\n"
+    failed :: "spawn sleeping: jet -c 'exec sleep 20'\nlimit: time=2\nstep: printf wrong\nstdout: = left.out\nwait sleeping\n"
     assert_eq(cases_test_advanced(root, "cleanup", failed).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove spawn scratch")
 }

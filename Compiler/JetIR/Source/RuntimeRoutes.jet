@@ -2527,6 +2527,8 @@ IR_WORD_RECORDS :: comptime { [IRRuntimeWordRecord]{
 // Fields of runtime handle structs readable in place (Places.jet):
 // Scalar/native handle fields lend storage; Text and header_bytes carriers
 // write read-only caller stack headers, never owned/freeable field values.
+// A "Text.Owned" field the carrier derives (no stored text) returns a fresh
+// String the read owns.
 struct IRHandleField { runtime: String, field: String, kind: String, header_bytes: Int }
 
 IR_HANDLE_FIELDS :: comptime { [IRHandleField]{
@@ -2654,6 +2656,8 @@ IR_HANDLE_FIELDS :: comptime { [IRHandleField]{
     IRHandleField{runtime: "JetUDPPacket", field: "addr", kind: "Handle.JetSocketAddr", header_bytes: 56},
     IRHandleField{runtime: "JetUDPPacket", field: "truncated", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "JetUDPPacket", field: "data", kind: "List.Byte", header_bytes: 24},
+    IRHandleField{runtime: "JetUDPPacket", field: "host", kind: "Text.Owned", header_bytes: 0},
+    IRHandleField{runtime: "JetUDPPacket", field: "port", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "JetUDPPacket", field: "original_len", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "JetUiClipboardText", field: "text", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "JetUiFileDialogRequest", field: "title", kind: "Text", header_bytes: 0},

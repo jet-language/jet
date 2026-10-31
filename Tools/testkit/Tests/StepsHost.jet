@@ -50,7 +50,7 @@ use core.sys as sys
     root :: cases_test_root("host-environment")
     directory :: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "environment.out"), "base:next\nalpha\nbeta\n")
-    source :: "env: VALUE=base\nstep: printf '%s\\n' {{env:VALUE}} {{env-words:WORDS|alpha beta}}\nenv: VALUE={{env:VALUE}}:next\nstdout: = environment.out\n"
+    source :: "env: VALUE=base\nstep: printf '%s\\\\n' {{env:VALUE}} {{env-words:WORDS|alpha beta}}\nenv: VALUE={{env:VALUE}}:next\nstdout: = environment.out\n"
     assert_eq(cases_test_advanced(root, "effective", source).verdict.status, "PASS")
     kit_exec_write(files.join(directory, "wrong.out"), "wrong")
     wrong :: "step: printf '%s' {{env:ABSENT_TESTKIT|fallback}}\nstdout: = wrong.out\n"
@@ -93,6 +93,18 @@ use core.sys as sys
     cases_test_source(root, "ports-wrong", "step: printf \"%s\" {{free-port:app}}\nstdout: = \"wrong\"\n")
     assert_eq(kit_cases_run(cases_test_entry("ports-wrong"), context)[0].verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove free-port scratch")
+}
+
+#Test("free-port tokens in a write template are reserved in the case's one probe run") {
+    root :: cases_test_root("host-template-ports")
+    kit_exec_write(files.join(root, "tests/cases/group/port.template"), "{{free-port:templated}}")
+    cases_test_source(root, "template", "write: port.txt port.template\nstep: cat port.txt\nstdout: is-u32 # a port\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.jet = sys.get("TESTKIT_JET") ?? panic("TESTKIT_JET must name the pinned real compiler for the free-port self-test")
+    context.env.root = files.cwd() ?? panic("free-port probe source root")
+    context.env.timeout = 600s
+    assert_eq(kit_cases_run(cases_test_entry("template"), context)[0].verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove template free-port scratch")
 }
 
 #Test("host-triple and capture condition atoms execute setup from real case text") {
@@ -259,7 +271,7 @@ use core.sys as sys
     assert_eq(kit_steps_parse_case(source).error, "")
     assert_eq(cases_test_advanced(root, "platform", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "wrong", source.replace("cap:chosen: = \"ready\"", "cap:chosen: = \"wrong\"")).verdict.status, "FAIL")
-    loops :: "step producer: printf 'a\\nb\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name not-a-host: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
+    loops :: "step producer: printf 'a\\\\nb\\\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name not-a-host: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
     assert_eq(kit_steps_parse_case(loops).error, "")
     assert_eq(cases_test_advanced(root, "scopes", loops).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove platform capture scratch")

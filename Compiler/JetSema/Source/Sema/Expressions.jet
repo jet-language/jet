@@ -1625,7 +1625,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             return None
         }
         if !sema_expr_distinct_same(lhs.ty, rhs.ty, left_facts, right_facts) {
-            &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "`#Numeric` distinct types only support arithmetic between the same type", "both sides must be `{distinct.name}`"))
+            &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "`#Numeric` distinct types only support arithmetic between the same type", "both sides must be `{distinct.name}`"))
             return None
         }
         effective_lhs := lhs
@@ -1803,7 +1803,7 @@ fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact
     }
     if sema_scope_unit_explicit_units(scopes) {
         method := sema_expr_unit_conversion_method(source)
-        &diagnostics.push(sema_error("E0127", span, "`explicit_units` requires a written conversion", "this scope does not convert `{source.name}` to `{destination.name}` implicitly", "write `{destination.name}.{method}(expr)"))
+        &diagnostics.push(sema_error("E0127", span, "`explicit_units` requires a written conversion", "this scope does not convert `{source.name}` to `{destination.name}` implicitly", "write `{destination.name}.{method}(expr)`"))
         return false
     }
     true
@@ -1915,7 +1915,7 @@ fn sema_expr_unit_conversion(value: TExpr, source: SemaRegistrationUnitFact, des
 }
 
 fn sema_expr_unit_arithmetic_mismatch(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs)}` and `{type_name(rhs)}`", "unit-family arithmetic only defines scalar scaling and physical dimension algebra; nominal units and affine points do not multiply or divide", "scale a linear unit or delta by a plain numeric scalar, or use a dimensioned linear/delta family for physical products"))
+    &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available between `{type_name(lhs)}` and `{type_name(rhs)}`", "unit-family arithmetic only defines scalar scaling and physical dimension algebra; nominal units and affine points do not multiply or divide", "scale a linear unit or delta by a plain numeric scalar, or use a dimensioned linear/delta family for physical products"))
 }
 
 fn sema_expr_unit_dimension_mismatch(op: BinOp, left: Dimension, right: Dimension, span: Span, diagnostics: &[Diagnostic]) {
@@ -3977,7 +3977,7 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
         &diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
         return None
     }
-    &diagnostics.push(sema_error("E0109", span, "logical `!` needs Bool", "arithmetic uses named methods", "compare the value to produce Bool; use `value.bit_not()` for an integer"))
+    &diagnostics.push(sema_error("E0109", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
     None
 }
 
@@ -4295,6 +4295,25 @@ fn sema_expr_lint_ident(expr: Expr) -> String Never! {
     ""
 }
 
+// Rust `simple_text_operand` (binary.rs): a bare name, looking through parentheses.
+fn sema_expr_simple_text_operand(expr: Expr) -> String Never! {
+    if expr == {
+        .Paren(inner, _, _) -> return sema_expr_simple_text_operand(inner)
+        .Ident(name, _, _) -> return name.copy()
+        else -> return ""
+    }
+}
+
+// Rust binary.rs:2619: text joined with `+` teaches interpolation (S8).
+fn sema_expr_text_plus(left: Expr, right: Expr, span: Span) -> Diagnostic {
+    left_name :: sema_expr_simple_text_operand(left)
+    right_name :: sema_expr_simple_text_operand(right)
+    if left_name != "" && right_name != "" {
+        return sema_error("E0109", span, "text values `{left_name}` and `{right_name}` aren't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one string: \"{{{left_name}}}{{{right_name}}}\"")
+    }
+    sema_error("E0109", span, "text isn't joined with `+`", "there's one way to build text: interpolation (S8)", "write the pieces inside one interpolated string")
+}
+
 fn sema_expr_lint_normalized_path_text(name: String, scopes: SemaScopeTable) -> Bool Never! {
     index :: sema_scope_resolve_index(scopes, name) ?? return false
     scopes.bindings[index].normalized_path_text
@@ -4446,6 +4465,10 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     if op == BinOp.And || op == BinOp.Or {
+        // Rust binary.rs:1207-1246: each side of `||`/`&&` is reported at its own span (D-S25-RETIRE1=A).
+        if lhs.ty != Type.Bool -> &diagnostics.push(sema_error("E0110", lhs.span, "the left side of `{sema_expr_binary_name(op)}` must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(lhs.ty)}", "logic joins yes/no values", "compare the value to something first"))
+        if rhs.ty != Type.Bool -> &diagnostics.push(sema_error("E0110", rhs.span, "the right side of `{sema_expr_binary_name(op)}` must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(rhs.ty)}", "each side of a logic operator must be a yes/no comparison", "write the full comparison, e.g. `x == 2`"))
+        if lhs.ty != Type.Bool || rhs.ty != Type.Bool -> return None
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
         value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span}
         if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
@@ -4515,7 +4538,7 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         return sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if (op == BinOp.Add && left_point && right_point) || (op == BinOp.Sub && left_delta && right_point) {
-        &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
+        &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
         return None
     }
     duration := sema_expr_check_duration_binary(op, lhs, rhs, span)
@@ -4523,7 +4546,7 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
     time := sema_expr_check_time_binary(op, lhs, rhs, span, line)
     if time != None -> return sema_expr_expected(time ?? lhs, expected, environment, program, &diagnostics)
     if (lhs.ty == Type.Named{name: "Instant"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Add) || (lhs.ty == Type.Named{name: "Duration"} && rhs.ty == Type.Named{name: "Instant"} && op == BinOp.Sub) {
-        &diagnostics.push(sema_error("E0127", span, "{sema_expr_binary_name(op)} is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
+        &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two Instants for a Duration, or add a Duration to an Instant"))
         return None
     }
     unit_present := sema_expr_unit_fact(lhs.ty, environment, program) != None || sema_expr_unit_fact(rhs.ty, environment, program) != None || sema_expr_unit_dimension(lhs.ty, environment, program) != None || sema_expr_unit_dimension(rhs.ty, environment, program) != None
@@ -4639,6 +4662,10 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
     if op == BinOp.Pow && effective_lhs.ty == Type.Int && effective_rhs.ty == Type.Int && sema_expr_written_negative_integer(right) {
         exact :: sema_expr_negative_int_power(effective_lhs, effective_rhs, line, span)
         return sema_expr_expected_owned(^exact, expected, environment, program, &diagnostics)
+    }
+    if op == BinOp.Add && effective_lhs.ty == Type.String {
+        &diagnostics.push(sema_expr_text_plus(left, right, span))
+        return None
     }
     ty :: sema_expr_binary_type(op, effective_lhs.ty, effective_rhs.ty, span, &diagnostics) ?? return None
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Pow) && ty == .IntN(_, _) && context.arithmetic_policy == .Val(policy) {

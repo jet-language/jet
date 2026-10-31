@@ -80,7 +80,7 @@ fn services_up_ordered(host: ServiceHost, project_dir: String, env: &ShellEnv, p
 
 // Start selected enabled services in one dependency-first lifecycle. The
 // hook is the only caller-owned step; startup, readiness, and rollback stay
-// here for both the CLI and dev entry points.
+// here for every entry point.
 fn services_up_ordered_with(host: ServiceHost, project_dir: String, env: &ShellEnv, plans: [DevServicePlan], selected: [Int], timeout: Duration, before_start: fn(DevServicePlan) ServicesError!) -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> [Int] ServicesError! {
     order :: services_dependency_order(plans)
     chosen :: services_selected_dependency_order(plans, order, selected)

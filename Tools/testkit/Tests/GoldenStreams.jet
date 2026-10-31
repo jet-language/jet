@@ -162,6 +162,8 @@ fn kit_test_golden_env(root: String) -> KitEnv {
         assert(outcome.verdict.detail.contains("#4867"))
     }
     kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
+    // o2 (`--release`) prints the release value; its own file pins it.
+    kit_exec_write(files.join(root, "{entry.expected}.o2.out"), "wrong tier\n")
     loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
     kit_exec_write(files.join(root, "{entry.expected}.case"), "# KNOWN-FAILING #4868\n")
     loop outcome in kit_golden_run_suite(entry, context) {

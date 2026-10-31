@@ -144,8 +144,12 @@ fn jet_cli_find_parameter_type(part: String) -> String? Never! {
 }
 
 // CmdSemIndex.rs `signature_shape`: the call shape of a rendered symbol
-// signature, read between its first `(` and its last `)`.
-fn jet_cli_find_signature_shape(signature: String) -> JetCLIFindShape? Never! {
+// signature, read between the first `(` and the last `)` of its declaration
+// line. Source signatures carry a `failure:` line after it, whose own
+// parentheses are not part of the call shape.
+fn jet_cli_find_signature_shape(rendered: String) -> JetCLIFindShape? Never! {
+    signature := rendered
+    if jet_cli_find_split_once(rendered, "\n") == .Val(lines) -> signature = lines[0]
     open :: jet_cli_find_byte(signature, 40, false)
     close :: jet_cli_find_byte(signature, 41, true)
     if open < 0 || close < 0 || close < open -> return None

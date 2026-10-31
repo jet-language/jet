@@ -280,6 +280,27 @@ fn sema_expression_list_inference_error(element: Type, expected: Type, index: In
     &diagnostics.push(sema_error("E0504", span, "this list resolves to `{type_name(expected)}` but item {index + 1} is `{type_name(element)}`", "every item in a list literal must have the same type", "make every element the same type, or build the list in steps"))
 }
 
+// (Rust `check_list_element_assignable`): an item that does not fit the
+// list's element type is E0112 about the list item, after a checked
+// typed-text rejection.
+fn sema_expression_list_item_mismatch(required: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    want :: sema_expr_expected_type(required, environment, program)
+    got :: sema_expr_expected_type(offered, environment, program)
+    if sema_typed_text_mismatch(want, got, span) == .Val(typed_text) -> return typed_text
+    sema_error("E0112", span, "a list item needs {sema_type_show(want)}, but this is {sema_type_show(got)}", "every list item must match the list's element type", sema_type_fix_hint(want, got))
+}
+
+// The item's own check rejected it against the element type with the generic
+// E0108 at the item; that report becomes the list item's E0112, with the
+// item's own type inferred without the element type as a target.
+fn sema_expression_list_item_replace_mismatch(required: Type, element: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    element_span :: expr_span(element)
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, element_span) ?? return
+    probe_diagnostics := [Diagnostic]{}
+    offered :: sema_probe_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_expression_list_item_mismatch(required, offered.ty, element_span, environment, program)
+}
+
 fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaExpressionListCheckedParts? {
     checked_parts := [TListSpreadPart?]{}
     element_types := [Type?]{}
@@ -321,15 +342,19 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
                 // A `[View<str>]` item reads a string view as itself, as a
                 // `View<str>` field does.
                 string_view :: if expected_element == .Val(required) -> sema_stmt_string_view_type(required) else -> false
+                checked_start :: diagnostics.len()
                 checked :: if string_view -> sema_string_view_check_field(element, expected_element ?? Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else if expected_element != None -> sema_check_expression(element, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                value :: checked ?? return None
+                value :: checked ?? {
+                    if expected_element == .Val(required) -> sema_expression_list_item_replace_mismatch(required, element, checked_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return None
+                }
                 if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
                 if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
                 if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
                 if expected_element == .Val(required) {
                     compatible :: sema_expr_expected_assignable(required, value.ty, environment, program) ?? return None
                     if !compatible {
-                        &diagnostics.push(sema_error("E0112", expr_span(element), "A list item needs {sema_type_show(sema_expr_expected_type(required, environment, program))}, but this is {sema_type_show(sema_expr_expected_type(value.ty, environment, program))}", "Every list item must match the list's element type", "Use {sema_type_show(sema_expr_expected_type(required, environment, program))} here"))
+                        &diagnostics.push(sema_expression_list_item_mismatch(required, value.ty, expr_span(element), environment, program))
                         return None
                     }
                 }

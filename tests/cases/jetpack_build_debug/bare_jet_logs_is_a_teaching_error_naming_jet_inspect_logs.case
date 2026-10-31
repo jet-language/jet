@@ -1,8 +1,9 @@
 # Port of tests/jetpack_build_debug.rs:114-143. PENDING-SAME-HEAD, PENDING-GRAMMAR(batch-four).
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: fixtures/bare_jet_logs_is_a_teaching_error_naming_jet_inspect_logs
 mkdir: root
 env: JETPACK_ROOT={work}/root
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 exit: any # original setup build result was discarded
 step: jet logs weirdctl --json --no-color
 exit: 2

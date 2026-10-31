@@ -3,6 +3,11 @@
 // collect only where the reference kernels do (repeat/cycle/try/dedup_by).
 // Node words: kind,meta,source,other,count,index,env,invoke,release,callback-meta,
 // scratch,second-scratch,saved,saved-meta,list,extra,flags,initialized,done,context.
+// Hooked kinds (27 progress, 28 channel, 30 generator) keep their state in
+// env@48 and the addresses of their kernels in invoke@56 (pull(node, output)
+// -> 1 when it wrote output) and release@64 (release(state)). Only an image
+// that builds such a node links its kernels; iter_pull_kernel and
+// jet_rt_native_iter_drop name none of them.
 
 // The high kind-word bit of an Option descriptor (kind 7) whose value is an
 // inline Int? word, not a box (JetIR IR_LAZY_INLINE_OPTION).
@@ -22,8 +27,39 @@ fn iter_new(kind: I64, meta: I64) -> I64 {
 // This node owns the receiver, not another iterator or a per-item holder.
 fn iter_channel_new(receiver: I64, meta: I64) -> I64 {
     node :: iter_new(I64{28}, meta)
-    trap_store(node + I64{16}, receiver)
+    iter_hook(node, receiver, rt_iter_channel_pull_address(), rt_iter_channel_release_address())
     node
+}
+
+fn iter_hooked(kind: I64) -> Bool { kind == I64{27} || kind == I64{28} || kind == I64{30} }
+
+fn iter_hook(node: I64, state: I64, pull: I64, release: I64) {
+    trap_store(node + I64{48}, state)
+    trap_store(node + I64{56}, pull)
+    trap_store(node + I64{64}, release)
+}
+
+#Export(c) fn jet_rt_native_iter_channel_pull(node: I64, output: I64) -> I64 {
+    if channel_iter_pull(trap_word(node + I64{48}), output) -> I64{1} else -> I64{0}
+}
+
+#Export(c) fn jet_rt_native_iter_channel_release(receiver: I64) -> I64 {
+    jet_rt_native_receiver_drop(receiver)
+    I64{0}
+}
+
+// RuntimeLower resolves these checked addresses through its sole intrinsic table.
+fn rt_iter_channel_pull_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+fn rt_iter_channel_release_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+fn rt_iter_progress_pull_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+fn rt_iter_progress_release_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
 fn iter_wrap(kind: I64, source: I64, meta: I64) -> I64 {
@@ -92,7 +128,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     index :: trap_word(node + I64{40})
     count :: trap_word(node + I64{32})
     if (kind == I64{29}) { return iter_source_pull(node, output) }
-    if (kind == I64{30}) { return generator_pull(node, output) }
+    if iter_hooked(kind) { return coll_call2(trap_word(node + I64{56}), node, output) != I64{0} }
     if (kind == I64{0}) {
         header :: trap_word(node + I64{112})
         if (index >= trap_word(header)) { return false }
@@ -114,7 +150,6 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
         jet_rt_free(value, coll_size(meta), I64{8})
         return true
     }
-    if (kind == I64{28}) -> return channel_iter_pull(source, output)
     if (kind == I64{3}) {
         if (count <= I64{0}) { return false }
         trap_store(node + I64{32}, count - I64{1})
@@ -250,18 +285,6 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
         return true
     }
     if (kind == I64{26}) { return iter_pull_filter_map(node, output) }
-    if (kind == I64{27}) {
-        if !iter_pull(source, output) {
-            jet_rt_progress_state_finish(trap_word(node + I64{152}))
-            return false
-        }
-        jet_rt_progress_state_advance(trap_word(node + I64{152}))
-        if (jet_rt_session_propagate() != I64{0}) {
-            coll_slot_drop(output, meta)
-            return false
-        }
-        return true
-    }
     trap_defect_prepare()
     trap_msg_unreachable()
     trap_defect_exit(I64{101})
@@ -387,17 +410,14 @@ fn iter_list_release(source: I64, meta: I64) {
         jet_rt_string_drop(trap_word(context + I64{32}))
         jet_rt_free(context, I64{56}, I64{8})
     }
-    if (kind == I64{27}) { jet_rt_progress_state_drop(context) }
-    if (kind == I64{30}) {
-        jet_rt_session_shield_enter()
-        generator_drop(context)
-        jet_rt_session_shield_leave()
-    }
+    // A hooked kind's state is released here, where its kernel ran before,
+    // under Shield (a generator's producer is cancelled and joined).
+    if iter_hooked(kind) -> iter_release_callback(node)
     if (kind == I64{20}) { jet_rt_free(trap_word(node + I64{120}), I64{8}, I64{8}) }
     if (kind == I64{26} && trap_word(node + I64{120}) != I64{0}) {
         jet_rt_free(trap_word(node + I64{120}), coll_size(trap_word(trap_word(node + I64{72}) + I64{64})), I64{8})
     }
-    if (kind == I64{28}) { jet_rt_native_receiver_drop(source) } else if (kind == I64{25}) { text_iter_drop(source) } else if (source != I64{0}) {
+    if (kind == I64{25}) { text_iter_drop(source) } else if (source != I64{0}) {
         scratch :: trap_word(node + I64{80})
         if (scratch != I64{0}) {
             if (kind == I64{11} && trap_word(node + I64{128}) != I64{0}) {
@@ -1355,6 +1375,25 @@ fn iter_exact_length(node: I64) -> I64 {
 
 #Export(c) fn jet_rt_native_iter_progress(source: I64, description: I64, format: I64) -> I64 {
     node :: iter_wrap(I64{27}, source, iter_meta(source))
-    trap_store(node + I64{152}, jet_rt_progress_state_new(description, format, iter_exact_length(source)))
+    iter_hook(node, jet_rt_progress_state_new(description, format, iter_exact_length(source)), rt_iter_progress_pull_address(), rt_iter_progress_release_address())
     node
+}
+
+#Export(c) fn jet_rt_native_iter_progress_pull(node: I64, output: I64) -> I64 {
+    state :: trap_word(node + I64{48})
+    if !iter_pull(trap_word(node + I64{16}), output) {
+        jet_rt_progress_state_finish(state)
+        return I64{0}
+    }
+    jet_rt_progress_state_advance(state)
+    if (jet_rt_session_propagate() != I64{0}) {
+        coll_slot_drop(output, iter_meta(node))
+        return I64{0}
+    }
+    I64{1}
+}
+
+#Export(c) fn jet_rt_native_iter_progress_release(state: I64) -> I64 {
+    jet_rt_progress_state_drop(state)
+    I64{0}
 }

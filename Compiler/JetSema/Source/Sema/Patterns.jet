@@ -176,12 +176,12 @@ fn sema_pattern_core_payload(owner: String, variant: String) -> [Type]? {
 fn sema_pattern_core_enum_payload(owner_name: String, variant: String, span: Span, diagnostics: &[Diagnostic]) -> SemaPatternPayload {
     result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false}
     if core_enum_payload_variants(owner_name) == None && core_enum_variants(owner_name) == None {
-        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
+        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling"))
         return result
     }
     result.range_forbidden = true
     payload :: core_enum_variant_payload(owner_name, variant) ?? {
-        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
+        &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling"))
         return result
     }
     result.types = payload
@@ -260,7 +260,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
         result.types = core_payload ?? [Type]{}
         result.known = core_payload != None
         if !result.known {
-            &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
+            &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling"))
         }
         return result
     }
@@ -305,7 +305,7 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
             return result
         }
     }
-    &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the subject's enum type", "check the variant spelling"))
+    &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{owner_name}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling"))
     } else {
         &diagnostics.push(sema_error("E0305", span, "pattern `{variant}` cannot be resolved", "pattern validation needs the completed declaration graph", "resolve the subject's declaration before matching it"))
     }
@@ -786,7 +786,7 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
     keys := [String]{}
     loop entry in entries {
         if !sema_pattern_map_key_written(entry.key) {
-            &diagnostics.push(sema_error("E0305", entry.span, "a map pattern key must be written out", "keys must be literals, enum cases or ALL_CAPS constants", "write the key's value or an ALL_CAPS constant"))
+            &diagnostics.push(sema_error("E0305", entry.span, "a map-pattern key must be written out", "keys must be literals, enum cases or ALL_CAPS constants", "write the key's value or an ALL_CAPS constant"))
             complete = false
         }
         checked :: sema_check_expression(entry.key, Val(key_ty), env, program, &writes, &state, &tail_store, &context, &diagnostics)
@@ -1177,7 +1177,7 @@ fn sema_pattern_validate_internal(subject_ty: Type, pattern: Pattern, env: SemaS
             loop index in 1..<results.len() {
                 alternative :: results[index]
                 if !alternative.complete || !sema_pattern_facts_equal(results[0].bindings, alternative.bindings) {
-                    &diagnostics.push(sema_error("E0317", span, "or-pattern alternatives bind different names or types", "every alternative must bind the same names at the same types", "rename bindings so all alternatives agree"))
+                    &diagnostics.push(sema_error("E0317", span, "or-pattern alternatives bind different names or types", "every arm of `A(x) | B(y)` must bind the same names at the same types", "rename bindings so both alternatives bind identical names"))
                     complete = false
                 }
             }

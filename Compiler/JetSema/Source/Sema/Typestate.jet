@@ -307,7 +307,7 @@ fn sema_state_report(walk: &SemaStateWalk, splits: [SemaStateSplit], span: Span)
         }
         &pairs.sort()
         states :: pairs[0].split(" ").to_list()
-        &walk.diagnostics.push(sema_lint("L0152", span, "`{name}` ends in state `{states[0]}` on one path and `{states[1]}` on another.", "typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent.", "bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it."))
+        &walk.diagnostics.push(sema_lint("L0152", span, "`{name}` ends in state `{states[0]}` on one path and `{states[1]}` on another.", "typestate: after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent.", "bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it."))
     }
 }
 
@@ -518,7 +518,7 @@ fn sema_state_require(walk: &SemaStateWalk, local: String, current: String?, req
     if state == required -> return
     transition :: sema_state_hint(walk, owner, required)
     fix :: if transition.len() == 0 -> "transition `{local}` into state `{required}` before calling `{operation}`" else -> "transition it first: call `{transition}` to reach `{required}`"
-    &walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` is in state `{state}`", "typestate (D-STATE1): `{operation}` is only valid in state `{required}`; calling it in `{state}` is the out-of-order-events bug it prevents", fix))
+    &walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` is in state `{state}`", "typestate: `{operation}` is only valid in state `{required}`; calling it in `{state}` is the out-of-order-events bug it prevents", fix))
 }
 
 // The operation that reaches `required` on `owner`: a method transition of

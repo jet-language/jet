@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:5351-5418 channel_update_writes_exact_lock_and_build_uses_it_offline
 # PENDING-SEAM(hangar-verified-fixture): exact assertions; no runtime parity claim.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: channel_update_writes_exact_lock_and_build_uses_it_offline.fixture
 refused: hangar-verified-fixture
 # }
@@ -48,7 +49,7 @@ file: project/.jet/lock ~ "[[source_channel]]" # original predicate
 file: project/.jet/lock ~ "channel = \"latest\"" # original predicate
 file: project/.jet/lock ~ "exact = \"github:acme/tools#v1.2.0\"" # original predicate
 # Missing setup: original realized_fixtures(&fixtures,&root) produces fixtures-realized only after sealing/admitting authentic fixture outputs.
-step: jetpack build --no-color --offline
+step: jetpack env --prep --no-color --offline
 cwd: project
 env: JETPACK_FIXTURES={work}/fixtures-realized
 exit: 0

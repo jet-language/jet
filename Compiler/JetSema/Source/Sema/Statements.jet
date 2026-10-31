@@ -228,11 +228,11 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
     checked :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
     if frame.kind == SemaLoopValueKind.Collecting {
-        &diagnostics.push(sema_error("E0075", span, "a collecting loop can't break with a value", "collecting loops produce items with `yield`; only the loop's own break without a payload is valid", "remove the break payload or use an ordinary result loop"))
+        &diagnostics.push(sema_error("E0075", span, "this collecting loop cannot use a break payload", "its result is already the accumulated List, so a second payload would give one exit two result channels", "write `break` to return the accumulated list"))
         return None
     }
     if frame.kind == SemaLoopValueKind.Effect {
-        &diagnostics.push(sema_error("E0079", span, "this effect loop can't break with a value", "only a result loop consumes a break payload", "remove the payload or use a result loop"))
+        &diagnostics.push(sema_error("E0079", span, "this effect-only loop uses a result exit", "a break payload makes an effect-only loop a value expression", "bind the loop with `::`, or remove the payload"))
         return None
     }
     result :: sema_loop_value_check_result_exit(&context, frame_index, checked, environment, program, &diagnostics) ?? return None
@@ -1357,7 +1357,7 @@ fn sema_stmt_check_range_stride(expr: Expr, environment: SemaScopeEnvironment, p
     if expr == {
         .Int(n, span, _, _, _) -> {
             if n <= 0 {
-                &diagnostics.push(sema_error("E0123", span, "a range loop stride must be positive, not {n}", "a zero or negative stride would never reach the end", "use a stride of 1 or more"))
+                &diagnostics.push(sema_error("E0123", span, "a range loop stride must be positive, not {n}", "a zero or negative stride would never reach the end", "use a stride of 1 or more, like `loop i in 0..10, 2 {{ ... }}`"))
                 return None
             }
         }
@@ -2486,7 +2486,7 @@ fn sema_stmt_for_in_columnar(environment: SemaScopeEnvironment, program: SemaPro
 fn sema_stmt_check_source_stride(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     value :: sema_check_expression(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_stmt_range_integer_type(value.ty) {
-        &diagnostics.push(sema_error("E0123", expr_span(expr), "a source loop stride must be Int, not {type_name(value.ty)}", "the stride counts source pulls, so it must be a positive whole number", "use an Int stride of 1 or more"))
+        &diagnostics.push(sema_error("E0123", expr_span(expr), "a source loop stride must be {sema_type_show(Type.Int)}, not {sema_type_show(value.ty)}", "the stride counts source pulls, so it must be a positive whole number", "use an Int stride of 1 or more"))
         return None
     }
     if expr == {
@@ -3892,7 +3892,10 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                         }
                     }
                     if field_type == None {
-                        &diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "a destructuring pattern can only name declared fields", "use one of the declared field names"))
+                        // Rust `check_destructure`: the field-access E0302, nearest field suggested.
+                        suggestion :: sema_suggest_field(selected_field.name, loop field in nominal.fields -> field.symbol.name)
+                        fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the field names on `{type_name(ty)}`"
+                        &diagnostics.push(sema_error("E0302", selected_field.span, "`{type_name(ty)}` has no field `{selected_field.name}`", "field access only works on names declared in the struct", fix))
                     }
                     &fields.push(TypeTupleField{name: selected_field.name, ty: field_type ?? Type.Int})
                 }
@@ -5607,7 +5610,7 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         .Index(_, _, span, _) -> {
             if op != None {
                 operator :: op
-                &diagnostics.push(sema_error("E0164", span, "compound assignment `{sema_expr_binary_name(operator)}` can't target an indexed slot", "a compound update reads an indexed slot before it writes, so a missing map key or checked index would make the update partial", "write a total update such as `map[key] = (map.get(key) ?? 0) {sema_expr_binary_name(operator)} 1`"))
+                &diagnostics.push(sema_error("E0164", span, "compound assignment can't target an indexed slot.", "a compound update reads an indexed slot before it writes; that read can panic when a map key is missing.", "write a total update, such as `map[key] = (map.get(key) ?? 0) {sema_expr_binary_name(operator)} 1`"))
                 return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 1")
             }
         }
@@ -6923,8 +6926,9 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     sema_stmt_never_return_rejected(value, return_type, context.function_name, span, &diagnostics) -> complete = false
                     value == None -> {
                         if !sema_stmt_return_allows_empty(return_type) {
+                            // Rust statements.rs:1257 (E0113): the empty `return` against the declared result.
                             required :: sema_stmt_return_required_type(return_type)
-                            &diagnostics.push(sema_type_mismatch(required, Type.Named{name: "Unit"}, span))
+                            &diagnostics.push(sema_error("E0113", span, "`{context.function_name}` promises to return {type_name(required)}, but this `return` is empty", "the value handed back must match the declared return type", "add the value: `return ...;`"))
                             complete = false
                         }
                         &output.push(TStmt.Return{value: None, span: span})

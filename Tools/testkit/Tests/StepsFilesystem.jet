@@ -139,9 +139,17 @@ use core.files as files
     files.remove_all(root) ?? panic("remove tree capture scratch")
 }
 
+#Test("a missing fixture directory is an ERROR verdict naming it") {
+    root :: cases_test_root("filesystem-missing-fixture")
+    outcome :: cases_test_advanced(root, "absent", "fixture: absent\nstep: printf ready\n")
+    assert_eq(outcome.verdict.status, "ERROR")
+    assert_eq(outcome.verdict.detail, "fixture directory is missing: absent")
+    files.remove_all(root) ?? panic("remove missing fixture scratch")
+}
+
 #Test("first-spawnable accepts nonzero exit and prefixed capture observes marker precedence") {
     root :: cases_test_root("filesystem-first-spawnable")
-    source :: "capture: selected = first-spawnable /jet-testkit-does-not-exist | sh -c 'exit 13'\nwhen captured selected: step: printf '%s' {{cap:selected}}\nstdout: = \"sh\"\nstep: printf 'SECOND=value2\\nFIRST=value1\\n'\ncapture: value = prefixed stdout \"FIRST=\" | \"SECOND=\"\ncap:value: = \"value1\"\ncapture: missing = first-spawnable /jet-testkit-does-not-exist\nwhen !captured missing: step: printf absent\nstdout: = \"absent\"\n"
+    source :: "capture: selected = first-spawnable /jet-testkit-does-not-exist | sh -c 'exit 13'\nwhen captured selected: step: printf '%s' {{cap:selected}}\nstdout: = \"sh\"\nstep: printf 'SECOND=value2\\\\nFIRST=value1\\\\n'\ncapture: value = prefixed stdout \"FIRST=\" | \"SECOND=\"\ncap:value: = \"value1\"\ncapture: missing = first-spawnable /jet-testkit-does-not-exist\nwhen !captured missing: step: printf absent\nstdout: = \"absent\"\n"
     assert_eq(cases_test_advanced(root, "select", source).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove first-spawnable scratch")
 }

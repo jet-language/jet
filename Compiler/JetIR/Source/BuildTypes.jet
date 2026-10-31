@@ -752,9 +752,10 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
 // read through the runtime's field export: a Float or Bool through the
 // address it returns, a String or converted carrier through the header it
 // writes into a frame slot, a nested handle as the word it returns, an
-// optional handle as a selector with a retained payload it writes. The
-// handle keeps the field, so the read is copied out before a fresh `base` is
-// released. -2 when the handle lends no such field.
+// optional handle as a selector with a retained payload it writes, a derived
+// "Text.Owned" String as the fresh value it returns. The handle keeps a
+// lent field, so the read is copied out before a fresh `base` is released.
+// -2 when the handle lends no such field.
 fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, name: String, field_ty: Type, span: Span) -> Int Never! {
     if !ir_is_handle(m, b.f.slot_type[base]) -> return -2
     nominal :: ir_nominal_name(ir_untag(ty)) ?? return -2
@@ -763,7 +764,7 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
     row :: ir_value_type(&m, p, field_ty) ?? return ir_type_fail(&b, span, field_ty)
     kind :: m.types[row].kind
     matches :: if lent.kind == {
-        "Text" -> kind == .String
+        "Text" | "Text.Owned" -> kind == .String
         "Float" -> kind == .Float
         "Flag" -> kind == .Bool
         "List.Byte" -> kind == .Aggregate && lent.header_bytes > 0
@@ -777,6 +778,11 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
         // The payload is a fresh retain of the handle, so the Option owns it.
         carrier :: IRRouteCarrier.Handle{name: lent.kind.remove_prefix("Option.Handle.")}
         value :: ir_route_option(&m, p, &b, symbol, [Int]{base}, carrier, field_ty, span)
+        ir_release(&m, &b, base)
+        return value
+    }
+    if lent.kind == "Text.Owned" {
+        value :: ir_runtime(&m, &b, symbol, [Int]{base}, row)
         ir_release(&m, &b, base)
         return value
     }

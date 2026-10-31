@@ -410,7 +410,16 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
                         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
                     }
                 }
-                &diagnostics.push(sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", "use one of the declared field names"))
+                // Rust `infer_field_access`: the nearest declared field is
+                // the suggested fix and its edit; otherwise name the owner.
+                suggestion :: sema_suggest_field(member, loop field in struct_def.fields -> field.name)
+                fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "check the field names on `{owner_name}`"
+                diagnostic :: sema_error("E0302", span, "`{owner_name}` has no field `{member}`", "field access only works on names declared in the struct", fix)
+                if suggestion == .Val(candidate) {
+                    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate}))
+                } else {
+                    &diagnostics.push(diagnostic)
+                }
                 return None
             }
         }
@@ -661,8 +670,8 @@ SEMA_TERMINAL_FACTS :: [String]{"terminal", "resize", "raw"}
 
 fn sema_expression_terminal_fact(member: String, member_span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if !SEMA_TERMINAL_FACTS.contains(member) {
-        fix :: if sema_suggest_field(member, SEMA_TERMINAL_FACTS) == .Val(fact) -> "write `TerminalFact.{fact}`" else -> "write `TerminalFact.terminal`, `TerminalFact.resize` or `TerminalFact.raw`"
-        &diagnostics.push(sema_error("E0302", member_span, "`TerminalFact` has no key `{member}`", "the stable terminal facts are {SEMA_TERMINAL_FACTS.join(", ")}; any other fact is a preview string key", fix))
+        fix :: if sema_suggest_field(member, SEMA_TERMINAL_FACTS) == .Val(fact) -> "did you mean `TerminalFact.{fact}`?" else -> "write `TerminalFact.terminal`, `TerminalFact.resize` or `TerminalFact.raw`"
+        &diagnostics.push(sema_error("E0302", member_span, "`TerminalFact` has no key `{member}`", "stable terminal fact keys use the checked TerminalFact namespace", fix))
         return None
     }
     key :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
@@ -933,7 +942,7 @@ fn sema_expression_optional_field(base: Expr, member: String, member_span: Span,
     inner_ty :: if checked_base.ty == {
         .Option(value) -> value
         else -> {
-            &diagnostics.push(sema_error("E0047", member_span, "`?.` needs an optional on the left, but this is `{sema_type_show(checked_base.ty)}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first"))
+            &diagnostics.push(sema_error("E0047", member_span, "`?.` needs an optional on the left, but this is `{sema_registration_serde_label(checked_base.ty)}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first"))
             return None
         }
     }
@@ -956,7 +965,7 @@ fn sema_expression_optional_method_call(receiver: Expr, method: String, method_s
     inner_ty :: if checked_base.ty == {
         .Option(value) -> value
         else -> {
-            &diagnostics.push(sema_error("E0047", method_span, "`?.` needs an optional on the left, but this is `{sema_type_show(checked_base.ty)}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first"))
+            &diagnostics.push(sema_error("E0047", method_span, "`?.` needs an optional on the left, but this is `{sema_registration_serde_label(checked_base.ty)}`", "optional chaining short-circuits a `T?` to absent on a missing link", "use plain `.` here, or make the value optional first"))
             return None
         }
     }

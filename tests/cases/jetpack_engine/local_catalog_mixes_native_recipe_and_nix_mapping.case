@@ -1,27 +1,29 @@
 # HAND-PORT tests/jetpack_engine.rs:4835-4968 local_catalog_mixes_native_recipe_and_nix_mapping
 # PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: local_catalog_mixes_native_recipe_and_nix_mapping.fixture
 env: NO_COLOR=1
 env: JETPACK_ROOT={work}/root
 mkdir: root
 mkdir: project
 mkdir: catalog
-artifact: peer
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
 copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
 step: jet build peer
 exit: 0
 spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source normal {work}/catalog
 await: file peer.port timeout 30s
 capture: port = text file peer.port
-step: jet run native-setup.jet -- {work}/catalog {work}/project
+step: jet run --allow=Env,FS.Read,FS.Write native-setup.jet -- {work}/catalog {work}/project
 exit: 0
-step: jetpack build --no-color --trust --local-nix-catalog {work}/catalog
+step: jetpack env --prep --no-color --trust --local-nix-catalog {work}/catalog
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0
 file: project/.jet/lock ~ "catalog-tier = \"local-unofficial\"" # original contains predicate
 file: project/.jet/lock ~ "catalog-trust = \"unverified\"" # original contains predicate
-step: jetpack explain ripgrep@nixpkgs --json --no-color
+step: jetpack explain ripgrep@jetpack --json --no-color
 cwd: project
 exit: 0
 capture: nix_id stdout doc $.explain.entry.id

@@ -94,7 +94,7 @@ use core.encoding.hex as hex
     root :: cases_test_root("forms-captures")
     directory :: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "sorted.txt"), "a\nb\n")
-    source :: "step first: printf 'b\\na\\n'\ncapture: n = lines stdout\ncapture: text = text stdout\ncap:text: lines = {{cap:n}} # original predicate\ncap:text: sorted-lines = sorted.txt # original predicate\nstep second: printf 'b\\na\\nb\\na\\n'\nstdout: lines = 2*{{cap:n}} # original predicate\nstdout: lines = {{cap:n}}+2 # original predicate\nstdout: != first # original predicate\nstdout: in-order-of {{cap:text}} # original predicate\n"
+    source :: "step first: printf 'b\\\\na\\\\n'\ncapture: n = lines stdout\ncapture: text = text stdout\ncap:text: lines = {{cap:n}} # original predicate\ncap:text: sorted-lines = sorted.txt # original predicate\nstep second: printf 'b\\\\na\\\\nb\\\\na\\\\n'\nstdout: lines = 2*{{cap:n}} # original predicate\nstdout: lines = {{cap:n}}+2 # original predicate\nstdout: != first # original predicate\nstdout: in-order-of {{cap:text}} # original predicate\n"
     assert_eq(cases_test_advanced(root, "capture", source).verdict.status, "PASS")
     wrong :: "step first: printf a\nstep second: printf a\nstdout: != first # original predicate\n"
     assert_eq(cases_test_advanced(root, "equal", wrong).verdict.status, "FAIL")
@@ -138,9 +138,9 @@ use core.encoding.hex as hex
 
 #Test("normalize_journey_paths ports checked_text line paths CRLF and final LF through real cases") {
     root :: cases_test_root("forms-journey-paths")
-    source :: "step: printf 'error (some/thing.jet:12)\\r\\nnote (other.txt:1)\\n'\nstdout.normalize_journey_paths: = \"error (<source>:12)\\nnote (other.txt:1)\\n\" # original checked_text.rs135-156\n"
+    source :: "step: printf 'error (some/thing.jet:12)\\\\r\\\\nnote (other.txt:1)\\\\n'\nstdout.normalize_journey_paths: = \"error (<source>:12)\\nnote (other.txt:1)\\n\" # original checked_text.rs135-156\n"
     assert_eq(cases_test_advanced(root, "normalize", source).verdict.status, "PASS")
-    malformed :: "step: printf 'prefix : suffix (file.jet\\n'\nstdout.normalize_journey_paths: = \"unused\" # original checked_text.rs135-156 invalid slice\n"
+    malformed :: "step: printf 'prefix : suffix (file.jet\\\\n'\nstdout.normalize_journey_paths: = \"unused\" # original checked_text.rs135-156 invalid slice\n"
     assert_eq(cases_test_advanced(root, "bad-range", malformed).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove journey path scratch")
 }

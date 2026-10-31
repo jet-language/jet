@@ -49,7 +49,7 @@ fn sema_process_infer_args(args: [CallArg], environment: SemaScopeEnvironment, p
 }
 
 fn sema_process_wrong_arity(method: String, expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_call_arity_diagnostic(method, expected, actual, false, span))
+    &diagnostics.push(sema_call_core_arity_diagnostic(method, expected, actual, span))
 }
 
 fn sema_process_check_args(args: [CallArg], required: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
@@ -562,7 +562,7 @@ fn sema_call_try_process_handle_method(receiver: Expr, receiver_value: TExpr, me
     if method == "has" && args.len() == 1 && receiver_value.ty == .Tagged(marker, _) && marker == (TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}) {
         if args[0].expr == .Str(parts, key_span, _) && parts.len() == 1 && parts[0] == .Lit(key) {
             if sema_suggest_field(key, SEMA_TERMINAL_FACTS) == .Val(fact) {
-                &diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but a close spelling of a stable fact is a typo", "write `TerminalFact.{fact}`"))
+                &diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but close spellings of stable facts are probably typos", "write `TerminalFact.{fact}`"))
                 sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }

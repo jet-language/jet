@@ -1151,7 +1151,8 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
             return Val(Stmt.ContinueLabel{name: name, span: span})
         }
         .Break(span) | .Continue(span) -> {
-            &diagnostics.push(sema_error("E0078", span, "this finite value loop can't use an unlabeled exhaustion control route", "the route would control the loop that just closed", "write a labeled route to an enclosing loop"))
+            route :: if fallback == .Break(_) -> "break" else -> "next"
+            &diagnostics.push(sema_error("E0078", span, "this finite value loop cannot use `?? {route}` after its closing brace", "the route would control the loop that just closed; use a labeled loop to name the target", "write a labeled search such as `found :: loop {{ ... break(found, value) }}`"))
             return None
         }
         .Block(_, _, span) -> {
@@ -2274,7 +2275,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
                         // Two numeric producers follow the one widening law, as
                         // an operator's operands do.
                         numeric :: sema_expr_numeric_join(then_checked.ty, else_checked.ty) ?? {
-                            &diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
+                            &diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path (S68)", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
                             return None
                         }
                         line :: sema_source_line_at(environment.source_segments, span) ?? 0

@@ -99,6 +99,9 @@ struct JetCLISemWalk {
     // Top-level function span start -> its written return type span, for a
     // function whose checked row lost it (jet_cli_sem_written_returns).
     written_returns: [Int: Span]
+    // A let-bound local's checked type by name and name span
+    // (jet_cli_sem_local_types): an unannotated binding parses with no type.
+    local_types: [String: Type]
 }
 
 struct JetCLISemSlotSave {
@@ -594,6 +597,27 @@ fn jet_cli_sem_written_returns(doc_module: JetDriverDocModule) -> [Int: Span] Ne
         }
     }
     written
+}
+
+// The checked type of every let-bound local in the module's checked bodies,
+// keyed by name and name span (sema gives the checked local its binding's
+// name span). A generic body's instances share spans and keep the first.
+fn jet_cli_sem_local_types(doc_module: JetDriverDocModule) -> [String: Type] Never! {
+    types := [String: Type]{}
+    loop function in doc_module.functions {
+        if function.synthetic -> next
+        loop statement in function.tree.stmts {
+            if statement == .Let(local, _, _, _, _, _) {
+                key :: jet_cli_sem_local_type_key(local.name, local.span)
+                if types.get(key) == None -> types[key] = local.ty.copy()
+            }
+        }
+    }
+    types
+}
+
+fn jet_cli_sem_local_type_key(name: String, span: Span) -> String Never! {
+    "{name}@{span.start}:{span.end}"
 }
 
 // Build.rs `item_span` and `item_shape`.
@@ -1142,7 +1166,8 @@ fn jet_cli_sem_binding(binding: Binding, db: &JetCLISemDB, ctx: &JetCLISemWalk, 
         loop name in jet_cli_sem_bind_names(pattern) -> jet_cli_sem_local_def(name.name, name.span, "local", binding.mutable, None, &db, ctx)
         return
     }
-    jet_cli_sem_local_def(binding.name, binding.name_span, "local", binding.mutable, binding.ty, &db, ctx)
+    ty :: if binding.ty == .Val(written) -> Val(written.copy()) else -> ctx.local_types.get(jet_cli_sem_local_type_key(binding.name, binding.name_span))
+    jet_cli_sem_local_def(binding.name, binding.name_span, "local", binding.mutable, ty, &db, ctx)
     jet_cli_sem_scalar("initializer", binding.init, &db, &ctx, modules)
 }
 
@@ -2323,6 +2348,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
             references: doc_module.name_references,
             module_paths: module_paths,
             written_returns: jet_cli_sem_written_returns(doc_module),
+            local_types: jet_cli_sem_local_types(doc_module),
         }
         loop item in doc_module.items -> jet_cli_sem_item(item, &db, &ctx, modules)
         jet_cli_sem_apply_inferred_rows(&db, doc_module, summaries)

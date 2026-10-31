@@ -244,6 +244,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             }
             &state.diagnostics.push(diagnostic)
             state.abort_mark = state.diagnostics.len()
+            state.abort_position = state.position
             break
         }
 
@@ -1033,6 +1034,7 @@ fn parser_take_nested_failure(state: &JetParserState, diagnostics: [Diagnostic])
     if parser_aborting(&state) -> return
     loop diagnostic in diagnostics -> &state.diagnostics.push(diagnostic)
     state.abort_mark = state.diagnostics.len()
+    state.abort_position = state.position
 }
 
 // The closed interpolation selector

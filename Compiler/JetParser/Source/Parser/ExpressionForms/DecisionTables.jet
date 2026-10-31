@@ -185,7 +185,8 @@ fn parser_expression_form_same_dispatch_subject(left: Expr, right: Expr) -> Bool
 
 fn parser_expression_form_pattern_condition(state: &JetParserState, subject: Expr, pattern: ParsedPattern, op: BinOp) -> Expr {
     if op != BinOp.Eq {
-        parser_expression_form_error(&state, "E0366", pattern.span, "pattern arms need `==` — this table uses `{op}`", "structural patterns compare by shape under `if subject == {{ … }}` only", "write `if subject == {{ … }}` for pattern arms, or use a Bool head")
+        op_text :: jfmt_bin_op_spell(op)
+        parser_expression_form_error(&state, "E0366", pattern.span, "pattern arms need `==` — this table uses `{op_text}`", "structural patterns compare by shape under `if subject == {{ … }}` only", "write `if subject == {{ … }}` for pattern arms, or use a Bool head")
         return Expr.Bool{value: false, span: pattern.span, id: parser_node_id(&state)}
     }
     Expr.PatternTest{subject: subject, pattern: pattern.pattern, span: pattern.span, id: parser_node_id(&state)}
@@ -239,9 +240,9 @@ struct ParserExpressionFormAlternates {
 // A distributed `|` group next to a Boolean operator needs parentheses; the
 // fix wraps exactly the group's source text.
 fn parser_expression_form_distributed_group(state: &JetParserState, span: Span) {
-    what :: "a bare distributed atom group cannot be a direct operand of `&&` or `||`"
-    why :: "distributed atom groups need parentheses before a Boolean operator"
-    fix :: "write `(atom | atom) && guard` or `(atom | atom) || guard`"
+    what :: "distributed atom groups need parentheses before `&&` or `||`."
+    why :: "a `|` arm head is one distributed group, so its boundary must stay visible before a Boolean operator applies."
+    fix :: "write `(atom | atom) && guard` or `(atom | atom) || guard`."
     if state.sources.len() > 0 && span.start >= 0 && span.start < span.end && span.end <= state.sources[0].len() {
         group :: parser_source_slice(state, span.start, span.end)
         parser_add_error_code_edit(&state, "E0386", span, what, why, fix, TextEdit{span: span, new_text: "({group})"})
@@ -434,7 +435,7 @@ fn parser_expression_form_parse_guard_table(state: &JetParserState, start: Span,
         if kind == TOKEN_RBRACE {
             close :: parser_bump(&state)
             end = close.span
-            parser_expression_form_error(&state, "E0003", close.span, "a value guard needs a final `else` arm", "arbitrary Boolean guards cannot prove that one arm always matches", "add `else -> value`")
+            parser_expression_form_error(&state, "E0003", close.span, "a guard table used as a value needs a final `else` arm", "arbitrary Boolean guards cannot prove that one arm always matches", "add `else -> value` so every path produces a value")
             break
         }
         if kind == TOKEN_EOF {
@@ -490,7 +491,7 @@ fn parser_expression_form_parse_dispatch_table(state: &JetParserState, subject: 
                 if arm.cond == { .PatternTest(_, _, _, _) -> {} else -> all_patterns = false }
             }
             if !all_patterns {
-                parser_expression_form_error(&state, "E0003", close.span, "a value dispatch needs a final `else` arm", "only a table whose every arm is a pattern can prove one arm always matches", "add `else -> value`")
+                parser_expression_form_error(&state, "E0003", close.span, "a value dispatch needs a final `else` arm", "only a table whose every arm is a pattern can prove one arm always matches; this one has a comparison or Bool arm", "add `else -> value` so every path produces a value")
             }
             break
         }
@@ -551,7 +552,8 @@ fn parser_expression_form_parse_if(state: &JetParserState, depth: Int, lint_styl
     else_value := Expr.NoElse{span: then_branch.span, id: parser_node_id(&state)}
     end := then_branch.span
     if parser_current_kind(&state) != TOKEN_KW_ELSE {
-        parser_expression_form_error(&state, "E0003", then_branch.span, "an `if` used as a value needs an `else` branch", "both value branches must produce one", "add `else -> value`")
+        at :: parser_current(&state).span
+        parser_expression_form_error(&state, "E0003", at, "an `if` used as a value needs an `else` branch", "when `if` produces a value, both branches must produce one (S68)", "add `else -> value` so every path has a value")
         return ParsedExpr{expr: Expr.If{cond: condition.expr, then_body: then_branch.body, then_value: then_branch.value, else_body: else_body, else_value: else_value, span: parser_cover(start.span, end), id: parser_node_id(&state)}, span: parser_cover(start.span, end)}
     }
     parser_bump(&state)

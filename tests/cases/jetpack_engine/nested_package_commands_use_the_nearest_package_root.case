@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:4117-4144 nested_package_commands_use_the_nearest_package_root
 # PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+# Retargeted off the retired `jetpack run` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: nested_package_commands_use_the_nearest_package_root.fixture
 env: NO_COLOR=1
 refused: hangar-verified-fixture
@@ -46,7 +47,7 @@ write: project/env.jet env.template
 mkdir: project/package/src
 copy: project/env.jet project/package/env.jet
 remove: project/env.jet
-step: jetpack run --no-color --offline -- true
+step: jetpack env --no-color --offline -- true
 cwd: project/package/src
 exit: 0
 stderr: ~ "hello" # original contains predicate

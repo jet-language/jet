@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:9158-9196 jet_vendor_writes_pinned_sources
 # PENDING-GRAMMAR: approved batch-two/four forms.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: jet_vendor_writes_pinned_sources.fixture
 env: NO_COLOR=1
 env: JETPACK_ROOT={work}/root
@@ -7,7 +8,7 @@ mkdir: root
 mkdir: project
 when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
 write: project/env.jet env.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0

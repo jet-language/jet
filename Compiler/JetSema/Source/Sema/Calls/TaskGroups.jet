@@ -701,7 +701,7 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
     if !sema_taskgroup_check_arity(args, 1, method, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     empty := if args[0].expr == {.ListLit(values, _, _) -> values.len() == 0 else -> false}
     if empty {
-        &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task-group combinator cannot wait for an empty set", "give it one or more task branches"))
+        &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task combinator must have a child to join or select", "write `{method}` {{ work() }} with one or more branches"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     saved_binding := context.taskgroups.binding_name

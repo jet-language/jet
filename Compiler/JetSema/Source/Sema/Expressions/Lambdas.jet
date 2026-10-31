@@ -1679,6 +1679,16 @@ fn sema_expression_lambda_value_expected(value: Expr, body_expected: Type?, expe
     body_expected.copy()
 }
 
+// (Rust lambdas.rs:1075, E0113): an expression body whose own check rejected
+// it against the expected return with the generic E0108 is the lambda's
+// return mismatch, reported on the lambda with the body's own type.
+fn sema_expression_lambda_return_replace_mismatch(required: Type, value: Expr, lambda_span: Span, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return
+    probe_diagnostics := [Diagnostic]{}
+    offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_error("E0113", lambda_span, "this lambda should return {sema_type_show(required)}, not {sema_type_show(offered.ty)}", "the lambda's return type must match what's expected here", sema_type_fix_hint(required, offered.ty))
+}
+
 fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, lambda_scopes: &SemaScopeTable, outer_return_type: Type?, outer_failure_carrier: TFailureCarrier?, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
     lambda_work := lambda
     inline_loop := lambda_work.params.len() == 0 && (lambda_work.meta.collecting_loop || lambda_work.meta.result_loop)
@@ -1805,7 +1815,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {
             if index < required_params.len() && !type_identity_equal(sema_expr_expected_type(parameter_type, environment, program), sema_expr_expected_type(required_params[index], environment, program)) {
-                &diagnostics.push(sema_type_mismatch(required_params[index], parameter_type, parameter.ty_span ?? parameter.name_span))
+                // Rust lambdas.rs:114 (E0113): a written lambda parameter type must equal the expected one.
+                &diagnostics.push(sema_error("E0113", parameter.ty_span ?? parameter.name_span, "this lambda parameter should be {sema_type_show(required_params[index])}, not {sema_type_show(parameter_type)}", "a written lambda parameter type must equal the expected parameter type", sema_type_fix_hint(required_params[index], parameter_type)))
                 return None
             }
         }
@@ -1898,9 +1909,13 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     executable := TLambdaBody?{None}
     if lambda_work.body == {
         .Expr(value) -> {
+            body_start :: diagnostics.len()
             checked_value := sema_check_expression(value, sema_expression_lambda_value_expected(value, body_expected, expected_ret, environment, lambda_scopes), environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
             sema_ownership_keep_share_found(&state, lambda_state)
-            checked :: checked_value ?? return None
+            checked :: checked_value ?? {
+                if !inline_loop && expected_ret == .Val(required) && !sema_expression_lambda_type_is_result(required) -> sema_expression_lambda_return_replace_mismatch(required, value, lambda.span, body_start, environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+                return None
+            }
             body_result_ty = checked.ty
             executable = Val(TLambdaBody.Expr{value: checked})
         }

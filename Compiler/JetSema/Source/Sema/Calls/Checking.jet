@@ -384,7 +384,16 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             next
         }
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
-        value := if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
+        // A self-typed read that does not fit reports the generic E0108 at
+        // the value; like any other argument, that becomes the call's E0112.
+        // Integer narrowing keeps its own E0108 (Rust check_type_assignable
+        // reports it in place of the argument's E0112).
+        slot_start :: diagnostics.len()
+        widened :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) else -> Val(checked_value)
+        value := widened ?? {
+            if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, environment, program)) == None -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, slot_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return None
+        }
         compatible := if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
         // A parameter whose written type names nothing reported E0119 at its
         // declaration; it takes any argument, so the call's own checks (the

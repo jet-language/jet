@@ -7,12 +7,14 @@
 // lock Rust cannot parse is no lockfile, as in `Lock::load`.
 use core.files as cli_files
 use jet_driver.[
+    JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR,
     jet_driver_present_diagnostics,
 ]
+use jet_pkg_model.[ProvenanceRequirement]
 
 // Lock.rs `MAX_LOCK_BYTES` (also the per-line limit).
 JET_CLI_LOCK_MAX_BYTES :: 1048576
@@ -566,8 +568,8 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
 
 // The host half of `run_provenance`: Loader.rs `package_facts_for_entry`
 // reads the entry's package facts. The Jet driver reads the same manifest
-// as it checks the entry; a project that does not check (a malformed
-// manifest) is refused, so the requirement is the default `none`.
+// as it checks the entry, so the requirement is the checked entry root's
+// `authority.trust.require`; a project that does not check is refused.
 fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !cli_files.is_file(job.file) -> return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -577,14 +579,27 @@ fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             checked :: jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None
-            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_provenance_report(job) else -> jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color))
+            jet_cli_inspect_finish(job, if checked -> jet_cli_inspect_provenance_report(job, jet_cli_provenance_requirement(snapshot)) else -> jet_cli_not_ported_output("inspect provenance <project that does not check>", job.color))
         }
     }
     output
 }
 
+// The entry package's `authority.trust.require` floor; `none` when its
+// manifest names none.
+fn jet_cli_provenance_requirement(snapshot: JetDriverAuthorizedSourceSnapshot) -> String Never! {
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        facts :: jet_cli_root_package_facts(root) ?? break
+        trust :: facts.authority.trust ?? break
+        require :: trust.require ?? break
+        return require.label()
+    }
+    ProvenanceRequirement.Unrequired.label()
+}
+
 // The locked dependencies' provenance of a project that checked.
-fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob) -> JetDriverVerbOutput {
+fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob, requirement: String) -> JetDriverVerbOutput {
     packages := [JetCLILockPackage]{}
     if jet_cli_lock_load(job.root) == {
         .Loaded(loaded) -> packages = loaded
@@ -599,7 +614,6 @@ fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob) -> JetDriverVerbOutp
             return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, job.color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
     }
-    requirement :: "none"
     if job.json -> return JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     JetDriverVerbOutput{stdout: jet_cli_provenance_text(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

@@ -252,8 +252,11 @@ fn jet_driver_foreign_add_request(requests: &[JetDriverForeignRequest], language
         if existing.module_index == module_index && existing.scope == scope && existing.language == language && existing.library == library && existing.form != "item" && form != "item" && existing.form != form {
             existing_header :: jet_driver_foreign_import_header(existing.declaration)
             header :: if existing_header == "" -> jet_driver_foreign_import_header(declaration) else -> existing_header
-            diagnostic :: jet_driver_foreign_import_conflict_diagnostic(library, header, declaration.span)
-            &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, declaration.span.start))
+            // The report sits on the later of the two lines in the file,
+            // whatever order the import forms were collected in.
+            span :: if existing.declaration.span.start > declaration.span.start -> existing.declaration.span else -> declaration.span
+            diagnostic :: jet_driver_foreign_import_conflict_diagnostic(library, header, span)
+            &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, span.start))
             return
         }
     }

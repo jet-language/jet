@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:3169-3227 unreadable_and_wrong_kind_outputs_leave_no_store_entry
 # PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: unreadable_and_wrong_kind_outputs_leave_no_store_entry.fixture
 env: NO_COLOR=1
 requires: os:unix
@@ -10,7 +11,7 @@ mkdir: fixtures
 mkdir: root/unreadable
 chmod: root/unreadable 000
 when !dir-readable root/unreadable: write: fixtures/nixpkgs-greet.json unreadable.template
-when !dir-readable root/unreadable: step: jetpack build greet@nixpkgs --no-color --offline
+when !dir-readable root/unreadable: step: jetpack use --prep greet@jetpack --no-color --offline
 when !dir-readable root/unreadable: env: JETPACK_FIXTURES={work}/fixtures
 when !dir-readable root/unreadable: exit: nonzero
 when !dir-readable root/unreadable: stderr: ~ "Error [E1315]:" # original contains predicate
@@ -25,7 +26,7 @@ spawn peer: jet run {work}/socket-peer.jet
 await: file ready
 capture: socket = text file socket.path
 write: fixtures/nixpkgs-greet.json socket.template
-step: jetpack build greet@nixpkgs --no-color --offline
+step: jetpack use --prep greet@jetpack --no-color --offline
 env: JETPACK_FIXTURES={work}/fixtures
 exit: nonzero
 stderr: ~ "Error [E1315]:" # original contains predicate

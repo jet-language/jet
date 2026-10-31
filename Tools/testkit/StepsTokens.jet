@@ -97,15 +97,8 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
             .None -> {}
         }
     }
-    loop i in 0..<step.assertions.len() {
-        // NonZ assertion conditions are selected after the command. Leave its
-        // PID untouched only on unsupported hosts so the checker can refuse
-        // after condition selection, without changing Linux token precedence.
-        if !(step.assertions[i].stream == "process" && kit_steps_process_nonzombie_mode(step.assertions[i].mode) && sys.name() != "linux") -> step.assertions[i].path = kit_steps_runtime_expand(step.assertions[i].path, context, state) ?? return None
-        step.assertions[i].json_path = kit_steps_runtime_expand(step.assertions[i].json_path, context, state) ?? return None
-        // Keep predicate values unexpanded: the checker chooses raw or normalized
-        // matching based on the presence of path tokens in the original value.
-    }
+    // A capture's or await's own assertions may name the value it captures; they resolve once it ran.
+    if original.action != "capture" && original.action != "await" -> step.assertions = kit_steps_resolve_assertions(original.assertions, context, state) ?? return None
     if step.action == "wait" || step.action == "close" {
         loop pending in state.children {
             if pending.label == step.label {
@@ -124,6 +117,21 @@ fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStep
         }
     }
     Val(step)
+}
+
+// Expands the subject paths of assertions against the captures known so far.
+fn kit_steps_resolve_assertions(original: [KitAssertion], context: KitStepCtx, state: KitStepState) -> [KitAssertion]? {
+    assertions := original
+    loop i in 0..<assertions.len() {
+        // NonZ assertion conditions are selected after the command. Leave its
+        // PID untouched only on unsupported hosts so the checker can refuse
+        // after condition selection, without changing Linux token precedence.
+        if !(assertions[i].stream == "process" && kit_steps_process_nonzombie_mode(assertions[i].mode) && sys.name() != "linux") -> assertions[i].path = kit_steps_runtime_expand(assertions[i].path, context, state) ?? return None
+        assertions[i].json_path = kit_steps_runtime_expand(assertions[i].json_path, context, state) ?? return None
+        // Keep predicate values unexpanded: the checker chooses raw or normalized
+        // matching based on the presence of path tokens in the original value.
+    }
+    Val(assertions)
 }
 
 fn kit_steps_replacements(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
@@ -160,6 +168,22 @@ fn kit_steps_free_port_names(text: String) -> [String]? {
         rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
     }
     Val(names)
+}
+
+// Every free-port name the case uses: the ones its lines name, then the ones in the template files its
+// `write` and `send` steps expand, which the parser never reads.
+fn kit_steps_case_port_names(context: KitStepCtx) -> [String] {
+    names := context.plan.free_ports
+    loop step in context.plan.steps {
+        if step.literal_input -> next
+        template :: if step.action == "write" && step.argv.len() == 3 -> step.argv[2] else if step.action == "send" && step.argv.len() == 1 -> step.argv[0] else -> ""
+        if template == "" -> next
+        text :: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, template)) ?? next
+        loop name in (kit_steps_free_port_names(text) ?? []) {
+            if !kit_expect_named(names, name) -> &names.push(name)
+        }
+    }
+    names
 }
 
 // One probe run reserves every port a case names: the probe holds all its listeners until it has printed

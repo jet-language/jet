@@ -226,8 +226,13 @@ fn sema_call_diag_required_label(callee: String, label: String, span: Span) -> D
 fn sema_call_arity_diagnostic(callee: String, expected: Int, actual: Int, variadic: Bool, span: Span) -> Diagnostic {
     if {
         variadic -> sema_error("E0104", span, "`{callee}` expects at least {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every fixed parameter must receive a value before the variadic tail", "check how many values this function expects")
-        else -> sema_error("E0104", span, "`{callee}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a parameter", "check how many values this function expects")
+        else -> sema_error("E0104", span, "`{callee}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a parameter", if callee == "this call" -> "check how many values this function expects" else -> "check the definition of `{callee}`")
     }
+}
+
+// Rust `CheckerCoreLib/serde_diags.rs:715`: a Core method's arity names the call, not a user definition.
+fn sema_call_core_arity_diagnostic(callee: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+    sema_error("E0104", span, "`{callee}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{callee}`")
 }
 
 fn sema_call_diag_spread(callee: String, span: Span) -> Diagnostic {

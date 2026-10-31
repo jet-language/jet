@@ -1,21 +1,22 @@
 # Port of tests/jetpack_offline.rs:63-132; runtime PENDING-SAME-HEAD.
+# Retargeted off the retired `jetpack build`/`jetpack run` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 refused: hangar-verified-realization
 mkdir: project
 mkdir: package-root
 mkdir: fixtures
 mkdir: staging/bin
 env: JETPACK_ROOT={work}/package-root
-step: jetpack build greet@nixpkgs --no-color --offline --fixtures {work}/fixtures
+step: jetpack use --prep greet@jetpack --no-color --offline --fixtures {work}/fixtures
 cwd: project
 exit: 0
-step: jetpack build greet@nixpkgs --no-color --offline
+step: jetpack use --prep greet@jetpack --no-color --offline
 cwd: project
 env: JETPACK_DENY_NETWORK=1
 unset: JETPACK_FIXTURES
 exit: 0
 stderr: ~ "cached" # original predicate
 stderr: !~ "fixture" # original predicate
-step: jetpack run greet@nixpkgs --no-color --offline -- greet
+step: jetpack use greet@jetpack --no-color --offline -- greet
 cwd: project
 env: JETPACK_DENY_NETWORK=1
 unset: JETPACK_FIXTURES

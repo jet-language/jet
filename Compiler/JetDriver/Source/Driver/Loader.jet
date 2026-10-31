@@ -3446,6 +3446,9 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     tokens :: lexed.tokens.len()
     line_starts :: parser_line_starts(source)
     lines :: line_starts.len() - 1
+    // Rust Driver/mod.rs:7147: a lexer error ends the frontend before the
+    // parse, so a broken token never cascades into parse errors.
+    if jet_driver_has_errors(lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.diagnostics}, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
     parsed :: parse_lexed_with_source(^lexed, source, line_starts)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
 }
@@ -3466,6 +3469,8 @@ fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads
     lexed := lex_threads(source, threads)
     tokens :: lexed.lexed.tokens.len()
     lines :: lexed.line_starts.len() - 1
+    // Rust Driver/mod.rs:7147: a lexer error ends the frontend before the parse.
+    if jet_driver_has_errors(lexed.lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.lexed.diagnostics}, demand: jet_driver_empty_core_identifier_demand(), lines: lines, tokens: tokens, line_starts: ^lexed.line_starts}
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
     demand := ^scanned.demand
     parsed := parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)

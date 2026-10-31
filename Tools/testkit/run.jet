@@ -537,10 +537,16 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         .None -> {}
     }
     files.create_dir_all(files.join(context.scratch, "tmp")) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "create case temp directory: {err}"))
-    if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
-    if plan.free_ports.len() > 0 {
-        ports :: kit_steps_free_ports(context, plan.free_ports.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-        loop index in 0..<plan.free_ports.len() -> &state.free_ports.push(KitFreePort{name: plan.free_ports[index], port: ports[index]})
+    if plan.fixture != "" {
+        fixture :: files.join(context.snapshots, plan.fixture)
+        // A missing fixture would stop the copy, and with it the pool task, without a verdict.
+        if !files.is_dir(fixture) -> return kit_steps_finish(state, kit_expect_verdict("ERROR", "fixture directory is missing: {plan.fixture}"))
+        kit_exec_copy_tree(fixture, context.work, true)
+    }
+    port_names :: kit_steps_case_port_names(context)
+    if port_names.len() > 0 {
+        ports :: kit_steps_free_ports(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        loop index in 0..<port_names.len() -> &state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
     }
     loop index in 0..<context.plan.environment.len() {
         context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
@@ -654,6 +660,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
             kit_steps_action(step, context, state) else -> kit_steps_hook_invoke(hooks, step, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" || state.settled -> return kit_steps_finish(state, invoked.verdict)
+        if step.action == "capture" || step.action == "await" -> step.assertions = kit_steps_resolve_assertions(step.assertions, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
         if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
         if kit_expect_named(["", "wait", "close", "poll"], step.action) {
             wired :: kit_steps_wiring_finish(step, context, state)

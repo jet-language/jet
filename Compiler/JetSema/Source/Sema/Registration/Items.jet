@@ -2118,7 +2118,8 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
     if name == "" -> return true
     if !sema_registration_reserved_type_rule(module_row, item, name, &diagnostics) -> return false
     if sema_registration_module_has_name(module_row, name) {
-        &diagnostics.push(sema_defined_twice(name, "module declarations share one namespace", sema_registration_root_span(item)))
+        why :: if item == .Func(_) -> "every function needs a unique name so calls aren't ambiguous" else -> "module declarations share one namespace"
+        &diagnostics.push(sema_defined_twice(name, why, sema_registration_root_span(item)))
         return false
     }
     if !sema_registration_value_type_rules(module_row, item, &diagnostics) -> return false
@@ -3034,7 +3035,7 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
                 }
                 flag :: sema_checked_field_shape_names(definition, field).args
                 if seen_flags.get(flag) != None {
-                    &diagnostics.push(sema_error("E1306", field.name_span, "two `#[CLI]` fields both derive the flag `--{flag}`", "every field needs a distinct `--flag`; generated commands reserve `--help`, `--allow`, and `--deny`.", "rename the colliding field or choose a non-reserved flag name"))
+                    &diagnostics.push(sema_error("E1306", field.name_span, "two `#[CLI]` fields both derive the flag `--{flag}`", "every field needs a distinct `--flag`; generated commands reserve `--help`, `--allow`, and `--deny`.", "rename the colliding field or choose a non-reserved flag name."))
                 }
                 seen_flags[flag] = true
                 sema_registration_cli_short_name(field, &seen_shorts, &diagnostics)
@@ -4484,7 +4485,8 @@ fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, modul
     if !sema_scope_add_compiler_builtin(&scopes, graph) -> complete = false
     loop (position, symbol) in module_row.symbols {
         if !sema_scope_add_module_symbol(&scopes, symbol) {
-            &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "module declarations share one namespace", symbol.span), module_row.source_segments))
+            why :: if symbol.kind == SymbolKind.Function -> "every function needs a unique name so calls aren't ambiguous" else -> "module declarations share one namespace"
+            &diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, why, symbol.span), module_row.source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {
             &waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Symbol{position: position}})

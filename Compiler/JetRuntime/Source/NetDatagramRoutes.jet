@@ -93,6 +93,41 @@ fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: 
     sync_mutex_unlock(state + I64{8})
     I64{1}
 }
+// UdpSocket::close: idempotent. The shared FD72 is marked closed (failing
+// any poller waiting on it); later operations report "socket is closed".
+#Export(c) fn jet_net_udp_close(value: I64, error: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    jet_fd_close_raw(jet_udp_socket_fd_raw(value), scratch, scratch + I64{32})
+    code :: net_word(scratch, I64{8})
+    jet_rt_free(scratch, I64{40}, I64{8})
+    if (code != I64{0}) -> return net_route_errno(rt_static_text("udp close"), I64{0}, code, error)
+    I64{1}
+}
+// UdpSocket::ready: one readiness wait under the explicit deadline; a
+// cancelled waiter reports "udp ready cancelled".
+#Export(c) fn jet_net_udp_ready(value: I64, interest: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("udp ready")
+    milliseconds :: net_deadline_millis(deadline)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (interest < I64{0} || interest > I64{2}) {
+        host_record_index_refused()
+        return I64{0}
+    }
+    if !net_udp_open(value, operation, error) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, operation, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_route_deadline_push(milliseconds, scratch + I64{32})
+    mask :: if (interest == I64{0}) -> I64{1} else if (interest == I64{1}) -> I64{4} else -> I64{5}
+    ready :: net_tcp_wait(jet_udp_socket_fd_raw(value), mask, operation, scratch, error)
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    if (ready == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(I64{16}, I64{8})
+    net_put(result, I64{0}, if (ready.bit_and(I64{1}) != I64{0}) -> I64{1} else -> I64{0})
+    net_put(result, I64{8}, if (ready.bit_and(I64{4}) != I64{0}) -> I64{1} else -> I64{0})
+    net_put(output, I64{0}, result)
+    I64{1}
+}
 fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, error: I64) -> I64 {
     operation :: rt_static_text("udp send")
     if !net_udp_open(value, operation, error) -> return I64{0}

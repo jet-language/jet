@@ -377,8 +377,17 @@ fn parser_parse_tail_if(state: &JetParserState) -> Stmt {
     parsed :: parser_parse_expression(&state, 1, 0)
     at_tail :: parser_current_kind(&state) == TOKEN_RBRACE || (parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
     if at_tail && !parser_error_since(state, saved_diagnostics) -> return Stmt.Expr{expr: parsed.expr}
+    value_errors :: state.diagnostics.len() - saved_diagnostics
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    parser_parse_statement(&state)
+    statement :: parser_parse_statement(&state)
+    if !at_tail || !parser_error_since(state, saved_diagnostics) -> return statement
+    // Both readings fail: keep the value form when the statement reading
+    // only adds errors, so one bad arm head (E0366) does not cascade into
+    // value arms read as statements (Rust reports the arm error alone).
+    if state.diagnostics.len() - saved_diagnostics <= value_errors -> return statement
+    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    reparsed :: parser_parse_expression(&state, 1, 0)
+    Stmt.Expr{expr: reparsed.expr}
 }
 
 fn parser_expression_is_collecting_loop(expr: Expr) -> Bool Never! {
@@ -1673,6 +1682,12 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
         parser_add_error(&state, start.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
     }
+    if parser_at_foreign_loop_statement(&state) {
+        word :: parser_value(state, start)
+        parser_bump(&state)
+        parser_report_foreign_loop_word(&state, word, start.span)
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
+    }
     named :: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
     if !named && !parser_starts_expression(start.kind) {
         parser_report_not_a_statement(&state, start)
@@ -1698,6 +1713,12 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
         return Stmt.Assign{target: ^target, op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
     }
     if named && !parser_named_line_does_work(&state, left.expr) {
+        // Rust `stmt`: a bare foreign loop word computes nothing; it is a word
+        // Jet does not spell, not an unused value.
+        if left.expr == .Ident(word, span, _) && parser_is_foreign_loop_word(word) {
+            parser_report_foreign_loop_word(&state, word, span)
+            return Stmt.Expr{expr: left.expr}
+        }
         parser_add_error(&state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x :: ...` or `print(...)`")
         return Stmt.Expr{expr: left.expr}
     }
@@ -1712,6 +1733,62 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
 fn parser_report_not_a_statement(state: &JetParserState, start: Token) {
     found :: parser_describe_token(state, start)
     parser_add_error(&state, start.span, "expected a call, binding, assignment, or `return`, found {found}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x :: 1")
+}
+
+// Rust `foreign_keyword_kind`: the retired foreign loop words (D-S14-PAUSE).
+// None is Jet syntax; each is recognized only to report a current-syntax error.
+fn parser_is_foreign_loop_word(word: String) -> Bool Never! {
+    word == "for" || word == "while" || word == "continue" || word == "do" || word == "repeat" || word == "until"
+}
+
+// Rust `at_foreign_loop_word_statement`: the current name opens a foreign
+// loop statement. `for`/`while` need a block ahead on the line, `continue`
+// ends the line (optionally with a label name), and `do`/`repeat`/`until`
+// open a block directly.
+fn parser_at_foreign_loop_statement(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_IDENT -> return false
+    word :: parser_value_at(&state, 0)
+    if word == "for" || word == "while" -> return parser_foreign_loop_has_block(&state)
+    if word == "continue" {
+        next_kind :: parser_kind_at(&state, 1)
+        if next_kind == TOKEN_SEMI || next_kind == TOKEN_RBRACE || next_kind == TOKEN_EOF -> return true
+        after :: parser_kind_at(&state, 2)
+        return next_kind == TOKEN_IDENT && (after == TOKEN_SEMI || after == TOKEN_RBRACE || after == TOKEN_EOF)
+    }
+    if word == "do" || word == "repeat" || word == "until" -> return parser_kind_at(&state, 1) == TOKEN_LBRACE
+    false
+}
+
+// Rust `foreign_loop_has_block`: a `{` at bracket depth zero before the line ends.
+fn parser_foreign_loop_has_block(state: &JetParserState) -> Bool Never! {
+    parens := 0
+    brackets := 0
+    offset := 1
+    loop {
+        kind :: parser_kind_at(&state, offset)
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+        if parens == 0 && brackets == 0 {
+            if kind == TOKEN_LBRACE -> return true
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE -> return false
+        }
+        if kind == TOKEN_EOF -> return false
+        offset += 1
+    }
+    false
+}
+
+// Rust `foreign_keyword_diagnostic` for the loop words.
+fn parser_report_foreign_loop_word(state: &JetParserState, word: String, span: Span) {
+    current :: "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords"
+    if {
+        word == "for" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `loop item in source {{ … }}`")
+        word == "while" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `loop condition {{ … }}`; for repeated input, use `loop line in io.stdin().lines()` and stop in the body with `if test {{ break }}`")
+        word == "continue" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `next`")
+        else -> parser_add_error(&state, span, "expected a statement, found `{word}`", "Jet uses one body-first loop form; put the stop test inside the body and exit with `break`", "write `loop {{ … if test {{ break }} }}`; for repeated input, use `loop line in io.stdin().lines()`")
+    }
 }
 
 // Rust `starts_expr`: the tokens that can open an expression line.

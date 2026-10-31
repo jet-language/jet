@@ -335,8 +335,18 @@ struct ServicesClaim {
         }
     }
 
-    // A packageless project (never trust-sensitive) declaring dev services.
-    fn write_project(self, services_body: String, main_src: String) -[FS]> {
+    // A packageless project declaring dev services. Dev services make the env
+    // a typed environment, so the gated verbs (`up`, `restart`, `watch`,
+    // `health`, `wait`) need trust: each claim pre-authorizes its own project
+    // in its own HOME through `config trust add`, as a user would.
+    fn write_project(self, services_body: String, main_src: String) -[FS, Env, Exec, Time.Wait]> {
+        self.write_untrusted_project(services_body, main_src)
+        trusted :: self.run([String]{"config", "trust", "add", self.project}, cli_test_no_env())
+        assert(trusted.success, "trust the claim project: {trusted.errors}")
+    }
+
+    // The same project with no trust decision recorded.
+    fn write_untrusted_project(self, services_body: String, main_src: String) -[FS]> {
         files.write(files.join(self.project, "env.jet"), "module env.dev {{ services: {{ {services_body} }} }}\n") ?? panic("write env.jet")
         files.write(files.join(self.project, "run.jet"), main_src) ?? panic("write run.jet")
     }

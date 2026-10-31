@@ -60,6 +60,7 @@ use jet_eval.[
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
 use jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
+use jet_sema.[SemaOutputIntent]
 use jet_web.[web_runtime_partition]
 
 // The production CLI's compile, under the driver's all-phases collector when
@@ -1318,6 +1319,12 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options
             // copy: `refusal` is a payload view of `contributed`.
             if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
             compiled_request := ^contributed.request
+            // A single program compile is a singular intent: sema selects its
+            // entry in the decided order (explicit address, legacy `fn run`,
+            // sole compatible Output, checked `defaults: { run: … }`, then an
+            // ambiguity error; syntax-decisions.md:7421-7429), and the driver
+            // starts at the selected Output's function.
+            compiled_request.output_intent = SemaOutputIntent.Run
             if entry != None -> compiled_request.selected_entry = entry.copy()
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: compiled_request.compiler_threads.copy()

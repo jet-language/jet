@@ -531,7 +531,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
         first :: paths[0] ?? [TFieldRef]{}
         second :: paths[1] ?? [TFieldRef]{}
         if paths[0] == None || paths[1] == None || sema_call_memory_guard_paths_overlap(first, second) {
-            &diagnostics.push(sema_error("E0216", span, "`SharedGuard.split` needs two disjoint field projections", "two guards may never point at the same field or at an enclosing and nested field", "project sibling fields, such as `value.left` and `value.right`"))
+            &diagnostics.push(sema_error("E0216", span, "`SharedGuard.split` needs two disjoint field projections", "two editable guards may never point at the same field or at an enclosing and nested field", "project sibling fields, such as `value.left` and `value.right`"))
             paths[0] = None
             paths[1] = None
         }

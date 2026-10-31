@@ -601,6 +601,7 @@ fn expr_source_start(expr: Expr) -> Int Never! {
         .Paren(_, span, _) -> return span.start
         .Field(base, _, _, _) -> return expr_source_start(base)
         .OptField(base, _, _, _, _, _) -> return expr_source_start(base)
+        .Index(base, _, _, _, _) -> return expr_source_start(base)
         .MethodCall(receiver, _, _, _, _, _, _) -> return expr_source_start(receiver)
         else -> return expr_span(expr).start
     }

@@ -164,9 +164,9 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
     }
     if range_value == None && parser_current_kind(&state) == TOKEN_LPAREN {
         open :: parser_bump(&state)
-        lower :: parser_distinct_range_bound(&state, "as the lower range bound")
+        lower :: parser_distinct_range_bound(&state, "as the range's lower bound")
         parser_expect(&state, TOKEN_DOT_DOT, "between distinct range bounds")
-        upper :: parser_distinct_range_bound(&state, "as the upper range bound")
+        upper :: parser_distinct_range_bound(&state, "as the range's upper bound")
         close :: parser_expect(&state, TOKEN_RPAREN, "`)` after a distinct range")
         if lower.value > upper.value {
             parser_type_declaration_error(&state, "E0137", parser_cover(lower.span, upper.span), "this distinct range is empty", "a range lower bound cannot be greater than its upper bound", "swap the two bounds")
@@ -193,7 +193,7 @@ struct DistinctRangeBound {
 fn parser_distinct_range_bound(state: &JetParserState, context: String) -> DistinctRangeBound {
     token :: parser_current(&state)
     if token.kind == TOKEN_MINUS {
-        parser_add_error(&state, token.span, "expected a non-negative whole number {context}", "distinct ranges use literal integer bounds", "write a plain integer such as `0..10`")
+        parser_add_error(&state, token.span, "expected a non-negative whole number {context}", "a range constraint's bounds are literal whole numbers", "write a plain integer, e.g. `0..10`")
         parser_bump(&state)
         if parser_current_kind(&state) == TOKEN_INT {
             value :: parser_bump(&state)
@@ -202,7 +202,8 @@ fn parser_distinct_range_bound(state: &JetParserState, context: String) -> Disti
         return DistinctRangeBound{value: 0, span: token.span}
     }
     if token.kind != TOKEN_INT {
-        parser_add_error(&state, token.span, "expected a whole number {context}", "distinct ranges use literal integer bounds", "write a plain integer such as `0..10`")
+        found :: parser_describe_token(state, token)
+        parser_add_error(&state, token.span, "expected a whole number {context}, found {found}", "a range constraint's bounds are literal whole numbers", "write a plain integer, e.g. `0..10`")
         if token.kind != TOKEN_EOF -> parser_bump(&state)
         return DistinctRangeBound{value: 0, span: token.span}
     }
@@ -257,7 +258,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
                     if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
-            index == 1 -> {
+            index == 1 && (label == "" || label == "dimension") -> {
                 if value == .Val(expr) {
                     if expr == {
                         .Ident(name, span, _) -> {
@@ -267,7 +268,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
                     }
                 }
             }
-            index == 2 && base == None -> {
+            index == 2 && label == "" && base == None -> {
                 if value == .Val(expr) {
                     if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
@@ -282,7 +283,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
         .None -> false
     }
     if derived_without_base {
-        parser_type_declaration_error(&state, "E0003", family_span, "a derived dimension needs a canonical base", "derived unit dimensions require one member with scale one and offset zero", "add `base: member_name` to `#UnitFamily`")
+        parser_type_declaration_error(&state, "E0003", family_span, "Derived dimension `{family}` has no canonical base", "Every derived dimension needs one member whose scale is exactly one", "Add `base: member_name` and keep that member's scale at 1 with offset 0")
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before unit-family members")
     members := [UnitFamilyMember]{}
@@ -304,7 +305,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
                 if parser_value(state, field) == {
                     "scale" -> {
                         if saw_scale {
-                            parser_type_declaration_error(&state, "E0003", field.span, "unit scale is repeated", "each unit member has one scale fact", "keep one `scale:` entry")
+                            parser_type_declaration_error(&state, "E0003", field.span, "Unit metadata `scale` appears twice", "Each conversion fact has one exact value", "Keep one `scale: ...` entry")
                         }
                         parsed :: parser_unit_scale(&state)
                         scale = parsed.ratio
@@ -313,13 +314,14 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
                     }
                     "offset" -> {
                         if saw_offset {
-                            parser_type_declaration_error(&state, "E0003", field.span, "unit offset is repeated", "each unit member has one offset fact", "keep one `offset:` entry")
+                            parser_type_declaration_error(&state, "E0003", field.span, "Unit metadata `offset` appears twice", "Each conversion fact has one exact value", "Keep one `offset: ...` entry")
                         }
                         offset = parser_unit_ratio(&state)
                         saw_offset = true
                     }
                     else -> {
-                        parser_type_declaration_error(&state, "E0003", field.span, "unknown unit conversion metadata", "unit members accept scale and offset facts", "use `scale:` or `offset:`")
+                        field_name :: parser_value(state, field)
+                        parser_type_declaration_error(&state, "E0003", field.span, "Unknown unit metadata `{field_name}`", "Unit members accept exact `scale` and `offset` facts", "Use `scale: numerator/denominator` or `offset: numerator/denominator`")
                         parser_parse_expression(&state, 1, 0)
                     }
                 }
@@ -328,7 +330,8 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
             parser_expect(&state, TOKEN_RPAREN, "`)` after unit conversion metadata")
         }
         if scale.numerator == 0 {
-            parser_type_declaration_error(&state, "E0003", member.span, "a unit scale cannot be zero", "unit conversion must remain invertible", "write a nonzero exact scale")
+            member_name :: parser_value(state, member)
+            parser_type_declaration_error(&state, "E0003", member.span, "Unit `{member_name}` has a zero scale", "A unit conversion must be invertible", "Use a nonzero exact ratio for `scale`")
         }
         if saw_scale || saw_offset -> has_conversion = true
         &members.push(UnitFamilyMember{name: parser_value(state, member), name_span: member.span, scale: scale, scale_provenance: scale_provenance, offset: offset})
@@ -345,11 +348,11 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
                 if member.name == base_value.name {
                     found = true
                     if member.scale.numerator != member.scale.denominator || member.offset.numerator != 0 {
-                        parser_type_declaration_error(&state, "E0003", member.name_span, "the unit-family base must have scale one and offset zero", "the canonical base carries the family's unchanged value", "remove conversion metadata from the base member")
+                        parser_type_declaration_error(&state, "E0003", member.name_span, "Base `{member.name}` changes its own scale or offset", "The canonical base always has scale 1 and offset 0", "Remove metadata from the base member")
                     }
                 }
             }
-            if !found -> parser_type_declaration_error(&state, "E0003", base_value.span, "the unit-family base is not a member", "the canonical base must be declared in the same family", "name an existing member as `base`")
+            if !found -> parser_type_declaration_error(&state, "E0003", base_value.span, "Base `{base_value.name}` is not a member of `{family}`", "The canonical base is one member of its closed unit family", "Add `{base_value.name}` to the family or name an existing member")
         }
         else -> {}
     }
@@ -433,7 +436,7 @@ fn parser_unit_integer(state: &JetParserState, context: String) -> UnitText {
     }
     token :: parser_current(&state)
     if token.kind != TOKEN_INT {
-        parser_add_error(&state, token.span, "expected an integer {context}", "unit ratios use exact integer numerators and denominators", "write an integer")
+        parser_add_error(&state, token.span, "expected an exact integer {context}", "Unit conversion metadata uses exact integer ratios, not floating point", "Write an integer or `numerator/denominator`")
         if token.kind != TOKEN_EOF -> parser_bump(&state)
         return UnitText{text: "0", span: parser_cover(start, token.span)}
     }
@@ -442,13 +445,13 @@ fn parser_unit_integer(state: &JetParserState, context: String) -> UnitText {
 }
 
 fn parser_unit_ratio(state: &JetParserState) -> UnitRatio {
-    numerator :: parser_unit_integer(&state, "as a conversion numerator")
+    numerator :: parser_unit_integer(&state, "as conversion metadata")
     denominator := UnitText{text: "1", span: numerator.span}
     if parser_current_kind(&state) == TOKEN_SLASH {
         parser_bump(&state)
-        denominator = parser_unit_integer(&state, "as a conversion denominator")
+        denominator = parser_unit_integer(&state, "as a ratio denominator")
         if parser_unit_decimal_to_ratio(denominator.text).numerator == 0 {
-            parser_type_declaration_error(&state, "E0003", denominator.span, "a ratio denominator cannot be zero", "unit conversion factors must be finite and invertible", "write a nonzero integer denominator")
+            parser_type_declaration_error(&state, "E0003", denominator.span, "Invalid unit conversion ratio: rational denominator is zero", "Unit conversion metadata must be a finite exact ratio", "Use a nonzero integer denominator")
         }
     }
     parser_unit_ratio_from_text(numerator.text, denominator.text)

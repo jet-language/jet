@@ -56,7 +56,9 @@ fn jet_cli_emit_ast(file: String, source: String, color: Bool, json: Bool, funct
 // `--fn` names.
 fn jet_cli_emit_ir_result(file: String, source: String, color: Bool, json: Bool, requires_run: Bool, function: String?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-    if requires_run -> &diagnostics.push(jet_cli_no_run_diagnostic())
+    // No `fn run` is E0101 only when sema selected no Output entry either.
+    selected_entry :: if inputs == .Val(lowering) -> lowering.entry_key != None else -> false
+    if requires_run && !selected_entry -> &diagnostics.push(jet_cli_no_run_diagnostic())
     errors :: jet_cli_errors(diagnostics)
     if errors.len() > 0 -> return jet_cli_emit_check_failure(file, source, errors, color, json)
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)

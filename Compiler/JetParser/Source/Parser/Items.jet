@@ -577,7 +577,7 @@ fn parser_parse_import(state: &JetParserState) -> ImportDecl {
                 if kind == TOKEN_RBRACE -> brace_depth -= 1
                 parser_bump(&state)
             }
-            parser_add_error(&state, open.span, "brace import groups are not supported", "imports group members in brackets", "write a bracketed member list instead")
+            parser_add_error(&state, open.span, "brace import groups are not supported", "`use {path}.{{…}}` is the retired grouped-import spelling", "write `use {path}.[item, other as local]`")
             parser_finish_statement(&state)
             end := parser_lookahead(&state, -1).span
             return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start.span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
@@ -766,7 +766,9 @@ fn parser_parse_param_list(state: &JetParserState) -> [Param] {
             }
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
             if parser_current_kind(&state) != TOKEN_COMMA {
-                parser_add_error_here(&state, "expected `,` between parameters", "function parameters are comma-separated", "add a comma or close the parameter list")
+                current :: parser_current(&state)
+                found :: parser_describe_token(state, current)
+                parser_add_error_here(&state, "expected `,` between parameters, found {found}", "the structure here isn't what the compiler expected", "use `,` between parameters")
                 break
             }
             parser_bump(&state)
@@ -887,7 +889,12 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
             // Sema supplies the receiver type from its owning declaration.
         }
         else -> {
-            parser_expect(&state, TOKEN_COLON, "`:` and a type after the parameter name")
+            if parser_current_kind(&state) == TOKEN_COLON {
+                parser_bump(&state)
+            } else {
+                param_name :: parser_text(state, name)
+                parser_add_error(&state, name.span, "expected `:` after the parameter `{param_name}`", "every parameter except `self` needs a type after its name", "write `{param_name}: Type`")
+            }
             cap_kind := parser_current_kind(&state)
             if cap_kind == TOKEN_AMP || cap_kind == TOKEN_CARET {
                 cap :: parser_bump(&state)

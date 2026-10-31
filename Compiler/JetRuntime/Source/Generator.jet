@@ -28,15 +28,24 @@ GENERATOR_BYTES :: I64{88}
     sync_store(state + I64{72}, iter_meta(node))
     sync_store(state + I64{80}, label)
     sync_store(env, state)
-    trap_store(node + I64{152}, state)
+    iter_hook(node, state, rt_generator_pull_address(), rt_generator_release_address())
     node
 }
 
-// The consumer's pull: resumes (first: starts) the producer and waits until
-// it yields into `output` or finishes; a finished producer marks the node
-// done (iter_pull_kernel). A producer panic is raised again here.
-fn generator_pull(node: I64, output: I64) -> Bool {
-    state :: trap_word(node + I64{152})
+// RuntimeLower resolves these checked addresses through its sole intrinsic table.
+fn rt_generator_pull_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+fn rt_generator_release_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// The consumer's pull (the node's pull hook, Iter.jet): resumes (first:
+// starts) the producer and waits until it yields into `output` (1) or
+// finishes (0); a finished producer marks the node done. A producer panic is
+// raised again here.
+#Export(c) fn jet_rt_native_generator_pull(node: I64, output: I64) -> I64 {
+    state :: trap_word(node + I64{48})
     sync_store(state + I64{40}, output)
     sync_store(state + I64{48}, I64{1})
     child := sync_load(state + I64{32})
@@ -50,10 +59,10 @@ fn generator_pull(node: I64, output: I64) -> Bool {
     scheduler_blocking_wait_enter()
     loop sync_load(state + I64{48}) != (I64{0}) && sync_load(child + I64{24}) == (I64{0}) -> sync_park(sync_load(child + I64{104}), I64{-1})
     scheduler_blocking_wait_leave()
-    if (sync_load(state + I64{48}) == I64{0}) -> return true
+    if (sync_load(state + I64{48}) == I64{0}) -> return I64{1}
     trap_store(node + I64{144}, I64{1})
     if (sync_load(child + I64{32}) == I64{5}) -> generator_raise(child)
-    false
+    I64{0}
 }
 
 fn generator_raise(child: I64) {
@@ -84,10 +93,11 @@ fn generator_raise(child: I64) {
     jet_rt_string_drop(kind)
 }
 
-// Dropping the stream (jet_rt_native_iter_drop, under its shield): a
-// producer never started only releases its env; a running one is cancelled
-// and waited for, so its cleanup has run when the drop returns.
-fn generator_drop(state: I64) {
+// Dropping the stream (the node's release hook, run by jet_rt_native_iter_drop
+// under its shield): a producer never started only releases its env; a
+// running one is cancelled and waited for, so its cleanup has run when the
+// drop returns.
+#Export(c) fn jet_rt_native_generator_release(state: I64) -> I64 {
     child :: sync_load(state + I64{32})
     if (child == I64{0}) {
         coll_call1_unit(sync_load(state + I64{16}), sync_load(state))
@@ -103,4 +113,5 @@ fn generator_drop(state: I64) {
     sync_park_drop(sync_load(state + I64{64}))
     coll_meta_drop(sync_load(state + I64{24}))
     jet_rt_free(state, GENERATOR_BYTES, I64{8})
+    I64{0}
 }

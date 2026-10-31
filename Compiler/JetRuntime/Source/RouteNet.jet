@@ -33,8 +33,21 @@ NET_UDP_PACKET_BYTES :: I64{96}
 #Export(c) fn jet_rt_handle_field_jet_udp_packet_addr(value: I64, out: I64) { coll_copy(value, out, I64{56}) }
 #Export(c) fn jet_rt_handle_field_jet_udp_packet_truncated(value: I64) -> I64 { value + I64{56} }
 #Export(c) fn jet_rt_handle_field_jet_udp_packet_data(value: I64, out: I64) { coll_copy(value + I64{64}, out, I64{24}) }
-// original_len is at most 65535, so the word is its own inline Int.
+// original_len is at most 65535, so the word is its own inline Int; so is
+// the peer port (Socket56 port@24).
 #Export(c) fn jet_rt_handle_field_jet_udp_packet_original_len(value: I64) -> I64 { net_word(value, I64{88}) }
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_port(value: I64) -> I64 { net_word(value, I64{24}) }
+// The peer host is derived, not stored: a fresh String of the IP (an IPv6
+// scope as `%N`, no brackets), the form net.socket_addr(host, port) parses.
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_host(value: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    ip_show_into(text, value)
+    if (net_word(value, I64{0}) == I64{6} && net_word(value, I64{40}) != I64{0}) {
+        jet_rt_string_builder_push(text, rt_static_text("%"))
+        rt_text_push_number(text, net_word(value, I64{40}))
+    }
+    jet_rt_string_builder_finish(text)
+}
 
 // NetHTTP.rs:2853 packet.addr.clone()
 #Export(c) fn jet_net_raw_udp_packet_addr(packet: I64) -> I64 { net_copy(packet, I64{56}) }
