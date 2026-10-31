@@ -94,6 +94,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
     unit_family_distinct_defs,
+    access_sigil,
     CModule,
 ]
 use jet_parser.[parser_guest_import_symbol]
@@ -2964,7 +2965,9 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             else -> graph.complete
         }
         if mismatch {
-            &diagnostics.push(sema_error("E0913", actual.declaration.name_span, "implementation method `{actual.declaration.name}` does not match its trait method", "trait dispatch uses the registered callable signature", "make the implementation parameter, return, and effect contract match the trait"))
+            expected_declaration :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration
+            written :: sema_checked_trait_method_expected(expected_declaration, associated_names, associated_types)
+            &diagnostics.push(sema_error("E0907", actual.declaration.name_span, "`{actual.declaration.name}` doesn't match the `{trait_name}` contract", "a trait implementation must use the trait method's receiver, parameters, return type, and effects", "write `{written}`, matching the `{trait_name}` declaration exactly, including `self`, types, labels, return type, and effects"))
         }
     }
     loop associated in implementation.associated_types {
@@ -2973,6 +2976,44 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             &diagnostics.push(sema_error("E0913", associated.symbol.span, "associated type `{associated.symbol.name}` is not resolved for this impl", "associated types are checked against one trait implementation", "declare the associated type in the trait and provide one concrete value"))
         }
     }
+}
+
+// (Rust `trait_method_expected_signature`) The callable a trait declares, as
+// this impl must write it: `Self` and the associated types are the impl's
+// concrete types. An effect row rides the arrow (`-[IO]> T`, pure `-[]> T`);
+// otherwise a success value is spelled `-> T`, and a Unit or unit-fallible
+// result keeps the arrowless form.
+fn sema_checked_trait_method_expected(declaration: TraitMethodSig, names: [String], types: [Type]) -> String {
+    params := [String]{}
+    loop param in declaration.params {
+        sigil :: access_sigil(param.convention)
+        if param.name == "self" {
+            &params.push("{sigil}self")
+        } else {
+            &params.push("{param.name}: {sigil}{type_name(sema_inference_substitute_type(param.ty, names, types))}")
+        }
+    }
+    rendered := "fn {declaration.name}({params.join(", ")})"
+    success_value := false
+    if declaration.return_type == .Val(returned) {
+        success_value = true
+        if returned == .Result(ok, _) {
+            if ok == (Type.Named{name: "Unit"}) -> success_value = false
+        } else if returned == (Type.Named{name: "Unit"}) {
+            success_value = false
+        }
+    }
+    if declaration.declared_effects == .Val(effects) {
+        effect_names := [String]{}
+        loop entry in effects -> &effect_names.push(entry.name)
+        rendered = "{rendered} -[{effect_names.join(", ")}]>"
+    } else if declaration.is_pure {
+        rendered = "{rendered} -[]>"
+    } else if success_value {
+        rendered = "{rendered} ->"
+    }
+    if declaration.return_type == .Val(returned) -> rendered = "{rendered} {type_name(sema_inference_substitute_type(returned, names, types))}"
+    rendered
 }
 
 // An impl method that writes no effect row keeps its inferred row, which the
