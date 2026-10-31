@@ -260,12 +260,11 @@ fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     Ok(BrowserTimeout{milliseconds: ms})
 }
 
-fn locked(engine: String) -[FS, IO, Env]> BrowserLocked BrowserError! {
+// The project's pin, read through FS alone (architecture.md:1287-1288): the
+// `.jet/lock` of the working directory, the project root a program runs from.
+fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
-    env :: core.sys.__startup_env()
-    root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
-    lock_path :: core.web.browser.__path_join(root, ".jet/lock")
-    raw :: core.web.browser.__read_text(lock_path) ?? return Err(BrowserError{kind: "missing lock"})
+    raw :: core.web.browser.__read_text(".jet/lock") ?? return Err(BrowserError{kind: "missing lock"})
     entry :: parse_locked(raw, engine)
     if !core.web.browser.__is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
     size :: core.web.browser.__file_size(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
