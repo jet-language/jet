@@ -363,6 +363,9 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // References per slot, as the code reads them: a frame home's count of
     // rbp displacements (homes below).
     refs := [Int]{}
+    // Per instruction, whether it reads its first operand field `a` as a
+    // slot (ir_x64_scan's partners).
+    left_reads := [Bool]{}
     loop _ in 0..<count {
         &writes.push(0)
         &last_write.push(-1)
@@ -371,8 +374,10 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     }
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, &reads)
+        left := false
         loop slot in reads {
             if slot < 0 || slot >= count -> next
+            if slot == f.a[at] -> left = true
             if at < starts[slot] {
                 starts[slot] = at
                 first_writes[slot] = false
@@ -393,6 +398,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             refs[written] = refs[written] + 1
             last_write[written] = at
         }
+        &left_reads.push(left)
     }
     classes :: loop slot in 0..<count -> ir_x64_row_class(m, f.slot_type[slot])
     consts := [Bool]{}
@@ -505,18 +511,22 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
 
     // Linear scan: the General slots over the callee-saved registers, the
     // Float slots over xmm8-xmm15. A General slot that starts with its
-    // write may take the register of one its writer reads last, and a copy
-    // that may share its source's register (ir_x64_aliases) rides on it. A
-    // Float slot does neither: a call reloads the xmm slots live across it
-    // after it returns.
+    // write may take the register of one its writer reads last, that of
+    // the writer's first operand first (`partners`), an If's result that of
+    // its then arm's source (ir_x64_phis), and a copy that may share its
+    // source's register (ir_x64_aliases) rides on it. A Float slot does
+    // none of these: a call reloads the xmm slots live across it after it
+    // returns.
     general :: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
     floating :: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float
     fresh :: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot
+    partners :: loop slot in 0..<count -> if fresh[slot] && left_reads[starts[slot]] -> f.a[starts[slot]] else -> -1
+    phis :: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
     aliases :: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)
-    regs :: ir_x64_scan(starts, ends, weights, general, fresh, aliases, IR_X64_SLOT_REGISTERS)
+    regs :: ir_x64_scan(starts, ends, weights, general, fresh, partners, phis, aliases, IR_X64_SLOT_REGISTERS)
     stale :: loop _ in 0..<count -> false
     alone :: loop _ in 0..<count -> -1
-    xmms :: ir_x64_scan(starts, ends, weights, floating, stale, alone, IR_X64_XMM_REGISTERS)
+    xmms :: ir_x64_scan(starts, ends, weights, floating, stale, alone, alone, alone, IR_X64_XMM_REGISTERS)
     xmm_slots := [Int]{}
     loop slot in 0..<count {
         if xmms[slot] >= 0 -> &xmm_slots.push(slot)
@@ -613,6 +623,56 @@ fn ir_x64_aliases(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_w
     aliases
 }
 
+// Per slot, the slot whose register it may take while that one is still
+// live (-1: none): an If's result, a General 8-byte slot written twice, by a
+// Move or a Copy that does not clone of `source` directly in the If's then
+// arm (its first reference) and once in the else arm. The source is not
+// read again in the then arm, it is read in the else arm only up to and at
+// that second write, never after the If, and never written while the
+// result is live; the result is not read in the else arm up to that write.
+// So no path holds both values apart: one register serves both, the copy
+// is no instruction and the else arm overwrites the source only once done
+// with it.
+fn ir_x64_phis(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_write: [Int], writes: [Int], classes: [IRX64Class], consts: [Bool], addressed: [Bool], around: [Int]) -> [Int] Never! {
+    count :: f.slot_type.len()
+    phis := [Int]{}
+    reads := [Int]{}
+    loop slot in 0..<count {
+        &phis.push(-1)
+        at :: starts[slot]
+        if slot < f.param_count || at < 0 || writes[slot] != 2 || ir_x64_write(f, at) != slot || ends[slot] - at > IR_X64_ALIAS_SPAN -> next
+        if classes[slot] != .General || consts[slot] || addressed[slot] || m.types[f.slot_type[slot]].size != 8 -> next
+        op :: f.op[at]
+        if op != .Move && op != .Copy -> next
+        source :: f.a[at]
+        if source < 0 || source >= count || source == slot || classes[source] != .General || consts[source] || addressed[source] -> next
+        row :: m.types[f.slot_type[source]]
+        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) -> next
+        branch :: around[at]
+        if branch < 0 || f.op[branch] != .If -> next
+        middle :: f.b[branch]
+        end :: f.c[branch]
+        if middle <= at || middle >= end || end >= f.op.len() -> next
+        other :: last_write[slot]
+        if other <= middle || other >= end || ends[source] > other -> next
+        safe := true
+        loop k in (at + 1)..<(ends[slot] + 1) {
+            if ir_x64_write(f, k) == source {
+                safe = false
+                break
+            }
+            if k > other -> next
+            ir_x64_reads_into(f, k, &reads)
+            loop read in reads {
+                if (read == source && k < middle) || (read == slot && k > middle) -> safe = false
+            }
+            if !safe -> break
+        }
+        if safe -> phis[slot] = source
+    }
+    phis
+}
+
 // The slot an aggregate-returning function builds its result in, when the
 // caller's result storage can take that place: every Return with a value
 // returns it, its only write is a StackAddress of exactly the result's size
@@ -649,11 +709,15 @@ fn ir_x64_storage_size(f: IRFunction, at: Int) -> Int Never! {
 // own, and loses it with the source. A range whose first reference writes
 // it (`fresh`) may take the register of one whose last reference is that
 // same instruction: selection reads every operand of an instruction before
-// it writes the result. When every register is taken, the register whose
-// owner and live riders weigh least together (ir_x64_lighter) goes to the
-// range if they are lighter than it; else the range stays in its home. Per
-// slot: its register, -1 for none.
-fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fresh: [Bool], aliases: [Int], pool: [Int]) -> [Int] Never! {
+// it writes the result. It takes that of its `partners` slot (the writer's
+// first operand, -1 none) before any other, so a two-address instruction
+// computes in place with no copy. An If's result takes the register of its
+// `phis` slot (ir_x64_phis) while that one still owns it, live or not; the
+// source then rides on it until it ends. When every register is taken, the
+// register whose owner and live riders weigh least together
+// (ir_x64_lighter) goes to the range if they are lighter than it; else the
+// range stays in its home. Per slot: its register, -1 for none.
+fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fresh: [Bool], partners: [Int], phis: [Int], aliases: [Int], pool: [Int]) -> [Int] Never! {
     count :: starts.len()
     regs := [Int]{}
     loop _ in 0..<count -> &regs.push(-1)
@@ -680,9 +744,22 @@ fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fre
             next
         }
         // A fresh range may also take a register whose range ends where it
-        // starts.
+        // starts, its partner's first.
         shares :: fresh[slot] && start >= 0
+        partner :: partners[slot]
         free := -1
+        phi :: phis[slot]
+        if shares && phi >= 0 {
+            loop row in 0..<pool.len() {
+                if owners[row] == phi -> free = row
+            }
+            if free >= 0 && ends[phi] > start -> &riders.push(phi)
+        }
+        if free < 0 && shares && partner >= 0 && ends[partner] == start {
+            loop row in 0..<pool.len() {
+                if owners[row] == partner -> free = row
+            }
+        }
         loop row in 0..<pool.len() {
             if free < 0 && (owners[row] < 0 || (shares && ends[owners[row]] == start)) -> free = row
         }
@@ -744,13 +821,53 @@ fn ir_x64_lighter(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     eligible :: [Bool]{true, true, true}
     fresh :: [Bool]{true, true, true}
     aliases :: [Int]{-1, 0, -1}
-    regs :: ir_x64_scan(starts, ends, weights, eligible, fresh, aliases, [Int]{3})
+    partners :: [Int]{-1, -1, -1}
+    regs :: ir_x64_scan(starts, ends, weights, eligible, fresh, partners, partners, aliases, [Int]{3})
     assert_eq(regs[0], 3)
     assert_eq(regs[1], 3)
     assert_eq(regs[2], -1)
     // Without the copy riding, the value alone is lighter and goes home.
-    alone :: ir_x64_scan(starts, ends, weights, eligible, fresh, [Int]{-1, -1, -1}, [Int]{3})
+    alone :: ir_x64_scan(starts, ends, weights, eligible, fresh, partners, partners, [Int]{-1, -1, -1}, [Int]{3})
     assert_eq(alone[0], -1)
+}
+
+// Two ranges end at instruction 5, where a third starts with its write:
+// it takes the register of its writer's first operand (slot 1), which the
+// instruction then computes in place, rather than the first one free.
+#Test("A result takes its first operand's register when that operand ends there") {
+    starts :: [Int]{0, 1, 5}
+    ends :: [Int]{5, 5, 9}
+    weights :: [Int]{1, 1, 1}
+    eligible :: [Bool]{true, true, true}
+    fresh :: [Bool]{true, true, true}
+    aliases :: [Int]{-1, -1, -1}
+    pool :: [Int]{3, 12}
+    regs :: ir_x64_scan(starts, ends, weights, eligible, fresh, [Int]{-1, -1, 1}, aliases, aliases, pool)
+    assert_eq(regs[0], 3)
+    assert_eq(regs[1], 12)
+    assert_eq(regs[2], 12)
+    first :: ir_x64_scan(starts, ends, weights, eligible, fresh, aliases, aliases, aliases, pool)
+    assert_eq(first[2], 3)
+}
+
+// if c { x = y } else { x = g(y) }: y (slot 1, 1..6) is still live in the
+// else arm when x (slot 2) starts with the then arm's copy at 3. As y's
+// phi, x takes y's register with y riding on it; else both registers are
+// held by heavier ranges and x stays in its home.
+#Test("An If's result takes its then arm's source's register") {
+    starts :: [Int]{0, 1, 3}
+    ends :: [Int]{9, 6, 9}
+    weights :: [Int]{10, 10, 1}
+    eligible :: [Bool]{true, true, true}
+    fresh :: [Bool]{true, true, true}
+    none :: [Int]{-1, -1, -1}
+    pool :: [Int]{3, 12}
+    regs :: ir_x64_scan(starts, ends, weights, eligible, fresh, none, [Int]{-1, -1, 1}, none, pool)
+    assert_eq(regs[0], 3)
+    assert_eq(regs[1], 12)
+    assert_eq(regs[2], 12)
+    apart :: ir_x64_scan(starts, ends, weights, eligible, fresh, none, none, none, pool)
+    assert_eq(apart[2], -1)
 }
 
 // f(x) = g(x - 1) + x: the Call is the last read of x - 1 and writes g's

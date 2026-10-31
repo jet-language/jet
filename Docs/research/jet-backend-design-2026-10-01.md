@@ -1424,9 +1424,12 @@ then one `sub rsp` for spill slots and StackSlot storage, padded so rsp is
 16-byte aligned at every call. Spill slot k lives at
 `[rbp - 8 * (saved + k + 1)]`. StackSlot storage lies below the spill slots,
 each at the next multiple of its alignment (rbp is 16-byte aligned after the
-push), and a StackSlot is `lea reg, [rbp - disp]`. Every return
-restores rsp with `lea rsp, [rbp - 8 * saved]`, pops the saved registers and
-rbp, and returns. Entry parameters arrive in the System V argument registers
+push), and a StackSlot is `lea reg, [rbp - disp]`. A return
+restores rsp with `lea rsp, [rbp - 8 * saved]` when the frame has storage
+below the saved registers (with none, rsp already points at them), pops the
+saved registers and rbp, and returns; the stop exit always restores rsp,
+since a slow path may reach it with stack arguments pushed. Entry parameters
+arrive in the System V argument registers
 and are moved (in parallel) to their allocated homes. The frame keeps rbp as
 a frame pointer; its call frame information is in each function's FDE
 (Debug information, below).
