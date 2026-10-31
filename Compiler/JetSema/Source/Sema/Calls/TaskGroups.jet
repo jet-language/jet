@@ -59,6 +59,9 @@ struct SemaTaskGroupBorrow {
     name: String
     place: SemaOwnershipPlace
     access: AccessConvention
+    // Lent through a captured window (`left :: &xs[0]`), which the parent
+    // may no longer change or (for a write) read until the group joins.
+    window: Bool{false}
 }
 
 struct SemaTaskGroupFrame {
@@ -112,6 +115,7 @@ fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupSta
                 name: borrow.name,
                 place: sema_ownership_place_snapshot(borrow.place),
                 access: borrow.access,
+                window: borrow.window,
             })
         }
         &stack.push(SemaTaskGroupFrame{
@@ -215,6 +219,20 @@ fn sema_taskgroup_note_detach_problem(context: &SemaCheckContext, view_borrow: B
 
 fn sema_taskgroup_push_parameter(context: &SemaCheckContext, name: String) Never! {
     &context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Parameter, Span{start: 0, end: 0}))
+}
+
+// Hands the parent's ownership checks the places running children hold. A
+// child's own body sees none: there the loan is what makes the access legal.
+fn sema_taskgroup_publish_loans(context: SemaCheckContext, state: &SemaOwnershipState) Never! {
+    loans := [SemaOwnershipGroupLoan]{}
+    if !context.taskgroups.in_spawn {
+        loop frame in context.taskgroups.stack {
+            loop held in frame.borrows {
+                if held.window -> &loans.push(SemaOwnershipGroupLoan{name: held.name, group: frame.name, place: sema_ownership_place_snapshot(held.place), access: held.access})
+            }
+        }
+    }
+    state.group_loans = loans
 }
 
 fn sema_taskgroup_note_time_effect(context: &SemaCheckContext, span: Span) Never! {
@@ -390,10 +408,17 @@ fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, b
     nested := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
     sema_taskgroup_mark_spawns_owned(&context, SemaTaskGroupOrigin.Lexical, scopes, &state, &diagnostics)
     if context.taskgroups.stack.len() > 0 -> _ := &context.taskgroups.stack.pop()
+    sema_taskgroup_publish_loans(context, &state)
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     if !nested.complete || !valid -> return None
     group_local := checked_symbol_local(name, name_span, id, Type.Named{name: "Group"})
     TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
+}
+
+// The check is inside a `task.group` body the current body owns, not in a
+// spawned child's body outside its own groups.
+fn sema_taskgroup_in_group_body(context: SemaCheckContext) -> Bool Never! {
+    context.taskgroups.stack.len() > context.taskgroups.spawn_group_floor
 }
 
 fn sema_taskgroup_contains_name(names: [String], name: String) -> Bool Never! {
@@ -523,7 +548,10 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         frozen := sema_taskgroup_contains_name(lambda.capture_facts.frozen, capture.source)
         materialized := sema_taskgroup_contains_name(lambda.capture_facts.materialized, capture.source)
         borrowed := Bool?{None}
-        if !taken && !frozen && !materialized {
+        // A read window the body materializes still names the place it lends
+        // from, so a `task.group` child borrows that place like Rust's
+        // `admit_scoped_borrow`, which runs before any view materialization.
+        if !taken && !frozen {
             borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, span, scopes, &state, &context, &diagnostics)
         }
         // A scoped `task.group` borrow is admitted, but a detached task could
@@ -534,8 +562,38 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         if problem == .Val(value) {
             sema_taskgroup_note_detach_problem(&context, value.kind == SemaSendProblemKind.ViewBorrow)
             &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
+            next
+        }
+        // A capture the body writes is refused: the task runs beside its
+        // owner. `^` or a frozen snapshot removes the outer alias, a shared
+        // handle orders its own crossing, and the owner of a window the task
+        // also captures is judged through that window.
+        if taken || frozen || materialized || sema_taskgroup_shared_capture(capture.ty) || sema_taskgroup_window_owner(lambda, capture.source, state) -> next
+        if sema_taskgroup_contains_name(lambda.capture_facts.mutable, capture.source) {
+            &diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(capture.source, "task capture", span))
         }
     }
+}
+
+fn sema_taskgroup_window_owner(lambda: TLambda, owner: String, state: SemaOwnershipState) -> Bool Never! {
+    loop view in state.views {
+        if !view.active || view.invalidated || view.source.root != owner || view.carrier == owner -> next
+        loop capture in lambda.captures {
+            if capture.source == view.carrier -> return true
+        }
+    }
+    false
+}
+
+// A capture that aliases one lock-ordered cell: `Shared<T>`, a `Condition`
+// wait set, a reactive handle, or a Cell guard.
+fn sema_taskgroup_shared_capture(ty: Type) -> Bool Never! {
+    shared :: if ty == {
+        .Shared(_) -> true
+        .Named(name) -> name == "Condition"
+        else -> false
+    }
+    shared || sema_function_reactive_handle_type(ty) || sema_cell_guard_contained(ty)
 }
 
 fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
@@ -545,6 +603,7 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
     name := capture.source
     expression := Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
     place := SemaOwnershipPlace?{None}
+    window := false
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol :: capture.local.symbol_id ?? return None
     loop binding_index in 0..<scopes.bindings.len() {
@@ -556,6 +615,7 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
         if view.active && !view.invalidated && sema_ownership_view_fact_matches_expr(view, expression, scopes) {
             place = Val(sema_ownership_place_snapshot(view.source))
             access = view.access
+            window = true
             break
         }
     }
@@ -569,10 +629,12 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
         }
     }
     if place == None -> return None
-    sema_taskgroup_admit_scoped_borrow(&context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, span, scopes, &diagnostics)
+    admitted :: sema_taskgroup_admit_scoped_borrow(&context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, window, span, scopes, &diagnostics)
+    sema_taskgroup_publish_loans(context, &state)
+    admitted
 }
 
-fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
+fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, window: Bool, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
     if context.taskgroups.stack.len() == 0 -> return None
     active_index := context.taskgroups.stack.len() - 1
     active := context.taskgroups.stack[active_index]
@@ -593,45 +655,28 @@ fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, 
         &diagnostics.push(sema_error("E1101", span, what, "children of a task group run concurrently, so overlapping places cannot include a write borrow", "give the task owned data, freeze it, use `shared`, or borrow provably separate fields"))
         return Val(false)
     }
-    &context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access})
+    &context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access, window: window})
     Val(true)
 }
 
-fn sema_taskgroup_report_scoped_loan_conflict(context: SemaCheckContext, changed: SemaOwnershipPlace, action: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    if context.taskgroups.in_spawn -> return false
-    lent := String?{None}
-    group_name := ""
-    loop frame in context.taskgroups.stack {
-        loop held in frame.borrows {
-            if sema_ownership_places_overlap(held.place, changed) {
-                lent = Val(held.name)
-                group_name = frame.name
-                break
-            }
-        }
-        if lent != None -> break
-    }
-    if lent == .Val(name) {
-        target := sema_ownership_place_name(changed)
-        &diagnostics.push(sema_error("E1101", span, "`{target}` cannot {action} while `{name}` is lent to a task in `{group_name}`", "the task group joins children only at the end of its block, so the place remains borrowed while the child runs", "do this after `{group_name}` joins, or use owned, frozen, or shared data"))
-        return true
-    }
-    false
-}
-
+// A child holding a write loan runs beside the parent, so a parent read of
+// that place races the child's writes. Sequentially a read beside a live
+// write view is fine, which is why this rule belongs to task groups and not
+// to the general view model.
 fn sema_taskgroup_check_scoped_loan_read(context: &SemaCheckContext, expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    if context.taskgroups.in_spawn || context.taskgroups.scoped_loan_read_reported -> return
+    if context.taskgroups.scoped_loan_read_reported -> return
+    // Almost no expression runs while a child holds a loan.
+    if state.group_loans.len() == 0 -> return
     is_place_read := if expression == {.Index(_, _, _, _, _) | .Field(_, _, _, _) -> true else -> false}
     if !is_place_read -> return
-    place :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
-    if place.len() == 0 -> return
-    loop frame in context.taskgroups.stack {
-        loop held in frame.borrows {
-            if held.access == AccessConvention.Write && sema_ownership_places_overlap(held.place, place[0]) {
-                context.taskgroups.scoped_loan_read_reported = true
-                _ := sema_taskgroup_report_scoped_loan_conflict(context, place[0], "be read", expr_span(expression), &diagnostics)
-                return
-            }
+    places :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
+    if places.len() == 0 -> return
+    loop held in state.group_loans {
+        if held.access == AccessConvention.Write && sema_ownership_places_overlap(held.place, places[0]) {
+            context.taskgroups.scoped_loan_read_reported = true
+            read_name :: sema_ownership_place_name(places[0])
+            &diagnostics.push(sema_error("E1101", expr_span(expression), "`{read_name}` cannot be read while `{held.name}` is lent to a task in `{held.group}`", "`{held.name}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes", "read `{read_name}` after the `{held.group}` block ends, give it with `^`, freeze it with `freeze`, or share it with `shared`"))
+            return
         }
     }
 }
@@ -718,6 +763,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     saved_spawn_binding := context.taskgroups.spawn_binding
     saved_spawn_body := context.taskgroups.spawn_body
     context.taskgroups.in_spawn = true
+    sema_taskgroup_publish_loans(context, &state)
     context.taskgroups.spawn_group_floor = context.taskgroups.stack.len()
     context.taskgroups.spawn_binding = saved_binding_name
     context.taskgroups.binding_name = None
@@ -725,6 +771,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     context.taskgroups.spawn_body = saved_spawn_body
     context.taskgroups.in_spawn = saved_in_spawn
+    sema_taskgroup_publish_loans(context, &state)
     context.taskgroups.spawn_group_floor = saved_floor
     context.taskgroups.binding_name = saved_binding_name
     context.taskgroups.spawn_binding = saved_spawn_binding

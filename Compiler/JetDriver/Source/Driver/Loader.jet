@@ -100,7 +100,7 @@ use jet_sema.[
 use jet_pkg_model.[
     PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
     pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
-    pkg_inline_deps_version_matches, pkg_manifest_parse_diagnostic,
+    pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
 ]
 
 // The one language edition (greenfield: one meaning, no edition-gated behaviour).
@@ -1527,7 +1527,7 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
                 relative_path: file.relative_path,
                 source_segments: jet_driver_unparsed_source_segments(unit_path, file.source.count_bytes(), SemaSourceOrigin.Snapshot),
                 source_origin: SemaSourceOrigin.Snapshot,
-                in_namespace: package.manifest_path != None && !package.inline_package,
+                in_namespace: package.manifest_path != None && !package.inline_package && !jet_driver_declares_workspace(file.source),
             })
         }
     }
@@ -2179,6 +2179,13 @@ fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never!
     parts := unit.relative_path.split("/").to_list()
     file_name :: &parts.pop() ?? ""
     file_name != "pkg.jet" && file_name != "workspace.jet"
+}
+
+// A file with a top-level `module workspace` declaration is workspace
+// authority (the index, or a policy boundary under another name), read by the
+// workspace evaluator rather than compiled into the package namespace.
+fn jet_driver_declares_workspace(source: String) -> Bool Never! {
+    source.contains("workspace") && pkg_lex_workspace_declaration(source.bytes()).declares_module
 }
 
 fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_unit: JetDriverSourceUnit, import_path: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {

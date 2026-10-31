@@ -493,8 +493,25 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
             target = Val(import.target_module_identity)
         }
         if target == None {
-            &diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry module alias is not imported by the selected source module", "qualified entry bindings resolve through one exact File or Module import alias", "import the entry module under the manifest's explicit alias"))
-            return None
+            // `entry: file.function` names the entry package's member file
+            // whose stem is `file`, the file the CLI selected as the entry.
+            // No such file, or more than one, leaves the output without a
+            // unique source entry.
+            entry_package := ""
+            loop module_row in load.modules {
+                if module_row.module_identity == load.entry_module_identity -> entry_package = module_row.package_identity
+            }
+            members := 0
+            loop module_row in load.modules {
+                if module_row.package_identity != entry_package || module_row.module_name != alias || module_row.source_unit_index < 0 || !load.source_units[module_row.source_unit_index].in_namespace -> next
+                members += 1
+                target = Val(module_row.module_identity)
+            }
+            if members != 1 {
+                stems :: if members == 0 -> "no member file has" else -> "{members} member files have"
+                &diagnostics.push(jet_driver_diagnostic_at_source("E2105", entry.span, entry.source_path, 0, "the package output entry `{alias}.{entry.function_name}` has no unique source entry: {stems} the stem `{alias}`, and no import of the entry module uses that alias", "an explicit `entry: file.function` binds the one member file whose stem is `file`, or one exact File or Module import alias", "keep exactly one member file named `{alias}.jet`, or import the entry module under that alias"))
+                return None
+            }
         }
         target_module_identity = target ?? return None
     }

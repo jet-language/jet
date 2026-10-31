@@ -6,8 +6,7 @@ fn run() -[Exec, IO, Time.Wait]> {
     timeout :: Duration.seconds(1) ?? panic("duration")
     timed :: process.run_spec(process.cmd(["{work}/timeout.sh"]).timeout(timeout)) ?? panic("timeout run failed")
     print(timed.timed_out)
-    limited :: process.run_spec(process.cmd(["{work}/output.sh"]).output_limit(16))
-    if limited == {
+    if process.run_spec(process.cmd(["{work}/output.sh"]).output_limit(16)) == {
         .Ok(_) -> { print("limit:accepted") }
         .Err(_) -> { print("limit:refused") }
     }

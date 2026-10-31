@@ -8,16 +8,19 @@ fn run() {
     text :: files.read(sys.get("S5_FILE") ?? panic("file")) ?? panic("read grammar")
     begin :: "BEGIN GENERATED JET SYNTAX HIGHLIGHTS"
     finish :: "END GENERATED JET SYNTAX HIGHLIGHTS"
-    start :: text.find(begin) ?? panic("missing start marker")
+    start :: text.find(begin)
+    if start < 0 -> panic("missing start marker")
     line_start := 0
     loop index in 0..<start {
         if text.bytes()[index] == (U8{10}) -> line_start = index + 1
     }
     after :: text.slice(start..<text.len())
-    end :: after.find(finish) ?? panic("missing end marker")
+    end :: after.find(finish)
+    if end < 0 -> panic("missing end marker")
     end_marker :: start + end + finish.len()
     suffix :: text.slice(end_marker..<text.len())
-    line_end :: if suffix.find("\n") == .Val(index) -> end_marker + index else -> text.len()
+    newline :: suffix.find("\n")
+    line_end :: if newline >= 0 -> end_marker + newline else -> text.len()
     section :: text.slice(line_start..<line_end)
     print(json.to_string(section))
 }

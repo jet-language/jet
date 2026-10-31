@@ -9,12 +9,14 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     ParamZone,
+    PlaceAccess,
     Span,
     TClosureOp,
     TDeclarationOwnership,
     Type,
     TypeTupleField,
     type_identity_equal,
+    ast_visit_expr,
 ]
 
 fn sema_call_concurrency_label(argument: CallArg) -> String? {
@@ -127,7 +129,10 @@ fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, envir
     open_result := false
     if required == .Fn(_, ret, _, _, _, _) && ret == None -> open_result = true
     result :: if open_result -> sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
-    checked :: result ?? return None
+    checked :: result ?? {
+        sema_call_concurrency_failed_callback_writes(argument.expr, scopes, &diagnostics)
+        return None
+    }
     contract := required
     if open_result && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) && checked.ty == .Fn(_, adopted, _, _, _, _) {
         // copy: the contract is a new owned Type built from the required slot and the callback's adopted result
@@ -139,6 +144,29 @@ fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, envir
         return None
     }
     Val(checked)
+}
+
+// A callback whose body did not check has no capture facts, yet each outer
+// place its body marks with `&` is still a write a worker would race, so it
+// is refused at the worker boundary as a checked callback's would be.
+fn sema_call_concurrency_failed_callback_writes(source: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if source == .Lambda(lambda, _) {
+        written := [String]{}
+        ast_visit_expr(source, (expression: Expr) -> sema_call_concurrency_note_marked_write(&written, expression))
+        loop name in written {
+            parameter := false
+            loop param in lambda.params { if param.name == name -> parameter = true }
+            if parameter || sema_scope_resolve_index(scopes, name) == None -> next
+            &diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(name, "parallel worker", lambda.span))
+        }
+    }
+}
+
+fn sema_call_concurrency_note_marked_write(written: &[String], expression: Expr) Never! {
+    if expression == .Place(value, access, _, _) && access == PlaceAccess.Write {
+        root :: sema_receiver_mark_place_root(value) ?? return
+        if !written.contains(root) -> &written.push(root)
+    }
 }
 
 fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

@@ -120,10 +120,10 @@ fn s1_repair_apply(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repai
                 return Err("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}")
             }
             // String::get(start..end) rejects both non-UTF8 boundaries, even for an empty slice.
-            if edit.start < fixed.len() && (Int.from_u8(fixed[edit.start]) & 192) == 128 {
+            if edit.start < fixed.len() && Int.from_u8(fixed[edit.start]).bit_and(192) == 128 {
                 return Err("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}")
             }
-            if edit.end < fixed.len() && (Int.from_u8(fixed[edit.end]) & 192) == 128 {
+            if edit.end < fixed.len() && Int.from_u8(fixed[edit.end]).bit_and(192) == 128 {
                 return Err("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}")
             }
             replacement := fixed.slice(0, edit.start)

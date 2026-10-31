@@ -56,6 +56,8 @@ use jet_driver.[
     jet_driver_ice_keep_going_row,
     jet_driver_ice_record,
     jet_driver_ice_text,
+    jet_driver_inline_package,
+    jet_driver_mask_inline_package,
     jet_driver_report_problems,
     jet_driver_source_query,
     jet_driver_entry_root_path,
@@ -124,6 +126,7 @@ use jet_ir.[
     ir_x64_object,
 ]
 use jet_parser.[
+    JetFormatResult,
     jet_format_source,
 ]
 use jet_plugin.[jet_plugin_link]
@@ -1982,12 +1985,33 @@ fn jet_cli_fmt_format_source(source: String, origin: String, explicit_copies: Bo
     if jet_cli_fmt_is_typed_package_source(materialized, origin) {
         if pkg_format_source(materialized, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
     }
-    result :: jet_format_source(materialized, simplify)
+    result :: jet_cli_fmt_ordinary(materialized, simplify)
     if result.ok -> return jet_cli_fmt_formatted(result.text)
     // The source checked clean, so marks that do not parse are a defect in
     // the copy-site data (E0122), never carets on the user's source.
     if copy_marks_inserted -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_diagnostic_from_row("E0122", [ManifestEntry]{ManifestEntry{key: "file", value: origin}}, None)})
     jet_cli_fmt_rejected(result.diagnostics)
+}
+
+// The ordinary formatter with one leading inline `package { … }` carrier kept
+// exactly as written: the carrier and the trivia before it are masked from the
+// parser formatter and restored in front of its output, so Package fields stay
+// owned by the Package model.
+fn jet_cli_fmt_ordinary(source: String, simplify: Bool) -> JetFormatResult {
+    carrier :: jet_driver_inline_package(source)
+    if carrier.error == .Val(error) -> return JetFormatResult{ok: false, text: "", diagnostics: [Diagnostic]{error}}
+    if !carrier.found -> return jet_format_source(source, simplify)
+    masked := jet_driver_mask_inline_package(source, carrier).bytes()
+    loop offset in 0..<carrier.start {
+        if masked[offset] != (U8{10}) && masked[offset] != (U8{13}) -> masked[offset] = U8{32}
+    }
+    ordinary :: String.from_bytes(masked) ?? panic("masking keeps the source UTF-8")
+    formatted :: jet_format_source(ordinary, simplify)
+    if !formatted.ok -> return formatted
+    kept :: String.from_bytes(source.bytes()[0..<carrier.end]) ?? panic("the carrier ends on a character boundary")
+    if formatted.text == "" -> return JetFormatResult{ok: true, text: kept, diagnostics: [Diagnostic]{}}
+    separator :: if kept.ends_with("\n") || kept.ends_with("\r") -> "" else -> "\n"
+    JetFormatResult{ok: true, text: "{kept}{separator}{formatted.text}", diagnostics: [Diagnostic]{}}
 }
 
 // Format one source and count its retired spellings (`run_fmt` preflight).

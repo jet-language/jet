@@ -2,8 +2,7 @@
 use core.process as process
 
 fn run() -[Exec, IO, Time.Wait]> {
-    limited :: process.run_spec(process.cmd(["{work}/flood.sh"]).output_limit(1024))
-    if limited == {
+    if process.run_spec(process.cmd(["{work}/flood.sh"]).output_limit(1024)) == {
         .Ok(_) -> { print("limit:accepted") }
         .Err(_) -> { print("limit:refused") }
     }

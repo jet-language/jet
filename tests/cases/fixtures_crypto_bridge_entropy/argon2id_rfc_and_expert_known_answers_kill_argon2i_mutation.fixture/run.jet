@@ -27,11 +27,11 @@ fn hex(text: String) -> [U8] {
 }
 fn little(bytes: [U8], at: Int, width: Int) -> Int {
     out := 0
-    loop i in 0..<width -> out = out | (Int.from_u8(bytes[at + i]) << (8 * i))
+    loop i in 0..<width -> out = out.bit_or(Int.from_u8(bytes[at + i]) << (8 * i))
     out
 }
 fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
-    loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)) & 255})
+    loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)).bit_and(255)})
 }
 #Test("argon2id_rfc_and_expert_known_answers_kill_argon2i_mutation") {
     #Unsafe("original public expert Argon2id KAT") {

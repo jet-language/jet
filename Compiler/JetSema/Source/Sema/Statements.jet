@@ -2967,10 +2967,18 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
         }
         // A window whose open is rejected holds no loan: the binding stays,
         // but later uses of it are not judged against the conflict already
-        // reported.
+        // reported. Inside a `task.group` body the window is still recorded,
+        // contested, so a child task that captures it is judged against its
+        // place.
         if sema_ownership_view_producer(binding.init) == .Val(producer) {
             producer_places :: sema_ownership_places_from_expr_in_state(producer.source, scopes, &state)
-            if !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer.source, producer_places, producer.access, scopes, &diagnostics) -> return true
+            if !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer.source, producer_places, producer.access, scopes, &diagnostics) {
+                if !sema_taskgroup_in_group_body(context) -> return true
+                first :: state.views.len()
+                recorded :: sema_ownership_record_binding_view(&state, binding, scopes)
+                sema_ownership_mark_views_contested(&state, first)
+                return recorded
+            }
         }
         return sema_ownership_record_binding_view(&state, binding, scopes)
     }
@@ -2981,9 +2989,16 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
         _ := sema_ownership_record_view_returns(&state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, &empty_provenance, expr_span(binding.init), &diagnostics)
         return false
     }
-    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) && !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, binding.init, places, access, scopes, &diagnostics) -> return true
+    contested := false
+    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) && !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, binding.init, places, access, scopes, &diagnostics) {
+        if !sema_taskgroup_in_group_body(context) -> return true
+        contested = true
+    }
+    first :: state.views.len()
     fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: access, places: places}
-    sema_ownership_record_call_view_batch(&state, binding.name, binding.name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
+    recorded :: sema_ownership_record_call_view_batch(&state, binding.name, binding.name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
+    if contested -> sema_ownership_mark_views_contested(&state, first)
+    recorded
 }
 
 fn sema_stmt_destructure_names(pattern: BindPattern) -> [BindName] Never! {

@@ -97,6 +97,10 @@ struct SemaOwnershipViewFact {
     // Only this capability's actual ancestry may exempt overlapping windows.
     reborrow_parent: Int{-1}
     lexical: Bool{false}
+    // A window opened over a conflict already reported (E0212) inside a
+    // `task.group` body: it is kept so a child capturing it is judged against
+    // its place, but it neither blocks nor is blocked by other views.
+    contested: Bool{false}
     active: Bool
     invalidated: Bool
     invalidated_span: Span
@@ -182,6 +186,16 @@ struct SemaOwnershipLoan {
     // name carries it unless its own statement binds it (`w := &xs`); an
     // unbound one ends before the next statement (sema_ownership_release_dead_views).
     statement_window: Bool{false}
+}
+
+// A place a running `task.group` child holds through a captured window
+// (TaskGroups.jet publishes those borrows here). The child keeps it past the
+// window binding's last lexical use, until `group` joins.
+struct SemaOwnershipGroupLoan {
+    name: String
+    group: String
+    place: SemaOwnershipPlace
+    access: AccessConvention
 }
 
 struct SemaOwnershipBindingFact {
@@ -306,6 +320,9 @@ struct SemaOwnershipState {
     // (`return`, `break`). A fork rollback drops a leaving path's references,
     // but its reads are still uses for L0101/L0102.
     used_keys: [String:Bool]{[String:Bool]{}}
+    // The places the active task groups lend to running children, as the
+    // parent sees them; empty while a child's own body is checked.
+    group_loans: [SemaOwnershipGroupLoan]{[SemaOwnershipGroupLoan]{}}
 }
 
 // First/last declaration rows and total reference/write counts for one key.
@@ -502,6 +519,7 @@ fn sema_ownership_view_snapshot(source: SemaOwnershipViewFact) -> SemaOwnershipV
         loan_span: source.loan_span,
         reborrow_parent: source.reborrow_parent,
         lexical: source.lexical,
+        contested: source.contested,
         active: source.active,
         invalidated: source.invalidated,
         invalidated_span: source.invalidated_span,
@@ -540,6 +558,7 @@ fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershipSta
     snapshot.forks = source.forks
     snapshot.trail = source.trail
     snapshot.used_keys = source.used_keys
+    loop loan in source.group_loans -> &snapshot.group_loans.push(SemaOwnershipGroupLoan{name: loan.name, group: loan.group, place: sema_ownership_place_snapshot(loan.place), access: loan.access})
     snapshot
 }
 
@@ -554,6 +573,7 @@ fn sema_ownership_state_restore(state: &SemaOwnershipState, saved: SemaOwnership
     state.persist_roots = saved.persist_roots.copy()
     state.close_owners = saved.close_owners.copy()
     state.close_receiver_key = saved.close_receiver_key.copy()
+    state.group_loans = saved.group_loans.copy()
 }
 
 // The per-path part of sema_ownership_state_restore: everything except the
@@ -2088,7 +2108,7 @@ fn sema_ownership_check_binding_view_conflicts(state: &SemaOwnershipState, carri
     loop place in places {
         parent :: sema_ownership_reborrow_parent(state, source, place, access, scopes)
         loop fact in state.views {
-            if !fact.active || fact.invalidated || fact.carrier_key == key -> next
+            if !fact.active || fact.invalidated || fact.contested || fact.carrier_key == key -> next
             if sema_ownership_is_reborrow_lineage(state, fact, parent) -> next
             if (fact.access == AccessConvention.Write || access == AccessConvention.Write) && sema_ownership_places_overlap(fact.source, place) {
                 &diagnostics.push(sema_error("E0212", carrier_span, "`{sema_ownership_place_name(place)}` already has a live view that conflicts with `{carrier}`", "many read views may overlap, but an exclusive mutable view cannot overlap any other live view", "finish using the earlier view before creating this one, or make an owned copy"))
@@ -2642,14 +2662,21 @@ fn sema_ownership_carrier_loan_exempt(state: &SemaOwnershipState, expr: Expr, pl
 
 fn sema_ownership_active_view_conflict(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
     loop fact in state.views {
-        if fact.active && !fact.invalidated && sema_ownership_places_overlap(fact.source, place) && (fact.access == AccessConvention.Write || access == AccessConvention.Write) -> return true
+        if fact.active && !fact.invalidated && !fact.contested && sema_ownership_places_overlap(fact.source, place) && (fact.access == AccessConvention.Write || access == AccessConvention.Write) -> return true
     }
     false
 }
 
+fn sema_ownership_mark_views_contested(state: &SemaOwnershipState, first: Int) Never! {
+    loop index in first..<state.views.len() -> state.views[index].contested = true
+}
+
 fn sema_ownership_conflicting_view_for_expr(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention, expr: Expr, scopes: SemaScopeTable) -> SemaOwnershipViewFact? {
+    loop carrier in state.views {
+        if carrier.active && carrier.contested && sema_ownership_view_fact_matches_expr(carrier, expr, scopes) -> return None
+    }
     loop fact in state.views {
-        if !fact.active || fact.invalidated || !sema_ownership_places_overlap(fact.source, place) || (fact.access != AccessConvention.Write && access != AccessConvention.Write) -> next
+        if !fact.active || fact.invalidated || fact.contested || !sema_ownership_places_overlap(fact.source, place) || (fact.access != AccessConvention.Write && access != AccessConvention.Write) -> next
         through_ancestor := false
         loop carrier in state.views {
             if carrier.active && !carrier.invalidated && sema_ownership_view_fact_matches_expr(carrier, expr, scopes) && sema_ownership_place_extends(carrier.source, place) && (carrier.seq == fact.seq || sema_ownership_view_descends_from(state, carrier, fact.seq)) {
@@ -2667,16 +2694,27 @@ fn sema_ownership_active_view_conflict_for_expr(state: &SemaOwnershipState, plac
 }
 
 fn sema_ownership_active_loan_conflict_for_expr(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention, expr: Expr, scopes: SemaScopeTable) -> SemaOwnershipLoan? {
+    loop carrier in state.views {
+        if carrier.active && carrier.contested && sema_ownership_view_fact_matches_expr(carrier, expr, scopes) -> return None
+    }
     loop loan in state.loans {
         if sema_ownership_places_overlap(loan.place, place) {
             conflicts :: access == AccessConvention.Move || loan.access == AccessConvention.Write || access == AccessConvention.Write
             if conflicts {
-                if sema_ownership_carrier_loan_exempt(&state, expr, place, loan, scopes) -> next
+                if sema_ownership_carrier_loan_exempt(&state, expr, place, loan, scopes) || sema_ownership_loan_contested(state, loan) -> next
                 return Val(loan)
             }
         }
     }
     None
+}
+
+fn sema_ownership_loan_contested(state: SemaOwnershipState, loan: SemaOwnershipLoan) -> Bool Never! {
+    if loan.carrier_fact_seq < 0 -> return false
+    loop view in state.views {
+        if view.seq == loan.carrier_fact_seq && view.contested -> return true
+    }
+    false
 }
 
 fn sema_ownership_binding_for_expr(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> SemaScopeBinding? {
@@ -2715,6 +2753,11 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
         if sema_ownership_writes_temporary_edit_guard(expr) -> return true
         &diagnostics.push(sema_error("E0202", expr_span(expr), "the write-access marker `&` needs a place after it", "write access can only be granted to stable storage, not a temporary expression", "bind the value first, then pass the binding with `&`"))
         return false
+    }
+    // The group loan outlives the borrow binding's last lexical use, so it is
+    // checked before the view scan below, which has already let the place go.
+    loop place in places {
+        if sema_ownership_report_group_loan_change(state, place, if action == "" -> "be edited" else -> action, expr_span(expr), &diagnostics) -> return false
     }
     loop place in places {
         if sema_ownership_place_refuses_write(state, place, scopes) {
@@ -2804,6 +2847,20 @@ fn sema_ownership_report_assignment_capability(expr: Expr, root: String, info: S
         }
         else -> false
     }
+}
+
+// A change to a place a running `task.group` child still holds: the child
+// keeps its loan until the group joins, so a write, move or reset here would
+// race the child or free memory it reads.
+fn sema_ownership_report_group_loan_change(state: SemaOwnershipState, changed: SemaOwnershipPlace, action: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    loop held in state.group_loans {
+        if sema_ownership_places_overlap(held.place, changed) {
+            changed_name :: sema_ownership_place_name(changed)
+            &diagnostics.push(sema_error("E1101", span, "`{changed_name}` cannot {action} while `{held.name}` is lent to a task in `{held.group}`", "a task.group joins its children at the end of the block, so `{held.name}` stays borrowed until `{held.group}` joins — changing `{changed_name}` now would race a running task or free memory it still reads", "do this after the `{held.group}` block ends, give it with `^`, freeze it with `freeze`, or share it with `shared`"))
+            return true
+        }
+    }
+    false
 }
 
 // `action` is Rust's change wording for a pinned place (E0219), such as
@@ -2978,6 +3035,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
             return false
         }
         if !unmarked && sema_ownership_reject_partial_close_move(state, place, expr_span(expr), &diagnostics) -> return false
+        if sema_ownership_report_group_loan_change(state, place, "be moved", expr_span(expr), &diagnostics) -> return false
         if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Move, expr, scopes) == .Val(fact) {
             &diagnostics.push(sema_ownership_diag_view_change(fact, place, "be moved", expr_span(expr), scopes))
             return false

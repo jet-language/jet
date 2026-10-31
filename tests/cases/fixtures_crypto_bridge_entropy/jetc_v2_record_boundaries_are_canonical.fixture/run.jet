@@ -8,7 +8,7 @@ use core.files as files
 struct Record { length: Int, flags: Int }
 fn little(bytes: [U8], start: Int, count: Int) -> Int {
     value := 0
-    loop i in 0..<count -> value = value | (Int.from_u8(bytes[start + i]) << (8 * i))
+    loop i in 0..<count -> value = value.bit_or(Int.from_u8(bytes[start + i]) << (8 * i))
     value
 }
 fn plain_length(body: Int) -> Int? {

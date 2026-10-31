@@ -25,7 +25,7 @@ fn sema_reactive_loadable_type(value: Type, error: Type) -> Type Never! {
 
 fn sema_reactive_element_type(ty: Type, name: String, fallback: Type) -> Type Never! {
     if ty == {
-        .Apply(owner, args) -> if owner == name && args.len() == 1 -> args[0] else -> fallback
+        .Apply(_, args) -> if sema_reactive_type_name(ty) == name && args.len() == 1 -> args[0] else -> fallback
         else -> fallback
     }
 }
@@ -220,8 +220,14 @@ fn sema_call_try_reactive_core_call(module_name: String, member: String, args: [
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 
+// The handle owner a receiver names: the bare runtime handle, or the leaf of
+// its `core.reactive` declaration (`<corelib>/core.reactive::Signal`, the
+// type a written `Signal<Int>` resolves to).
 fn sema_reactive_type_name(ty: Type) -> String Never! {
-    sema_expr_type_base_name(ty) ?? type_name(ty)
+    owner :: sema_expr_type_base_name(ty) ?? type_name(ty)
+    prefix :: "<corelib>/core.reactive::"
+    if owner.starts_with(prefix) -> return owner.slice(prefix.len(), owner.len())
+    owner
 }
 
 fn sema_reactive_handle_member(owner: String, method: String) -> Bool Never! {
@@ -249,7 +255,10 @@ fn sema_reactive_checked_handle_args(owner: String, method: String, args: [CallA
         _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return None
     }
-    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
+    // A bare name passed to `set` is an ordinary
+    // owning argument. A copy value passes; any other moves at its last use,
+    // and the ownership check below rejects it (E0209) when it is used again.
+    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     Val(typed.values)

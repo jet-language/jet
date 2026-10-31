@@ -232,7 +232,9 @@ fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
             &body.push(parser_marker_template_loop(&state))
             next
         }
-        if parser_current_kind(&state) == TOKEN_KW_PUB || parser_current_kind(&state) == TOKEN_KW_PRIV {
+        // Visibility words and declaration markers (`#Codable struct …`) on
+        // their own line attach to the member item below.
+        if parser_current_kind(&state) == TOKEN_KW_PUB || parser_current_kind(&state) == TOKEN_KW_PRIV || (parser_current_kind(&state) == TOKEN_HASH && !parser_test_ahead(&state) && parser_hash_leads_to_item(&state)) {
             modifiers :: parser_parse_item_modifiers(&state, true)
             &body.push(DeriveBodyItem.Item{value: parser_marker_body_item(&state, modifiers)})
             next

@@ -5297,6 +5297,7 @@ fn sema_expr_check_bare_member_chain(expr: Expr, expected: Type?, environment: S
 }
 
 fn sema_check_expression(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    sema_taskgroup_check_scoped_loan_read(&context, expr, scopes, &state, &diagnostics)
     if context.lending_view_parameter_keys.len() > 0 {
         if expr == {
             .Call(call, _) -> loop argument in call.args -> _ := sema_ownership_report_lending_view_escape(argument.expr, "be passed to a call", scopes, context, &diagnostics)
