@@ -244,7 +244,7 @@ IR_LINT_OPS :: comptime { [IRLintOp]{
     IRLintOp{op: IROp.Return, dst: IRLintRole.Unused, a: IRLintRole.SlotOrNone, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_ANY, a_kinds: IR_LINT_ANY, typing: IRLintTyping.Return},
     IRLintOp{op: IROp.Unreachable, dst: IRLintRole.Unused, a: IRLintRole.Unused, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_ANY, a_kinds: IR_LINT_ANY, typing: IRLintTyping.Bare},
     IRLintOp{op: IROp.Sqrt, dst: IRLintRole.Slot, a: IRLintRole.Slot, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_FLOAT + IR_LINT_FLOAT32, a_kinds: IR_LINT_FLOAT + IR_LINT_FLOAT32, typing: IRLintTyping.Unary},
-    IRLintOp{op: IROp.IntBig, dst: IRLintRole.Slot, a: IRLintRole.Slot, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_BOOL, a_kinds: IR_LINT_INT, typing: IRLintTyping.Bare},
+    IRLintOp{op: IROp.IntBig, dst: IRLintRole.Slot, a: IRLintRole.Slot, b: IRLintRole.Immediate, c: IRLintRole.Unused, dst_kinds: IR_LINT_BOOL, a_kinds: IR_LINT_INT, typing: IRLintTyping.Bare},
 } }
 
 // The share keys a box or function value row names as its clone: its Copy
@@ -791,8 +791,10 @@ fn ir_lint_typing(m: IRModule, context: IRLintContext, f: IRFunction, at: Int, t
             if (ta != tb && !ir_lint_same(m, ta, tb)) || (ta != td && !ir_lint_same(m, ta, td)) {
                 &out.push(ir_lint_at(f, at, pass, IR_LINT_LAYOUT, "s{dst} <- s{a}, s{b} of {ir_lint_row_text(m, td)}, {ir_lint_row_text(m, ta)} and {ir_lint_row_text(m, tb)}"))
             }
-            // Only an exact Int Add, Sub or Mul has proven inline operands.
-            operands :: c == IR_OVERFLOW_OPERANDS && context.kind_bits[ta] == IR_LINT_INT && (f.op[at] == .Add || f.op[at] == .Sub || f.op[at] == .Mul)
+            // Only an exact Int Add, Sub or Mul has proven inline operands
+            // (both, or the left or right one alone).
+            proven :: c == IR_OVERFLOW_OPERANDS || c == IR_OVERFLOW_LEFT || c == IR_OVERFLOW_RIGHT
+            operands :: proven && context.kind_bits[ta] == IR_LINT_INT && (f.op[at] == .Add || f.op[at] == .Sub || f.op[at] == .Mul)
             if c != -1 && c != IR_OVERFLOW_TRAP && c != IR_OVERFLOW_WRAP && !operands -> &out.push(ir_lint_at(f, at, pass, IR_LINT_IMM, "overflow policy {c}"))
         }
         .Shift -> {

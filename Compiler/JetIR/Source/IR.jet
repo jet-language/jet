@@ -28,9 +28,12 @@
 //   Neg Not                                    dst  a=operand
 //   Sqrt         dst  a=operand                IEEE square root of a Float or
 //                                              Float32 (correctly rounded)
-//   IntBig       dst(Bool) a=Int slot          whether the exact Int is a big
-//                                              integer, not an inline word (a
-//                                              pass's guard; Build emits none)
+//   IntBig       dst(Bool) a=Int slot b=bits   whether the exact Int is a big
+//                                              integer or an inline word outside
+//                                              the signed `b`-bit range (33..=63;
+//                                              IR_INT_INLINE_BITS is every inline
+//                                              word; a pass's guard; Build emits
+//                                              none)
 //   Convert      dst  a=operand                numeric conversion by the slot
 //                                              types: Float/Float32 to a Word
 //                                              truncates toward zero (signed
@@ -134,10 +137,14 @@ enum IROp {
 // Overflow policy of an arithmetic op on a fixed-width integer (`c`).
 // IR_OVERFLOW_OPERANDS marks an exact Int Add, Sub or Mul whose operands
 // are proven inline Ints but whose result may not be (OptRange.jet): only
-// the result is tested.
+// the result is tested. IR_OVERFLOW_LEFT and IR_OVERFLOW_RIGHT mark one
+// whose left or right operand alone is proven inline: that operand's test
+// goes, the other's and the result's stay.
 IR_OVERFLOW_TRAP :: 0
 IR_OVERFLOW_WRAP :: 1
 IR_OVERFLOW_OPERANDS :: 2
+IR_OVERFLOW_LEFT :: 3
+IR_OVERFLOW_RIGHT :: 4
 
 // The stop polls (Build.jet ir_stop_poll): after a call, and after a user
 // operation whose slow path can publish a numeric stop.
@@ -174,6 +181,10 @@ struct IRType {
 }
 
 enum IRSlotKind { Param Local Temp }
+
+// IntBig's width for the test that an exact Int is inline at all (its
+// bits 63 and 62 agree).
+IR_INT_INLINE_BITS :: 63
 
 // One function's arena. Slots 0..<param_count are the parameters in order.
 // `slot_name` is an interned name (-1 for a temporary); `slot_line` the
@@ -300,9 +311,11 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // runtime stop are followed by a stop check (Build.jet ir_stop_check); the
 // runtime library manages its own stops and has none, nor has a program that
 // owns its main. `owned_main`: the program's entry runs under a main of its
-// own, with no process root (EntryOwned.jet ir_entry_own). `debug_directory`:
-// the compilation directory the image's DWARF records ("": the working
-// directory), which relative source paths (a fault report's) resolve from.
+// own, with no process root (EntryOwned.jet ir_entry_own). `owned_attach`:
+// that main attaches its thread first (IR_OWNED_ATTACH_ROUTES).
+// `debug_directory`: the compilation directory the image's DWARF records
+// ("": the working directory), which relative source paths (a fault
+// report's) resolve from.
 struct IRModule {
     types: [IRType]
     type_keys: [String]
@@ -339,6 +352,7 @@ struct IRModule {
     trait_keys: NameRows
     stop_points: Bool{false}
     owned_main: Bool{false}
+    owned_attach: Bool{false}
     debug_directory: String{""}
 }
 

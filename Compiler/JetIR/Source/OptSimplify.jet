@@ -438,19 +438,23 @@ fn ir_opt_unreachable(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // ---------------------------------------------------------------------------
 // Compare fusion.
 
+// `t := a < b; x := !t` is `x := a >= b` when every write of `t` is such a
+// compare that a Not reads right after (only Nops between) and those Nots
+// are its only reads: each compare's value then reaches its own Not alone
+// (a loop OptVersion.jet copied writes and tests the same slot twice).
 fn ir_opt_fuse_compares(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     changed := 0
+    pairs := [Int]{}
+    loop _ in 0..<f.slot_type.len() -> &pairs.push(0)
+    loop at in 1..<f.op.len() {
+        if f.op[at] == .Not && f.a[at] >= 0 && ir_opt_fused_def(f, at) >= 0 -> pairs[f.a[at]] = pairs[f.a[at]] + 1
+    }
     loop at in 1..<f.op.len() {
         if f.op[at] != .Not -> next
         tested :: f.a[at]
-        if tested < f.param_count || facts.defs[tested] != 1 || facts.uses[tested] != 1 -> next
-        def :: facts.def_at[tested]
-        if def < 0 || def >= at || !ir_opt_is_compare(f.op[def]) -> next
-        between := false
-        loop k in (def + 1)..<at {
-            if f.op[k] != .Nop -> between = true
-        }
-        if between -> next
+        if tested < f.param_count || facts.defs[tested] != pairs[tested] || facts.uses[tested] != pairs[tested] -> next
+        def :: ir_opt_fused_def(f, at)
+        if def < 0 -> next
         kind :: ir_opt_type(m, f, f.a[def]).kind
         if kind == .Float || kind == .Float32 -> next
         f.op[at] = ir_opt_inverse(f.op[def])
@@ -462,6 +466,17 @@ fn ir_opt_fuse_compares(m: IRModule, f: &IRFunction, facts: OptFacts, report: &I
         changed += 1
     }
     changed
+}
+
+// The compare into the slot Not `at` reads, with only Nops between them;
+// -1 when there is none.
+fn ir_opt_fused_def(f: IRFunction, at: Int) -> Int Never! {
+    k := at - 1
+    loop k >= 0 && f.op[k] == .Nop {
+        k -= 1
+    }
+    if k < 0 || f.dst[k] != f.a[at] || !ir_opt_is_compare(f.op[k]) -> return -1
+    k
 }
 
 // ---------------------------------------------------------------------------

@@ -9,8 +9,8 @@
 // [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
 // 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
 // the large-block cache owns lock 216, cached bytes 224 and 59 class heads
-// from 256; the slab regions own lock 736, cursor 744, end 752 and the
-// free-slab stack 760 (alloc_slab_map).
+// from 256; the slab regions own lock 736, cursor 744, end 752, the
+// free-slab stack 760 and the next region size 768 (alloc_slab_map).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
@@ -348,16 +348,22 @@ fn alloc_link(slab: I64, head: I64) {
     }
 }
 
-// Slabs come from slab regions, not one mapping each: a region is
-// ALLOC_REGION of 4 KiB pages, mapped once and carved 64 KiB at a time, so a
-// program touches only the pages its blocks use and a growing heap makes one
-// mmap per 512 slabs. A slab that is no longer needed (more empty slabs than
+// Slabs come from slab regions, not one mapping each: a region is mapped
+// once and carved 64 KiB at a time, so a program touches only the pages its
+// blocks use. The first region is ALLOC_REGION_FIRST and each next one twice
+// the last, up to ALLOC_REGION, so a growing heap makes one mmap per 512 slabs
+// while a small program reserves only 1 MiB of address space: a child under a
+// tight address-space limit (Process memory_limit is RLIMIT_AS) starts and
+// grows toward it. A region that cannot be mapped is retried at half the
+// size, down to one slab. A slab that is no longer needed (more empty slabs than
 // ALLOC_RETAINED_EMPTY_SLABS) goes on the process's free-slab stack and serves
 // the next new slab of any class and arena. Its pages are never returned, so
 // they never fault again.
 // State page words: lock 736, region cursor 744, region end 752, free-slab
-// stack 760 (a stacked slab's first word links the next).
+// stack 760 (a stacked slab's first word links the next), next region size
+// 768 (zero before the first region).
 ALLOC_SLAB_BYTES :: I64{65536}
+ALLOC_REGION_FIRST :: I64{1048576}
 ALLOC_REGION :: I64{33554432}
 
 // A slab's 64 KiB: a stacked slab, else the next of the current region,
@@ -376,10 +382,18 @@ fn alloc_slab_map() -> I64 {
             cursor :: wrapping(alloc_root + I64{744})
             end :: wrapping(alloc_root + I64{752})
             if (os_load_i64(cursor) == os_load_i64(end)) {
-                region :: alloc_region_map()
+                next :: wrapping(alloc_root + I64{768})
+                size := os_load_i64(next)
+                if (size == I64{0}) { size = ALLOC_REGION_FIRST }
+                region := I64{0}
+                loop region == (I64{0}) && size >= ALLOC_SLAB_BYTES {
+                    region = alloc_region_map(size)
+                    if (region == I64{0}) { size = size >> I64{1} }
+                }
                 if (region != I64{0}) {
                     os_store_i64(cursor, region)
-                    os_store_i64(end, wrapping(region + ALLOC_REGION))
+                    os_store_i64(end, wrapping(region + size))
+                    os_store_i64(next, if (size < ALLOC_REGION) -> size << I64{1} else -> size)
                 }
             }
             at :: os_load_i64(cursor)
@@ -405,16 +419,16 @@ fn alloc_slab_retire(slab: I64) {
     alloc_unlock(lock)
 }
 
-// A new slab region, or zero. It keeps 4 KiB pages (MADV_NOHUGEPAGE): where
-// the system makes huge pages unasked, a first touch would zero 2 MiB, and an
-// advised huge region compacts memory synchronously on fault, which stalls
-// every thread allocating under a loaded host. A refused advice only costs
-// page size.
-fn alloc_region_map() -> I64 {
-    region :: alloc_map_try(ALLOC_REGION)
+// A new slab region of `bytes`, or zero. It keeps 4 KiB pages
+// (MADV_NOHUGEPAGE): where the system makes huge pages unasked, a first touch
+// would zero 2 MiB, and an advised huge region compacts memory synchronously
+// on fault, which stalls every thread allocating under a loaded host. A
+// refused advice only costs page size.
+fn alloc_region_map(bytes: I64) -> I64 {
+    region :: alloc_map_try(bytes)
     if (region == I64{0}) { return I64{0} }
     #Unsafe("madvise only changes the page size of the fresh private region") {
-        _ := os_syscall_i64(I64{28}, region, ALLOC_REGION, I64{15}, I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{28}, region, bytes, I64{15}, I64{0}, I64{0}, I64{0})
     }
     region
 }
@@ -555,9 +569,18 @@ fn alloc_cache_row(slot: I64) -> I64 {
     if (base == I64{0}) -> I64{0} else -> wrapping(base + wrapping(I64{304} + wrapping(alloc_head(I64{0}, slot) * I64{2})))
 }
 
+// 1 once a thread refilled its cache. Its storage is a guard of the thread
+// start (Thread.jet jet_rt_thread_init): a program that links the cached
+// front doors (jet_rt_alloc, jet_rt_alloc_8) attaches its main thread, so
+// its allocations take the cache as before; one that never allocates
+// attaches none, and every allocation of an unattached thread takes the
+// uncached path anyway (alloc_cache_row).
+alloc_cache_linked := I64{0}
+
 // Refill this thread's cache row with up to 32 blocks of one slab of the
 // stack band's arena. False only when no slab can be mapped.
 fn alloc_cache_refill(row: I64, slot: I64) -> Bool {
+    alloc_cache_linked = I64{1}
     root :: alloc_arena()
     alloc_lock(root)
     taken :: alloc_slab_take(root, alloc_head(root, slot), slot, row, I64{32})

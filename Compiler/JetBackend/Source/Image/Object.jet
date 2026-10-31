@@ -116,21 +116,29 @@ fn elf64_section_header(bytes: &[U8], name: Int, kind: Int, flags: Int, offset: 
 // The push keeps rsp 16-byte aligned at all calls. Host constructors have
 // already run through the runtime object's init array. A program that owns
 // its main (`owned`, JetIR EntryOwned.jet) runs the entry itself, with no
-// process root: jet_rt_main_owned_start, the entry, the stdout flush, and
-// status 0 as jet_rt_main's normal return.
-fn x64_object_main(entry: X64FunctionID, owned: Bool) -> X64CompiledFunction Never! {
+// process root: jet_rt_thread_init when it must attach its thread
+// (`attach`, IRModule.owned_attach), jet_rt_main_owned_start, the entry,
+// the stdout flush, and status 0 as jet_rt_main's normal return.
+fn x64_object_main(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64CompiledFunction Never! {
     code := [U8]{}
     x64_push(&code, X64_RBX)
     arguments_at :: x64_call_rel32(&code)
     start_at :: x64_call_rel32(&code)
     if owned {
+        relocs := [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}}
+        if attach {
+            attach_at :: x64_call_rel32(&code)
+            &relocs.push(X64Reloc{at: attach_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_thread_init"}})
+        }
         owned_at :: x64_call_rel32(&code)
         entry_at :: x64_call_rel32(&code)
         flush_at :: x64_call_rel32(&code)
         x64_alu_rr(&code, X64Alu.Xor, X64_RAX, X64_RAX)
         x64_pop(&code, X64_RBX)
         x64_ret(&code)
-        relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: owned_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main_owned_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
+        &relocs.push(X64Reloc{at: owned_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main_owned_start"}})
+        &relocs.push(X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}})
+        &relocs.push(X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}})
         return X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code, relocs: relocs}
     }
     entry_at :: x64_lea_rip(&code, X64_RDI)

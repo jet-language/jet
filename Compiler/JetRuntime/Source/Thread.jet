@@ -156,7 +156,17 @@ fn thread_unregister_tcb(tcb: I64) {
     sync_mutex_unlock(thread_tls_registry)
 }
 
-// runtime-init: 2
+// A hook only of a program that links Jet TLS (its registry) or the
+// allocator's cached front doors (Alloc.jet alloc_cache_linked). A process
+// root (Main.jet jet_rt_main) calls this too, so every rooted program keeps
+// it, and so does the main of a program that owns its main and calls a
+// route that reads its thread block without allocating (JetIR
+// EntryOwned.jet IR_OWNED_ATTACH_ROUTES). Any other program that owns its
+// main reads no thread block: its traps find the report domain by probe
+// (Scheduler.jet scheduler_report_base), so its main thread stays on the
+// detached zero word jet_rt_alloc_init installs. Repeating it is harmless:
+// the attach finds the thread's live block.
+// runtime-init: 2 when thread_tls_registry,alloc_cache_linked
 #Export(c) fn jet_rt_thread_init() {
     // Runtime-object .init_array priority follows allocator and host init.
     if (thread_tls_registry == I64{0}) {
@@ -369,8 +379,14 @@ fn thread_stack_bytes() -> I64 {
     soft
 }
 
+// The smallest stack thread_spawn falls back to.
+THREAD_STACK_FLOOR :: I64{1048576}
+
 // musl pthread_attr_t is 56 bytes on x86-64; 64-byte storage is conservative.
-// Returns pthread_t on success, negative pthread errno on failure.
+// Returns pthread_t on success, negative pthread errno on failure. A stack
+// musl cannot map (EAGAIN, as under a tight RLIMIT_AS: Process memory_limit)
+// is retried at half the size, down to THREAD_STACK_FLOOR, so a thread still
+// starts in a process that has address space left for a smaller stack.
 fn thread_spawn(entry: I64, argument: I64) -> I64 {
     storage :: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(storage, I64{72})
@@ -380,13 +396,20 @@ fn thread_spawn(entry: I64, argument: I64) -> I64 {
         jet_rt_free(storage, I64{72}, I64{8})
         return -status
     }
-    status = thread_pthread_attr_setstacksize(attr, thread_stack_bytes())
+    bytes := thread_stack_bytes()
+    status = thread_pthread_attr_setstacksize(attr, bytes)
     start := I64{0}
     if (status == I64{0}) {
         start = jet_rt_alloc(I64{16}, I64{8})
         sync_store(start, entry)
         sync_store(start + I64{8}, argument)
-        status = thread_pthread_create(storage, attr, rt_thread_entry_address(), start)
+        loop {
+            status = thread_pthread_create(storage, attr, rt_thread_entry_address(), start)
+            if (status != I64{11} || bytes <= THREAD_STACK_FLOOR) -> break
+            bytes = bytes >> I64{1}
+            status = thread_pthread_attr_setstacksize(attr, bytes)
+            if (status != I64{0}) -> break
+        }
     }
     _ := thread_pthread_attr_destroy(attr)
     handle :: sync_load(storage)

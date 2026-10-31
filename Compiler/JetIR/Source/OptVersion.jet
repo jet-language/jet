@@ -42,9 +42,9 @@
 //
 //     block
 //       block
-//         br_if int_big(n), 0
-//         <the loop, its head first doing br_if int_big(x) to the inner
-//          block's End>
+//         br_if int_big(n, 61), 0
+//         <the loop, its head first doing br_if int_big(x, 61) to the
+//          inner block's End>
 //         br 1
 //       end
 //       <the loop as it was>
@@ -60,7 +60,7 @@
 // its entry, on up to IR_VERSION_GUARDS such parameters:
 //
 //     block
-//       br_if int_big(p), 0
+//       br_if int_big(p, 61), 0
 //       <the body, its slots but the parameters its own>
 //     end
 //     <the body as it was>
@@ -74,6 +74,8 @@
 // A copy fits IR_VERSION_BODY instructions and a function's loop copies
 // stay within IR_VERSION_BUDGET.
 
+use jet_foundation.[compiler_threads_single, name_rows_set]
+
 IR_VERSION_BODY :: 160
 IR_VERSION_BUDGET :: 480
 IR_VERSION_GUARDS :: 4
@@ -82,6 +84,13 @@ IR_VERSION_GUARDS :: 4
 // `n < IR_VERSION_HIGH` and `n > IR_VERSION_LOW` leave n inline.
 IR_VERSION_HIGH :: 4611686018427387902
 IR_VERSION_LOW :: -4611686018427387903
+
+// An IntBig guard passes an Int of IR_VERSION_GUARD_BITS signed bits, two
+// short of every inline word: below it a sum of four such Ints, or one
+// times a factor up to 4, is still inline (OptRange), so the copy's
+// arithmetic needs no overflow tests. A larger inline Int runs the code as
+// it was.
+IR_VERSION_GUARD_BITS :: 61
 
 // Versions the loops of `f`; returns how many copies it made.
 fn ir_opt_version_loops(m: IRModule, f: &IRFunction) -> Int Never! {
@@ -292,10 +301,10 @@ fn ir_version_entry(m: IRModule, f: &IRFunction, bool_row: Int) -> Int Never! {
     1
 }
 
-// `br_if int_big(slot), depth`.
+// `br_if int_big(slot, IR_VERSION_GUARD_BITS), depth`.
 fn ir_version_guard(f: &IRFunction, code: &IROptCode, slot: Int, depth: Int, bool_row: Int, line: Int) Never! {
     big :: ir_slot(&f, bool_row, .Temp, -1, line)
-    ir_opt_code_put(&code, .IntBig, big, slot, -1, -1, line)
+    ir_opt_code_put(&code, .IntBig, big, slot, IR_VERSION_GUARD_BITS, -1, line)
     ir_opt_code_put(&code, .BrIf, -1, big, depth, -1, line)
 }
 
@@ -532,4 +541,54 @@ fn ir_version_copy(f: &IRFunction, code: &IROptCode, start: Int, last: Int, shif
 fn ir_version_name(names: [Int], slot: Int) -> Int Never! {
     if slot < 0 || slot >= names.len() || names[slot] < 0 -> return slot
     names[slot]
+}
+
+// steps(x) runs x = 3x + 1 until x is 1, counting the passes in t: the
+// loop's guards pass Ints of IR_VERSION_GUARD_BITS bits, so in the copy
+// 3x + 1 and t + 1 stay inline and wrap, with no overflow test.
+#Test("A guarded loop's arithmetic on its guarded Ints wraps") {
+    m := ir_module_new()
+    exact :: ir_type_row(&m, Type.Int) ?? panic("no Int row")
+    flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("steps", "test:steps.jet::steps", "", "steps.jet", 1)
+    x :: ir_slot(&g, exact, IRSlotKind.Param, ir_intern_name(&m, "x"), 1)
+    g.result = exact
+    t :: ir_slot(&g, exact, IRSlotKind.Local, ir_intern_name(&m, "t"), 2)
+    one :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+    three :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+    tripled :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+    done :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&g, IROp.Const, t, 0, -1, -1, 2)
+    _ := ir_emit(&g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(&g, IROp.Const, three, 3, -1, -1, 2)
+    _ := ir_open(&g, IROp.Block, 3)
+    _ := ir_open(&g, IROp.Loop, 3)
+    _ := ir_emit(&g, IROp.Eq, done, x, one, -1, 3)
+    _ := ir_emit(&g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(&g, IROp.Mul, tripled, three, x, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(&g, IROp.Add, x, tripled, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(&g, IROp.Add, t, t, one, IR_OVERFLOW_TRAP, 5)
+    _ := ir_emit(&g, IROp.Br, -1, 0, -1, -1, 5)
+    ir_end(&g, 5)
+    ir_end(&g, 5)
+    _ := ir_emit(&g, IROp.Return, -1, t, -1, -1, 6)
+    m.entry = 0
+    name_rows_set(&m.function_rows, g.key, 0)
+    &m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report :: ir_optimize_module(&m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    f :: m.functions[0]
+    guards := 0
+    wrapped := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .IntBig {
+            assert_eq(f.b[at], IR_VERSION_GUARD_BITS)
+            guards += 1
+        }
+        if f.op[at] == .Mul && f.c[at] == IR_OVERFLOW_WRAP -> wrapped += 1
+    }
+    assert(guards > 0)
+    assert(wrapped > 0)
 }

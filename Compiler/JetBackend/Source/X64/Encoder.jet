@@ -198,11 +198,34 @@ fn x64_imul_rr(code: &[U8], dst: Int, src: Int) Never! {
     x64_modrm_reg(&code, dst, src)
 }
 
+// imul dst, src, imm (REX.W 6B /r ib, or 69 /r id): OF when the signed
+// product leaves 64 bits.
+fn x64_imul_rri(code: &[U8], dst: Int, src: Int, value: Int) Never! {
+    x64_rex(&code, true, dst, src)
+    if x64_fits_i8(value) {
+        x64_byte(&code, 0x6b)
+        x64_modrm_reg(&code, dst, src)
+        x64_byte(&code, value)
+    } else {
+        x64_byte(&code, 0x69)
+        x64_modrm_reg(&code, dst, src)
+        x64_u32(&code, value)
+    }
+}
+
 // test left, right (REX.W 85 /r)
 fn x64_test_rr(code: &[U8], left: Int, right: Int) Never! {
     x64_rex(&code, true, right, left)
     x64_byte(&code, 0x85)
     x64_modrm_reg(&code, right, left)
+}
+
+// test reg, imm (REX.W F7 /0 id). The immediate must fit i32.
+fn x64_test_ri(code: &[U8], reg: Int, value: Int) Never! {
+    x64_rex(&code, true, 0, reg)
+    x64_byte(&code, 0xf7)
+    x64_modrm_reg(&code, 0, reg)
+    x64_u32(&code, value)
 }
 
 // mov dst, [base + disp] (REX.W 8B /r)
@@ -255,6 +278,13 @@ fn x64_lea(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, true, dst, base)
     x64_byte(&code, 0x8d)
     x64_modrm_mem(&code, dst, base, disp)
+}
+
+// lea dst, [base + index * scale + disp] (REX.W 8D /r)
+fn x64_lea_indexed(code: &[U8], dst: Int, base: Int, index: Int, scale: Int, disp: Int) Never! {
+    x64_rex_indexed(&code, true, dst, base, index)
+    x64_byte(&code, 0x8d)
+    x64_modrm_indexed(&code, dst, base, index, scale, disp)
 }
 
 // movzx dst, byte [base + disp] (REX.W 0F B6 /r)
@@ -363,6 +393,14 @@ fn x64_movzx_r8(code: &[U8], dst: Int, src: Int) Never! {
     x64_modrm_reg(&code, dst, src)
 }
 
+// cmovcc dst, src (REX.W 0F 40+cc /r)
+fn x64_cmov_rr(code: &[U8], cond: X64Cond, dst: Int, src: Int) Never! {
+    x64_rex(&code, true, dst, src)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x40 + x64_cond_code(cond))
+    x64_modrm_reg(&code, dst, src)
+}
+
 // push r64 (50+r) and pop r64 (58+r)
 fn x64_push(code: &[U8], reg: Int) Never! {
     if reg >= 8 -> x64_byte(&code, 0x41)
@@ -377,6 +415,41 @@ fn x64_pop(code: &[U8], reg: Int) Never! {
 fn x64_ret(code: &[U8]) Never! { x64_byte(&code, 0xc3) }
 
 fn x64_int3(code: &[U8]) Never! { x64_byte(&code, 0xcc) }
+
+// `count` bytes of no-op: the recommended multi-byte NOP forms (90, 66 90,
+// 0F 1F /0 with a ModRM, SIB and displacement as needed), nine bytes at most
+// per instruction.
+fn x64_nops(code: &[U8], count: Int) Never! {
+    left := count
+    loop left > 0 {
+        n :: if left > 9 -> 9 else -> left
+        if n == 2 || n == 6 || n == 9 -> x64_byte(&code, 0x66)
+        if n == 1 || n == 2 {
+            x64_byte(&code, 0x90)
+        } else {
+            x64_byte(&code, 0x0f)
+            x64_byte(&code, 0x1f)
+            if n == 3 {
+                x64_byte(&code, 0x00)
+            } else if n == 4 {
+                x64_byte(&code, 0x40)
+                x64_byte(&code, 0x00)
+            } else if n == 5 || n == 6 {
+                x64_byte(&code, 0x44)
+                x64_byte(&code, 0x00)
+                x64_byte(&code, 0x00)
+            } else if n == 7 {
+                x64_byte(&code, 0x80)
+                x64_u32(&code, 0)
+            } else {
+                x64_byte(&code, 0x84)
+                x64_byte(&code, 0x00)
+                x64_u32(&code, 0)
+            }
+        }
+        left -= n
+    }
+}
 
 // call rel32 (E8 cd); returns the offset of the rel32 field.
 fn x64_call_rel32(code: &[U8]) -> Int Never! {

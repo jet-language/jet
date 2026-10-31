@@ -110,10 +110,26 @@ fn ir_entry_edge_plain(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     }
 }
 
+// The root-free routes that read the calling thread's block (JetRuntime
+// Thread.jet) even when nothing allocated: the cleanup scopes (the
+// scheduler's shield, the session status) and the journey's Jet TLS. The
+// runtime attaches a thread exactly when the program links the allocator's
+// cached front doors or Jet TLS (jet_rt_thread_init's guards), and these
+// routes need neither, so a main that calls one attaches its thread itself.
+// Every other root-free route reads a thread block only behind the
+// allocator or the report probe (Scheduler.jet scheduler_report_base),
+// both of which take an unattached thread.
+IR_OWNED_ATTACH_ROUTES :: comptime { [String]{
+    "jet_journey_reset",
+    "jet_rt_cleanup_enter",
+    "jet_rt_cleanup_leave",
+} }
+
 // Decides the main of the program `m` (built by ir_build_program) and
 // returns why it keeps the process root, or "" when it owns its main: then
 // every stop point and every jet_rt_process_entry_return call goes, the
-// module has no stop points and `owned_main` is set. Its print calls
+// module has no stop points and `owned_main` is set, and `owned_attach`
+// when it calls an IR_OWNED_ATTACH_ROUTES route. Its print calls
 // jet_term_write_stdout_line_direct: no other route it may call writes
 // stdout and it runs no test capture, so its lines need no buffer.
 fn ir_entry_own(m: &IRModule) -> String Never! {
@@ -124,9 +140,18 @@ fn ir_entry_own(m: &IRModule) -> String Never! {
     entry_return :: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
     print :: name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
     direct :: if print >= 0 -> ir_intern_name(&m, "jet_term_write_stdout_line_direct") else -> -1
+    attach := [Bool]{}
+    loop _ in 0..<m.names.len() -> &attach.push(false)
+    loop route in IR_OWNED_ATTACH_ROUTES {
+        row :: name_rows_value(m.name_rows, route) ?? -1
+        if row >= 0 -> attach[row] = true
+    }
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
         ir_entry_own_strip(&m.functions[id], poll, trap, entry_return, print, direct)
+        loop (at, op) in m.functions[id].op {
+            if op == .CallRuntime && attach[m.functions[id].a[at]] -> m.owned_attach = true
+        }
     }
     m.stop_points = false
     m.owned_main = true

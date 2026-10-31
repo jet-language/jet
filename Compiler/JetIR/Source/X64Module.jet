@@ -328,7 +328,8 @@ fn ir_x64_take_inputs(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // functions behind a global `main` that runs the module's entry function
 // (no parameters, no result) through the runtime's jet_rt_main, as the old
 // native route's object, or itself when the program owns its main
-// (IRModule.owned_main). `debug_info` false (the build option) leaves the
+// (IRModule.owned_main), attaching its thread first when
+// IRModule.owned_attach. `debug_info` false (the build option) leaves the
 // DWARF sections empty.
 fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
@@ -337,8 +338,9 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     if entry < 0 || entry >= owned.program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
     owned_main :: owned.program.owned_main
+    owned_attach :: owned.program.owned_attach
     program :: ir_x64_object_module(&owned)
-    main :: x64_object_main(X64FunctionID{value: entry}, owned_main)
+    main :: x64_object_main(X64FunctionID{value: entry}, owned_main, owned_attach)
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
