@@ -1137,14 +1137,7 @@ fn sema_expr_mismatch_diagnostic(required: Type, offered: Type, span: Span) -> D
     if required == .Fn(_, required_ret, _, _, _, _) && offered == .Fn(_, offered_ret, _, _, _, _) && sema_expr_never_success(required_ret) && !sema_expr_never_success(offered_ret) {
         return sema_error("E2426", span, "Function value does not satisfy `fn() Never`.", "`fn() Never` promises the callable never completes, so a returning function has the wrong contract.", "Pass a function declared `Never`, or change the expected function type.")
     }
-    // E0401: `T !E` where plain `T` is needed.
-    required_plain :: if required == {
-        .Result(_, _) -> false
-        else -> true
-    }
-    if required_plain && offered == .Result(ok, _) && type_identity_equal(ok, required) {
-        return sema_error("E0401", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a fallible result must be checked before its value is used", "use `?`, `??`, or test with `== Ok(...)` / `== Err(...)`")
-    }
+    if sema_plain_carrier_mismatch(required, offered, span) == .Val(carrier) -> return carrier
     sema_type_mismatch(required, offered, span)
 }
 

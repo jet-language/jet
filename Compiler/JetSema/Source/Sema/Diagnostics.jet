@@ -296,6 +296,19 @@ fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     )
 }
 
+// (Rust `check_type_assignable`) A carrier offered where its plain payload
+// is required: an unchecked fallible result (E0401) or an optional value
+// (E0310) must be tested before its value is used.
+fn sema_plain_carrier_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic? {
+    if offered == .Result(ok, _) {
+        if !(required == .Result(_, _)) && type_identity_equal(ok, required) -> return Val(sema_error("E0401", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a fallible result must be checked before its value is used", "use `?`, `??`, or test with `== Ok(...)` / `== Err(...)`"))
+    }
+    if offered == .Option(inner) {
+        if !(required == .Option(_)) && type_identity_equal(inner, required) -> return Val(sema_error("E0310", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a plain value is required here, not an optional one", "test with `== Val(...)` or `== None` first, e.g. `if x == Val(n) {{ ... }}`"))
+    }
+    None
+}
+
 // E0108: a write whose value doesn't fit the binding or field it lands in;
 // `holder` is "binding" or "field".
 fn sema_slot_holds_mismatch(slot: String, holder: String, required: Type, offered: Type, span: Span) -> Diagnostic {

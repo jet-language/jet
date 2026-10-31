@@ -527,6 +527,7 @@ fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
 // E0112 about the call, after a checked typed-text rejection.
 fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    if sema_plain_carrier_mismatch(required, offered, span) == .Val(carrier) -> return carrier
     // A value of a type that does not implement the one trait a trait-value
     // parameter names is the missing implementation, not a type mismatch.
     if required == .TraitObject(bounds) {
