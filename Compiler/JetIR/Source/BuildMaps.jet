@@ -1052,6 +1052,7 @@ fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, ind
     base_ty :: ir_ty(p, b, base)
     written_row :: ir_value_type(&m, p, base_ty) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
     written :: ir_map_shape(&m, p, written_row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
+    if op == None && ir_map_update_fuses(m, p, b, written, base, index, value) -> return ir_map_update(&m, p, &b, base, index, value, span)
     right :: ir_value_as(&m, p, &b, value, written.value.ty, span)
     if ir_failed(b) -> return
     map :: ir_write_base(&m, p, &b, base, span)
@@ -1073,6 +1074,126 @@ fn ir_map_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, ind
     if ir_failed(b) -> return
     if m.types[shape.value.ty].drop != "" -> ir_emit(&b.f, IROp.Drop, -1, current, -1, -1, b.line)
     ir_store_at(&m, p, &b, address, 0, result)
+}
+
+// Whether `base[index] = value` is one probe (ir_map_update): the map is a
+// variable, the key and value only read (ir_map_update_reads), the value
+// gets a key of the map, and key and value are words a store moves (no
+// aggregate, none without a clone).
+fn ir_map_update_fuses(m: IRModule, p: IRProgram, b: IRBuilder, shape: IRMapShape, base: Int, index: Int, value: Int) -> Bool Never! {
+    if ir_body_node(p, b, base).kind == {
+        .Local(_) -> {}
+        else -> return false
+    }
+    if !ir_map_update_word(m, shape.key.ty) || !ir_map_update_word(m, shape.value.ty) -> return false
+    ir_map_update_reads(p, b, index) >= 0 && ir_map_update_reads(p, b, value) > 0
+}
+
+fn ir_map_update_word(m: IRModule, row: Int) -> Bool Never! {
+    kind :: m.types[row].kind
+    kind != .Aggregate && kind != .Unit && (m.types[row].drop == "" || m.types[row].clone != "")
+}
+
+// The number of Map `get`s in node `id` when evaluating it only reads
+// (literals, variables, primitive arithmetic and comparisons, `??` with a
+// value fallback, Map `get`); -1 when it may write or call anything else.
+fn ir_map_update_reads(p: IRProgram, b: IRBuilder, id: Int) -> Int Never! {
+    node :: ir_body_node(p, b, id)
+    reads :: if node.kind == {
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) -> 0
+        .Binary(_, _, _, lhs, rhs) -> {
+            if !ir_map_update_primitive(ir_ty(p, b, lhs)) || !ir_map_update_primitive(ir_ty(p, b, rhs)) -> return -1
+            ir_map_update_both(ir_map_update_reads(p, b, lhs), ir_map_update_reads(p, b, rhs))
+        }
+        .Unary(_, operand) -> if ir_map_update_primitive(ir_ty(p, b, operand)) -> ir_map_update_reads(p, b, operand) else -> -1
+        .OrFallback(value, fallback, _) -> if fallback == .Value(other) -> ir_map_update_both(ir_map_update_reads(p, b, value), ir_map_update_reads(p, b, other)) else -> -1
+        .BuiltinMethod(receiver, operation, args) -> {
+            if operation != .GetMap || args.len() != 1 -> return -1
+            ir_map_update_both(ir_map_update_both(ir_map_update_reads(p, b, receiver), ir_map_update_reads(p, b, args[0])), 1)
+        }
+        .Borrow(place, _) -> ir_map_update_reads(p, b, place)
+        .Clone(value, _) -> ir_map_update_reads(p, b, value)
+        else -> -1
+    }
+    reads
+}
+
+fn ir_map_update_both(left: Int, right: Int) -> Int Never! {
+    if left < 0 || right < 0 -> return -1
+    left + right
+}
+
+// Whether `ty` is a number, Bool or Char, whose operators are instructions.
+fn ir_map_update_primitive(ty: Type) -> Bool Never! {
+    code :: ir_scalar_code(ty)
+    (code >= 0 && code <= 4) || code >= 10
+}
+
+// `map[key] = value` as one probe (ir_map_update_fuses): the key is found
+// first and a `get` of it in the value answers from that entry
+// (ir_map_probed). A found entry takes the value in place, its key never
+// copied; a missing key is set as ir_map_set sets it. Key and value only
+// read, so building them before the value, not after as
+// ir_map_index_assign does, is the same program.
+fn ir_map_update(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int, value: Int, span: Span) Never! {
+    base_ty :: ir_ty(p, b, base)
+    map :: ir_write_base(&m, p, &b, base, span)
+    if ir_failed(b) || map < 0 -> return
+    ir_make_unique(&m, p, &b, map)
+    row :: b.f.slot_type[map]
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "map index write of {ir_type_name(base_ty)}")
+    key :: ir_value_as(&m, p, &b, index, shape.key.ty, span)
+    if ir_failed(b) || key < 0 -> return
+    word_row :: ir_word_row(&m)
+    found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{map, key}, word_row)
+    b.probe = Val(IRMapProbe{map: map, key: key, found: found})
+    right :: ir_value_as(&m, p, &b, value, shape.value.ty, span)
+    b.probe = None
+    if ir_failed(b) || right < 0 -> return
+    owned :: ir_own(&m, p, &b, right)
+    none :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Ge, found, none)
+    ir_open_if(&b.f, present, b.line)
+    entries :: ir_load_word(&m, &b, map, 16)
+    entry :: ir_element_address(&m, &b, entries, found, shape.stride)
+    if m.types[shape.value.ty].drop != "" {
+        old :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+        ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+    }
+    ir_emit(&b.f, IROp.Store, -1, entry, shape.value.offset, owned, b.line)
+    if b.fresh[key] && ir_has_drop(m, b, key) -> ir_emit(&b.f, IROp.Drop, -1, key, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    owned_key :: ir_own(&m, p, &b, key)
+    _ :: ir_map_call(&m, p, &b, row, "map.set", [Int]{map, owned_key, owned}, -1)
+    ir_end(&b.f, b.line)
+    b.fresh[key] = false
+    b.fresh[owned_key] = false
+    b.fresh[owned] = false
+}
+
+// The entry a probe of `map` for `key` found (ir_map_update), if one did.
+fn ir_map_probed(b: IRBuilder, map: Int, key: Int) -> Int? Never! {
+    probe :: b.probe ?? return None
+    if probe.map == map && probe.key == key -> return Val(probe.found)
+    None
+}
+
+// `map.get(key)` from the entry `found` a probe found: a copy of its value,
+// absent when `found` is negative (as map.get answers).
+fn ir_map_found_option(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, map: Int, found: Int, option_row: Int) -> Int Never! {
+    result :: ir_fresh_temp(&m, &b, option_row)
+    ir_option_none(&m, &b, result)
+    none :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Ge, found, none)
+    ir_open_if(&b.f, present, b.line)
+    entries :: ir_load_word(&m, &b, map, 16)
+    entry :: ir_element_address(&m, &b, entries, found, shape.stride)
+    stored :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+    copied :: ir_copy_value(&m, p, &b, stored, Span{start: 0, end: 0})
+    made :: ir_option_make(&m, p, &b, option_row, copied, m.types[shape.value.ty].size)
+    ir_option_set(&m, &b, result, made)
+    ir_end(&b.f, b.line)
+    result
 }
 
 // `[k: v, ...]` in display: `[:]` when empty; keys and values render as
@@ -1412,6 +1533,9 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{subject, key}, word_row)
         none :: ir_word_const(&m, &b, 0)
         result = ir_bool_op(&m, &b, IROp.Ge, found, none)
+    } else if symbol == "jet_map_get_opt" && ir_map_probed(b, subject, key) != None {
+        found :: ir_map_probed(b, subject, key) ?? -1
+        result = ir_map_found_option(&m, p, &b, shape, subject, found, option_row)
     } else {
         result = ir_map_call(&m, p, &b, row, if symbol == "jet_map_get_opt" -> "map.get" else -> "map.remove", [Int]{subject, key}, option_row)
     }

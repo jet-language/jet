@@ -165,10 +165,18 @@ struct IRBuilder {
     // a valued `if` or block (ir_return): building one starts its failure's
     // journey there, as `return Err(...)` does.
     origins: [Int]{[Int]{}}
+    // The probe a Map entry update made before building its value
+    // (BuildMaps.jet ir_map_update): a `get` of that map and key in the value
+    // answers from the entry it found.
+    probe: IRMapProbe?{None}
 }
 
 // One failure of a body: its message and the span it names.
 struct IRFailureRow { message: String, span: Span }
+
+// The entry `found` (negative: none) a probe of the map in slot `map` for the
+// key in slot `key` found.
+struct IRMapProbe { map: Int, key: Int, found: Int }
 
 // A generic instance being built: the type parameters it binds
 // (ir_generic_names), their arguments, and sema's types of its checked
