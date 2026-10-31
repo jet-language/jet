@@ -249,7 +249,9 @@ fn trust_is_test_public_key_id(key_id: String) -> Bool Never! {
 
 // The public trust-root manifest the site publishes. It records the local
 // bootstrap pin when one exists but never a `TrustKey` secret; an empty key
-// list is intentional while the production key ceremony is pending.
+// list is intentional while the production key ceremony is pending. Objects
+// are built with `Dyn.object()` so the wire keeps the declared field order;
+// a `[String: Dyn]` map would iterate its keys sorted.
 fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
     if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
     sorted := keys
@@ -260,33 +262,33 @@ fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: 
     status :: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
     root :: if bootstrap == {
         .Val(pin) -> {
-            fields := [String: Dyn]{}
+            fields := Dyn.object()
             fields["protocol"] = Dyn.Text("jet-tuf-root-v1")
             fields["digest"] = Dyn.Text(pin.pin_digest)
             fields["version"] = Dyn.Int(pin.root_version)
             fields["consistent_snapshot"] = Dyn.Bool(pin.consistent_snapshot)
-            Dyn.Object(fields)
+            fields
         }
         .None -> Dyn.Null
     }
     rendered := [Dyn]{}
     loop key in sorted {
-        fields := [String: Dyn]{}
+        fields := Dyn.object()
         fields["role"] = Dyn.Text(key.role)
         fields["path"] = Dyn.Text(key.path_for_publication())
         fields["key_id"] = Dyn.Text(key.key_id)
         fields["algorithm"] = Dyn.Text(key.algorithm)
         fields["public_key"] = Dyn.Text(key.public_key)
-        &rendered.push(Dyn.Object(fields))
+        &rendered.push(fields)
     }
-    manifest := [String: Dyn]{}
+    manifest := Dyn.object()
     manifest["schema"] = Dyn.Int(1)
     manifest["domain"] = Dyn.Text(domain.copy())
     manifest["status"] = Dyn.Text(status)
     manifest["root"] = root
     manifest["keys"] = Dyn.Array(rendered)
     manifest["rotation"] = Dyn.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
-    text :: json.to_string(Dyn.Object(manifest)) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
+    text :: json.to_string(manifest) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
     Ok("{text}\n")
 }
 

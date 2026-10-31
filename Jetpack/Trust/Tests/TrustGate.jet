@@ -4,9 +4,9 @@ use jet_pkg_model.[PackageGateError, RefSource, RefSpec, SourceTable]
 use jet_env_model.[SecretSpec]
 use jetpack_trust.[
     TrustAuthority, TrustGrant, trust_add_grant, trust_add_pattern, trust_env_definition_hash,
-    trust_flake_definition_hash, trust_gate, trust_gate_flake, trust_grant_hash,
-    trust_is_env_trusted, trust_is_trust_sensitive, trust_is_trust_sensitive_ext, trust_is_trusted,
-    trust_list_entries, trust_parse_grant_selector, trust_remove_pattern,
+    trust_flake_definition_hash, trust_gate, trust_gate_build_identity, trust_gate_flake,
+    trust_grant_hash, trust_is_env_trusted, trust_is_trust_sensitive, trust_is_trust_sensitive_ext,
+    trust_is_trusted, trust_list_entries, trust_parse_grant_selector, trust_remove_pattern,
 ]
 use jetpack_foundation.[PACKAGE_FILE, TRUST_SCOPE_REPO, TRUST_SCOPE_USER, Theme]
 use core.files as files
@@ -233,4 +233,16 @@ fn trust_test_write_refusal(error: PackageGateError, site: String, root: String)
     assert(!(trust_add_pattern(store, root, "/reviewed/*") ?? panic("pattern duplicate permitted")))
     assert_eq(files.read(store) ?? panic("grant store"), "grant:repo:build:audited\nhash:audited\npattern:/reviewed/*\n")
     files.remove_all(root).drop("test cleanup")
+}
+
+// Ported from tests/jetpack_trust_root.rs: a repo build grant authorizes only
+// its exact identity, and a hostile identity is never run through a shell.
+#Test("core_build_hook_requires_the_exact_trust_identity") {
+    dir :: trust_test_gate_dir("core-build-trust")
+    store :: files.join(dir, "trust")
+    assert(trust_add_grant(store, dir, TrustGrant{authority: "build", subject: "build-sha256:trusted", scope: "repo"}) ?? panic("grant"))
+    hostile_identity :: "build-sha256:trusted\n$(touch core-build-pwned)"
+    assert(trust_gate_build_identity(Theme.plain(), store, dir, hostile_identity, false) != None)
+    assert(!files.exists(files.join(dir, "core-build-pwned")))
+    files.remove_all(dir).drop("test cleanup")
 }

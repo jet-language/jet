@@ -1,20 +1,10 @@
 // Shared helpers for the foreign-binder claims.
-use jet_pkg_model.[
-    ForeignBindError, pkg_binder_remove_file_quiet, pkg_bridge_tool_path, pkg_cobol_parse_copybook,
-]
+use jet_pkg_model.[ForeignBindError, pkg_binder_remove_file_quiet, pkg_bridge_tool_path]
 use jetpack_integrations.[pkg_php_discover_functions]
 
 // Non-overlapping occurrences of `needle` (Rust `str::matches(..).count()`).
 fn pkg_binders_test_count(haystack: String, needle: String) -> Int Never! {
     haystack.split(needle).to_list().len() - 1
-}
-
-// Whether the closed copybook subset refuses `source`.
-fn pkg_binders_test_copybook_rejected(source: String) -> Bool Never! {
-    if pkg_cobol_parse_copybook(source) == {
-        .Ok(_) -> false
-        .Err(_) -> true
-    }
 }
 
 // Whether `tool --version` runs on this host.

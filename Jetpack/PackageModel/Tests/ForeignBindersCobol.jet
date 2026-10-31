@@ -4,6 +4,14 @@ use jet_pkg_model.[
     pkg_cobol_render_bridge, pkg_cobol_render_jet,
 ]
 
+// Whether the closed copybook subset refuses `source`.
+fn pkg_binders_test_copybook_rejected(source: String) -> Bool Never! {
+    if pkg_cobol_parse_copybook(source) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+}
+
 #Test("cobol copybook layout keeps packed decimal exact") {
     layout :: pkg_cobol_parse_copybook("       01 PAYROLL-RECORD.\n          05 EMPLOYEE-ID PIC 9(6) COMP-5.\n          05 NAME PIC X(20).\n          05 GROSS-PAY PIC S9(7)V99 COMP-3.\n") ?? panic("the payroll copybook parses")
     assert_eq(layout.width, 29)
