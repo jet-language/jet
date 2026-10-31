@@ -282,19 +282,25 @@ fn jet_cli_output_entry(tokens: [Token], tables: TokenTables, open: Int, close: 
     None
 }
 
-// `outputs: { app: Executable{ entry: app.run }, lib: Library{} }`.
+// `outputs: { app: .Executable{ entry: app.run }, lib: .Library{} }`.
 fn jet_cli_outputs(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIOutputFact] Never! {
     outputs := [JetCLIOutputFact]{}
     index := open + 1
     loop index < close {
-        if tokens[index].kind != TOKEN_IDENT || index + 2 >= close || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT {
+        if tokens[index].kind != TOKEN_IDENT || index + 2 >= close || tokens[index + 1].kind != TOKEN_COLON {
+            index += 1
+            next
+        }
+        // `name: .Kind{ … }`, or `name: Kind{ … }` as the driver's manifest reader also accepts.
+        kind_index :: if tokens[index + 2].kind == TOKEN_DOT -> index + 3 else -> index + 2
+        if kind_index >= close || tokens[kind_index].kind != TOKEN_IDENT {
             index += 1
             next
         }
         name :: token_decoded(tables, tokens[index])
-        kind :: token_decoded(tables, tokens[index + 2])
+        kind :: token_decoded(tables, tokens[kind_index])
         entry := String?{None}
-        index += 3
+        index = kind_index + 1
         if index < close && tokens[index].kind == TOKEN_LBRACE {
             body_close :: jet_cli_matching_close(tokens, index)
             if body_close < 0 -> break
@@ -1339,10 +1345,32 @@ fn jet_cli_package_is_library_only(entry: String, compiled: JetDriverCompileResu
 // `fn run` in its entry file (E0101). Only a cleanly parsed entry is judged;
 // a parse error is reported by the compile itself.
 fn jet_cli_entry_lacks_run(source: String) -> Bool Never! {
+    jet_cli_entry_lacks_callable(source, "run")
+}
+
+fn jet_cli_entry_lacks_callable(source: String, callable: String) -> Bool Never! {
     block :: jet_driver_inline_package(source)
     if block.error != None -> return false
     program :: jet_cli_parsed_program(jet_driver_mask_inline_package(source, block)) ?? return false
-    jet_cli_function_count(program, "run") == 0
+    jet_cli_function_count(program, callable) == 0
+}
+
+// The callable a project check of `file` starts at: the one a selected
+// `outputs:` entry `file.callable` names when it resolves to `file`, else
+// `run`.
+fn jet_cli_project_entry_callable(file: String) -[FS, Env]> String Never! {
+    folder :: jet_cli_parent(file) ?? "."
+    root := ""
+    if jet_cli_find_package_root(folder, false) == {
+        .Root(found) -> root = found
+        else -> return "run"
+    }
+    facts :: jet_cli_root_manifest(root) ?? return "run"
+    notices := [String]{}
+    if jet_cli_resolve_run_entry(root, Val(facts), &notices) == .Found(entry) {
+        if entry.path == file -> return entry.callable ?? "run"
+    }
+    "run"
 }
 
 // The E0101 report of a project check whose entry has no `fn run`.
