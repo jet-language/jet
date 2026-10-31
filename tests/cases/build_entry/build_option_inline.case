@@ -1,21 +1,22 @@
 # #5005: the Choice row `inline` (auto, always_marked, off; stock auto) says
 # which callees the optimizer inlines. `mix` is marked `#Inline(Always)` and
 # past the O1 callee limit, `bump` is small and unmarked: auto inlines `bump`,
-# always_marked every call of `mix` (the largest image), off neither (the
-# smallest). The program prints the same under every value.
+# always_marked every call of `mix` (the largest image), off neither. A callee
+# spliced at every call is unreached, so `dead_code: remove` (the stock)
+# drops it and the image does not name it; off keeps `bump` and its name.
+# The program prints the same under every value.
 fixture: fixtures/build_inline
 env: NO_COLOR=1
 step: jet build main.jet
 cwd: open
 exit: 0
 rename: open/.jet/build/main open/.jet/build/main_auto
-capture: auto_size = size file open/.jet/build/main_auto
+file: open/.jet/build/main_auto !~ "bump" # auto splices `bump` at every call
 step: jet build --inline=off main.jet
 cwd: open
 exit: 0
-file: open/.jet/build/main size < {cap:auto_size}
+file: open/.jet/build/main ~ "bump" # off inlines nothing, so `bump` stays a function
 rename: open/.jet/build/main open/.jet/build/main_off
-capture: off_size = size file open/.jet/build/main_off
 step: {work}/open/.jet/build/main_off
 exit: 0
 stdout: = "mixed: 400255\n"
@@ -24,6 +25,7 @@ cwd: open
 exit: 0
 capture: marked_size = size file open/.jet/build/main
 file: open/.jet/build/main_auto size < {cap:marked_size}
+file: open/.jet/build/main ~ "bump" # always_marked takes only marked callees
 step: {work}/open/.jet/build/main
 exit: 0
 stdout: = "mixed: 400255\n"
