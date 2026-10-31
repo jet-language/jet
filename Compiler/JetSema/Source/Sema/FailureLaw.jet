@@ -35,6 +35,7 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     type_name,
+    foundation_named_type,
 ]
 use jet_parser.[
     parse_source,
@@ -257,7 +258,9 @@ fn sema_error_conversion_routine(definition: ErrorConvDef, local_types: [String]
         &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
         return None
     }
-    Val(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
+    // The source is a written type name; a primitive name is that primitive
+    // (`impl String -> Err` takes a `String` self).
+    Val(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, foundation_named_type(from_ty), definition.body, definition.body_span)})
 }
 
 // The canonical Prelude conversion of one family member into
@@ -645,7 +648,9 @@ fn sema_type_hole(span: Span) -> Diagnostic {
 
 // E0119: a written type name that names nothing. A name that writes a
 // lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
+// The common guess `Text` points at `String` (D-TEXT-NAMES1=A).
 fn sema_unknown_type_name(name: String, span: Span) -> Diagnostic {
+    if name == "Text" -> return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
     sema_casing_acronym_diagnostic(name, span) ?? sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")
 }
 

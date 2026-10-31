@@ -1,0 +1,10 @@
+# #6322 C4: `jet build --watch` must not build once and exit 0 in silence.
+# D-BUILD-WATCH1=A asks for a watching build on the engine run, test and check
+# share; until that engine drives `jet build`, the flag is refused with the
+# registered E2104 not-built-yet report (Front.jet jet_cli_not_ported_output,
+# the same bytes `jet fetch` prints), exit 2 (JET_DRIVER_EXIT_USAGE).
+fixture: fixtures/flags
+step: jet build run.jet --watch
+exit: 2
+stdout: empty
+stderr: = build-watch.stderr
