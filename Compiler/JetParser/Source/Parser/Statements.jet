@@ -51,6 +51,7 @@ use jet_lexer.[
     TOKEN_EQ_EQ,
     TOKEN_FALSE,
     TOKEN_FLOAT,
+    TOKEN_GT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
@@ -67,6 +68,7 @@ use jet_lexer.[
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
+    TOKEN_LT,
     TOKEN_MINUS,
     TOKEN_MINUS_EQ,
     TOKEN_NULL,
@@ -2027,6 +2029,16 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
             &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(switched_span), site: Val(RuleSite.Statement)})
             return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: switched_span}
         }
+    }
+    // The retired angle form `#SQL<Row> { … }` names its row type with the
+    // ordinary call form now.
+    if word == "SQL" && parser_current_kind(&state) == TOKEN_LT && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_GT && parser_kind_at(&state, 3) == TOKEN_LBRACE {
+        parser_bump(&state)
+        parser_bump(&state)
+        close :: parser_bump(&state)
+        parser_parse_body_block(&state, false)
+        parser_add_error_code(&state, "E0927", parser_cover(marker_span, close.span), "`#{word}<…>` is retired", "marker arguments use the ordinary call form from the registry", "write `#{word}(Row) {{ … }}`")
+        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
     }
     saved_tail_depth :: state.callable_tail_depth
     value_tail :: marker.name == "Unsafe" && state.callable_tail_value && state.callable_tail_depth == state.block_depth
