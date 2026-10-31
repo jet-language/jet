@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildScoreboard, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, validateEntryShape, validateResultShape } from "./run.mjs";
+import { buildScoreboard, CEILING_POLICY, ceilingReferenceIssues, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, STRICT_PERFORMANCE_POLICY, strictPerformancePolicyIssues, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals } from "./live-reload.mjs";
 import { compileThroughputContractIssues } from "./compile-throughput.mjs";
 import { BUILD_SYSTEM_CELLS, buildSystemContractIssues } from "./build-system.mjs";
@@ -587,6 +587,75 @@ test("publication rejects peer sample identity mismatch", () => {
   const publication = fixturePublication(fixture, scoreboard);
   assert.equal(publication.complete, false);
   assert.ok(publication.blockers.some((blocker) => blocker.includes("peer sample identity")));
+});
+
+test("the matrix encodes the peer floor and the machine ceiling, and every ceiling reference names its gauntlet cells", async () => {
+  const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
+  assert.deepEqual(strictPerformancePolicyIssues(matrix), []);
+  const ceiling = matrix.strict_performance_policy.ceiling;
+  assert.deepEqual(ceiling, JSON.parse(JSON.stringify(CEILING_POLICY)));
+  assert.deepEqual(ceiling.stages.map((stage) => [stage.id, stage.role]), [["peer_floor", "initial"], ["machine_ceiling", "final"]]);
+  assert.deepEqual(ceiling.stages[1].comparators, { meet: "<=1", miss: ">1" });
+  assert.equal(ceiling.peer_win_closes_cell, false);
+  assert.equal(ceiling.missing_reference, "uncovered");
+  assert.ok(matrix.strict_performance_policy.failure_statuses.includes(ceiling.missing_reference));
+  const references = JSON.parse(await fs.readFile(repoSourcePath(ceiling.references), "utf8"));
+  assert.deepEqual(await ceilingReferenceIssues(matrix, references), []);
+  // AGENTS.md carries the ceiling paragraph word for word.
+  const agents = (await fs.readFile(path.join(repoDir, "AGENTS.md"), "utf8")).replace(/\s+/g, " ");
+  const paragraph = STRICT_PERFORMANCE_POLICY.text.split("\n\n").find((item) => item.startsWith("Peers are the initial benchmark"));
+  assert.ok(paragraph);
+  assert.ok(agents.includes(paragraph), "AGENTS.md Performance gate lacks the machine-ceiling paragraph");
+  const missing = await ceilingReferenceIssues(matrix, [{ name: "nope", gauntlet: ["no.such-cell"] }, { name: "sieve" }]);
+  assert.ok(missing.includes("nope: machine-ceiling reference names unknown matrix cell no.such-cell"));
+  assert.ok(missing.includes("nope: machine-ceiling reference has no ref.S"));
+  assert.ok(missing.includes("sieve: machine-ceiling reference does not name its gauntlet cells"));
+});
+
+test("a peer win never closes a cell whose machine ceiling is unmet", () => {
+  const fixture = scoreboardFixture();
+  const tower = { status: "available", revision: 1, cards: new Map() };
+  const reference = [{ name: "fixture-ref", gauntlet: ["fixture.cell"] }];
+  const rows = (cycles, size, output = "same") => ({
+    rows: [
+      { cell: "fixture-ref", variant: "asm", cycles_x: 1, size_x: 1, output: "same" },
+      { cell: "fixture-ref", variant: "jet-default", cycles_x: cycles, size_x: size, output },
+      { cell: "fixture-ref", variant: "jet-release", cycles_x: cycles, size_x: size, output },
+    ],
+  });
+  const judge = (ceiling) => buildScoreboard(fixture.matrix, [fixture.result], fixture.manifest, tower, ceiling);
+
+  const uncovered = judge(undefined);
+  const cell = uncovered.cells[0];
+  assert.equal(cell.peer_verdict, "win");
+  assert.equal(cell.ceiling.status, "uncovered");
+  assert.equal(cell.ceiling_verdict, "uncovered");
+  assert.equal(cell.verdict, "unmeasured");
+  assert.deepEqual(Object.keys(cell.ceiling.metrics), ["runtime_wall_seconds", "runtime_first_stdout_seconds", "binary_bytes"]);
+  assert.deepEqual(uncovered.ceiling_coverage.uncovered, ["fixture.cell"]);
+  const blockers = fixturePublication(fixture, uncovered).blockers;
+  assert.ok(blockers.includes("fixture.cell/machine-ceiling/runtime_wall_seconds: metric uncovered (no hand-written machine-code reference names this cell)"));
+  assert.ok(blockers.includes("fixture.cell/machine-ceiling/binary_bytes: metric uncovered (no hand-written machine-code reference names this cell)"));
+
+  const unmeasured = judge({ references: reference, measurements: null }).cells[0];
+  assert.equal(unmeasured.ceiling.status, "covered");
+  assert.equal(unmeasured.ceiling_verdict, "unmeasured");
+  assert.equal(unmeasured.verdict, "unmeasured");
+
+  const miss = judge({ references: reference, measurements: rows(1.2, 0.9) }).cells[0];
+  assert.equal(miss.ceiling.metrics.runtime_wall_seconds.verdict, "miss");
+  assert.equal(miss.ceiling.metrics.binary_bytes.verdict, "meet");
+  assert.equal(miss.verdict, "loss");
+
+  const wrong = judge({ references: reference, measurements: rows(0.5, 0.5, "DIFF (status 1)") }).cells[0];
+  assert.equal(wrong.ceiling_verdict, "wrong");
+  assert.equal(wrong.verdict, "unmeasured");
+
+  const meet = judge({ references: reference, measurements: rows(1, 0.8) });
+  assert.equal(meet.cells[0].ceiling_verdict, "meet");
+  assert.equal(meet.cells[0].verdict, "win");
+  assert.deepEqual(meet.ceiling_coverage.covered, [{ cell: "fixture.cell", references: ["fixture-ref"] }]);
+  assert.equal(fixturePublication(fixture, meet).blockers.some((blocker) => blocker.includes("machine-ceiling")), false);
 });
 
 test("web-app results omit undeclared Jet tiers", () => {

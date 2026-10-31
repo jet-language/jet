@@ -68,15 +68,42 @@ const RATIO_VERDICTS = { win: "<1", loss: ">=1" };
 const STRICT_PERFORMANCE_POLICY_TEXT = [
   "Jet targets a strict win for every matched peer on every required cell and metric. Rust is judged like every other peer: Jet/peer must be below 1.00. The target is the machine's ceiling: code as good as the best hand-written assembly for the workload; beating peers is the floor, not the goal.",
   "",
+  "Peers are the initial benchmark; hand-written, maximally optimized machine code is the final one. Every required cell needs a ceiling reference: an asm-parity cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the best known technique for the workload (SIMD, algorithmic, or syscall-level), not a naive transliteration. Jet/ceiling must be at most 1.00 for every runtime and size metric. A cell without a reference is uncovered and fails the gate, and a peer win never closes a cell whose ceiling is unmet. A better technique replaces the reference and raises the target.",
+  "",
   "Required cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.",
   "",
   "Apply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate.",
 ].join("\n");
 
+// The target has two stages. `peer_floor` is the per-cell, per-metric strict win
+// over every matched peer (RATIO_VERDICTS). `machine_ceiling` is the final one:
+// Jet against a hand-written, maximally optimized machine-code reference (an
+// asm-parity cell, Tools/perf/asm-parity/cells.json + <cell>/ref.S, whose
+// `gauntlet` field names the matrix cells it bounds), Jet/ceiling <= 1.00 on
+// every runtime and size metric. `metrics` maps a metric's loss-owner category
+// (LOSS_OWNER_CATEGORY_BY_METRIC) to the asm-parity measure that judges it.
+const CEILING_VERDICTS = Object.freeze({ meet: "<=1", miss: ">1" });
+const CEILING_POLICY = Object.freeze({
+  stages: Object.freeze([
+    { id: "peer_floor", role: "initial", against: "every_matched_peer", comparators: RATIO_VERDICTS },
+    { id: "machine_ceiling", role: "final", against: "hand_written_machine_code", comparators: CEILING_VERDICTS },
+  ]),
+  closes_cell: "machine_ceiling",
+  peer_win_closes_cell: false,
+  required_cells: "every_required_cell",
+  metrics: Object.freeze({ runtime: "cycles", latency: "cycles", binary: "bytes" }),
+  references: "Tools/perf/asm-parity/cells.json",
+  reference_source: "ref.S",
+  reference_link: "gauntlet",
+  missing_reference: "uncovered",
+  reference_technique: "best_known_for_the_workload",
+  better_technique: "replaces_reference_and_raises_target",
+});
+
 const STRICT_PERFORMANCE_POLICY = Object.freeze({
-  schema: "jet.strict-performance-policy.v2",
+  schema: "jet.strict-performance-policy.v3",
   id: "AGENTS.md#strict-performance-gate",
-  version: 2,
+  version: 3,
   comparison: "per_cell_and_metric",
   comparators: RATIO_VERDICTS,
   failure_statuses: Object.freeze([
@@ -108,6 +135,7 @@ const STRICT_PERFORMANCE_POLICY = Object.freeze({
   ]),
   first_party_battery_required: true,
   historical_receipts: "immutable_recorded_policy",
+  ceiling: CEILING_POLICY,
   text: STRICT_PERFORMANCE_POLICY_TEXT,
 });
 const METRIC_APPLICABILITY_POLICY = {
@@ -206,10 +234,10 @@ function shellQuote(value) {
 }
 
 function parseArgs(argv) {
-  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null };
+  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis") {
+    if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis" || arg === "--ceiling-results") {
       if (i + 1 >= argv.length) throw new Error(`${arg} needs a value`);
       const value = argv[++i];
       if (arg === "--entry") options.entry = value;
@@ -217,10 +245,11 @@ function parseArgs(argv) {
       if (arg === "--entries-dir") options.entriesDir = value;
       if (arg === "--runs") options.runs = Number.parseInt(value, 10);
       if (arg === "--axis") options.axis = value;
+      if (arg === "--ceiling-results") options.ceilingResults = value;
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node Tools/gauntlet/harness/run.mjs [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput]");
+      console.log("usage: node Tools/gauntlet/harness/run.mjs [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json]");
       process.exit(0);
     }
     throw new Error(`unknown argument: ${arg}`);
@@ -798,6 +827,9 @@ function strictPerformancePolicyIssues(matrix) {
   if (policy.historical_receipts !== STRICT_PERFORMANCE_POLICY.historical_receipts) {
     issues.push("matrix strict performance policy does not preserve historical receipts");
   }
+  if (JSON.stringify(policy.ceiling) !== JSON.stringify(STRICT_PERFORMANCE_POLICY.ceiling)) {
+    issues.push("matrix strict performance policy machine-ceiling stage differs from the ratified law");
+  }
   if (policy.text !== STRICT_PERFORMANCE_POLICY.text) {
     issues.push("matrix strict performance policy text differs from AGENTS.md");
   }
@@ -805,15 +837,114 @@ function strictPerformancePolicyIssues(matrix) {
   if (new Set(matrixIds).size !== matrixIds.length || matrixIds.some((id) => typeof id !== "string" || id.length === 0)) {
     issues.push("matrix strict performance policy cannot address an invalid or duplicate matrix cell");
   }
-  const covered = new Set([
-    ...(Array.isArray(policy.foundations) ? policy.foundations : []),
-    ...(Array.isArray(policy.critical_areas) ? policy.critical_areas : []),
-  ].filter((area) => area?.required === true)
-    .flatMap((area) => policyTerritoryCells(area, matrixIds)));
+  const covered = requiredPolicyCells(policy, matrixIds);
   for (const id of matrixIds) {
     if (!covered.has(id)) issues.push(`${id}: matrix cell has no required strict-performance territory battery`);
   }
   return [...new Set(issues)];
+}
+
+// The cells some required territory claims: every one of them is judged against
+// its peers and against its machine ceiling.
+function requiredPolicyCells(policy, matrixIds) {
+  return new Set([
+    ...(Array.isArray(policy?.foundations) ? policy.foundations : []),
+    ...(Array.isArray(policy?.critical_areas) ? policy.critical_areas : []),
+  ].filter((area) => area?.required === true)
+    .flatMap((area) => policyTerritoryCells(area, matrixIds)));
+}
+
+// The machine-ceiling references (CEILING_POLICY.references): every asm-parity
+// cell names the matrix cells it bounds in `gauntlet` ([] for a microbenchmark
+// that bounds none) and ships its hand-written reference beside cells.json.
+async function ceilingReferenceIssues(matrix, references) {
+  if (!Array.isArray(references)) return [`${CEILING_POLICY.references}: machine-ceiling references are missing`];
+  const matrixIds = new Set((Array.isArray(matrix?.cells) ? matrix.cells : []).map((cell) => cell.id));
+  const referenceDir = path.dirname(path.join(repoDir, CEILING_POLICY.references));
+  const issues = [];
+  const names = new Set();
+  for (const reference of references) {
+    const name = reference?.name;
+    if (typeof name !== "string" || name.length === 0) {
+      issues.push(`${CEILING_POLICY.references}: a machine-ceiling reference has no name`);
+      continue;
+    }
+    if (names.has(name)) issues.push(`${CEILING_POLICY.references}: duplicate machine-ceiling reference ${name}`);
+    names.add(name);
+    if (!Array.isArray(reference[CEILING_POLICY.reference_link])) {
+      issues.push(`${name}: machine-ceiling reference does not name its gauntlet cells`);
+    } else {
+      for (const cell of reference[CEILING_POLICY.reference_link]) {
+        if (!matrixIds.has(cell)) issues.push(`${name}: machine-ceiling reference names unknown matrix cell ${cell}`);
+      }
+    }
+    if (!await exists(path.join(referenceDir, name, CEILING_POLICY.reference_source))) {
+      issues.push(`${name}: machine-ceiling reference has no ${CEILING_POLICY.reference_source}`);
+    }
+  }
+  return issues;
+}
+
+// The runtime and size metrics a mode's machine ceiling judges.
+function ceilingMetrics(mode) {
+  return comparisonMetrics(mode).filter((metric) => Object.hasOwn(CEILING_POLICY.metrics, LOSS_OWNER_CATEGORY_BY_METRIC[metric]));
+}
+
+function ceilingRatioVerdict(ratio) {
+  if (typeof ratio !== "number" || !Number.isFinite(ratio) || ratio <= 0) return null;
+  return ratio <= 1 ? "meet" : "miss";
+}
+
+// One verdict for several judged rows: any wrong, unmeasured or missed row
+// fails the metric; it meets only when every row meets.
+function ceilingReduce(verdicts) {
+  for (const verdict of ["wrong", "uncovered", "unmeasured", "miss"]) {
+    if (verdicts.includes(verdict)) return verdict;
+  }
+  return verdicts.length ? "meet" : "unmeasured";
+}
+
+// A matrix cell against its machine ceiling. `measurements` is an asm-parity
+// results.json (Tools/perf/asm-parity/asm-parity.mjs): each reference's `asm`
+// row and every Jet row it measured. A cell no reference names is uncovered.
+function ceilingCell(cell, references, measurements, required) {
+  const metrics = ceilingMetrics(matrixCellMode(cell));
+  const names = (Array.isArray(references) ? references : [])
+    .filter((reference) => Array.isArray(reference?.[CEILING_POLICY.reference_link]) && reference[CEILING_POLICY.reference_link].includes(cell.id))
+    .map((reference) => reference.name);
+  const rows = Array.isArray(measurements?.rows) ? measurements.rows : [];
+  const metricResults = Object.fromEntries(metrics.map((metric) => {
+    const measure = CEILING_POLICY.metrics[LOSS_OWNER_CATEGORY_BY_METRIC[metric]];
+    if (!names.length) {
+      return [metric, { measure, verdict: "uncovered", rows: [], reason: "no hand-written machine-code reference names this cell" }];
+    }
+    const ratioKey = measure === "cycles" ? "cycles_x" : "size_x";
+    const judged = names.flatMap((name) => {
+      const own = rows.filter((row) => row?.cell === name);
+      const asm = own.find((row) => row.variant === "asm");
+      const jet = own.filter((row) => row.variant !== "asm");
+      if (!asm || !jet.length) return [{ reference: name, variant: null, ratio: null, verdict: "unmeasured" }];
+      return jet.map((row) => ({
+        reference: name,
+        variant: row.variant,
+        ratio: typeof row[ratioKey] === "number" ? row[ratioKey] : null,
+        verdict: asm.output !== "same" || row.output !== "same" ? "wrong" : (ceilingRatioVerdict(row[ratioKey]) ?? "unmeasured"),
+      }));
+    });
+    const verdict = ceilingReduce(judged.map((row) => row.verdict));
+    const reason = verdict === "meet" ? null
+      : verdict === "unmeasured" ? "machine-ceiling reference was not measured (asm-parity results are missing)"
+      : verdict === "wrong" ? "machine-ceiling output differs from the cell's expected output"
+      : "Jet/ceiling is above 1.00";
+    return [metric, { measure, verdict, rows: judged, reason }];
+  }));
+  return {
+    required,
+    status: names.length ? "covered" : "uncovered",
+    references: names,
+    metrics: metricResults,
+    verdict: ceilingReduce(Object.values(metricResults).map((item) => item.verdict)),
+  };
 }
 
 function matrixPeerLanguages(matrix, cell = null) {
@@ -2741,7 +2872,9 @@ function validateResultShape(result, matrix = null) {
   }
   return [...new Set(issues)];
 }
-function buildScoreboard(matrix, results, manifest, tower) {
+// `ceiling` carries the machine-ceiling references (Tools/perf/asm-parity/cells.json)
+// and the asm-parity results.json that measured them (null when not measured).
+function buildScoreboard(matrix, results, manifest, tower, ceiling = { references: [], measurements: null }) {
   const inputResults = Array.isArray(results) ? results : [];
   const resultValidationIssues = inputResults.flatMap((result) => validateResultShape(result, matrix));
   const policyValidationIssues = strictPerformancePolicyIssues(matrix);
@@ -2761,6 +2894,7 @@ function buildScoreboard(matrix, results, manifest, tower) {
   }
   const declaredOwners = manifest?.loss_owners ?? {};
   const towerState = tower && typeof tower === "object" ? tower : { status: "unavailable", reason: "Tower state is missing" };
+  const requiredCells = requiredPolicyCells(matrix?.strict_performance_policy, (Array.isArray(matrix?.cells) ? matrix.cells : []).map((cell) => cell.id));
   const cells = (Array.isArray(matrix?.cells) ? matrix.cells : []).map((cell) => {
     const candidates = entriesByCell.get(cell.id) ?? [];
     const records = candidates.map((result) => {
@@ -2880,14 +3014,26 @@ function buildScoreboard(matrix, results, manifest, tower) {
       : (allowedUncovered.has(cell.id)
         ? {}
         : Object.fromEntries(structuralMetricNames.map((metric) => [metric, "unmeasured"])));
+    // A peer win never closes a cell while its machine ceiling is unmet.
+    const peerVerdict = records.length === 1 ? records[0].verdict : "unmeasured";
+    const ceilingRecord = ceilingCell(cell, ceiling?.references, ceiling?.measurements ?? null, requiredCells.has(cell.id));
+    const ceilingFailures = Object.entries(ceilingRecord.metrics)
+      .filter(([, item]) => item.verdict !== "meet")
+      .map(([metric, item]) => ({ metric, peer: "machine-ceiling", verdict: item.verdict, reason: item.reason, tiers: {} }));
     return {
       id: cell.id,
       domain: cell.domain,
       kind: cell.kind,
       entries: records,
       metric_verdicts: structuralMetricVerdicts,
-      metric_failures: records.flatMap((record) => record.metric_failures).concat(structuralFailures),
-      verdict: records.length === 1 ? records[0].verdict : "unmeasured",
+      metric_failures: records.flatMap((record) => record.metric_failures).concat(structuralFailures, ceilingFailures),
+      peer_verdict: peerVerdict,
+      ceiling: ceilingRecord,
+      ceiling_verdict: ceilingRecord.verdict,
+      verdict: peerVerdict !== "win" ? peerVerdict
+        : ceilingRecord.verdict === "meet" ? "win"
+        : ceilingRecord.verdict === "miss" ? "loss"
+        : "unmeasured",
       loss_owners: records.flatMap((record) => record.loss_owners),
     };
   });
@@ -2911,6 +3057,16 @@ function buildScoreboard(matrix, results, manifest, tower) {
       metric_loss: metricVerdicts.filter((verdict) => verdict === "loss").length,
       metric_unmeasured: metricVerdicts.filter((verdict) => verdict === "unmeasured").length,
       metric_not_applicable: metricVerdicts.filter((verdict) => verdict === "not_applicable").length,
+      ceiling_meet: cells.filter((cell) => cell.ceiling_verdict === "meet").length,
+      ceiling_miss: cells.filter((cell) => cell.ceiling_verdict === "miss").length,
+      ceiling_uncovered: cells.filter((cell) => cell.ceiling_verdict === "uncovered").length,
+      ceiling_unmeasured: cells.filter((cell) => !["meet", "miss", "uncovered"].includes(cell.ceiling_verdict)).length,
+    },
+    ceiling_coverage: {
+      references: CEILING_POLICY.references,
+      covered: cells.filter((cell) => cell.ceiling.status === "covered").map((cell) => ({ cell: cell.id, references: cell.ceiling.references })),
+      uncovered: cells.filter((cell) => cell.ceiling.status === "uncovered").map((cell) => cell.id),
+      measured: Boolean(ceiling?.measurements),
     },
     loss_owners: {
       declared: declaredOwners,
@@ -3735,9 +3891,17 @@ async function main() {
   const { loaded, skipped } = axisOnly
     ? { loaded: [], skipped: [] }
     : await loadEntries(entriesDir, options.entry);
+  // The machine-ceiling references and, when given, the asm-parity run that measured them.
+  const ceilingReferences = JSON.parse(await fs.readFile(path.join(repoDir, CEILING_POLICY.references), "utf8"));
+  const ceilingMeasurements = options.ceilingResults === null
+    ? null
+    : JSON.parse(await fs.readFile(path.resolve(process.cwd(), options.ceilingResults), "utf8"));
   const validationIssues = axisOnly
     ? []
-    : await validateCorpus(entriesDir, loaded, skipped, matrix, sourceManifest, fullScope);
+    : [
+      ...await validateCorpus(entriesDir, loaded, skipped, matrix, sourceManifest, fullScope),
+      ...await ceilingReferenceIssues(matrix, ceilingReferences),
+    ];
   for (const issue of validationIssues) console.warn(`WARN corpus: ${issue}`);
   const results = [];
   for (const item of loaded) {
@@ -3767,7 +3931,7 @@ async function main() {
   const tower = axisOnly ? null : await readLiveTowerCards();
   const scoreboard = axisOnly
     ? { strict_performance_policy: STRICT_PERFORMANCE_POLICY, primary_metric_by_mode: MODE_PRIMARY_METRIC, verdict_policy: RATIO_VERDICTS, summary: {}, cells: [] }
-    : buildScoreboard(matrix, results, sourceManifest, tower);
+    : buildScoreboard(matrix, results, sourceManifest, tower, { references: ceilingReferences, measurements: ceilingMeasurements });
   const axes = await runAxes(sourceManifest, runDir, jetBin, fullScope || axisOnly, runId, options.axis);
   const publication = publicationState({ fullScope, loaded, skipped, matrix, manifest: sourceManifest, sourceMeasurements, results, scoreboard, axes, validationIssues, axisId: options.axis });
   const expectedEntryNames = sourceManifest?.corpus?.entry_names ?? [];
@@ -3783,7 +3947,7 @@ async function main() {
     contract: "gauntlet-report-v1",
     generated: new Date().toISOString(),
     run_id: runId,
-    options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
+    options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, ceiling_results: options.ceilingResults, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
     matrix_version: matrix.version,
     matrix_rails: matrix.rails,
     strict_performance_policy: STRICT_PERFORMANCE_POLICY,
@@ -3912,5 +4076,7 @@ export {
   stageEntry,
   STRICT_PERFORMANCE_POLICY,
   strictPerformancePolicyIssues,
+  CEILING_POLICY,
+  ceilingReferenceIssues,
   matrixPeerLanguages,
 };

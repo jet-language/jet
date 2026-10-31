@@ -2,6 +2,11 @@
 // Jet against hand-written x86-64 assembly, in size and in cycles (cards
 // #6328 C6 and #6414). Each cell in cells.json is a Jet package and a ref.S
 // that does the same work with the same output, written as an expert would.
+// A cell's `gauntlet` field names the gauntlet matrix cells whose machine
+// ceiling it is (AGENTS.md "Performance gate"): the gauntlet harness reads
+// this file and judges those cells Jet/ceiling <= 1.00 from results.json
+// (`run.mjs --ceiling-results`); a required cell no reference names is
+// uncovered and fails the gauntlet gate.
 //
 //   node Tools/perf/asm-parity/asm-parity.mjs --jet PATH [--out DIR] [--runs N]
 //       [--cpu C] [--modes default,release] [--cells hello,fib] [--perf PATH] [--gate]
@@ -11,24 +16,35 @@
 // come from PATH (Tools/agent/jet-env provides the first two).
 //
 // Per cell:
-// - the reference: `as` assembles ref.S (common.S is .include'd first, so
-//   _start is the blob's first byte), `objcopy -O binary` takes its .text,
-//   and the file is that blob behind an ELF header, one R+X PT_LOAD and
-//   PT_GNU_STACK (176 bytes): no section headers, symbols or padding;
+// - the reference: `as` assembles ref.S (a kernel cell .include's common.S
+//   first; either way _start is the blob's first byte), `objcopy -O binary`
+//   takes its .text, and the file is that blob behind an ELF header, one R+X
+//   PT_LOAD and PT_GNU_STACK (176 bytes): no section headers, symbols or
+//   padding;
 // - the Jet program: `jet build` of a copy of the package, once per mode
 //   (default, release = --release);
-// - output: every binary's stdout must equal the cell's `expect`
-//   byte for byte, with exit status 0 (exit 1 otherwise);
+// - input: a cell with a `fixture` {script, out} has `python3 script out`
+//   write its input (a file or a directory) into the cell's output
+//   directory, and every binary runs there (its `args` name it). The input
+//   is written once, or, with `fresh: true` (a program that changes it),
+//   again before every run. A cell with `steps` (argument lists) runs them
+//   in order in a `work` directory emptied before every run, in place of
+//   `args` (a program that keeps state between invocations); stdout is the
+//   steps' together and cycles their sum;
+// - output: every binary's stdout must equal the cell's `expect` (or the
+//   file `expect_file`) byte for byte, with exit status 0 (exit 1
+//   otherwise);
 // - size: file bytes, and Jet / reference;
 // - speed: `perf stat -e cycles:u,instructions:u`, best of N runs (default
 //   5) pinned to one CPU (default 8), and Jet / reference.
 // Gates: size <= 2.00x the reference (#6328 C6) and cycles <= 1.10x
-// (#6414). They are reported per row; `--gate` also exits 1 when one fails.
+// (#6414): the cards' interim bounds, not the final target. They are reported
+// per row; `--gate` also exits 1 when one fails.
 //
 // Writes DIR/results.json and DIR/table.tsv (default DIR: .asm-parity under
 // the current directory) and prints the table.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -113,23 +129,38 @@ function buildJet(o, cell, mode, dir) {
   return join(src, '.jet', 'build', 'run');
 }
 
-function output(exe, args) {
-  const r = run(exe, args);
-  return { stdout: r.stdout.toString('latin1'), status: r.status, signal: r.signal };
+// One run: the input prepared, then each step (an argument list) in order;
+// stdout is the steps' concatenated, the status the first nonzero one.
+function output(exe, plan, cwd, prepare) {
+  prepare();
+  let stdout = '';
+  for (const args of plan) {
+    const r = run(exe, args, { cwd });
+    stdout += r.stdout.toString('latin1');
+    if (r.status !== 0 || r.signal) return { stdout, status: r.status, signal: r.signal };
+  }
+  return { stdout, status: 0, signal: null };
 }
 
-// Best of `runs` (fewest cycles) user-mode cycles and instructions.
-function measure(o, exe, args) {
+// Best of `runs` (fewest cycles) user-mode cycles and instructions, summed
+// over a run's steps.
+function measure(o, exe, plan, cwd, prepare) {
   let best = null;
   for (let i = 0; i < o.runs; i++) {
-    const r = run('taskset', ['-c', o.cpu, o.perf, 'stat', '-x,', '-e', 'cycles:u,instructions:u', exe, ...args]);
-    const row = {};
-    for (const line of r.stderr.toString().split('\n')) {
-      const f = line.split(',');
-      if (f[2] === 'cycles:u' || f[2] === 'instructions:u') row[f[2].split(':')[0]] = Number(f[0]);
+    prepare();
+    const total = { cycles: 0, instructions: 0 };
+    for (const args of plan) {
+      const r = run('taskset', ['-c', o.cpu, o.perf, 'stat', '-x,', '-e', 'cycles:u,instructions:u', exe, ...args], { cwd });
+      const row = {};
+      for (const line of r.stderr.toString().split('\n')) {
+        const f = line.split(',');
+        if (f[2] === 'cycles:u' || f[2] === 'instructions:u') row[f[2].split(':')[0]] = Number(f[0]);
+      }
+      if (!Number.isFinite(row.cycles)) throw new Error(`perf stat gave no cycles for ${exe}:\n${r.stderr.toString()}`);
+      total.cycles += row.cycles;
+      total.instructions += row.instructions;
     }
-    if (!Number.isFinite(row.cycles)) throw new Error(`perf stat gave no cycles for ${exe}:\n${r.stderr.toString()}`);
-    if (!best || row.cycles < best.cycles) best = row;
+    if (!best || total.cycles < best.cycles) best = total;
   }
   return best;
 }
@@ -142,16 +173,31 @@ let wrong = 0, gated = 0;
 for (const cell of cells) {
   const dir = join(o.out, cell.name);
   mkdirSync(dir, { recursive: true });
+  const input = cell.fixture ? join(dir, cell.fixture.out) : null;
+  // A cell with `steps` runs them in `work`, empty at the start of each run.
+  const cwd = cell.steps ? join(dir, 'work') : dir;
+  const plan = cell.steps ?? [cell.args];
+  const prepare = () => {
+    if (cell.steps) {
+      rmSync(cwd, { recursive: true, force: true });
+      mkdirSync(cwd);
+    }
+    if (!input || (!cell.fixture.fresh && existsSync(input))) return;
+    rmSync(input, { recursive: true, force: true });
+    must('python3', [resolve(HERE, cell.fixture.script), input]);
+  };
+  const expect = cell.expect_file ? readFileSync(resolve(HERE, cell.expect_file), 'latin1') : cell.expect;
   const variants = [{ variant: 'asm', exe: buildRef(cell, dir) }];
   for (const mode of o.modes) variants.push({ variant: `jet-${mode}`, exe: buildJet(o, cell, mode, dir) });
   let ref = null;
   for (const v of variants) {
-    const out = output(v.exe, cell.args);
-    const same = out.status === 0 && out.stdout === cell.expect;
+    const out = output(v.exe, plan, cwd, prepare);
+    const same = out.status === 0 && out.stdout === expect;
     if (!same) wrong++;
-    const speed = measure(o, v.exe, cell.args);
+    const speed = measure(o, v.exe, plan, cwd, prepare);
     const bytes = statSync(v.exe).size;
-    const row = { cell: cell.name, variant: v.variant, args: cell.args.join(' '), bytes, cycles: speed.cycles, instructions: speed.instructions, output: same ? 'same' : `DIFF (status ${out.status}${out.signal ? ` ${out.signal}` : ''})` };
+    const args = cell.steps ? cell.steps.map((s) => s.join(' ')).join(' ; ') : cell.args.join(' ');
+    const row = { cell: cell.name, variant: v.variant, args, bytes, cycles: speed.cycles, instructions: speed.instructions, output: same ? 'same' : `DIFF (status ${out.status}${out.signal ? ` ${out.signal}` : ''})` };
     if (!ref) ref = row;
     row.size_x = bytes / ref.bytes;
     row.cycles_x = speed.cycles / ref.cycles;

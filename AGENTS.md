@@ -153,6 +153,15 @@ Rust is judged like every other peer: Jet/peer must be below `1.00`.
 The target is the machine's ceiling: code as good as the best hand-written
 assembly for the workload; beating peers is the floor, not the goal.
 
+Peers are the initial benchmark; hand-written, maximally optimized machine code
+is the final one. Every required cell needs a ceiling reference: an asm-parity
+cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with
+the best known technique for the workload (SIMD, algorithmic, or
+syscall-level), not a naive transliteration. Jet/ceiling must be at most 1.00
+for every runtime and size metric. A cell without a reference is uncovered and
+fails the gate, and a peer win never closes a cell whose ceiling is unmet. A
+better technique replaces the reference and raises the target.
+
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
 area: web, games, CLI and scripts, data analysis, backend services, GUI

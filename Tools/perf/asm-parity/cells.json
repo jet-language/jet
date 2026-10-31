@@ -2,6 +2,7 @@
   {
     "name": "hello",
     "what": "startup, print, exit: the size floor (#6328)",
+    "gauntlet": [],
     "jet": "hello",
     "args": [],
     "expect": "hello\n"
@@ -9,6 +10,7 @@
   {
     "name": "collatz",
     "what": "integer loop with data-dependent branches",
+    "gauntlet": [],
     "jet": "collatz",
     "args": ["3000000"],
     "expect": "steps 428343355\n"
@@ -16,6 +18,7 @@
   {
     "name": "fib",
     "what": "calls: naive doubly recursive Fibonacci",
+    "gauntlet": [],
     "jet": "fib",
     "args": ["40"],
     "expect": "fib 102334155\n"
@@ -23,6 +26,7 @@
   {
     "name": "isum",
     "what": "list fill and bounds-checked index reads",
+    "gauntlet": [],
     "jet": "isum",
     "args": ["10000000"],
     "expect": "sum 333333233333340\n"
@@ -30,8 +34,59 @@
   {
     "name": "sieve",
     "what": "the gauntlet numerics.int-kernel cell",
+    "gauntlet": ["numerics.int-kernel"],
     "jet": "../../gauntlet/entries/sieve/jet",
     "args": ["10000000"],
     "expect": "count 664579\nlargest 9999991\n"
+  },
+  {
+    "name": "wordfreq",
+    "what": "the gauntlet text.kernel cell: whitespace split, exact token counts, top 20",
+    "gauntlet": ["text.kernel"],
+    "jet": "../../gauntlet/entries/wordfreq/jet",
+    "fixture": { "script": "../../gauntlet/entries/wordfreq/fixtures/gen.py", "out": "input.txt" },
+    "args": ["input.txt"],
+    "expect_file": "../../gauntlet/entries/wordfreq/expected.out"
+  },
+  {
+    "name": "nbody",
+    "what": "the gauntlet numerics.float-kernel cell: five bodies, symplectic Euler, energy before and after",
+    "gauntlet": ["numerics.float-kernel"],
+    "jet": "../../gauntlet/entries/nbody/jet",
+    "args": ["50000"],
+    "expect_file": "../../gauntlet/entries/nbody/expected.out"
+  },
+  {
+    "name": "bulkrename",
+    "what": "the gauntlet files.script cell: list a directory, rename the IMG_<n>.jpeg files in number order",
+    "gauntlet": ["files.script"],
+    "jet": "../../gauntlet/entries/bulkrename/jet",
+    "fixture": { "script": "../../gauntlet/entries/bulkrename/fixtures/gen.py", "out": "photos", "fresh": true },
+    "args": ["photos"],
+    "expect_file": "../../gauntlet/entries/bulkrename/expected.out"
+  },
+  {
+    "name": "taskfile",
+    "what": "the gauntlet cli.app and formats.json-app cells: a JSON task store, one process per add/done/list step",
+    "gauntlet": ["cli.app", "formats.json-app"],
+    "jet": "../../gauntlet/entries/taskfile-cli/jet",
+    "steps": [["add", "write gauntlet report"], ["add", "close cards"], ["done", "1"], ["add", "ship it"], ["done", "9"], ["list"]],
+    "expect_file": "../../gauntlet/entries/taskfile-cli/expected.out"
+  },
+  {
+    "name": "tensormap",
+    "what": "the gauntlet numerics.tensor-map cell: two 4096 x 4096 double tensors, their sum, its corner and checksum",
+    "gauntlet": ["numerics.tensor-map"],
+    "jet": "../../gauntlet/entries/tensor-map-4k/jet",
+    "args": [],
+    "expect_file": "../../gauntlet/entries/tensor-map-4k/expected.out"
+  },
+  {
+    "name": "fft",
+    "what": "the gauntlet numerics.fft cell: the 4096-point transform of an impulse, checked to 1e-9",
+    "gauntlet": ["numerics.fft"],
+    "jet": "../../gauntlet/entries/fft-4096/jet",
+    "args": [],
+    "expect_file": "../../gauntlet/entries/fft-4096/expected.out"
   }
 ]

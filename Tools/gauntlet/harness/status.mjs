@@ -50,6 +50,24 @@ const STATUS_POLICY_TERRITORIES = Object.freeze({
     { id: "embedded", required: true, cells: ["embedded.kernel", "embedded.data"], metrics: "all" },
   ]),
 });
+// The machine-ceiling stage (run.mjs CEILING_POLICY): peers are the initial
+// benchmark; hand-written machine code is the final one, Jet/ceiling <= 1.00.
+const STATUS_POLICY_CEILING = Object.freeze({
+  stages: [
+    { id: "peer_floor", role: "initial", against: "every_matched_peer", comparators: { win: "<1", loss: ">=1" } },
+    { id: "machine_ceiling", role: "final", against: "hand_written_machine_code", comparators: { meet: "<=1", miss: ">1" } },
+  ],
+  closes_cell: "machine_ceiling",
+  peer_win_closes_cell: false,
+  required_cells: "every_required_cell",
+  metrics: { runtime: "cycles", latency: "cycles", binary: "bytes" },
+  references: "Tools/perf/asm-parity/cells.json",
+  reference_source: "ref.S",
+  reference_link: "gauntlet",
+  missing_reference: "uncovered",
+  reference_technique: "best_known_for_the_workload",
+  better_technique: "replaces_reference_and_raises_target",
+});
 const DETAIL_KEYS = Object.freeze(["reason", "unit", "applicability", "evidence", "stats", "confidence", "noise"]);
 const STAMP_KEYS = Object.freeze(["measured_at", "measured_iso", "run_id", "source_file"]);
 
@@ -450,9 +468,9 @@ function statusPolicyIssues(matrix) {
   const policy = matrix?.strict_performance_policy;
   if (!isObject(policy)) return ["matrix is missing the strict performance policy"];
   const issues = [];
-  if (policy.schema !== "jet.strict-performance-policy.v2" ||
+  if (policy.schema !== "jet.strict-performance-policy.v3" ||
       policy.id !== "AGENTS.md#strict-performance-gate" ||
-      policy.version !== 2 ||
+      policy.version !== 3 ||
       policy.comparison !== "per_cell_and_metric") {
     issues.push("matrix strict performance policy identity is not ratified");
   }
@@ -474,8 +492,12 @@ function statusPolicyIssues(matrix) {
       policy.historical_receipts !== "immutable_recorded_policy") {
     issues.push("matrix strict performance policy does not preserve the first-party and historical-evidence rules");
   }
+  if (JSON.stringify(policy.ceiling) !== JSON.stringify(STATUS_POLICY_CEILING)) {
+    issues.push("matrix strict performance policy machine-ceiling stage differs from the ratified law");
+  }
   if (typeof policy.text !== "string" ||
       !policy.text.includes("Never average away a loss") ||
+      !policy.text.includes("hand-written, maximally optimized machine code is the final one") ||
       !policy.text.includes("Historical receipts remain immutable")) {
     issues.push("matrix strict performance policy text is missing AGENTS.md law");
   }
@@ -598,6 +620,11 @@ export function validateStatusGate(status, matrix) {
       for (const metric of metrics) issues.push(...statusMetricFailures(id, peerName, peer, metric, mode, cell?.failures, cell?.loss_owners));
     }
     if (!cell) continue;
+    // The final benchmark: a peer win never closes a cell whose machine ceiling is unmet.
+    const ceiling = asObject(cell.ceiling);
+    if (ceiling.verdict !== "meet") {
+      issues.push(`${id}/machine-ceiling/metric: ceiling ${ceiling.verdict ?? "uncovered"}`);
+    }
     if (cell.verdict !== "win") {
       issues.push(`${id}/peer/metric: cell ${cell.verdict ?? "unmeasured"}`);
     }
@@ -646,6 +673,7 @@ function projectCells(report, primaryMetricByMode, stamp = null, { recompute = f
       metric_verdicts: metricVerdicts,
       failures: projectedRecords.flatMap((item) => item.metric_failures),
       loss_owners: projectedRecords.flatMap((item) => item.loss_owners),
+      ceiling: isObject(source.ceiling) ? source.ceiling : null,
     };
     if (!projectedRecords.length) {
       cell.failures.push(...asArray(source.failures ?? source.metric_failures));
