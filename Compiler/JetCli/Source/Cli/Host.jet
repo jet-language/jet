@@ -77,6 +77,7 @@ use jet_foundation.[
     Diagnostic,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
+    GateEntry,
     GateLedger,
     Span,
     TComptimeValue,
@@ -2370,27 +2371,34 @@ fn jet_cli_policy_explain_host(key: PolicyKey, file: String, site: String?, line
 
 // CmdGates.rs `run`/`append_external_writers`: the authorized load-only
 // request of `file`, its external gate rows extended by the canonical writers
-// (the actual trust store's typed records, then the written invocation
-// choices in `args`), queried without checking bodies. Transfer the prepared
-// request when replacing its ledger; its execution host cannot be copied.
+// (the entry package's and lock's authority rows, the actual trust store's
+// typed records, then the written invocation choices in `args`), queried
+// without checking bodies. Transfer the prepared request when replacing its
+// ledger; its execution host cannot be copied.
 fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
         .Refused(output) -> return ^output
-        .Prepared(request, _) -> {
+        .Prepared(request, snapshot) -> {
             gated := ^request
-            // The ledger takes the request's own rows, then replaces them.
-            external :: ^gated.external_gate_entries
-            ledger := GateLedger{}
-            loop entry in ^external -> gate_ledger_push(&ledger, ^entry)
-            store :: trust_store_path()
-            trusted :: jet_cli_gate_trust_entries(store, trust_list_records(store))
-            loop entry in ^trusted -> gate_ledger_push(&ledger, ^entry)
-            jet_cli_gate_append_invocation(&ledger, args)
-            gated.external_gate_entries = ledger.rows
+            gated.external_gate_entries = jet_cli_external_gate_rows(^gated.external_gate_entries, snapshot, args)
             return jet_cli_gates_host(gated, args, file, color, json)
         }
     }
+}
+
+// The request's own external gate rows, then the package/lock writers, the
+// trust store's records and the invocation choices in `args`, in the order
+// CmdGates.rs `append_external_writers` writes them.
+fn jet_cli_external_gate_rows(external: ^[GateEntry], snapshot: JetDriverAuthorizedSourceSnapshot, args: [String]) -> [GateEntry] {
+    ledger := GateLedger{}
+    loop entry in ^external -> gate_ledger_push(&ledger, ^entry)
+    jet_cli_gate_append_package_writers(&ledger, snapshot)
+    store :: trust_store_path()
+    trusted :: jet_cli_gate_trust_entries(store, trust_list_records(store))
+    loop entry in ^trusted -> gate_ledger_push(&ledger, ^entry)
+    jet_cli_gate_append_invocation(&ledger, args)
+    ledger.rows
 }
 
 // CmdInspect.rs `run_output`: the canonical Output query (run intent, dev
@@ -2533,6 +2541,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Emit(file, source, color, json, tier, function) -> output = jet_cli_compile_emit(file, source, color, json, tier, function, trace_sink)
         .Fill(target, json, color) -> output = jet_cli_compile_fill(target, json, color)
         .Structural(argv, command, json) -> output = jet_cli_structural(argv, command, json)
+        .Review(argv, json, color) -> output = jet_cli_review(argv, json, color)
         .Lint(file, source, color, notice, category, raw, json) -> {
             jet_cli_write_notice(notice)
             output = if category == "complexity" -> jet_cli_lint_complexity(file, source, raw, color, json) else if category == "cost" -> jet_cli_lint_cost(file, source, color, json) else -> jet_cli_lint_a11y(file, source, color, json)
@@ -2565,6 +2574,11 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         }
         .Output(file, address, color, json) -> output = jet_cli_output_run(file, address, color, json)
         .Doctor(online, apply, cross_target, color) -> output = jet_cli_doctor(online, apply, cross_target, color)
+        .UpdateJet(root, channel, color, json, quiet) -> output = jet_cli_update_jet_pin(root, channel, JET_CLI_VERSION, color, json, quiet)
+        .AuditCopies(file, source, color, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_audit_copies(file, source, color, json)
+        }
         .CompilerService(op) -> output = jet_cli_compiler_service(op)
     }
     output

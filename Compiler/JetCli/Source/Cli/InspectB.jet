@@ -867,7 +867,8 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
 // in commit bf658e410 (InspectB.jet).
 fn jet_cli_audit(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     if args.len() > 0 && args[0] == "memory" -> return jet_cli_audit_memory_at(jet_cli_selected_root_or_cwd(), jet_cli_tail(args, 1), color, json)
-    if args.len() > 0 && (args[0] == "copies" || args[0].ends_with(".jet")) -> return jet_cli_not_ported("inspect audit copies", color)
+    if args.len() > 0 && args[0] == "copies" -> return jet_cli_audit_copies_plan(jet_cli_tail(args, 1), color, json)
+    if args.len() > 0 && args[0].ends_with(".jet") -> return jet_cli_audit_copies_plan(args, color, json)
     if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: no package.jet found — run `jet inspect audit` inside a project", color) == .Refused(plan) -> return plan
     jet_cli_not_ported("inspect audit", color)
 }
@@ -883,9 +884,14 @@ fn jet_cli_sbom(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
 // page, and the data-schema binders (`json|csv|sql|xml|proto`, Bindings.jet).
 // A default output lands under the selected project root of the input's
 // directory (lib.rs `build_project_root`); a root that cannot be selected is
-// its registered diagnostic, exit 1. The language binders and the C header
-// backend are not ported.
+// its registered diagnostic, exit 1. `com` refuses away from Windows before it
+// reads any input (`run_com_bind`). The language binders, the Windows COM
+// binder and the C header backend are not ported.
 fn jet_cli_bind(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
+    if args.len() > 0 && args[0] == "com" {
+        if cli_sys.name() != "windows" -> return jet_cli_done("", jet_cli_report("E3260", "`com.*` needs a Windows host.", "COM type libraries, apartments, and IDispatch are Windows facilities.", "Run `jet inspect bind com` and build the COM module on a Windows host.", color), JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_not_ported("inspect bind com", color)
+    }
     if args.len() > 0 && (args[0] == "json" || args[0] == "csv" || args[0] == "sql" || args[0] == "xml" || args[0] == "proto") {
         if jet_cli_data_bind_prepare(args[0], jet_cli_tail(args, 1), color) == {
             .Done(plan) -> return plan

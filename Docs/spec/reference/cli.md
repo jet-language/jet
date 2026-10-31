@@ -143,8 +143,8 @@ Compiler-backed inspection and fix planning declare the execution host's actual
 `Net` for the checked build-input HTTP provider already admitted by the CLI
 package; these ceilings do not change the package's authority grants.
 The compiler assembly retains the pre-merge command boundary: unwired
-post-merge `Jobs`, package bundle/flash ports, `Supply`, and `ToolchainPin`
-remain in the repository but are explicitly excluded from its source inventory.
+post-merge `Jobs`, package bundle/flash ports, and `Supply` remain in the
+repository but are explicitly excluded from its source inventory.
 Other unlisted CLI sources still fail assembly.
 The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
 examining response bytes; it never lets the provider's failure carrier escape
@@ -399,6 +399,17 @@ names the compared file and its before/after byte checkpoints. Hand edits
 do not inherit stale rename intent. A merge conflict leaves the output
 unwritten; a clean candidate must parse and pass semantic checking before
 publication.
+
+`review <base.jet> <head.jet>` compares two error-free checked sides. Meaning
+aligns the checked definitions of the one semantic index by stable id,
+compiler identity, then signature and module; a recorded rename or move
+receipt for the compared files aligns what the facts alone cannot. Authority
+compares each side's gate ledger, including the package and lock writers, and
+its checked effect rows; a widened or changed authority blocks `reviewable`.
+`--base-receipt` and `--receipt` compare proof receipts, and equal sampled
+traces never count as universal agreement. `review --diagnostics` instead
+compares checker diagnostics by occurrence identity; a side whose checker
+stopped before its bodies leaves relations unknown, never resolved.
 ## Command groups
 
 The generated help groups subcommands as follows:
@@ -695,6 +706,27 @@ comment-only command homes `build.jet`, `dev.jet` and `test.jet` for
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.
 
+`jet init [<script.jet>]` writes `package.jet` in the working directory,
+named after the directory (`app` when it has no name) and pinned with
+`jet: <channel>` to the running toolchain; an existing `package.jet` is E1252
+and is never overwritten. With a script, each inline `use pkg#version` ref in it
+is added to the new manifest's `deps` block, and `lifted N inline
+dependencies into package.jet` precedes `created package.jet (pinned jet
+<channel>)` on stderr (muted by `--quiet` and `--json`). `jet init --check`
+with no migration-era role files (`pkg.jet`, `env.jet`, `workspace.jet`,
+`config.jet`) beside it reports that no files changed. The role-file
+transition itself (`--restore-role-files`, `--check` beside role files, and a
+bare `jet init` beside them without `package.jet`) is refused with E2104 until
+it is ported.
+
+`jet update jet [<channel>]` re-resolves the project's toolchain pin, moved to
+`channel` when given (else the manifest's `jet:` channel, else the running
+toolchain's), and records the resolved version in `.jet/lock`; its status
+line is on stderr (muted by `--quiet` and
+`--json`), and a pin diagnostic is always on stderr with exit 1. Outside a
+project it is a user error. `jet update` of dependencies is refused with E2104
+until the package fetch is ported.
+
 `jet fmt [paths…] [-]` formats `.jet` sources with the Jet formatter
 ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter)):
 no paths walk the project root (the nearest `package.jet` directory, else the
@@ -731,6 +763,22 @@ takes the selected environment's `formatter:` package, stages the matching
 temporary directory, and runs `jetpack env … -- <formatter> <staged…>`;
 `--check`/`--diff`/`--dry-run` report the files whose bytes changed (exit 1),
 otherwise those files are written back. No formatter declared is E1340.
+
+`jet audit copies [--json] [<entry.jet>]` (also `jet audit <file.jet>` and
+`jet inspect audit copies`) lists the implicit copies of the entry's checked
+package without writing anything. The entry is the named file, a directory's
+stock entry, or the entry of the project around the working directory. The
+sites are the ones `fmt --explicit-copies` writes: the Safe `.copy()` edits
+sema gives every module of the entry's source root under
+`#Policy(copies: .Explicit)`, each at its copied expression. The text form is
+`implicit read-view copies: N` and then one
+`  <path>:<line>:<col>  span=<start>..<end>  size=dynamic  kind=implicit` row
+per site, sorted by path and then by offset. `--json` emits the `audit.copies` status
+envelope with a `copies` array of `{path, line, column, span{start, end},
+size, kind}`. A source that does not check reports its diagnostics on stderr
+(the `diagnostics` envelope under `--json`) with exit 1. `jet audit memory`
+is the memory-ledger audit; the dependency audit is refused with E2104
+until it is ported.
 
 The Jet-hosted `lint --a11y` and `lint --complexity` leaves use the checked
 compiler diagnostics. Accessibility findings exit 1 and go to stderr, as

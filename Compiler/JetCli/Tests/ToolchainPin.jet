@@ -2,7 +2,7 @@
 use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jetpack_trust.[trust_pin_locked_toolchain]
 use core.files as cli_files
-use jet_cli_commands.[jet_cli_update_jet_pin]
+use jet_cli.[jet_cli_update_jet_pin]
 
 struct JetCLIPinFixtureRoot { path: String }
 impl JetCLIPinFixtureRoot.Close {
@@ -46,7 +46,7 @@ impl JetCLIPinFixtureRoot.Close {
     defer close(^owner)
     output :: jet_cli_update_jet_pin(root, Val("1"), "0.4.2", false, true, true)
     assert_eq(output.stdout, "")
-    assert_eq(output.stderr, "Error [E1249]: `1` is not a valid toolchain pin\n Why: the `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.\n Fix: write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.\nMore: jet-lang.dev/e/E1249\n")
+    assert_eq(output.stderr, "Error [E1249]: `1` is not a valid toolchain pin\n Why: The `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.\n Fix: Write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.\nMore: jet-lang.dev/e/E1249\n")
     assert_eq(output.exit_code, JET_DRIVER_EXIT_USER_ERROR)
     assert(!cli_files.exists(cli_files.join(root, ".jet/lock")))
 }

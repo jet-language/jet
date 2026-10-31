@@ -1,0 +1,148 @@
+// `jet audit copies [--json] [<entry.jet>]` and `jet audit <file.jet>`
+// (CmdSupply.rs `run_copy_audit`, #3738): every implicit read-view copy in the
+// checked package of the entry, one row per site. The sites are sema's one
+// copy-site rule, the same one `jet fmt --explicit-copies` writes: with
+// `#Policy(copies: .Explicit)` laid over each module of the entry's source
+// root, each implicit copy is a diagnostic with a Safe `.copy()` edit, and the
+// diagnostic's span is the copied expression. Nothing is written.
+use core.files as cli_files
+use jet_driver.[
+    JetDriverAuthorizedSourceFile,
+    JetDriverCompileMode,
+    JetDriverVerbOutput,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USER_ERROR,
+    jet_driver_present_diagnostics,
+    jet_driver_report_problems,
+]
+use jet_foundation.[Diagnostic]
+
+// One implicit copy: `path` as the snapshot spells it, the 1-based line and
+// character column of `start`, and the copied expression's byte span.
+struct JetCLICopySite {
+    path: String
+    line: Int
+    column: Int
+    start: Int
+    end: Int
+}
+
+// main.rs `"audit"`: `copies [file]` and a `.jet` argument audit copies.
+// `words` is the argv after `copies` (flags included); the target is its first
+// non-flag word, else the project around the working directory, and a
+// directory resolves to its stock entry as `jet lint` resolves one.
+fn jet_cli_audit_copies_plan(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    target := ""
+    loop word in words {
+        if target == "" && !word.starts_with("-") -> target = word
+    }
+    if target == "" {
+        cwd :: cli_files.cwd() ?? "."
+        target = jet_cli_manifest_root(cwd) ?? cwd
+    }
+    file := target
+    notice := ""
+    if cli_files.is_dir(target) {
+        if jet_cli_resolve_source_path("audit", target, color, [String]{}) == {
+            .File(path, _, written) -> {
+                file = path
+                notice = written
+            }
+            .Refused(plan) -> return plan
+        }
+    }
+    source :: cli_files.read(file) ?? return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)}", JET_DRIVER_EXIT_USER_ERROR)
+    JetCLIPlan.AuditCopies{file: file, source: source, color: color, json: json, notice: notice}
+}
+
+fn jet_cli_audit_copies(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    modules := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_compile_file(file, color, None, JetDriverCompileMode.Check) == {
+        .Refused(refusal) -> return refusal
+        .Compiled(result, snapshot) -> {
+            errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+            if errors.len() > 0 {
+                rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, errors) else -> jet_driver_report_problems(file, source, errors, color, false)
+                return JetDriverVerbOutput{stdout: "", stderr: rendered, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
+            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            loop root in snapshot.roots {
+                if root.identity != snapshot.entry_root_identity -> next
+                loop member in root.files {
+                    if !member.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(member.path) || jet_cli_fmt_is_typed_package_source(member.source, member.path) -> next
+                    &modules.push(member)
+                }
+            }
+        }
+    }
+    sites := jet_cli_audit_copy_sites(file, modules, color)
+    &sites.sort_by((left: JetCLICopySite, right: JetCLICopySite) -> (left.path <=> right.path).then(left.start <=> right.start))
+    if json {
+        rows :: loop site in sites -> jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("path", jet_cli_status_text(site.path)),
+            jet_cli_status_field("line", jet_cli_status_int(site.line)),
+            jet_cli_status_field("column", jet_cli_status_int(site.column)),
+            jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(site.start)), jet_cli_status_field("end", jet_cli_status_int(site.end))})),
+            jet_cli_status_field("size", jet_cli_status_text("dynamic")),
+            jet_cli_status_field("kind", jet_cli_status_text("implicit")),
+        })
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("audit.copies", true, [JetCLIStatusField]{jet_cli_status_field("copies", jet_cli_status_array(rows))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    lines := "implicit read-view copies: {sites.len()}\n"
+    loop site in sites -> lines = "{lines}  {site.path}:{site.line}:{site.column}  span={site.start}..{site.end}  size=dynamic  kind=implicit\n"
+    JetDriverVerbOutput{stdout: lines, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The second compile, every module under the explicit-copies policy: each
+// `.copy()` edit sema offers names one implicit copy of the clean compile.
+fn jet_cli_audit_copy_sites(file: String, modules: [JetDriverAuthorizedSourceFile], color: Bool) -> [JetCLICopySite] {
+    shift :: JET_CLI_FMT_EXPLICIT_COPIES_POLICY.len()
+    overlays :: loop member in modules -> JetCLIOverlay{path: member.path, source: "{JET_CLI_FMT_EXPLICIT_COPIES_POLICY}{member.source}"}
+    sites := [JetCLICopySite]{}
+    if jet_cli_compile_overlays(file, file, overlays, color, None, JetDriverCompileMode.Check, None) == .Compiled(result, snapshot) {
+        loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+            owner :: diagnostic.origin ?? next
+            edit :: diagnostic.edit ?? next
+            if edit.new_text != ".copy()" || edit.span.start != edit.span.end -> next
+            span :: diagnostic.span ?? next
+            source := ""
+            found := false
+            loop member in modules {
+                if member.path == owner.path {
+                    source = member.source
+                    found = true
+                }
+            }
+            if !found -> next
+            start :: span.start - shift
+            end :: span.end - shift
+            if start < 0 || end < start || end > source.len() -> next
+            duplicate := false
+            loop site in sites {
+                if site.path == owner.path && site.start == start -> duplicate = true
+            }
+            if duplicate -> next
+            position :: jet_cli_audit_line_column(source, start)
+            &sites.push(JetCLICopySite{path: owner.path, line: position[0], column: position[1], start: start, end: end})
+        }
+    }
+    sites
+}
+
+// Diagnostics.rs `span_line_col`: the 1-based line of byte `offset`, and its
+// column counting every character that starts before it on that line.
+fn jet_cli_audit_line_column(source: String, offset: Int) -> [Int] Never! {
+    bytes :: source.bytes()
+    line := 1
+    column := 1
+    loop index in 0..<offset {
+        byte :: bytes[index]
+        if byte == (U8{10}) {
+            line += 1
+            column = 1
+        } else if byte.bit_and(U8{192}) != (U8{128}) {
+            column += 1
+        }
+    }
+    [Int]{line, column}
+}

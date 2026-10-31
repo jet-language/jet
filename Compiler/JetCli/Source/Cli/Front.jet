@@ -105,6 +105,8 @@ enum JetCLIPlan {
     Fill(target: String, json: Bool, color: Bool)
     // `jet diff|merge ...` (StructuralMerge.jet): `argv` starts at the command word.
     Structural(argv: [String], command: String, json: Bool)
+    // `jet review ...` (Review.jet): `argv` starts at the command word.
+    Review(argv: [String], json: Bool, color: Bool)
     // `jet lint --a11y|--complexity <file>`: the accessibility lints or the
     // cognitive-complexity view of the entry (CmdDevTools.rs `run_lint_a11y`,
     // `run_lint_complexity`); `category` is `a11y` or `complexity`, `raw` is
@@ -167,6 +169,13 @@ enum JetCLIPlan {
     // `jet self doctor` (Doctor.jet): environment self-diagnosis; `apply` is
     // `--fix`, `cross_target` the rustc triple `--target` selects.
     Doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
+    // `jet update jet [<channel>]` (main.rs `run_update_jet`): move the
+    // toolchain pin of the project at `root` (ToolchainPin.jet) on the host,
+    // since its channel resolution and lock write need `Exec` and `Time.Wait`.
+    UpdateJet(root: String, channel: String?, color: Bool, json: Bool, quiet: Bool)
+    // `jet audit copies [<entry.jet>]` / `jet audit <file.jet>`
+    // (AuditCopies.jet): the implicit copies of `file`'s checked package.
+    AuditCopies(file: String, source: String, color: Bool, json: Bool, notice: String)
     // `jet __jetpack <op>` (JetpackService.jet): the internal compiler
     // service `jetpack` speaks over stdin/stdout; never in help.
     CompilerService(op: String)
@@ -1747,6 +1756,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             }
             return JetCLIPlan.Structural{argv: jet_cli_tail(argv, start), command: command, json: json}
         }
+        "review" -> return JetCLIPlan.Review{argv: jet_cli_command_first(argv, command), json: json, color: color}
         "lint" -> return jet_cli_lint(jet_argv, args, color, quiet, json)
         "fmt" -> return jet_cli_fmt(argv, jet_argv, args, color, quiet)
         "find" -> return jet_cli_find(jet_cli_tail(argv, 1), color, json)
@@ -1777,6 +1787,18 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "remote" -> return JetCLIPlan.Remote{argv: argv, json: json, color: color}
         // `jet self toolchain` (main.rs `run_toolchain`): read-only pin report.
         "toolchain" -> return jet_cli_self_toolchain(json)
+        "init" -> return jet_cli_init(jet_argv, args, color, quiet, json)
+        // D-JPK-TOOLCHAIN1=A (#179): `jet update jet [<channel>]` moves the
+        // toolchain pin; a dependency refresh needs the package fetch, which
+        // is not built and falls to the E2104 refusal below.
+        "update" -> {
+            if args.len() > 1 && args[1] == "jet" {
+                if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: `jet update jet` needs a project — no `package.jet` found here or above", color) == {
+                    .Root(root) -> return JetCLIPlan.UpdateJet{root: root, channel: args.get(2), color: color, json: json, quiet: quiet}
+                    .Refused(plan) -> return plan
+                }
+            }
+        }
         "doctor" -> return jet_cli_doctor_plan(raw, jet_argv, color)
         // CmdTest.rs `run_test_compare(target, jet_argv, mode)`.
         "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
