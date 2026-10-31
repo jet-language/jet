@@ -148,19 +148,20 @@ A violation stops the affected work until it is fixed at the root.
 
 ## Performance gate
 
-Jet must strictly beat every matched peer on every required cell and metric.
-Rust is judged like every other peer: Jet/peer must be below `1.00`.
-The target is the machine's ceiling: code as good as the best hand-written
-assembly for the workload; beating peers is the floor, not the goal.
+Jet's performance target has two stages, and each required cell and metric
+must pass both. The first stage is the peer floor: Jet/peer must be below
+`1.00` for every matched peer. Rust is judged like every other peer, with no
+parity band. The second and final stage is the machine ceiling: hand-written,
+maximally optimized machine code for the same workload. Jet must match or beat
+it in both cycles and bytes (Jet/ceiling at most `1.00`). Beating the peers is
+the floor, not the goal.
 
-Peers are the initial benchmark; hand-written, maximally optimized machine code
-is the final one. Every required cell needs a ceiling reference: an asm-parity
-cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with
-the best known technique for the workload (SIMD, algorithmic, or
-syscall-level), not a naive transliteration. Jet/ceiling must be at most 1.00
-for every runtime and size metric. A cell without a reference is uncovered and
-fails the gate, and a peer win never closes a cell whose ceiling is unmet. A
-better technique replaces the reference and raises the target.
+Every required cell needs a ceiling reference: an asm-parity cell
+(Tools/perf/asm-parity) that names its gauntlet cell and does the work with the
+best known technique for the workload (SIMD, algorithmic, or syscall-level),
+not a naive transliteration. A cell without a reference is uncovered and fails
+the gate, and a peer win never closes a cell whose ceiling is unmet. A better
+technique replaces the reference and raises the target.
 
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
