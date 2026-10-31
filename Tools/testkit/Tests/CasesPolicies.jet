@@ -1,4 +1,6 @@
 use core.files as files
+use core.process as process
+use core.time as time
 
 #Test("case limits parse positive bounds and override only the step policy") {
     plan :: kit_steps_parse_case("step slow: printf x\nlimit: time=2 memory=1024\nstep next: printf x\n")
@@ -152,4 +154,36 @@ use core.files as files
     assert_eq(global.steps[0].json_normalize.len(), 0)
     assert(kit_steps_parse_case("step: printf x\nnormalize: json stdout $.elapsed : number\n").error != "")
     files.remove_all(root) ?? panic("remove JSON normalizer scratch")
+}
+
+// Port of tests/agent_workloads.rs:2439-2457 (process_output_limit_fails_closed).
+// The kit runs every step through Core process (kit_exec_run). A writer that
+// never stops is stopped at a 1048576-byte output limit (the original
+// PROCESS_OUTPUT_LIMIT_BYTES): the wait fails with the output resource limit,
+// not a timeout, well inside the 120 s deadline; kit_exec_run turns that wait
+// failure into an ERROR row. The corpus runner's own bound,
+// `stdout+stderr: len <= 1048576` beside `limit: time=120`
+// (tests/cases/agent_workloads), fails an adapter that writes 2000000 bytes.
+#Test("process output limit fails closed") {
+    started :: time.instant()
+    child := process.cmd(["/bin/sh", "-c", "yes x"]).stdout(.Capture).stderr(.Capture).timeout(120s).output_limit(1048576).spawn() ?? panic("spawn: {err}")
+    child.stdin.close()
+    failure := ""
+    if child.wait() == {
+        .Err(error) -> failure = "{error}"
+        .Ok(_) -> panic("output limit did not stop the process")
+    }
+    elapsed :: started.elapsed().ns
+    assert_eq(failure, "process resource limit exceeded: output")
+    assert(elapsed < 2000000000, "output limit cleanup took {elapsed}ns")
+    root :: cases_test_root("output-limit")
+    bound :: "limit: time=120\nstdout+stderr: len <= 1048576 # original predicate\n"
+    cases_test_source(root, "over", "step: jet -c 'yes x | head -c 2000000'\n{bound}")
+    cases_test_source(root, "under", "step: jet -c 'yes x | head -c 1048576'\n{bound}")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    over :: kit_cases_run(cases_test_entry("over"), context)[0]
+    assert_eq(over.verdict.status, "FAIL")
+    assert(!over.run.timed_out)
+    assert_eq(kit_cases_run(cases_test_entry("under"), context)[0].verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove output limit scratch")
 }

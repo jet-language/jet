@@ -68,6 +68,7 @@ use core.files as s4_review_files
 use core.crypto as s4_review_crypto
 use core.sys as s4_review_sys
 use core.text.parse as s4_review_parse
+use core.process as s4_review_process
 
 fn s4_review_slice(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
@@ -147,6 +148,53 @@ fn s4_review_walk(directory: String, relative: String) -> [String] {
     }
     &result.sort()
     result
+}
+#Error
+struct S4ReviewChecksumError { message: String }
+fn s4_review_checksum_error(message: String) -> S4ReviewChecksumError { S4ReviewChecksumError{message: message} }
+fn s4_review_quoted(paths: [String]) -> String {
+    quoted := [String]{}
+    loop path in paths -> &quoted.push("\"{path}\"")
+    "[{quoted.join(", ")}]"
+}
+// The SHA256SUMS closure: every row splits on two spaces and names a safe,
+// unique relative path; the listed set equals the files under inputs/ and
+// expected/; each listed file hashes to its row. Returns the row count.
+fn s4_review_checksum_closure(root: String, sums: String) -> Int S4ReviewChecksumError! {
+    declared := [String]{}
+    hashes := [String]{}
+    loop line in sums.lines() {
+        if line == "" -> next
+        parts :: s4_review_parse.split_once(line.to_string(), "  ")
+        if !parts.found -> return Err(s4_review_checksum_error("bad SHA256SUMS row: {line}"))
+        if !s4_review_path(parts.tail) -> return Err(s4_review_checksum_error("invalid checksum path: {parts.tail}"))
+        if declared.contains(parts.tail) -> return Err(s4_review_checksum_error("duplicate checksum path: {parts.tail}"))
+        &declared.push(parts.tail)
+        &hashes.push(parts.head)
+    }
+    actual := [String]{}
+    fixture_roots :: [String]{"inputs", "expected"}
+    loop name in fixture_roots {
+        if s4_review_files.is_dir("{root}/{name}") {
+            loop relative in s4_review_walk("{root}/{name}", name) -> &actual.push(relative)
+        }
+    }
+    actual_set :: s4_review_set(actual)
+    listed :: s4_review_set(declared)
+    if actual_set != listed {
+        unhashed := [String]{}
+        loop path in actual_set { if !listed.contains(path) -> &unhashed.push(path) }
+        missing := [String]{}
+        loop path in listed { if !actual_set.contains(path) -> &missing.push(path) }
+        return Err(s4_review_checksum_error("checksum closure mismatch; unhashed={s4_review_quoted(unhashed)}; missing={s4_review_quoted(missing)}"))
+    }
+    loop relative in listed {
+        bytes :: s4_review_files.read_bytes("{root}/{relative}") ?? return Err(s4_review_checksum_error("{err}"))
+        index := 0
+        loop declared[index] != relative -> index += 1
+        if s4_review_crypto.sha256(bytes).hex() != hashes[index] -> return Err(s4_review_checksum_error("fixture drift: {relative}"))
+    }
+    Ok(declared.len())
 }
 fn s4_review_input(path: String) -> String {
     canonical := ""
@@ -315,25 +363,7 @@ fn s4_review_manifest_is_complete_frozen_and_non_vacuous() {
         &actual_domains.push([String]{row[1], row[2], row[3], row[4]})
     }
     assert_eq(actual_domains, S4_REVIEW_EXPECTED_DOMAIN_CONTRACT)
-    actual_paths := [String]{}
-    fixture_roots :: [String]{"inputs", "expected"}
-    loop name in fixture_roots {
-        if s4_review_files.is_dir("{root}/{name}") {
-            loop relative in s4_review_walk("{root}/{name}", name) -> &actual_paths.push(relative)
-        }
-    }
-    declared := [String]{}
-    loop line in s4_review_read("{root}/SHA256SUMS").lines() {
-        if line == "" -> next
-        parts :: s4_review_parse.split_once(line.to_string(), "  ")
-        assert(parts.found)
-        assert(s4_review_path(parts.tail))
-        assert(!declared.contains(parts.tail))
-        &declared.push(parts.tail)
-        assert_eq(s4_review_sha("{root}/{parts.tail}"), parts.head)
-    }
-    assert_eq(s4_review_set(actual_paths), s4_review_set(declared))
-    assert_eq(declared.len(), 82)
+    assert_eq(s4_review_checksum_closure(root, s4_review_read("{root}/SHA256SUMS")) ?? panic(err.message), 82)
 }
 
 fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
@@ -498,4 +528,75 @@ fn s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_row
 }
 #Test("compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows") {
     s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows()
+}
+
+// Port of tests/agent_workloads.rs:1378-1395: the guards read each recorded
+// stdout/stderr artifact as baselines/<path> only after s4_review_path accepts it.
+#Test("receipt_artifact_paths_reject_escape_attempts") {
+    assert(s4_review_path("outputs/bash/task.stdout"))
+    hostile :: [String]{"/etc/passwd", "../outside", "outputs//task", "outputs/../task", "outputs/./task", "..\\outside", "C:\\outside"}
+    loop path in hostile {
+        assert(!s4_review_path(path), "accepted {path}")
+    }
+}
+
+// Port of tests/agent_workloads.rs:1397-1414.
+#Test("corpus_fixture_paths_reject_escape_attempts") {
+    assert(s4_review_path("inputs/repository"))
+    hostile :: [String]{"", "/etc/passwd", "../outside", "inputs/../outside", "..\\outside", "C:\\outside", "inputs//repository", "inputs/./repository"}
+    loop path in hostile {
+        assert(!s4_review_path(path), "accepted {path}")
+    }
+}
+
+fn s4_review_closure_error(root: String, sums: String) -> String {
+    if s4_review_checksum_closure(root, sums) == {
+        .Err(error) -> return error.message.copy()
+        .Ok(count) -> panic("checksum closure accepted {count} rows")
+    }
+}
+
+// Port of tests/agent_workloads.rs:2340-2416.
+#Test("checksum_closure_rejects_drift_and_hostile_sums") {
+    home :: s4_review_sys.get("HOME") ?? panic("HOME required")
+    root :: "{home}/.cache/jet-dev/scratch/agent-workloads-{s4_review_process.current_pid()}-checksum-closure"
+    s4_review_files.remove_all(root).drop("a previous run may have left no scratch")
+    s4_review_files.create_dir_all("{root}/inputs") ?? panic("create inputs: {err}")
+    s4_review_files.create_dir_all("{root}/expected") ?? panic("create expected: {err}")
+    s4_review_files.write("{root}/inputs/task.txt", "input") ?? panic("write input: {err}")
+    s4_review_files.write("{root}/expected/task.out", "output") ?? panic("write output: {err}")
+    input_hash :: s4_review_crypto.sha256("input".bytes()).hex()
+    output_hash :: s4_review_crypto.sha256("output".bytes()).hex()
+    sums :: "{input_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n"
+    assert_eq(s4_review_checksum_closure(root, sums) ?? panic(err.message), 2)
+    s4_review_files.write("{root}/inputs/unhashed.txt", "extra") ?? panic("write extra: {err}")
+    unhashed :: s4_review_closure_error(root, sums)
+    assert(unhashed.contains("unhashed") && unhashed.contains("inputs/unhashed.txt"), unhashed)
+    s4_review_files.remove("{root}/inputs/unhashed.txt") ?? panic("remove extra: {err}")
+
+    // A drifted byte in a declared fixture names the fixture.
+    s4_review_files.write("{root}/inputs/task.txt", "drifted") ?? panic("write drift: {err}")
+    assert_eq(s4_review_closure_error(root, sums), "fixture drift: inputs/task.txt")
+    s4_review_files.write("{root}/inputs/task.txt", "input") ?? panic("restore input: {err}")
+
+    // A removed declared fixture is reported as missing, never as a pass.
+    s4_review_files.remove("{root}/expected/task.out") ?? panic("remove output: {err}")
+    missing :: s4_review_closure_error(root, sums)
+    assert(missing.contains("missing") && missing.contains("expected/task.out"), missing)
+    s4_review_files.write("{root}/expected/task.out", "output") ?? panic("restore output: {err}")
+    assert_eq(s4_review_checksum_closure(root, sums) ?? panic(err.message), 2)
+
+    // A hostile SHA256SUMS cannot smuggle a path out of the corpus root, hide a
+    // fixture behind a duplicate row, or pass a row the reader cannot split.
+    hostile :: [[String]]{
+        [String]{"{input_hash}  /etc/passwd\n{output_hash}  expected/task.out\n", "invalid checksum path: /etc/passwd"},
+        [String]{"{input_hash}  ../outside.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: ../outside.txt"},
+        [String]{"{input_hash}  ..\\outside.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: ..\\outside.txt"},
+        [String]{"{input_hash}  inputs//task.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: inputs//task.txt"},
+        [String]{"{input_hash}  inputs/./task.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: inputs/./task.txt"},
+        [String]{"{input_hash}  inputs/task.txt\n{output_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n", "duplicate checksum path: inputs/task.txt"},
+        [String]{"{input_hash} inputs/task.txt\n{output_hash}  expected/task.out\n", "bad SHA256SUMS row: {input_hash} inputs/task.txt"},
+    }
+    loop row in hostile -> assert_eq(s4_review_closure_error(root, row[0]), row[1])
+    s4_review_files.remove_all(root) ?? panic("cleanup: {err}")
 }

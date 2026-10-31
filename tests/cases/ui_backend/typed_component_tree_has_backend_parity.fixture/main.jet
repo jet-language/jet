@@ -1,0 +1,20 @@
+use core.ui as ui
+fn run() {
+    tree := ui.box([ui.text("Title"), ui.button("Save")])
+    limit := ui.constraint(0.0, 0.0, 80.0, 24.0)
+
+    null := ui.null_backend()
+    size := null.measure(tree, limit)
+    null.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    null.paint(tree)
+    print(null.focused_label())
+    null.on_event(ui.key_event("Tab"))
+    print(null.focused_label())
+    loop command in null.commands() { print(command) }
+
+    tui := ui.tui_backend()
+    tui.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    tui.paint(tree)
+    print(tui.focused_label())
+    loop line in tui.frame_lines() { print(line) }
+}
