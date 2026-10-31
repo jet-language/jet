@@ -107,10 +107,17 @@ fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics
     }
 }
 
-// A `<comptime N: Int>` number parameter is rejected with E0390 by
-// registration, so it has no type-parameter casing to check.
+// Every generic declaration site (functions and methods, structs, enums,
+// aliases) reaches its parameters through this one walk. A `<comptime N: Int>`
+// number parameter parses into `TypeParam.prep`, but number-parameter
+// substitution, instance identity and layout belong to card #3505, so it is
+// rejected here, once per written parameter, and registration never treats
+// `N` as a type.
 fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) {
-    if parameter.prep != None -> return
+    if parameter.prep != None {
+        &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet.", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented.", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship."))
+        return
+    }
     sema_casing_pascal(parameter.name, parameter.name_span, "type parameter", &diagnostics)
 }
 

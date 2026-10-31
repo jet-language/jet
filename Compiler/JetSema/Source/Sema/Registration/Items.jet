@@ -948,15 +948,9 @@ fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrati
 fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String, module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
-        // `<comptime N: Int>` parses into `TypeParam.prep`, but
-        // number-parameter substitution, instance identity and layout belong
-        // to card #3505. Until they land, the parameter is rejected here, the
-        // one registration entry for function, method, struct, enum and alias
-        // generics, and never registered as a type parameter.
-        if parameter.prep != None {
-            &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship"))
-            next
-        }
+        // A `<comptime N: Int>` number parameter is rejected by the casing
+        // walk (E0390) and is never registered as a type parameter.
+        if parameter.prep != None -> next
         duplicate :: loop previous in params {
             if previous.name == parameter.name -> break true
         } ?? false
