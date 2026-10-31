@@ -5,7 +5,7 @@
 // Present, None as a clean failure and Err as a told one, a fixed-width
 // integer as an Int.
 use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, name_rows_value, type_name, FnBody]
-use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_fixed_shape, ir_host_value_row, ir_list_stride, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_fixed_shape, ir_host_value_row, ir_list_stride, ir_map_row_hashed, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_static_map_order, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
 use jet_backend.[ERR_CAUSE, ERR_CODE, ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_MESSAGE]
 
 // What one IR evaluation produced: its value (when it completed with data),
@@ -188,6 +188,14 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
                         value :: jet_eval_ir_member_value(&m, p, &s, entry, shape.value) ?? return None
                         &entries.push(TComptimeMapEntry{key: key, value: value})
                     }
+                }
+                // A hashed Map keeps entries it gained after its last
+                // rebuild out of key order.
+                if ir_map_row_hashed(&m, p, row) {
+                    order :: ir_static_map_order(shape.kind, entries) ?? return jet_eval_ir_transport_fail(&s, checked)
+                    ordered := [TComptimeMapEntry]{}
+                    loop at in order -> &ordered.push(entries[at].copy())
+                    return Val(TComptimeValue.Map{entries: ordered})
                 }
                 return Val(TComptimeValue.Map{entries: entries})
             }

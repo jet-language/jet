@@ -431,7 +431,9 @@ fn ir_list_append(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
 // `Err(AllocError)` naming the requested bytes with the List untouched. A
 // negative request asks for 0 bytes; one above I64.MAX, or whose bytes would
 // pass I64.MAX, saturates there. The Ok payload is `payload` (-1: Unit).
-fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, additional: Int, payload: Int, span: Span) -> Int Never! {
+// `pushed` (-1: none) is the element `xs.try_push` stores into the reserved
+// room on Ok; a refusal drops it.
+fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, additional: Int, payload: Int, pushed: Int, span: Span) -> Int Never! {
     err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "try_reserve without its checked Result") }
     if ir_kind_of(m, b, additional) != .Int {
         capacity_ty :: m.types[b.f.slot_type[additional]].ty
@@ -520,6 +522,8 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     ir_release(&m, &b, additional)
     result :: ir_fresh_temp(&m, &b, result_row)
     ir_open_if(&b.f, failed, b.line)
+    // Only this branch gives the element up; the Ok branch still moves it.
+    if pushed >= 0 && b.fresh[pushed] && ir_has_drop(m, b, pushed) -> ir_emit(&b.f, IROp.Drop, -1, pushed, -1, -1, b.line)
     exact :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{requested}, int_row)
     string_row :: ir_string_row(&m)
     list_text :: ir_static_text(&m, &b, "List")
@@ -538,6 +542,7 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
         unbounded :: ir_word_const(&m, &b, largest)
         ir_emit(&b.f, IROp.Store, -1, list, 8, unbounded, b.line)
     }
+    if pushed >= 0 -> ir_list_push(&m, p, &b, list, row, pushed)
     reserved :: ir_result_box(&m, p, &b, ty, true, payload)
     ir_emit(&b.f, IROp.Copy, result, reserved, -1, -1, b.line)
     b.fresh[reserved] = false
@@ -691,7 +696,7 @@ fn ir_list_try_with_capacity(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type
     if ir_failed(b) || capacity < 0 -> return -1
     list :: ir_list_empty(&m, &b, list_row)
     element :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "List.try_with_capacity producing {ir_type_name(ty)}")
-    ir_list_try_reserve(&m, p, &b, ty, list, element, capacity, list, span)
+    ir_list_try_reserve(&m, p, &b, ty, list, element, capacity, list, -1, span)
 }
 
 // `xs.remove(value)` (the first equal element, None when there is none) and
@@ -904,7 +909,14 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
             }
             .TryReserve -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "try_reserve without a capacity")
-                return ir_list_try_reserve(&m, p, &b, ty, subject, element, operands[1], -1, span)
+                return ir_list_try_reserve(&m, p, &b, ty, subject, element, operands[1], -1, -1, span)
+            }
+            .TryPush -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "try_push without a value")
+                value :: ir_adapt(&m, p, &b, operands[1], element, span)
+                if ir_failed(b) -> return -1
+                one :: ir_int_constant(&m, &b, int_row, 1)
+                return ir_list_try_reserve(&m, p, &b, ty, subject, element, one, -1, value, span)
             }
             .Clear -> {
                 zero :: ir_word_const(&m, &b, 0)
@@ -1966,7 +1978,8 @@ fn ir_closure_map_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
         result = ir_list_empty(&m, &b, result_row)
     }
     mapped_shape :: if operation == .MapMap -> ir_map_shape(&m, p, result_row) ?? return ir_fail_slot(&b, span, "map result {ir_type_name(ty)}") else -> shape
-    walk :: ir_walk_open(&m, &b, map, shape.entry)
+    ordered :: ir_map_ordered(&m, p, &b, map)
+    walk :: ir_walk_open(&m, &b, ordered, shape.entry)
     key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
     value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
     if operation == {
@@ -2007,6 +2020,7 @@ fn ir_closure_map_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, re
         }
     }
     ir_walk_close(&m, &b, walk)
+    ir_map_ordered_end(&m, &b, map, ordered)
     if operation == .MapFold -> b.fresh[result] = true
     // The method only lends its closures.
     loop slot in operands -> ir_release_closure(&m, &b, slot)
@@ -2249,9 +2263,7 @@ fn ir_closure_group_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: In
     ir_else(&b.f, b.line)
     empty :: ir_list_empty(&m, &b, shape.value.ty)
     ir_map_set(&m, p, &b, result_row, result, key, empty)
-    // map.find's miss is -1 - the insertion point, the new entry's index.
-    minus_one :: ir_word_const(&m, &b, -1)
-    point :: ir_word_op(&m, &b, IROp.Sub, minus_one, found)
+    point :: ir_map_added_index(&m, &b, shape, result, found)
     ir_emit(&b.f, IROp.Copy, index, point, -1, -1, b.line)
     ir_end(&b.f, b.line)
     entries :: ir_load_word(&m, &b, result, 16)
@@ -2285,9 +2297,7 @@ fn ir_closure_count_by(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: In
     ir_else(&b.f, b.line)
     none_yet :: ir_int_constant(&m, &b, shape.value.ty, 0)
     ir_map_set(&m, p, &b, result_row, result, key, none_yet)
-    // map.find's miss is -1 - the insertion point, the new entry's index.
-    minus_one :: ir_word_const(&m, &b, -1)
-    point :: ir_word_op(&m, &b, IROp.Sub, minus_one, found)
+    point :: ir_map_added_index(&m, &b, shape, result, found)
     ir_emit(&b.f, IROp.Copy, index, point, -1, -1, b.line)
     ir_end(&b.f, b.line)
     entries :: ir_load_word(&m, &b, result, 16)
@@ -3952,13 +3962,16 @@ fn ir_string_cut(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
         hit :: ir_bool_op(&m, &b, IROp.Ne, cut_flag, zero)
         ir_open_if(&b.f, hit, b.line)
     }
-    // Some((before, after)): the box holds the String pair at offset 0.
+    // Some((before, after)): the box holds the String pair at offset 0. The
+    // pair's members are label-sorted (S73: `after` precedes `before`), so
+    // each half goes to the member of its own name.
+    swapped :: members[0].name == "after"
     pair_size :: m.types[pair_row].size
     boxed :: ir_box_alloc(&m, &b, pair_size, result_row)
     before :: ir_load_word(&m, &b, slot, if last -> 0 else -> 8)
-    ir_emit(&b.f, IROp.Store, -1, boxed, members[0].offset, before, b.line)
+    ir_emit(&b.f, IROp.Store, -1, boxed, if swapped -> members[1].offset else -> members[0].offset, before, b.line)
     after :: ir_load_word(&m, &b, slot, 16)
-    ir_emit(&b.f, IROp.Store, -1, boxed, members[1].offset, after, b.line)
+    ir_emit(&b.f, IROp.Store, -1, boxed, if swapped -> members[0].offset else -> members[1].offset, after, b.line)
     ir_emit(&b.f, IROp.Copy, found, boxed, -1, -1, b.line)
     if !last {
         ir_else(&b.f, b.line)

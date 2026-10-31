@@ -451,14 +451,18 @@ fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Nev
     // Each key with its position; ordering the pairs by key, then position,
     // makes the last of a run the later duplicate. The comparator is
     // explicit because a named tuple's own order compares its members in
-    // name order (S73), which would put `at` before `key`. "uword" keys are
-    // Int keys below 2^63 (a larger one is a BigInt key), so their signed
-    // order is their unsigned order.
+    // name order (S73), which would put `at` before `key`. A key beyond 64
+    // bits (an Int's, or a uword's at 2^63 and above) is a BigInt decimal,
+    // ordered by its exact value, so uword keys keep their unsigned order.
     words := [(key: Int, at: Int)]{}
     texts := [(key: String, at: Int)]{}
     loop (index, entry) in entries {
         if entry.key == {
             .Int(value) | .Char(value) -> &words.push((key: value, at: index))
+            .BigInt(decimal) -> {
+                if kind != "int" && kind != "uword" -> return None
+                &words.push((key: Int.parse(decimal) ?? return None, at: index))
+            }
             .Bool(flag) -> &words.push((key: if flag -> 1 else -> 0, at: index))
             .String(text) -> &texts.push((key: text, at: index))
             else -> return None

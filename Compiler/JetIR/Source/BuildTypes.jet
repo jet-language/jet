@@ -2612,6 +2612,39 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_end(&b.f, b.line)
         return
     }
+    if ir_map_row_hashed(&m, p, row) {
+        // Equal lengths, then each left entry's key held by the right Map
+        // under an equal value: a hashed Map's entries are not in key order.
+        shape :: ir_map_shape(&m, p, row) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        word_row :: ir_word_row(&m)
+        length :: ir_load_word(&m, &b, left, 0)
+        right_length :: ir_load_word(&m, &b, right, 0)
+        same_length :: ir_bool_op(&m, &b, IROp.Eq, length, right_length)
+        ir_exit_unless(&m, &b, same_length, differ)
+        left_data :: ir_load_word(&m, &b, left, 16)
+        index :: ir_word_const(&m, &b, 0)
+        done :: ir_open(&b.f, IROp.Block, b.line)
+        _ :: ir_open(&b.f, IROp.Loop, b.line)
+        more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
+        ir_exit_unless(&m, &b, more, done)
+        left_at :: ir_element_address(&m, &b, left_data, index, shape.stride)
+        key :: ir_load_at(&m, &b, left_at, shape.key.offset, shape.key.ty)
+        found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{right, key}, word_row)
+        none :: ir_word_const(&m, &b, 0)
+        held :: ir_bool_op(&m, &b, IROp.Ge, found, none)
+        ir_exit_unless(&m, &b, held, differ)
+        right_data :: ir_load_word(&m, &b, right, 16)
+        right_at :: ir_element_address(&m, &b, right_data, found, shape.stride)
+        a :: ir_load_at(&m, &b, left_at, shape.value.offset, shape.value.ty)
+        c :: ir_load_at(&m, &b, right_at, shape.value.offset, shape.value.ty)
+        ir_equal_into(&m, p, &b, shape.value.ty, a, c, differ, outer, span)
+        one :: ir_word_const(&m, &b, 1)
+        ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_end(&b.f, b.line)
+        return
+    }
     element_ty :: if ir_sequence_element(ty) == .Val(element) -> Val(element) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
     if element_ty == .Val(element) {
         // Equal lengths, then every element (a Map's entries) in order.

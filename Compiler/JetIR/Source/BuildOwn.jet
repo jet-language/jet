@@ -533,7 +533,7 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
         ir_open_if(&a.f, counted, a.line)
         length :: ir_load_word(&m, &a, at, 0)
         data :: ir_load_word(&m, &a, at, 16)
-        ir_release_buffer(&m, &a, entry, data, length, capacity)
+        ir_release_buffer(&m, p, &a, row, entry, data, length, capacity)
         ir_end(&a.f, a.line)
     } else if ir_inline_members(&m, p, row) == .Val(members) {
         loop member in members {
@@ -551,10 +551,10 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     m.functions[id] = ^a.f
 }
 
-// Gives up one owner of the counted buffer `data` holding `length` elements
-// of row `entry` in `capacity` slots; the last owner drops each element and
-// frees the buffer.
-fn ir_release_buffer(m: &IRModule, b: &IRBuilder, entry: Int, data: Int, length: Int, capacity: Int) Never! {
+// Gives up one owner of the counted buffer `data` of the header row `row`
+// holding `length` elements of row `entry` in `capacity` slots; the last owner
+// drops each element and frees the buffer.
+fn ir_release_buffer(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int, data: Int, length: Int, capacity: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     last :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{data}, bool_row)
     ir_open_if(&b.f, last, b.line)
@@ -574,8 +574,7 @@ fn ir_release_buffer(m: &IRModule, b: &IRBuilder, entry: Int, data: Int, length:
         ir_end(&b.f, b.line)
         ir_end(&b.f, b.line)
     }
-    width :: ir_word_const(&m, &b, stride)
-    bytes :: ir_word_op(&m, &b, IROp.Mul, capacity, width)
+    bytes :: ir_buffer_bytes(&m, p, &b, row, data, capacity, stride)
     ir_free(&m, &b, data, bytes)
     ir_end(&b.f, b.line)
 }
@@ -655,21 +654,38 @@ fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int 
     ir_end(&a.f, a.line)
     ir_end(&a.f, a.line)
     word_row :: ir_word_row(&m)
-    fresh_capacity :: ir_temp(&m, &a, word_row)
-    ir_emit(&a.f, IROp.Copy, fresh_capacity, capacity, -1, -1, a.line)
-    frozen :: ir_bool_op(&m, &a, IROp.Eq, capacity, zero)
-    ir_open_if(&a.f, frozen, a.line)
-    ir_emit(&a.f, IROp.Copy, fresh_capacity, length, -1, -1, a.line)
-    ir_end(&a.f, a.line)
     stride :: ir_list_stride(m, entry)
-    width :: ir_word_const(&m, &a, stride)
-    bytes :: ir_word_op(&m, &a, IROp.Mul, fresh_capacity, width)
-    align :: ir_word_const(&m, &a, 8)
-    replica :: ir_runtime(&m, &a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
-    moved :: ir_word_op(&m, &a, IROp.Mul, length, width)
-    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{replica, data, moved}, -1)
-    ir_emit(&a.f, IROp.Store, -1, header, 16, replica, a.line)
-    ir_emit(&a.f, IROp.Store, -1, header, 8, fresh_capacity, a.line)
+    replica := -1
+    if ir_map_row_hashed(&m, p, row) {
+        // A hashed Map's copy takes its index too: a frozen one gets a
+        // fresh index (map.rebuild), a counted one a byte copy of its block.
+        frozen :: ir_bool_op(&m, &a, IROp.Eq, capacity, zero)
+        ir_open_if(&a.f, frozen, a.line)
+        _ :: ir_map_call(&m, p, &a, row, "map.rebuild", [Int]{header, length}, -1)
+        ir_else(&a.f, a.line)
+        block :: ir_buffer_bytes(&m, p, &a, row, data, capacity, stride)
+        align :: ir_word_const(&m, &a, 8)
+        copied :: ir_runtime(&m, &a, "jet_rt_alloc", [Int]{block, align}, word_row)
+        _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{copied, data, block}, -1)
+        ir_emit(&a.f, IROp.Store, -1, header, 16, copied, a.line)
+        ir_end(&a.f, a.line)
+        replica = ir_load_word(&m, &a, header, 16)
+    } else {
+        fresh_capacity :: ir_temp(&m, &a, word_row)
+        ir_emit(&a.f, IROp.Copy, fresh_capacity, capacity, -1, -1, a.line)
+        frozen :: ir_bool_op(&m, &a, IROp.Eq, capacity, zero)
+        ir_open_if(&a.f, frozen, a.line)
+        ir_emit(&a.f, IROp.Copy, fresh_capacity, length, -1, -1, a.line)
+        ir_end(&a.f, a.line)
+        width :: ir_word_const(&m, &a, stride)
+        bytes :: ir_word_op(&m, &a, IROp.Mul, fresh_capacity, width)
+        align :: ir_word_const(&m, &a, 8)
+        replica = ir_runtime(&m, &a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+        moved :: ir_word_op(&m, &a, IROp.Mul, length, width)
+        _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{replica, data, moved}, -1)
+        ir_emit(&a.f, IROp.Store, -1, header, 16, replica, a.line)
+        ir_emit(&a.f, IROp.Store, -1, header, 8, fresh_capacity, a.line)
+    }
     if ir_copy_needs(&m, p, entry) {
         index :: ir_word_const(&m, &a, 0)
         done :: ir_open(&a.f, IROp.Block, a.line)
@@ -686,7 +702,7 @@ fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int 
     }
     ir_open_if(&a.f, counted, a.line)
     ir_inherit_zero_mark(&m, &a, data, replica, stride)
-    ir_release_buffer(&m, &a, entry, data, length, capacity)
+    ir_release_buffer(&m, p, &a, row, entry, data, length, capacity)
     ir_end(&a.f, a.line)
     if a.error != "" {
         ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)

@@ -5296,8 +5296,15 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     if ir_failed(b) -> return
     stride :: ir_list_stride(m, row)
     ir_scope_open(&b)
-    length :: ir_list_length(&m, &b, list)
-    data :: ir_list_data(&m, &b, list)
+    // A hashed Map walks its entries in key order (ir_map_ordered), which a
+    // variable that may write it first settles in place.
+    walked := list
+    if ir_map_entry_type(collection_ty) != None {
+        ir_map_settle_for(&m, p, &b, collection, list)
+        walked = ir_map_ordered(&m, p, &b, list)
+    }
+    length :: ir_list_length(&m, &b, walked)
+    data :: ir_list_data(&m, &b, walked)
     index :: ir_word_const(&m, &b, 0)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)

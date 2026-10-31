@@ -1,8 +1,23 @@
-// The IR builder's Maps: a Map is a List of its (key, value) entry tuples
-// kept in ascending key order, the same 24-byte header (len, cap, data);
-// iteration, display and every lookup see the entries in BTreeMap order, and
-// a lookup is a binary search. Its operations are helper functions built once
-// per Map type (map.find, map.set, map.get, map.remove, map.insert).
+// The IR builder's Maps: a Map is a List of its (key, value) entry tuples,
+// the same 24-byte header (len, cap, data); iteration, display and every
+// ordered read see the entries in BTreeMap order. Its operations are helper
+// functions built once per Map type (map.find, map.set, map.get, map.remove,
+// map.insert, and for a hashed Map map.order, map.merge, map.settle,
+// map.rebuild).
+//
+// A Map whose keys hash (exact Int, word and String keys, ir_map_hashed)
+// keeps a hash index behind its counted buffer's `cap` entries: a trailer of
+// the sorted count `s`, the slot mask (slots - 1, the slots a power of two of
+// at least twice the capacity and 8), then the slots. Entries [0, s) are in
+// ascending key order; a new key is appended after them, and the tail is
+// merged in when the buffer grows (map.rebuild) or when a write site settles
+// it. A slot is 0 when empty, else (tag << 32) | (position + 1), the tag the
+// key's 31-bit hash (ir_map_tag), found by linear probing from tag & mask; a
+// removal shifts the later entries down and the probe run back, so no slot
+// ever names a removed entry. A read that needs key order gets the entries
+// merged into a temporary buffer (map.order); a read never writes the Map. A
+// frozen buffer (capacity 0: static, empty) has no trailer: its entries are
+// all in order, found by binary search, as every Map of other keys is.
 
 use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, TypeTupleField, TPanicLoc, TPanicLocal, name_rows_set, name_rows_value, type_carrier_identity]
 
@@ -87,37 +102,92 @@ fn ir_map_order(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: String, left: I
     IRMapOrder{less: ir_bool_op(&m, &b, IROp.Lt, left, right), same: ir_bool_op(&m, &b, IROp.Eq, left, right)}
 }
 
+// Whether a Map of `shape` keeps a hash index in its buffer's trailer: its
+// keys hash (ir_map_tag) and its entries are whole words, so the trailer
+// after them is word aligned.
+fn ir_map_hashed(shape: IRMapShape) -> Bool Never! {
+    hashing :: shape.kind == "int" || shape.kind == "word" || shape.kind == "uword" || shape.kind == "string"
+    hashing && shape.stride %% 8 == 0
+}
+
+// Whether the type row `row` is a Map row with a hash index (ir_map_hashed).
+fn ir_map_row_hashed(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if ir_map_entry_type(m.types[row].ty) == None -> return false
+    shape :: ir_map_shape(&m, p, row) ?? return false
+    ir_map_hashed(shape)
+}
+
 // The id of Map helper `name` of the Map type row `map_row`, built on first use.
 fn ir_map_helper(m: &IRModule, p: IRProgram, map_row: Int, name: String) -> Int Never! {
     key :: "{name}<{type_carrier_identity(m.types[map_row].ty)}>"
     if name_rows_value(m.function_rows, key) == .Val(known) -> return known
     shape :: ir_map_shape(&m, p, map_row) ?? panic("Map helper {name} of a type without a Map shape")
     id :: m.functions.len()
-    symbol :: if name == "map.find" -> "find" else if name == "map.set" -> "set" else if name == "map.get" -> "get" else if name == "map.remove" -> "remove" else -> "insert"
+    symbol :: ir_map_helper_symbol(name)
     &m.functions.push(ir_hashed_function(name, key, "jet_ir_map_{symbol}_", "", 0))
     name_rows_set(&m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     map :: ir_new_slot(&a, map_row, IRSlotKind.Param, ir_intern_name(&m, "map"))
-    probe_key :: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))
-    if name == "map.find" {
-        ir_map_find_body(&m, p, &a, shape, map, probe_key)
-    } else if name == "map.set" || name == "map.insert" {
-        value :: ir_new_slot(&a, shape.value.ty, IRSlotKind.Param, ir_intern_name(&m, "value"))
-        option_row :: if name == "map.insert" -> ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1 else -> -1
-        ir_map_insert_body(&m, p, &a, shape, map_row, map, probe_key, value, option_row)
+    if name == "map.order" {
+        ir_map_order_body(&m, p, &a, shape, map_row, map)
+    } else if name == "map.settle" {
+        ir_map_settle_body(&m, p, &a, map_row, map)
+    } else if name == "map.merge" {
+        target :: ir_new_slot(&a, ir_word_row(&m), IRSlotKind.Param, ir_intern_name(&m, "target"))
+        ir_map_merge_body(&m, p, &a, shape, map, target)
+    } else if name == "map.rebuild" {
+        capacity :: ir_new_slot(&a, ir_word_row(&m), IRSlotKind.Param, ir_intern_name(&m, "capacity"))
+        ir_map_rebuild_body(&m, p, &a, shape, map_row, map, capacity)
     } else {
-        option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1
-        ir_map_take_body(&m, p, &a, shape, map_row, map, probe_key, option_row, name == "map.remove")
+        probe_key :: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))
+        if name == "map.find" {
+            if ir_map_hashed(shape) {
+                ir_map_probe_body(&m, p, &a, shape, map, probe_key)
+            } else {
+                ir_map_find_body(&m, p, &a, shape, map, probe_key)
+            }
+        } else if name == "map.set" || name == "map.insert" {
+            value :: ir_new_slot(&a, shape.value.ty, IRSlotKind.Param, ir_intern_name(&m, "value"))
+            option_row :: if name == "map.insert" -> ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1 else -> -1
+            ir_map_insert_body(&m, p, &a, shape, map_row, map, probe_key, value, option_row)
+        } else {
+            option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? -1
+            ir_map_take_body(&m, p, &a, shape, map_row, map, probe_key, option_row, name == "map.remove")
+        }
     }
     ir_resolve_deferred(&m, p, &a)
     m.functions[id] = ^a.f
     id
 }
 
+// The symbol stem of Map helper `name` (jet_ir_map_<stem>_<hash>).
+fn ir_map_helper_symbol(name: String) -> String Never! {
+    if name == {
+        "map.find" -> "find"
+        "map.set" -> "set"
+        "map.get" -> "get"
+        "map.remove" -> "remove"
+        "map.order" -> "order"
+        "map.settle" -> "settle"
+        "map.merge" -> "merge"
+        "map.rebuild" -> "rebuild"
+        else -> "insert"
+    }
+}
+
 // Binary search over the ascending entries: the entry's index, or -1 - the
 // insertion point when the key is absent.
 fn ir_map_find_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
     a.f.result = ir_word_row(&m)
+    low :: ir_map_search(&m, p, &a, shape, map, key)
+    minus_one :: ir_word_const(&m, &a, -1)
+    insertion :: ir_word_op(&m, &a, IROp.Sub, minus_one, low)
+    ir_emit(&a.f, IROp.Return, -1, insertion, -1, -1, a.line)
+}
+
+// The binary search of ir_map_find_body: returns the index of an entry
+// whose key is `key`; falls through with the insertion point.
+fn ir_map_search(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) -> Int Never! {
     length :: ir_load_word(&m, &a, map, 0)
     data :: ir_load_word(&m, &a, map, 16)
     low :: ir_word_const(&m, &a, 0)
@@ -145,9 +215,531 @@ fn ir_map_find_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
     ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
     ir_end(&a.f, a.line)
     ir_end(&a.f, a.line)
+    low
+}
+
+// The 31-bit hash tag of the key `key` of a hashed Map: a String's runtime
+// hash (jet_string_hash); a word key's bits (zero-extended from its width)
+// or an exact Int's inline word, times the 64-bit golden ratio, the high
+// half folded into the low. Every big Int hashes as 0: an Int in the inline
+// range is always inline (Int.jet int_pack), so equal keys hash equal.
+fn ir_map_tag(m: &IRModule, a: &IRBuilder, shape: IRMapShape, key: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    low_bits :: ir_word_const(&m, &a, 2147483647)
+    if shape.kind == "string" {
+        hash :: ir_runtime(&m, &a, "jet_string_hash", [Int]{key}, word_row)
+        return ir_word_op(&m, &a, IROp.BitAnd, hash, low_bits)
+    }
+    pointer_row :: ir_pointer_row(&m)
+    cell :: ir_temp(&m, &a, pointer_row)
+    ir_emit(&a.f, IROp.StackAddress, cell, 8, 8, -1, a.line)
+    zero :: ir_word_const(&m, &a, 0)
+    ir_emit(&a.f, IROp.Store, -1, cell, 0, zero, a.line)
+    ir_emit(&a.f, IROp.Store, -1, cell, 0, key, a.line)
+    bits :: ir_load_word(&m, &a, cell, 0)
+    word := bits
+    if shape.kind == "int" {
+        // Inline when bits 62 and 63 agree (int_inline).
+        sixty_two :: ir_word_const(&m, &a, 62)
+        sixty_three :: ir_word_const(&m, &a, 63)
+        top :: ir_word_op(&m, &a, IROp.Shr, bits, sixty_two)
+        sign :: ir_word_op(&m, &a, IROp.Shr, bits, sixty_three)
+        fits :: ir_bool_op(&m, &a, IROp.Eq, top, sign)
+        word = ir_temp(&m, &a, word_row)
+        ir_emit(&a.f, IROp.Copy, word, zero, -1, -1, a.line)
+        ir_open_if(&a.f, fits, a.line)
+        ir_emit(&a.f, IROp.Copy, word, bits, -1, -1, a.line)
+        ir_end(&a.f, a.line)
+    }
+    golden :: ir_word_const(&m, &a, -7046029254386353131)
+    mixed :: ir_word_op(&m, &a, IROp.Mul, word, golden)
+    thirty_two :: ir_word_const(&m, &a, 32)
+    high :: ir_word_op(&m, &a, IROp.Shr, mixed, thirty_two)
+    folded :: ir_word_op(&m, &a, IROp.BitXor, mixed, high)
+    ir_word_op(&m, &a, IROp.BitAnd, folded, low_bits)
+}
+
+// The address of the trailer of a hashed Map's counted buffer `data` of
+// `capacity` entries: its sorted count at 0, its mask at 8, slot `i` at
+// 16 + 8 * i.
+fn ir_map_trailer(m: &IRModule, a: &IRBuilder, shape: IRMapShape, data: Int, capacity: Int) -> Int Never! {
+    ir_element_address(&m, &a, data, capacity, shape.stride)
+}
+
+// The address of slot `at` of the trailer at `trailer`.
+fn ir_map_slot_address(m: &IRModule, a: &IRBuilder, trailer: Int, at: Int) -> Int Never! {
+    sixteen :: ir_word_const(&m, &a, 16)
+    slots :: ir_word_op(&m, &a, IROp.Add, trailer, sixteen)
+    ir_element_address(&m, &a, slots, at, 8)
+}
+
+// The bytes of a hashed Map's counted buffer of `capacity` entries whose
+// index has mask `mask`: the entries, the two trailer words, the slots.
+fn ir_map_block_bytes(m: &IRModule, a: &IRBuilder, shape: IRMapShape, capacity: Int, mask: Int) -> Int Never! {
+    width :: ir_word_const(&m, &a, shape.stride)
+    entries :: ir_word_op(&m, &a, IROp.Mul, capacity, width)
+    three :: ir_word_const(&m, &a, 3)
+    words :: ir_word_op(&m, &a, IROp.Add, mask, three)
+    eight :: ir_word_const(&m, &a, 8)
+    trailer :: ir_word_op(&m, &a, IROp.Mul, words, eight)
+    ir_word_op(&m, &a, IROp.Add, entries, trailer)
+}
+
+// The bytes a hashed Map's counted buffer `data` of `capacity` entries
+// takes (its mask read from its trailer); `capacity` itself for any other
+// row's buffer of entries of `stride` bytes.
+fn ir_buffer_bytes(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, data: Int, capacity: Int, stride: Int) -> Int Never! {
+    if ir_map_row_hashed(&m, p, row) {
+        shape :: ir_map_shape(&m, p, row) ?? panic("hashed Map row without a Map shape")
+        trailer :: ir_map_trailer(&m, &b, shape, data, capacity)
+        mask :: ir_load_word(&m, &b, trailer, 8)
+        return ir_map_block_bytes(&m, &b, shape, capacity, mask)
+    }
+    width :: ir_word_const(&m, &b, stride)
+    ir_word_op(&m, &b, IROp.Mul, capacity, width)
+}
+
+// map.find of a hashed Map: the entry's index, -1 when the key is absent. A
+// frozen buffer is searched; a counted one probes its index from the tag's
+// home slot to the first empty one.
+fn ir_map_probe_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, key: Int) Never! {
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    zero :: ir_word_const(&m, &a, 0)
+    one :: ir_word_const(&m, &a, 1)
     minus_one :: ir_word_const(&m, &a, -1)
-    insertion :: ir_word_op(&m, &a, IROp.Sub, minus_one, low)
-    ir_emit(&a.f, IROp.Return, -1, insertion, -1, -1, a.line)
+    capacity :: ir_load_word(&m, &a, map, 8)
+    frozen :: ir_bool_op(&m, &a, IROp.Le, capacity, zero)
+    ir_open_if(&a.f, frozen, a.line)
+    _ :: ir_map_search(&m, p, &a, shape, map, key)
+    ir_emit(&a.f, IROp.Return, -1, minus_one, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    data :: ir_load_word(&m, &a, map, 16)
+    hash :: ir_map_tag(&m, &a, shape, key)
+    trailer :: ir_map_trailer(&m, &a, shape, data, capacity)
+    mask :: ir_load_word(&m, &a, trailer, 8)
+    at :: ir_word_op(&m, &a, IROp.BitAnd, hash, mask)
+    thirty_two :: ir_word_const(&m, &a, 32)
+    low_half :: ir_word_const(&m, &a, 4294967295)
+    exit :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    slot_at :: ir_map_slot_address(&m, &a, trailer, at)
+    slot :: ir_load_word(&m, &a, slot_at, 0)
+    occupied :: ir_bool_op(&m, &a, IROp.Ne, slot, zero)
+    ir_exit_unless(&m, &a, occupied, exit)
+    slot_tag :: ir_word_op(&m, &a, IROp.Shr, slot, thirty_two)
+    same_tag :: ir_bool_op(&m, &a, IROp.Eq, slot_tag, hash)
+    ir_open_if(&a.f, same_tag, a.line)
+    numbered :: ir_word_op(&m, &a, IROp.BitAnd, slot, low_half)
+    position :: ir_word_op(&m, &a, IROp.Sub, numbered, one)
+    entry :: ir_element_address(&m, &a, data, position, shape.stride)
+    probe :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+    same :: ir_bool_op(&m, &a, IROp.Eq, probe, key)
+    ir_open_if(&a.f, same, a.line)
+    ir_emit(&a.f, IROp.Return, -1, position, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    following :: ir_word_op(&m, &a, IROp.Add, at, one)
+    ir_emit(&a.f, IROp.BitAnd, at, following, mask, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Return, -1, minus_one, -1, -1, a.line)
+}
+
+// Records entry `position` under tag `hash` in the index of the trailer at
+// `trailer`: the first empty slot from the tag's home.
+fn ir_map_slot_insert(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
+    zero :: ir_word_const(&m, &a, 0)
+    one :: ir_word_const(&m, &a, 1)
+    mask :: ir_load_word(&m, &a, trailer, 8)
+    at :: ir_word_op(&m, &a, IROp.BitAnd, hash, mask)
+    placed :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    slot_at :: ir_map_slot_address(&m, &a, trailer, at)
+    slot :: ir_load_word(&m, &a, slot_at, 0)
+    taken :: ir_bool_op(&m, &a, IROp.Ne, slot, zero)
+    ir_exit_unless(&m, &a, taken, placed)
+    following :: ir_word_op(&m, &a, IROp.Add, at, one)
+    ir_emit(&a.f, IROp.BitAnd, at, following, mask, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    thirty_two :: ir_word_const(&m, &a, 32)
+    high :: ir_word_op(&m, &a, IROp.Shl, hash, thirty_two)
+    numbered :: ir_word_op(&m, &a, IROp.Add, position, one)
+    entry :: ir_word_op(&m, &a, IROp.BitOr, high, numbered)
+    free_at :: ir_map_slot_address(&m, &a, trailer, at)
+    ir_emit(&a.f, IROp.Store, -1, free_at, 0, entry, a.line)
+}
+
+// Takes entry `position` (hashed under tag `hash`) out of the index of the
+// trailer at `trailer` as the entries after it shift down one place: its
+// slot empties, the probe run after it shifts back over the hole (each
+// slot whose home is not cyclically after the hole), every later position
+// drops by one, and so does the sorted count when the entry was in order.
+fn ir_map_slot_remove(m: &IRModule, a: &IRBuilder, trailer: Int, hash: Int, position: Int) Never! {
+    word_row :: ir_word_row(&m)
+    zero :: ir_word_const(&m, &a, 0)
+    one :: ir_word_const(&m, &a, 1)
+    thirty_two :: ir_word_const(&m, &a, 32)
+    low_half :: ir_word_const(&m, &a, 4294967295)
+    numbered :: ir_word_op(&m, &a, IROp.Add, position, one)
+    mask :: ir_load_word(&m, &a, trailer, 8)
+    hole :: ir_word_op(&m, &a, IROp.BitAnd, hash, mask)
+    found :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    slot_at :: ir_map_slot_address(&m, &a, trailer, hole)
+    slot :: ir_load_word(&m, &a, slot_at, 0)
+    names :: ir_word_op(&m, &a, IROp.BitAnd, slot, low_half)
+    other :: ir_bool_op(&m, &a, IROp.Ne, names, numbered)
+    ir_exit_unless(&m, &a, other, found)
+    following :: ir_word_op(&m, &a, IROp.Add, hole, one)
+    ir_emit(&a.f, IROp.BitAnd, hole, following, mask, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    scan :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, scan, hole, -1, -1, a.line)
+    shifted :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    next_scan :: ir_word_op(&m, &a, IROp.Add, scan, one)
+    ir_emit(&a.f, IROp.BitAnd, scan, next_scan, mask, IR_OVERFLOW_WRAP, a.line)
+    moving_at :: ir_map_slot_address(&m, &a, trailer, scan)
+    moving :: ir_load_word(&m, &a, moving_at, 0)
+    run :: ir_bool_op(&m, &a, IROp.Ne, moving, zero)
+    ir_exit_unless(&m, &a, run, shifted)
+    moving_tag :: ir_word_op(&m, &a, IROp.Shr, moving, thirty_two)
+    home :: ir_word_op(&m, &a, IROp.BitAnd, moving_tag, mask)
+    from_home :: ir_word_op(&m, &a, IROp.Sub, scan, home)
+    home_distance :: ir_word_op(&m, &a, IROp.BitAnd, from_home, mask)
+    from_hole :: ir_word_op(&m, &a, IROp.Sub, scan, hole)
+    hole_distance :: ir_word_op(&m, &a, IROp.BitAnd, from_hole, mask)
+    fills :: ir_bool_op(&m, &a, IROp.Ge, home_distance, hole_distance)
+    ir_open_if(&a.f, fills, a.line)
+    hole_at :: ir_map_slot_address(&m, &a, trailer, hole)
+    ir_emit(&a.f, IROp.Store, -1, hole_at, 0, moving, a.line)
+    ir_emit(&a.f, IROp.Copy, hole, scan, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    emptied_at :: ir_map_slot_address(&m, &a, trailer, hole)
+    ir_emit(&a.f, IROp.Store, -1, emptied_at, 0, zero, a.line)
+    // Positions after the removed entry move down one.
+    every :: ir_word_const(&m, &a, 0)
+    renumbered :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    within :: ir_bool_op(&m, &a, IROp.Le, every, mask)
+    ir_exit_unless(&m, &a, within, renumbered)
+    each_at :: ir_map_slot_address(&m, &a, trailer, every)
+    each :: ir_load_word(&m, &a, each_at, 0)
+    each_number :: ir_word_op(&m, &a, IROp.BitAnd, each, low_half)
+    later :: ir_bool_op(&m, &a, IROp.Gt, each_number, numbered)
+    ir_open_if(&a.f, later, a.line)
+    lowered :: ir_word_op(&m, &a, IROp.Sub, each, one)
+    ir_emit(&a.f, IROp.Store, -1, each_at, 0, lowered, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Add, every, every, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    sorted :: ir_load_word(&m, &a, trailer, 0)
+    ordered :: ir_bool_op(&m, &a, IROp.Lt, position, sorted)
+    ir_open_if(&a.f, ordered, a.line)
+    fewer :: ir_word_op(&m, &a, IROp.Sub, sorted, one)
+    ir_emit(&a.f, IROp.Store, -1, trailer, 0, fewer, a.line)
+    ir_end(&a.f, a.line)
+}
+
+// The sorted count of a hashed Map: every entry of a frozen buffer, the
+// trailer's count of a counted one.
+fn ir_map_sorted(m: &IRModule, a: &IRBuilder, shape: IRMapShape, map: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    length :: ir_load_word(&m, &a, map, 0)
+    capacity :: ir_load_word(&m, &a, map, 8)
+    sorted :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, sorted, length, -1, -1, a.line)
+    zero :: ir_word_const(&m, &a, 0)
+    counted :: ir_bool_op(&m, &a, IROp.Gt, capacity, zero)
+    ir_open_if(&a.f, counted, a.line)
+    data :: ir_load_word(&m, &a, map, 16)
+    trailer :: ir_map_trailer(&m, &a, shape, data, capacity)
+    kept :: ir_load_word(&m, &a, trailer, 0)
+    ir_emit(&a.f, IROp.Copy, sorted, kept, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    sorted
+}
+
+// map.merge(map, target): byte copies of the hashed Map's entries in key
+// order at `target` (room for its length): the sorted entries merged with
+// the appended tail, whose positions are merge sorted by key first.
+fn ir_map_merge_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map: Int, target: Int) Never! {
+    word_row :: ir_word_row(&m)
+    zero :: ir_word_const(&m, &a, 0)
+    one :: ir_word_const(&m, &a, 1)
+    eight :: ir_word_const(&m, &a, 8)
+    width :: ir_word_const(&m, &a, shape.stride)
+    length :: ir_load_word(&m, &a, map, 0)
+    data :: ir_load_word(&m, &a, map, 16)
+    sorted :: ir_map_sorted(&m, &a, shape, map)
+    tail :: ir_word_op(&m, &a, IROp.Sub, length, sorted)
+    clean :: ir_bool_op(&m, &a, IROp.Eq, tail, zero)
+    ir_open_if(&a.f, clean, a.line)
+    bytes :: ir_word_op(&m, &a, IROp.Mul, length, width)
+    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{target, data, bytes}, -1)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    // Two arrays of the tail's positions: the merge sort's source and output.
+    tail_bytes :: ir_word_op(&m, &a, IROp.Mul, tail, eight)
+    both_bytes :: ir_word_op(&m, &a, IROp.Add, tail_bytes, tail_bytes)
+    first :: ir_runtime(&m, &a, "jet_rt_alloc", [Int]{both_bytes, eight}, word_row)
+    second :: ir_word_op(&m, &a, IROp.Add, first, tail_bytes)
+    fill :: ir_word_const(&m, &a, 0)
+    filled :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    unfilled :: ir_bool_op(&m, &a, IROp.Lt, fill, tail)
+    ir_exit_unless(&m, &a, unfilled, filled)
+    fill_at :: ir_element_address(&m, &a, first, fill, 8)
+    position :: ir_word_op(&m, &a, IROp.Add, sorted, fill)
+    ir_emit(&a.f, IROp.Store, -1, fill_at, 0, position, a.line)
+    ir_emit(&a.f, IROp.Add, fill, fill, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    // Bottom-up merge sort of the positions by key, runs of `run` doubling.
+    source :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, source, first, -1, -1, a.line)
+    output :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, output, second, -1, -1, a.line)
+    run :: ir_word_const(&m, &a, 1)
+    passes :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    unsorted :: ir_bool_op(&m, &a, IROp.Lt, run, tail)
+    ir_exit_unless(&m, &a, unsorted, passes)
+    start :: ir_word_const(&m, &a, 0)
+    pairs :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more_pairs :: ir_bool_op(&m, &a, IROp.Lt, start, tail)
+    ir_exit_unless(&m, &a, more_pairs, pairs)
+    middle :: ir_word_op(&m, &a, IROp.Add, start, run)
+    ir_map_clamp(&m, &a, middle, tail)
+    span_end :: ir_word_op(&m, &a, IROp.Add, middle, run)
+    ir_map_clamp(&m, &a, span_end, tail)
+    left :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, left, start, -1, -1, a.line)
+    right :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, right, middle, -1, -1, a.line)
+    out :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, out, start, -1, -1, a.line)
+    merged :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more_out :: ir_bool_op(&m, &a, IROp.Lt, out, span_end)
+    ir_exit_unless(&m, &a, more_out, merged)
+    left_first :: ir_map_takes_left(&m, p, &a, shape, data, source, left, middle, source, right, span_end)
+    out_at :: ir_element_address(&m, &a, output, out, 8)
+    ir_open_if(&a.f, left_first, a.line)
+    left_at :: ir_element_address(&m, &a, source, left, 8)
+    left_position :: ir_load_word(&m, &a, left_at, 0)
+    ir_emit(&a.f, IROp.Store, -1, out_at, 0, left_position, a.line)
+    ir_emit(&a.f, IROp.Add, left, left, one, IR_OVERFLOW_WRAP, a.line)
+    ir_else(&a.f, a.line)
+    right_at :: ir_element_address(&m, &a, source, right, 8)
+    right_position :: ir_load_word(&m, &a, right_at, 0)
+    ir_emit(&a.f, IROp.Store, -1, out_at, 0, right_position, a.line)
+    ir_emit(&a.f, IROp.Add, right, right, one, IR_OVERFLOW_WRAP, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Add, out, out, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Copy, start, span_end, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    swap :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, swap, source, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Copy, source, output, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Copy, output, swap, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Add, run, run, run, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    // The sorted entries and the sorted tail, merged into `target`.
+    prefix :: ir_word_const(&m, &a, 0)
+    taken :: ir_word_const(&m, &a, 0)
+    written :: ir_word_const(&m, &a, 0)
+    copied :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more :: ir_bool_op(&m, &a, IROp.Lt, written, length)
+    ir_exit_unless(&m, &a, more, copied)
+    from :: ir_temp(&m, &a, word_row)
+    prefix_first :: ir_map_takes_left(&m, p, &a, shape, data, -1, prefix, sorted, source, taken, tail)
+    ir_open_if(&a.f, prefix_first, a.line)
+    ir_emit(&a.f, IROp.Copy, from, prefix, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Add, prefix, prefix, one, IR_OVERFLOW_WRAP, a.line)
+    ir_else(&a.f, a.line)
+    taken_at :: ir_element_address(&m, &a, source, taken, 8)
+    tail_position :: ir_load_word(&m, &a, taken_at, 0)
+    ir_emit(&a.f, IROp.Copy, from, tail_position, -1, -1, a.line)
+    ir_emit(&a.f, IROp.Add, taken, taken, one, IR_OVERFLOW_WRAP, a.line)
+    ir_end(&a.f, a.line)
+    entry :: ir_element_address(&m, &a, data, from, shape.stride)
+    landing :: ir_element_address(&m, &a, target, written, shape.stride)
+    ir_emit(&a.f, IROp.CopyBytes, -1, landing, entry, shape.stride, a.line)
+    ir_emit(&a.f, IROp.Add, written, written, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_free(&m, &a, first, both_bytes)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// `value` = min(value, limit), in place.
+fn ir_map_clamp(m: &IRModule, a: &IRBuilder, value: Int, limit: Int) Never! {
+    over :: ir_bool_op(&m, &a, IROp.Gt, value, limit)
+    ir_open_if(&a.f, over, a.line)
+    ir_emit(&a.f, IROp.Copy, value, limit, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+}
+
+// Whether a merge takes its left run's next entry: the right run [right,
+// right_end) is spent, or the left run [left, left_end) is not and its key
+// is the lesser. A run's item `i` is entry `i` itself when its array is -1,
+// else the entry whose position is word `i` of the array.
+fn ir_map_takes_left(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, data: Int, left_array: Int, left: Int, left_end: Int, right_array: Int, right: Int, right_end: Int) -> Int Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    takes :: ir_temp(&m, &a, bool_row)
+    ir_emit(&a.f, IROp.Const, takes, 1, -1, -1, a.line)
+    right_open :: ir_bool_op(&m, &a, IROp.Lt, right, right_end)
+    ir_open_if(&a.f, right_open, a.line)
+    ir_emit(&a.f, IROp.Const, takes, 0, -1, -1, a.line)
+    left_open :: ir_bool_op(&m, &a, IROp.Lt, left, left_end)
+    ir_open_if(&a.f, left_open, a.line)
+    left_key :: ir_map_run_key(&m, &a, shape, data, left_array, left)
+    right_key :: ir_map_run_key(&m, &a, shape, data, right_array, right)
+    order :: ir_map_order(&m, p, &a, shape.kind, left_key, right_key)
+    ir_emit(&a.f, IROp.Copy, takes, order.less, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    takes
+}
+
+// The key of item `index` of a merge run (ir_map_takes_left).
+fn ir_map_run_key(m: &IRModule, a: &IRBuilder, shape: IRMapShape, data: Int, array: Int, index: Int) -> Int Never! {
+    position := index
+    if array >= 0 {
+        at :: ir_element_address(&m, &a, array, index, 8)
+        position = ir_load_word(&m, &a, at, 0)
+    }
+    entry :: ir_element_address(&m, &a, data, position, shape.stride)
+    ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+}
+
+// map.order(map) -> the address of the hashed Map's entries in key order:
+// its own buffer when frozen or when every entry is in order, else a fresh
+// buffer of byte copies (map.merge) the caller frees.
+fn ir_map_order_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int) Never! {
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    length :: ir_load_word(&m, &a, map, 0)
+    data :: ir_load_word(&m, &a, map, 16)
+    sorted :: ir_map_sorted(&m, &a, shape, map)
+    clean :: ir_bool_op(&m, &a, IROp.Eq, sorted, length)
+    ir_open_if(&a.f, clean, a.line)
+    ir_emit(&a.f, IROp.Return, -1, data, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    width :: ir_word_const(&m, &a, shape.stride)
+    bytes :: ir_word_op(&m, &a, IROp.Mul, length, width)
+    eight :: ir_word_const(&m, &a, 8)
+    view :: ir_runtime(&m, &a, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    _ :: ir_map_call(&m, p, &a, map_row, "map.merge", [Int]{map, view}, -1)
+    ir_emit(&a.f, IROp.Return, -1, view, -1, -1, a.line)
+}
+
+// map.settle(map): a hashed Map whose own variable reads it in key order
+// merges its tail in place first, so that read and the ones after it walk
+// its buffer: made unique, then rebuilt at its capacity.
+fn ir_map_settle_body(m: &IRModule, p: IRProgram, a: &IRBuilder, map_row: Int, map: Int) Never! {
+    shape :: ir_map_shape(&m, p, map_row) ?? panic("map.settle of a type without a Map shape")
+    length :: ir_load_word(&m, &a, map, 0)
+    sorted :: ir_map_sorted(&m, &a, shape, map)
+    dirty :: ir_bool_op(&m, &a, IROp.Ne, sorted, length)
+    ir_open_if(&a.f, dirty, a.line)
+    ir_make_unique(&m, p, &a, map)
+    capacity :: ir_load_word(&m, &a, map, 8)
+    _ :: ir_map_call(&m, p, &a, map_row, "map.rebuild", [Int]{map, capacity}, -1)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// map.rebuild(map, capacity): moves the hashed Map's entries, in key order,
+// into a fresh counted buffer of `capacity` (at least its length) entries
+// with a fresh index, every entry sorted; the old buffer's owner is the
+// caller, which made it unique (a counted one is freed, its entries moved).
+fn ir_map_rebuild_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, capacity: Int) Never! {
+    word_row :: ir_word_row(&m)
+    zero :: ir_word_const(&m, &a, 0)
+    one :: ir_word_const(&m, &a, 1)
+    eight :: ir_word_const(&m, &a, 8)
+    length :: ir_load_word(&m, &a, map, 0)
+    old_capacity :: ir_load_word(&m, &a, map, 8)
+    old_data :: ir_load_word(&m, &a, map, 16)
+    slots :: ir_word_const(&m, &a, 8)
+    wanted :: ir_word_op(&m, &a, IROp.Add, capacity, capacity)
+    sized :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    short :: ir_bool_op(&m, &a, IROp.Lt, slots, wanted)
+    ir_exit_unless(&m, &a, short, sized)
+    ir_emit(&a.f, IROp.Add, slots, slots, slots, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    mask :: ir_word_op(&m, &a, IROp.Sub, slots, one)
+    bytes :: ir_map_block_bytes(&m, &a, shape, capacity, mask)
+    fresh :: ir_runtime(&m, &a, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    _ :: ir_map_call(&m, p, &a, map_row, "map.merge", [Int]{map, fresh}, -1)
+    trailer :: ir_map_trailer(&m, &a, shape, fresh, capacity)
+    ir_emit(&a.f, IROp.Store, -1, trailer, 0, length, a.line)
+    ir_emit(&a.f, IROp.Store, -1, trailer, 8, mask, a.line)
+    cleared :: ir_word_const(&m, &a, 0)
+    emptied :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    uncleared :: ir_bool_op(&m, &a, IROp.Lt, cleared, slots)
+    ir_exit_unless(&m, &a, uncleared, emptied)
+    cleared_at :: ir_map_slot_address(&m, &a, trailer, cleared)
+    ir_emit(&a.f, IROp.Store, -1, cleared_at, 0, zero, a.line)
+    ir_emit(&a.f, IROp.Add, cleared, cleared, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    indexed :: ir_word_const(&m, &a, 0)
+    hashed :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    unhashed :: ir_bool_op(&m, &a, IROp.Lt, indexed, length)
+    ir_exit_unless(&m, &a, unhashed, hashed)
+    entry :: ir_element_address(&m, &a, fresh, indexed, shape.stride)
+    key :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+    hash :: ir_map_tag(&m, &a, shape, key)
+    ir_map_slot_insert(&m, &a, trailer, hash, indexed)
+    ir_emit(&a.f, IROp.Add, indexed, indexed, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    counted :: ir_bool_op(&m, &a, IROp.Gt, old_capacity, zero)
+    ir_open_if(&a.f, counted, a.line)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    last :: ir_runtime(&m, &a, "jet_rt_block_release", [Int]{old_data}, bool_row)
+    ir_open_if(&a.f, last, a.line)
+    old_trailer :: ir_map_trailer(&m, &a, shape, old_data, old_capacity)
+    old_mask :: ir_load_word(&m, &a, old_trailer, 8)
+    old_bytes :: ir_map_block_bytes(&m, &a, shape, old_capacity, old_mask)
+    ir_free(&m, &a, old_data, old_bytes)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_emit(&a.f, IROp.Store, -1, map, 16, fresh, a.line)
+    ir_emit(&a.f, IROp.Store, -1, map, 8, capacity, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
 // Moves the key and value in: an existing key keeps its entry key (the
@@ -182,24 +774,54 @@ fn ir_map_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
     if m.types[shape.key.ty].drop != "" -> ir_emit(&a.f, IROp.Drop, -1, key, -1, -1, a.line)
     ir_emit(&a.f, IROp.Return, -1, old, -1, -1, a.line)
     ir_end(&a.f, a.line)
-    minus_one :: ir_word_const(&m, &a, -1)
-    point :: ir_word_op(&m, &a, IROp.Sub, minus_one, index)
-    length :: ir_list_reserve(&m, &a, map, shape.entry)
-    room :: ir_load_word(&m, &a, map, 16)
-    target :: ir_element_address(&m, &a, room, point, shape.stride)
-    one :: ir_word_const(&m, &a, 1)
-    after :: ir_word_op(&m, &a, IROp.Add, point, one)
-    shifted :: ir_element_address(&m, &a, room, after, shape.stride)
-    moved :: ir_word_op(&m, &a, IROp.Sub, length, point)
-    width :: ir_word_const(&m, &a, shape.stride)
-    bytes :: ir_word_op(&m, &a, IROp.Mul, moved, width)
-    _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
-    a.fresh[key] = true
-    ir_store_at(&m, p, &a, target, shape.key.offset, key)
-    a.fresh[value] = true
-    ir_store_at(&m, p, &a, target, shape.value.offset, value)
-    grown :: ir_word_op(&m, &a, IROp.Add, length, one)
-    ir_emit(&a.f, IROp.Store, -1, map, 0, grown, a.line)
+    if ir_map_hashed(shape) {
+        // A new key goes after the last entry, out of order until a
+        // rebuild merges it in.
+        length :: ir_load_word(&m, &a, map, 0)
+        capacity :: ir_load_word(&m, &a, map, 8)
+        full :: ir_bool_op(&m, &a, IROp.Ge, length, capacity)
+        ir_open_if(&a.f, full, a.line)
+        grown :: ir_word_op(&m, &a, IROp.Add, length, length)
+        four :: ir_word_const(&m, &a, 4)
+        small :: ir_bool_op(&m, &a, IROp.Lt, grown, four)
+        ir_open_if(&a.f, small, a.line)
+        ir_emit(&a.f, IROp.Copy, grown, four, -1, -1, a.line)
+        ir_end(&a.f, a.line)
+        _ :: ir_map_call(&m, p, &a, map_row, "map.rebuild", [Int]{map, grown}, -1)
+        ir_end(&a.f, a.line)
+        hash :: ir_map_tag(&m, &a, shape, key)
+        room :: ir_load_word(&m, &a, map, 16)
+        room_capacity :: ir_load_word(&m, &a, map, 8)
+        target :: ir_element_address(&m, &a, room, length, shape.stride)
+        a.fresh[key] = true
+        ir_store_at(&m, p, &a, target, shape.key.offset, key)
+        a.fresh[value] = true
+        ir_store_at(&m, p, &a, target, shape.value.offset, value)
+        one :: ir_word_const(&m, &a, 1)
+        grown_length :: ir_word_op(&m, &a, IROp.Add, length, one)
+        ir_emit(&a.f, IROp.Store, -1, map, 0, grown_length, a.line)
+        trailer :: ir_map_trailer(&m, &a, shape, room, room_capacity)
+        ir_map_slot_insert(&m, &a, trailer, hash, length)
+    } else {
+        minus_one :: ir_word_const(&m, &a, -1)
+        point :: ir_word_op(&m, &a, IROp.Sub, minus_one, index)
+        length :: ir_list_reserve(&m, &a, map, shape.entry)
+        room :: ir_load_word(&m, &a, map, 16)
+        target :: ir_element_address(&m, &a, room, point, shape.stride)
+        one :: ir_word_const(&m, &a, 1)
+        after :: ir_word_op(&m, &a, IROp.Add, point, one)
+        shifted :: ir_element_address(&m, &a, room, after, shape.stride)
+        moved :: ir_word_op(&m, &a, IROp.Sub, length, point)
+        width :: ir_word_const(&m, &a, shape.stride)
+        bytes :: ir_word_op(&m, &a, IROp.Mul, moved, width)
+        _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
+        a.fresh[key] = true
+        ir_store_at(&m, p, &a, target, shape.key.offset, key)
+        a.fresh[value] = true
+        ir_store_at(&m, p, &a, target, shape.value.offset, value)
+        grown :: ir_word_op(&m, &a, IROp.Add, length, one)
+        ir_emit(&a.f, IROp.Store, -1, map, 0, grown, a.line)
+    }
     null := -1
     if option_row >= 0 {
         null = ir_temp(&m, &a, option_row)
@@ -245,6 +867,11 @@ fn ir_map_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
         source :: ir_address_at(&m, &a, entry, shape.value.offset)
         ir_emit(&a.f, IROp.CopyBytes, -1, boxed, source, ir_align8(value_size), a.line)
     }
+    hash := -1
+    if ir_map_hashed(shape) {
+        removed_probe :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
+        hash = ir_map_tag(&m, &a, shape, removed_probe)
+    }
     if m.types[shape.key.ty].drop != "" {
         removed_key :: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
         ir_emit(&a.f, IROp.Drop, -1, removed_key, -1, -1, a.line)
@@ -259,6 +886,14 @@ fn ir_map_take_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape
     bytes :: ir_word_op(&m, &a, IROp.Mul, moved, width)
     _ :: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
     ir_emit(&a.f, IROp.Store, -1, map, 0, last, a.line)
+    if hash >= 0 {
+        capacity :: ir_load_word(&m, &a, map, 8)
+        counted :: ir_bool_op(&m, &a, IROp.Gt, capacity, none)
+        ir_open_if(&a.f, counted, a.line)
+        trailer :: ir_map_trailer(&m, &a, shape, data, capacity)
+        ir_map_slot_remove(&m, &a, trailer, hash, index)
+        ir_end(&a.f, a.line)
+    }
     ir_emit(&a.f, IROp.Return, -1, boxed, -1, -1, a.line)
 }
 
@@ -270,6 +905,19 @@ fn ir_map_call(m: &IRModule, p: IRProgram, b: &IRBuilder, map_row: Int, name: St
     ir_emit(&b.f, IROp.Call, dst, callee, operands, args.len(), b.line)
     ir_stop_check(&m, &b)
     dst
+}
+
+// The index of the entry map.set just added to the Map at `map` after
+// map.find missed with `found`: a hashed Map appends it, any other inserts it
+// at the insertion point -1 - found.
+fn ir_map_added_index(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int, found: Int) -> Int Never! {
+    if ir_map_hashed(shape) {
+        length :: ir_load_word(&m, &b, map, 0)
+        one :: ir_word_const(&m, &b, 1)
+        return ir_word_op(&m, &b, IROp.Sub, length, one)
+    }
+    minus_one :: ir_word_const(&m, &b, -1)
+    ir_word_op(&m, &b, IROp.Sub, minus_one, found)
 }
 
 // Room for one more element of the list at `list`: grows its buffer to twice
@@ -439,7 +1087,8 @@ fn ir_render_map(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: 
     ir_push_static(&m, &b, builder, "[:]")
     ir_else(&b.f, b.line)
     ir_push_static(&m, &b, builder, "[")
-    walk :: ir_walk_open(&m, &b, slot, shape.entry)
+    ordered :: ir_map_ordered(&m, p, &b, slot)
+    walk :: ir_walk_open(&m, &b, ordered, shape.entry)
     first :: ir_word_const(&m, &b, 0)
     later :: ir_bool_op(&m, &b, IROp.Ne, walk.index, first)
     ir_open_if(&b.f, later, b.line)
@@ -451,7 +1100,87 @@ fn ir_render_map(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: 
     value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
     ir_render_push_value(&m, p, &b, builder, value, mode, span)
     ir_walk_close(&m, &b, walk)
+    ir_map_ordered_end(&m, &b, slot, ordered)
     ir_push_static(&m, &b, builder, "]")
+    ir_end(&b.f, b.line)
+}
+
+// The entries of the Map at `map` in key order, as a List header (len, cap,
+// data) to walk (ir_walk_open). A hashed Map's is a [U8] header owning its
+// map.order buffer (capacity 0 when that is the Map's own), held by a
+// variable binding so that any exit drops it, as ir_map_ordered_end does on
+// the way out; any other Map is its own.
+fn ir_map_ordered(m: &IRModule, p: IRProgram, b: &IRBuilder, map: Int) -> Int Never! {
+    row :: b.f.slot_type[map]
+    shape :: ir_map_shape(&m, p, row) ?? return map
+    if !ir_map_hashed(shape) -> return map
+    word_row :: ir_word_row(&m)
+    bytes_ty :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    bytes_row :: ir_value_type(&m, p, bytes_ty) ?? return ir_type_fail(&b, Span{start: 0, end: 0}, bytes_ty)
+    view :: ir_map_call(&m, p, &b, row, "map.order", [Int]{map}, word_row)
+    header :: ir_list_empty(&m, &b, bytes_row)
+    b.fresh[header] = false
+    length :: ir_load_word(&m, &b, map, 0)
+    data :: ir_load_word(&m, &b, map, 16)
+    ir_emit(&b.f, IROp.Store, -1, header, 0, length, b.line)
+    ir_emit(&b.f, IROp.Store, -1, header, 16, view, b.line)
+    copied :: ir_bool_op(&m, &b, IROp.Ne, view, data)
+    ir_open_if(&b.f, copied, b.line)
+    width :: ir_word_const(&m, &b, shape.stride)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
+    ir_emit(&b.f, IROp.Store, -1, header, 8, bytes, b.line)
+    ir_end(&b.f, b.line)
+    &b.bindings.push(IRBinding{name: "map.ordered", slot: header, owned: true})
+    header
+}
+
+// Drops the ordered header `header` of the Map at `map` (ir_map_ordered).
+fn ir_map_ordered_end(m: &IRModule, b: &IRBuilder, map: Int, header: Int) Never! {
+    if header == map || !ir_owned_binding(b, header) -> return
+    ir_emit(&b.f, IROp.Drop, -1, header, -1, -1, b.line)
+    ir_disown(&b, header)
+}
+
+// Before a walk of the hashed Map at `map` that expression `collection`
+// reads: a variable that owns it and may write it (a `:=` binding, a write
+// parameter) settles it (map.settle), its out-of-order entries merged into
+// its own buffer, so the walk reads that buffer instead of a sorted copy.
+fn ir_map_settle_for(m: &IRModule, p: IRProgram, b: &IRBuilder, collection: Int, map: Int) Never! {
+    row :: b.f.slot_type[map]
+    shape :: ir_map_shape(&m, p, row) ?? return
+    if !ir_map_hashed(shape) -> return
+    if ir_body_node(p, b, collection).kind == .Local(local) {
+        binding :: ir_lookup_local(b, local) ?? return
+        if binding.slot != map || binding.indirect >= 0 -> return
+        owner :: local.mutable && binding.owned && binding.live < 0
+        if owner || binding.write {
+            _ :: ir_map_call(&m, p, &b, row, "map.settle", [Int]{map}, -1)
+        }
+    }
+}
+
+// Empties the index of the hashed Map at `map` after its entries are gone.
+fn ir_map_clear_index(m: &IRModule, b: &IRBuilder, shape: IRMapShape, map: Int) Never! {
+    zero :: ir_word_const(&m, &b, 0)
+    capacity :: ir_load_word(&m, &b, map, 8)
+    counted :: ir_bool_op(&m, &b, IROp.Gt, capacity, zero)
+    ir_open_if(&b.f, counted, b.line)
+    data :: ir_load_word(&m, &b, map, 16)
+    trailer :: ir_map_trailer(&m, &b, shape, data, capacity)
+    ir_emit(&b.f, IROp.Store, -1, trailer, 0, zero, b.line)
+    mask :: ir_load_word(&m, &b, trailer, 8)
+    cleared :: ir_word_const(&m, &b, 0)
+    emptied :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    within :: ir_bool_op(&m, &b, IROp.Le, cleared, mask)
+    ir_exit_unless(&m, &b, within, emptied)
+    cleared_at :: ir_map_slot_address(&m, &b, trailer, cleared)
+    ir_emit(&b.f, IROp.Store, -1, cleared_at, 0, zero, b.line)
+    one :: ir_word_const(&m, &b, 1)
+    ir_emit(&b.f, IROp.Add, cleared, cleared, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
 }
 
@@ -490,11 +1219,12 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         }
         zero :: ir_word_const(&m, &b, 0)
         ir_emit(&b.f, IROp.Store, -1, subject, 0, zero, b.line)
+        if ir_map_hashed(shape) -> ir_map_clear_index(&m, &b, shape, subject)
         return Val(-1)
     }
     // `equal(other)` is the maps' equality; `merge(other)` is a copy of the
-    // receiver with each entry of `other`, in key order, set as a copy: the
-    // right side wins.
+    // receiver with each entry of `other` set as a copy: the right side wins
+    // (each key once, so the walk's order is never seen).
     if symbol == "jet_map_equal" || symbol == "jet_map_merge" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map {symbol} with {operands.len() - 1} arguments"))
         other :: ir_adapt(&m, p, &b, operands[1], row, span)
@@ -532,9 +1262,11 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         result_row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
         result :: ir_list_empty(&m, &b, result_row)
         if ir_list_element(&m, p, b, result) != Val(shape.entry) -> return Val(ir_fail_slot(&b, span, "Map to_list entries as {ir_type_name(ty)}"))
-        walk :: ir_walk_open(&m, &b, subject, shape.entry)
+        ordered :: ir_map_ordered(&m, p, &b, subject)
+        walk :: ir_walk_open(&m, &b, ordered, shape.entry)
         ir_list_push(&m, p, &b, result, shape.entry, walk.item)
         ir_walk_close(&m, &b, walk)
+        ir_map_ordered_end(&m, &b, subject, ordered)
         return Val(result)
     }
     // `intersection(other)`: a new Map of copies of the receiver's entries
@@ -590,7 +1322,22 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
         ir_open_if(&b.f, present, b.line)
         data :: ir_load_word(&m, &b, subject, 16)
-        least :: ir_load_at(&m, &b, data, shape.key.offset, shape.key.ty)
+        pointer_row :: ir_pointer_row(&m)
+        chosen :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Copy, chosen, data, -1, -1, b.line)
+        if ir_map_hashed(shape) {
+            // The appended entries are out of order: the least of all.
+            walk :: ir_walk_open(&m, &b, subject, shape.entry)
+            entry :: ir_element_address(&m, &b, data, walk.index, shape.stride)
+            candidate :: ir_load_at(&m, &b, entry, shape.key.offset, shape.key.ty)
+            incumbent :: ir_load_at(&m, &b, chosen, shape.key.offset, shape.key.ty)
+            order :: ir_map_order(&m, p, &b, shape.kind, candidate, incumbent)
+            ir_open_if(&b.f, order.less, b.line)
+            ir_emit(&b.f, IROp.Copy, chosen, entry, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            ir_walk_close(&m, &b, walk)
+        }
+        least :: ir_load_at(&m, &b, chosen, shape.key.offset, shape.key.ty)
         probe :: ir_copy_value(&m, p, &b, least, span)
         removed :: ir_map_call(&m, p, &b, row, "map.remove", [Int]{subject, probe}, option_row)
         ir_option_set(&m, &b, result, removed)
@@ -682,10 +1429,12 @@ fn ir_map_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     list_row :: ir_value_type(&m, p, Type.List{element: item_ty}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(item_ty)}]")
     items :: ir_list_empty(&m, &b, list_row)
-    walk :: ir_walk_open(&m, &b, map, shape.entry)
+    ordered :: ir_map_ordered(&m, p, &b, map)
+    walk :: ir_walk_open(&m, &b, ordered, shape.entry)
     item :: ir_load_at(&m, &b, walk.item, member.offset, member.ty)
     ir_list_push(&m, p, &b, items, member.ty, item)
     ir_walk_close(&m, &b, walk)
+    ir_map_ordered_end(&m, &b, map, ordered)
     meta :: ir_lazy_meta(&m, p, &b, item_ty, span)
     if meta < 0 -> return -1
     ir_lazy_iter_from_list(&m, p, &b, items, item_ty, meta, result_row, span)
@@ -703,20 +1452,25 @@ fn ir_map_pick(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     pointer_row :: ir_pointer_row(&m)
     result :: ir_fresh_temp(&m, &b, result_row)
     ir_option_none(&m, &b, result)
-    length :: ir_load_word(&m, &b, map, 0)
+    // A hashed Map's least key is found by a scan, its appended entries
+    // being out of order; ties between values that order equal yet differ
+    // need the key order.
+    source :: if !keyed && kind == "order" -> ir_map_ordered(&m, p, &b, map) else -> map
+    length :: ir_load_word(&m, &b, source, 0)
     zero :: ir_word_const(&m, &b, 0)
     present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
     ir_open_if(&b.f, present, b.line)
-    data :: ir_load_word(&m, &b, map, 16)
+    data :: ir_load_word(&m, &b, source, 16)
     chosen :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.Copy, chosen, data, -1, -1, b.line)
-    if !keyed {
-        walk :: ir_walk_open(&m, &b, map, shape.entry)
+    if !keyed || ir_map_hashed(shape) {
+        walk :: ir_walk_open(&m, &b, source, shape.entry)
         entry :: ir_element_address(&m, &b, data, walk.index, shape.stride)
         candidate :: ir_load_at(&m, &b, entry, member.offset, member.ty)
         incumbent :: ir_load_at(&m, &b, chosen, member.offset, member.ty)
         order :: ir_map_order(&m, p, &b, kind, candidate, incumbent)
-        // min replaces on candidate < incumbent; max unless candidate < incumbent.
+        // first_key and min replace on candidate < incumbent; max unless
+        // candidate < incumbent.
         replace := order.less
         if symbol == "jet_map_max_value_kernel" {
             no :: ir_word_const(&m, &b, 0)
@@ -732,6 +1486,7 @@ fn ir_map_pick(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     made :: ir_option_make(&m, p, &b, result_row, item, size)
     ir_option_set(&m, &b, result, made)
     ir_end(&b.f, b.line)
+    ir_map_ordered_end(&m, &b, map, source)
     result
 }
 
@@ -744,7 +1499,8 @@ fn ir_map_merge_with(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShap
     target :: ir_copy_value(&m, p, &b, subject, span)
     // The copy shares the receiver's buffer until it is the target's own.
     ir_make_unique(&m, p, &b, target)
-    walk :: ir_walk_open(&m, &b, other, shape.entry)
+    ordered :: ir_map_ordered(&m, p, &b, other)
+    walk :: ir_walk_open(&m, &b, ordered, shape.entry)
     key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
     value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
     found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{target, key}, word_row)
@@ -761,6 +1517,7 @@ fn ir_map_merge_with(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShap
     ir_map_set(&m, p, &b, row, target, key, value)
     ir_end(&b.f, b.line)
     ir_walk_close(&m, &b, walk)
+    ir_map_ordered_end(&m, &b, other, ordered)
     ir_release(&m, &b, other)
     ir_release(&m, &b, callback)
     target
