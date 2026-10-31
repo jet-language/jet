@@ -1,18 +1,17 @@
 package {
     name: "gap"
-    authority: { allow: [GPU, Net] }
+    authority: { allow: [Net] }
 }
 
-use core.compute as compute
+use core.ui.host.ime as ime
 use core.web.browser as browser
 
 fn nine() {
-    row :: compute.vec(9, 1.0) ?? panic("vec")
-    wire :: compute.serialize(row) ?? panic("serialize")
+    event :: ime.poll() ?? panic("poll")
     print("made")
 }
 
-#Test("nine serializes its vector") {
+#Test("nine polls one IME event") {
     nine()
 }
 
