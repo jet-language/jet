@@ -21,6 +21,7 @@ use jet_foundation.[
     core_source_owns_type,
     symbol_id,
     ast_empty_call_arg_flags,
+    expr_span,
 ]
 
 struct SemaStreamHandleSpec {
@@ -303,6 +304,15 @@ fn sema_stream_handle_integer_width(ty: Type) -> Bool Never! {
     }
 }
 
+// (Rust `check_shift_arg`): a `Reader`/`Cursor` byte-shift argument that does
+// not fit its fixed parameter is E0112 about the call; every other handle
+// argument is the plain E0108 mismatch.
+fn sema_stream_handle_argument_mismatch(callee: String, required: Type, offered: Type, span: Span) -> Diagnostic {
+    shift :: callee == "Reader.over" || callee == "Reader.take" || callee == "Reader.seek" || callee == "Reader.skip" || callee == "Cursor.over" || callee == "Cursor.take_until"
+    if !shift -> return sema_type_mismatch(required, offered, span)
+    sema_error("E0112", span, "`{callee}` wants {sema_type_show(required)}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
+}
+
 fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
     checked_args := args
     binding :: sema_call_bind_args(callee, params, &checked_args, span, &diagnostics) ?? {
@@ -316,8 +326,18 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         if slot < 0 || slot >= params.len() -> return None
         required_declared :: sema_call_parameter_type(params[slot]) ?? return None
         required := sema_call_resolved_type(required_declared, environment, program)
+        value_start :: diagnostics.len()
         value :: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(checked_args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        checked :: value ?? return None
+        checked :: value ?? {
+            // The parameter type is the value's hint: its own E0108 against
+            // it becomes the handle call's argument mismatch.
+            value_span :: expr_span(checked_args[index].expr)
+            if sema_value_mismatch_index(diagnostics, value_start, value_span) == .Val(mismatch_index) {
+                probe_diagnostics := [Diagnostic]{}
+                if sema_probe_expression(checked_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) == .Val(offered) -> diagnostics[mismatch_index] = sema_stream_handle_argument_mismatch(callee, required, sema_call_resolved_type(offered.ty, environment, program), value_span)
+            }
+            return None
+        }
         if shift_argument == index {
             if checked.ty == .IntN(_, _) {
                 if !sema_stream_handle_integer_width(checked.ty) {
@@ -332,7 +352,7 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         compatible := sema_call_type_assignable(required_declared, checked.ty, environment, program) ?? false
         if !compatible && sema_stream_handle_fixed_list_assignable(required_declared, checked.ty, environment, program) -> compatible = true
         if !compatible {
-            &diagnostics.push(sema_type_mismatch(required, checked.ty, checked_args[index].span))
+            &diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
             return None
         }
         &values.push(checked)
