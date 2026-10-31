@@ -122,6 +122,33 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI driver scratch: {err}")
 }
 
+#Test("UI known-failing ledger rows own real snapshot failures and reject stale passes") {
+    root :: kit_ui_test_scratch("known-failing")
+    loop path in ["tests/ui/owned.jet", "tests/ui/stale.jet", "tests/ui/unowned.jet", "tests/ui/dir_owned/run.jet"] -> kit_exec_write(files.join(root, path), "fn run() {{}}\n")
+    loop path in ["tests/ui/owned.stderr", "tests/ui/unowned.stderr", "tests/ui/dir_owned/stderr"] -> kit_exec_write(files.join(root, path), "Error [E0107]: other\n")
+    kit_exec_write(files.join(root, "tests/ui/stale.stderr"), "Error [E0109]: mismatch\n")
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "# repo-relative ID\tcard\treason\ntests/ui/owned\t#4868\towned ui mismatch\ntests/ui/stale\t#4869\tstale ui row\ntests/ui/dir_owned\t#4870\towned ui project\n")
+    kit_ui_stage(root, files.join(root, "ui-source"))
+    entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.len(), 4)
+    loop (index, entry) in entries {
+        outcome :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))[0]
+        if entry.path == "tests/ui/owned.jet" {
+            assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+            assert(outcome.verdict.detail.starts_with("#4868 owned ui mismatch: "))
+        } else if entry.path == "tests/ui/dir_owned/run.jet" {
+            assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+        } else if entry.path == "tests/ui/stale.jet" {
+            assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+            assert_eq(outcome.verdict.detail, "#4869 stale ui row: remove stale known-failing annotation")
+        } else {
+            assert_eq(entry.path, "tests/ui/unowned.jet")
+            assert_eq(outcome.verdict.status, "FAIL")
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI known-failing scratch: {err}")
+}
+
 #Test("UI shared staging preserves imported modules and route trees without discovering them") {
     root :: kit_ui_test_scratch("imports")
     main :: "use \"./modules/helper\" as helper\nfn run() {{ print(helper.value()) }}\n"
