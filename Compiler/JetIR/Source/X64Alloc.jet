@@ -19,7 +19,9 @@
 // least spill weight (ir_x64_lighter; its references, each weighing
 // IR_X64_LOOP_WEIGHT per enclosing loop up to three, but in an If arm that
 // leaves the function only per loop inside that arm) lives in its frame
-// home, the one that ends last among equals.
+// home, the one that ends last among equals. A register weighs its owner's
+// weight plus that of the copies riding on it (ir_x64_aliases), which lose
+// it with the owner: a light value never takes a hot copy down with it.
 // A value a hot Loop shares with the code around it has a slot of its own
 // in the Loop at O2 (OptSplit.jet), so the Loop's range alone competes.
 //
@@ -572,9 +574,10 @@ fn ir_x64_storage_size(f: IRFunction, at: Int) -> Int Never! {
 // own, and loses it with the source. A range whose first reference writes
 // it (`fresh`) may take the register of one whose last reference is that
 // same instruction: selection reads every operand of an instruction before
-// it writes the result. When every register is taken, the range with the
-// least spill weight (ir_x64_lighter) stays in its home. Per slot: its
-// register, -1 for none.
+// it writes the result. When every register is taken, the register whose
+// owner and live riders weigh least together (ir_x64_lighter) goes to the
+// range if they are lighter than it; else the range stays in its home. Per
+// slot: its register, -1 for none.
 fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fresh: [Bool], aliases: [Int], pool: [Int]) -> [Int] Never! {
     count :: starts.len()
     regs := [Int]{}
@@ -613,17 +616,29 @@ fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fre
             regs[slot] = pool[free]
             next
         }
+        // A register holds its owner's spill weight plus that of the copies
+        // riding on it that are still live: evicting the owner evicts them
+        // too. Riders that ended are dropped here, so the list stays the
+        // live ones.
+        live := [Int]{}
+        held := loop row in 0..<pool.len() -> weights[owners[row]]
+        loop rider in riders {
+            if ends[rider] < start -> next
+            &live.push(rider)
+            loop row in 0..<pool.len() {
+                if regs[rider] == pool[row] -> held[row] = held[row] + weights[rider]
+            }
+        }
+        riders = ^live
         victim := 0
         loop row in 1..<pool.len() {
-            if ir_x64_lighter(weights, ends, owners[row], owners[victim]) -> victim = row
+            if ir_x64_lighter(held[row], ends[owners[row]], held[victim], ends[owners[victim]]) -> victim = row
         }
         loser :: owners[victim]
-        if ir_x64_lighter(weights, ends, loser, slot) {
+        if ir_x64_lighter(held[victim], ends[loser], weights[slot], ends[slot]) {
             regs[loser] = -1
-            // The copies riding on it lose the register with it.
             kept := [Int]{}
             loop rider in riders {
-                if ends[rider] < start -> next
                 if regs[rider] == pool[victim] {
                     regs[rider] = -1
                     next
@@ -638,10 +653,29 @@ fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], fre
     regs
 }
 
-// Whether range `a` should stay in its home before range `b`: its spill
-// weight is less, or equal and it ends later.
-fn ir_x64_lighter(weights: [Int], ends: [Int], a: Int, b: Int) -> Bool Never! {
-    weights[a] < weights[b] || (weights[a] == weights[b] && ends[a] > ends[b])
+// Whether a register holding spill weight `a` up to `a_end` should go before
+// one holding `b` up to `b_end`: it holds less, or as much and ends later.
+fn ir_x64_lighter(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
+    a < b || (a == b && a_end > b_end)
+}
+
+// One register: a light value (weight 1) whose hot copy (weight 100) rides
+// on it, then a range of weight 50. Evicting the value would evict the copy
+// too, 101 against 50, so the new range stays in its home.
+#Test("A copy riding on a register adds its weight to the register's") {
+    starts :: [Int]{0, 1, 2}
+    ends :: [Int]{10, 5, 8}
+    weights :: [Int]{1, 100, 50}
+    eligible :: [Bool]{true, true, true}
+    fresh :: [Bool]{true, true, true}
+    aliases :: [Int]{-1, 0, -1}
+    regs :: ir_x64_scan(starts, ends, weights, eligible, fresh, aliases, [Int]{3})
+    assert_eq(regs[0], 3)
+    assert_eq(regs[1], 3)
+    assert_eq(regs[2], -1)
+    // Without the copy riding, the value alone is lighter and goes home.
+    alone :: ir_x64_scan(starts, ends, weights, eligible, fresh, [Int]{-1, -1, -1}, [Int]{3})
+    assert_eq(alone[0], -1)
 }
 
 // f(x) = g(x - 1) + x: the Call is the last read of x - 1 and writes g's
