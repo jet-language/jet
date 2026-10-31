@@ -535,12 +535,8 @@ fn os_load_u8(address: I64) -> I64 {
 #[Unsafe("writes one byte to a live writable mapped address supplied by the caller"), FFI(asm)]
 fn os_store_u8(address: I64, value: I64) {
     """
-    push {address}
-    push {value}
-    pop rdx
-    pop rcx
-    mov byte ptr [rcx], dl
-    ; clobbers rcx, rdx
+    mov rax, {value}
+    mov byte ptr [{address}], al
     """
 }
 

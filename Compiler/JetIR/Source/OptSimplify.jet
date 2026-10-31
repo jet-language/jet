@@ -17,6 +17,8 @@
 //   fuse        `t = a <cmp> b; n = not t` becomes `n = a <inverse> b` when t
 //               has no other reader (never for Float: NaN compares false both
 //               ways)
+//   branch      a Bool from `&&` or `||` read only by the branch after it
+//               becomes branches on its two operands (ir_opt_short_circuits)
 //   propagate   a slot written once by a Move/Copy of a slot written once
 //               reads its source directly
 //   address     an address written once by `p = offset t k` folds into its
@@ -31,7 +33,10 @@
 //               value masked by a nonnegative constant
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
+// The address sums below are no sweep of it: Opt.jet ir_opt_function moves
+// them once per function, last (ir_opt_sink_addresses).
 
+use jet_backend.[X64_RDI, X64_RSI]
 use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
 
 IR_OPT_SIMPLIFY_ROUNDS :: 8
@@ -63,6 +68,7 @@ fn ir_opt_simplify(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         changed += ir_opt_structure(&f, &report)
         changed += ir_opt_unwrap(&f)
         ir_opt_compact(&f)
+        changed += ir_opt_short_circuits(&f, &report)
         if changed == 0 -> break
         round += 1
     }
@@ -480,6 +486,268 @@ fn ir_opt_fused_def(f: IRFunction, at: Int) -> Int Never! {
 }
 
 // ---------------------------------------------------------------------------
+// Short circuits as branches.
+
+// `r = c1 && c2` and `r = c1 || c2` as built (BuildExpr.jet
+// ir_short_circuit) are `r = copy c1; if c1 { B; r = c2 }` and
+// `r = copy c1; t = not c1; if t { B; r = c2 }`. When the only reader of r
+// is the If or BrIf right after that If (directly, or through one
+// `n = not r`), that branch tests c1 and c2 itself and r is never a value:
+//   and, If X [Else Y]: if c1 { B; r = c2; if r { X } }; with Y,
+//                       block { if c1 { B; r = c2; if r { X; br 2 } }; Y }
+//   or,  If X:          block { if t { B; r = c2; s = not r; br_if s 1 }; X }
+//   or,  If X Else Y:   block { block { br_if c1 0; B; r = c2; br_if r 0;
+//                       Y; br 1 }; X }
+//   and, BrIf d:        if c1 { B; r = c2; br_if r d+1 }
+//   or,  BrIf d:        br_if c1 d; B; r = c2; br_if r d
+// A negated If swaps X and Y. A negated BrIf branches when c1 or c2 decides
+// false: `and` is br_if (not c1) d; B; r = c2; br_if (not r) d, and `or` is
+// if t { B; r = c2; br_if (not r) d+1 }. Every Not right after a compare
+// then becomes the inverse compare (ir_opt_fuse_compares), and a compare
+// read only by the branch after it leaves its result in the flags
+// (X64Select.jet ir_x64_fusable). The Br depths inside B, X and Y that
+// leave them count the constructs they gained or lost; a Br in B that
+// leaves the If itself (skipping `r = c2`) keeps the Bool. Returns the
+// rewrites.
+fn ir_opt_short_circuits(f: &IRFunction, report: &IROptReport) -> Int Never! {
+    changed := 0
+    from := 1
+    loop {
+        facts :: ir_opt_facts(f)
+        nesting :: ir_opt_nesting(f)
+        found := -1
+        loop at in from..<f.op.len() {
+            if f.op[at] == .If && ir_opt_short_circuit_at(f, facts, nesting, at) {
+                found = at
+                break
+            }
+        }
+        if found < 0 -> return changed
+        ir_opt_short_circuit_rewrite(&f, nesting, found)
+        ir_opt_compact(&f)
+        report.short_circuits += 1
+        changed += 1
+        from = found - 1
+    }
+}
+
+// The Copy writing r before If `at` (r = copy c1), or -1 when `at` does not
+// open a short circuit.
+fn ir_opt_short_circuit_copy(f: IRFunction, at: Int) -> Int Never! {
+    tested :: f.a[at]
+    prev :: at - 1
+    if f.op[prev] == .Not && f.dst[prev] == tested {
+        if prev < 1 -> return -1
+        seed :: prev - 1
+        if (f.op[seed] == .Copy || f.op[seed] == .Move) && f.a[seed] == f.a[prev] -> return seed
+        return -1
+    }
+    copied :: (f.op[prev] == .Copy || f.op[prev] == .Move) && f.a[prev] == tested
+    if copied -> prev else -> -1
+}
+
+// The Not `n = not r` read only by the branch after it, at `at`; -1 when
+// `at` is no such Not.
+fn ir_opt_short_circuit_not(f: IRFunction, facts: OptFacts, at: Int, r: Int) -> Int Never! {
+    if at + 1 >= f.op.len() || f.op[at] != .Not || f.a[at] != r -> return -1
+    n :: f.dst[at]
+    if n < f.param_count || f.slot_kind[n] != .Temp || facts.defs[n] != 1 || facts.uses[n] != 1 -> return -1
+    if (f.op[at + 1] != .If && f.op[at + 1] != .BrIf) || f.a[at + 1] != n -> return -1
+    at
+}
+
+fn ir_opt_short_circuit_at(f: IRFunction, facts: OptFacts, nesting: OptNesting, at: Int) -> Bool Never! {
+    if at < 1 || nesting.els[at] >= 0 -> return false
+    seed :: ir_opt_short_circuit_copy(f, at)
+    if seed < 0 -> return false
+    is_or :: seed != at - 1
+    if is_or && (facts.defs[f.a[at]] != 1 || facts.uses[f.a[at]] != 1) -> return false
+    r :: f.dst[seed]
+    c1 :: f.a[seed]
+    end :: nesting.end[at]
+    last :: end - 1
+    if r < f.param_count || r == c1 || f.slot_kind[r] != .Temp || facts.defs[r] != 2 || facts.uses[r] != 1 -> return false
+    if last <= at || ir_opt_structural(f.op[last]) || ir_x64_write(f, last) != r -> return false
+    branch := end + 1
+    if branch >= f.op.len() -> return false
+    if f.op[branch] == .Not {
+        negation :: ir_opt_short_circuit_not(f, facts, branch, r)
+        if negation < 0 -> return false
+        branch = negation + 1
+    } else if (f.op[branch] != .If && f.op[branch] != .BrIf) || f.a[branch] != r {
+        return false
+    }
+    // A Br in B that leaves the If itself skips `r = c2`.
+    depth := 0
+    loop k in (at + 1)..<last {
+        op :: f.op[k]
+        if op == .End || op == .Else -> depth -= 1
+        if op == .Br && f.a[k] == depth -> return false
+        if op == .BrIf && f.b[k] == depth -> return false
+        if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
+    }
+    true
+}
+
+// The instruction rows of a function being rebuilt (Ir_opt_compact
+// recomputes the structural indexes).
+struct OptRows {
+    op: [IROp]
+    dst: [Int]
+    a: [Int]
+    b: [Int]
+    c: [Int]
+    line: [Int]
+}
+
+fn ir_opt_row(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
+    &rows.op.push(op)
+    &rows.dst.push(dst)
+    &rows.a.push(a)
+    &rows.b.push(b)
+    &rows.c.push(c)
+    &rows.line.push(line)
+}
+
+// Instructions `from..<to` of `f`, each Br that leaves the range `shift`
+// constructs deeper.
+fn ir_opt_rows_moved(rows: &OptRows, f: IRFunction, from: Int, to: Int, shift: Int) Never! {
+    depth := 0
+    loop k in from..<to {
+        op :: f.op[k]
+        if op == .End || op == .Else -> depth -= 1
+        a := f.a[k]
+        b := f.b[k]
+        if op == .Br && a >= depth -> a += shift
+        if op == .BrIf && b >= depth -> b += shift
+        ir_opt_row(&rows, op, f.dst[k], a, b, f.c[k], f.code_line[k])
+        if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
+    }
+}
+
+// A fresh Bool temporary of `like`'s type.
+fn ir_opt_bool_temp(f: &IRFunction, like: Int) -> Int Never! {
+    ir_slot(&f, f.slot_type[like], IRSlotKind.Temp, -1, 0)
+}
+
+fn ir_opt_short_circuit_rewrite(f: &IRFunction, nesting: OptNesting, at: Int) Never! {
+    seed :: ir_opt_short_circuit_copy(f, at)
+    is_or :: seed != at - 1
+    r :: f.dst[seed]
+    c1 :: f.a[seed]
+    t :: f.a[at]
+    end :: nesting.end[at]
+    last :: end - 1
+    line :: f.code_line[at]
+    negated :: f.op[end + 1] == .Not
+    branch :: if negated -> end + 2 else -> end + 1
+    rows := OptRows{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    ir_opt_rows_moved(&rows, f, 0, seed, 0)
+    // `t = not c1` stays for the forms that test t; dead code drops it
+    // where they do not.
+    if is_or -> ir_opt_rows_moved(&rows, f, seed + 1, at, 0)
+    after := 0
+    if f.op[branch] == .BrIf {
+        d :: f.b[branch]
+        after = branch + 1
+        if is_or == negated {
+            // and: c1 && c2; negated or: !c1 && !c2. Both branch inside If.
+            ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, at + 1, end, 0)
+            test := r
+            if negated {
+                test = ir_opt_bool_temp(&f, r)
+                ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
+            }
+            ir_opt_row(&rows, IROp.BrIf, -1, test, d + 1, -1, line)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        } else {
+            // or: c1 || c2; negated and: !c1 || !c2. Branch on either.
+            first := c1
+            if negated {
+                first = ir_opt_bool_temp(&f, r)
+                ir_opt_row(&rows, IROp.Not, first, c1, -1, -1, line)
+            }
+            ir_opt_row(&rows, IROp.BrIf, -1, first, d, -1, line)
+            ir_opt_rows_moved(&rows, f, at + 1, end, -1)
+            test := r
+            if negated {
+                test = ir_opt_bool_temp(&f, r)
+                ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
+            }
+            ir_opt_row(&rows, IROp.BrIf, -1, test, d, -1, line)
+        }
+    } else {
+        close :: nesting.end[branch]
+        els :: nesting.els[branch]
+        after = close + 1
+        then_end :: if els >= 0 -> els else -> close
+        // The arm r true runs, and the arm r false runs.
+        yes_from := branch + 1
+        yes_to := then_end
+        no_from := if els >= 0 -> els + 1 else -> close
+        no_to := close
+        if negated {
+            yes_from = no_from
+            yes_to = no_to
+            no_from = branch + 1
+            no_to = then_end
+        }
+        if !is_or && no_from == no_to {
+            ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, at + 1, end, 0)
+            ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, yes_from, yes_to, 1)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        } else if !is_or {
+            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+            ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, at + 1, end, 1)
+            if yes_from == yes_to {
+                ir_opt_row(&rows, IROp.BrIf, -1, r, 1, -1, line)
+            } else {
+                ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
+                ir_opt_rows_moved(&rows, f, yes_from, yes_to, 2)
+                ir_opt_row(&rows, IROp.Br, -1, 2, -1, -1, line)
+                ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            }
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, no_from, no_to, 0)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        } else if no_from == no_to {
+            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+            ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, at + 1, end, 1)
+            skip :: ir_opt_bool_temp(&f, r)
+            ir_opt_row(&rows, IROp.Not, skip, r, -1, -1, line)
+            ir_opt_row(&rows, IROp.BrIf, -1, skip, 1, -1, line)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, yes_from, yes_to, 0)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        } else {
+            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+            ir_opt_row(&rows, IROp.BrIf, -1, c1, 0, -1, line)
+            ir_opt_rows_moved(&rows, f, at + 1, end, 1)
+            ir_opt_row(&rows, IROp.BrIf, -1, r, 0, -1, line)
+            ir_opt_rows_moved(&rows, f, no_from, no_to, 1)
+            ir_opt_row(&rows, IROp.Br, -1, 1, -1, -1, line)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+            ir_opt_rows_moved(&rows, f, yes_from, yes_to, 0)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        }
+    }
+    ir_opt_rows_moved(&rows, f, after, f.op.len(), 0)
+    f.op = ^rows.op
+    f.dst = ^rows.dst
+    f.a = ^rows.a
+    f.b = ^rows.b
+    f.c = ^rows.c
+    f.code_line = ^rows.line
+}
+
+// ---------------------------------------------------------------------------
 // Copy propagation: `x = move/copy y` where x is written only there and y
 // is a parameter or written once before it, and the Move/Copy reaches every
 // read of x: the reads of x read y, and the Move/Copy goes. A Copy of a
@@ -648,6 +916,120 @@ fn ir_opt_coalesce(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int
         changed += 1
     }
     changed
+}
+
+// ---------------------------------------------------------------------------
+// Address sums.
+
+// The last pass of each function (Opt.jet ir_opt_function): a wrapping word
+// Add whose one reader is the address of a later memory access moves to just
+// before that access, and a wrapping word Mul whose one reader is such a sum
+// moves to just before the sum. A memory access is a Load, a Store, or a
+// call of an inline template (an `#FFI(asm)` leaf, keyed "<key>#asm")
+// through its first argument. Only plain instructions may sit between: no
+// structured control, no call of a body, runtime routine or stop poll, and
+// none writes the moved instruction's operands or result, so its operands
+// hold the same values at the new place. Nothing then holds the sum across
+// the instructions between, and it sits where an addressing mode can take it
+// (X64Select ir_x64_indexed). Pure word arithmetic moves within one
+// straight-line run, so the program means the same on every target.
+// Instructions are visited last first: a move shifts only instructions after
+// the one moved. `keys` are the module's function keys by id.
+fn ir_opt_sink_addresses(m: IRModule, keys: [String], f: &IRFunction) -> Int Never! {
+    facts :: ir_opt_facts(f)
+    changed := 0
+    reads := [Int]{}
+    at := f.op.len() - 1
+    loop at >= 0 {
+        to :: ir_opt_sink_target(m, keys, f, facts, at, &reads)
+        if to > at + 1 {
+            ir_opt_rotate(&f, at, to - 1)
+            changed += 1
+        }
+        at -= 1
+    }
+    changed
+}
+
+// The reader instruction `at` moves next to (ir_opt_sink_addresses), else -1.
+fn ir_opt_sink_target(m: IRModule, keys: [String], f: IRFunction, facts: OptFacts, at: Int, reads: &[Int]) -> Int Never! {
+    op :: f.op[at]
+    if (op != .Add && op != .Mul) || f.c[at] != IR_OVERFLOW_WRAP -> return -1
+    sum :: f.dst[at]
+    if sum < f.param_count || facts.defs[sum] != 1 || facts.uses[sum] != 1 -> return -1
+    if ir_opt_type(m, f, sum).kind != .Word -> return -1
+    left :: f.a[at]
+    right :: f.b[at]
+    k := at + 1
+    loop k < f.op.len() {
+        if ir_opt_structural(f.op[k]) -> return -1
+        ir_x64_reads_into(f, k, &reads)
+        loop slot in reads {
+            if slot == sum -> return if ir_opt_addresses_at(keys, f, op, sum, k) -> k else -> -1
+        }
+        if !ir_opt_plain(keys, f, k) -> return -1
+        written :: ir_x64_write(f, k)
+        if written >= 0 && (written == left || written == right || written == sum) -> return -1
+        k += 1
+    }
+    return -1
+}
+
+// Whether instruction `k` reads `slot` as the address of a memory access
+// (`op` Add), or as an operand of a wrapping Add that addresses the access
+// right after it (`op` Mul).
+fn ir_opt_addresses_at(keys: [String], f: IRFunction, op: IROp, slot: Int, k: Int) -> Bool Never! {
+    if op == .Add -> return ir_opt_access_address(keys, f, k) == slot
+    if f.op[k] != .Add || f.c[k] != IR_OVERFLOW_WRAP || k + 1 >= f.op.len() -> return false
+    ir_opt_access_address(keys, f, k + 1) == f.dst[k]
+}
+
+// The address slot memory access `k` reads, else -1.
+fn ir_opt_access_address(keys: [String], f: IRFunction, k: Int) -> Int Never! {
+    op :: f.op[k]
+    if op == .Load || op == .Store -> return f.a[k]
+    if ir_opt_template_call(keys, f, k) && f.c[k] >= 1 -> return f.args[f.b[k]]
+    return -1
+}
+
+// Whether instruction `k` calls an inline template: an `#FFI(asm)` leaf
+// other than the stop poll and trap, which the selector calls.
+fn ir_opt_template_call(keys: [String], f: IRFunction, k: Int) -> Bool Never! {
+    if f.op[k] != .Call || f.a[k] < 0 || f.a[k] >= keys.len() -> return false
+    key :: keys[f.a[k]]
+    key.ends_with("#asm") && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY
+}
+
+// Whether instruction `k` calls nothing but an inline template: no body,
+// runtime routine, release (Drop, Close) or runtime-backed operation.
+fn ir_opt_plain(keys: [String], f: IRFunction, k: Int) -> Bool Never! {
+    op :: f.op[k]
+    if op == .Call -> return ir_opt_template_call(keys, f, k)
+    op != .CallRuntime && op != .CallIndirect && op != .Drop && op != .Close && op != .Concat && op != .CopyBytes && op != .IntBig && op != .ConstBigInt
+}
+
+// Moves instruction `from` to `to` (> from); the ones between move up one.
+fn ir_opt_rotate(f: &IRFunction, from: Int, to: Int) Never! {
+    op :: f.op[from]
+    dst :: f.dst[from]
+    a :: f.a[from]
+    b :: f.b[from]
+    c :: f.c[from]
+    line :: f.code_line[from]
+    loop k in from..<to {
+        f.op[k] = f.op[k + 1]
+        f.dst[k] = f.dst[k + 1]
+        f.a[k] = f.a[k + 1]
+        f.b[k] = f.b[k + 1]
+        f.c[k] = f.c[k + 1]
+        f.code_line[k] = f.code_line[k + 1]
+    }
+    f.op[to] = op
+    f.dst[to] = dst
+    f.a[to] = a
+    f.b[to] = b
+    f.c[to] = c
+    f.code_line[to] = line
 }
 
 // ---------------------------------------------------------------------------
@@ -852,5 +1234,109 @@ fn ir_opt_unwrap(f: &IRFunction) -> Int Never! {
             if f.op[at] == .BitAnd && f.a[at] == x -> masks += 1
         }
         assert(masks > 0)
+    }
+}
+
+// `if p && q -> return 1; if p || q -> return 2; 0` as ir_short_circuit
+// builds it: at O1 and O2 every branch tests p or q (or `not p`), no Bool
+// copy is left, and IR Lint finds nothing after any pass.
+#Test("A short-circuit Bool read only by a branch becomes branches on its operands") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        exact :: ir_type_row(&m, Type.Int) ?? panic("no Int row")
+        flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        g := ir_function_new("pick", "test:pick.jet::pick", "", "pick.jet", 1)
+        p :: ir_slot(&g, flag, IRSlotKind.Param, ir_intern_name(&m, "p"), 1)
+        q :: ir_slot(&g, flag, IRSlotKind.Param, ir_intern_name(&m, "q"), 1)
+        g.result = exact
+        both :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Copy, both, p, -1, -1, 2)
+        _ := ir_open_if(&g, p, 2)
+        _ := ir_emit(&g, IROp.Copy, both, q, -1, -1, 2)
+        ir_end(&g, 2)
+        _ := ir_open_if(&g, both, 2)
+        one :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, one, 1, -1, -1, 2)
+        _ := ir_emit(&g, IROp.Return, -1, one, -1, -1, 2)
+        ir_end(&g, 2)
+        either :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Copy, either, p, -1, -1, 3)
+        unset :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Not, unset, p, -1, -1, 3)
+        _ := ir_open_if(&g, unset, 3)
+        _ := ir_emit(&g, IROp.Copy, either, q, -1, -1, 3)
+        ir_end(&g, 3)
+        _ := ir_open_if(&g, either, 3)
+        two :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, two, 2, -1, -1, 3)
+        _ := ir_emit(&g, IROp.Return, -1, two, -1, -1, 3)
+        ir_end(&g, 3)
+        zero :: ir_slot(&g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, zero, 0, -1, -1, 4)
+        _ := ir_emit(&g, IROp.Return, -1, zero, -1, -1, 4)
+        m.entry = 0
+        name_rows_set(&m.function_rows, g.key, 0)
+        &m.functions.push(g)
+        options := ir_opt_options(level)
+        options.verify = true
+        report :: ir_optimize_module(&m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        assert_eq(report.short_circuits, 2)
+        f :: m.functions[0]
+        loop at in 0..<f.op.len() {
+            assert(f.op[at] != .Copy && f.op[at] != .Move)
+            if f.op[at] == .If || f.op[at] == .BrIf -> assert(f.a[at] != both && f.a[at] != either)
+        }
+    }
+}
+
+// copy(p, q, i) stores at p + i the word loaded from q + i and hands p + q
+// with it to an `#FFI(asm)` leaf, all three sums computed first: at O1 and
+// O2 each sum sits right before the access it addresses, and IR Lint finds
+// nothing after any pass.
+#Test("An address sum moves to just before the access it addresses") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        g := ir_function_new("copy", "test:copy.jet::copy", "", "copy.jet", 1)
+        p :: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "p"), 1)
+        q :: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "q"), 1)
+        i :: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "i"), 1)
+        g.result = word
+        target :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Add, target, p, i, IR_OVERFLOW_WRAP, 2)
+        source :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Add, source, q, i, IR_OVERFLOW_WRAP, 2)
+        both :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Add, both, p, q, IR_OVERFLOW_WRAP, 2)
+        value :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Load, value, source, 0, -1, 2)
+        _ := ir_emit(&g, IROp.Store, -1, target, 0, value, 2)
+        args :: ir_args(&g, [Int]{both, value})
+        _ := ir_emit(&g, IROp.Call, -1, 1, args, 2, 3)
+        _ := ir_emit(&g, IROp.Return, -1, value, -1, -1, 3)
+        put := ir_function_new("put", "test:put#asm", "", "copy.jet", 1)
+        _ := ir_slot(&put, word, IRSlotKind.Param, ir_intern_name(&m, "address"), 1)
+        _ := ir_slot(&put, word, IRSlotKind.Param, ir_intern_name(&m, "value"), 1)
+        put.asm = Val(IRAsmLeaf{code: [U8]{0x48, 0x89, 0x37}, regs: [Int]{X64_RDI, X64_RSI}, result: -1})
+        m.entry = 0
+        name_rows_set(&m.function_rows, g.key, 0)
+        &m.functions.push(g)
+        name_rows_set(&m.function_rows, put.key, 1)
+        &m.functions.push(put)
+        options := ir_opt_options(level)
+        options.verify = true
+        report :: ir_optimize_module(&m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        f :: m.functions[0]
+        accesses := 0
+        loop at in 1..<f.op.len() {
+            address :: if f.op[at] == .Load || f.op[at] == .Store -> f.a[at] else if f.op[at] == .Call -> f.args[f.b[at]] else -> -1
+            if address >= 0 {
+                assert(f.op[at - 1] == .Add && f.dst[at - 1] == address)
+                accesses += 1
+            }
+        }
+        assert_eq(accesses, 3)
     }
 }

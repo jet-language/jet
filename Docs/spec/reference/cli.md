@@ -990,7 +990,7 @@ Decision inspection builds the checked program into the slot IR from its
 `fn run` and runs the IR optimizer at the level `jet build` uses: O1, or O2
 under `--release` or the `release`/`hardened` profiles. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
-fused compares, coalesced copies, removed dead and unreachable code, scalar
+fused compares, short circuits branched, coalesced copies, removed dead and unreachable code, scalar
 replaced aggregates) and names each function the IR builder could not build.
 It also lists, as built before any pass, each counted loop sema's loop proof
 covers (`loop <function> <file>:<line>`): the proved extent and element type,

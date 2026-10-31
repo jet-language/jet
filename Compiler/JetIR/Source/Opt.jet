@@ -20,7 +20,9 @@
 // (`split`, OptSplit.jet). Both levels fold polls into later ones before
 // Simplify and again at the end, then move stop points right after their
 // calls, and once every body is optimized drop the stop points after calls
-// of bodies that never report a stop (`stops`, OptStops.jet).
+// of bodies that never report a stop (`stops`, OptStops.jet). Last, each
+// function's address sums move next to the memory accesses they address
+// (`sink`, OptSimplify.jet ir_opt_sink_addresses).
 //
 // Every pass keeps the program's meaning exactly, on every level: runtime
 // calls, drops, stores and stops stay in order (but Int and word drops,
@@ -40,7 +42,7 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
 // a difference to one pass: "unique", "entry", "once", "scalar", "promote",
-// "version", "range", "ssa", "stops", "glue", "split", "reduce"), whether
+// "version", "range", "ssa", "stops", "glue", "split", "reduce", "sink"), whether
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
@@ -111,6 +113,7 @@ struct IROptReport {
     folded: Int
     branches_folded: Int
     compares_fused: Int
+    short_circuits: Int
     copies_coalesced: Int
     dead_removed: Int
     unreachable_removed: Int
@@ -136,11 +139,11 @@ struct IROptReport {
 }
 
 fn ir_opt_report(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
+    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
 }
 
 fn ir_opt_report_text(r: IROptReport) -> String Never! {
-    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
+    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, short circuits {r.short_circuits}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
     loop note in r.reductions -> text = "{text}\n{note}"
     loop dump in r.dumps -> text = "{text}\n{dump}"
     text
@@ -152,6 +155,7 @@ fn ir_opt_report_add(total: &IROptReport, part: IROptReport) Never! {
     total.folded += part.folded
     total.branches_folded += part.branches_folded
     total.compares_fused += part.compares_fused
+    total.short_circuits += part.short_circuits
     total.copies_coalesced += part.copies_coalesced
     total.dead_removed += part.dead_removed
     total.unreachable_removed += part.unreachable_removed
@@ -483,9 +487,9 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 // callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
 // a glue call left is a Drop again), then the polls folded into the next
 // stop point, Simplify, scalar replacement, Simplify again, at level 2
-// the SSA round trip, and last the polls folded again and the stop points
-// moved after their calls.
-// Hoisting, glue and stops match callees by `keys` (every function's key),
+// the SSA round trip, the polls folded again and the stop points moved
+// after their calls, and last the address sums moved to their accesses.
+// Hoisting, glue, stops and sink match callees by `keys` (every function's key),
 // never by a body a wave may hold. With
 // `options.verify`, IR Lint (`lint`, Lint.jet) checks the body as the
 // passes get it and after each pass, until one breaks it: that pass's rows
@@ -543,7 +547,12 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
         ir_opt_fold_polls(&out, keys)
         if checking -> checking = ir_opt_lint(m, lint, out, "polls", &report)
         ir_opt_stops_after_calls(&out, m, keys)
-        if checking -> _ := ir_opt_lint(m, lint, out, "stops", &report)
+        if checking -> checking = ir_opt_lint(m, lint, out, "stops", &report)
+    }
+    // Last: every pass before may leave an address sum away from its access.
+    if ir_opt_enabled(options, "sink") {
+        _ := ir_opt_sink_addresses(m, keys, &out)
+        if checking -> _ := ir_opt_lint(m, lint, out, "sink", &report)
     }
     out
 }

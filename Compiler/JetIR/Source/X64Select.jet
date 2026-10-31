@@ -65,6 +65,7 @@ use jet_backend.[
     dwarf_cfa_restore_state,
     x64_alu_ri,
     x64_alu_rr,
+    x64_assemble_template,
     x64_call_reg,
     x64_call_rel32,
     x64_cmov_rr,
@@ -93,6 +94,7 @@ use jet_backend.[
     x64_lea_rip,
     x64_load,
     x64_load_indexed,
+    x64_load_u8,
     x64_lock_step,
     x64_mov_ri,
     x64_mov_rr,
@@ -114,6 +116,7 @@ use jet_backend.[
     x64_store,
     x64_store_indexed,
     x64_store_indexed_imm,
+    x64_store_u8,
     x64_test_rr,
     x64_test_ri,
     x64_ucomisd,
@@ -594,12 +597,7 @@ fn ir_x64_tail_jump(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
 // slots live there are kept as around a call), and it leaves rsp balanced.
 // False, emitting nothing, for any other call.
 fn ir_x64_asm_inline(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, leaf: IRAsmLeaf, args: [Int], start: Int, count: Int, dst: Int) -> Bool Never! {
-    if count != leaf.regs.len() || count > IR_X64_ARGUMENT_REGISTERS.len() -> return false
-    if dst >= 0 && (leaf.result < 0 || ir_x64_class(ir_x64_type(m, f, dst)) != .General) -> return false
-    loop position in 0..<count {
-        if leaf.regs[position] != IR_X64_ARGUMENT_REGISTERS[position] || ir_x64_slot_class(m, f, args[start + position]) != .General -> return false
-    }
-    if ir_x64_asm_access(&e, m, f, al, leaf, args, start, count, dst) -> return true
+    if !ir_x64_asm_inlinable(m, f, leaf, args, start, count, dst) -> return false
     // Sources are callee-saved registers, frame homes and immediates, as
     // for ir_x64_call.
     loop position in 0..<count -> ir_x64_load(&e, m, f, al, args[start + position], leaf.regs[position])
@@ -614,31 +612,63 @@ fn ir_x64_asm_inline(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     true
 }
 
-// A template that is exactly one 8-byte store of its second operand at its
-// first, or one 8-byte load at its operand into its result, emitted as that
-// same access on the operands' own registers: the template writes no other
-// register, so nothing needs copying into the argument registers. False,
-// emitting nothing, for any other template.
-fn ir_x64_asm_access(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, leaf: IRAsmLeaf, args: [Int], start: Int, count: Int, dst: Int) -> Bool Never! {
-    if count == 2 && dst < 0 {
-        store := [U8]{}
-        x64_store_indexed(&store, leaf.regs[0], -1, 1, 0, leaf.regs[1], 8)
-        if store != leaf.code -> return false
-        base :: ir_x64_use(&e, m, f, al, args[start], X64_R10)
-        value :: ir_x64_use(&e, m, f, al, args[start + 1], X64_RAX)
-        x64_store_indexed(&e.code, base, -1, 1, 0, value, 8)
-        return true
+// Whether a call of `leaf` can be its template in place (ir_x64_asm_inline):
+// its operand registers are the argument registers in order, and every
+// argument and the result are general.
+fn ir_x64_asm_inlinable(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, args: [Int], start: Int, count: Int, dst: Int) -> Bool Never! {
+    if count != leaf.regs.len() || count > IR_X64_ARGUMENT_REGISTERS.len() -> return false
+    if dst >= 0 && (leaf.result < 0 || ir_x64_class(ir_x64_type(m, f, dst)) != .General) -> return false
+    loop position in 0..<count {
+        if leaf.regs[position] != IR_X64_ARGUMENT_REGISTERS[position] || ir_x64_slot_class(m, f, args[start + position]) != .General -> return false
     }
-    if count != 1 || dst < 0 -> return false
-    load := [U8]{}
-    x64_load_indexed(&load, leaf.result, leaf.regs[0], -1, 1, 0, 8)
-    if load != leaf.code -> return false
-    base :: ir_x64_use(&e, m, f, al, args[start], X64_R10)
-    reg :: ir_x64_home_reg(m, f, al, dst, X64_RAX)
-    x64_load_indexed(&e.code, reg, base, -1, 1, 0, 8)
-    ir_x64_normalize(&e, ir_x64_type(m, f, dst), reg)
-    ir_x64_store(&e, m, f, al, dst, reg)
     true
+}
+
+// The width of the one memory access Call `at` makes, else 0: a call of an
+// `#FFI(asm)` leaf in place (ir_x64_asm_inlinable) whose template is exactly
+// one store of its second operand at its first or one load at its operand
+// into its result. The template writes no other register a caller may read,
+// so the call is selected as a Load or Store is (ir_x64_memory): on the
+// operands' own registers, its address folded as theirs is (ir_x64_indexed).
+fn ir_x64_asm_access_size(m: IRModule, f: IRFunction, at: Int) -> Int Never! {
+    if f.op[at] != .Call || f.a[at] < 0 || f.a[at] >= m.functions.len() -> return 0
+    if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return 0
+    key :: m.functions[f.a[at]].key
+    if key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY -> return 0
+    leaf :: m.functions[f.a[at]].asm ?? return 0
+    if !ir_x64_asm_inlinable(m, f, leaf, f.args, f.b[at], f.c[at], f.dst[at]) -> return 0
+    if f.c[at] == 2 && f.dst[at] < 0 -> return ir_x64_asm_store_size(leaf)
+    if f.c[at] == 1 && f.dst[at] >= 0 -> return ir_x64_asm_load_size(leaf)
+    0
+}
+
+// The width of a template that is exactly one store of its second operand at
+// its first: 8 for `mov qword ptr [{address}], {value}`, 1 for `mov rax,
+// {value}` then `mov byte ptr [{address}], al` (an Intel template names a
+// byte register, never a word operand's low byte, so a byte store goes
+// through al). 0 for any other template.
+fn ir_x64_asm_store_size(leaf: IRAsmLeaf) -> Int Never! {
+    word := [U8]{}
+    x64_store_indexed(&word, leaf.regs[0], -1, 1, 0, leaf.regs[1], 8)
+    if word == leaf.code -> return 8
+    byte := [U8]{}
+    x64_mov_rr(&byte, X64_RAX, leaf.regs[1])
+    x64_store_u8(&byte, leaf.regs[0], 0, X64_RAX)
+    if byte == leaf.code -> return 1
+    0
+}
+
+// The width of a template that is exactly one zero-extending load at its
+// operand into its result: 8 for `mov rax, qword ptr [{address}]`, 1 for
+// `movzx rax, byte ptr [{address}]`. 0 for any other template.
+fn ir_x64_asm_load_size(leaf: IRAsmLeaf) -> Int Never! {
+    word := [U8]{}
+    x64_load_indexed(&word, leaf.result, leaf.regs[0], -1, 1, 0, 8)
+    if word == leaf.code -> return 8
+    byte := [U8]{}
+    x64_load_u8(&byte, leaf.result, leaf.regs[0], 0)
+    if byte == leaf.code -> return 1
+    0
 }
 
 // A runtime helper call with general arguments (at most six) and a general result.
@@ -2284,7 +2314,29 @@ fn ir_x64_address(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
     (base: ir_x64_use(&e, m, f, al, slot, scratch), disp: offset)
 }
 
-// An element address folded into the Load or Store that reads it (the
+// The memory access instruction `at` makes: a Load, a Store, or a call of an
+// asm leaf that is one access (ir_x64_asm_access_size). `value` is the slot
+// loaded into or stored, `disp` the access's displacement, and `width` the
+// leaf's access width (0 for a Load or Store: its value's type has it).
+struct IRX64Access {
+    address: Int
+    value: Int
+    load: Bool
+    disp: Int
+    width: Int
+}
+
+fn ir_x64_access(m: IRModule, f: IRFunction, at: Int) -> IRX64Access? Never! {
+    if f.op[at] == .Load -> return Val(IRX64Access{address: f.a[at], value: f.dst[at], load: true, disp: f.b[at], width: 0})
+    if f.op[at] == .Store -> return Val(IRX64Access{address: f.a[at], value: f.c[at], load: false, disp: f.b[at], width: 0})
+    width :: ir_x64_asm_access_size(m, f, at)
+    if width == 0 -> return None
+    start :: f.b[at]
+    load :: f.dst[at] >= 0
+    Val(IRX64Access{address: f.args[start], value: if load -> f.dst[at] else -> f.args[start + 1], load: load, disp: 0, width: width})
+}
+
+// An element address folded into the memory access that reads it (the
 // access's own displacement on top): `base + index * scale`, scale 1, 2, 4
 // or 8. `base` is -1 when the access takes its address as it is; `scaled`:
 // a product made `index * scale` (else the scale is 1 and only the sum is
@@ -2296,7 +2348,7 @@ struct IRX64Indexed {
     scaled: Bool
 }
 
-// The folded address of Load or Store `at` (IRX64Indexed). Its address is
+// The folded address of memory access `at` (ir_x64_access). Its address is
 // a temporary that only the access reads and that the instruction right
 // before computes as a wrapping 64-bit Add of two General slots in
 // registers or homes. When one of those is in turn a temporary that only
@@ -2306,10 +2358,11 @@ struct IRX64Indexed {
 // nothing (ir_x64_folded); a Float value keeps the plain address.
 fn ir_x64_indexed(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> IRX64Indexed Never! {
     none :: IRX64Indexed{base: -1, index: -1, scale: 1, scaled: false}
-    if at < 1 || (f.op[at] != .Load && f.op[at] != .Store) -> return none
-    value :: if f.op[at] == .Load -> f.dst[at] else -> f.c[at]
+    if at < 1 -> return none
+    access :: ir_x64_access(m, f, at) ?? return none
+    value :: access.value
     if value < 0 || al.xmms[value] >= 0 -> return none
-    address :: f.a[at]
+    address :: access.address
     sum :: at - 1
     if value == address || !ir_x64_wrapping_word(m, f, sum, .Add) || f.dst[sum] != address || !ir_x64_passing(f, al, address, sum, at) -> return none
     left :: f.a[sum]
@@ -2365,30 +2418,32 @@ fn ir_x64_folded(m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) -> Bo
 }
 
 fn ir_x64_memory(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
-    op :: f.op[at]
+    access :: ir_x64_access(m, f, at) ?? return ir_x64_fail(&e, f, at, "instruction {at} is not a memory access")
     folded :: ir_x64_indexed(m, f, al, at)
-    address :: if folded.base >= 0 -> (base: ir_x64_use(&e, m, f, al, folded.base, X64_R10), disp: f.b[at]) else -> ir_x64_address(&e, m, f, al, f.a[at], f.b[at], X64_R10)
+    address :: if folded.base >= 0 -> (base: ir_x64_use(&e, m, f, al, folded.base, X64_R10), disp: access.disp) else -> ir_x64_address(&e, m, f, al, access.address, access.disp, X64_R10)
     base :: address.base
     offset :: address.disp
     index :: if folded.base >= 0 -> ir_x64_use(&e, m, f, al, folded.index, X64_R11) else -> -1
     if !x64_fits_i32(offset) -> return ir_x64_fail(&e, f, at, "offset {offset} does not fit a displacement")
-    if op == .Load {
-        dst :: f.dst[at]
-        ty :: ir_x64_type(m, f, dst)
-        if ir_x64_class(ty) == .Empty -> return
-        if al.xmms[dst] >= 0 -> return x64_float_load(&e.code, ty.kind == .Float32, al.xmms[dst], base, offset)
-        width :: ir_x64_value_width(ty)
-        reg :: ir_x64_home_reg(m, f, al, dst, X64_RAX)
-        x64_load_indexed(&e.code, reg, base, index, folded.scale, offset, width)
-        // Loads zero-extend; a signed narrow integer's carrier is sign-extended.
-        if ty.kind == .Word && ty.signed && width < 8 -> ir_x64_narrow(&e, reg, true, 8 * width)
-        return ir_x64_store(&e, m, f, al, dst, reg)
-    }
-    value :: f.c[at]
+    value :: access.value
     ty :: ir_x64_type(m, f, value)
     if ir_x64_class(ty) == .Empty -> return
+    width :: if access.width > 0 -> access.width else -> ir_x64_value_width(ty)
+    if access.load {
+        if al.xmms[value] >= 0 -> return x64_float_load(&e.code, ty.kind == .Float32, al.xmms[value], base, offset)
+        reg :: ir_x64_home_reg(m, f, al, value, X64_RAX)
+        x64_load_indexed(&e.code, reg, base, index, folded.scale, offset, width)
+        // Loads zero-extend; a signed narrow integer's carrier is
+        // sign-extended. A leaf's load is its template's, zero-extended into
+        // the result's word.
+        if access.width > 0 {
+            ir_x64_normalize(&e, ty, reg)
+        } else if ty.kind == .Word && ty.signed && width < 8 {
+            ir_x64_narrow(&e, reg, true, 8 * width)
+        }
+        return ir_x64_store(&e, m, f, al, value, reg)
+    }
     if al.xmms[value] >= 0 -> return x64_float_store(&e.code, ty.kind == .Float32, base, offset, al.xmms[value])
-    width :: ir_x64_value_width(ty)
     // A constant fitting the store's immediate is stored directly.
     if al.consts[value] && (width < 8 || x64_fits_i32(al.values[value])) -> return x64_store_indexed_imm(&e.code, base, index, folded.scale, offset, al.values[value], width)
     reg :: ir_x64_use(&e, m, f, al, value, X64_RAX)
@@ -2580,6 +2635,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             // A stop poll's leaf has no template (Build.jet ir_stop_poll): one
             // apart from its If (ir_x64_stop_point) is a call of its body.
             key :: m.functions[f.a[at]].key
+            if ir_x64_asm_access_size(m, f, at) > 0 -> return ir_x64_memory(&e, m, f, al, at)
             if m.functions[f.a[at]].asm == .Val(leaf) && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY {
                 if ir_x64_asm_inline(&e, m, f, al, leaf, f.args, f.b[at], f.c[at], dst) -> return
             }
@@ -3368,6 +3424,27 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         }
         assert(found)
     }
+}
+
+// The leaf of `source` assembled for operands `names`.
+fn ir_x64_test_leaf(source: String, names: [String], returns: Bool) -> IRAsmLeaf Never! {
+    assembled :: x64_assemble_template(source, names, returns)
+    assert(assembled.error == None)
+    IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result}
+}
+
+// The OS layer's byte and word access templates are each exactly one access
+// of that width, so a call of one is that access on the operands' own
+// registers; a template with a displacement is not one of them.
+#Test("A template that is exactly one byte or word access is emitted as that access") {
+    pair :: [String]{"address", "value"}
+    one :: [String]{"address"}
+    assert(ir_x64_asm_store_size(ir_x64_test_leaf("mov rax, {{value}}\nmov byte ptr [{{address}}], al", pair, false)) == 1)
+    assert(ir_x64_asm_store_size(ir_x64_test_leaf("mov qword ptr [{{address}}], {{value}}", pair, false)) == 8)
+    assert(ir_x64_asm_store_size(ir_x64_test_leaf("mov qword ptr [{{address}}+8], {{value}}", pair, false)) == 0)
+    assert(ir_x64_asm_load_size(ir_x64_test_leaf("movzx rax, byte ptr [{{address}}] ; -> return", one, true)) == 1)
+    assert(ir_x64_asm_load_size(ir_x64_test_leaf("mov rax, qword ptr [{{address}}] ; -> return", one, true)) == 8)
+    assert(ir_x64_asm_load_size(ir_x64_test_leaf("mov rax, qword ptr [{{address}}+8] ; -> return", one, true)) == 0)
 }
 
 // count(n) counts i up to n; the Loop is line 3 and its first instruction
