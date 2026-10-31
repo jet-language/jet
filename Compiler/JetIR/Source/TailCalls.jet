@@ -27,7 +27,11 @@
 //     (the callee writes that parameter, or the value is passed twice).
 // A value with visible cleanup (Close, defer) leaves its cleanup after the
 // call, so that call never has the shape; sema's tail_call_blocked lint
-// names it. A panic unwinding a variant does not drop its owned parameters.
+// names it. Neither has a value whose Drop is not memory only (a process
+// Child's Drop kills its tree, a handle's may close a resource): the jump
+// would run that Drop before the callee instead of after it (D-DROP-ASAP1),
+// so a call after which one is dropped stays a call (ir_tail_memory_only).
+// A panic unwinding a variant does not drop its owned parameters.
 
 use jet_foundation.[name_rows, name_rows_set, name_rows_value]
 
@@ -251,7 +255,19 @@ fn ir_tail_site(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tra
     loop slot in 0..<f.param_count {
         if ir_tail_has(owned, slot) && !handed.contains(slot) -> &drops.push(slot)
     }
+    loop slot in drops {
+        if !ir_tail_memory_only(m, f.slot_type[slot]) -> return ir_tail_none()
+    }
     IRTailSite{call: call, mask: mask, poll: stop_poll, drops: ^drops}
+}
+
+// Whether dropping a value of type row `ty` only frees memory, so nothing
+// can observe it running before the tail jump: a trivial Drop, a String or
+// an Int. Every other Drop (a handle's, an Aggregate's glue, which may reach
+// one) may close or stop something, and keeps its place after the call.
+fn ir_tail_memory_only(m: IRModule, ty: Int) -> Bool Never! {
+    t :: m.types[ty]
+    t.drop == "" || t.kind == .String || t.kind == .Int
 }
 
 fn ir_tail_bit(index: Int) -> Int Never! {
