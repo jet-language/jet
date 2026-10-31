@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   asRunCommand,
   buildArgs,
+  caseStdoutAlternatives,
   caseStdoutFile,
   classifyEmit,
   classifyRun,
@@ -126,6 +127,21 @@ test("a case's own `stdout: = FILE` assertion names the expected stdout", () => 
   assert.equal(caseStdoutFile("step: built\nstdout: = \"literal\\n\"\n"), null);
   assert.equal(caseStdoutFile("step: built\nstdout: one-of a.out b.out # host\n"), null);
   assert.equal(caseStdoutFile("step: built a\nstdout: = a.out\nstep: built b\nstdout: = b.out\n"), null);
+});
+
+test("a case's `stdout: one-of` assertion accepts any of its exact snapshots", () => {
+  assert.deepEqual(caseStdoutAlternatives("step: built\nstdout: one-of a.out b.out # host-dependent device\n"), ["a.out", "b.out"]);
+  assert.equal(caseStdoutAlternatives(null), null);
+  assert.equal(caseStdoutAlternatives("step: built\nstdout: one-of a.out b.out\n"), null);
+  assert.equal(caseStdoutAlternatives("step: built\nstdout: one-of a.out # host\n"), null);
+  assert.equal(caseStdoutAlternatives("step: built\nstdout: = a.out\n"), null);
+  const entry = { stem: "example", path: "example.jet" };
+  const run = (stdout) => ({ code: 0, stdout, stderr: "", timedOut: false, timeoutSec: 60 });
+  const expected = { out: "vulkan:accepted\n", alternatives: ["vulkan:accepted\n", "vulkan:rejected\n"], err: null, stderrOut: null };
+  assert.equal(classifyRun(entry, run("vulkan:rejected\n"), expected).status, "passed");
+  assert.equal(classifyRun(entry, run("vulkan:accepted\n"), expected).status, "passed");
+  assert.equal(classifyRun(entry, run("vulkan:missing\n"), expected).status, "no-match");
+  assert.equal(classifyRun(entry, run("vulkan:rejected\n"), { ...expected, alternatives: ["vulkan:accepted\n", null] }).status, "no-match");
 });
 
 test("the build tier builds with the case's run flags", () => {

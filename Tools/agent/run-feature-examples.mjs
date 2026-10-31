@@ -105,7 +105,10 @@ export const EMIT_TIERS = ["ast", "mir", "lir"];
 
 // The example's goldens. A case whose only run step asserts
 // `stdout: = FILE` compares stdout with that file instead of `<stem>.out`,
-// as testkit Golden.jet does for an explicit stdout assertion.
+// as testkit Golden.jet does for an explicit stdout assertion. One that
+// asserts `stdout: one-of FILE FILE… # reason` accepts any of those exact
+// snapshots (`alternatives`, the first also as `out`), as testkit
+// `kit_steps_one_of` does; a missing snapshot is null and matches nothing.
 function readExpected(stem, caseText) {
   const stdoutFile = caseStdoutFile(caseText);
   const outPath = stdoutFile === null ? join(EXPECTED, `${stem}.out`) : join(EXPECTED, dirname(stem), stdoutFile);
@@ -116,21 +119,26 @@ function readExpected(stem, caseText) {
     const path = join(EXPECTED, `${stem}.${tier}.out`);
     emit[tier] = existsSync(path) ? readFileSync(path, "utf8") : null;
   }
+  const alternatives = caseStdoutAlternatives(caseText)?.map((file) => {
+    const path = join(EXPECTED, dirname(stem), file);
+    return existsSync(path) ? readFileSync(path, "utf8") : null;
+  }) ?? null;
   return {
-    out: existsSync(outPath) ? readFileSync(outPath, "utf8") : null,
+    out: alternatives !== null ? alternatives[0] : existsSync(outPath) ? readFileSync(outPath, "utf8") : null,
+    alternatives,
     err: existsSync(errPath) ? readFileSync(errPath, "utf8") : null,
     stderrOut: existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : null,
     emit,
   };
 }
 
-// The `FILE` of a `stdout: = FILE` assertion on a case's only run step (the
-// step caseInvocation reads), or null.
-export function caseStdoutFile(caseText) {
+// The last `stdout:` line of a case's only run step (the step
+// caseInvocation reads) that `pattern` matches, as its match, or null.
+function runStepStdoutMatch(caseText, pattern) {
   if (caseText === null) return null;
   let runSteps = 0;
   let inRunStep = false;
-  let file = null;
+  let found = null;
   for (const raw of caseText.split("\n")) {
     const line = raw.trim();
     if (line.startsWith("step:")) {
@@ -139,10 +147,26 @@ export function caseStdoutFile(caseText) {
       if (inRunStep) runSteps += 1;
       continue;
     }
-    const assertion = inRunStep ? /^stdout:\s*=\s*([^"\s]\S*)$/u.exec(line) : null;
-    if (assertion) file = assertion[1];
+    const match = inRunStep ? pattern.exec(line) : null;
+    if (match) found = match;
   }
-  return runSteps === 1 ? file : null;
+  return runSteps === 1 ? found : null;
+}
+
+// The `FILE` of a `stdout: = FILE` assertion on a case's only run step, or
+// null.
+export function caseStdoutFile(caseText) {
+  return runStepStdoutMatch(caseText, /^stdout:\s*=\s*([^"\s]\S*)$/u)?.[1] ?? null;
+}
+
+// The snapshot files of a `stdout: one-of FILE FILE… # reason` assertion on a
+// case's only run step, or null. Testkit refuses a one-of without a reason
+// or with fewer than two snapshots, so neither names alternatives here.
+export function caseStdoutAlternatives(caseText) {
+  const match = runStepStdoutMatch(caseText, /^stdout:\s*one-of\s+([^#]*?)\s*#\s*\S/u);
+  if (match === null) return null;
+  const files = match[1].split(/\s+/u).filter((file) => file !== "");
+  return files.length >= 2 ? files : null;
 }
 
 // The run flags and program arguments of an example's `<stem>.case`, as
@@ -534,7 +558,7 @@ export function classifyRun(entry, run, expected, tier = "run") {
   }
   const actual = normalize(run.stdout);
   if (expected.out === null) return { status: "failed", detail: "missing expected output" };
-  if (actual !== normalize(expected.out)) {
+  if (!(expected.alternatives ?? [expected.out]).some((text) => text !== null && actual === normalize(text))) {
     return { status: "no-match", detail: "stdout", expected: expected.out, actual };
   }
   if (expected.stderrOut !== null && normalize(run.stderr) !== normalize(expected.stderrOut)) {
