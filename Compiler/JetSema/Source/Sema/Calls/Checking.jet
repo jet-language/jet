@@ -341,6 +341,12 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             .Val(_) -> true
             .None -> false
         }
+        // A `^` argument out of pinned storage is the move E0219, reported
+        // before checking the argument reads it beside the pin (E0220).
+        if !default_in_owner && args[index].convention == AccessConvention.Move && !sema_pin_check_move(&state, args[index].expr, scopes, &diagnostics) {
+            complete = false
+            next
+        }
         binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, &scopes, &state, args[index].expr) else -> [String]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
