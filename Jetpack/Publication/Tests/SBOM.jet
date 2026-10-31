@@ -1,5 +1,15 @@
 // Publish/mod.rs and tests/pkg.rs SBOM cases. Full-byte regressions pin all
 // fixed whitespace; digest expectations reuse the actual Lock writer + SHA.
+use jet_pkg_model.[ForeignLanguage, LockFile, LockSource, LockedPackage, pkg_lock_write, pkg_sha256_hex]
+use jetpack_publication.[
+    publication_emit_cyclonedx, publication_emit_spdx, publication_lock_digest,
+    publication_registry_spdx, publication_spdx_checksum,
+]
+use core.files as files
+use core.process as process
+use core.sys as sys
+use core.time as time
+
 fn publication_sbom_test_package(name: String, version: String, fingerprint: String) -> LockedPackage Never! {
     LockedPackage{name: name, version: version, source: LockSource.Path("../{name}"), fingerprint: fingerprint}
 }

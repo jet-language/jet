@@ -326,7 +326,7 @@ fn provider_peek_pack_markers(tmp: String, remote: RemoteSource) -[Env, Exec, Ti
 
 // Run one hardened Git command inside `dir`; true on success.
 fn provider_git_in(dir: String, args: [String]) -[Env, Exec, Time.Wait]> Bool Never! {
-    if provider_hardened_git_command().arg("-C").arg(dir).args_extend(args).run() == {
+    if foundation_hardened_git_command().arg("-C").arg(dir).args_extend(args).run() == {
         .Ok(receipt) -> receipt.success
         .Err(_) -> false
     }
@@ -334,7 +334,7 @@ fn provider_git_in(dir: String, args: [String]) -[Env, Exec, Time.Wait]> Bool Ne
 
 // The standard output of one successful hardened Git command inside `dir`.
 fn provider_git_output_in(dir: String, args: [String]) -[Env, Exec, Time.Wait]> String? Never! {
-    if provider_hardened_git_command().arg("-C").arg(dir).args_extend(args).run() == {
+    if foundation_hardened_git_command().arg("-C").arg(dir).args_extend(args).run() == {
         .Ok(receipt) -> if receipt.success -> Val(receipt.output) else -> None
         .Err(_) -> None
     }

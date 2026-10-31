@@ -3,6 +3,26 @@
 // Tests/Tuf.jet. Those genuine entry points retain #4262/#3593/#3598/#4409
 // rather than successful fixtures standing in for Artifacts/Fetch.
 // Reuse Index's actual entry/root helpers; unique suffix is Cache-owned.
+use jet_pkg_model.[pkg_sha256_hex]
+use jetpack_foundation.[
+    FoundationPublicationPhase, FoundationPublicationPolicy, foundation_open_directory_authority,
+    foundation_open_file_authority, foundation_tree_hash, foundation_write_file_nofollow_at_root,
+]
+use jetpack_publication.[
+    PUBLICATION_MAX_OCI_REFERRER_BYTES, PUBLICATION_OCI_PENDING_SBOM, PUBLICATION_OCI_PROVENANCE_TYPE,
+    PUBLICATION_OCI_REFERRER_INDEX, PUBLICATION_OCI_REPRODUCIBILITY_TYPE, PUBLICATION_OCI_SBOM_TYPE,
+    PUBLICATION_OCI_SIGNATURE_TYPE, PublicationIndexEntry, PublicationOCIDescriptor,
+    publication_existing_oci_referrer_root, publication_finalize_oci_referrers,
+    publication_oci_provenance_payload, publication_oci_reconcile_winner, publication_oci_referrer_root,
+    publication_oci_reproducibility_payload, publication_oci_sbom_bound,
+    publication_oci_signature_payload, publication_parse_oci_index, publication_publish_artifact,
+    publication_read_error, publication_read_oci_file, publication_referrer_index_digest,
+    publication_registry_spdx, publication_registry_unique_suffix, publication_render_oci_index,
+    publication_validate_evidence_value, publication_validate_oci_digest,
+    publication_verify_oci_referrers, publication_write_oci_file,
+]
+use core.files as files
+
 fn publication_oci_test_subject() -> String Never! {
     "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }

@@ -14,11 +14,14 @@ NixEval:
 PackageModel: Foundation
 EnvModel: PackageModel, Compiler front end
 Nix: NixEval, PackageModel
+# Publication is also the `jetpack_publication` package (Jetpack/Publication/package.jet), so jet_cli can
+# depend on it without the engine. Package fetch ingests into the Store, so it lives in Engine
+# (Provider/Source/PackageFetch).
+Publication: PackageModel
 # Engine holds Store, Trust, Recipe, Provider and Environment: their sources use each other in a cycle
 # (Store reaches Provider, Trust and Environment), so they check as one unit until #4589 breaks it.
-Engine: PackageModel, TrustRoot, EnvModel, Nix
+Engine: PackageModel, TrustRoot, EnvModel, Nix, Publication
 Secrets: Compiler front end, Foundation, PackageModel, EnvModel, Engine
-Publication: PackageModel, Engine
 Services: Engine
 Image: Engine
 JetOS: EnvModel, Engine

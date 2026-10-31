@@ -1,86 +1,13 @@
-// The one hardened Git subprocess policy shared by every provider and Source
-// Fetch operation, exclusive temporary directories, and the network gate
-// (Rust Provider.rs `hardened_git_command`, `exclusive_temp_dir`,
+// Provider-side process helpers: Git availability over the one hardened Git
+// policy (Foundation `foundation_hardened_git_command`), exclusive temporary
+// directories, and the network gate (Rust Provider.rs `exclusive_temp_dir`,
 // `network_denied`).
-
-// Git environment that could reintroduce ambient configuration, helpers,
-// proxies, or traces. Every hardened command removes all of them.
-PROVIDER_GIT_REMOVED_ENV :: comptime { [String]{
-    "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE",
-    "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
-    "GIT_REPLACE_REF_BASE", "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "GIT_SSH", "GIT_SSH_VARIANT",
-    "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY", "SSH_ASKPASS", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
-    "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_TRACE", "GIT_TRACE_PERFORMANCE", "GIT_TRACE_SETUP",
-    "GIT_TRACE_PACKET", "GIT_TRACE_CURL", "GIT_TRACE_CURL_NO_DATA", "GIT_TRACE2", "GIT_TRACE2_EVENT",
-    "GIT_TRACE2_PERF", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
-    "ALL_PROXY", "NO_PROXY"
-} }
-
-// Command-line configuration wins over a repository-local credential helper.
-PROVIDER_GIT_CONFIG_ARGS :: [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"}
 
 PROVIDER_DENY_NETWORK_ENV :: "JETPACK_DENY_NETWORK"
 
-// The one hardened Git subprocess policy: its fixed working directory, the
-// environment it sets, the ambient variables it removes, and the leading
-// configuration arguments. No caller can create a weaker policy.
-struct HardenedGitPolicy {
-    cwd: String
-    env: [String: String]
-    removed_env: [String]
-    args: [String]
-
-    fn current() -[Env]> HardenedGitPolicy Never! {
-        null_device :: provider_git_null_device()
-        HardenedGitPolicy{
-            cwd: provider_git_safe_cwd(),
-            env: [String: String]{
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_SYSTEM": null_device,
-                "GIT_CONFIG_GLOBAL": null_device,
-                "GIT_CONFIG_LOCAL": null_device,
-                "GIT_CONFIG_COUNT": "0",
-                "GIT_TERMINAL_PROMPT": "0",
-                "GIT_ASKPASS": null_device,
-                "GIT_SSH_COMMAND": provider_hardened_ssh_command(),
-            },
-            removed_env: PROVIDER_GIT_REMOVED_ENV,
-            args: PROVIDER_GIT_CONFIG_ARGS,
-        }
-    }
-
-    // The captured `git` process specification of this policy.
-    fn spec(self) -[Exec]> ProcessSpec Never! {
-        spec := process.cmd([String]{"git"}).cwd(self.cwd)
-        loop key in provider_sorted_keys(self.env) -> spec = spec.env(key, self.env[key])
-        loop variable in self.removed_env -> spec = spec.env_remove(variable)
-        spec.args_extend(self.args).stdout(.Capture).stderr(.Capture)
-    }
-}
-
-// The hardened Git command every provider and Source Fetch operation runs.
-fn provider_hardened_git_command() -[Env, Exec]> ProcessSpec Never! {
-    HardenedGitPolicy.current().spec()
-}
-
-// The non-interactive SSH policy shared by every hardened Git command.
-fn provider_hardened_ssh_command() -[Env]> String Never! {
-    if sys.is_windows() -> return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
-    "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
-}
-
-fn provider_git_null_device() -[Env]> String Never! {
-    if sys.is_windows() -> "NUL" else -> "/dev/null"
-}
-
-fn provider_git_safe_cwd() -[Env]> String Never! {
-    if sys.is_windows() -> "\\" else -> "/"
-}
-
 // Whether a hardened Git binary can run at all.
 fn provider_git_available() -[Env, Exec, Time.Wait]> Bool Never! {
-    if provider_hardened_git_command().arg("--version").run() == {
+    if foundation_hardened_git_command().arg("--version").run() == {
         .Ok(_) -> true
         .Err(_) -> false
     }

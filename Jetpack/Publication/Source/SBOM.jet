@@ -1,6 +1,9 @@
 // Source/Publish/SBOM.rs: deterministic SPDX 2.3 and CycloneDX 1.5.
 // Namespace/serial identity is the canonical PackageModel lock writer's bytes,
 // hashed by the Compiler-owned SHA kernel. Production never samples a clock.
+use jet_foundation.[foundation_json_quote]
+use jet_pkg_model.[LockFile, pkg_lock_write, pkg_sha256_hex]
+
 fn publication_emit_spdx(lock: LockFile, root_name: String, root_version: String) -> String Never! {
     digest :: publication_lock_digest(lock)
     root_checksum := "NOASSERTION"

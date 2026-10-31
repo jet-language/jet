@@ -69,7 +69,7 @@ fn pkg_fetch_git_transport(root: String, url: String) -[FS, Env, Net, Time.Wait]
     Ok(PackageFetchGitTransport{network: Val(transport), local: None, remote: transport.remote(url)})
 }
 fn pkg_fetch_git_command(transport: PackageFetchGitTransport) -[FS, Env, Exec]> ProcessSpec PackageFetchError! {
-    spec := if transport.network == .Val(network) -> network.command() else -> provider_hardened_git_command()
+    spec := if transport.network == .Val(network) -> network.command() else -> foundation_hardened_git_command()
     if transport.local == .Val(source) -> spec = source.process_directory(spec, 199, false) ?? return Err(pkg_fetch_git_bad("could not retain local Git descriptor: {err}"))
     Ok(spec)
 }
@@ -122,7 +122,7 @@ fn pkg_fetch_git_populate(transport: PackageFetchGitTransport, stage: Foundation
     clone :: stage.process_directory(pkg_fetch_git_command(transport), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git cache authority: {err}"))
     receipt :: clone.args_extend([String]{"clone", "--quiet", "--", transport.remote, "."}).run() ?? return Err(pkg_fetch_git_bad("failed to clone: {err}"))
     if !receipt.success -> return Err(pkg_fetch_git_bad("failed to clone `{transport.remote}`"))
-    checkout :: stage.process_directory(provider_hardened_git_command(), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git checkout authority: {err}"))
+    checkout :: stage.process_directory(foundation_hardened_git_command(), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git checkout authority: {err}"))
     checked :: checkout.args_extend([String]{"checkout", "--quiet", revision}).run() ?? return Err(pkg_fetch_git_bad("couldn't check out revision: {err}"))
     if !checked.success -> return Err(pkg_fetch_git_bad("couldn't check out revision `{revision}`"))
     stage.revalidate() ?? return Err(pkg_fetch_git_bad("Git cache authority changed: {err}"))
