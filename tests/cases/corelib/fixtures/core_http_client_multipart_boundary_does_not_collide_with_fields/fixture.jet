@@ -17,11 +17,11 @@ fn multipart_test() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     peer :: task {
-        stream :: net.tcp_accept(listener) ?? panic("accept")
-        net.set_read_timeout(stream, 5000) ?? panic("timeout")
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        net.set_read_timeout(&stream, 5000) ?? panic("timeout")
         request := [U8]{}
         loop {
-            chunk :: net.tcp_read_bytes(stream, 4096) ?? panic("read request")
+            chunk :: net.tcp_read_bytes(&stream, 4096) ?? panic("read request")
             assert(chunk.len() != 0, "multipart request ended before body")
             loop b in chunk -> &request.push(b)
             shown :: String.from_bytes(request) ?? panic("request UTF-8")
@@ -32,8 +32,8 @@ fn multipart_test() {
             if request.len() >= header_end + 4 + content_length -> break
         }
         response :: files.read_bytes("response.bin") ?? panic("response")
-        net.tcp_write_all_bytes(stream, response) ?? panic("write response")
-        net.tcp_close(stream) ?? panic("drop peer")
+        net.tcp_write_all_bytes(&stream, response) ?? panic("write response")
+        net.tcp_close(&stream) ?? panic("drop peer")
         String.from_bytes(request) ?? panic("request UTF-8")
     }
     long_candidate :: files.read("long-candidate.txt") ?? panic("long candidate")

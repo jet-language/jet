@@ -6,13 +6,11 @@ use core.files as files
 fn run() {
     directory_input :: files.open("{work}") ?? panic("open dir")
     directory_reader := cbor.reader(^directory_input) ?? panic("reader")
-    result :: directory_reader.next()
-    if result == {
-        .Ok(_) -> { print("read-ok-missed") }
+    if &directory_reader.next() == {
+        .Val(_) | .None -> { print("read-ok-missed") }
         .Err(first) -> {
-            again :: directory_reader.next()
-            if again == {
-                .Ok(_) -> { print("not-latched") }
+            if &directory_reader.next() == {
+                .Val(_) | .None -> { print("not-latched") }
                 .Err(second) -> {
                     print(first.kind == encoding.EncodingErrorKind.IO)
                     print(first.reason == second.reason)

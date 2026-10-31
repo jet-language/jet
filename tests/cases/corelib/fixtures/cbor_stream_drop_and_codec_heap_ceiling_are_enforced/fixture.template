@@ -5,9 +5,9 @@ use core.files as files
 
 fn write_unfinished(path: String) {
     output :: files.create(path) ?? panic("create partial")
-    writer :: cbor.writer(^output) ?? panic("writer")
-    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+    writer := cbor.writer(^output) ?? panic("writer")
+    &writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    &writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
     &writer.flush() ?? panic("flush")
     // no ArrayEnd / finish — Drop leaves buffered items unwritten (incomplete)
 }
@@ -20,9 +20,9 @@ fn run() {
     print(leftover == empty)
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{work}/partial.cbor") ?? panic("same-path recreate after Drop")
-    reopen_writer :: cbor.writer(^reopen_out) ?? panic("reopen writer")
-    reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
-    reopen_writer.finish() ?? panic("reopen finish")
+    reopen_writer := cbor.writer(^reopen_out) ?? panic("reopen writer")
+    &reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+    &reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read_bytes("{work}/partial.cbor") ?? panic("same-path read after finish")
     null_wire :: [U8]{ 246 }
     print(finished == null_wire)
@@ -35,16 +35,14 @@ fn run() {
     limits.max_item_bytes = 150000
     limits.max_expansion_bytes = 0
     input :: files.open("{work}/heap.cbor") ?? panic("heap open")
-    reader :: cbor.reader(^input, limits) ?? panic("heap reader")
+    reader := cbor.reader(^input, limits) ?? panic("heap reader")
     count := 0
     loop count < 4 {
-        result :: reader.next()
-        if result == {
-            .Ok(_) -> { count++ }
+        if &reader.next() == {
+            .Val(_) | .None -> { count += 1 }
             .Err(first) -> {
-                again :: reader.next()
-                if again == {
-                    .Ok(_) -> { print("heap-not-latched") }
+                if &reader.next() == {
+                    .Val(_) | .None -> { print("heap-not-latched") }
                     .Err(second) -> {
                         print(first.byte_offset)
                         print(first.path)

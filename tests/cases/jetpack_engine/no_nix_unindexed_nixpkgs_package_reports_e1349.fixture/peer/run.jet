@@ -67,7 +67,7 @@ fn peer_nar_node(out: &[U8], path: String) {
     } else {
         assert(info.is_file)
         peer_nar_token(&out, "regular".bytes())
-        if info.mode & 73 != 0 {
+        if info.mode.bit_and(73) != 0 {
             peer_nar_token(&out, "executable".bytes())
             peer_nar_token(&out, "".bytes())
         }
@@ -101,7 +101,7 @@ fn peer_nix_base32(bytes: [U8]) -> String {
         digit := 0
         loop offset in 0..<5 {
             target :: bit + offset
-            if target < 256 && (Int.from_u8(bytes[target /% 8]) & (1 << (target % 8))) != 0 -> digit |= 1 << offset
+            if target < 256 && Int.from_u8(bytes[target /% 8]).bit_and(1 << (target % 8)) != 0 -> digit = digit.bit_or(1 << offset)
         }
         &out.push(alphabet[digit])
     }

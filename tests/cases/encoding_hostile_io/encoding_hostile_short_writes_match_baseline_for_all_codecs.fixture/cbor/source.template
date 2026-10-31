@@ -5,15 +5,14 @@ use core.files as files
 
 fn run() {
     output :: files.create("{work}/cbor/output.data") ?? panic("create")
-    writer :: cbor.writer(^output) ?? panic("writer")
-    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    writer.write(encoding.DataEvent.Int(3)) ?? panic("int")
-    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("end")
-    if writer.finish() == {
+    writer := cbor.writer(^output) ?? panic("writer")
+    &writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    &writer.write(encoding.DataEvent.Int(3)) ?? panic("int")
+    &writer.write(encoding.DataEvent.ArrayEnd) ?? panic("end")
+    if &writer.finish() == {
         .Ok(_) -> { print("finish-ok") }
         .Err(first) -> {
-            again :: writer.finish()
-            if again == {
+            if &writer.finish() == {
                 .Ok(_) -> { print("not-latched") }
                     .Err(second) -> {
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
@@ -21,6 +20,6 @@ fn run() {
             }
         }
     }
-    writer.finish() ?? panic("finish")
+    &writer.finish() ?? panic("finish")
     print("done")
 }

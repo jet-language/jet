@@ -5,17 +5,20 @@ use core.files as files
 
 fn run() {
     input :: files.open("{work}/jsonl/input.data") ?? panic("open")
-    reader :: jsonl.reader(^input) ?? panic("reader")
-    first :: reader.next() ?? panic("first")
-    if first == {
-        Val(v) -> print(v.text() ?? "bad")
-        None -> print("none")
+    reader := jsonl.reader(^input) ?? panic("reader")
+    if &reader.next() == {
+        .Val(v) -> print(v.text() ?? "bad")
+        .None -> print("none")
+        .Err(_) -> panic("first")
     }
-    second :: reader.next() ?? panic("second")
-    if second == {
-        Val(v) -> print(v.int() ?? -1)
-        None -> print("none2")
+    if &reader.next() == {
+        .Val(v) -> print(v.int() ?? -1)
+        .None -> print("none2")
+        .Err(_) -> panic("second")
     }
-    eof :: reader.next() ?? panic("eof")
-    if eof == None { print("eof") } else { print("bad-eof") }
+    if &reader.next() == {
+        .None -> print("eof")
+        .Val(_) -> print("bad-eof")
+        .Err(_) -> panic("eof")
+    }
 }

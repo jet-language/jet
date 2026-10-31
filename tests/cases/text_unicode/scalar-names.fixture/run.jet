@@ -9,17 +9,17 @@ fn s3_unicode_scalar(cp: Int) -> String Never! {
     if cp < 128 {
         &bytes.push(U8{cp})
     } else if cp < 2048 {
-        &bytes.push(U8{192 | (cp >> 6)})
-        &bytes.push(U8{128 | (cp & 63)})
+        &bytes.push(U8{(cp >> 6).bit_or(192)})
+        &bytes.push(U8{cp.bit_and(63).bit_or(128)})
     } else if cp < 65536 {
-        &bytes.push(U8{224 | (cp >> 12)})
-        &bytes.push(U8{128 | ((cp >> 6) & 63)})
-        &bytes.push(U8{128 | (cp & 63)})
+        &bytes.push(U8{(cp >> 12).bit_or(224)})
+        &bytes.push(U8{(cp >> 6).bit_and(63).bit_or(128)})
+        &bytes.push(U8{cp.bit_and(63).bit_or(128)})
     } else {
-        &bytes.push(U8{240 | (cp >> 18)})
-        &bytes.push(U8{128 | ((cp >> 12) & 63)})
-        &bytes.push(U8{128 | ((cp >> 6) & 63)})
-        &bytes.push(U8{128 | (cp & 63)})
+        &bytes.push(U8{(cp >> 18).bit_or(240)})
+        &bytes.push(U8{(cp >> 12).bit_and(63).bit_or(128)})
+        &bytes.push(U8{(cp >> 6).bit_and(63).bit_or(128)})
+        &bytes.push(U8{cp.bit_and(63).bit_or(128)})
     }
     String.from_bytes(bytes) ?? panic("valid Unicode scalar encoding")
 }

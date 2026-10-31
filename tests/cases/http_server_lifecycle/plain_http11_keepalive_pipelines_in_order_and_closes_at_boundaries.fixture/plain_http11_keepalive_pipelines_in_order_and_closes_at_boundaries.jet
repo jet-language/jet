@@ -10,9 +10,9 @@ use core.net as net
 fn s6_pipeline_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 
 fn s6_pipeline_exchange(addr: String, request: String) -> String {
-    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream := net.tcp_connect(addr) ?? panic("connect")
     stream.write_all(request.bytes()) ?? panic("request write")
-    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request write")
+    net.tcp_shutdown(&stream, NetShutdown.Write) ?? panic("finish request write")
     parts := [String]{}
     loop {
         part :: stream.read_text(8192) ?? panic("response read")

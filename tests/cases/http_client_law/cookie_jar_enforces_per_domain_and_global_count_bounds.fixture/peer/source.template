@@ -21,9 +21,9 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: TCPStream) -> [U8] {
+fn request_head(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block :: stream.read(512) ?? panic("request read")
@@ -46,8 +46,8 @@ fn run() {
         batches :: (count + 89) /% 90
         loop batch_index in 0..<batches {
             start :: batch_index * 90
-            stream :: &listener.accept() ?? panic("seed accept")
-            head :: request_head(stream)
+            stream := &listener.accept() ?? panic("seed accept")
+            head :: request_head(&stream)
             _ :: String.from_bytes(head) ?? panic("original strict UTF8")
             assert(prefix(head, "GET http://d{domain}.xn--55qx5d.cn/seed{batch_index} HTTP/1.1{PEER_CRLF}".bytes()))
             response := "HTTP/1.1 200 OK{PEER_CRLF}"
@@ -58,12 +58,15 @@ fn run() {
             stream.close() ?? panic("seed close")
         }
     }
-    stream :: &listener.accept() ?? panic("verify accept")
-    head :: String.from_bytes(request_head(stream)) ?? panic("original strict UTF8")
+    stream := &listener.accept() ?? panic("verify accept")
+    head :: String.from_bytes(request_head(&stream)) ?? panic("original strict UTF8")
     cookies := ""
     found := false
     loop line in head.lines() {
-        if !found && line.to_lower().starts_with("cookie: ") { cookies = line.to_lower().strip_prefix("cookie: ") ?? panic("prefix"); found = true }
+        if !found && line.to_lower().starts_with("cookie: ") {
+            cookies = line.to_lower().strip_prefix("cookie: ") ?? panic("prefix")
+            found = true
+        }
     }
     assert(found)
     assert(cookies.split("; ").to_list().len() == 136)

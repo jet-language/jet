@@ -18,14 +18,14 @@ fn fixture_run() -> ProcessReceipt {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     server :: task {
-        stream :: net.tcp_accept(listener) ?? panic("accept")
-        _request :: net.tcp_read_bytes(stream, 4096) ?? panic("read")
+        stream := net.tcp_accept(listener) ?? panic("accept")
+        _request :: net.tcp_read_bytes(&stream, 4096) ?? panic("read")
         header :: files.read_bytes("response.header") ?? panic("response header")
         response := header
         &response.push(U8{0})
         &response.push(U8{255})
         &response.push(U8{1})
-        net.tcp_write_all_bytes(stream, response) ?? panic("response")
+        net.tcp_write_all_bytes(&stream, response) ?? panic("response")
     }
     fixture_build(address)
     observed :: fixture_run()

@@ -6,14 +6,14 @@ use core.text.parse as txt
 use core.time as time
 
 fn http_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
-fn http_read(stream: net.TCPStream) -> String {
-    net.set_read_timeout(stream, 1000) ?? panic("read timeout")
-    String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+fn http_read(stream: &net.TCPStream) -> String {
+    net.set_read_timeout(&stream, 1000) ?? panic("read timeout")
+    String.from_bytes(net.tcp_read_bytes(&stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
 }
-fn http_reply(stream: net.TCPStream, file: String) {
+fn http_reply(stream: &net.TCPStream, file: String) {
     bytes :: files.read_bytes(file) ?? panic("response bytes")
-    net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
-    net.tcp_close(stream) ?? panic("drop peer stream")
+    net.tcp_write_all_bytes(&stream, bytes) ?? panic("write response")
+    net.tcp_close(&stream) ?? panic("drop peer stream")
 }
 fn require_timeout(request: HTTPRequest) {
     if request.send() == {
@@ -52,11 +52,11 @@ fn check_pre_response_errors() {
             if &listener.accept(deadline: 0s) == {
                 .Ok(stream) -> {
                     index :: requests.len()
-                    &requests.push(http_read(stream))
+                    &requests.push(http_read(&stream))
                     if index < 2 {
-                        http_reply(stream, "proxy-{index}.response")
+                        http_reply(&stream, "proxy-{index}.response")
                     } else {
-                        net.tcp_close(stream) ?? panic("drop")
+                        net.tcp_close(&stream) ?? panic("drop")
                     }
                 }
                 .Err(error) -> if error == {
