@@ -1058,24 +1058,32 @@ fn sema_marker_rules_check_rule_signatures(markers: [Marker], environment: SemaS
 // statement or block is the module's Statement- or Block-site application
 // targeting the statement. `#Meta` is its binding's (Statements.jet) and
 // `#Context` its block's (sema_marker_rules_check_context_fact).
-// D-HTML-NAME1=B (syntax-decisions.md, M03 marker ballot): `#HTML` has a
-// site-dependent signature, `HTML(page: Path)` at the file site and bare
-// `#HTML { … }` at the block site (Rust `validate_registered_rule_marker`,
-// Parser/Items/marker_groups.rs @ 6083377777). The block form's header is
-// the checked text block's own law (sema_stmt_check_scope_member, E0617).
+// A marker with a site-dependent signature (`#HTML(path)` at the file site,
+// bare `#HTML { … }` at the block site; Rust `validate_registered_rule_marker`,
+// Parser/Items/marker_groups.rs @ 6083377777) is bare at its block site. The
+// block form's header is the checked text block's own law
+// (sema_stmt_check_scope_member, E0617).
 fn sema_marker_rules_check_statement_facts(target: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if program.registration_graph == .Val(graph) {
-        if graph.marker_catalog == None -> return
-        row :: sema_scope_caller_row(environment, graph)
-        if row < 0 -> return
-        loop index in 0..<graph.modules[row].program.rule_facts.len() {
-            if graph.modules[row].program.rule_facts[index].target != (Val(target)) -> next
-            if graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Statement)) -> next
-            if graph.modules[row].program.rule_facts[index].marker.name == "Meta" || graph.modules[row].program.rule_facts[index].marker.name == "Context" -> next
-            if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].marker.name == "HTML" -> next
-            _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if graph.marker_catalog == .Val(registry) {
+            row :: sema_scope_caller_row(environment, graph)
+            if row < 0 -> return
+            loop index in 0..<graph.modules[row].program.rule_facts.len() {
+                if graph.modules[row].program.rule_facts[index].target != (Val(target)) -> next
+                if graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Statement)) -> next
+                if graph.modules[row].program.rule_facts[index].marker.name == "Meta" || graph.modules[row].program.rule_facts[index].marker.name == "Context" -> next
+                if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && sema_marker_rules_block_form_is_bare(registry, graph.modules[row].program.rule_facts[index].marker) -> next
+                _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
         }
     }
+}
+
+// A builtin rule registered at both the file and the block site takes its
+// signature at the file site, so its block form is bare.
+fn sema_marker_rules_block_form_is_bare(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Bool {
+    rule_index :: sema_marker_rules_builtin_index(registry, marker) ?? return false
+    registry.applied_rules[rule_index].sites.contains(sema_marker_rules_site_name(RuleSite.File)) && registry.applied_rules[rule_index].sites.contains(sema_marker_rules_site_name(RuleSite.Block))
 }
 
 // Rust `Stmt::ContextBlock` (statements.rs:3869 @ 6083377777): the block's
