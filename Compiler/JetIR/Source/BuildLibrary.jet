@@ -169,9 +169,9 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     if lifecycle_problem != "" -> return ir_library_failed([String]{lifecycle_problem})
     hooked := 0
     loop (index, row) in exports {
-        if lifecycle.get(row.symbol) == None -> next
+        hook :: lifecycle.get(row.symbol) ?? next
         hooked += 1
-        if !ir_void_hook(p.functions[export_rows[index]]) -> return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must take no parameters and return nothing"})
+        if !ir_lifecycle_hook(p.functions[export_rows[index]], hook) -> return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must return nothing and take no parameters, or, as an init hook, the init array's (argc, argv, envp) as three I64"})
     }
     if hooked != lifecycle.len() -> return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
     intrinsics := [String:IRRuntimeIntrinsic]{}
@@ -564,6 +564,19 @@ fn ir_export_signature_problems(function: FnBody) -> [String] Never! {
 // A lifecycle hook: no parameters, no result.
 fn ir_void_hook(function: FnBody) -> Bool Never! {
     function.params.len() == 0 && ir_c_export_result(function) == None
+}
+
+// A lifecycle hook: no result, and no parameters or, for an init-only hook,
+// the (argc, argv, envp) every startup's init-array loop calls an entry with
+// (glibc's convention, which JetBackend Image/StaticLink.jet's startups
+// keep), as three I64.
+fn ir_lifecycle_hook(function: FnBody, hook: IRLifecycle) -> Bool Never! {
+    if ir_void_hook(function) -> return true
+    if ir_c_export_result(function) != None || hook.fini_priority >= 0 || function.params.len() != 3 -> return false
+    loop param in function.params {
+        if (ir_c_primitive(param.ty) ?? "") != "I64" -> return false
+    }
+    true
 }
 
 // A runtime-only ordinary Jet reference function of `count` parameters

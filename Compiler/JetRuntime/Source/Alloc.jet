@@ -68,8 +68,8 @@
 // Checked mode (alloc_class_limit, the "Checked mode" section below) is
 // chosen once, from the process environment, before the first allocation:
 // by jet_rt_alloc_check_init, which only a checked build keeps. Any other
-// build reads no environment here; startup refuses the request
-// (alloc_check_refuse_requested).
+// build reads no environment here; jet_rt_alloc_check_refuse_init refuses
+// the request.
 //
 // The runtime object puts jet_rt_alloc_init in .init_array, so initialization
 // precedes all user code in both programs and entryless libraries. There is no
@@ -245,20 +245,32 @@ fn rt_alloc_check_sweep_address() -> I64 {
 }
 
 // JET_CHECKED_ALLOC=1 asked for checking at start, but this program was built
-// without the checked heap: it stops with status 70 before user code rather
-// than run unchecked. Startup (HostStartup.jet jet_rt_host_arguments), which
-// a program's main and an entryless host run before any runtime entry,
-// tests the startup environment `envp` (the null-terminated pointer array
-// startup lends) here, or in the walk jet_rt_host_env_capture already makes
-// when the program links it, so the array is walked once. Only the pointers
-// are walked: an entry whose first byte is not 'J' costs one compare
-// (alloc_check_refuse_entry compares the rest). A checked build decided at
-// jet_rt_alloc_check_init and never refuses: its hook set
-// alloc_check_take_code. That word, not alloc_check_linked, is the test,
-// since reading alloc_check_linked here would keep the hook, and so the
-// checked heap, in every program.
-fn alloc_check_refuse_requested(envp: I64) {
-    if (alloc_check_take_code != I64{0} || envp == I64{0}) -> return
+// without the checked heap: it stops with status 70 before any entry runs
+// rather than run unchecked. The runtime's .init_array runs this hook before
+// every entry of every image that links the runtime: a program's main, an
+// entryless library, a foreign host that never calls jet_rt_host_arguments.
+// It runs after jet_rt_alloc_check_init (priority 0): a checked build decided
+// there and never refuses, its hook having set alloc_check_take_code. That
+// word, not alloc_check_linked, is the test, since reading alloc_check_linked
+// here would keep that hook, and so the checked heap, in every program.
+// Its arguments are the (argc, argv, envp) that glibc and the program's own
+// startup (JetBackend Image/StaticLink.jet) pass every .init_array entry.
+// Only envp's pointers are walked: an entry whose first byte is not 'J' costs
+// one compare (alloc_check_refuse_entry compares the rest), with no syscall.
+// A libc whose init loop passes no arguments (musl) leaves the three
+// registers unrelated, so envp is trusted only where the kernel's startup
+// stack puts it, right past argv's terminating null:
+// envp == argv + 8 * (argc + 1). Otherwise the hook reads /proc/self/environ
+// (alloc_check_requested).
+// runtime-init: 1
+#Export(c) fn jet_rt_alloc_check_refuse_init(argc: I64, argv: I64, envp: I64) {
+    if (alloc_check_take_code != I64{0}) -> return
+    // The init loop passes argc as an int32; discard the upper register bits.
+    count :: argc.bit_and(I64{4294967295})
+    if (argv == I64{0} || (argv.bit_and(I64{7})) != I64{0} || envp != wrapping(argv + wrapping(wrapping(count + I64{1}) * I64{8}))) {
+        if alloc_check_requested() { alloc_check_refuse() }
+        return
+    }
     at := envp
     #Unsafe("startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries") {
         loop {
@@ -270,12 +282,10 @@ fn alloc_check_refuse_requested(envp: I64) {
     }
 }
 
-// Refuses (alloc_check_refuse_requested) when the startup entry `entry`,
-// whose first byte is 'J', is exactly JET_CHECKED_ALLOC=1 in a build without
-// the checked heap. Bytes are compared up to the first difference, so none
-// past the entry's NUL is read.
+// Refuses (jet_rt_alloc_check_refuse_init) when the startup entry `entry`,
+// whose first byte is 'J', is exactly JET_CHECKED_ALLOC=1. Bytes are compared
+// up to the first difference, so none past the entry's NUL is read.
 fn alloc_check_refuse_entry(entry: I64) {
-    if (alloc_check_take_code != I64{0}) -> return
     pattern :: rt_text_data(rt_static_text("JET_CHECKED_ALLOC=1"))
     index := I64{1}
     #Unsafe("startup lends the NUL-terminated entry; pattern is a static text's 19 bytes, read below index 19") {
@@ -285,6 +295,10 @@ fn alloc_check_refuse_entry(entry: I64) {
         }
         if (os_load_u8(wrapping(entry + I64{19})) != I64{0}) -> return
     }
+    alloc_check_refuse()
+}
+
+fn alloc_check_refuse() {
     alloc_check_say(rt_static_text("jet checked allocator (JET_CHECKED_ALLOC=1): this program was built without the checked allocator; build it again with JET_CHECKED_ALLOC=1 set\n"))
     trap_defect_exit(I64{70})
 }
@@ -1228,8 +1242,8 @@ fn alloc_arena_give(pointer: I64) {
 // reaches the direct-mapping branch, which alone tests for checked mode.
 // The checked heap (jet_rt_alloc_check_take, _give, _sweep) is linked only
 // into a program built with the variable set (alloc_check_linked above); a
-// program built without it stops at startup capture when the variable asks
-// for checking (alloc_check_refuse_requested).
+// program built without it stops at startup when the variable asks for
+// checking (jet_rt_alloc_check_refuse_init).
 // A checked payload p of (size, align) lives inside one ordinary heap block
 // q of (prefix + size + 8, max(align, 8)), p = q + prefix, where the prefix
 // is 200 bytes rounded up to align:
@@ -1265,11 +1279,12 @@ ALLOC_CHECK_SLOTS :: I64{4096}
 ALLOC_CHECK_BUDGET :: I64{67108864}
 
 // Whether the environment holds exactly JET_CHECKED_ALLOC=1, for a checked
-// build's jet_rt_alloc_check_init. It runs before any allocation and before
-// the startup environment is captured, and is an init-array hook a C host's
-// libc may call without the startup arguments, so it reads
-// /proc/self/environ through the state page's unused tail (path and pattern
-// words at 1024 and 1048, a 2016-byte buffer at 2048), cleared again
+// build's jet_rt_alloc_check_init, and for jet_rt_alloc_check_refuse_init
+// when its init loop passed no startup arguments. It runs before any
+// allocation and before the startup environment is captured, and is an
+// init-array hook a C host's libc may call without the startup arguments, so
+// it reads /proc/self/environ through the state page's unused tail (path and
+// pattern words at 1024 and 1048, a 2016-byte buffer at 2048), cleared again
 // afterwards. Without /proc the mode stays off.
 fn alloc_check_requested() -> Bool {
     path :: wrapping(alloc_root + I64{1024})

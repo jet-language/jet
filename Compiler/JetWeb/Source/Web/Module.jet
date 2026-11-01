@@ -155,7 +155,17 @@ fn web_hooks_body(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never!
     loop priority in priorities {
         loop hook in hooks {
             if hook.fini != fini || hook.priority != priority -> next
-            if st.sigs[hook.row].starts_with(":") -> web_call_dropping(&e, st, hook.row) else -> &st.errors.push("lifecycle hook {hook.row} takes parameters")
+            sig :: st.sigs[hook.row]
+            // An init hook may take the native init array's (argc, argv, envp)
+            // (JetIR BuildLibrary.jet ir_lifecycle_hook); a web module starts
+            // with no process arguments, so it passes three zeros.
+            arguments :: !fini && sig.starts_with("lll:")
+            if !sig.starts_with(":") && !arguments {
+                &st.errors.push("lifecycle hook {hook.row} takes parameters")
+                next
+            }
+            if arguments -> loop _ in 0..<3 -> web_i64(&e, 0)
+            web_call_dropping(&e, st, hook.row)
         }
     }
     web_finish(e)

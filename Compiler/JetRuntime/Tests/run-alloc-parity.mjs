@@ -18,14 +18,18 @@ if (!output || !inputs.length) {
 }
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
-const fixture = join(root, 'Compiler/JetRuntime/Tests/CAbiDriver.c');
+// CAbiDriver.c starts the runtime as a program's main does
+// (jet_rt_host_arguments); EmbedHost.c is a foreign host that never does.
+const fixtures = {
+  native: [join(root, 'Compiler/JetRuntime/Tests/CAbiDriver.c'), '-DC_ABI_ALLOC_ONLY=1'],
+  embed: [join(root, 'Compiler/JetRuntime/Tests/EmbedHost.c')],
+};
 const binaries = {};
 const errors = [];
-const groups = [['native', inputs]];
-for (const [tier, links] of groups) {
+for (const [tier, [fixture, ...defines]] of Object.entries(fixtures)) {
   const binary = join(out, `alloc-${tier}`);
-  const args = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic', '-DC_ABI_ALLOC_ONLY=1', fixture,
-    ...links.map(input => input.startsWith('-') ? input : resolve(input)), '-lpthread', '-ldl', '-lm', '-o', binary];
+  const args = ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic', ...defines, fixture,
+    ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-lpthread', '-ldl', '-lm', '-o', binary];
   const built = spawnSync(nativeCCompiler, args);
   writeFileSync(join(out, `${tier}.build.stdout`), built.stdout ?? Buffer.alloc(0));
   writeFileSync(join(out, `${tier}.build.stderr`), built.stderr ?? Buffer.alloc(0));
@@ -57,14 +61,18 @@ for (const test of [
     prefix: Buffer.from(`${trap}write past the end of 0x`), contains: ['(20 bytes, align 1), found at its free', ' alloc_overflow+0x'] },
   { name: 'alloc-write-after-free', env: checked, status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}write after free into 0x`), contains: ['(40 bytes, align 8) at byte offset 3\n', '  freed at:\n', ' alloc_write_after_free+0x'] },
+  { name: 'embed-clean', tier: 'embed', status: 0, signal: null, exact: Buffer.alloc(0) },
+  { name: 'embed-checked-clean', tier: 'embed', arg: 'embed-clean', env: checked, status: 0, signal: null, exact: Buffer.alloc(0) },
+  { name: 'embed-double-free', tier: 'embed', env: checked, status: null, signal: 'SIGABRT',
+    prefix: Buffer.from(`${trap}double free of 0x`), contains: ['(40 bytes, align 8)\n  at:\n', ' embed_double_free+0x'] },
 ]) {
   const before = errors.length;
-  for (const tier of ['native']) {
+  for (const tier of [test.tier ?? 'native']) {
     if (!binaries[tier]) {
       errors.push(`${test.name}/${tier}: build failed`);
       continue;
     }
-    const result = spawnSync(binaries[tier], [test.name], test.env ? { env: test.env } : {});
+    const result = spawnSync(binaries[tier], [test.arg ?? test.name], test.env ? { env: test.env } : {});
     writeFileSync(join(out, `${test.name}.${tier}.stdout`), result.stdout ?? Buffer.alloc(0));
     writeFileSync(join(out, `${test.name}.${tier}.stderr`), result.stderr ?? Buffer.alloc(0));
     writeFileSync(join(out, `${test.name}.${tier}.status.json`), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null }) + '\n');

@@ -218,7 +218,12 @@ none of its startup. A guarded hook may run once per kept guard and therefore
 starts idempotently. System linkers ignore the flag and keep every hook, as
 does the runtime image, whose exports are all live. Code a service runs only
 when used is installed by its hook as a code word (`rt_*_address()`), never
-called from always-live startup or exit paths.
+called from always-live startup or exit paths. A hook takes no parameters and
+returns nothing. The one exception is an init hook, which may instead take the
+init array's `(argc, argv, envp)` as three `I64`. This is how a decision gets
+made on every entry, including a foreign C host that never calls
+`jet_rt_host_arguments`. A web module has no process arguments, so it passes
+three zeros.
 
 `RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
 its only home: its route, record and import rows are edited by hand, sorted,
