@@ -193,14 +193,13 @@ fn alloc_unmap(address: I64, bytes: I64) {
         return
     }
     // mmap is zero-filled: the locks, every free-list head, every live total
-    // and the large cache start at zero.
+    // and the large cache start at zero. One mapping holds the state page and,
+    // in the two pages after it, the 32 arenas (32 * 216 bytes).
     #Unsafe("runtime-init runs before any other thread exists") {
-        alloc_root = alloc_map(I64{4096}, I64{4096})
+        alloc_root = alloc_map(I64{12288}, I64{12288})
     }
-    // The 32 arenas: 32 * 216 bytes in one zero-filled mapping.
-    table :: alloc_map(I64{8192}, I64{8192})
     #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
-        os_store_i64(wrapping(alloc_root + I64{208}), table)
+        os_store_i64(wrapping(alloc_root + I64{208}), wrapping(alloc_root + I64{4096}))
     }
     // The initializing thread has no TCB yet; point its GS at the zero word
     // so thread_base() reads 0 instead of faulting on the kernel's GS base 0.
@@ -256,7 +255,8 @@ fn rt_alloc_check_sweep_address() -> I64 {
 // Its arguments are the (argc, argv, envp) that glibc and the program's own
 // startup (JetBackend Image/StaticLink.jet) pass every .init_array entry.
 // Only envp's pointers are walked: an entry whose first byte is not 'J' costs
-// one compare (alloc_check_refuse_entry compares the rest), with no syscall.
+// one compare (alloc_check_requested_entry compares the rest), with no
+// syscall and no call inside the walk.
 // A libc whose init loop passes no arguments (musl) leaves the three
 // registers unrelated, so envp is trusted only where the kernel's startup
 // stack puts it, right past argv's terminating null:
@@ -276,26 +276,26 @@ fn rt_alloc_check_sweep_address() -> I64 {
         loop {
             entry :: os_load_i64(at)
             if (entry == I64{0}) -> return
-            if (os_load_u8(entry) == I64{74}) -> alloc_check_refuse_entry(entry)
+            if (os_load_u8(entry) == I64{74} && alloc_check_requested_entry(entry)) -> break
             at = wrapping(at + I64{8})
         }
     }
+    alloc_check_refuse()
 }
 
-// Refuses (jet_rt_alloc_check_refuse_init) when the startup entry `entry`,
-// whose first byte is 'J', is exactly JET_CHECKED_ALLOC=1. Bytes are compared
-// up to the first difference, so none past the entry's NUL is read.
-fn alloc_check_refuse_entry(entry: I64) {
+// Whether the startup entry `entry`, whose first byte is 'J', is exactly
+// JET_CHECKED_ALLOC=1. Bytes are compared up to the first difference, so
+// none past the entry's NUL is read.
+fn alloc_check_requested_entry(entry: I64) -> Bool {
     pattern :: rt_text_data(rt_static_text("JET_CHECKED_ALLOC=1"))
     index := I64{1}
     #Unsafe("startup lends the NUL-terminated entry; pattern is a static text's 19 bytes, read below index 19") {
         loop index < (I64{19}) {
-            if (os_load_u8(wrapping(entry + index)) != os_load_u8(wrapping(pattern + index))) -> return
+            if (os_load_u8(wrapping(entry + index)) != os_load_u8(wrapping(pattern + index))) -> return false
             index = wrapping(index + I64{1})
         }
-        if (os_load_u8(wrapping(entry + I64{19})) != I64{0}) -> return
+        return os_load_u8(wrapping(entry + I64{19})) == I64{0}
     }
-    alloc_check_refuse()
 }
 
 fn alloc_check_refuse() {
