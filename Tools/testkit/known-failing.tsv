@@ -70,6 +70,8 @@ tests/ui/import_ambiguous	#6425	check not ported: E0606
 tests/ui/import_boundary	#6425	check not ported: E0619
 tests/ui/import_boundary_invalid	#6425	check not ported: E1206
 tests/ui/import_boundary_unused	#6006	check not ported: L0619
+tests/ui/modules/bodyless_private_module_stays_hidden_outside_owner_file	#6480	E0611 `helper` is not defined, not E0609: Registration/Items.jet:3833 finds no direct symbol for a bodyless `priv module` child, so the E0609 branch never fires
+tests/ui/vis_priv_module_cross_file	#6480	E0611 `helper` is not defined, not E0609: Registration/Items.jet:3833 finds no direct symbol for a bodyless `priv module` child, so the E0609 branch never fires
 tests/ui/impure_no_reason	#6425	check not ported: E0999
 tests/ui/impure_tier2_no_gate	#4926	E3410 names the effect class (`opening a file`), not the call `core.files.read()` (#4926 C4)
 tests/ui/index_non_collection_reported_once	#6425	check not ported: E0505
@@ -734,7 +736,6 @@ tests/cases/fact_reads/typed_fact_fixture_is_accepted_by_comptime_repl_and_web.n
 tests/cases/ffi_javascript/javascript_sidecar_binds_runs_and_rejects_dynamic_types.case	#6418	`jet inspect bind` is not built yet (E2104)
 tests/cases/ffi_python/python_sidecar_binds_runs_and_launders_failure.case	#6418	`jet inspect bind` is not built yet (E2104)
 tests/cases/first_hour/first_hour_cli_journey.case	#4944	`jet add` is not built yet (E2104)
-tests/cases/gate_ledger/i9_repl_tier_keeps_the_fixture_behavior.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/generics/generic_module_fact_value_example_has_profile_and_tier_parity.case	#6418	`jet run --set` is not built yet (E2104)
 tests/cases/grammar/seeded_tree_sitter_drift_fails_the_generated_section_guard.case	#6418	`jet devtools` is not built yet (E2104)
 tests/cases/inline_deps/jet_lock_unresolved_dep_is_e1253.case	#4944	`jet fetch` is not built yet (E2104)
@@ -867,7 +868,6 @@ tests/cases/web_build/default_wasm_top_level_dev_is_not_web_runtime.case	#5201	`
 tests/cases/web_build/forms_table_web_lowering_preserves_typed_form_contract.case	#5201	`jet build --target=web main.jet` exits 1: Error [E1803]: Application authority is undecided for `Env, FS.Read, Net, Time`, as the native build does
 tests/cases/web_build/host_dev_entry_is_not_web_runtime_and_run_prints_the_literal.case	#5201	`jet build --target web --json main.jet` exits 1: Error [E0102]: `DevServer` has no method `port`, the error native `jet check` gives the same program
 tests/cases/web_build/js_source_map_uses_line_markers_and_hides_host_paths.case	#5201	expects `.jet/build/app.js.map`, which the wasm build does not write
-tests/cases/web_build/knowledge_tier_web_js_and_wasm_runtime_values_match.case	#5201	`node app.js` exits 70: Stop [E3010]: `whole number cannot cross into the decimal without losing precision`, as the native build does
 tests/cases/web_build/module_local_dev_is_validated_as_web_runtime.case	#5201	`jet build --target web --json main.jet` exits 1: Error [E0003]: `#Target(Web)` isn't valid on a module
 tests/cases/web_build/module_local_run_cannot_hijack_web_entrypoint.case	#5201	`jet build --target web main.jet` exits 1: Error [E0003]: `#Target(Web)` isn't valid on a module
 tests/cases/web_build/selected_browser_machine_emits_dossier_bound_web_artifact.case	#5201	the build writes beside the entry (Examples/features/web/.jet/build), not the case's `.jet/build`, and the case pins the retired JS emitter's dossier fields in the manifest and app.js
@@ -928,10 +928,11 @@ tests/cases/web_build/web_wasm_map_string_int_export_hostile_roundtrip.case	#520
 tests/cases/web_build/web_wasm_range_loop_bridge_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_wasm_string_export_hostile_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_wasm_string_param_export_hostile_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
+Examples/features/net/backend_battery	#3173	ir.build unlowered: `jet run` is an internal compiler error (exit 101): the `HTTPRouterRegister` handle method and the `jet_http_router_dispatch`/`jet_openapi_router_inputs` runtime routes have no IR lowering, and the runtime exports no `jet_http_router_new`; no expected stream exists yet (the load line prints measured p50/p95/p99)
 Examples/features/packages/mod_load_errors	#4599	`mod.load` is not built yet (E2104)
 Examples/features/lowlevel/polyglot_go	#6418	`jet inspect bind` reports E2104 not built yet; `use go.handles` reports E1002 (foreign root `go` reserved)
 Examples/features/lowlevel/ffi	#6366	ir.build unlowered: foreign import requires a checked direct C scalar signature (BuildForeign.jet:35); extern rust slot trampoline jet_ffi_<name>_cabi has no IR call lowering
-Examples/features/tooling/compute_autodiff	#4599	E0112 `compute.jvp` needs a function returning `Tensor`; jvp/VJPRun storage is not in the registered compute vocabulary
+Examples/features/tooling/compute_autodiff	#4599	ir.build unlowered: `jet check` is clean, but `jet run` is an internal compiler error (exit 101) with 7 faults "generic Core call core.compute.gradient/jvp/vjp/value_and_gradient": the autodiff entry points have no IR lowering
 Examples/features/serde/field_metadata_edges	#3236	unbuilt: owner ruling on None-field encoding pending
 tests/cases/authority_manifest/default_run_records_source_linked_authority_delegation.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 tests/cases/build_entry/action_generated_jet_reenters_frontend_before_runtime_codegen.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2102)
@@ -1261,7 +1262,11 @@ tests/cases/corelib/core_data_schema_empty_table_and_series_law.case	#5976	bug: 
 tests/cases/corelib/generated_struct_codecs_preserve_option_and_computed_fields.case	#5976	bug: the generated struct codec drops computed fields
 tests/cases/corelib/json_parser_is_rfc8259_complete.case	#5976	verify-intent: first.out expects sorted keys and `1500`, but objects keep insertion order and `Number` keeps its exact spelling (encoding-decisions.md:34-36), so `{"big":1.5e3,"acc":…}` is correct; second/third.jet read the removed `EncodingError.message` (E0302; the field is `reason`, Encoding.jet:150), and with `.reason` they print the current emitter's wording, which no doc pins, so goldens 2/3 need an owner ruling
 tests/cases/corelib/tracked_origin_is_a_folded_optional_fact.case	#5976	bug: the tracked origin fact reads false/missing where the golden reads true/speed
+tests/cases/crypto_diagnostics/e2702_json_exits_one_and_creates_no_artifact.case	#6488	unbuilt: nothing in Compiler emits E2702 (the CryptoMisuse report plumbing exists, no sema check); the fixture also predates the current API: `hkdf_sha256` takes `ikm: [U8]` (Core/Crypto/Crypto.jet:386) and the case passes a `Secret`, so `jet check` stops at E0112
+tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case	#6488	unbuilt: nothing in Compiler emits E2702 (the CryptoMisuse report plumbing exists, no sema check); the fixture also passes a `Secret` to `hkdf_sha256(ikm: [U8], …)` (Core/Crypto/Crypto.jet:386), so `jet check` stops at E0112
 tests/cases/crypto_diagnostics/explain_e2702_teaches_precedence_and_dynamic_values.case	#3720	unbuilt: E2702's registry why/fix are emission templates (`{why}`, `…: {fix}`, DiagnosticRows.jet:11771-11772), so explain prints the raw placeholders; the Rust-era essay the case reads (syntax/effects/types precedence, compiler-known, Dynamic values) has no source in the repo or spec (examples.md:165 names type/effect/authority precedence only), so its text needs an owner decision
+tests/cases/crypto_diagnostics/multiple_e2702_diagnostics_are_independent_json_lines.case	#6488	unbuilt: nothing in Compiler emits E2702 (the CryptoMisuse report plumbing exists, no sema check); the fixture also passes a `Secret` to `hkdf_sha256(ikm: [U8], …)` (Core/Crypto/Crypto.jet:386), so `jet check` stops at E0112, and the case reads one `jet.report/v1` line per diagnostic where `--json` now prints one `jet.status/v1` envelope with `jet.report/v3` rows
+tests/cases/crypto_diagnostics/safe_raw_nonce_json_omits_inapplicable_bounds.case	#6488	unbuilt: nothing in Compiler emits E2702 (no raw-nonce check on the safe envelope); today's `seal(recipients, bytes, aad)` (Core/Crypto/Crypto.jet:461) has no `nonce` label, so the fixture stops at E0764
 tests/cases/dataflow_stream/rolling_mean_nonfinite_matches_aot_and_default_dev.case	#5976	bug: the summing overflow error names rolling_mean where the golden names sum
 tests/cases/dev_parts_routine/dev_default_tls_peer_identity_matches_aot_and_interpreter.case	#5454	testkit: a step ends with no exit status (-1) inside the raw openssl s_server sessions; by hand on the same jet both tiers print localhost/TLS13_…/TLS13/tls-response-ok
 tests/cases/dev_parts_routine/ul6_run_watch_and_dev_share_engine.case	#6418	unbuilt: jet run --watch (E2104); the session exits before the KILL signal

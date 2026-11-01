@@ -40,6 +40,7 @@ use jet_foundation.[
     Diagnostic,
     PolicyKey,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_render_all,
     policy_key_parse,
 ]
@@ -858,7 +859,11 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
                 // The stock `debug` profile is the stock values; the front end keeps its `dev` profile.
                 name == "debug" -> profile = ""
                 name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
-                else -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "build profile `{name}` isn't declared", jet_cli_why("E2104"), "declare it under `build:` in package.jet, or select `release` or `debug`", color, JET_DRIVER_EXIT_USAGE)}
+                // The registered E1219 row is the unknown-profile report; its holes name the profile.
+                else -> {
+                    row :: diagnostic_registry_row("E1219") ?? panic("E1219 is not registered")
+                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E1219", row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name), color, JET_DRIVER_EXIT_USAGE)}
+                }
             }
         }
     }
@@ -1692,6 +1697,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         if jet_cli_looks_like_source(command) {
             // `jet <file>` is `jet run <file>`; Source/main.rs dispatches it
             // before the help and flag checks, so it ignores both.
+            if jet_cli_pinned_toolchain(raw, Val(command), color, quiet || json) == .Val(plan) -> return plan
             threads := Int?{None}
             if !jet_cli_any_help_flag(jet_argv) {
                 if jet_cli_threads(jet_argv, "run", color) == {
@@ -1736,7 +1742,9 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
     }
     if JET_CLI_PINNED_VERBS.contains(command) {
-        if jet_cli_pinned_toolchain(raw, color, quiet || json) == .Val(plan) -> return plan
+        target := String?{None}
+        if args.len() > 1 && jet_cli_looks_like_source(args[1]) -> target = Val(args[1])
+        if jet_cli_pinned_toolchain(raw, target, color, quiet || json) == .Val(plan) -> return plan
     }
 
     if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan

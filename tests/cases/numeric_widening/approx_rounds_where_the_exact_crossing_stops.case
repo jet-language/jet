@@ -1,0 +1,19 @@
+# #6475: `approx(value)` is the one explicit lossy crossing. It rounds a whole
+# number a Float cannot hold to the nearest Float (2^53 + 1 -> 2^53), at run
+# time and at compile time, on every optimization level. The implicit crossing
+# of the same value still stops with E3010.
+fixture: approx_rounds_where_the_exact_crossing_stops.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = approx_rounds_where_the_exact_crossing_stops.out
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = approx_rounds_where_the_exact_crossing_stops.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = approx_rounds_where_the_exact_crossing_stops.out
+step: jet run stops.jet
+exit: 70
+stdout: empty
+stderr: ~ "whole number cannot cross into the decimal without losing precision" # the exact crossing keeps its runtime refusal
