@@ -54,13 +54,14 @@ fn process_execution_environment(spec: I64, err: I64) -> I64 {
     if (fd_word(spec, PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255}) == I64{0}) {
         jet_rt_logical_env_seed()
         shared_acquire(logical_env_root, false)
+        // The logical environment holds each key once (logical_environment_append
+        // drops an earlier match), so its rows move in as they are: no lookup.
         entry := fd_word(logical_env_root, I64{56})
         loop entry != (I64{0}) {
-            key :: rt_text_copy(fd_word(entry, I64{8}), fd_word(entry, I64{16}))
-            value :: rt_text_copy(fd_word(entry, I64{24}), fd_word(entry, I64{32}))
-            process_execution_env_set(env, key, value)
-            jet_rt_string_drop(key)
-            jet_rt_string_drop(value)
+            row :: data_sequence_reserve(env, I64{16})
+            fd_put(row, I64{0}, rt_text_copy(fd_word(entry, I64{8}), fd_word(entry, I64{16})))
+            fd_put(row, I64{8}, rt_text_copy(fd_word(entry, I64{24}), fd_word(entry, I64{32})))
+            fd_put(env, I64{0}, fd_word(env, I64{0}) + I64{1})
             entry = fd_word(entry, I64{0})
         }
         shared_release(logical_env_root, false)
@@ -87,6 +88,16 @@ fn process_execution_environment(spec: I64, err: I64) -> I64 {
     }
     env
 }
+// This process's inherited PATH as an owned text, or 0 when it is unset. The
+// receipt resolves against it without building a whole child environment.
+fn process_execution_inherited_path() -> I64 {
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    entry :: logical_environment_find(rt_text_data(rt_static_text("PATH")), I64{4})
+    path :: if (entry == I64{0}) -> I64{0} else -> rt_text_copy(fd_word(entry, I64{24}), fd_word(entry, I64{32}))
+    shared_release(logical_env_root, false)
+    path
+}
 fn process_execution_env_get(env: I64, key: I64) -> I64 {
     at := I64{0}
     loop at < fd_word(env, I64{0}) {
@@ -96,13 +107,13 @@ fn process_execution_env_get(env: I64, key: I64) -> I64 {
     }
     I64{0}
 }
-fn process_execution_candidates(command: I64, env: I64) -> I64 {
+// `path` is a borrowed PATH value, or 0 for the default search.
+fn process_execution_candidates(command: I64, path: I64) -> I64 {
     list :: data_sequence_new(I64{0}, I64{8})
     if (process_execution_has(command, I64{47}) || rt_text_len(command) == I64{0}) {
         process_text_list_push(list, command)
         return list
     }
-    path :: process_execution_env_get(env, rt_static_text("PATH"))
     search :: if (path == I64{0}) -> rt_static_text("/bin:/usr/bin") else -> path
     start := I64{0}
     at := I64{0}
@@ -255,7 +266,7 @@ fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
     relaunch :: process_execution_relaunch(cmd)
     words :: if (relaunch == I64{0}) -> cmd else -> relaunch
     first :: fd_word(fd_word(words, I64{16}), I64{0})
-    candidates :: process_execution_candidates(first, env)
+    candidates :: process_execution_candidates(first, process_execution_env_get(env, rt_static_text("PATH")))
     process_text_list_drop(env, true)
     candidate_columns :: process_execution_nul_columns(candidates)
     argv :: process_execution_nul_columns(words)

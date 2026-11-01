@@ -156,10 +156,7 @@ fn process_authority_cwd(spec: I64, err: I64) -> I64 {
 }
 // The canonical path of `command` on this process's PATH, or 0.
 fn process_authority_on_path(command: I64, path: I64) -> I64 {
-    env :: data_sequence_new(I64{0}, I64{16})
-    process_execution_env_set(env, rt_static_text("PATH"), path)
-    candidates :: process_execution_candidates(command, env)
-    process_text_list_drop(env, true)
+    candidates :: process_execution_candidates(command, path)
     found :: process_execution_first_file(candidates)
     process_text_list_drop(candidates, false)
     found

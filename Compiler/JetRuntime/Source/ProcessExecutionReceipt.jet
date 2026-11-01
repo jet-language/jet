@@ -245,16 +245,12 @@ fn process_execution_first_file(candidates: I64) -> I64 {
 fn process_execution_identity(spec: I64) -> I64 {
     // Receipt resolution is best-effort and never turns successful execution
     // into a Resolve failure. Snapshot PATH is independent of child overrides.
-    blank :: jet_std_process_cmd(I64{0}, I64{0})
-    scratch :: jet_rt_alloc(I64{24}, I64{8})
-    env :: process_execution_environment(blank, scratch)
-    jet_rt_free(scratch, I64{24}, I64{8})
-    jet_rt_handle_drop_process_spec(blank)
+    path :: process_execution_inherited_path()
     command :: process_execution_first(spec)
     direct :: process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})
-    candidates :: if (direct || process_execution_env_get(env, rt_static_text("PATH")) == I64{0}) -> data_sequence_new(I64{0}, I64{8}) else -> process_execution_candidates(command, env)
+    candidates :: if (direct || path == I64{0}) -> data_sequence_new(I64{0}, I64{8}) else -> process_execution_candidates(command, path)
     if direct -> process_text_list_push(candidates, command)
-    process_text_list_drop(env, true)
+    if (path != I64{0}) -> jet_rt_string_drop(path)
     found :: process_execution_first_file(candidates)
     process_text_list_drop(candidates, false)
     if (found == I64{0}) -> jet_rt_string_clone(process_execution_first(spec)) else -> found
