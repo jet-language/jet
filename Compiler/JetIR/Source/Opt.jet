@@ -3,15 +3,17 @@
 // leaves the module as built; level 1 (`jet build`) first has a program's
 // functions that return a small fresh box (a `T E!` Result) write it into
 // frame storage their callers pass (`retslot`,
-// OptReturnSlot.jet), puts each call of a
+// OptReturnSlot.jet), hoists calls making a list's buffer its own out of
+// Loops and, for a `&` parameter only direct calls reach, into the callers
+// (`unique`, OptUnique.jet), puts each call of a
 // recursive function that starts by testing its parameters and returning
 // behind that test (`entry`, OptEntry.jet), inlines small direct
 // callees bottom-up over the call graph (drop glue too, `glue`), simplifies
-// every function, replaces frame aggregates by their fields (`scalar`) and
+// every function, turns the small boxes that never leave their function
+// into frame storage (`localbox`, OptLocalBox.jet; simplifying again when
+// one moved), replaces frame aggregates by their fields (`scalar`) and
 // simplifies again;
-// level 2 (`--release`) first hoists calls making a list's buffer its own
-// out of Loops and, for a `&` parameter only direct calls reach, into the
-// callers (`unique`), also replaces frame aggregates whose address is
+// level 2 (`--release`) also replaces frame aggregates whose address is
 // only lent out (`promote`), copies counted loops behind a test of their
 // Int bound, and other Int loops and small loopless functions behind
 // IntBig guards (`version`, OptVersion.jet), runs each function through
@@ -46,8 +48,9 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
-// a difference to one pass: "retslot", "unique", "entry", "once", "scalar",
-// "promote", "version", "range", "ssa", "stops", "fold", "glue", "split", "reduce", "sink"), whether
+// a difference to one pass: "retslot", "unique", "entry", "once", "localbox",
+// "scalar", "promote", "version", "range", "ssa", "stops", "fold", "glue",
+// "split", "reduce", "sink"), whether
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
@@ -227,7 +230,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     loop f in functions -> &keys.push(f.key.copy())
     // Before the call graph: the `#unique<..>` calls this moves into callers
     // are edges of it.
-    if level >= 2 && ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, &functions, keys)
+    if ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, &functions, keys)
     weights := [Int]{}
     loop f in functions -> &weights.push(1 + f.op.len())
     glue :: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
@@ -498,9 +501,10 @@ fn ir_opt_calls_of(f: IRFunction, count: Int, to: &[Int]) -> Int Never! {
     to.len() - before
 }
 
-// The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet).
+// The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet,
+// OptLocalBox.jet).
 fn ir_opt_routes() -> [String] Never! {
-    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at"}
+    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_free", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at"}
 }
 
 // Whether instruction `at` calls the runtime route `route`.
@@ -508,7 +512,7 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
     f.op[at] == .CallRuntime && f.a[at] == (name_rows_value(m.name_rows, route) ?? -2)
 }
 
-// One function's passes: at level 2 uniqueness hoisting, then inlining its
+// One function's passes: uniqueness hoisting, then inlining its
 // callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
 // a glue call left is a Drop again), then the polls folded into the next
 // stop point, Simplify, scalar replacement, Simplify again, at level 2
@@ -523,7 +527,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     level :: options.level
     body := ^f
     checking := options.verify && ir_opt_lint(m, lint, body, "prepare", &report)
-    if level >= 2 && ir_opt_enabled(options, "unique") {
+    if ir_opt_enabled(options, "unique") {
         report.unique_hoisted += ir_opt_hoist_unique(m, &body, keys)
         if checking -> checking = ir_opt_lint(m, lint, body, "unique", &report)
     }
@@ -545,6 +549,13 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     }
     ir_opt_simplify(m, &out, &report)
     if checking -> checking = ir_opt_lint(m, lint, out, "simplify", &report)
+    // Local boxes after simplify: the copies between a box and its uses are
+    // coalesced, and the unique tests the frame answers fold away again.
+    if level >= 1 && ir_opt_enabled(options, "localbox") && ir_opt_local_boxes(m, &out) > 0 {
+        if checking -> checking = ir_opt_lint(m, lint, out, "localbox", &report)
+        ir_opt_simplify(m, &out, &report)
+        if checking -> checking = ir_opt_lint(m, lint, out, "simplify", &report)
+    }
     // Scalar replacement runs from O1 (an aggregate an inlined call returns
     // lives in registers there too); its loans (`promote`) wait for O2.
     if level >= 1 && ir_opt_enabled(options, "scalar") {

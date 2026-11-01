@@ -1,6 +1,6 @@
 use jet_foundation.[name_rows_value]
 
-// Uniqueness hoisting (O2), before inlining: a call making a local list's
+// Uniqueness hoisting (O1, O2), before inlining: a call making a local list's
 // counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
 // out of every Loop that cannot make the buffer shared again, to just
 // before the outermost such Loop. Inside such a Loop the buffer stays the
@@ -193,7 +193,7 @@ fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: In
     ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
 }
 
-// Uniqueness at the caller (O2, before the call graph is built). A
+// Uniqueness at the caller (O1, O2, before the call graph is built). A
 // function's first step can be to make a `&` list parameter's buffer its
 // own: after hoisting, a `#unique<..>` call on the parameter that only Block
 // openers, other such calls and side-effect-free instructions writing no
