@@ -37,14 +37,16 @@
 //    GOT loads/calls to direct `lea`/`call`/`jmp` when the instruction allows.
 // 6. Debug tail: after the loaded image, the relocated `.debug_*` sections
 //    of the directly linked objects (none without `debug_info`), a `.symtab`
-//    and section headers.
+//    and section headers. A split link (x64_link_executable_split) writes
+//    them to a side debug file instead and gives the image a build-id note,
+//    the one section its own headers name.
 //
 // Inputs are read in place. Section headers and local symbols are not copied
 // into tables (a runtime codegen unit has ~63k sections): they are read from
 // the input bytes when needed, and only live sections and global symbols get
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 
-use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, sha256_bytes]
 
 LINK_BASE :: 0x400000
 LINK_RUN_BASE :: 0x200000000000
@@ -57,6 +59,10 @@ LINK_RUN_LOW_BASE :: 0x40000000
 LINK_PAGE :: 0x1000
 LINK_EHDR_SIZE :: 64
 LINK_PHDR_SIZE :: 56
+// The GNU build-id note: name size, descriptor size, type
+// (NT_GNU_BUILD_ID), "GNU\0", then the 20-byte id.
+LINK_BUILD_ID_SIZE :: 20
+LINK_BUILD_ID_NOTE_SIZE :: 36
 
 // Output classes, in image order. LINK_DROP sections never reach the image;
 // LINK_DISCARD sections belong to a COMDAT group loaded earlier.
@@ -1667,19 +1673,25 @@ struct LinkLayout {
     preinit_start: Int
     preinit_end: Int
     bss_start: Int
+    // The build-id note's address, right after the program headers; 0 when
+    // the image has none.
+    note_at: Int
     // Keeps the layout from deriving comparisons over its nested lists.
     notes: [String:Int]
 }
 
-fn link_layout(c: &LinkContext) -> LinkLayout Never! {
+// The image's layout at the link base, with a build-id note when `note`.
+fn link_layout(c: &LinkContext, note: Bool) -> LinkLayout Never! {
     order :: link_order(c)
     has_tls :: order[LINK_TDATA].len() + order[LINK_TBSS].len() > 0
     commons := false
     loop g in 0..<c.g_name.len() { if c.g_kind[g] == LINK_G_COMMON -> commons = true }
     has_rw := c.got_keys.len() > 0 || commons
     loop class in LINK_TDATA..<LINK_CLASSES { if order[class].len() > 0 -> has_rw = true }
-    phnum :: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0)
+    phnum :: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0)
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
+    note_at :: if note -> addr else -> 0
+    if note -> addr += LINK_BUILD_ID_NOTE_SIZE
     addr = link_place(&c, order[LINK_RODATA], addr)
     r_end :: link_place_eh(&c, addr)
     text_start :: link_align(r_end, LINK_PAGE)
@@ -1727,7 +1739,7 @@ fn link_layout(c: &LinkContext) -> LinkLayout Never! {
         file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
         has_rw: has_rw, has_tls: has_tls, tdata_end: tdata_end, init_start: init_start, init_end: init_end,
         fini_start: fini_start, fini_end: fini_end, preinit_start: preinit_start, preinit_end: preinit_end,
-        bss_start: file_end, notes: [String:Int]{},
+        bss_start: file_end, note_at: note_at, notes: [String:Int]{},
     }
 }
 
@@ -2066,12 +2078,15 @@ fn link_write(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) -
     link_phdr(&out, c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
     if l.has_rw -> link_phdr(&out, c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
     if l.has_tls -> link_phdr(&out, c.base, 7, 4, c.tls_start, l.tdata_end - c.tls_start, c.tls_end - c.tls_start, c.tls_align)
+    // PT_NOTE: the build-id note, its id zero until link_build_id.
+    if l.note_at != 0 -> link_phdr(&out, c.base, 4, 4, l.note_at, LINK_BUILD_ID_NOTE_SIZE, LINK_BUILD_ID_NOTE_SIZE, 4)
     // PT_GNU_STACK: the stack is not executable.
     elf64_u32(&out, 0x6474e551)
     elf64_u32(&out, 6)
     loop _ in 0..<5 -> elf64_u64(&out, 0)
     elf64_u64(&out, 16)
     base :: c.base
+    if l.note_at != 0 -> link_build_id_note(&out)
     link_write_contents(&c, &out, l, base, &pieces)
     out
 }
@@ -2365,11 +2380,15 @@ fn link_image_symbol(symtab: &[U8], strtab: &[U8], name: String, info: Int, head
 }
 
 // Append the debug sections, the symbol table and the section headers to
-// the loaded image `out`, and point the ELF header at the headers.
-fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) Never! {
+// the loaded image `out`, and point the ELF header at the headers. A side
+// debug file's `out` (`side`, link_debug_file) is its ELF header and the
+// image's build-id note: its headers name that note and the loaded
+// sections, whose bytes stay in the image (SHT_NOBITS), at their addresses.
+fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces, side: Bool) Never! {
     headers := [LinkSectionHeader]{}
     class_headers := [Int]{}
     loop _ in 0..<LINK_CLASSES -> &class_headers.push(-1)
+    if side -> &headers.push(LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: LINK_EHDR_SIZE, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0})
     names :: [String]{".rodata", ".eh_frame", ".text", ".tdata", ".tbss", ".preinit_array", ".init_array", ".fini_array", ".data.rel.ro", ".data", ".bss"}
     kinds :: [Int]{LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS, LINK_SHT_PREINIT_ARRAY, LINK_SHT_INIT_ARRAY, LINK_SHT_FINI_ARRAY, LINK_SHT_PROGBITS, LINK_SHT_PROGBITS, LINK_SHT_NOBITS}
     // ALLOC, plus EXECINSTR for code, WRITE for data, TLS for thread data.
@@ -2383,11 +2402,11 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         }
         if extent[1] > extent[0] {
             class_headers[class] = headers.len() + 1
-            &headers.push(LinkSectionHeader{name: names[class], kind: kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - c.base, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
+            &headers.push(LinkSectionHeader{name: names[class], kind: if side -> LINK_SHT_NOBITS else -> kinds[class], flags: flags[class], addr: extent[0], offset: extent[0] - c.base, size: extent[1] - extent[0], link: 0, info: 0, align: if class == LINK_TEXT -> 16 else -> 8, entry_size: 0})
         }
         // The GOT follows the read-only-after-relocation data.
         if class == LINK_RELRO && c.got_keys.len() > 0 {
-            &headers.push(LinkSectionHeader{name: ".got", kind: LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - c.base, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
+            &headers.push(LinkSectionHeader{name: ".got", kind: if side -> LINK_SHT_NOBITS else -> LINK_SHT_PROGBITS, flags: 3, addr: c.got_start, offset: c.got_start - c.base, size: 8 * c.got_keys.len(), link: 0, info: 0, align: 8, entry_size: 8})
         }
     }
     sections :: link_debug_bytes(&c, debug, &pieces, l.text_start, l.text_end)
@@ -2438,6 +2457,54 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     &headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
     shoff :: link_write_section_headers(&out, 0, headers)
     link_elf_sections(&out, shoff, headers.len() + 2)
+}
+
+// The build-id note with a zero id, appended to `out`.
+fn link_build_id_note(out: &[U8]) Never! {
+    elf64_u32(&out, 4)
+    elf64_u32(&out, LINK_BUILD_ID_SIZE)
+    elf64_u32(&out, 3)
+    loop byte in ([Int]{0x47, 0x4e, 0x55, 0}) -> &out.push(U8{byte})
+    loop _ in 0..<LINK_BUILD_ID_SIZE -> &out.push(U8{0})
+}
+
+// A split image's section headers, appended to it: the build-id note's
+// alone (and the name table's), where debuggers read the id that finds the
+// side debug file.
+fn link_image_note_section(image: &[U8], l: LinkLayout, base: Int) Never! {
+    note :: LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}
+    shoff :: link_write_section_headers(&image, 0, [LinkSectionHeader]{note})
+    link_elf_sections(&image, shoff, 3)
+}
+
+// The side debug file of the image `image`, laid out as `l` (whose build-id
+// note holds a zero id): its ELF header with no program headers, the note,
+// the debug sections, symbol table and section headers (link_write_sections).
+fn link_debug_file(c: &LinkContext, image: [U8], l: LinkLayout, debug: LinkDebug, pieces: &LinkPieces) -> [U8] Never! {
+    note :: l.note_at - c.base
+    out := image[0..<LINK_EHDR_SIZE]
+    link_put64(&out, 32, 0)
+    loop at in 54..<58 -> out[at] = U8{0}
+    &out.extend(image[note..<note + LINK_BUILD_ID_NOTE_SIZE])
+    link_write_sections(&c, &out, l, debug, &pieces, true)
+    out
+}
+
+// Give the image `image` and its side debug file `side` their build id: the
+// first 20 bytes of the SHA-256 of their two SHA-256 digests, each taken
+// with the id still zero, written into both notes (the image's at file
+// offset `note`). Returns the id.
+fn link_build_id(image: &[U8], side: &[U8], note: Int) -> [U8] Never! {
+    digests := sha256_bytes(image[0..<image.len()])
+    &digests.extend(sha256_bytes(side[0..<side.len()]))
+    hash :: sha256_bytes(digests[0..<digests.len()])
+    id := [U8]{}
+    loop k in 0..<LINK_BUILD_ID_SIZE {
+        image[note + 16 + k] = hash[k]
+        side[LINK_EHDR_SIZE + 16 + k] = hash[k]
+        &id.push(hash[k])
+    }
+    id
 }
 
 // Append the section name table and the section headers `headers` (after
@@ -2581,12 +2648,16 @@ struct X64ResidentLinkFacts {
     fini_end: Int
     symbols: [X64ResidentSymbol]
 }
+// The linked image, else (`image.errors` not empty) why it failed; with a
+// split link, its side debug file and build id (else both empty).
 struct X64ResidentLinkResult {
     image: X64ExecutableResult
     facts: X64ResidentLinkFacts?
+    debug_file: [U8]
+    build_id: [U8]
 }
 fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
-    X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: ^errors}, facts: None}
+    X64ResidentLinkResult{image: X64ExecutableResult{bytes: [U8]{}, errors: ^errors}, facts: None, debug_file: [U8]{}, build_id: [U8]{}}
 }
 
 // Link `bufs` into a static executable. Each buffer is a relocatable object
@@ -2599,13 +2670,36 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // at its own (link_owned_fits). The ELF header is loaded at `base`
 // (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
 fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, ^bufs, base, None, threads, debug_info)
+    linked := link_executable_image(names, ^bufs, base, None, threads, debug_info, false)
     ^linked.image
+}
+
+// A static executable whose debug information is in a side file.
+struct X64SplitExecutableResult {
+    // The executable: its loaded segments, a PT_NOTE naming its GNU build-id
+    // note, section headers naming only that note (debuggers read the id
+    // from it), and no symbol table or debug section.
+    bytes: [U8]
+    // The side debug file: an ELF file of the build-id note, the debug
+    // sections, the symbol table and the section headers, the loaded ones
+    // SHT_NOBITS; a debugger or profiler finds it by the build id.
+    debug_file: [U8]
+    // The 20-byte id both files' notes hold.
+    build_id: [U8]
+    errors: [String]
+}
+
+// x64_link_executable with the DWARF, `.symtab` and section headers in a
+// side debug file instead of the executable's tail.
+fn x64_link_executable_split(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
+    linked := link_executable_image(names, ^bufs, base, None, threads, true, true)
+    X64SplitExecutableResult{bytes: ^linked.image.bytes, debug_file: ^linked.debug_file, build_id: ^linked.build_id, errors: ^linked.image.errors}
 }
 
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
-fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool) -> X64ResidentLinkResult Never! {
+// `split` writes the debug tail to a side file (x64_link_executable_split).
+fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
     c := link_context(^bufs, base)
     if request == .Val(wanted) {
         if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
@@ -2651,7 +2745,7 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     loop name in link_linker_names() -> &linker_names.add(name, true).drop("names are unique")
     link_collect(&c, entries, linker_names)
     if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
-    layout :: link_layout(&c)
+    layout :: link_layout(&c, split)
     if request != .None {
         if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure(^[String]{"resident executable layout is outside the native address range"})
     }
@@ -2660,13 +2754,22 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     entry :: link_global_addr(c, entry_g)
     // The unloaded debug tail (`.debug_*` under `debug_info`, `.symtab`,
     // section headers) follows the loaded image, so profilers and debuggers
-    // name the code.
+    // name the code; under `split` it is the side debug file, which the
+    // image's build id names.
     debug :: link_debug_sections(&c, debug_info)
     // The sections' bytes, relocated on the threads, then written in order.
     emitted := link_emit_pieces(^c, link_emitted_rows(layout, debug), threads)
     c = ^emitted.context
     image := link_write(&c, layout, entry, &emitted.pieces)
-    link_write_sections(&c, &image, layout, debug, &emitted.pieces)
+    debug_file := [U8]{}
+    build_id := [U8]{}
+    if split {
+        debug_file = link_debug_file(&c, image, layout, debug, &emitted.pieces)
+        link_image_note_section(&image, layout, c.base)
+        build_id = link_build_id(&image, &debug_file, layout.note_at - c.base)
+    } else {
+        link_write_sections(&c, &image, layout, debug, &emitted.pieces, false)
+    }
     if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
     facts := X64ResidentLinkFacts?{None}
     if request == .Val(wanted) {
@@ -2694,5 +2797,5 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
         if layout.has_tls -> tls = Val(X64ResidentSegment{address: c.tls_start, file_size: layout.tdata_end - c.tls_start, memory_size: c.tls_end - c.tls_start, align: c.tls_align, flags: 4})
         facts = Val(X64ResidentLinkFacts{base: c.base, entry: entry, segments: ^segments, tls: tls, preinit_start: layout.preinit_start, preinit_end: layout.preinit_end, init_start: layout.init_start, init_end: layout.init_end, fini_start: layout.fini_start, fini_end: layout.fini_end, symbols: ^symbols})
     }
-    X64ResidentLinkResult{image: X64ExecutableResult{bytes: ^image, errors: [String]{}}, facts: ^facts}
+    X64ResidentLinkResult{image: X64ExecutableResult{bytes: ^image, errors: [String]{}}, facts: ^facts, debug_file: ^debug_file, build_id: ^build_id}
 }

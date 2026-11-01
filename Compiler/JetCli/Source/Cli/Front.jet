@@ -825,7 +825,7 @@ fn jet_cli_profile_name(jet_argv: [String]) -> String Never! {
 // selected profile's fields, then the flags (`--optimize=full`); a package
 // build adds its `fn build` layer between the two (jet_cli_build_package). A
 // profile `package.jet` declares replaces the stock profile of that name:
-// `release` is `optimize: full`, `debug` the stock values.
+// `release` is `optimize: full, debug_info: split`, `debug` the stock values.
 fn jet_cli_build_options(jet_argv: [String], command: String, file: String, source: String, color: Bool, quiet: Bool) -[FS, Env]> JetCLIBuildOptions Never! {
     written := [BuildOptionChoice]{}
     flags := [BuildOptionChoice]{}
@@ -855,7 +855,7 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
             }
         } else {
             if {
-                name == "release" -> &written.push(jet_cli_stock_release_choice())
+                name == "release" -> &written.extend(jet_cli_stock_release_choices())
                 // The stock `debug` profile is the stock values; the front end keeps its `dev` profile.
                 name == "debug" -> profile = ""
                 name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
@@ -890,9 +890,14 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
     }
 }
 
-// The stock `release` profile: `optimize: full`.
-fn jet_cli_stock_release_choice() -> BuildOptionChoice Never! {
-    BuildOptionChoice{name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: "of the stock `release` profile", pinned: false}
+// The stock `release` profile: `optimize: full`, and `debug_info: split`,
+// which `jet build` writes as a side debug file beside the image.
+fn jet_cli_stock_release_choices() -> [BuildOptionChoice] Never! {
+    site :: "of the stock `release` profile"
+    [BuildOptionChoice]{
+        {name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: site.copy(), pinned: false},
+        {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.copy(), pinned: false},
+    }
 }
 
 // `plan` (a build, package build, or run) with the build options its entry

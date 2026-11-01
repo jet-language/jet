@@ -16,6 +16,7 @@ use jet_backend.[
     x64_executable_bytes,
     x64_executable_complete,
     x64_executable_load,
+    x64_executable_split,
     x64_executable_whole,
     x64_executable_write,
     x64_file_exec,
@@ -25,6 +26,7 @@ use jet_backend.[
     x64_image_spawn,
     x64_image_unload,
     x64_link_executable,
+    x64_link_executable_split,
     x64_process_env,
     x64_process_mirror,
     x64_process_nap,
@@ -94,6 +96,7 @@ use jet_foundation.[
     diagnostic_render_all,
     gate_ledger_push,
     sha256_hex,
+    sha256_hex_bytes,
     compiler_transfer_rows,
     compiler_threads_failure_text,
     CompilerThreads,
@@ -514,7 +517,10 @@ fn jet_cli_ice_report(summary: String, census: [JetDriverIceRow]) -[FS, Env]> Je
 // command named (jet_cli_debug_directory); `root` is its package root, where
 // a literal plugin artifact path is read (jet_plugin_link). `hot`: the
 // functions to lay out first (ir_x64_hot_order; jet_cli_hot_text).
-fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, options: BuildOptions, runtime_dir: String, executable_path: String, base: Int, census: &[JetDriverIceRow], file: String, root: String, hot: [String]) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
+// `split_debug`: the link puts the DWARF, `.symtab` and section headers in a
+// side debug file the executable names by build id (`debug_info: split`
+// under `jet build`).
+fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs, harness: IRTestHarness?, sources: JetCLIForeignSources, options: BuildOptions, runtime_dir: String, executable_path: String, base: Int, census: &[JetDriverIceRow], file: String, root: String, hot: [String], split_debug: Bool) -[FS, Env, Exec, Time.Wait]> JetCLINativeLinked Never! {
     trace_sink :: result.trace_sink
     checked := ^inputs
     if harness == None && checked.entry_key == None -> return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.NoEntry}
@@ -531,9 +537,9 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     // reads would stall the object between ir.build and ir.opt.
     runtime_exports :: jet_cli_runtime_exports(runtime_dir)
     runtime_key :: if runtime_exports.failure == None -> Val(runtime_exports.key.copy()) else -> None
-    // The program object holds DWARF only under `debug_info`; the link
+    // The program object holds DWARF unless `debug_info: false`; the link
     // drops every other input's too (the runtime pack's, a C closure's).
-    debug_info :: build_options_value(options, "debug_info") == "true"
+    debug_info :: build_options_value(options, "debug_info") != "false"
     objects := [JetCLINativeObject]{}
     closures := [JetCLIForeignRealized]{}
     // copy: the closure's thread owns its inputs; this function still reads them.
@@ -582,24 +588,51 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
     if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
     // The memory term is read now: the link's section pieces are new work.
     link_threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
-    image := x64_link_executable(names, ^bytes, base, link_threads, debug_info)
-    if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, ^inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info)
+    errors := [String]{}
+    executable := x64_executable_whole([U8]{})
+    if split_debug {
+        split := x64_link_executable_split(names, ^bytes, base, link_threads)
+        errors = split.errors.copy()
+        executable = x64_executable_split(^split)
+    } else {
+        image := x64_link_executable(names, ^bytes, base, link_threads, debug_info)
+        if image.errors.len() > 0 && retry == .Val(inputs_again) -> image = x64_link_executable(names, ^inputs_again, LINK_RUN_LOW_BASE, link_threads, debug_info)
+        errors = image.errors.copy()
+        executable = x64_executable_whole(^image.bytes)
+    }
     if trace_sink == .Val(sink) {
         sink.end("native.link", input_count)
-        sink.progress("counters.native.link.bytes", image.bytes.len(), -1)
+        sink.progress("counters.native.link.bytes", executable.tail.len(), -1)
     }
-    if image.errors.len() > 0 {
-        loop error in image.errors -> jet_driver_ice_record(&census, "-", "native.link", "link", error)
+    if errors.len() > 0 {
+        loop error in errors -> jet_driver_ice_record(&census, "-", "native.link", "link", error)
         return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Faulted}
     }
-    JetCLINativeLinked.Image{executable: x64_executable_whole(^image.bytes)}
+    JetCLINativeLinked.Image{executable: ^executable}
 }
 
-// Write the linked executable `executable` as the file `path`.
+// Write the linked executable `executable` as the file `path`, and a split
+// link's side debug file as `path`.debug.
 fn jet_cli_native_write(path: String, executable: X64Executable) -[FS]> JetCLINativeFailure? Never! {
     failure :: x64_executable_write(executable, path)
     if failure != "" -> return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {failure}"})
     cli_files.set_mode(path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {path} executable: {err}"})
+    if executable.debug_file.len() > 0 {
+        cli_files.write_bytes("{path}.debug", executable.debug_file) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}.debug: {err}"})
+    }
+    None
+}
+
+// File a split link's side debug file in the package at `root`'s symbol
+// store, `.jet/symbols/.build-id/<first two hex digits of the build
+// id>/<the rest>.debug`, the layout debuggers and profilers search.
+fn jet_cli_symbols_file(root: String, executable: X64Executable) -[FS]> JetCLINativeFailure? Never! {
+    if executable.build_id.len() == 0 -> return None
+    id :: sha256_hex_bytes(executable.build_id)
+    dir :: "{root}/.jet/symbols/.build-id/{id.slice(0, 2)}"
+    cli_files.create_dir_all(dir) ?? return Val(JetCLINativeFailure.Write{what: "couldn't create the symbol store {dir}: {err}"})
+    file :: "{dir}/{id.slice(2, id.len())}.debug"
+    cli_files.write_bytes(file, executable.debug_file) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {file}: {err}"})
     None
 }
 
@@ -919,7 +952,7 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     loop error in compiled.errors -> jet_driver_ice_record(&census, "-", "ir.x64", "select", error)
     if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
     hot_missing :: ir_x64_hot_order(&compiled, hot)
-    object := ir_x64_object(^compiled, build_options_value(options, "debug_info") == "true")
+    object := ir_x64_object(^compiled, build_options_value(options, "debug_info") != "false")
     if trace_sink == .Val(sink) {
         sink.end("ir.object", function_count)
         sink.progress("counters.ir.object.bytes", object.bytes.len(), -1)
@@ -971,7 +1004,10 @@ fn jet_cli_build_native(file: String, command: String, options: BuildOptions, re
     census := [JetDriverIceRow]{}
     base :: if command == "run" -> LINK_RUN_BASE else -> LINK_BASE
     hot :: if command == "build" -> jet_cli_hot_text(snapshot.roots[0].canonical_path) else -> [String]{}
-    linked := jet_cli_native_executable(result, ^inputs, None, sources, options, jet_cli_runtime_dir(), binary, base, &census, file, jet_driver_entry_root_path(snapshot), hot)
+    // Only `jet build`'s image ships: the other commands run theirs, whose
+    // fault reports name frames from the image's own location table.
+    split_debug :: command == "build" && build_options_value(options, "debug_info") == "split"
+    linked := jet_cli_native_executable(result, ^inputs, None, sources, options, jet_cli_runtime_dir(), binary, base, &census, file, jet_driver_entry_root_path(snapshot), hot, split_debug)
     if census.len() > 0 {
         // JET_KEEP_GOING still writes the image, each faulty function a trap.
         if jet_cli_keep_going_enabled() {
@@ -1101,6 +1137,7 @@ fn jet_cli_build_binary(file: String, name: String, command: String, color: Bool
     built := jet_cli_build_native(file, command, options, result, ^checked, snapshot, binary, color)
     if built == .Image(executable, path) {
         if jet_cli_native_write(path, executable) == .Val(failure) -> return JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
+        if jet_cli_symbols_file(snapshot.roots[0].canonical_path, executable) == .Val(failure) -> return JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
     }
     built
 }
@@ -1514,7 +1551,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     // The harness's build, object and link are one traced span.
     if result.trace_sink == .Val(sink) -> sink.begin("native.build", "", -1, -1)
     census := [JetDriverIceRow]{}
-    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, options.build, jet_cli_runtime_dir(), binary, LINK_BASE, &census, file, jet_driver_entry_root_path(snapshot), [String]{})
+    native :: jet_cli_native_executable(result, ^plan, Val(harness), sources, options.build, jet_cli_runtime_dir(), binary, LINK_BASE, &census, file, jet_driver_entry_root_path(snapshot), [String]{}, false)
     if census.len() > 0 -> return jet_cli_ice_census(file, census)
     if native == {
         .Failed(failure) -> return jet_cli_test_native_failure(file, failure, color)

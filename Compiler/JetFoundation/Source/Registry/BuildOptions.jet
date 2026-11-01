@@ -10,7 +10,8 @@
 // How a row's value is written. A Choice value is a word (`optimize: full`,
 // `--optimize=full`, `b.optimize(.Full)`); a Bool value is `true` or `false`
 // everywhere (`debug_info: false`, `--debug-info=false`,
-// `b.debug_info(false)`), and its bare flag (`--small`) is `true`. A Text
+// `b.debug_info(false)`), and its bare flag (`--small`) is `true`;
+// `debug_info` also takes the word `split` as a profile field and a flag. A Text
 // value is a string (`output_dir: "dist"`, `--output-dir=dist`,
 // `b.output_dir("dist")`). A List value is strings (`libs: ["z"]`,
 // `b.libs(["z"])`), one flag per item (`--libs=z --libs=bz2`); it is kept as
@@ -46,7 +47,13 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     {name: "bounds", kind: BuildOptionKind.Choice, values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
     // false leaves the DWARF sections (.debug_*) out of the image; .eh_frame
     // stays, and a crash report then names addresses, not functions and lines.
-    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true or false"},
+    // split (the stock `release` profile's) has `jet build` write the DWARF,
+    // the symbol table and the section headers to the side file
+    // `<image>.debug` and to the package's symbol store
+    // `.jet/symbols/.build-id/`, both found by the image's GNU build id; the
+    // other commands keep it in the image as with true. `fn build` writes
+    // true or false only (build_option_method_values).
+    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false", "split"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true, false or split"},
     // true keeps the optimizer's inlining to the O1 limits at any level, so
     // inlining grows the code no more than `optimize: basic` does.
     {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
@@ -257,8 +264,20 @@ fn build_option_variants_text(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
     if row.kind == BuildOptionKind.List -> return "a list literal of strings"
     words := [String]{}
-    loop value in row.values -> &words.push(build_option_argument(row, value))
+    loop value in build_option_method_values(row) -> &words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
+}
+
+// The values `fn build` writes for a Choice or Bool row: a Bool row's are
+// its Bool literals, since `debug_info`'s `split` is a profile field's and a
+// flag's value only.
+fn build_option_method_values(row: BuildOptionRow) -> [String] Never! {
+    if row.kind != BuildOptionKind.Bool -> return row.values.copy()
+    out := [String]{}
+    loop value in row.values {
+        if value == "true" || value == "false" -> &out.push(value.copy())
+    }
+    out
 }
 
 fn build_option_join(words: [String]) -> String Never! {
