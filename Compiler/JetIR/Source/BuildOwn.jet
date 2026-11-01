@@ -173,6 +173,11 @@ fn ir_drop_key(m: IRModule, row: Int) -> String Never! {
     "#drop<{ir_row_key(m, row)}>"
 }
 
+// The function name of a row's last-owner routine (ir_box_last_helper,
+// ir_buffer_last_helper): what a drop does once the count reaches zero.
+// Inlining never takes one (OptInline.jet).
+IR_LAST_OWNER :: "last"
+
 // `row`, a counted buffer header's row, drops through its glue.
 fn ir_mark_counted(m: &IRModule, row: Int) -> Int Never! {
     if m.types[row].drop != "" -> return row
@@ -303,7 +308,9 @@ fn ir_box_shape_open(m: &IRModule, b: &IRBuilder, boxed: Int, shape: IRBoxShape)
 }
 
 // The drop of the box at `at` (box row `row`): a null box holds nothing; the
-// last owner drops the active shape's members and frees it.
+// last owner drops the active shape's members and frees it. A site keeps
+// only the release inline: a box with members to drop calls its one shared
+// last-owner routine (ir_box_last_helper).
 fn ir_box_drop_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
     shapes :: ir_box_shapes(&m, p, row) ?? return ir_fail(&b, Span{start: 0, end: 0}, "drop of {ir_type_name(m.types[row].ty)}")
     present :: ir_option_is_some(&m, &b, at)
@@ -311,38 +318,98 @@ fn ir_box_drop_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     last :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{at}, bool_row)
     ir_open_if(&b.f, last, b.line)
+    if {
+        ir_box_shapes_drop(m, shapes) -> {
+            helper :: ir_box_last_helper(&m, p, &b, row, shapes)
+            ir_last_owner_call(&b, helper, [Int]{at})
+        }
+        else -> ir_box_free(&m, p, &b, row, at)
+    }
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+}
+
+// Whether any shape of a box holds a member dropped with it.
+fn ir_box_shapes_drop(m: IRModule, shapes: [IRBoxShape]) -> Bool Never! {
+    loop shape in shapes {
+        loop member in shape.members {
+            if ir_box_member_drops(m, member) -> return true
+        }
+    }
+    false
+}
+
+// The routine the last owner of a box of row `row` calls: it drops the
+// active shape's members and frees the box. Built once per row and never
+// inlined (OptInline.jet), so the drop sites share one copy.
+fn ir_box_last_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, shapes: [IRBoxShape]) -> Int Never! {
+    helper_key :: "#box.last<{ir_row_key(m, row)}>"
+    known :: name_rows_value(m.function_rows, helper_key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
+    name_rows_set(&m.function_rows, helper_key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    at :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
     loop shape in shapes {
         dropped := false
         loop member in shape.members {
             if ir_box_member_drops(m, member) -> dropped = true
         }
         if !dropped -> next
-        opened :: ir_box_shape_open(&m, &b, at, shape)
+        opened :: ir_box_shape_open(&m, &a, at, shape)
         loop member in shape.members {
             if !ir_box_member_drops(m, member) -> next
             if member.boxed {
                 pointer_row :: ir_pointer_row(&m)
-                wrapper :: ir_temp(&m, &b, pointer_row)
-                ir_emit(&b.f, IROp.Load, wrapper, at, member.offset, -1, b.line)
+                wrapper :: ir_temp(&m, &a, pointer_row)
+                ir_emit(&a.f, IROp.Load, wrapper, at, member.offset, -1, a.line)
                 if ir_glue_drops(m, member.ty) {
-                    value :: ir_load_at(&m, &b, wrapper, 0, member.ty)
-                    ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+                    value :: ir_load_at(&m, &a, wrapper, 0, member.ty)
+                    ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
                 }
                 size :: m.types[member.ty].size
-                wrapper_bytes :: ir_word_const(&m, &b, ir_align8(size))
-                ir_free(&m, &b, wrapper, wrapper_bytes)
+                wrapper_bytes :: ir_word_const(&m, &a, ir_align8(size))
+                ir_free(&m, &a, wrapper, wrapper_bytes)
                 next
             }
-            value :: ir_load_at(&m, &b, at, member.offset, member.ty)
-            ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+            value :: ir_load_at(&m, &a, at, member.offset, member.ty)
+            ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
         }
-        if opened -> ir_end(&b.f, b.line)
+        if opened -> ir_end(&a.f, a.line)
     }
+    ir_box_free(&m, p, &a, row, at)
+    ir_last_helper_finish(&m, &b, ^a, id, helper_key)
+}
+
+fn ir_box_free(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: Int) Never! {
     size :: ir_box_bytes(&m, p, row)
     bytes :: ir_word_const(&m, &b, size)
     ir_free(&m, &b, at, bytes)
-    ir_end(&b.f, b.line)
-    ir_end(&b.f, b.line)
+}
+
+// Stores the last-owner routine `a` built as function `id`; a build that
+// failed reports to the caller's builder `b` and leaves no routine (-1).
+fn ir_last_helper_finish(m: &IRModule, b: &IRBuilder, a: ^IRBuilder, id: Int, helper_key: String) -> Int Never! {
+    built := ^a
+    if built.error != "" {
+        ir_emit(&built.f, IROp.Unreachable, -1, -1, -1, -1, built.line)
+        m.functions[id] = ^built.f
+        name_rows_set(&m.function_rows, helper_key, -1)
+        ir_fail(&b, built.error_span, built.error)
+        return -1
+    }
+    ir_emit(&built.f, IROp.Return, -1, -1, -1, -1, built.line)
+    m.functions[id] = ^built.f
+    id
+}
+
+// Calls the last-owner routine `helper` with `values`; a routine whose build
+// failed (-1) has already reported to `b`.
+fn ir_last_owner_call(b: &IRBuilder, helper: Int, values: [Int]) Never! {
+    if helper < 0 -> return
+    start :: ir_args(&b.f, values)
+    ir_emit(&b.f, IROp.Call, -1, helper, start, values.len(), b.line)
 }
 
 // The IR function making the box its parameter holds (box row `row`) its
@@ -553,30 +620,63 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
 
 // Gives up one owner of the counted buffer `data` of the header row `row`
 // holding `length` elements of row `entry` in `capacity` slots; the last owner
-// drops each element and frees the buffer.
+// drops each element and frees the buffer. A site keeps only the release
+// inline: elements to drop go through the row's one shared last-owner
+// routine (ir_buffer_last_helper).
 fn ir_release_buffer(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int, data: Int, length: Int, capacity: Int) Never! {
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     last :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{data}, bool_row)
     ir_open_if(&b.f, last, b.line)
-    stride :: ir_list_stride(m, entry)
-    if ir_glue_drops(m, entry) {
-        index :: ir_word_const(&m, &b, 0)
-        done :: ir_open(&b.f, IROp.Block, b.line)
-        _ :: ir_open(&b.f, IROp.Loop, b.line)
-        more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
-        ir_exit_unless(&m, &b, more, done)
-        address :: ir_element_address(&m, &b, data, index, stride)
-        value :: ir_load_at(&m, &b, address, 0, entry)
-        ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
-        one :: ir_word_const(&m, &b, 1)
-        ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
-        ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
-        ir_end(&b.f, b.line)
-        ir_end(&b.f, b.line)
+    if {
+        ir_glue_drops(m, entry) -> {
+            helper :: ir_buffer_last_helper(&m, p, &b, row, entry)
+            ir_last_owner_call(&b, helper, [Int]{data, length, capacity})
+        }
+        else -> ir_buffer_free(&m, p, &b, row, entry, data, capacity)
     }
+    ir_end(&b.f, b.line)
+}
+
+// The routine the last owner of a counted buffer of the header row `row`
+// calls with the buffer, its length and its capacity: it drops each element
+// (row `entry`) and frees the buffer. Built once per row and never inlined
+// (OptInline.jet), so the release sites share one copy.
+fn ir_buffer_last_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int) -> Int Never! {
+    helper_key :: "#buffer.last<{ir_row_key(m, row)}>"
+    known :: name_rows_value(m.function_rows, helper_key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function(IR_LAST_OWNER, helper_key, "jet_ir_last_", "", 0))
+    name_rows_set(&m.function_rows, helper_key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    word_row :: ir_word_row(&m)
+    data :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "data"))
+    length :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "length"))
+    capacity :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "capacity"))
+    stride :: ir_list_stride(m, entry)
+    index :: ir_word_const(&m, &a, 0)
+    done :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more :: ir_bool_op(&m, &a, IROp.Lt, index, length)
+    ir_exit_unless(&m, &a, more, done)
+    address :: ir_element_address(&m, &a, data, index, stride)
+    value :: ir_load_at(&m, &a, address, 0, entry)
+    ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
+    one :: ir_word_const(&m, &a, 1)
+    ir_emit(&a.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, a.line)
+    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(&a.f, a.line)
+    ir_end(&a.f, a.line)
+    ir_buffer_free(&m, p, &a, row, entry, data, capacity)
+    ir_last_helper_finish(&m, &b, ^a, id, helper_key)
+}
+
+// Frees the counted buffer `data` of the header row `row` with `capacity`
+// slots of row `entry`.
+fn ir_buffer_free(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, entry: Int, data: Int, capacity: Int) Never! {
+    stride :: ir_list_stride(m, entry)
     bytes :: ir_buffer_bytes(&m, p, &b, row, data, capacity, stride)
     ir_free(&m, &b, data, bytes)
-    ir_end(&b.f, b.line)
 }
 
 // Gives up the buffer an in-place growth moved its elements out of into
@@ -1283,6 +1383,17 @@ fn ir_close_temporary(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
     b.fresh[slot] = false
     drops :: ir_has_drop(m, b, slot)
     ir_hold_statement_guard(&b, slot, glue, drops)
+}
+
+// A fresh value ended in place (`close(^make("x"))`, `consume(make("x"))`):
+// when its value closes it closes now, once, before its drop. A lent value
+// or an allocator view closes nothing. False when the build failed.
+fn ir_close_fresh(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Bool Never! {
+    if b.views.get(slot) != None || ir_lent(b, slot) -> return true
+    glue :: ir_close_glue(&m, p, &b, b.f.slot_type[slot], false, span)
+    if ir_failed(b) -> return false
+    if glue >= 0 -> ir_close_call(&b, glue, slot)
+    true
 }
 
 // `slot` holds the part `step` of the value in `parent`. When that value is

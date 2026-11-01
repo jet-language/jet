@@ -518,6 +518,9 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             ir_stmt_line(p, &b, span)
             result :: ir_expr(&m, p, &b, value)
             if ir_failed(b) -> return
+            // A discarded fresh value (`make("x").drop("why")`) ends with the
+            // statement: when its value closes, it closes once, then drops.
+            ir_close_temporary(&m, p, &b, result, span)
             ir_release(&m, &b, result)
         }
         .Return(value, span) -> {
@@ -2013,8 +2016,8 @@ fn ir_ptr_from_addr(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, address
 
 // `consume(x)` (a Drop of `^x`, a move to nowhere): the value's cleanup runs
 // now. An owned variable's binding stops owning it, so its scope-end drop
-// does not run a second time; a fresh value drops in place. A payload
-// binding's value ends with its carrier box's last owner.
+// does not run a second time; a fresh value closes (ir_close_fresh) and drops
+// in place. A payload binding's value ends with its carrier box's last owner.
 fn ir_drop_value(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     if ir_body_node(p, b, value).kind == .Local(local) {
@@ -2046,7 +2049,9 @@ fn ir_drop_value(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Sp
         return -1
     }
     slot :: ir_expr(&m, p, &b, value)
-    if ir_failed(b) || slot < 0 || !ir_has_drop(m, b, slot) -> return -1
+    if ir_failed(b) || slot < 0 -> return -1
+    if b.fresh[slot] && !ir_close_fresh(&m, p, &b, slot, span) -> return -1
+    if !ir_has_drop(m, b, slot) -> return -1
     if !b.fresh[slot] -> return ir_fail_slot(&b, span, "drop of a held {ir_type_name(value_ty)}")
     ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     b.fresh[slot] = false
@@ -2085,7 +2090,7 @@ fn ir_close_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: In
         ir_close_disarm(&b, slot)
         return -1
     }
-    if !ir_has_drop(m, b, slot) -> return -1
+    if !ir_close_fresh(&m, p, &b, slot, span) || !ir_has_drop(m, b, slot) -> return -1
     ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     b.fresh[slot] = false
     return -1

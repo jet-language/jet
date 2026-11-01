@@ -2,15 +2,15 @@
 // module function (BuildOwn.jet ir_drop_glue: a counted buffer's release, a
 // struct's member drops) is selected as that function's call (X64Select
 // ir_x64_drop). Before the call graph is built such a Drop becomes that
-// Call when it runs often: inside a Loop, or in a glue itself (a list's
-// release drops each element in its loop). So the glue is optimized before
-// its users and inlining can take a small glue into them. After inlining, a
-// Call of a glue left in place is a Drop again, which scalar replacement
-// lends storage to (OptScalar.jet).
+// Call when it runs often: inside a Loop, or in a glue or a last-owner
+// routine itself (a list's last owner drops each element in its loop). So
+// the glue is optimized before its users and inlining can take a small glue
+// into them. After inlining, a Call of a glue left in place is a Drop again,
+// which scalar replacement lends storage to (OptScalar.jet).
 
 // `glue` is ir_opt_glue_table's: per type row, its glue function or -1.
 fn ir_opt_glue_calls(f: &IRFunction, glue: [Int]) Never! {
-    in_glue :: f.name == "drop" && f.source_file == ""
+    in_glue :: (f.name == "drop" || f.name == IR_LAST_OWNER) && f.source_file == ""
     // Open Loops around `at` (an End's `a` is its opener).
     loops := 0
     loop at in 0..<f.op.len() {
