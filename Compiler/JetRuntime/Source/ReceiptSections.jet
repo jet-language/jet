@@ -1,0 +1,429 @@
+// Typed receipt sections (`receipt.attach`). Sema supplies the section name,
+// declared type name and schema digest from the record's `#Receipt` facts;
+// this leaf only publishes. Without JET_RECEIPT_DIR and JET_RECEIPT_CLAIM the
+// attachment is a no-op. A record is one append-only file whose bytes are the
+// framed claim, parent digest, section, type, schema digest, payload digest
+// and canonical JSON payload; its name is the digest of the same frames
+// without the payload. The CLI receipt reader (ReceiptSections.jet in JetCli)
+// parses exactly this format.
+RECEIPT_SECTION_BYTES :: I64{67108864}
+RECEIPT_SECTION_COUNT :: I64{256}
+// O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC.
+RECEIPT_SECTION_STAGE_OPEN :: I64{524481}
+
+#Export(c) fn jet_receipt_attach(tree: I64, section: I64, type_name: I64, schema: I64) {
+    receipt_section_attach(tree, section, type_name, schema)
+    jet_rt_string_drop(section)
+    jet_rt_string_drop(type_name)
+    jet_rt_string_drop(schema)
+}
+
+fn receipt_section_attach(tree: I64, section: I64, type_name: I64, schema: I64) {
+    directory :: rt_env_get(rt_static_text("JET_RECEIPT_DIR"))
+    if (directory == I64{0}) -> return
+    claim :: rt_env_get(rt_static_text("JET_RECEIPT_CLAIM"))
+    if (claim == I64{0}) {
+        jet_rt_string_drop(directory)
+        return
+    }
+    found :: rt_env_get(rt_static_text("JET_RECEIPT_DIGEST"))
+    parent :: if (found == I64{0}) -> jet_rt_string_builder_finish(jet_rt_string_builder_new()) else -> found
+    if receipt_section_valid(tree, section, type_name, schema, claim, parent) {
+        receipt_section_store(tree, section, type_name, schema, directory, claim, parent)
+    }
+    jet_rt_string_drop(directory)
+    jet_rt_string_drop(claim)
+    jet_rt_string_drop(parent)
+}
+
+fn receipt_section_stop(message: I64) {
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+}
+
+// Stops with "<head><value><tail>".
+fn receipt_section_stop_with(head: I64, value: I64, tail: I64) {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, head)
+    jet_rt_string_builder_push(text, value)
+    jet_rt_string_builder_push(text, tail)
+    message :: jet_rt_string_builder_finish(text)
+    receipt_section_stop(message)
+    jet_rt_string_drop(message)
+}
+
+// 64 lowercase hex digits.
+fn receipt_section_digest_ok(value: I64) -> Bool {
+    if (rt_text_len(value) != I64{64}) -> return false
+    data :: rt_text_data(value)
+    at := I64{0}
+    loop at < (I64{64}) {
+        byte :: rt_text_byte(wrapping(data + at))
+        if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{97} && byte <= I64{102})) -> return false
+        at += I64{1}
+    }
+    true
+}
+
+// Non-empty, at most `limit` bytes, no control character (C0, DEL, or C1 as
+// UTF-8 C2 80..9F) and no path separator.
+fn receipt_section_name_ok(value: I64, limit: I64) -> Bool {
+    length :: rt_text_len(value)
+    if (length == I64{0} || length > limit) -> return false
+    data :: rt_text_data(value)
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(wrapping(data + at))
+        if (byte < I64{32} || byte == I64{127} || byte == I64{47} || byte == I64{92}) -> return false
+        if (byte == I64{194} && at + I64{1} < length) {
+            next_byte :: rt_text_byte(wrapping(data + at + I64{1}))
+            if (next_byte >= I64{128} && next_byte <= I64{159}) -> return false
+        }
+        at += I64{1}
+    }
+    true
+}
+
+fn receipt_section_valid(tree: I64, section: I64, type_name: I64, schema: I64, claim: I64, parent: I64) -> Bool {
+    if !receipt_section_digest_ok(claim) {
+        receipt_section_stop(rt_static_text("receipt section claim digest is malformed"))
+        return false
+    }
+    if (rt_text_len(parent) != I64{0} && !receipt_section_digest_ok(parent)) {
+        receipt_section_stop(rt_static_text("receipt section parent digest is malformed"))
+        return false
+    }
+    if !receipt_section_name_ok(section, I64{128}) {
+        receipt_section_stop(rt_static_text("receipt section name is invalid"))
+        return false
+    }
+    if !receipt_section_name_ok(type_name, I64{256}) {
+        receipt_section_stop(rt_static_text("receipt section type name is invalid"))
+        return false
+    }
+    if !receipt_section_digest_ok(schema) {
+        receipt_section_stop(rt_static_text("receipt section schema digest is malformed"))
+        return false
+    }
+    if (rt_text_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT) {
+        receipt_section_stop_with(rt_static_text("receipt section `"), section, rt_static_text("` must encode as an object"))
+        return false
+    }
+    true
+}
+
+// Compact JSON with every object's keys in byte order (stable for equal
+// keys), recursively; scalars render as data_tree_render does.
+fn receipt_section_render(target: I64, tree: I64) {
+    kind :: rt_text_word(wrapping(tree + DATA_TREE_TAG))
+    if (kind != DATA_TREE_ARRAY && kind != DATA_TREE_OBJECT) {
+        data_tree_render(target, tree)
+        return
+    }
+    value :: rt_text_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    length :: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
+    data :: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
+    if (kind == DATA_TREE_ARRAY) {
+        rt_text_push_word(target, I64{91}, I64{1})
+        at := I64{0}
+        loop at < length {
+            if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
+            receipt_section_render(target, rt_text_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES)))
+            at += I64{1}
+        }
+        rt_text_push_word(target, I64{93}, I64{1})
+        return
+    }
+    order :: jet_rt_alloc(if (length == I64{0}) -> I64{8} else -> length * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        entry :: wrapping(data + at * DATA_TREE_ENTRY_BYTES)
+        slot := at
+        loop slot > (I64{0}) {
+            previous :: rt_text_word(wrapping(order + (slot - I64{1}) * I64{8}))
+            if (jet_rt_string_compare(rt_text_word(wrapping(previous + DATA_TREE_ENTRY_KEY)), rt_text_word(wrapping(entry + DATA_TREE_ENTRY_KEY))) <= I64{0}) -> break
+            fd_put(order, slot * I64{8}, previous)
+            slot -= I64{1}
+        }
+        fd_put(order, slot * I64{8}, entry)
+        at += I64{1}
+    }
+    rt_text_push_word(target, I64{123}, I64{1})
+    at = I64{0}
+    loop at < length {
+        if (at != I64{0}) -> rt_text_push_word(target, I64{44}, I64{1})
+        entry :: rt_text_word(wrapping(order + at * I64{8}))
+        data_tree_quote(target, rt_text_word(wrapping(entry + DATA_TREE_ENTRY_KEY)))
+        rt_text_push_word(target, I64{58}, I64{1})
+        receipt_section_render(target, rt_text_word(wrapping(entry + DATA_TREE_ENTRY_VALUE)))
+        at += I64{1}
+    }
+    rt_text_push_word(target, I64{125}, I64{1})
+    jet_rt_free(order, if (length == I64{0}) -> I64{8} else -> length * I64{8}, I64{8})
+}
+
+// One frame: the value's byte length as a big-endian u64, then its bytes.
+fn receipt_section_frame(target: I64, value: I64) {
+    length :: rt_text_len(value)
+    shift := I64{56}
+    loop shift >= (I64{0}) {
+        rt_text_append_raw_word(target, (length >> shift).bit_and(I64{255}), I64{1})
+        shift -= I64{8}
+    }
+    rt_text_append(target, rt_text_data(value), length)
+}
+
+// The magic (with its NUL terminator) and the six identity frames.
+fn receipt_section_frames(magic: I64, claim: I64, parent: I64, section: I64, type_name: I64, schema: I64, payload_digest: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, magic)
+    rt_text_append_raw_word(target, I64{0}, I64{1})
+    receipt_section_frame(target, claim)
+    receipt_section_frame(target, parent)
+    receipt_section_frame(target, section)
+    receipt_section_frame(target, type_name)
+    receipt_section_frame(target, schema)
+    receipt_section_frame(target, payload_digest)
+    target
+}
+
+fn receipt_section_join(head: I64, separator: I64, tail: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, head)
+    jet_rt_string_builder_push(text, separator)
+    jet_rt_string_builder_push(text, tail)
+    jet_rt_string_builder_finish(text)
+}
+
+fn receipt_section_store(tree: I64, section: I64, type_name: I64, schema: I64, directory: I64, claim: I64, parent: I64) {
+    rendered :: jet_rt_string_builder_new()
+    receipt_section_render(rendered, tree)
+    rt_text_push_word(rendered, I64{10}, I64{1})
+    payload :: jet_rt_string_builder_finish(rendered)
+    if (rt_text_len(payload) > RECEIPT_SECTION_BYTES) {
+        jet_rt_string_drop(payload)
+        receipt_section_stop_with(rt_static_text("receipt section `"), section, rt_static_text("` is too large (maximum 67108864 bytes)"))
+        return
+    }
+    payload_digest :: process_execution_hash(payload)
+    record_builder :: receipt_section_frames(rt_static_text("jet-receipt-section-record-v1"), claim, parent, section, type_name, schema, payload_digest)
+    receipt_section_frame(record_builder, payload)
+    record :: jet_rt_string_builder_finish(record_builder)
+    identity :: jet_rt_string_builder_finish(receipt_section_frames(rt_static_text("jet-receipt-section-id-v1"), claim, parent, section, type_name, schema, payload_digest))
+    record_id :: process_execution_hash(identity)
+    jet_rt_string_drop(identity)
+    jet_rt_string_drop(payload_digest)
+    lane :: receipt_section_join(directory, rt_static_text("/"), if (rt_text_len(parent) == I64{0}) -> rt_static_text("staged") else -> rt_static_text("sections"))
+    target_dir :: receipt_section_join(lane, rt_static_text("/"), claim)
+    jet_rt_string_drop(lane)
+    if receipt_section_capacity(target_dir, rt_text_len(payload)) {
+        if receipt_section_directory(target_dir) {
+            receipt_section_publish(target_dir, record_id, record)
+        } else {
+            receipt_section_stop_with(rt_static_text("receipt section directory is unsafe: "), target_dir, rt_static_text(""))
+        }
+    }
+    jet_rt_string_drop(target_dir)
+    jet_rt_string_drop(record_id)
+    jet_rt_string_drop(record)
+    jet_rt_string_drop(payload)
+}
+
+// lstat of a terminated path into the 128-byte StatFacts row: mode@16,
+// size@56. Returns 0 or -errno.
+fn receipt_section_lstat(name: I64, facts: I64) -> I64 {
+    result := I64{0}
+    #Unsafe("the terminated path and the 128-byte stat fact row are live for the syscall") {
+        result = os_stat_facts_i64(I64{6}, name, facts)
+    }
+    result
+}
+
+// Fewer than 256 published sections and at most 64 MiB with this payload. A
+// missing directory has none; every entry must be a regular file, and
+// dot-named staging files do not count.
+fn receipt_section_capacity(directory: I64, payload_bytes: I64) -> Bool {
+    name :: fd_c_path(directory)
+    fd :: host_call(I64{2}, name, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+    fd_c_path_drop(name, directory)
+    if (fd < I64{0}) -> return true
+    buffer :: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
+    facts :: jet_rt_alloc(I64{128}, I64{8})
+    count := I64{0}
+    total := I64{0}
+    // The static stop message, or 0 while every entry is acceptable.
+    stop := I64{0}
+    loop stop == (I64{0}) {
+        listed :: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
+        if (listed == I64{-4}) -> next
+        if (listed <= I64{0}) -> break
+        at := I64{0}
+        loop at < listed {
+            record :: wrapping(buffer + at)
+            at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+            entry :: wrapping(record + I64{19})
+            if files_dot_entry(entry) -> next
+            path_text :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(path_text, directory)
+            rt_text_push_word(path_text, I64{47}, I64{1})
+            rt_text_append(path_text, entry, files_c_len(entry))
+            path :: jet_rt_string_builder_finish(path_text)
+            child :: fd_c_path(path)
+            result :: receipt_section_lstat(child, facts)
+            fd_c_path_drop(child, path)
+            jet_rt_string_drop(path)
+            if (result < I64{0}) {
+                stop = rt_static_text("could not inspect receipt section")
+                break
+            }
+            if ((rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})) != I64{32768}) {
+                stop = rt_static_text("receipt section record is not a regular file")
+                break
+            }
+            if (rt_text_byte(entry) == I64{46}) -> next
+            count += I64{1}
+            total = wrapping(total + rt_text_word(wrapping(facts + I64{56})))
+        }
+    }
+    jet_rt_free(facts, I64{128}, I64{8})
+    jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (stop != I64{0}) {
+        receipt_section_stop(stop)
+        return false
+    }
+    if (count >= RECEIPT_SECTION_COUNT) {
+        receipt_section_stop(rt_static_text("receipt has too many sections (maximum 256)"))
+        return false
+    }
+    if (total < I64{0} || total + payload_bytes > RECEIPT_SECTION_BYTES) {
+        receipt_section_stop(rt_static_text("receipt sections are too large (maximum 67108864 bytes)"))
+        return false
+    }
+    true
+}
+
+// Each path prefix must be a real directory (never a symbolic link); a
+// missing one is created with mode 0700, tolerating a concurrent creator.
+fn receipt_section_directory(directory: I64) -> Bool {
+    name :: fd_c_path(directory)
+    length :: rt_text_len(directory)
+    facts :: jet_rt_alloc(I64{128}, I64{8})
+    safe := true
+    at := I64{0}
+    loop safe && at <= length {
+        boundary :: at == length || rt_text_byte(wrapping(name + at)) == I64{47}
+        if !boundary {
+            at += I64{1}
+            next
+        }
+        // `end` is the prefix length: the root itself for a leading slash; an
+        // empty component (a repeated or trailing slash) checks nothing new.
+        end :: if (at == I64{0}) -> I64{1} else -> at
+        empty :: at != I64{0} && rt_text_byte(wrapping(name + at - I64{1})) == I64{47}
+        if (!empty && end <= length) {
+            saved :: rt_text_byte(wrapping(name + end))
+            #Unsafe("the path copy owns its terminator byte and every byte before it") { os_store_u8(wrapping(name + end), I64{0}) }
+            loop {
+                result :: receipt_section_lstat(name, facts)
+                if (result == I64{0}) {
+                    if ((rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})) != I64{16384}) -> safe = false
+                    break
+                }
+                if (result != I64{-2}) {
+                    safe = false
+                    break
+                }
+                made :: host_call(I64{83}, name, I64{448}, I64{0})
+                if (made != I64{0} && made != I64{-17}) {
+                    safe = false
+                    break
+                }
+            }
+            #Unsafe("the path copy owns every byte before its terminator") { os_store_u8(wrapping(name + end), saved) }
+        }
+        at += I64{1}
+    }
+    jet_rt_free(facts, I64{128}, I64{8})
+    fd_c_path_drop(name, directory)
+    safe
+}
+
+fn receipt_section_write_all(fd: I64, data: I64, length: I64) -> Bool {
+    written := I64{0}
+    loop written < length {
+        result :: host_call(I64{1}, fd, wrapping(data + written), length - written)
+        if (result == I64{-4}) -> next
+        if (result <= I64{0}) -> return false
+        written += result
+    }
+    true
+}
+
+// Whether the file at the terminated `name` holds exactly `bytes`.
+fn receipt_section_same(name: I64, bytes: I64) -> Bool {
+    fd :: host_call(I64{2}, name, I64{524288}, I64{0})
+    if (fd < I64{0}) -> return false
+    length :: rt_text_len(bytes)
+    buffer :: jet_rt_alloc(length + I64{1}, I64{1})
+    filled := I64{0}
+    loop filled <= length {
+        result :: host_call(I64{0}, fd, wrapping(buffer + filled), length + I64{1} - filled)
+        if (result == I64{-4}) -> next
+        if (result <= I64{0}) -> break
+        filled += result
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    same :: filled == length && rt_text_equal_bytes(buffer, rt_text_data(bytes), length)
+    jet_rt_free(buffer, length + I64{1}, I64{1})
+    same
+}
+
+// Stage `.{id}.{pid}.{nanos}` with O_EXCL, flush it, then hard-link it to the
+// record name: an existing record must hold the same bytes.
+fn receipt_section_publish(directory: I64, record_id: I64, record: I64) {
+    clock :: jet_rt_alloc(I64{16}, I64{8})
+    _ := host_call(I64{228}, I64{0}, clock, I64{0})
+    nanos :: wrapping(rt_text_word(clock) * I64{1000000000} + rt_text_word(wrapping(clock + I64{8})))
+    jet_rt_free(clock, I64{16}, I64{8})
+    staged_text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(staged_text, directory)
+    jet_rt_string_builder_push(staged_text, rt_static_text("/."))
+    jet_rt_string_builder_push(staged_text, record_id)
+    rt_text_push_word(staged_text, I64{46}, I64{1})
+    rt_text_push_number(staged_text, jet_std_os_pid())
+    rt_text_push_word(staged_text, I64{46}, I64{1})
+    rt_text_push_number(staged_text, nanos)
+    staged :: jet_rt_string_builder_finish(staged_text)
+    published :: receipt_section_join(directory, rt_static_text("/"), record_id)
+    staged_name :: fd_c_path(staged)
+    published_name :: fd_c_path(published)
+    failure := rt_static_text("")
+    fd :: host_call(I64{2}, staged_name, RECEIPT_SECTION_STAGE_OPEN, I64{438})
+    if (fd < I64{0}) {
+        failure = rt_static_text("could not stage receipt section")
+    } else {
+        flushed := receipt_section_write_all(fd, rt_text_data(record), rt_text_len(record))
+        if flushed {
+            synced := I64{-4}
+            loop synced == (I64{-4}) -> synced = host_call(I64{74}, fd, I64{0}, I64{0})
+            flushed = synced == I64{0}
+        }
+        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        if !flushed {
+            failure = rt_static_text("could not flush receipt section")
+        } else {
+            linked :: host_call(I64{86}, staged_name, published_name, I64{0})
+            if (linked == I64{-17}) {
+                if !receipt_section_same(published_name, record) -> failure = rt_static_text("receipt section identity collision with different content")
+            } else if (linked != I64{0}) {
+                failure = rt_static_text("could not publish receipt section")
+            }
+        }
+        _ := host_call(I64{87}, staged_name, I64{0}, I64{0})
+    }
+    fd_c_path_drop(staged_name, staged)
+    fd_c_path_drop(published_name, published)
+    jet_rt_string_drop(staged)
+    jet_rt_string_drop(published)
+    if (rt_text_len(failure) != I64{0}) -> receipt_section_stop(failure)
+}

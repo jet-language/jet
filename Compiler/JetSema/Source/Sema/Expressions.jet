@@ -3583,6 +3583,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if explicit_unit.handled -> return explicit_unit.value
     enum_variant := sema_expression_enum_variant_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if enum_variant.handled -> return enum_variant.value
+    receipt_attach := sema_receipt_try_attach(receiver, method, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if receipt_attach.handled -> return receipt_attach.value
     pre_receiver := sema_expr_try_method_static_routes(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if pre_receiver.handled -> return pre_receiver.value
     hardware_pre_receiver := sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
