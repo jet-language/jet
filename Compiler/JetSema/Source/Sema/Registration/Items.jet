@@ -3611,6 +3611,45 @@ fn sema_registration_direct_symbol(module_row: SemaRegistrationModule, name: Str
     None
 }
 
+// A Core module's public surface is its `module core.X exports {…}` row in
+// Compiler/Prelude/Core.jet, not its source visibility: Core declares no
+// `pub`, so every Core item is visible by default. Code outside Core reaches
+// only the names that row lists, or a Core submodule; the rest (a handle
+// struct such as `SqliteDB { raw }`, a host leaf, an internal constant) is
+// Core's own. Core itself reaches every Core item. A dotted member
+// (`use core.[math.abs]`) is checked against its own module's row.
+fn sema_registration_core_private(module_row: SemaRegistrationModule, name: String, requester_module: String) -> Bool Never! {
+    if !module_row.module_identity.starts_with("<corelib>/") || requester_module.starts_with("<corelib>/") -> return false
+    owner := module_row.module_name.copy()
+    leaf := name.copy()
+    if name.cut_last(".") == .Val(parts) {
+        owner = "{owner}.{parts.before}"
+        leaf = parts.after.copy()
+    }
+    if core_module_export(owner) == None -> return false
+    !core_module_has_member(owner, leaf) && !core_module_has_type(owner, leaf) && core_module_export("{owner}.{leaf}") == None
+}
+
+fn sema_registration_core_private_error(name: String, module_name: String, span: Span) -> Diagnostic {
+    sema_error("E0609", span, "`{name}` is private in module `{module_name}`", "a Core module's API is the names it exports; its other types and helpers belong to Core alone", "use what `{module_name}` exports instead")
+}
+
+// The Core module behind `alias` when `alias.name` names a declaration that
+// module keeps private from `module_identity`: the qualified spelling of an
+// import the E0609 above refuses (`db.SqliteDB{raw: 1}`).
+fn sema_registration_core_private_qualified(graph: SemaRegistrationGraph, module_identity: String, alias: String, name: String) -> String? {
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    loop import in graph.modules[module_index].imports {
+        if import.declaration.alias != alias || sema_registration_file_import_taken_over(graph.modules[module_index], import) -> next
+        target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? return None
+        target :: graph.modules[target_index]
+        if !sema_registration_core_private(target, name, module_identity) -> return None
+        if sema_registration_lookup_name_at(graph, target_index, target.module_identity, name) == None -> return None
+        return Val(target.module_name.copy())
+    }
+    None
+}
+
 fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: String, requester_package: String, seen: [String]) -> SemaRegistrationExport? {
     if module_index < 0 || module_index >= graph.modules.len() -> return None
     key :: "{module_index}:{name}"
@@ -3620,6 +3659,7 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
     next_seen := seen
     &next_seen.push(key)
     module_row :: graph.modules[module_index]
+    if sema_registration_core_private(module_row, name, requester_module) -> return None
     direct :: sema_registration_direct_symbol(module_row, name)
     if direct == .Val(export) {
         if sema_registration_visible(export.visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) -> return Val(export)
@@ -3839,6 +3879,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         }
                         if {
                             private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
+                            direct != None && sema_registration_core_private(graph.modules[target_index], item.original, source_identity) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_registration_core_private_error(item.original, target_name, declaration.span))
                             direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
                             else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }

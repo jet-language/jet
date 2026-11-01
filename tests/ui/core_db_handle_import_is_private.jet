@@ -1,0 +1,9 @@
+// #6479: `SqliteDB` is core.db's own handle (its `raw` word is a live sqlite3
+// pointer) and core.db does not export it, so user code can't name it or
+// forge one from a made-up word.
+use core.db.[SqliteDB]
+
+fn run() {
+    d :: SqliteDB{raw: 1}
+    print("made")
+}

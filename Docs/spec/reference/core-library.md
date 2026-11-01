@@ -254,6 +254,16 @@ use "core/files"
 The first form is an ordinary import error under D-S14-PAUSE; the second uses
 the file-import grammar.
 
+A Core module's API is the list of names it exports: the items this reference
+documents for it, recorded as its `module core.X exports { … }` row in
+`Compiler/Prelude/Core.jet`. Every other declaration in its source belongs to
+Core alone, including internal helpers and constants and handle types such as
+`core.db`'s `SqliteDB` or `core.crypto`'s `JetcFd`, whose fields are live
+native handles. Code outside Core can't name them: `use core.db.[SqliteDB]`
+and a `db.SqliteDB{…}` literal through an alias are both **E0609**. A call to
+an unexported function through an alias is E1004, so safe code can't build a
+handle from a made-up word.
+
 ### `core.compiler.lang` — language declarations
 
 `core.compiler.lang` publishes the closed compiler vocabulary used by typed
