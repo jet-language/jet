@@ -118,11 +118,15 @@ fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> 
 }
 
 // Whether the buffer of `header` is stored before the Loop at `opener`, in
-// a region around it; a parameter's header holds one from the start.
+// a region around it, by a Store of it or a CopyBytes of a whole list
+// header into it (`l := other`); a parameter's header holds one from the
+// start.
 fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
     if header < f.param_count -> return true
     loop at in 0..<opener {
-        if f.op[at] != .Store || f.b[at] != 16 || f.a[at] < 0 || root[f.a[at]] != header -> next
+        stores :: f.op[at] == .Store && f.b[at] == 16
+        copies :: f.op[at] == .CopyBytes && f.c[at] >= 24
+        if (!stores && !copies) || f.a[at] < 0 || root[f.a[at]] != header -> next
         if ir_opt_encloses(facts, facts.region[at], facts.region[opener]) -> return true
     }
     false
