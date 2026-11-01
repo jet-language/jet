@@ -294,6 +294,7 @@ fn kit_steps_exit_test(assertion: KitAssertion, state: KitStepState) -> KitVerdi
         }
         return kit_expect_verdict("ERROR", "exit label missing: {assertion.value}")
     }
+    if assertion.mode == "status" -> return kit_steps_exit_status(assertion.value, state.last.code)
     loop code in assertion.alternatives {
         if actual == kit_steps_integer(code) -> return kit_expect_verdict("PASS", "")
     }

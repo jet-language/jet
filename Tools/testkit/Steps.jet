@@ -808,6 +808,13 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid exit or missing partial reason"
                 return plan
             }
+            // A status under a guard its step does not share is an assertion,
+            // so the guard selects it; the step's own status stays unconditional.
+            if conditions.len() > 0 && plan.steps[i].conditions != conditions {
+                if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
+                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "status", value: value})
+                next
+            }
             plan.steps[i].exit = value
             plan.steps[i].exit_explicit = true
             next
@@ -1083,17 +1090,30 @@ fn kit_steps_check(step: KitStep, context: KitStepCtx, state: KitStepState, sour
         }
     }
     if process || step.exit_explicit {
-        if step.exit == "nonzero" {
-            if result.code == 0 -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit 0; expected nonzero"), context, step, result)
-        } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
-            forbidden :: Int.parse(kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim().copy()) ?? 0
-            if result.code == forbidden -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}"), context, step, result)
-        } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}"), context, step, result)
+        verdict :: kit_steps_exit_status(step.exit, result.code)
+        if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
     }
     loop assertion in step.assertions {
         verdict :: kit_steps_check_assertion(assertion, context, state, source_name, true)
         if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
     }
+    kit_expect_verdict("PASS", "")
+}
+
+// One `exit:` status (`nonzero`, `any`, `!= N` or an integer) judged against a
+// run's exit code: a step's own status, or a guarded `exit:` assertion.
+fn kit_steps_exit_status(expected: String, code: Int) -> KitVerdict {
+    if expected == "any" -> return kit_expect_verdict("PASS", "")
+    if expected == "nonzero" {
+        if code == 0 -> return kit_expect_verdict("FAIL", "exit 0; expected nonzero")
+        return kit_expect_verdict("PASS", "")
+    }
+    if expected.starts_with("!=") {
+        forbidden :: Int.parse(kit_steps_byte_slice(expected, 2, expected.count_bytes()).trim().copy()) ?? 0
+        if code == forbidden -> return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
+        return kit_expect_verdict("PASS", "")
+    }
+    if code != (Int.parse(expected) ?? 0) -> return kit_expect_verdict("FAIL", "exit {code}; expected {expected}")
     kit_expect_verdict("PASS", "")
 }
 

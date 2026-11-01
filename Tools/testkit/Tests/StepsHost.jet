@@ -82,6 +82,19 @@ use core.sys as sys
     files.remove_all(root) ?? panic("remove boolean scratch")
 }
 
+#Test("a guarded exit status applies only when its guard holds") {
+    root :: cases_test_root("host-guarded-exit")
+    unselected :: "step named: printf ok\nexit: any # status read only under the guard\nwhen named.stdout !~ \"ok\": exit: nonzero\n"
+    assert_eq(cases_test_advanced(root, "unselected", unselected).verdict.status, "PASS")
+    selected :: "step named: printf ok\nexit: any # status read only under the guard\nwhen named.stdout ~ \"ok\": exit: nonzero\n"
+    result :: cases_test_advanced(root, "selected", selected)
+    assert_eq(result.verdict.status, "FAIL")
+    assert(result.verdict.detail.contains("exit 0; expected nonzero"))
+    shared :: "when os {sys.family()}: step: false\nwhen os {sys.family()}: exit: 1\n"
+    assert_eq(cases_test_advanced(root, "shared-guard", shared).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove guarded exit scratch")
+}
+
 #Test("named free-port tokens come from one real Jet probe run per case and reuse the selected value") {
     root :: cases_test_root("host-free-ports")
     cases_test_source(root, "ports", "step: printf \"%s\\n%s\\n\" {{free-port:app}} {{free-port:app}}\nstdout: lines = 2 # original predicate\ncapture: first = text stdout.line(0)\ncapture: second = text stdout.line(1)\ncap:first: = {{cap:second}}\nstep: printf \"%s\" {{free-port:app}}\nstdout: = \"{{cap:first}}\"\nstdout: is-u32 # a port\nstep: printf \"%s\" {{free-port:other}}\nstdout: is-u32 # a port\n")
