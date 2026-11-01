@@ -213,6 +213,15 @@ fn rt_text_reserve_extra(target: I64, old: I64, used: I64, extra: I64) -> I64 {
         (grown < I64{16}) -> I64{16}
         else -> grown
     }
+    // A direct-mapped buffer grows by mremap: no second buffer, no copy.
+    if (cap != I64{0}) {
+        moved :: alloc_grow_large(old, cap, capacity)
+        if (moved != I64{0}) {
+            rt_text_store(target, moved)
+            rt_text_store(wrapping(target + I64{16}), capacity)
+            return moved
+        }
+    }
     data :: jet_rt_alloc(capacity, I64{1})
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
     rt_text_bytes_copy(data, old, used)
@@ -389,7 +398,22 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
 // shared or static `left` keeps its bytes: the result is a fresh owner (as
 // jet_rt_string_concat) and this owner of `left` is released. On a stop
 // `left` is still owned by the variable and the result is 0.
+// Fast path (ScriptBench w12, #6080): a sole heap owner whose spare capacity
+// already holds `right` is written here with one count load and no further
+// call but the copy. Spare capacity rules out a static text (cap 0), and the
+// buffer stays put, so a borrowed window of `left` needs no alias fixup.
 #Export(c) fn jet_rt_string_append(left: I64, right: I64) -> I64 {
+    extra :: rt_text_len(right)
+    used :: rt_text_len(left)
+    if (extra > I64{0} && extra <= rt_text_word(wrapping(left + I64{16})) - used) {
+        count :: rc_load(wrapping(left - I64{8}))
+        if (count >= I64{0} && count.bit_and(RC_OWNER_BITS) == I64{1}) {
+            rt_text_store(wrapping(left + I64{24}), I64{0})
+            rt_text_bytes_copy(wrapping(rt_text_data(left) + used), rt_text_data(right), extra)
+            rt_text_store(wrapping(left + I64{8}), used + extra)
+            return left
+        }
+    }
     if (rt_text_immortal(left) || !jet_rt_rc_unique(wrapping(left - I64{8}))) {
         joined :: jet_rt_string_concat(left, right)
         if (joined == I64{0}) -> return I64{0}

@@ -798,6 +798,37 @@ fn alloc_large(size: I64, align: I64) -> I64 {
     pointer
 }
 
+// A direct-mapped align-1 payload of `size` bytes regrown to hold `grown`
+// (rt_text_reserve_extra, #6080): mremap(MREMAP_MAYMOVE) extends or moves
+// its pages, so the old and the new buffer never both hold memory, as
+// allocate + copy + free would (and the freed mapping would then sit in the
+// large cache). The result is the payload's new address, its bytes kept and
+// the old address consumed, freed later as (result, grown, 1). Zero leaves
+// the payload untouched for the caller's allocate + copy + free: a
+// class-sized payload, checked mode, the counting policy or a tracked
+// payload (their accounting sees allocations and frees only), or a refused
+// syscall.
+fn alloc_grow_large(pointer: I64, size: I64, grown: I64) -> I64 {
+    if (alloc_class_limit == I64{0} || grown <= size || alloc_class(size, I64{1}, alloc_class_limit) != I64{0}) -> return I64{0}
+    #Unsafe("pointer is a live direct allocation of exactly `size` bytes at align 1 whose two header words name its mapping and the mapping's bytes; the mode and tracked-count words are aligned words read atomically on x86, as alloc_reserve and alloc_untrack read them; a refused mremap leaves the mapping as it was") {
+        if (os_load_i64(wrapping(alloc_root + I64{144})) != I64{0} || os_load_i64(wrapping(alloc_root + I64{200})) != I64{0}) { return I64{0} }
+        mapping :: os_load_i64(wrapping(pointer - I64{16}))
+        bytes :: os_load_i64(wrapping(pointer - I64{8}))
+        offset :: wrapping(pointer - mapping)
+        if (grown > wrapping(wrapping(I64{9223372036854775807} - I64{4095}) - offset)) { return I64{0} }
+        needed :: alloc_align(wrapping(grown + offset), I64{4096})
+        if (needed <= bytes) { return pointer }
+        class :: alloc_large_class(needed)
+        target :: if (class < I64{0}) -> needed else -> wrapping(alloc_large_class_pages(class) * I64{4096})
+        moved :: os_syscall_i64(I64{25}, mapping, bytes, target, I64{1}, I64{0}, I64{0})
+        if (moved < I64{0}) { return I64{0} }
+        result :: wrapping(moved + offset)
+        os_store_i64(wrapping(result - I64{16}), moved)
+        os_store_i64(wrapping(result - I64{8}), target)
+        return result
+    }
+}
+
 // Session reserve is nullable on bad layout/OOM; every successful allocation
 // still uses the same heap and exact-layout free as ordinary native storage.
 // Checked mode (alloc_class_limit 0) sends every request to alloc_check_take.
