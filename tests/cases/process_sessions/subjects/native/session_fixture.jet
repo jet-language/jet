@@ -52,7 +52,11 @@ fn descendant(pid_file: String) {
         group :: sys.getpgid(sys.getppid()) ?? panic("read the tree's process group")
         sys.setpgid(0, group) ?? panic("join the tree's process group")
     }
-    files.write(pid_file, "{process.current_pid()}") ?? panic("write descendant pid")
+    // The pid file appears whole, by rename: a tree killed while this child
+    // writes leaves no empty or partial pid file behind.
+    staging :: "{pid_file}.part"
+    files.write(staging, "{process.current_pid()}") ?? panic("write descendant pid")
+    files.rename(staging, pid_file) ?? panic("publish descendant pid")
     loop { time.sleep(1s) }
 }
 
