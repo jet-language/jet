@@ -186,22 +186,29 @@ struct FileScope {
     }
 }
 
+// The native file resources below are filled only by Core's own opens:
+// their `priv handle` keeps a literal outside core.files from forging one
+// (core-library.md:635/:701: `.path` stays readable, the handle does not).
 struct MappedFile {
     path: String
     bytes: [U8]
+    priv handle: Int
 }
 
 struct TempDir {
     path: String
     is_dir: Bool
+    priv handle: Int
 }
 
 struct TempFile {
     path: String
+    priv handle: Int
 }
 
 struct FileLock {
     path: String
+    priv handle: Int
 }
 
 
@@ -250,9 +257,11 @@ impl AdvisoryLock.Close {
 
 /// An open file for reading. `read_line`, `lines`, and `read(max)` advance
 /// one shared position; `read` returns up to `max` bytes and an empty list
-/// at end of file.
+/// at end of file. Only Core's opens fill the `priv handle`, so a literal
+/// outside core.files cannot forge one.
 struct FileReader {
     path: String
+    priv handle: Int
 
     /// What the open file is now (fstat). Comparing
     /// `id` with a later `files.stat(path).id` shows whether the path was
@@ -268,8 +277,11 @@ struct FileReader {
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
 /// `flush` hands the bytes to the system and `fsync` also makes them durable.
+/// Only Core's opens fill the `priv handle`, so a literal outside core.files
+/// cannot forge one.
 struct FileWriter {
     path: String
+    priv handle: Int
 
     /// What the open file is now (fstat). Bytes still
     /// buffered are not counted until `flush` or `fsync`.
