@@ -1,8 +1,8 @@
 // A foreign host embedding the Jet runtime that never calls
-// jet_rt_host_arguments: its first runtime entry is an allocation. The
-// JET_CHECKED_ALLOC decision is the runtime's .init_array's
-// (Alloc.jet jet_rt_alloc_check_init, jet_rt_alloc_check_refuse_init), so
-// checked mode still holds here (run-alloc-parity.mjs embed-* cases).
+// jet_rt_host_arguments: its first runtime entry is an allocation. A system
+// linker keeps every runtime .init_array hook, the checked heap's
+// (Alloc.jet jet_rt_alloc_check_init) among them, so checked mode holds here
+// from the first allocation (run-alloc-parity.mjs embed-* cases).
 #include <stdint.h>
 #include <string.h>
 extern void *jet_rt_alloc(int64_t,int64_t);

@@ -3,6 +3,7 @@
 // receipt (`layout`, `export` and `import` rows) is what the program
 // partition is placed and linked against at `jet build --target web`.
 
+use jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS]
 use jet_ir.[IRLibraryExport, IRModule]
 
 struct WebRuntime {
@@ -14,11 +15,16 @@ struct WebRuntime {
 }
 
 // The runtime partition of the runtime library's lowered module `m` (JetIR
-// ir_x64_compile_module's program) and its exports and lifecycle hooks.
+// ir_x64_compile_module's program) and its exports and lifecycle hooks. Every
+// web program shares it, and a web build has no checked heap, so it leaves
+// out the checked heap's exports (CHECKED_ALLOC_RUNTIME_EXPORTS), as the
+// prelinked native image does (JetBackend Image/RuntimePack.jet): their hook
+// would turn checked mode on in every web program.
 fn web_runtime_partition(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime Never! {
     rows := [String:Int]{}
     hooks := [WebHook]{}
     loop row in exports {
+        if CHECKED_ALLOC_RUNTIME_EXPORTS.contains(row.symbol) -> next
         rows[row.symbol.copy()] = row.function
         if row.init_priority >= 0 -> &hooks.push(WebHook{row: row.function, priority: row.init_priority, fini: false})
         if row.fini_priority >= 0 -> &hooks.push(WebHook{row: row.function, priority: row.fini_priority, fini: true})

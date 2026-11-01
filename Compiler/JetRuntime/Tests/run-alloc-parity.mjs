@@ -40,30 +40,31 @@ for (const [tier, [fixture, ...defines]] of Object.entries(fixtures)) {
   binaries[tier] = binary;
 }
 const size = '9223372036854775800'; // isize::MAX - 7, aligned to 8 on x86-64.
-// JET_CHECKED_ALLOC=1 (Alloc.jet checked mode): every bad free traps with a
-// report naming the case's own function (the call site), then SIGABRT.
-const checked = { ...process.env, JET_CHECKED_ALLOC: '1' };
-const trap = 'jet checked allocator (JET_CHECKED_ALLOC=1): ';
+// A system linker keeps every runtime .init_array hook, the checked heap's
+// (Alloc.jet jet_rt_alloc_check_init) among them, so both fixtures run in
+// checked mode, as a Jet program built with `--checked-alloc` does: every bad
+// free traps with a report naming the case's own function (the call site),
+// then SIGABRT, and a clean case stays silent.
+const trap = 'jet checked allocator: ';
 const results = [];
 for (const test of [
   { name: 'alloc-invalid-layout', status: 70, signal: null,
     prefix: Buffer.from('Stop [E3001]: `panic: invalid box layout`\n  --> <core.prelude>:0\n') },
   { name: 'alloc-failure', status: null, signal: 'SIGABRT',
     exact: Buffer.from(`memory allocation of ${size} bytes failed\n`) },
-  { name: 'alloc-checked-clean', env: checked, status: 0, signal: null, exact: Buffer.alloc(0) },
-  { name: 'alloc-double-free', env: checked, status: null, signal: 'SIGABRT',
+  { name: 'alloc-checked-clean', status: 0, signal: null, exact: Buffer.alloc(0) },
+  { name: 'alloc-double-free', status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}double free of 0x`), contains: ['(40 bytes, align 8)\n  at:\n', ' alloc_double_free+0x', '  first freed at:\n', '  allocated at:\n'] },
-  { name: 'alloc-foreign-free', env: checked, status: null, signal: 'SIGABRT',
+  { name: 'alloc-foreign-free', status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}free of 0x`), contains: ['(16 bytes, align 8), which this heap never handed out', ' alloc_foreign_free+0x'] },
-  { name: 'alloc-layout-mismatch', env: checked, status: null, signal: 'SIGABRT',
+  { name: 'alloc-layout-mismatch', status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}free of 0x`), contains: ['(16 bytes, align 8), allocated as (24 bytes, align 8)', ' alloc_layout_mismatch+0x'] },
-  { name: 'alloc-overflow', env: checked, status: null, signal: 'SIGABRT',
+  { name: 'alloc-overflow', status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}write past the end of 0x`), contains: ['(20 bytes, align 1), found at its free', ' alloc_overflow+0x'] },
-  { name: 'alloc-write-after-free', env: checked, status: null, signal: 'SIGABRT',
+  { name: 'alloc-write-after-free', status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}write after free into 0x`), contains: ['(40 bytes, align 8) at byte offset 3\n', '  freed at:\n', ' alloc_write_after_free+0x'] },
   { name: 'embed-clean', tier: 'embed', status: 0, signal: null, exact: Buffer.alloc(0) },
-  { name: 'embed-checked-clean', tier: 'embed', arg: 'embed-clean', env: checked, status: 0, signal: null, exact: Buffer.alloc(0) },
-  { name: 'embed-double-free', tier: 'embed', env: checked, status: null, signal: 'SIGABRT',
+  { name: 'embed-double-free', tier: 'embed', status: null, signal: 'SIGABRT',
     prefix: Buffer.from(`${trap}double free of 0x`), contains: ['(40 bytes, align 8)\n  at:\n', ' embed_double_free+0x'] },
 ]) {
   const before = errors.length;
@@ -72,7 +73,7 @@ for (const test of [
       errors.push(`${test.name}/${tier}: build failed`);
       continue;
     }
-    const result = spawnSync(binaries[tier], [test.arg ?? test.name], test.env ? { env: test.env } : {});
+    const result = spawnSync(binaries[tier], [test.name]);
     writeFileSync(join(out, `${test.name}.${tier}.stdout`), result.stdout ?? Buffer.alloc(0));
     writeFileSync(join(out, `${test.name}.${tier}.stderr`), result.stderr ?? Buffer.alloc(0));
     writeFileSync(join(out, `${test.name}.${tier}.status.json`), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null }) + '\n');

@@ -417,12 +417,11 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
     Val(key)
 }
 
-// JET_CHECKED_ALLOC=1 (Docs/spec/reference/environment.md) when jet builds a
-// program: only such a build links the runtime's checked heap
-// (D-SIZE-PAYUSE1 A), so the variable is part of the build key
-// (jet_cli_script_toolchain).
-fn jet_cli_checked_alloc() -[Env]> Bool Never! {
-    (cli_sys.get("JET_CHECKED_ALLOC") ?? "") == "1"
+// `--checked-alloc` (the `checked_alloc` build option): only such a build
+// links the runtime's checked heap and runs checked, and the option is part
+// of every build key (build_options_key).
+fn jet_cli_checked_alloc(options: BuildOptions) -> Bool Never! {
+    build_options_value(options, "checked_alloc") == "true"
 }
 
 // Why the one native executable route stopped; each caller reports it.
@@ -613,11 +612,21 @@ fn jet_cli_native_executable(result: JetDriverCompileResult, inputs: ^JetDriverL
 }
 
 // Write the linked executable `executable` as the file `path`, and a split
-// link's side debug file as `path`.debug.
-fn jet_cli_native_write(path: String, executable: X64Executable) -[FS]> JetCLINativeFailure? Never! {
-    failure :: x64_executable_write(executable, path)
-    if failure != "" -> return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {failure}"})
-    cli_files.set_mode(path, 0o755) ?? return Val(JetCLINativeFailure.Write{what: "couldn't make {path} executable: {err}"})
+// link's side debug file as `path`.debug. The image is written to a new file
+// beside `path` and renamed over it: a program still running from the old
+// file keeps that file busy (ETXTBSY), and the rename never opens it.
+fn jet_cli_native_write(path: String, executable: X64Executable) -[FS, Env]> JetCLINativeFailure? Never! {
+    staged :: "{path}.{cli_sys.pid()}.new"
+    failure :: x64_executable_write(executable, staged)
+    if failure != "" {
+        cli_files.remove(staged).drop("a partial image is never named `path`")
+        return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {failure}"})
+    }
+    if cli_files.set_mode(staged, 0o755) == .Err(err) {
+        cli_files.remove(staged).drop("a partial image is never named `path`")
+        return Val(JetCLINativeFailure.Write{what: "couldn't make {path} executable: {err}"})
+    }
+    cli_files.rename(staged, path) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"})
     if executable.debug_file.len() > 0 {
         cli_files.write_bytes("{path}.debug", executable.debug_file) ?? return Val(JetCLINativeFailure.Write{what: "couldn't write {path}.debug: {err}"})
     }
@@ -845,7 +854,7 @@ fn jet_cli_native_program(result: JetDriverCompileResult, inputs: ^JetDriverLowe
     level :: jet_cli_native_level(options)
     checked := ^inputs
     checks := jet_cli_ir_checks(result, checked, options)
-    checks.checked_alloc = jet_cli_checked_alloc()
+    checks.checked_alloc = jet_cli_checked_alloc(options)
     declarations := jet_driver_checked_declarations(&checked)
     // The program's C closure defines its foreign functions' symbols.
     closure_symbols := [String:Bool]{}

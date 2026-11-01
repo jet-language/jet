@@ -3961,6 +3961,21 @@ non-generic function of the package's own modules, so the image carries them
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
 
+`checked_alloc` (stock `false`) holds a Bool. With `true` the program links
+the runtime's checked memory allocator and runs with it from its first
+allocation: every heap block carries guard words and the call chain that
+allocated it, and a double free, a free of a pointer the heap never handed
+out, a free with another size or alignment than the allocation's, a write
+past a block's end or a write into a freed block (freed blocks wait in a
+quarantine and are checked as they leave it and when `main` returns) stops
+the program with a report that names the block and the call sites, then
+aborts. With `false` the image holds none of the checked allocator, and the
+program reads nothing at start to decide it. `jet build --checked-alloc`,
+`jet run --checked-alloc` and `jet test --checked-alloc` are `true`, and
+`fn build` writes `b.checked_alloc(true)`. The row is part of every build
+key, so a checked build never reuses an unchecked one's outputs. A web build
+has no checked allocator: `true` with `os: web` is refused (E2104).
+
 ### Output places, link inputs and targets
 
 The `output_dir`, `libs`, `link_args`, `os` and `min_os` rows place the

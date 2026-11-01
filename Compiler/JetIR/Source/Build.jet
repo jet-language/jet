@@ -244,7 +244,7 @@ struct IRChecks {
     // D-JOB-SUBCMD1=C: the jobs the program's first word can select ahead of
     // the entry; the entry function calls each (ir_entry_function).
     jobs: [IRJob]{[IRJob]{}}
-    // JET_CHECKED_ALLOC=1 at build time (D-SIZE-PAYUSE1 A): the entry calls
+    // `--checked-alloc` (the `checked_alloc` build option): the entry calls
     // jet_rt_alloc_check_link, so the link keeps the runtime's checked heap
     // (ir_checked_alloc_link).
     checked_alloc: Bool{false}
@@ -1213,7 +1213,7 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
     id
 }
 
-// A JET_CHECKED_ALLOC=1 build's entry (or test harness main) first calls
+// A `--checked-alloc` build's entry (or test harness main) first calls
 // jet_rt_alloc_check_link: the call keeps the runtime's checked heap in the
 // link (JetRuntime Alloc.jet alloc_check_linked).
 fn ir_checked_alloc_link(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {

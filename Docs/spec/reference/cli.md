@@ -529,7 +529,9 @@ The options below are intentionally named exactly as in `jet help`:
 - `--locked` requires locked dependency and provenance facts; `--fixtures`
   selects an explicit fixture bundle.
 - `--lib` makes `build` emit the native Library and C header; `--output` selects
-  a named output; `--small` favors a smaller binary.
+  a named output; `--small` favors a smaller binary; `--checked-alloc` on
+  `build`, `run` and `test` links the checked memory allocator, which stops at
+  a bad free or a write after free.
 - `--json`, `--quiet`, `--color`, and `--verbose` select output detail.
 - `--watch`, `--fresh`, `--docs`, `--coverage`, `--where`, and `--capture`
   control test or development execution; `--browser` selects browser engines.

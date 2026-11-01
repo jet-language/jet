@@ -18,6 +18,7 @@
 // slots, TLS offsets and the instruction relaxations) stays in the program
 // link. The file is plain ELF, so `readelf`/`objdump` read it and it can be
 // mapped as is.
+use jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS]
 
 struct LinkPack {
     // Kept sections in input order: live row per ordinal, ordinal per live
@@ -571,7 +572,13 @@ fn link_image_failure(c: LinkContext) -> X64ExecutableResult Never! {
     X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
 }
 
-// Link the runtime pack `pack` (named `name` in reports) into the runtime image.
+// Link the runtime pack `pack` (named `name` in reports) into the runtime
+// image. The image leaves out the checked heap's exports
+// (CHECKED_ALLOC_RUNTIME_EXPORTS): either one keeps alloc_check_linked, the
+// guard of the hook that turns checked mode on, so rooting them would check
+// every program bound to the image. A `--checked-alloc` program imports
+// jet_rt_alloc_check_link, which the image then lacks, so it links the pack
+// in full (JetCli Host.jet jet_cli_native_executable).
 fn x64_link_runtime_image(name: String, pack: ^[U8]) -> X64ExecutableResult Never! {
     c := link_context(^[[U8]]{^pack}, LINK_RUN_BASE)
     link_load_inputs(&c, [String]{name})
@@ -579,10 +586,10 @@ fn x64_link_runtime_image(name: String, pack: ^[U8]) -> X64ExecutableResult Neve
     entry_g :: link_resolve_program(&c)
     entry_section :: link_entry_section(&c, entry_g)
     if entry_section < 0 -> return link_image_failure(c)
-    // Every definition the pack exports stays: any program may use it.
+    // Every other definition the pack exports stays: any program may use it.
     sections := [Int]{entry_section}
     loop g in 0..<c.g_name.len() {
-        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 -> &sections.push(c.g_section[g])
+        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 && !CHECKED_ALLOC_RUNTIME_EXPORTS.contains(c.g_name[g]) -> &sections.push(c.g_section[g])
     }
     imports := [String:Bool]{}
     &imports.add("main", true).drop("a fresh map")

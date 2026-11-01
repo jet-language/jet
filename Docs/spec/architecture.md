@@ -216,7 +216,11 @@ storage's data section; the pack keeps the link. Jet's linker
 one of its guards, so a program that touches no service state runs and links
 none of its startup. A guarded hook may run once per kept guard and therefore
 starts idempotently. System linkers ignore the flag and keep every hook, as
-does the runtime image, whose exports are all live. Code a service runs only
+do the runtime image and the web runtime partition, whose exports are all
+live but the checked allocator's link entry and hook
+(`CHECKED_ALLOC_RUNTIME_EXPORTS`, `--checked-alloc`; a checked native program
+links the pack in full, and a web build has no checked allocator). Code a
+service runs only
 when used is installed by its hook as a code word (`rt_*_address()`), never
 called from always-live startup or exit paths. A hook takes no parameters and
 returns nothing. The one exception is an init hook, which may instead take the

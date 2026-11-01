@@ -245,8 +245,8 @@ fn rt_main_stopped_address() -> I64 {
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins
     // the worker executing the process boundary and cannot self-wait.
     jet_scheduler_drain_after_exit()
-    // JET_CHECKED_ALLOC=1 (Alloc.jet): a write after one of the last frees
-    // traps here rather than going unseen.
+    // Checked mode (Alloc.jet, `--checked-alloc`): a write after one of the
+    // last frees traps here rather than going unseen.
     alloc_check_sweep()
     main_flush(wrapping(main_exit_root + I64{16}))
     if (parked_code != I64{0}) {
