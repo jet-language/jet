@@ -198,6 +198,31 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
         sync_store(ok, sign)
         return I64{1}
     }
+    // Clinger's fast path, the first stage of Rust's dec2flt: when the
+    // significant digits are an integer w <= 2^53 and |power| <= 22, w and
+    // 10^|power| are both exact doubles (each step of the 10.0 product
+    // below is exact), so one IEEE multiply or divide rounds the exact
+    // rational once, to the same nearest-even result as the exact path.
+    if (significant_digits <= I64{16} && power >= I64{-22} && power <= I64{22}) {
+        whole := I64{0}
+        at = first_nonzero
+        loop at <= last_nonzero {
+            byte :: rt_text_byte(wrapping(data + at))
+            if (byte != I64{46}) -> whole = whole * I64{10} + byte - I64{48}
+            at += I64{1}
+        }
+        if (whole <= I64{9007199254740992}) {
+            scale := Float{1.0}
+            count := if (power < I64{0}) -> -power else -> power
+            loop count > (I64{0}) {
+                scale = scale * Float{10.0}
+                count -= I64{1}
+            }
+            value :: if (power < I64{0}) -> Float{whole} / scale else -> Float{whole} * scale
+            sync_store(ok, sign.bit_or(rt_f64_bits(value)))
+            return I64{1}
+        }
+    }
     numerator :: int_new(significant_digits /% I64{9} + I64{40} + (if (power > I64{0}) -> power /% I64{9} else -> I64{0}))
     at = first_nonzero
     loop at <= last_nonzero {

@@ -629,9 +629,37 @@ fn rt_text_maximal_suffix(pattern: I64, len: I64, reverse: Bool, order: Bool) ->
     (split: suffix + I64{1}, period: period)
 }
 
+// A one-byte needle needs no two-way setup: the first (or last) equal byte
+// at or after `start`, eight bytes per word forward. A word holds the byte
+// when the word XOR the byte in every lane has a zero lane.
+fn rt_text_find_byte(data: I64, len: I64, target: I64, start: I64, last: Bool) -> I64 {
+    if last {
+        at := len
+        loop at > start {
+            at -= I64{1}
+            if (rt_text_byte(wrapping(data + at)) == target) -> return at
+        }
+        return I64{-1}
+    }
+    spread :: wrapping(target * I64{72340172838076673})
+    at := start
+    limit :: wrapping(len - I64{8})
+    loop at <= limit {
+        word :: rt_text_word(wrapping(data + at)).bit_xor(spread)
+        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_not()).bit_and(I64{-9187201950435737472}) != I64{0}) { break }
+        at += I64{8}
+    }
+    loop at < len {
+        if (rt_text_byte(wrapping(data + at)) == target) -> return at
+        at += I64{1}
+    }
+    I64{-1}
+}
+
 fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
     if start > len || n > len - start -> return I64{-1}
     if (n == I64{0}) { return if last -> len else -> start }
+    if (n == I64{1}) -> return rt_text_find_byte(data, len, rt_text_byte(pattern), start, last)
     first :: rt_text_maximal_suffix(pattern, n, last, true)
     second :: rt_text_maximal_suffix(pattern, n, last, false)
     split := first.split

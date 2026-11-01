@@ -64,11 +64,9 @@ fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: B
     if delimiter.len() != 1 || delimiter_bytes[0] == (U8{34}) || delimiter_bytes[0] == (U8{10}) || delimiter_bytes[0] == (U8{13}) {
         return Err(unsupported_error(EncodingFormat.CSV, 0, "a CSV delimiter is one character other than a quote or a line ending"))
     }
-    physical :: parse_rows_with(text, delimiter_bytes, skip_blank)
-    if !header || physical.len() == 0 -> return Ok(physical)
-    data := [CSVRow]{}
-    loop i in 1..<physical.len() -> &data.push(physical[i])
-    Ok(data)
+    physical := parse_rows_with(text, delimiter_bytes, skip_blank)
+    if header && physical.len() > 0 -> _ :: &physical.remove(0, .Slot)
+    Ok(physical)
 }
 
 /// Header-named typed rows. Missing cells become empty text; extra cells are
@@ -224,12 +222,32 @@ struct TypedCSV {
 
 fn typed_records(text: String) -> [[String]] TypedCSVError! {
     parser := TypedCSV{field: [U8]{}, fields: [String]{}, rows: [[String]]{}, quoted: false, after_quote: false, pending_cr: false, pending_line: 1, pending_column: 1, record: 1, line: 1, column: 0, ended_record: false, saw_input: false}
+    raw :: text.bytes()
     index := 0
-    loop index < text.count_bytes() {
-        lead :: Int.from_u8(stream.byte_at(text, index))
+    loop index < raw.len() {
+        lead :: Int.from_u8(raw[index])
+        // The plain bytes that open an unquoted field (no quote, comma, CR or
+        // LF; every UTF-8 lead and continuation byte is >= 128) enter it as
+        // one slice, with the column one past each scalar as push counts.
+        if !parser.quoted && !parser.pending_cr && parser.field.len() == 0 && lead != 34 && lead != 44 && lead != 13 && lead != 10 {
+            run := index
+            scalars := 0
+            loop run < raw.len() {
+                byte :: Int.from_u8(raw[run])
+                if byte == 34 || byte == 44 || byte == 13 || byte == 10 -> break
+                if byte < 128 || byte >= 192 -> scalars += 1
+                run += 1
+            }
+            parser.saw_input = true
+            parser.ended_record = false
+            parser.column += scalars
+            parser.field = raw.slice(index, run)
+            index = run
+            next
+        }
         width :: if lead < 128 -> 1 else if lead < 224 -> 2 else if lead < 240 -> 3 else -> 4
         scalar := [U8#4]{0, 0, 0, 0}
-        loop position in 0..<width -> scalar[position] = stream.byte_at(text, index + position)
+        loop position in 0..<width -> scalar[position] = raw[index + position]
         &parser.push(scalar[0..<width]) ?? return Err(err)
         index += width
     }
@@ -349,11 +367,27 @@ fn delimiter_at(raw: [U8], i: Int, delimiter: [U8]) -> Bool {
     true
 }
 
+// A field's bytes as text. They are a String's bytes, cut only at an ASCII
+// quote, CR or LF, or around a whole match of the delimiter's complete UTF-8
+// encoding (plus `""` escapes as ASCII quotes). UTF-8 is self-synchronizing,
+// as a lead byte never equals a continuation byte, so every cut is a scalar
+// boundary and the bytes are complete UTF-8.
+fn field_text(^bytes: [U8]) -> String Never! {
+    #Unsafe("a String's bytes cut at scalar boundaries, plus ASCII quotes, are complete UTF-8") {
+        return encoding.__bytes_into_text(^bytes)
+    }
+}
+
+// An unquoted field is the bytes from its start to its delimiter or line
+// break, taken as one slice; a quoted field collects its unescaped bytes.
 fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] EncodingError! {
     raw :: text.bytes()
+    first :: delimiter[0]
+    width :: delimiter.len()
     rows := [CSVRow]{}
     fields := [String]{}
     field := [U8]{}
+    start := 0
     line := 1
     row_line := 1
     column := 1
@@ -363,7 +397,7 @@ fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] 
     loop i < raw.len() {
         b :: raw[i]
         n :: b
-        if fields.len() == 0 && field.len() == 0 && !quoted && !closed -> row_line = line
+        if fields.len() == 0 && i == start && !quoted && !closed -> row_line = line
         if quoted {
             if n == 34 {
                 if i + 1 < raw.len() && raw[i + 1] == (U8{34}) {
@@ -389,64 +423,77 @@ fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] 
             next
         }
         if closed {
-            if delimiter_at(raw, i, delimiter) {
-                &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+            if n == first && (width == 1 || delimiter_at(raw, i, delimiter)) {
+                &fields.push(field_text(^field))
                 field = [U8]{}
                 closed = false
-                i += delimiter.len()
+                i += width
+                start = i
                 column += 1
                 next
             }
             if n == 10 || n == 13 {
-                &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+                &fields.push(field_text(^field))
                 field = [U8]{}
                 blank :: fields.len() == 1 && fields[0].len() == 0
-                if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: fields})
+                if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: ^fields})
                 fields = [String]{}
                 closed = false
                 if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
                 line += 1
                 column = 1
                 i += 1
+                start = i
                 next
             }
             return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "characters after a closing CSV quote must be a delimiter or line break"))
         }
         if n == 34 {
-            if field.len() != 0 -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "a quoted CSV field must begin with a quote"))
+            if i != start -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "a quoted CSV field must begin with a quote"))
             quoted = true
             i += 1
             column += 1
             next
         }
-        if delimiter_at(raw, i, delimiter) {
-            &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
-            field = [U8]{}
-            i += delimiter.len()
+        if n == first && (width == 1 || delimiter_at(raw, i, delimiter)) {
+            &fields.push(field_text(raw.slice(start, i)))
+            i += width
+            start = i
             column += 1
             next
         }
         if n == 10 || n == 13 {
-            &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
-            field = [U8]{}
+            &fields.push(field_text(raw.slice(start, i)))
             blank :: fields.len() == 1 && fields[0].len() == 0
-            if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: fields})
+            if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: ^fields})
             fields = [String]{}
             if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
             line += 1
             column = 1
             i += 1
+            start = i
             next
         }
-        &field.push(b)
+        // The rest of the unquoted field, up to its next quote, delimiter
+        // byte or line break.
         i += 1
         column += 1
+        loop i < raw.len() {
+            c :: raw[i]
+            if c == 34 || c == first || c == 10 || c == 13 -> break
+            i += 1
+            column += 1
+        }
     }
     if quoted -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "unterminated quoted CSV field"))
-    if field.len() > 0 || fields.len() > 0 || closed {
-        &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+    if closed || i > start || fields.len() > 0 {
+        if closed {
+            &fields.push(field_text(^field))
+        } else {
+            &fields.push(field_text(raw.slice(start, i)))
+        }
         blank :: fields.len() == 1 && fields[0].len() == 0
-        if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: fields})
+        if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: ^fields})
     }
     Ok(rows)
 }

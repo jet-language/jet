@@ -2,11 +2,15 @@
 // 1083-1106,1841-1861. Native Result ABI: one status word, and two distinct
 // caller-owned 8B output slots; only the selected slot is initialized.
 // Inputs are borrowed E4 text and exact-Int carriers; outputs own one carrier.
+// Printable ASCII 33..126 is never White_Space (in ASCII that is only 9..13
+// and 32), so such a byte ends the trim without a decode.
 fn numeric_trim_start(text: I64) -> I64 {
     data :: rt_text_data(text)
     length :: rt_text_len(text)
     at := I64{0}
     loop at < length {
+        byte :: rt_text_byte(wrapping(data + at))
+        if (byte > I64{32} && byte < I64{127}) -> break
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         at += rt_text_width(wrapping(data + at))
     }
@@ -18,6 +22,8 @@ fn numeric_trim_end(text: I64, start: I64) -> I64 {
     end := rt_text_len(text)
     loop end > start {
         at := end - I64{1}
+        byte :: rt_text_byte(wrapping(data + at))
+        if (byte > I64{32} && byte < I64{127}) -> break
         loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
         if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
@@ -134,10 +140,15 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
     // log_36(1e9)>5, so this capacity bounds every accepted base. Inline
     // inputs allocate nothing; widening creates exactly one limb workspace.
     capacity :: (end - digits) /% I64{5} + I64{1}
+    // small * radix + digit <= 2^62 - 1 exactly when small < quotient, or
+    // small == quotient and digit <= rest (digit < radix): the inline bound
+    // without a division per digit.
+    quotient :: I64{4611686018427387903} /% radix
+    rest :: I64{4611686018427387903} - quotient * radix
     loop at < end {
         digit :: numeric_digit(rt_text_byte(wrapping(data + at)))
         if (node == I64{0}) {
-            if (small <= (I64{4611686018427387903} - digit) /% radix) {
+            if (small < quotient || (small == quotient && digit <= rest)) {
                 small = small * radix + digit
             } else {
                 node = int_copy(small, capacity - int_len(small))
