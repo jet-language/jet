@@ -765,6 +765,10 @@ struct CSVReader {
     char2: U8
     char3: U8
     char_width: Int
+    // The bytes read ahead from `input` (buffer_bytes at a time, charged to
+    // `allocation` once), and how many of them `byte` has taken.
+    buffer: [U8]
+    buffered: Int
 
     fn path(self) -> String Never! { "$[{self.record - 1}][{self.fields.len()}]" }
 
@@ -778,25 +782,29 @@ struct CSVReader {
     }
 
     fn byte(&self) -[IO]> U8? EncodingError! {
-        byte :: if encoding.__read_byte(&self.input) == {
-            .Ok(value) -> value
-            .Err(cause) -> {
+        if self.buffered == self.buffer.len() {
+            if mem.__list_capacity<U8>(self.buffer) == 0 && !stream.reserve<U8>(self.allocation, &self.buffer, self.limits.buffer_bytes) -> return Err(self.capacity_error())
+            &self.buffer.clear()
+            self.buffered = 0
+            count :: encoding.__read_into(&self.input, &self.buffer, self.limits.buffer_bytes) ?? {
                 error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
-                error.cause = Val(cause)
+                error.cause = Val(err)
                 return Err(error)
             }
+            if count == 0 -> return Ok(None)
         }
-        if byte == None -> return Ok(None)
+        byte :: self.buffer[self.buffered]
+        self.buffered += 1
         if self.limits.max_total_bytes == .Val(limit) {
             if self.total >= limit -> return Err(codec_error(.Limit, self.offset, self.line, self.column, self.path(), "max_total_bytes {limit} exceeded"))
         }
         self.total += 1
         self.offset += 1
-        if byte == (Val(U8{10})) {
+        if byte == 10 {
             self.line += 1
             self.column = 1
         } else { self.column += 1 }
-        Ok(byte)
+        Ok(Val(byte))
     }
 
     fn utf8_error(self, offset: Int) -> EncodingError Never! {
@@ -966,9 +974,58 @@ struct CSVReader {
         Ok(None)
     }
 
+    // The bytes of unquoted fields waiting in the buffer, and the delimiters
+    // between them, taken as `byte`, `character` and `push` would take them
+    // one at a time. It stops before any byte that could start a quote, end
+    // the record, make the field grow, or reach a limit; `character` and
+    // `push` take that one.
+    fn take_plain(&self) EncodingError! {
+        loop !self.quoted && !self.pending_cr && self.buffered < self.buffer.len() {
+            room := self.buffer.len() - self.buffered
+            if self.limits.max_total_bytes == .Val(limit) {
+                room = min(room, limit - self.total)
+            }
+            if room <= 0 -> return
+            b :: self.buffer[self.buffered]
+            if b < 128 && Int.from_u8(b) == self.delimiter {
+                self.buffered += 1
+                self.total += 1
+                self.offset += 1
+                self.column += 1
+                self.saw_input = true
+                self.ended_record = false
+                self.parser_column += 1
+                self.char0 = b
+                self.char_width = 1
+                &self.finish_field() ?? return Err(err)
+                next
+            }
+            count :: min(room, min(mem.__list_capacity<U8>(self.field), self.limits.max_item_bytes) - self.field.len())
+            taken := 0
+            loop taken < count {
+                c :: self.buffer[self.buffered + taken]
+                if c >= 128 || c == 34 || c == 13 || c == 10 || Int.from_u8(c) == self.delimiter -> break
+                &self.field.push(c)
+                taken += 1
+            }
+            if taken == 0 -> return
+            self.buffered += taken
+            self.total += taken
+            self.offset += taken
+            self.column += taken
+            self.parser_column += taken
+            self.saw_input = true
+            self.ended_record = false
+            self.record_has_content = true
+            self.char0 = self.buffer[self.buffered - 1]
+            self.char_width = 1
+        }
+    }
+
     fn next_inner(&self) -[IO]> CSVRow? EncodingError! {
         if self.eof -> return Ok(None)
         loop {
+            &self.take_plain() ?? return Err(err)
             character :: if &self.character() == {
                 .Ok(value) -> value
                 .Err(error) -> { return Err(error) }
@@ -1014,7 +1071,7 @@ fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, de
     if raw.len() != width || n == 34 || n == 13 || n == 10 -> return Err(codec_error(.Syntax, 0, 1, 1, "", reason))
     code := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
     loop i in 1..<width -> code = (code << 6).bit_or((Int.from_u8(raw[i]).bit_and(63)))
-    Ok(CSVReader{input: ^source, limits: limits, delimiter: code, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0})
+    Ok(CSVReader{input: ^source, limits: limits, delimiter: code, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0, buffer: [U8]{}, buffered: 0})
 }
 
 #Test("typed CSV whole records preserve blank rows, doubled quotes and Unicode columns") {
