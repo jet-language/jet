@@ -240,6 +240,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     // The call graph stays: a guarded call is still the same call.
     if options.inline == .Auto && ir_opt_enabled(options, "entry") -> ir_opt_entry(m, &functions, order.recursive, keys)
     sites :: ir_opt_call_sites(calls)
+    if level >= 2 -> ir_opt_mark_cold(&functions, calls)
     total := 0
     loop weight in weights -> total += weight
     workers :: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
@@ -285,11 +286,58 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
 // facts the copy is there to give.
 fn ir_opt_version_entries(m: IRModule, functions: &[IRFunction], options: IROptOptions, lint: IRLintContext, report: &IROptReport) Never! {
     loop id in 0..<functions.len() {
-        if !ir_range_wanted(m, functions[id]) || ir_opt_version_entry(m, &functions[id]) == 0 -> next
+        if functions[id].cold || !ir_range_wanted(m, functions[id]) || ir_opt_version_entry(m, &functions[id]) == 0 -> next
         if options.verify && !ir_opt_lint(m, lint, functions[id], "version", &report) -> next
         before :: report.lint.len()
         ir_opt_ssa(m, &functions[id], options, &report)
         if options.verify && report.lint.len() == before -> _ := ir_opt_lint(m, lint, functions[id], "ssa", &report)
+    }
+}
+
+// Cold functions (O2): the generated typed-CLI parser (`__jet_cli_parse`,
+// or `__jet_cli_parse_<binding>` of an Executable Output; JetSema
+// Registration/CliEntry.jet), which runs once, before the program's work,
+// over the command line; then, to a fixed point, each function that has a
+// direct call, only from cold functions, and whose address no function
+// takes. A cold body is optimized for size: O1's inlining (no once-called
+// callee) and no loop or entry copies (OptVersion.jet), whose saved
+// overflow tests never pay back the code a copy adds, each copy repeating
+// the cleanup of every stop edge in it.
+fn ir_opt_mark_cold(functions: &[IRFunction], calls: OptCalls) Never! {
+    count :: functions.len()
+    addressed := [Bool]{}
+    loop _ in 0..<count -> &addressed.push(false)
+    seeds := [Int]{}
+    loop (id, f) in functions {
+        if f.key.ends_with("::__jet_cli_parse") || f.key.contains("::__jet_cli_parse_") -> &seeds.push(id)
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> addressed[f.a[at]] = true
+        }
+    }
+    loop id in seeds -> functions[id].cold = true
+    changed := true
+    loop changed {
+        changed = false
+        // Per function: 0 no direct call, 1 calls only from cold functions,
+        // 2 a call from one that is not.
+        callers := [Int]{}
+        loop _ in 0..<count -> &callers.push(0)
+        loop caller in 0..<count {
+            cold :: functions[caller].cold
+            loop k in calls.start[caller]..<calls.start[caller + 1] {
+                callee :: calls.to[k]
+                if !cold {
+                    callers[callee] = 2
+                } else if callers[callee] == 0 {
+                    callers[callee] = 1
+                }
+            }
+        }
+        loop id in 0..<count {
+            if functions[id].cold || callers[id] != 1 || addressed[id] -> next
+            functions[id].cold = true
+            changed = true
+        }
     }
 }
 
@@ -531,9 +579,10 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
         report.unique_hoisted += ir_opt_hoist_unique(m, &body, keys)
         if checking -> checking = ir_opt_lint(m, lint, body, "unique", &report)
     }
-    // `small` keeps inlining to O1's: its callee limit and budget, and no
-    // once-called callees (each copy adds up to its callee's size).
-    inline_level :: if options.small -> 1 else -> level
+    // `small`, and a cold body (ir_opt_mark_cold), keep inlining to O1's:
+    // its callee limit and budget, and no once-called callees (each copy
+    // adds up to its callee's size).
+    inline_level :: if options.small || body.cold -> 1 else -> level
     out := if options.inline == .Off -> ^body else -> ir_opt_inline_build(m, bodies, body, recursive, sites, inline_level >= 2 && ir_opt_enabled(options, "once"), inline_level, options.inline, &report) ?? ^body
     if checking -> checking = ir_opt_lint(m, lint, out, "inline", &report)
     if ir_opt_enabled(options, "glue") {
@@ -565,7 +614,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
         if checking -> checking = ir_opt_lint(m, lint, out, "scalar", &report)
     }
     if level >= 2 {
-        if ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
+        if !out.cold && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
             _ := ir_opt_version_loops(m, &out, &report)
             if checking -> checking = ir_opt_lint(m, lint, out, "version", &report)
         }
@@ -1252,4 +1301,28 @@ fn ir_opt_tarjan_visit(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     options.verify = true
     report :: ir_optimize_module(&m, options, compiler_threads_single())
     assert_eq(report.lint.len(), 0)
+}
+
+// parse (the generated CLI parser) calls unknown, shared and callback, and
+// takes callback's address; unknown calls usage; run calls shared. The
+// parser, unknown and usage (only cold callers) are cold; shared (run calls
+// it), callback (its address is taken) and run (no direct caller) are not.
+#Test("Cold functions are the CLI parser and what only cold functions call") {
+    m := ir_module_new()
+    word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    parse := ir_function_new("__jet_cli_parse", "test:cli.jet::__jet_cli_parse", "", "cli.jet", 1)
+    address :: ir_slot(&parse, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&parse, IROp.FunctionAddress, address, 5, -1, -1, 1)
+    functions := [IRFunction]{
+        parse,
+        ir_function_new("unknown", "test:cli.jet::unknown", "", "cli.jet", 2),
+        ir_function_new("shared", "test:cli.jet::shared", "", "cli.jet", 3),
+        ir_function_new("run", "test:cli.jet::run", "", "cli.jet", 4),
+        ir_function_new("usage", "test:cli.jet::usage", "", "cli.jet", 5),
+        ir_function_new("callback", "test:cli.jet::callback", "", "cli.jet", 6),
+    }
+    calls :: OptCalls{start: [Int]{0, 3, 4, 4, 5, 5, 5}, to: [Int]{1, 2, 5, 4, 2}}
+    ir_opt_mark_cold(&functions, calls)
+    cold :: (loop f in functions -> f.cold)
+    assert_eq(cold, [Bool]{true, true, false, false, true, false})
 }
