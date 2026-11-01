@@ -41,8 +41,9 @@ fn rt_text_len(value: I64) -> I64 { rt_text_word(wrapping(value + I64{8})) }
 // Four machine words a step, then single words (x86 permits unaligned word
 // access), then the byte tail: a string copy is one load/store pair per 8
 // bytes, not per byte, and the loop's own count and branch are paid once per
-// 32 bytes. The ranges never overlap (callers copy into a fresh or grown
-// buffer).
+// 32 bytes. A copy of 8 bytes or more ends with the word ending at `len`,
+// which rewrites bytes already copied with the same values. The ranges never
+// overlap (callers copy into a fresh or grown buffer).
 fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
     at := I64{0}
     blocks :: len - len % I64{32}
@@ -63,6 +64,11 @@ fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
     loop at < words {
         rt_text_store(wrapping(target + at), rt_text_word(wrapping(source + at)))
         at = wrapping(at + I64{8})
+    }
+    if (at < len && words > I64{0}) {
+        last :: wrapping(len - I64{8})
+        rt_text_store(wrapping(target + last), rt_text_word(wrapping(source + last)))
+        return
     }
     loop at < len {
         rt_text_put(wrapping(target + at), rt_text_byte(wrapping(source + at)))
@@ -474,33 +480,55 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
 
 // Equal and ordered comparisons skip equal 8-byte words. In the first word
 // that differs, the first differing byte is the lowest nonzero byte of the
-// two words' XOR (little-endian), found by halving, so it is the byte the
-// byte-by-byte scan would stop at. Offsets stay within `len`, so the sums
-// wrap unchecked.
+// two words' XOR (little-endian), found by halving (rt_text_low_byte), so it
+// is the byte the byte-by-byte scan would stop at. A tail under 8 bytes is
+// one more word: with 8 bytes or more before it, the word ending at `len`,
+// whose bytes before the tail are equal; otherwise, when each side's word
+// stays inside one page (the page holds the side's bytes, so it is mapped),
+// the words at the start masked to the `len` bytes. Offsets stay within
+// `len`, so the sums wrap unchecked.
 fn rt_text_first_difference(left: I64, right: I64, len: I64) -> I64 {
     // Shared owners (and a text compared with itself) hold one buffer.
     if (left == right) -> return len
     at := I64{0}
     words :: wrapping(len - len.bit_and(I64{7}))
     loop at < words {
-        diff := rt_text_word(wrapping(left + at)).bit_xor(rt_text_word(wrapping(right + at)))
-        if (diff != I64{0}) {
-            if (diff.bit_and(I64{4294967295}) == I64{0}) {
-                at = wrapping(at + I64{4})
-                diff = diff >> I64{32}
-            }
-            if (diff.bit_and(I64{65535}) == I64{0}) {
-                at = wrapping(at + I64{2})
-                diff = diff >> I64{16}
-            }
-            if (diff.bit_and(I64{255}) == I64{0}) -> at = wrapping(at + I64{1})
-            return at
-        }
+        diff :: rt_text_word(wrapping(left + at)).bit_xor(rt_text_word(wrapping(right + at)))
+        if (diff != I64{0}) -> return wrapping(at + rt_text_low_byte(diff))
         at = wrapping(at + I64{8})
+    }
+    if (at < len) {
+        if (words > I64{0}) {
+            last :: wrapping(len - I64{8})
+            diff :: rt_text_word(wrapping(left + last)).bit_xor(rt_text_word(wrapping(right + last)))
+            if (diff == I64{0}) -> return len
+            return wrapping(last + rt_text_low_byte(diff))
+        }
+        if (left.bit_and(I64{4095}) <= I64{4088} && right.bit_and(I64{4095}) <= I64{4088}) {
+            diff :: rt_text_word(left).bit_xor(rt_text_word(right)).bit_and(wrapping((I64{1} << (len * I64{8})) - I64{1}))
+            if (diff == I64{0}) -> return len
+            return rt_text_low_byte(diff)
+        }
     }
     loop at < len && rt_text_byte(wrapping(left + at)) == rt_text_byte(wrapping(right + at)) {
         at = wrapping(at + I64{1})
     }
+    at
+}
+
+// The index of the lowest nonzero byte of the nonzero word `diff`.
+fn rt_text_low_byte(diff: I64) -> I64 {
+    at := I64{0}
+    rest := diff
+    if (rest.bit_and(I64{4294967295}) == I64{0}) {
+        at = I64{4}
+        rest = rest >> I64{32}
+    }
+    if (rest.bit_and(I64{65535}) == I64{0}) {
+        at = wrapping(at + I64{2})
+        rest = rest >> I64{16}
+    }
+    if (rest.bit_and(I64{255}) == I64{0}) -> at = wrapping(at + I64{1})
     at
 }
 
