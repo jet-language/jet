@@ -101,16 +101,19 @@ IR_ENTRY_QUIET_ROUTES :: comptime { [String]{
 } }
 
 // Why the entry of `m` needs the process root: the first function, in
-// module order, that calls a route outside IR_ROOT_FREE_ROUTES or cleans
-// up on a stop edge. Returns "" when the program can own its main.
+// module order, that calls a route outside IR_ROOT_FREE_ROUTES or has a
+// stop point without its stop edge, else the first that cleans up on a
+// stop edge. Returns "" when the program can own its main.
 fn ir_entry_root_need(m: IRModule) -> String Never! {
     if m.entry < 0 -> return "the module has no program entry"
     free := [String:Bool]{}
     loop route in IR_ROOT_FREE_ROUTES -> free[route.copy()] = true
-    quiet :: ir_entry_quiet_drops(m)
     poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    loop f in m.functions {
+    // Each stop edge as (function, its first instruction, its End).
+    edges := [Int]{}
+    seeds := [Int]{}
+    loop (id, f) in m.functions {
         if f.asm != None -> next
         loop at in 0..<f.op.len() {
             if f.op[at] == .CallRuntime {
@@ -120,21 +123,41 @@ fn ir_entry_root_need(m: IRModule) -> String Never! {
             }
             if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap) -> next
             if at + 1 >= f.op.len() || f.op[at + 1] != .If || f.a[at + 1] != f.dst[at] || f.b[at + 1] >= 0 -> return "`{f.name}` has a stop point without its stop edge"
+            &edges.push(id)
+            &edges.push(at + 2)
+            &edges.push(f.c[at + 1])
             loop k in (at + 2)..<f.c[at + 1] {
-                if !ir_entry_quiet(m, f, k, quiet) -> return "`{f.name}` cleans up on a stop edge"
+                if f.op[k] == .Call && f.a[k] >= 0 -> &seeds.push(f.a[k])
             }
         }
+    }
+    quiet :: ir_entry_quiet_functions(m, seeds)
+    edge := 0
+    loop edge < edges.len() {
+        f :: m.functions[edges[edge]]
+        loop k in edges[edge + 1]..<edges[edge + 2] {
+            if !ir_entry_quiet(m, f, k, quiet) -> return "`{f.name}` cleans up on a stop edge"
+        }
+        edge += 3
     }
     ""
 }
 
-// Whether instruction `at` of `f` (on a stop edge, or in a drop routine one
-// reaches) does nothing a process exit could observe: it is no call, close
-// or unreachable, or it is a call of an IR_ENTRY_QUIET_ROUTES route, or a
-// drop of a type row `quiet` marks.
-fn ir_entry_quiet(m: IRModule, f: IRFunction, at: Int, quiet: [Bool]) -> Bool Never! {
+// What ir_entry_quiet_functions found: per type row of `m` its drop
+// routine's function (-1: it drops nothing a process exit could observe,
+// -2: its routine is missing), and per function whether running it does
+// nothing a process exit could observe.
+struct IREntryQuiet { glue: [Int], functions: [Bool] }
+
+// Whether instruction `at` of `f` (on a stop edge, or in a function one
+// reaches) does nothing a process exit could observe: it is no indirect
+// call, close or unreachable; a call of an IR_ENTRY_QUIET_ROUTES route; a
+// call of a function `quiet` marks; or a drop of a type that drops nothing
+// or whose drop routine `quiet` marks.
+fn ir_entry_quiet(m: IRModule, f: IRFunction, at: Int, quiet: IREntryQuiet) -> Bool Never! {
     if f.op[at] == {
-        .Call | .CallIndirect | .Close | .Unreachable -> false
+        .CallIndirect | .Close | .Unreachable -> false
+        .Call -> f.a[at] >= 0 && f.a[at] < quiet.functions.len() && quiet.functions[f.a[at]]
         .CallRuntime -> {
             symbol :: m.names[f.a[at]]
             loop route in IR_ENTRY_QUIET_ROUTES {
@@ -142,40 +165,62 @@ fn ir_entry_quiet(m: IRModule, f: IRFunction, at: Int, quiet: [Bool]) -> Bool Ne
             }
             false
         }
-        .Drop -> quiet[f.slot_type[f.a[at]]]
+        .Drop -> {
+            glue :: quiet.glue[f.slot_type[f.a[at]]]
+            glue == -1 || (glue >= 0 && quiet.functions[glue])
+        }
         else -> true
     }
 }
 
-// Per type row of `m`, whether dropping a value of it does nothing a
-// process exit could observe: its type has no drop, it is an Int or a
-// String, or its drop routine (BuildOwn.jet ir_drop_glue) is quiet
-// throughout (ir_entry_quiet). The rows start quiet and lose it until
-// nothing changes, so a recursive type's routine counts as quiet when its
-// cycle does nothing else.
-fn ir_entry_quiet_drops(m: IRModule) -> [Bool] Never! {
-    quiet := [Bool]{}
-    glue := [Int]{}
+// Which functions of `m` do nothing a process exit could observe, among
+// `seeds` (the functions stop edges call), the drop routines (BuildOwn.jet
+// ir_drop_glue; a type with none, an Int and a String drop quietly) and
+// every function those call or drop through; any other function counts as
+// not quiet, and so does an `#FFI(asm)` leaf (a stop point among them).
+// They start quiet and lose it until nothing changes, so a recursive
+// type's routine, or a routine calling one outlined part of it (a buffer's
+// last-owner release), counts as quiet when its cycle does nothing else.
+fn ir_entry_quiet_functions(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
+    q := IREntryQuiet{glue: [Int]{}, functions: [Bool]{}}
+    loop _ in m.functions -> &q.functions.push(false)
+    seen := q.functions.copy()
+    work := seeds.copy()
     loop row in m.types {
         id :: if row.drop == "" || row.kind == .Int || row.kind == .String -> -1 else -> name_rows_value(m.function_rows, row.drop) ?? -2
-        &quiet.push(id != -2)
-        &glue.push(id)
+        &q.glue.push(id)
+        if id >= 0 -> &work.push(id)
+    }
+    members := [Int]{}
+    loop work.len() > 0 {
+        id :: &work.pop() ?? -1
+        if id < 0 || id >= m.functions.len() || seen[id] -> next
+        seen[id] = true
+        f :: m.functions[id]
+        if f.asm != None -> next
+        q.functions[id] = true
+        &members.push(id)
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .Call -> &work.push(f.a[at])
+            if f.op[at] == .Drop && q.glue[f.slot_type[f.a[at]]] >= 0 -> &work.push(q.glue[f.slot_type[f.a[at]]])
+        }
     }
     changed := true
     loop changed {
         changed = false
-        loop row in 0..<glue.len() {
-            if !quiet[row] || glue[row] < 0 -> next
-            loop at in 0..<m.functions[glue[row]].op.len() {
-                if !ir_entry_quiet(m, m.functions[glue[row]], at, quiet) {
-                    quiet[row] = false
+        loop id in members {
+            if !q.functions[id] -> next
+            f :: m.functions[id]
+            loop at in 0..<f.op.len() {
+                if !ir_entry_quiet(m, f, at, q) {
+                    q.functions[id] = false
                     changed = true
                     break
                 }
             }
         }
     }
-    quiet
+    q
 }
 
 // The root-free routes that read the calling thread's block (JetRuntime
