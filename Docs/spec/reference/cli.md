@@ -279,7 +279,14 @@ Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
 editor code actions. Without `--all`, both the applicability and safety class
 must permit an unattended formatting or behavior-preserving change. Exact
 duplicate edits apply once; overlapping edits are deferred and rechecked for
-at most sixteen rounds. `--dry-run` renders the diff without publishing.
+at most sixteen rounds. Each round's edited file is checked again: when it
+has more errors than the file had before `jet fix`, each edit is retried on
+top of the ones kept, and an edit that adds an error is rolled back and
+reported with that error. The receipt's `skipped` rows record every edit left
+out (one needing review, or one rolled back) with its reason. A `#Deprecated`
+`use:` replacement is offered as an edit only when it is a plain rename, a
+declared function that takes the same call; otherwise L2001's Fix says to edit
+the use by hand. `--dry-run` renders the diff without publishing.
 `--edition=2027` performs the registered JSON/CBOR migrations first, retaining
 written propagation and making panic fallbacks idempotent. Human status is
 suppressed by `--quiet` and `--json`; machine mode does not create a fake fix

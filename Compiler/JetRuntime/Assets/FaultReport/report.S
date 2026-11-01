@@ -451,7 +451,9 @@ uleb:
 
 # Line [V_DECL] of the file find matched, without its line break or
 # trailing blanks, into [V_SRC] and [V_SRCLEN]: eax 1, else 0. A relative
-# path is read from the table's directory unless that is `.`.
+# path is read from the table's directory unless that is `.`; when no file
+# is there, from the working directory itself, so a program run from its
+# package root finds the source whichever directory built it.
 source:
     lea rdi, [rbp + PATH]
     mov rsi, [rbp + V_FILE]
@@ -477,8 +479,15 @@ source:
     mov eax, 257                # openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC)
     syscall
     test eax, eax
+    jns 8f
+    mov edi, -100
+    mov rsi, [rbp + V_FILE]
+    mov edx, 524288
+    mov eax, 257                # openat(AT_FDCWD, file, O_RDONLY | O_CLOEXEC)
+    syscall
+    test eax, eax
     js 9f
-    mov ebx, eax
+8:  mov ebx, eax
     mov edi, eax
     xor esi, esi
     push 2

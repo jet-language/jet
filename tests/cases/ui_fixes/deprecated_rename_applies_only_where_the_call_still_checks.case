@@ -1,0 +1,19 @@
+# #6405: a `use:` replacement is a `jet fix` rename only when it takes the same call,
+# and `jet fix` re-checks the file it edits, rolling back an edit that adds an error.
+fixture: deprecated_rename_applies_only_where_the_call_still_checks.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+stderr: = deprecated_rename_applies_only_where_the_call_still_checks.check.stderr
+step: jet fix run.jet
+exit: 0
+stderr: ~ "rolled back the fix at " # the shadowed use's edit is rolled back; its byte span is the fixture's
+stderr: ~ "applied 1 fix" # the one use that still checks is renamed
+file: run.jet = deprecated_rename_applies_only_where_the_call_still_checks.fixed
+file: .jet/codemods/Fix-run.log.json ~ "\"skipped\": [" # the log records the rolled-back edit
+file: .jet/codemods/Fix-run.log.json ~ "\"reason\":\"the edited file no longer checks: " # with the error that rolled it back
+step: jet check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "3\n8\n6\n"

@@ -1463,7 +1463,7 @@ fn jet_cli_run_settled(step: ^JetCLIRunStep) -> JetCLIRunStep {
 fn jet_cli_compile_kept(file: String, source: String, color: Bool, json: Bool, options: BuildOptions, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep {
     step := JetCLIRunStep.Output{output: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     held :: jet_cli_prepare_snapshot(file, file, [JetCLIOverlay]{}, color)
-    keep :: if held == .Held(snapshot) -> jet_cli_script_keeper(options, snapshot) else -> None
+    keep :: if held == .Held(snapshot) -> jet_cli_script_keeper(file, options, snapshot) else -> None
     if keep == .Val(kept) {
         if held == .Held(snapshot) {
             binary :: "{jet_cli_build_dir_path(snapshot)}/{jet_cli_stem(file)}"

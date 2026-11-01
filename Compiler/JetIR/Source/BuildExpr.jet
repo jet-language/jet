@@ -659,11 +659,12 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         .Match(subject, arms, _, span) -> ir_match(&m, p, &b, subject, arms, None, span)
         .EnumMatch(subject, arms, else_body, _, span) -> ir_match(&m, p, &b, subject, arms, else_body, span)
         .RangeSwitch(subject, arms, else_body, span) -> ir_range_switch(&m, p, &b, subject, arms, else_body, span)
-        .ForIn(label, variable, variable_two, source, collection, step, method_kind, columnar, _, _, body, span) -> {
+        .ForIn(label, variable, variable_two, source, collection, step, method_kind, _, _, _, body, span) -> {
             // `loop c in s.chars()`: the loop streams the scalars
             // (TForInMethod.Chars); the walk of the checked `s.chars()`
-            // list visits the same Chars in the same order.
-            chars :: method_kind == (Val(TForInMethod.Chars)) && ir_untag(ir_ty(p, b, collection)) == .List(_)
+            // value (a List, or an Iter of a `chars` method that returns
+            // one) visits the same items in the same order. A columnar List
+            // has the plain List layout here, so its walk is a List walk.
             line_export :: if method_kind == {
                 .Val(kind) -> if kind == {
                     .LinesFile -> "jet_rt_native_iter_file_lines"
@@ -673,27 +674,17 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
                 }
                 .None -> ""
             }
-            lines :: line_export != ""
-            received :: method_kind == (Val(TForInMethod.ChannelReceiver))
             if method_kind == .Val(kind) {
-                if kind == .Iterable(_, _, iter_symbol, next_symbol, item_type) {
-                    if step != None || columnar -> return ir_fail(&b, span, "statement ForIn over an Iterable with a step or columns")
-                    return ir_iterable_walk(&m, p, &b, label, variable, collection, iter_symbol, next_symbol, item_type, body, span)
-                }
-                if kind == .EncodingReader(_) {
-                    if step != None || columnar -> return ir_fail(&b, span, "statement ForIn over an encoding reader with a step or columns")
-                    return ir_encoding_reader_walk(&m, p, &b, label, variable, collection, body, span)
-                }
+                if kind == .Iterable(_, _, iter_symbol, next_symbol, item_type) -> return ir_iterable_walk(&m, p, &b, label, variable, collection, step, iter_symbol, next_symbol, item_type, body, span)
+                if kind == .EncodingReader(_) -> return ir_encoding_reader_walk(&m, p, &b, label, variable, collection, step, body, span)
+                // `loop line in handle.lines()` reads its source, the
+                // handle (Sema sema_stmt_for_in_source); `collection` is the
+                // checked `lines()` call, which has no function of its own.
+                if line_export != "" -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, source, step, line_export, body, span)
+                if kind == .ChannelReceiver -> return ir_channel_walk(&m, p, &b, label, variable, variable_two, collection, step, body, span)
             }
-            iter_step :: step != None && method_kind == None && !columnar && ir_iter_element(ir_ty(p, b, collection)) != None
-            if (method_kind != None && !chars && !lines && !received) || (step != None && !iter_step) || columnar -> return ir_fail(&b, span, "statement ForIn over a method, step or columns")
-            // `loop line in handle.lines()` reads its source, the handle
-            // (Sema sema_stmt_for_in_source); `collection` is the checked
-            // `lines()` call, which has no function of its own.
-            if lines -> return ir_lines_walk(&m, p, &b, label, variable, variable_two, source, line_export, body, span)
-            if received -> return ir_channel_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             if ir_iter_element(ir_ty(p, b, collection)) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, step, body, span)
-            ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
+            ir_list_walk(&m, p, &b, label, variable, variable_two, collection, step, body, span)
         }
         // A scope whose marker lowers to nothing: its body runs as a plain
         // scope.
@@ -2645,6 +2636,16 @@ fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TS
         member :: method.operator_identity ?? method.name
         if path == "core.data.plot" && member == "column" -> return ir_fail_slot(&b, span, "Prelude static call core.data.plot.column")
         if rooted && path == "JetAtomic" && member == "new" -> return ir_atomic_new(&m, p, &b, ty, args, span)
+        // `Atomic.try_new` takes the same frame word as `Atomic.new` and
+        // allocates nothing, so it is always Ok.
+        if rooted && path == "JetAtomic" && member == "try_new" {
+            if ir_untag(ty) == .Result(ok_ty, _) {
+                atomic :: ir_atomic_new(&m, p, &b, ok_ty, args, span)
+                if ir_failed(b) -> return -1
+                return ir_result_box(&m, p, &b, ty, true, atomic)
+            }
+            return ir_fail_slot(&b, span, "Atomic.try_new of {ir_type_name(ty)}")
+        }
         symbol := "{path}::{member}"
         if rooted && path == "JetAuthority" {
             if member == "from_rights" -> symbol = "jet_authority_from_rights"
@@ -5467,8 +5468,10 @@ fn ir_assign_at(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: In
     ir_store_at(&m, p, &b, address, 0, slot)
 }
 
-// `loop x in xs` / `loop (i, x) in xs` over a List: an index walk.
-fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, body: [Int], span: Span) Never! {
+// `loop x in xs` / `loop (i, x) in xs` over a List: an index walk. With a
+// step (`loop x in xs, n`) the body runs on every n-th item from the first,
+// and `i` stays the item's index.
+fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     collection_ty :: ir_ty(p, b, collection)
     list := -1
     if ir_body_node(p, b, collection).kind == .Slice(base, start, end, range, location) {
@@ -5477,8 +5480,10 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     }
     if list < 0 -> list = ir_expr(&m, p, &b, collection)
     if ir_failed(b) || list < 0 -> return
+    walk_stride :: ir_walk_stride(&m, p, &b, step)
+    if ir_failed(b) || (step != None && walk_stride < 0) -> return
     row :: ir_list_item(&m, p, b, list) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection_ty)}")
-    if ir_list_walk_takes(&m, p, &b, collection_ty, list, row, span) -> return ir_list_walk_taken(&m, p, &b, label, variable, variable_two, collection_ty, list, row, body, span)
+    if ir_list_walk_takes(&m, p, &b, collection_ty, list, row, span) -> return ir_list_walk_taken(&m, p, &b, label, variable, variable_two, collection_ty, list, row, walk_stride, body, span)
     if ir_failed(b) -> return
     stride :: ir_list_stride(m, row)
     ir_scope_open(&b)
@@ -5492,6 +5497,7 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     length :: ir_list_length(&m, &b, walked)
     data :: ir_list_data(&m, &b, walked)
     index :: ir_word_const(&m, &b, 0)
+    countdown :: ir_walk_countdown(&m, &b, walk_stride)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
     more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
@@ -5527,9 +5533,12 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
         _ :: ir_binder_holds(&m, p, &b, variable, item, span)
         &b.bindings.push(IRBinding{name: variable.name, slot: item})
     }
+    ir_walk_stride_enter(&m, &b, countdown, walk_stride)
     ir_stmts(&m, p, &b, body)
+    ir_walk_stride_leave(&b, countdown)
     _ :: &b.loops.pop()
     ir_end(&b.f, b.line)
+    ir_walk_stride_tick(&m, &b, countdown)
     one :: ir_word_const(&m, &b, 1)
     ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -5570,8 +5579,9 @@ fn ir_slice_walk_window(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, bas
 // value into its iterator, which the loop owns; each step calls
 // `next(&iterator)`, and the walk ends at its first None. The item a step
 // takes out of the Option belongs to that step: `break`, `next` and the end
-// of the body drop it unless the body moved it.
-fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, iter_symbol: String, next_symbol: String, item_type: Type, body: [Int], span: Span) Never! {
+// of the body drop it unless the body moved it. A step runs the body on
+// every n-th item from the first; the others are taken and dropped.
+fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, step: Int?, iter_symbol: String, next_symbol: String, item_type: Type, body: [Int], span: Span) Never! {
     iter_row :: ir_function_row(p, iter_symbol) ?? return ir_fail(&b, span, "loop over an Iterable whose `iter` is outside the checked program")
     next_row :: ir_function_row(p, next_symbol) ?? return ir_fail(&b, span, "loop over an Iterable whose `next` is outside the checked program")
     collection_ty :: ir_ty(p, b, collection)
@@ -5581,6 +5591,8 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
     item_row :: ir_value_type(&m, p, concrete_item) ?? return ir_fail(&b, span, "type {ir_type_name(item_type)}")
     source :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || source < 0 -> return
+    stride :: ir_walk_stride(&m, p, &b, step)
+    if ir_failed(b) || (step != None && stride < 0) -> return
     ir_scope_open(&b)
     iterator :: ir_call(&m, p, &b, iter_symbol, iter_args, source, [IRWriteBack]{}, [BodyCallArg]{}, span)
     if ir_failed(b) || iterator < 0 -> return
@@ -5588,6 +5600,7 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
     &b.bindings.push(IRBinding{name: "", slot: iterator, owned: true})
     iterator_ty :: m.types[b.f.slot_type[iterator]].ty
     next_args :: ir_owner_args(p, p.functions[next_row], iterator_ty) ?? return ir_fail(&b, span, "iterator {ir_type_name(iterator_ty)}, which does not spell its owner's type arguments")
+    countdown :: ir_walk_countdown(&m, &b, stride)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
     backs := [IRWriteBack]{}
@@ -5613,10 +5626,13 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
         _ :: ir_binder_holds(&m, p, &b, variable, item, span)
         &b.bindings.push(IRBinding{name: variable.name, slot: item, owned: ir_has_drop(m, b, item)})
     }
+    ir_walk_stride_enter(&m, &b, countdown, stride)
     ir_stmts(&m, p, &b, body)
+    ir_walk_stride_leave(&b, countdown)
     _ :: &b.loops.pop()
     ir_scope_close(&m, &b)
     ir_end(&b.f, b.line)
+    ir_walk_stride_tick(&m, &b, countdown)
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
@@ -5628,19 +5644,23 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
 // an item runs the body with it, Ok(None) ends the walk, and an error panics
 // with its display at <core.prelude>:0, as CollectionSources.rs's encoding
 // reader source does. A fresh reader belongs to the loop, which drops it; a
-// kept one is read in place and stays its owner's.
-fn ir_encoding_reader_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, body: [Int], span: Span) Never! {
+// kept one is read in place and stays its owner's. A step runs the body on
+// every n-th item from the first; the others are taken and dropped.
+fn ir_encoding_reader_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     reader_ty :: ir_ty(p, b, collection)
     next_symbol :: ir_encoding_reader_next_key(p.functions, reader_ty)
     next_row :: ir_function_row(p, next_symbol) ?? return ir_fail(&b, span, "loop over {ir_type_name(reader_ty)} whose `next` is outside the checked program")
     next_args :: ir_owner_args(p, p.functions[next_row], reader_ty) ?? return ir_fail(&b, span, "loop over {ir_type_name(reader_ty)}, which does not spell its owner's type arguments")
     source :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || source < 0 -> return
+    stride :: ir_walk_stride(&m, p, &b, step)
+    if ir_failed(b) || (step != None && stride < 0) -> return
     ir_scope_open(&b)
     if b.fresh[source] {
         b.fresh[source] = false
         &b.bindings.push(IRBinding{name: "", slot: source, owned: true})
     }
+    countdown :: ir_walk_countdown(&m, &b, stride)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
     backs := [IRWriteBack]{}
@@ -5697,10 +5717,13 @@ fn ir_encoding_reader_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: Str
         _ :: ir_binder_holds(&m, p, &b, variable, item, span)
         &b.bindings.push(IRBinding{name: variable.name, slot: item, owned: ir_has_drop(m, b, item)})
     }
+    ir_walk_stride_enter(&m, &b, countdown, stride)
     ir_stmts(&m, p, &b, body)
+    ir_walk_stride_leave(&b, countdown)
     _ :: &b.loops.pop()
     ir_scope_close(&m, &b)
     ir_end(&b.f, b.line)
+    ir_walk_stride_tick(&m, &b, countdown)
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)

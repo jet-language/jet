@@ -359,7 +359,7 @@ fn jet_cli_try_run(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
         plan_path :: cli_files.realpath(path) ?? return jet_cli_try_fail("could not canonicalize try plan `{path}`: {jet_cli_io_error_text(err)}")
         root :: jet_cli_parent(plan_path) ?? return jet_cli_try_fail("try plan has no parent directory")
         log_name :: "{receipt}.log.json"
-        _ :: jet_cli_commit_source_changes(root, changes, log_name, jet_cli_fix_log(root, receipt, changes, operations)) ?? return jet_cli_try_fail(err.message)
+        _ :: jet_cli_commit_source_changes(root, changes, log_name, jet_cli_fix_log(root, receipt, changes, operations, [JetCLIFixSkip]{})) ?? return jet_cli_try_fail(err.message)
     }
     jet_cli_try_output(plan, verdict, receipt, keep, json, source)
 }

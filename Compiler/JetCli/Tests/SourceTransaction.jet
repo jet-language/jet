@@ -27,7 +27,7 @@ impl JetCLITransactionFixtureRoot.Close {
         {path: "{root}/first.jet", before: "first".bytes(), after: "updated first".bytes()},
         {path: "{root}/second.jet", before: "second".bytes(), after: "updated second".bytes()},
     }
-    log :: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{})
+    log :: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{}, [JetCLIFixSkip]{})
     path :: jet_cli_commit_source_changes(root, changes, "test.log.json", log) ?? panic("commit")
     expected_path :: "{root}/.jet/codemods/test.log.json"
     assert(path == expected_path)

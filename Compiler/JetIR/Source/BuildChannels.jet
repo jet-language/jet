@@ -154,7 +154,7 @@ fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
 // `loop value in rx`: the receiver becomes a runtime Iter over the values it
 // receives, which takes a fresh endpoint over and adds one for a kept
 // receiver; the Iter is then walked as any other.
-fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, body: [Int], span: Span) Never! {
+fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     collection_ty :: ir_ty(p, b, collection)
     element :: ir_channel_element(collection_ty, "Receiver") ?? return ir_fail(&b, span, "channel loop over {ir_type_name(collection_ty)}")
     iter_ty :: Type.Apply{name: "Iter", args: [Type]{element}}
@@ -162,12 +162,14 @@ fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, va
     item_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "type {ir_type_name(element)}")
     handle :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || handle < 0 -> return
+    stride :: ir_walk_stride(&m, p, &b, step)
+    if ir_failed(b) || (step != None && stride < 0) -> return
     meta :: ir_lazy_meta(&m, p, &b, element, span)
     if ir_failed(b) -> return
     moved :: ir_lazy_moved(&m, &b, handle)
     source :: ir_runtime(&m, &b, "jet_rt_native_receiver_iter", [Int]{handle, moved, meta}, iter_row)
     ir_release(&m, &b, handle)
-    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, item_row, -1, body, span)
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, item_row, stride, body, span)
 }
 
 // `select { ... }`: the readiness table's receivers and timer deadlines
