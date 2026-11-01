@@ -2,11 +2,13 @@
 // sandbox spec (ProcessExecutionAuthority); the child keeps the bound spec
 // for its receipt.
 // ExecutionChild160: mutex0 refs8 Child72*16 owned Spec136*24 worker32 done40
-// receipt48 error56 reserved64 startNs72 output80 errors88 captured96 timeout104
+// receipt48 error56 waiter64 startNs72 output80 errors88 captured96 timeout104
 // limit112 stop120 stdoutPipe128 stderrPipe136 stdoutAt144 stderrAt152.
-// Worker owns one ref; every public alias owns one ref. Each pipe is the
-// Pipe40 cell the child lends as `child.stdout` / `child.stderr`, made on
-// first use; each At is how far its readers have consumed that capture.
+// Worker owns one ref; every public alias owns one ref. waiter is the park
+// slot (one reference) of the first explicit waiter, woken when done is set.
+// Each pipe is the Pipe40 cell the child lends as `child.stdout` /
+// `child.stderr`, made on first use; each At is how far its readers have
+// consumed that capture.
 PROCESS_EXECUTION_BYTES :: I64{160}
 PROCESS_EXECUTION_STDOUT :: I64{128}
 PROCESS_EXECUTION_STDERR :: I64{136}

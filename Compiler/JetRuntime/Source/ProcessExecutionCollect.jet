@@ -132,7 +132,7 @@ fn process_execution_capture(child: I64, native: I64, stream: I64, scratch: I64)
 #Export(c) fn jet_rt_process_execution_worker(child: I64) -> I64 {
     native :: process_execution_native(child)
     spec :: fd_word(child, I64{24})
-    scratch :: jet_rt_alloc(I64{8256}, I64{8})
+    scratch :: jet_rt_alloc(I64{8280}, I64{8})
     stream := I64{1}
     loop stream <= (I64{2}) {
         number :: fd_word(native, spawn_stream_offset(native, stream))
@@ -152,6 +152,9 @@ fn process_execution_capture(child: I64, native: I64, stream: I64, scratch: I64)
         }
         stream += I64{1}
     }
+    // The child's exit wakes the idle collector through its pidfd (Linux
+    // 5.3+); without one the collector polls the exit every millisecond.
+    pidfd :: host_call(I64{434}, fd_word(native, I64{8}), I64{0}, I64{0})
     exited := false
     output_done := false
     errors_done := false
@@ -187,8 +190,9 @@ fn process_execution_capture(child: I64, native: I64, stream: I64, scratch: I64)
             process_execution_sweep(child)
         }
         if (exited && output_done && errors_done) -> break
-        _ := sync_wait(child + I64{40}, I64{0}, sync_deadline(I64{1000000}))
+        process_execution_idle(child, native, pidfd, exited, output_done, errors_done, wrapping(scratch + I64{8256}))
     }
+    spawn_close(pidfd)
     sync_mutex_lock(native)
     spawn_close(fd_word(native, I64{32}))
     fd_put(native, I64{32}, I64{-1})
@@ -202,12 +206,43 @@ fn process_execution_capture(child: I64, native: I64, stream: I64, scratch: I64)
     if (resource_limit >= I64{0} && fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(resource_limit))
     if (status.bit_and(I64{127}) == I64{24} && fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(PROCESS_RESOURCE_CPU_TIME))
     if (fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{48}, process_execution_receipt(child, status))
+    waiter :: fd_word(child, I64{64})
+    fd_put(child, I64{64}, I64{0})
     sync_store(wrapping(child + I64{40}), I64{1})
     sync_wake(child + I64{40}, I64{2147483647})
     sync_mutex_unlock(child)
-    jet_rt_free(scratch, I64{8256}, I64{8})
+    if (waiter != I64{0}) {
+        sync_park_wake(waiter)
+        sync_park_drop(waiter)
+    }
+    jet_rt_free(scratch, I64{8280}, I64{8})
     process_execution_release(child)
     I64{0}
+}
+// Sleeps until the child exits or a captured stream has bytes or EOF: poll(2)
+// on the pidfd and the open pipes, as PollFd8 rows at `fds` (fd I32, events
+// I16 = POLLIN, revents I16). The exit of a child with no pidfd, a spec
+// timeout and a live resource limit still need their 1 ms check; otherwise
+// the 50 ms timeout only bounds an event that never comes.
+fn process_execution_idle(child: I64, native: I64, pidfd: I64, exited: Bool, output_done: Bool, errors_done: Bool, fds: I64) {
+    count := I64{0}
+    if (!exited && pidfd >= I64{0}) {
+        fd_put(fds, I64{0}, pidfd.bit_or(I64{4294967296}))
+        count = I64{1}
+    }
+    stream := I64{1}
+    loop stream <= (I64{2}) {
+        done :: if (stream == I64{1}) -> output_done else -> errors_done
+        number :: fd_word(native, spawn_stream_offset(native, stream))
+        if (!done && number >= I64{0}) {
+            fd_put(fds, count * I64{8}, number.bit_or(I64{4294967296}))
+            count += I64{1}
+        }
+        stream += I64{1}
+    }
+    spec :: fd_word(child, I64{24})
+    periodic :: !exited && (pidfd < I64{0} || fd_word(spec, PROCESS_SPEC_TIMEOUT) != I64{0} || fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT) != I64{0} || fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT) != I64{0})
+    _ := host_call(I64{7}, fds, count, if periodic -> I64{1} else -> I64{50})
 }
 fn process_execution_wait(child: I64, ok: I64, err: I64) -> I64 {
     flags :: sync_load(wrapping(child + I64{120}))
@@ -218,22 +253,27 @@ fn process_execution_wait(child: I64, ok: I64, err: I64) -> I64 {
     if !process_execution_collect_start(child, err) -> return I64{0}
     // Rust's wait drops the public readers before joining the collector: a
     // stream read after an explicit wait is at EOF.
+    park :: sync_park_new()
     sync_mutex_lock(child)
     pipe_detach(fd_word(child, PROCESS_EXECUTION_STDOUT))
     pipe_detach(fd_word(child, PROCESS_EXECUTION_STDERR))
+    // The first waiter lends the collector a reference to its park slot,
+    // which the collector wakes as it sets done. An aliased waiter behind it
+    // keeps the seed's 10ms scheduler poll on its own slot.
+    if (fd_word(child, I64{64}) == I64{0} && sync_load(wrapping(child + I64{40})) == I64{0}) {
+        sync_park_retain(park)
+        fd_put(child, I64{64}, park)
+    }
     sync_mutex_unlock(child)
-    // Each aliased waiter owns its single-parker slot; polling remains the
-    // seed's 10ms scheduler wait rather than sharing notification state.
-    park :: sync_park_new()
     loop sync_load(wrapping(child + I64{40})) == (I64{0}) {
         if (scheduler_yield(rt_static_text("process wait"), park, I64{10000000}) != I64{0}) {
+            process_execution_park_return(child, park)
             process_execution_stop(child)
             process_execution_await_cleanup(child)
-            sync_park_drop(park)
             return I64{0}
         }
     }
-    sync_park_drop(park)
+    process_execution_park_return(child, park)
     // Detached spawn/drop does not sweep descendants. Explicit wait does.
     if (sync_load(wrapping(child + I64{120})).bit_and(I64{8}) == I64{0}) -> process_execution_sweep(child)
     sync_mutex_lock(child)
@@ -246,6 +286,16 @@ fn process_execution_wait(child: I64, ok: I64, err: I64) -> I64 {
     fd_put(ok, I64{0}, jet_rt_handle_clone_process_receipt(fd_word(child, I64{48})))
     sync_mutex_unlock(child)
     I64{1}
+}
+// Drops the waiter's park slot, and the collector's reference with it when the
+// collector has not taken that reference to wake the slot.
+fn process_execution_park_return(child: I64, park: I64) {
+    sync_mutex_lock(child)
+    lent :: fd_word(child, I64{64}) == park
+    if lent -> fd_put(child, I64{64}, I64{0})
+    sync_mutex_unlock(child)
+    if lent -> sync_park_drop(park)
+    sync_park_drop(park)
 }
 #Export(c) fn jet_process_child_exited(child: I64, ok: I64, err: I64) -> I64 {
     if (sync_load(wrapping(child + I64{120})).bit_and(I64{2}) != I64{0}) {
