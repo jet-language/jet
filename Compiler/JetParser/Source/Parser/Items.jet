@@ -2394,6 +2394,15 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             parser_report_ineligible_state_section(&state, section, "trait")
             next
         }
+        // An unregistered marker before a trait member applies to the method
+        // site, where sema reports it from the shared applied-rule
+        // vocabulary (E0927); the member after it still parses.
+        if parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && !marker_registered(parser_value_at(&state, 1)) {
+            marker :: parser_parse_marker(&state)
+            span :: marker.span
+            &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(span), site: Val(RuleSite.Method)})
+            next
+        }
         if {
             parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "type" -> {
                 kw :: parser_bump(&state)
