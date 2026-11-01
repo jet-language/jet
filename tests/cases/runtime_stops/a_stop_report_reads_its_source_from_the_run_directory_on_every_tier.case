@@ -2,7 +2,9 @@
 # package directory still shows the stopping line: the report opens the
 # recorded file from the run directory when the build directory path does
 # not resolve, and `jet run` does not reuse an image written for another
-# entry path.
+# entry path. The release build keeps its debug info in the image
+# (`--debug-info=true`): the stock release profile splits it into a side
+# file, and that image's report prints addresses only.
 fixture: fixtures/a_stop_report_reads_its_source_from_the_run_directory_on_every_tier
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -14,7 +16,7 @@ cwd: app
 exit: 70
 stderr: ~ "--> overflow.jet:2 in recurse" # debug build names the stopping frame
 stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # debug build shows the source line
-step: jet build --release app/overflow.jet
+step: jet build --release --debug-info=true app/overflow.jet
 exit: 0
 step release: {work}/app/.jet/build/overflow
 cwd: app
