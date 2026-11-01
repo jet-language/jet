@@ -27,6 +27,12 @@ fn repeat_byte(value: U8, count: Int) -> [U8] {
     out
 }
 
+// A length or count chosen at run time. A written out-of-range literal is
+// E2702 at compile time, so the error rows pass their values through here.
+fn runtime(value: Int) -> Int {
+    value
+}
+
 fn mod251(count: Int) -> [U8] {
     out := [U8]{}
     loop i in 0..<count {
@@ -219,7 +225,7 @@ fn run() {
             .Ok(_) -> print("x25519_raw_short_key accepted")
             .Err(_) -> print("x25519_raw_short_key Err")
         }
-        if expert.hkdf_sha256_raw(ikm, salt, info, 8161) == {
+        if expert.hkdf_sha256_raw(ikm, salt, info, runtime(8161)) == {
             .Ok(_) -> print("hkdf_raw_too_long accepted")
             .Err(_) -> print("hkdf_raw_too_long Err")
         }
@@ -228,11 +234,11 @@ fn run() {
             .Err(_) -> print("argon2id_short_salt Err")
         }
     }
-    if crypto.hkdf_sha256(ikm, salt, info, 8161) == {
+    if crypto.hkdf_sha256(ikm, salt, info, runtime(8161)) == {
         .Ok(_) -> print("hkdf_too_long accepted")
         .Err(e) -> print("hkdf_too_long {crypto_error_name(e)}")
     }
-    if crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 0, 32) == {
+    if crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), runtime(0), 32) == {
         .Ok(_) -> print("pbkdf2_zero_iterations accepted")
         .Err(e) -> print("pbkdf2_zero_iterations {crypto_error_name(e)}")
     }

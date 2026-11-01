@@ -33,6 +33,11 @@ fn little(bytes: [U8], at: Int, width: Int) -> Int {
 fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)).bit_and(255)})
 }
+// An out-of-range length written as a literal is E2702 at compile time; the
+// runtime bound check below receives its length through here.
+fn runtime(value: Int) -> Int {
+    value
+}
 #Test("typed_secret_wrap_sign_kdf_and_password_paths_preserve_roles") {
     recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
     secret :: crypto.Secret.from_text("do not print")
@@ -47,7 +52,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     derived :: crypto.hkdf_sha256(material, [U8]{}, "domain".bytes(), 32) ?? panic("derive")
     assert(!crypto.constant_time_equal(secret, derived))
     // Core/Crypto/crypto.jet282: Length; payload/Display RETIRE.
-    if crypto.hkdf_sha256(material, [U8]{}, [U8]{}, -1) == {
+    if crypto.hkdf_sha256(material, [U8]{}, [U8]{}, runtime(-1)) == {
         .Ok(_) -> panic("HKDF length -1 accepted")
         .Err(error) -> assert_eq(error, crypto.CryptoError.Length)
     }

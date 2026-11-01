@@ -26,6 +26,12 @@ fn run() {
         .Err(e) -> print("store: {e.message}")
     }
     // Zero iterations is `CryptoError.Length`; it passes up out of `run`.
-    short :: crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 0, 32)
+    short :: crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), rounds(0), 32)
     print(short.len())
+}
+
+// A written `0` is a bound the compiler sees (E2702); the count reaches
+// `pbkdf2_hmac` at run time here, as one read from a config would.
+fn rounds(count: Int) -> Int {
+    count
 }

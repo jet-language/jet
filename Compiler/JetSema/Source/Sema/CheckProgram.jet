@@ -8899,6 +8899,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) -> &reported.push(diagnostic)
     }
     diagnostics = reported
+    sema_crypto_misuse_precedence(&diagnostics)
     programs := [Program]{}
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> &programs.push(source_module.program)

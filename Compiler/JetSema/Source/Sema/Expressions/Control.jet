@@ -888,6 +888,9 @@ fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, 
             callee :: sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes)
             if sema_failure_callee_is_generator(callee, program) -> return Val(TTryConvert.Never)
             sema_failure_record_edge(callee, &context)
+            // A call E2702 already reports can only fail: its implicit
+            // propagation is not a second error (sema_crypto_misused_call).
+            if implicit && sema_crypto_misused_call(source_expr, diagnostics) -> return Val(TTryConvert.NoConversion)
             // A callback whose expected return row is a plain value has no
             // failure route of its own: an unannotated callee's failure is an
             // obligation the bundle failure solve settles, as in a named

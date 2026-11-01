@@ -37,10 +37,6 @@ tests/ui/computed_fixed_list_unknown	#6425	check not ported: E0963
 tests/ui/core_string_view_reuse_after_json	#6425	check not ported: E2307
 tests/ui/corelib_parts_derives/structure_once_duplicate_generated_tests_reenter_test_registration	#6425	check not ported: E0105
 tests/ui/crossing_shared_write_voice	#6425	check not ported: E0101
-tests/ui/crypto_argon2id_literal_policy	#6425	check not ported: E2402
-tests/ui/crypto_expert_material_length	#6425	check not ported: E2402
-tests/ui/crypto_expert_nonce_length	#6425	check not ported: E2402
-tests/ui/crypto_hkdf_output_length	#6425	check not ported: E2402
 tests/ui/crypto_secret_generic_name_collisions	#6006	check not ported: L0104
 tests/ui/csv_to_string_wrong_input	#6425	check not ported: E0112
 tests/ui/db_read_query_hidden_write	#6425	check not ported: E0740
@@ -1262,11 +1258,8 @@ tests/cases/corelib/core_data_schema_empty_table_and_series_law.case	#5976	bug: 
 tests/cases/corelib/generated_struct_codecs_preserve_option_and_computed_fields.case	#5976	bug: the generated struct codec drops computed fields
 tests/cases/corelib/json_parser_is_rfc8259_complete.case	#5976	verify-intent: first.out expects sorted keys and `1500`, but objects keep insertion order and `Number` keeps its exact spelling (encoding-decisions.md:34-36), so `{"big":1.5e3,"acc":…}` is correct; second/third.jet read the removed `EncodingError.message` (E0302; the field is `reason`, Encoding.jet:150), and with `.reason` they print the current emitter's wording, which no doc pins, so goldens 2/3 need an owner ruling
 tests/cases/corelib/tracked_origin_is_a_folded_optional_fact.case	#5976	bug: the tracked origin fact reads false/missing where the golden reads true/speed
-tests/cases/crypto_diagnostics/e2702_json_exits_one_and_creates_no_artifact.case	#6488	unbuilt: nothing in Compiler emits E2702 (the CryptoMisuse report plumbing exists, no sema check); the fixture also predates the current API: `hkdf_sha256` takes `ikm: [U8]` (Core/Crypto/Crypto.jet:386) and the case passes a `Secret`, so `jet check` stops at E0112
-tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case	#6488	unbuilt: nothing in Compiler emits E2702 (the CryptoMisuse report plumbing exists, no sema check); the fixture also passes a `Secret` to `hkdf_sha256(ikm: [U8], …)` (Core/Crypto/Crypto.jet:386), so `jet check` stops at E0112
+tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case	#6531	bug: E2702 is emitted, but every `jet.report/v3` row's `file` is the absolute process path (Report.jet jet_cli_report_path, Report.rs ReportPath::from_process); the D-CRYPTO-DIAG1 workspace-relative report path (`src/main.jet` under the `.git` root) has no project-root lookup in the report projection
 tests/cases/crypto_diagnostics/explain_e2702_teaches_precedence_and_dynamic_values.case	#3720	unbuilt: E2702's registry why/fix are emission templates (`{why}`, `…: {fix}`, DiagnosticRows.jet:11771-11772), so explain prints the raw placeholders; the Rust-era essay the case reads (syntax/effects/types precedence, compiler-known, Dynamic values) has no source in the repo or spec (examples.md:165 names type/effect/authority precedence only), so its text needs an owner decision
-tests/cases/crypto_diagnostics/multiple_e2702_diagnostics_are_independent_json_lines.case	#6488	unbuilt: nothing in Compiler emits E2702 (the CryptoMisuse report plumbing exists, no sema check); the fixture also passes a `Secret` to `hkdf_sha256(ikm: [U8], …)` (Core/Crypto/Crypto.jet:386), so `jet check` stops at E0112, and the case reads one `jet.report/v1` line per diagnostic where `--json` now prints one `jet.status/v1` envelope with `jet.report/v3` rows
-tests/cases/crypto_diagnostics/safe_raw_nonce_json_omits_inapplicable_bounds.case	#6488	unbuilt: nothing in Compiler emits E2702 (no raw-nonce check on the safe envelope); today's `seal(recipients, bytes, aad)` (Core/Crypto/Crypto.jet:461) has no `nonce` label, so the fixture stops at E0764
 tests/cases/dataflow_stream/rolling_mean_nonfinite_matches_aot_and_default_dev.case	#5976	bug: the summing overflow error names rolling_mean where the golden names sum
 tests/cases/dev_parts_routine/dev_default_tls_peer_identity_matches_aot_and_interpreter.case	#5454	testkit: a step ends with no exit status (-1) inside the raw openssl s_server sessions; by hand on the same jet both tiers print localhost/TLS13_…/TLS13/tls-response-ok
 tests/cases/dev_parts_routine/ul6_run_watch_and_dev_share_engine.case	#6418	unbuilt: jet run --watch (E2104); the session exits before the KILL signal

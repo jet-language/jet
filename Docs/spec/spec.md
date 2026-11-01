@@ -1910,6 +1910,20 @@ an all-zero shared secret. HKDF output is at most 8160 bytes. Argon2id accepts
 `memory * iterations <= 1048576`; salts are 8–64 bytes and output is 16–64
 bytes. Invalid expert parameters use the `CryptoError` family.
 
+A bound the compiler can see is checked at the call (D-CRYPTO-DIAG1=A): an
+argument outside one of the bounds above, or outside `hkdf_sha256`'s 0–8160-byte
+length or `pbkdf2_hmac`'s 1–67108864-byte key length and at-least-one
+iteration count, is E2702 (`Crypto API misuse`, with the operation, the bound
+and the value), not a `CryptoError` at run time. The compiler sees a written
+Int literal, and a byte argument's length when it is a list literal or a
+fixed-length `[U8#N]` value; expert keys, secrets and public keys are 32
+bytes, Ed25519 signatures 64, AES-GCM nonces 12 and XChaCha20 nonces 24.
+E2702 is considered only once every other check passes: the argument's own
+type error, an expert call's missing `#Unsafe` gate (E0510), an effect error,
+or any other error is reported instead, and the call's own failure
+propagation is not reported beside its E2702. A value only known at run time
+still reaches the operation's own check.
+
 `crypto.file_seal(recipients, source, destination)` and
 `crypto.file_open(identity, source, destination)` have unit success and the
 explicit `FileCryptoError!` contract. The identity is read-borrowed rather than
