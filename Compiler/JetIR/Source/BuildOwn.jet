@@ -518,6 +518,16 @@ fn ir_box_take(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, offset: In
         return -1
     }
     payload :: ir_load_at(&m, &b, boxed, offset, row)
+    ir_box_hand_over(&m, p, &b, boxed, payload, row)
+}
+
+// The payload `payload` (type row `row`, not Unit; an aggregate's address)
+// read out of the present box `boxed` as a value of its own: the box's sole
+// owner hands it over and frees the box; a shared box keeps its payload, so
+// the value is a copy, and the box loses an owner. The caller no longer
+// holds the box.
+fn ir_box_hand_over(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, payload: Int, row: Int) -> Int Never! {
+    kind :: m.types[row].kind
     taken := payload
     if kind == .Aggregate {
         taken = ir_temp(&m, &b, row)

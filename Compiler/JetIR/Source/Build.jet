@@ -1669,6 +1669,13 @@ fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
             b.fresh[slot] = true
             return slot
         }
+        // `^x` of a payload bound from the Option or Result box a variable
+        // owns (`if ^warm == { .Val(list) -> keep(^list) }`) moves the
+        // payload out of the box the same way (ir_payload_take).
+        if b.moving == slot && ir_row_lacks_clone(&m, p, row) {
+            taken :: ir_payload_take(&m, p, &b, slot)
+            if taken >= 0 -> return taken
+        }
         // Any other shared List whose items have no clone glue is an internal
         // error (I2): a by-value walk of a shared buffer clones each item
         // (jet_rt_native_iter_from_list), and there is no clone to call.
@@ -1680,7 +1687,40 @@ fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
         ir_disown(&b, slot)
         return slot
     }
+    // `^x` of a variable's own Option, Result or enum box whose payload has
+    // no clone moves the box: a second owner of it would share a payload
+    // that has no clone (I2), and a payload moved out of it later
+    // (ir_payload_take) needs the box's only owner.
+    if ir_movable_binding(b, slot) && ir_box_row(m, row) && ir_row_lacks_clone(&m, p, row) {
+        ir_disown(&b, slot)
+        b.fresh[slot] = true
+        return slot
+    }
     ir_clone(&m, &b, slot, row)
+}
+
+// The payload binding in `slot` moved out (`^x`) of the Option or Result box
+// in `carrier` that a variable owns on every path here, as a value of its own
+// (ir_box_hand_over): the box hands it over, and the variable stops holding
+// the box on this path, so neither its drop nor its closing parts reach the
+// payload. -1 when `slot` is no such binding.
+fn ir_payload_take(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
+    index := b.bindings.len() - 1
+    loop index >= 0 && b.bindings[index].slot != slot -> index -= 1
+    if index < 0 -> return -1
+    binding :: b.bindings[index]
+    carrier :: binding.carrier
+    if binding.owned || binding.indirect >= 0 || carrier < 0 || !ir_owned_binding(b, carrier) -> return -1
+    carrier_row :: b.f.slot_type[carrier]
+    if !ir_box_row(m, carrier_row) -> return -1
+    if ir_untag(m.types[carrier_row].ty) == {
+        .Option(_) | .Result(_, _) -> {}
+        else -> return -1
+    }
+    ir_close_disarm(&b, slot)
+    ir_close_disarm(&b, carrier)
+    ir_disown(&b, carrier)
+    ir_box_hand_over(&m, p, &b, carrier, slot, b.f.slot_type[slot])
 }
 
 // Whether a variable owns the value in `slot` (its own storage) on every
