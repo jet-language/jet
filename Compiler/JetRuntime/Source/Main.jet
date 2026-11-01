@@ -198,8 +198,8 @@ fn rt_main_stopped_address() -> I64 {
 // libc main; Image/Loader.jet x64_image_exec explicitly truncates/sign-normalizes it.
 // Returning an I64 low word needs no ABI thunk or new I32 export admission.
 #Export(c) fn jet_rt_main(entry: I64) -> I64 {
-    // Startup (HostStartup.jet jet_rt_host_arguments) has captured and
-    // seeded the environment when the program reads it. The runtime's
+    // Startup (HostStartup.jet jet_rt_host_main_arguments) has registered
+    // argv and envp; the first environment reader indexes and seeds it. The
     // .init_array has already run; these idempotent initializers also make
     // the explicit loaded-image boundary usable.
     host_arguments_require()

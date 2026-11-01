@@ -1,7 +1,10 @@
 // The native main wrapper transfers argc/argv/envp before user code or threads.
 // Entryless hosts call this explicit entry before starting runtime threads.
-// argv arrays/bytes remain borrowed for the runtime lifetime. Environment
-// arrays/bytes are lent only during capture, then copied into one owned block.
+// argv arrays/bytes remain borrowed for the runtime lifetime. An entryless
+// host's environment arrays/bytes are lent only during capture, then copied
+// into one owned block. A program's own main passes the startup stack, whose
+// strings live as long as the process: only its pointer array is copied at
+// capture, and the block is built when a reader first needs it.
 // The native logical cell alone owns environment writes; this index is startup.
 // All storage uses the one IR .Global mechanism, never foreign data imports.
 
@@ -14,6 +17,11 @@ host_envp := I64{0}
 host_env_rows := I64{0}
 
 host_env_length := I64{0}
+
+// A main's startup environment until it is indexed: once state @0, entry
+// count @8, the copied envp pointers @16 (host_environment_require). 0 when
+// capture indexed it at registration, or nothing captured it.
+host_env_pending := I64{0}
 
 // jet_rt_host_env_capture, installed by jet_rt_host_env_init: the
 // before-user-code environment snapshot (D-EFF-ENV-SNAPSHOT1 A) is taken
@@ -50,6 +58,16 @@ fn host_environment_split(bytes: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_host_arguments(argc: I64, argv: I64, envp: I64) {
+    host_arguments_register(argc, argv, envp, false)
+}
+
+// A program's main (JetBackend Image/Object.jet x64_object_main): argv and
+// envp are the startup stack's, so the environment is indexed when first read.
+#Export(c) fn jet_rt_host_main_arguments(argc: I64, argv: I64, envp: I64) {
+    host_arguments_register(argc, argv, envp, true)
+}
+
+fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
     // libc main's argc is a nonnegative int32. Explicit hosts use that same
     // range; discard unspecified upper register bits before any other use.
     count :: argc.bit_and(I64{4294967295})
@@ -65,16 +83,22 @@ fn host_environment_split(bytes: I64) -> I64 {
     }
     capture :: host_env_capture_code
     if (capture != I64{0}) {
-        _ := coll_call1(capture, envp)
+        // The envp array is word aligned: bit 0 tells capture it is a main's.
+        _ := coll_call1(capture, if main -> envp.bit_or(I64{1}) else -> envp)
     }
     #Unsafe("host argument registration is single-threaded and precedes user code") {
         host_argc = count
     }
 }
 
-// Copies the startup environment `envp` into the owned index host_env_rows /
-// host_env_length and creates the logical environment its first use seeds.
-#Export(c) fn jet_rt_host_env_capture(envp: I64) -> I64 {
+// Creates the logical environment its first use seeds and takes the startup
+// environment: `startup` is the envp array, with bit 0 set when a main passed
+// it. An entryless host's is indexed now (it lends envp only for this call);
+// a main's pointer array is copied, to be indexed by the first reader
+// (host_environment_require).
+#Export(c) fn jet_rt_host_env_capture(startup: I64) -> I64 {
+    envp :: startup.bit_and(I64{-2})
+    logical_environment_startup()
     raw_count := I64{0}
     #Unsafe("startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries") {
         if (envp != I64{0}) {
@@ -85,6 +109,23 @@ fn host_environment_split(bytes: I64) -> I64 {
             }
         }
     }
+    if (startup.bit_and(I64{1}) == I64{0} || raw_count == I64{0}) {
+        host_environment_index(envp, raw_count)
+        return I64{0}
+    }
+    pending :: jet_rt_alloc(wrapping(raw_count + I64{2}) * I64{8}, I64{8})
+    #Unsafe("pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code") {
+        os_store_i64(pending, I64{0})
+        os_store_i64(wrapping(pending + I64{8}), raw_count)
+        rt_text_bytes_copy(wrapping(pending + I64{16}), envp, raw_count * I64{8})
+        host_env_pending = pending
+    }
+    I64{0}
+}
+
+// Indexes the `raw_count` entries of the envp array `envp` into the owned
+// index host_env_rows / host_env_length.
+fn host_environment_index(envp: I64, raw_count: I64) {
     // One process-lifetime index, not an environment map. The capacity is the
     // raw row count; valid rows are [entry pointer, name length, value offset].
     rows := I64{0}
@@ -124,20 +165,30 @@ fn host_environment_split(bytes: I64) -> I64 {
             index = wrapping(index + I64{1})
         }
     }
-    #Unsafe("the environment snapshot is taken by single-threaded host registration, before user code") {
+    #Unsafe("the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes") {
         host_env_rows = rows
         host_env_length = valid
     }
-    logical_environment_startup()
-    I64{0}
 }
 
 fn host_arguments_require() {
     if (host_argc == I64{-1}) { host_arguments_refused() }
 }
 
-fn host_environment_row(index: I64) -> I64 {
+// Every reader of host_env_rows / host_env_length calls this first: a main's
+// startup environment is indexed here, once, by the first reader.
+fn host_environment_require() {
     host_arguments_require()
+    pending :: host_env_pending
+    if (pending == I64{0} || sync_load(pending) == I64{2}) -> return
+    if sync_once_enter(pending) {
+        host_environment_index(wrapping(pending + I64{16}), rt_text_word(wrapping(pending + I64{8})))
+        sync_once_complete(pending)
+    }
+}
+
+fn host_environment_row(index: I64) -> I64 {
+    host_environment_require()
     if (index < I64{0} || index >= host_env_length) { host_environment_index_refused() }
     wrapping(host_env_rows + index * I64{24})
 }
@@ -179,7 +230,7 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
 }
 
 #Export(c) fn jet_rt_env_count() -> I64 {
-    host_arguments_require()
+    host_environment_require()
     host_env_length
 }
 
@@ -295,13 +346,13 @@ fn host_argument_bytes(index: I64) -> I64 {
 // The first matching row wins; this internal lookup lends raw startup bytes.
 // There is no Core route, provider or second environment map.
 fn host_environment_value(key: I64) -> I64 {
-    host_arguments_require()
     key_data :: rt_text_data(key)
     key_length :: rt_text_len(key)
     host_environment_value_bytes(key_data, key_length)
 }
 
 fn host_environment_value_bytes(key_data: I64, key_length: I64) -> I64 {
+    host_environment_require()
     index := I64{0}
     #Unsafe("the startup index and key bytes are immutable borrowed data") {
         loop index < host_env_length {
