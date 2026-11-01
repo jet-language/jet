@@ -298,7 +298,9 @@ fn iter_pull(node: I64, output: I64) -> Bool {
     if ((trap_word(node) == I64{0} || trap_word(node) == I64{6}) && trap_word(wrapping(node + I64{128})) != I64{0}) {
         return true
     }
-    if (jet_rt_iter_charge() != I64{0}) {
+    // Fuel is charged only inside a compile-time request; outside one a pull
+    // reads the active word and makes no call.
+    if (sync_load(wrapping(comptime_root + I64{8})) != I64{0} && jet_rt_iter_charge() != I64{0}) {
         coll_slot_drop(output, iter_meta(node))
         return false
     }

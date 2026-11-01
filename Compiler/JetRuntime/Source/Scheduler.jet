@@ -1247,7 +1247,8 @@ fn scheduler_timer_cancel(node: I64) {
             return I64{0}
         }
         now :: sync_now_ns()
-        earliest := sync_deadline(I64{50000000})
+        // With no timer pending the thread sleeps until one is scheduled.
+        earliest := I64{-1}
         link := wheel + I64{16}
         loop sync_load(link) != (I64{0}) {
             node :: sync_load(link)
@@ -1261,7 +1262,7 @@ fn scheduler_timer_cancel(node: I64) {
                     scheduler_timer_node_drop(node)
                 }
                 else -> {
-                    if deadline < earliest -> earliest = deadline
+                    if (earliest < I64{0} || deadline < earliest) -> earliest = deadline
                     link = node
                 }
             }
@@ -1352,10 +1353,9 @@ fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
         sync_park_drop(virtual_slot)
         return status
     }
+    // The park's own timeout ends the sleep; no timer thread is involved.
     slot :: sync_park_new()
-    timer :: scheduler_timer_schedule(sync_deadline(duration_ns), slot)
     status :: scheduler_yield(wait_kind, slot, duration_ns)
-    scheduler_timer_cancel(timer)
     sync_park_drop(slot)
     status
 }
