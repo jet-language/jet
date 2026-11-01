@@ -515,26 +515,69 @@ fn ir_opt_fused_def(f: IRFunction, at: Int) -> Int Never! {
 // leave them count the constructs they gained or lost; a Br in B that
 // leaves the If itself (skipping `r = c2`) keeps the Bool. Returns the
 // rewrites.
+//
+// One pass over the function. A rewrite changes the reads and writes of its
+// own r, c1, t and n and of the Bools it adds, and moves B, X and Y whole
+// (Br depths aside). Only an earlier short circuit's r can be its c1 (of
+// `(a && b) && c`), and the rewrites one at a time, first to last, never
+// look back before the Copy they rewrote; so every short circuit those
+// rewrites reach stood in the function as it came. They are all found on
+// its facts and nesting, and the function is rebuilt once, each short
+// circuit where the walk reaches its Copy. The walk meets them in the order
+// the one-at-a-time rewrites did, gives each its Bools in that order, and
+// shifts a moved Br by every range it leaves, outermost first: the rows are
+// the ones those rewrites made.
 fn ir_opt_short_circuits(f: &IRFunction, report: &IROptReport) -> Int Never! {
-    changed := 0
-    from := 1
-    loop {
-        facts :: ir_opt_facts(f)
-        nesting :: ir_opt_nesting(f)
-        found := -1
-        loop at in from..<f.op.len() {
-            if f.op[at] == .If && ir_opt_short_circuit_at(f, facts, nesting, at) {
-                found = at
-                break
-            }
+    count :: f.op.len()
+    facts :: ir_opt_facts(f)
+    nesting :: ir_opt_nesting(f)
+    seeds := [Int]{}
+    loop _ in 0..<count -> &seeds.push(-1)
+    found := 0
+    loop at in 1..<count {
+        if f.op[at] == .If && ir_opt_short_circuit_at(f, facts, nesting, at) {
+            seeds[ir_opt_short_circuit_copy(f, at)] = at
+            found += 1
         }
-        if found < 0 -> return changed
-        ir_opt_short_circuit_rewrite(&f, nesting, found)
-        ir_opt_compact(&f)
-        report.short_circuits += 1
-        changed += 1
-        from = found - 1
     }
+    if found == 0 -> return 0
+    open := [Int]{}
+    depth := 0
+    loop at in 0..<count {
+        op :: f.op[at]
+        if op == .End || op == .Else -> depth -= 1
+        &open.push(depth)
+        if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
+    }
+    plan :: OptShortPlan{nesting: ^nesting, seeds: ^seeds, open: ^open}
+    rows := OptRows{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    levels := [OptShift]{}
+    ir_opt_short_moved(&rows, &f, plan, &levels, 0, count, 0)
+    f.op = ^rows.op
+    f.dst = ^rows.dst
+    f.a = ^rows.a
+    f.b = ^rows.b
+    f.c = ^rows.c
+    f.code_line = ^rows.line
+    ir_opt_compact(&f)
+    report.short_circuits += found
+    found
+}
+
+// The short circuits of one pass: the nesting of the function as it came,
+// per instruction the If of the short circuit whose Copy it is (-1 for
+// none), and the constructs open at it (an Else or End counted closed).
+struct OptShortPlan {
+    nesting: OptNesting
+    seeds: [Int]
+    open: [Int]
+}
+
+// A moved range: the constructs open at its first instruction, and how many
+// constructs deeper each Br leaving it lands.
+struct OptShift {
+    open: Int
+    shift: Int
 }
 
 // The Copy writing r before If `at` (r = copy c1), or -1 when `at` does not
@@ -615,20 +658,40 @@ fn ir_opt_row(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: 
     &rows.line.push(line)
 }
 
-// Instructions `from..<to` of `f`, each Br that leaves the range `shift`
-// constructs deeper.
-fn ir_opt_rows_moved(rows: &OptRows, f: IRFunction, from: Int, to: Int, shift: Int) Never! {
-    depth := 0
-    loop k in from..<to {
+// Instructions `from..<to` of `f` onto `rows`, each Br that leaves the
+// range `shift` constructs deeper on top of what the ranges around it
+// (`levels`, outermost first) shift it, and each short circuit whose Copy
+// is among them rewritten.
+fn ir_opt_short_moved(rows: &OptRows, f: &IRFunction, plan: OptShortPlan, levels: &[OptShift], from: Int, to: Int, shift: Int) Never! {
+    if from >= to -> return
+    &levels.push(OptShift{open: plan.open[from], shift: shift})
+    k := from
+    loop k < to {
+        at :: plan.seeds[k]
+        if at >= 0 {
+            k = ir_opt_short_circuit_rewrite(&rows, &f, plan, &levels, at)
+            next
+        }
         op :: f.op[k]
-        if op == .End || op == .Else -> depth -= 1
         a := f.a[k]
         b := f.b[k]
-        if op == .Br && a >= depth -> a += shift
-        if op == .BrIf && b >= depth -> b += shift
+        if op == .Br -> a = ir_opt_short_depth(plan, levels, k, a)
+        if op == .BrIf -> b = ir_opt_short_depth(plan, levels, k, b)
         ir_opt_row(&rows, op, f.dst[k], a, b, f.c[k], f.code_line[k])
-        if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
+        k += 1
     }
+    _ := &levels.pop()
+}
+
+// Br depth `depth` of instruction `k` once every range in `levels` moved it:
+// a range shifts it when it leaves the range, judged on the depth as the
+// ranges around that one left it.
+fn ir_opt_short_depth(plan: OptShortPlan, levels: [OptShift], k: Int, depth: Int) -> Int Never! {
+    out := depth
+    loop level in levels {
+        if out >= plan.open[k] - level.open -> out += level.shift
+    }
+    out
 }
 
 // A fresh Bool temporary of `like`'s type.
@@ -636,121 +699,103 @@ fn ir_opt_bool_temp(f: &IRFunction, like: Int) -> Int Never! {
     ir_slot(&f, f.slot_type[like], IRSlotKind.Temp, -1, 0)
 }
 
-fn ir_opt_short_circuit_rewrite(f: &IRFunction, nesting: OptNesting, at: Int) Never! {
+// Short circuit If `at` rewritten onto `rows`; returns the instruction
+// after its branch. Its Bools come first, as rewriting it alone would make
+// them before any short circuit inside it.
+fn ir_opt_short_circuit_rewrite(rows: &OptRows, f: &IRFunction, plan: OptShortPlan, levels: &[OptShift], at: Int) -> Int Never! {
     seed :: ir_opt_short_circuit_copy(f, at)
     is_or :: seed != at - 1
     r :: f.dst[seed]
     c1 :: f.a[seed]
     t :: f.a[at]
-    end :: nesting.end[at]
-    last :: end - 1
+    end :: plan.nesting.end[at]
     line :: f.code_line[at]
     negated :: f.op[end + 1] == .Not
     branch :: if negated -> end + 2 else -> end + 1
-    rows := OptRows{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
-    ir_opt_rows_moved(&rows, f, 0, seed, 0)
     // `t = not c1` stays for the forms that test t; dead code drops it
     // where they do not.
-    if is_or -> ir_opt_rows_moved(&rows, f, seed + 1, at, 0)
-    after := 0
+    if is_or -> ir_opt_short_moved(&rows, &f, plan, &levels, seed + 1, at, 0)
     if f.op[branch] == .BrIf {
-        d :: f.b[branch]
-        after = branch + 1
+        d :: ir_opt_short_depth(plan, levels, branch, f.b[branch])
         if is_or == negated {
             // and: c1 && c2; negated or: !c1 && !c2. Both branch inside If.
+            test :: if negated -> ir_opt_bool_temp(&f, r) else -> r
             ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, at + 1, end, 0)
-            test := r
-            if negated {
-                test = ir_opt_bool_temp(&f, r)
-                ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
-            }
+            ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 0)
+            if negated -> ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
             ir_opt_row(&rows, IROp.BrIf, -1, test, d + 1, -1, line)
             ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
         } else {
             // or: c1 || c2; negated and: !c1 || !c2. Branch on either.
-            first := c1
-            if negated {
-                first = ir_opt_bool_temp(&f, r)
-                ir_opt_row(&rows, IROp.Not, first, c1, -1, -1, line)
-            }
+            first :: if negated -> ir_opt_bool_temp(&f, r) else -> c1
+            test :: if negated -> ir_opt_bool_temp(&f, r) else -> r
+            if negated -> ir_opt_row(&rows, IROp.Not, first, c1, -1, -1, line)
             ir_opt_row(&rows, IROp.BrIf, -1, first, d, -1, line)
-            ir_opt_rows_moved(&rows, f, at + 1, end, -1)
-            test := r
-            if negated {
-                test = ir_opt_bool_temp(&f, r)
-                ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
-            }
+            ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, -1)
+            if negated -> ir_opt_row(&rows, IROp.Not, test, r, -1, -1, line)
             ir_opt_row(&rows, IROp.BrIf, -1, test, d, -1, line)
         }
-    } else {
-        close :: nesting.end[branch]
-        els :: nesting.els[branch]
-        after = close + 1
-        then_end :: if els >= 0 -> els else -> close
-        // The arm r true runs, and the arm r false runs.
-        yes_from := branch + 1
-        yes_to := then_end
-        no_from := if els >= 0 -> els + 1 else -> close
-        no_to := close
-        if negated {
-            yes_from = no_from
-            yes_to = no_to
-            no_from = branch + 1
-            no_to = then_end
-        }
-        if !is_or && no_from == no_to {
-            ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, at + 1, end, 0)
-            ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, yes_from, yes_to, 1)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        } else if !is_or {
-            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
-            ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, at + 1, end, 1)
-            if yes_from == yes_to {
-                ir_opt_row(&rows, IROp.BrIf, -1, r, 1, -1, line)
-            } else {
-                ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
-                ir_opt_rows_moved(&rows, f, yes_from, yes_to, 2)
-                ir_opt_row(&rows, IROp.Br, -1, 2, -1, -1, line)
-                ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-            }
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, no_from, no_to, 0)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        } else if no_from == no_to {
-            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
-            ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, at + 1, end, 1)
-            skip :: ir_opt_bool_temp(&f, r)
-            ir_opt_row(&rows, IROp.Not, skip, r, -1, -1, line)
-            ir_opt_row(&rows, IROp.BrIf, -1, skip, 1, -1, line)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, yes_from, yes_to, 0)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        } else {
-            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
-            ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
-            ir_opt_row(&rows, IROp.BrIf, -1, c1, 0, -1, line)
-            ir_opt_rows_moved(&rows, f, at + 1, end, 1)
-            ir_opt_row(&rows, IROp.BrIf, -1, r, 0, -1, line)
-            ir_opt_rows_moved(&rows, f, no_from, no_to, 1)
-            ir_opt_row(&rows, IROp.Br, -1, 1, -1, -1, line)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-            ir_opt_rows_moved(&rows, f, yes_from, yes_to, 0)
-            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
-        }
+        return branch + 1
     }
-    ir_opt_rows_moved(&rows, f, after, f.op.len(), 0)
-    f.op = ^rows.op
-    f.dst = ^rows.dst
-    f.a = ^rows.a
-    f.b = ^rows.b
-    f.c = ^rows.c
-    f.code_line = ^rows.line
+    close :: plan.nesting.end[branch]
+    els :: plan.nesting.els[branch]
+    then_end :: if els >= 0 -> els else -> close
+    // The arm r true runs, and the arm r false runs.
+    yes_from := branch + 1
+    yes_to := then_end
+    no_from := if els >= 0 -> els + 1 else -> close
+    no_to := close
+    if negated {
+        yes_from = no_from
+        yes_to = no_to
+        no_from = branch + 1
+        no_to = then_end
+    }
+    if !is_or && no_from == no_to {
+        ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 0)
+        ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 1)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+    } else if !is_or {
+        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
+        if yes_from == yes_to {
+            ir_opt_row(&rows, IROp.BrIf, -1, r, 1, -1, line)
+        } else {
+            ir_opt_row(&rows, IROp.If, -1, r, -1, -1, line)
+            ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 2)
+            ir_opt_row(&rows, IROp.Br, -1, 2, -1, -1, line)
+            ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        }
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, no_from, no_to, 0)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+    } else if no_from == no_to {
+        skip :: ir_opt_bool_temp(&f, r)
+        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
+        ir_opt_row(&rows, IROp.Not, skip, r, -1, -1, line)
+        ir_opt_row(&rows, IROp.BrIf, -1, skip, 1, -1, line)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 0)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+    } else {
+        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_row(&rows, IROp.BrIf, -1, c1, 0, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
+        ir_opt_row(&rows, IROp.BrIf, -1, r, 0, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, no_from, no_to, 1)
+        ir_opt_row(&rows, IROp.Br, -1, 1, -1, -1, line)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+        ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 0)
+        ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
+    }
+    close + 1
 }
 
 // ---------------------------------------------------------------------------
