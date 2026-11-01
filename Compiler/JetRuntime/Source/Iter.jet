@@ -144,13 +144,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
         trap_store(wrapping(node + I64{40}), index + I64{1})
         return true
     }
-    if (kind == I64{25}) {
-        value :: text_iter_pull(source)
-        if (value == I64{0}) { return false }
-        coll_copy(value, output, coll_payload(meta))
-        jet_rt_free(value, coll_size(meta), I64{8})
-        return true
-    }
+    if (kind == I64{25}) { return text_iter_pull(source, output) }
     if (kind == I64{3}) {
         if (count <= I64{0}) { return false }
         trap_store(wrapping(node + I64{32}), count - I64{1})
@@ -293,7 +287,10 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
 }
 
 fn iter_pull(node: I64, output: I64) -> Bool {
-    if !iter_pull_kernel(node, output) -> return false
+    // A text split (kind 25) never sets the done word at +144, so its whole
+    // kernel is text_iter_pull; the general kernel is skipped for it.
+    pulled :: if (trap_word(node) == I64{25}) -> text_iter_pull(trap_word(wrapping(node + I64{16})), output) else -> iter_pull_kernel(node, output)
+    if !pulled -> return false
     // Internal map/list nodes implement one public flat-map/flatten adapter;
     // they are not additional inspected handles in the reference runtime.
     if ((trap_word(node) == I64{0} || trap_word(node) == I64{6}) && trap_word(wrapping(node + I64{128})) != I64{0}) {

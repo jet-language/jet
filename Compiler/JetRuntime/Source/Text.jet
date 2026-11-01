@@ -588,7 +588,11 @@ fn rt_text_ascii_end(data: I64, from: I64, stop: I64) -> I64 {
 
 // The Unicode scalars in the `len` UTF-8 bytes at `data`: every byte but a
 // continuation byte (10xxxxxx) starts one. Blocks of four words that are all
-// ASCII hold none, so only the other words are counted.
+// ASCII hold none, so only the other words are counted. A tail under 8 bytes
+// is one more word, as in rt_text_first_difference: with 8 bytes or more
+// before it, the word ending at `stop` with its already counted bytes
+// shifted out; otherwise, when the word at `data` stays inside the page
+// holding the bytes (so it is mapped), that word masked to the `len` bytes.
 fn rt_text_scalars(data: I64, len: I64) -> I64 {
     continuations := I64{0}
     at := data
@@ -607,6 +611,17 @@ fn rt_text_scalars(data: I64, len: I64) -> I64 {
         continuations += rt_text_continuations(at)
         at += I64{8}
     }
+    tail :: stop - at
+    if (tail > I64{0}) {
+        if (len >= I64{8}) {
+            // The counted bytes shift out; the sign fill (0x00 or 0xFF) has no continuation byte.
+            last :: rt_text_word(wrapping(stop - I64{8})) >> ((I64{8} - tail) * I64{8})
+            return len - continuations - rt_text_continuation_count(last)
+        }
+        if (data.bit_and(I64{4095}) <= I64{4088}) {
+            return len - continuations - rt_text_continuation_count(rt_text_word(data).bit_and((I64{1} << (len * I64{8})) - I64{1}))
+        }
+    }
     loop {
         if (at >= stop) -> break
         if (rt_text_byte(at).bit_and(I64{192}) == I64{128}) -> continuations += I64{1}
@@ -615,11 +630,12 @@ fn rt_text_scalars(data: I64, len: I64) -> I64 {
     len - continuations
 }
 
-// The continuation bytes in the word at `at`: a byte's bit 7 shifted onto
-// its bit 6 and its own bit 6 clear flags one; the flags are summed by
-// halves.
-fn rt_text_continuations(at: I64) -> I64 {
-    word :: rt_text_word(at)
+// The continuation bytes in the word at `at`.
+fn rt_text_continuations(at: I64) -> I64 { rt_text_continuation_count(rt_text_word(at)) }
+
+// The continuation bytes in `word`: a byte's bit 7 shifted onto its bit 6
+// and its own bit 6 clear flags one; the flags are summed by halves.
+fn rt_text_continuation_count(word: I64) -> I64 {
     flags := ((word >> I64{1}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{4629771061636907072})) >> I64{6}
     flags += flags >> I64{32}
     flags += flags >> I64{16}
@@ -699,7 +715,12 @@ fn rt_text_maximal_suffix(pattern: I64, len: I64, reverse: Bool, order: Bool) ->
 
 // A one-byte needle needs no two-way setup: the first (or last) equal byte
 // at or after `start`, eight bytes per word forward. A word holds the byte
-// when the word XOR the byte in every lane has a zero lane.
+// when the word XOR the byte in every lane has a zero lane, and its lowest
+// flagged lane is the first such byte (a borrow only runs upward from a zero
+// lane). The tail under 8 bytes is the word ending at `len`, its lanes before
+// `at` shifted out; its zero lanes come from the exact per-lane test, which
+// has no borrow, since bytes before `at` may hold the byte when `at` is
+// `start`.
 fn rt_text_find_byte(data: I64, len: I64, target: I64, start: I64, last: Bool) -> I64 {
     if last {
         at := len
@@ -714,8 +735,17 @@ fn rt_text_find_byte(data: I64, len: I64, target: I64, start: I64, last: Bool) -
     limit :: wrapping(len - I64{8})
     loop at <= limit {
         word :: rt_text_word(wrapping(data + at)).bit_xor(spread)
-        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_not()).bit_and(I64{-9187201950435737472}) != I64{0}) { break }
+        found :: wrapping(word - I64{72340172838076673}).bit_and(word.bit_not()).bit_and(I64{-9187201950435737472})
+        if (found != I64{0}) -> return wrapping(at + rt_text_low_byte(found))
         at += I64{8}
+    }
+    if (at < len && len >= I64{8}) {
+        word :: rt_text_word(wrapping(data + limit)).bit_xor(spread)
+        low :: I64{9187201950435737471}
+        zero :: wrapping(word.bit_and(low) + low).bit_or(word).bit_or(low).bit_not()
+        found :: (zero >> ((at - limit) * I64{8})).bit_and(wrapping((I64{1} << ((len - at) * I64{8})) - I64{1}))
+        if (found == I64{0}) -> return I64{-1}
+        return wrapping(at + rt_text_low_byte(found))
     }
     loop at < len {
         if (rt_text_byte(wrapping(data + at)) == target) -> return at
@@ -833,7 +863,8 @@ fn rt_text_take_unique_buffer(value: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_string_builder_push_static(target: I64, ptr: I64, len: I64) {
-    at := I64{0}
+    // An ASCII byte is one valid scalar, so the ASCII run needs no decoding.
+    at := rt_text_ascii_end(ptr, I64{0}, len)
     loop at < len {
         width :: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
         if (width < I64{0}) { break }
@@ -995,8 +1026,11 @@ fn text_iter_state(text: I64, separator: I64) -> I64 {
     state
 }
 
-fn text_iter_pull(state: I64) -> I64 {
-    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return I64{0} }
+// Stores the next piece, an owned String, in output and returns true, or
+// returns false once the text is exhausted. The iterator's items are these
+// Strings, so output is a String word slot (iter_pull_kernel kind 25).
+fn text_iter_pull(state: I64, output: I64) -> Bool {
+    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return false }
     text :: rt_text_word(state)
     sep :: rt_text_word(wrapping(state + I64{8}))
     len :: rt_text_len(text)
@@ -1029,9 +1063,8 @@ fn text_iter_pull(state: I64) -> I64 {
             }
         }
     }
-    slot :: jet_rt_alloc(I64{8}, I64{8})
-    rt_text_store(slot, rt_text_slice(text, start, end))
-    slot
+    rt_text_store(output, rt_text_slice(text, start, end))
+    true
 }
 
 fn text_iter_drop(state: I64) {
