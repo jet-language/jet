@@ -5,7 +5,7 @@ import {
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
 import { applyIndexDelta } from './live-delta.js';
-import { renderNowReports, refreshRelativeTimes } from './now.js';
+import { renderNowReports, refreshRelativeTimes, briefingBody } from './now.js';
 import { renderBallotIntro, lossText } from './ballot.js';
 
 import { projectGauntletMatrix, buildGauntletTooltip, formatPair, formatRatio, formatStamp } from './gauntlet.js';
@@ -128,12 +128,20 @@ function applyState(next, { own = false } = {}) {
   setBoard(next, { own });
 }
 
+// An own write redraws now; agent writes arrive in bursts, so those redraw
+// once per frame (and not at all while the tab is hidden).
+let liveFrame = 0;
 function setBoard(next, { own = false } = {}) {
   const first = !S;
   if (S && next.meta.rev !== S.meta.rev) closedRequest = null;
   S = next;
   if (first) return render();
-  liveRender({ own });
+  if (own) {
+    cancelAnimationFrame(liveFrame);
+    liveFrame = 0;
+    return liveRender({ own });
+  }
+  liveFrame ||= requestAnimationFrame(() => { liveFrame = 0; liveRender(); });
 }
 
 function maybeReload() {
@@ -546,23 +554,7 @@ function viewNow() {
     ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
-  const reports = el(`<div class="now-reports">${renderNowReports(S, { isOpen: reportIsOpen })}</div>`);
-  reports.querySelectorAll('details[data-report]').forEach(node => {
-    // Only real clicks change the saved choice; a redraw's initial open state
-    // also fires `toggle`, and that must not overwrite anything.
-    node.querySelector(':scope > summary')?.addEventListener('click', () => {
-      setTimeout(() => saveReportFold(node.dataset.report, node.open), 0);
-    });
-  });
-  reports.querySelectorAll('[data-report-card], [data-report-decision]').forEach(button => {
-    button.addEventListener('click', () => {
-      const decision = S.decisions.find(d => d.id === button.dataset.reportDecision);
-      if (decision && decision.group !== 'acceptance') return focusAll(decision.id);
-      const cardId = decision?.cardId || button.dataset.reportCard;
-      if (cardId) showDetail(cardId);
-    });
-  });
-  v.appendChild(reports);
+  v.appendChild(nowReportsNode());
 
   const queue = doneMessageBlock();
   if (queue) v.appendChild(queue);
@@ -591,6 +583,42 @@ function viewNow() {
   if (decs.length) section('Decisions');
   for (const it of decs) v.appendChild(dutyDecision(it.decision));
   updateNowSel();
+}
+
+// The reports block is the heaviest part of Now and rarely changes, while
+// agent writes redraw Now many times a minute. Reuse the built node while its
+// HTML is unchanged; events are delegated so a reused node needs no rebinding.
+let nowReports = null; // { html, node }
+function nowReportsNode() {
+  const html = renderNowReports(S, { isOpen: reportIsOpen });
+  if (nowReports?.html === html) return nowReports.node;
+  const node = el(`<div class="now-reports">${html}</div>`);
+  node.addEventListener('click', (event) => {
+    const summary = event.target.closest('summary');
+    const fold = summary?.parentElement;
+    // Only real clicks change the saved choice; a redraw's initial open state
+    // also fires `toggle`, and that must not overwrite anything.
+    if (fold?.matches('details[data-report]') && node.contains(fold)) {
+      setTimeout(() => saveReportFold(fold.dataset.report, fold.open), 0);
+      return;
+    }
+    const button = event.target.closest('[data-report-card], [data-report-decision]');
+    if (!button) return;
+    const decision = S.decisions.find(d => d.id === button.dataset.reportDecision);
+    if (decision && decision.group !== 'acceptance') return focusAll(decision.id);
+    const cardId = decision?.cardId || button.dataset.reportCard;
+    if (cardId) showDetail(cardId);
+  });
+  // Folded past briefings arrive without a body; fill one when it is shown.
+  node.addEventListener('toggle', () => {
+    for (const fold of node.querySelectorAll('.report__history[open] details.report__past[open]')) {
+      if (fold.querySelector(':scope > .report__body')) continue;
+      const record = (S.briefings || []).find(b => `briefing:${b.id}` === fold.dataset.report);
+      if (record) fold.insertAdjacentHTML('beforeend', briefingBody(record));
+    }
+  }, true);
+  nowReports = { html, node };
+  return node;
 }
 
 // ---- completed cards and durable agent messages ----------------------------

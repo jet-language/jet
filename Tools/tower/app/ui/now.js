@@ -44,17 +44,22 @@ function section({ key, cls = '', label, title = '', meta = '', body, isOpen }) 
   </details>`;
 }
 
-const briefingBody = record => `<div class="report__body">${renderMarkdown(record.body)}${(record.sections || []).map(part =>
+export const briefingBody = record => `<div class="report__body">${renderMarkdown(record.body)}${(record.sections || []).map(part =>
   `<section><h3>${esc(part.title)}</h3>${renderMarkdown(part.body)}${links(part.links)}</section>`
 ).join('')}</div>`;
 
-// isOpen(key, fallback) supplies the owner's saved open/closed choice.
+// isOpen(key, fallback) supplies the owner's saved open/closed choice. A
+// folded past briefing carries only its summary and data-report key; the caller
+// fills the body with briefingBody when the owner opens it, so a long history
+// costs nothing on every live redraw.
 export function renderNowReports({ briefings = [], statusSnapshot = null } = {}, { isOpen = (_key, fallback) => fallback } = {}) {
   const [latest, ...history] = briefings;
   const historyKey = 'briefing-history';
-  const past = history.length ? `<details class="report__history" data-report="${historyKey}"${isOpen(historyKey, defaultOpen(historyKey)) ? ' open' : ''}><summary>Briefing history · ${history.length}</summary>${history.map(record => {
+  const historyOpen = isOpen(historyKey, defaultOpen(historyKey));
+  const past = history.length ? `<details class="report__history" data-report="${historyKey}"${historyOpen ? ' open' : ''}><summary>Briefing history · ${history.length}</summary>${history.map(record => {
     const key = `briefing:${record.id}`;
-    return `<details class="report__past" data-report="${esc(key)}"${isOpen(key, false) ? ' open' : ''}><summary>${esc(record.title)} · ${stamp(record.created)} · ${esc(record.by)}</summary>${briefingBody(record)}</details>`;
+    const open = isOpen(key, false);
+    return `<details class="report__past" data-report="${esc(key)}"${open ? ' open' : ''}><summary>${esc(record.title)} · ${stamp(record.created)} · ${esc(record.by)}</summary>${historyOpen && open ? briefingBody(record) : ''}</details>`;
   }).join('')}</details>` : '';
   const brief = section({
     key: 'briefing', cls: 'report--briefing', label: 'Latest briefing', isOpen,
