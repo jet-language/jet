@@ -35,8 +35,14 @@
 //   file `expect_file`) byte for byte, with exit status 0 (exit 1
 //   otherwise);
 // - size: file bytes, and Jet / reference;
-// - speed: `perf stat -e cycles:u,instructions:u`, best of N runs (default
-//   5) pinned to one CPU (default 8), and Jet / reference.
+// - speed: `perf stat -e cycles:u,instructions:u`, N runs (default 21) of
+//   every binary of the cell interleaved (run i of each binary before run
+//   i + 1 of any), pinned to one CPU (default 8): the table's cycles and
+//   instructions are each the median over the runs, so that a quiet or
+//   noisy stretch of the machine lands on every binary alike, and the
+//   ratios are Jet / reference of those medians. Instructions, which the
+//   machine's state barely moves, are the ratio to read when cycles
+//   disagree with them;
 // Gates: size <= 2.00x the reference (#6328 C6) and cycles <= 1.10x
 // (#6414): the cards' interim bounds, not the final target. They are reported
 // per row; `--gate` also exits 1 when one fails.
@@ -51,9 +57,11 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SIZE_GATE = 2.0;
 const CYCLES_GATE = 1.10;
+// A median of fewer runs lets one quiet stretch of the machine decide a row.
+const MIN_RUNS = 21;
 
 function options(argv) {
-  const o = { out: resolve('.asm-parity'), runs: 5, cpu: '8', modes: ['default', 'release'], cells: null, perf: 'perf', gate: false, jet: null };
+  const o = { out: resolve('.asm-parity'), runs: MIN_RUNS, cpu: '8', modes: ['default', 'release'], cells: null, perf: 'perf', gate: false, jet: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -68,6 +76,7 @@ function options(argv) {
     else throw new Error(`unknown argument ${a}`);
   }
   if (!o.jet) throw new Error('--jet PATH is required');
+  if (!Number.isInteger(o.runs) || o.runs < MIN_RUNS) throw new Error(`--runs must be an integer of at least ${MIN_RUNS}`);
   for (const m of o.modes) if (m !== 'default' && m !== 'release') throw new Error(`unknown mode ${m}`);
   return o;
 }
@@ -142,27 +151,41 @@ function output(exe, plan, cwd, prepare) {
   return { stdout, status: 0, signal: null };
 }
 
-// Best of `runs` (fewest cycles) user-mode cycles and instructions, summed
-// over a run's steps.
-function measure(o, exe, plan, cwd, prepare) {
-  let best = null;
-  for (let i = 0; i < o.runs; i++) {
-    prepare();
-    const total = { cycles: 0, instructions: 0 };
-    for (const args of plan) {
-      const r = run('taskset', ['-c', o.cpu, o.perf, 'stat', '-x,', '-e', 'cycles:u,instructions:u', exe, ...args], { cwd });
-      const row = {};
-      for (const line of r.stderr.toString().split('\n')) {
-        const f = line.split(',');
-        if (f[2] === 'cycles:u' || f[2] === 'instructions:u') row[f[2].split(':')[0]] = Number(f[0]);
-      }
-      if (!Number.isFinite(row.cycles)) throw new Error(`perf stat gave no cycles for ${exe}:\n${r.stderr.toString()}`);
-      total.cycles += row.cycles;
-      total.instructions += row.instructions;
+// One run's user-mode cycles and instructions, summed over its steps.
+function sample(o, exe, plan, cwd, prepare) {
+  prepare();
+  const total = { cycles: 0, instructions: 0 };
+  for (const args of plan) {
+    const r = run('taskset', ['-c', o.cpu, o.perf, 'stat', '-x,', '-e', 'cycles:u,instructions:u', exe, ...args], { cwd });
+    const row = {};
+    for (const line of r.stderr.toString().split('\n')) {
+      const f = line.split(',');
+      if (f[2] === 'cycles:u' || f[2] === 'instructions:u') row[f[2].split(':')[0]] = Number(f[0]);
     }
-    if (!best || total.cycles < best.cycles) best = total;
+    if (!Number.isFinite(row.cycles) || !Number.isFinite(row.instructions)) throw new Error(`perf stat gave no cycles or instructions for ${exe}:\n${r.stderr.toString()}`);
+    total.cycles += row.cycles;
+    total.instructions += row.instructions;
   }
-  return best;
+  return total;
+}
+
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+// `runs` rounds over the variants, each round one run of every variant in
+// turn; per variant the median cycles and instructions and the cycles' range.
+function measure(o, variants, plan, cwd, prepare) {
+  const samples = variants.map(() => []);
+  for (let i = 0; i < o.runs; i++) {
+    variants.forEach((v, k) => samples[k].push(sample(o, v.exe, plan, cwd, prepare)));
+  }
+  return samples.map((s) => {
+    const cycles = s.map((x) => x.cycles);
+    return { cycles: median(cycles), instructions: median(s.map((x) => x.instructions)), cycles_min: Math.min(...cycles), cycles_max: Math.max(...cycles) };
+  });
 }
 
 const o = options(process.argv.slice(2));
@@ -189,28 +212,30 @@ for (const cell of cells) {
   const expect = cell.expect_file ? readFileSync(resolve(HERE, cell.expect_file), 'latin1') : cell.expect;
   const variants = [{ variant: 'asm', exe: buildRef(cell, dir) }];
   for (const mode of o.modes) variants.push({ variant: `jet-${mode}`, exe: buildJet(o, cell, mode, dir) });
+  const outs = variants.map((v) => output(v.exe, plan, cwd, prepare));
+  const speeds = measure(o, variants, plan, cwd, prepare);
   let ref = null;
-  for (const v of variants) {
-    const out = output(v.exe, plan, cwd, prepare);
+  variants.forEach((v, k) => {
+    const out = outs[k], speed = speeds[k];
     const same = out.status === 0 && out.stdout === expect;
     if (!same) wrong++;
-    const speed = measure(o, v.exe, plan, cwd, prepare);
     const bytes = statSync(v.exe).size;
     const args = cell.steps ? cell.steps.map((s) => s.join(' ')).join(' ; ') : cell.args.join(' ');
-    const row = { cell: cell.name, variant: v.variant, args, bytes, cycles: speed.cycles, instructions: speed.instructions, output: same ? 'same' : `DIFF (status ${out.status}${out.signal ? ` ${out.signal}` : ''})` };
+    const row = { cell: cell.name, variant: v.variant, args, bytes, ...speed, output: same ? 'same' : `DIFF (status ${out.status}${out.signal ? ` ${out.signal}` : ''})` };
     if (!ref) ref = row;
     row.size_x = bytes / ref.bytes;
     row.cycles_x = speed.cycles / ref.cycles;
+    row.instructions_x = speed.instructions / ref.instructions;
     row.size_gate = row.size_x <= SIZE_GATE ? 'ok' : 'over';
     row.cycles_gate = row.cycles_x <= CYCLES_GATE ? 'ok' : 'over';
     if (v.variant !== 'asm' && (row.size_gate !== 'ok' || row.cycles_gate !== 'ok')) gated++;
     rows.push(row);
-  }
+  });
 }
-const cols = ['cell', 'variant', 'args', 'bytes', 'size_x', 'size_gate', 'cycles', 'instructions', 'cycles_x', 'cycles_gate', 'output'];
+const cols = ['cell', 'variant', 'args', 'bytes', 'size_x', 'size_gate', 'cycles', 'instructions', 'cycles_x', 'instructions_x', 'cycles_gate', 'output'];
 const fmt = (r, c) => (typeof r[c] === 'number' && !Number.isInteger(r[c]) ? r[c].toFixed(2) : String(r[c]));
 const table = [cols.join('\t'), ...rows.map((r) => cols.map((c) => fmt(r, c)).join('\t'))].join('\n') + '\n';
-writeFileSync(join(o.out, 'results.json'), JSON.stringify({ runs: o.runs, cpu: o.cpu, gates: { size: SIZE_GATE, cycles: CYCLES_GATE }, rows }, null, 2) + '\n');
+writeFileSync(join(o.out, 'results.json'), JSON.stringify({ runs: o.runs, interleaved: true, statistic: 'median', cpu: o.cpu, gates: { size: SIZE_GATE, cycles: CYCLES_GATE }, rows }, null, 2) + '\n');
 writeFileSync(join(o.out, 'table.tsv'), table);
 process.stdout.write(table);
 if (wrong) console.error(`${wrong} binaries printed the wrong output`);
