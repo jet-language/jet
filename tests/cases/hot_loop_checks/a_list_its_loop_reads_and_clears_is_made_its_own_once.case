@@ -1,0 +1,30 @@
+# A token list that its loop grows by push, reads with String.from_bytes
+# (which copies the bytes) and empties with clear stays its own across the
+# loop, so at O1 and O2 it is made its own once, before the loop, rather
+# than on every push. A loop that keeps copies of its token shares the
+# buffer each pass and keeps the step in the loop. Every tier prints the
+# same words and copies, the invalid byte included.
+fixture: a_list_its_loop_reads_and_clears_is_made_its_own_once.fixture
+env: NO_COLOR=1
+step: jet inspect decisions main.jet
+exit: 0
+stdout: ~ "unique words [U8]: made unique before the Loop" # the default build hoists it (O1)
+stdout: ~ "unique kept [U8]: declined (the Loop hands on the list by its copy_bytes)" # the copies share the token's buffer
+step: jet inspect decisions --release main.jet
+exit: 0
+stdout: ~ "unique words [U8]: made unique before the Loop" # --release hoists it too (O2)
+stdout: ~ "unique kept [U8]: declined (the Loop hands on the list by its copy_bytes)" # --release keeps kept's step in its loop too
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_list_its_loop_reads_and_clears_is_made_its_own_once.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_list_its_loop_reads_and_clears_is_made_its_own_once.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_list_its_loop_reads_and_clears_is_made_its_own_once.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = a_list_its_loop_reads_and_clears_is_made_its_own_once.out

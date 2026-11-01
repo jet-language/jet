@@ -232,7 +232,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     loop f in functions -> &keys.push(f.key.copy())
     // Before the call graph: the `#unique<..>` calls this moves into callers
     // are edges of it.
-    if ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, &functions, keys)
+    if ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, &functions, keys, &report.steps)
     weights := [Int]{}
     loop f in functions -> &weights.push(1 + f.op.len())
     glue :: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
@@ -554,7 +554,7 @@ fn ir_opt_calls_of(f: IRFunction, count: Int, to: &[Int]) -> Int Never! {
 // The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet,
 // OptLocalBox.jet).
 fn ir_opt_routes() -> [String] Never! {
-    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_free", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at"}
+    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_rt_free", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at"}
 }
 
 // Whether instruction `at` calls the runtime route `route`.
@@ -578,7 +578,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     body := ^f
     checking := options.verify && ir_opt_lint(m, lint, body, "prepare", &report)
     if ir_opt_enabled(options, "unique") {
-        report.unique_hoisted += ir_opt_hoist_unique(m, &body, keys)
+        report.unique_hoisted += ir_opt_hoist_unique(m, &body, keys, &report.steps)
         if checking -> checking = ir_opt_lint(m, lint, body, "unique", &report)
     }
     // `small`, and a cold body (ir_opt_mark_cold), keep inlining to O1's:
