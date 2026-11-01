@@ -23,7 +23,9 @@
 // (`split`, OptSplit.jet). Both levels fold polls into later ones before
 // Simplify and again at the end, then move stop points right after their
 // calls, and once every body is optimized drop the stop points after calls
-// of bodies that never report a stop (`stops`, OptStops.jet). Last, each
+// of bodies that never report a stop (`stops`, OptStops.jet). Then glue
+// whose final body is the same as other glue's is called as that glue
+// (`fold`, OptFold.jet). Last, each
 // function's address sums move next to the memory accesses they address
 // (`sink`, OptSimplify.jet ir_opt_sink_addresses).
 //
@@ -45,7 +47,7 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
 // a difference to one pass: "retslot", "unique", "entry", "once", "scalar",
-// "promote", "version", "range", "ssa", "stops", "glue", "split", "reduce", "sink"), whether
+// "promote", "version", "range", "ssa", "stops", "fold", "glue", "split", "reduce", "sink"), whether
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
@@ -265,6 +267,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
         }
     }
     if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, &functions)
+    if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(&m, &functions)
     compiler_transfer_rows<IRFunction>(&m.functions, &functions)
     if options.dump != "" {
         loop f in m.functions {
