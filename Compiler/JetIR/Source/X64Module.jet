@@ -9,7 +9,7 @@
 use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
 use jet_backend.[
     X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
-    X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
+    X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange, X64_FUNCTION_ALIGN,
     x64_object_functions_threads, x64_object_main, x64_object_main_debug,
 ]
 
@@ -200,7 +200,7 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
             &variables.push(^selected.variables)
         } else {
             &row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
-            &functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}})
+            &functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             &debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             &variables.push([X64DebugVariable]{})
         }

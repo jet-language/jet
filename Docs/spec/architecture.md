@@ -154,6 +154,19 @@ layouts are recorded in `runtime.abi.json`; its symbols must match the checked
 export inventory. Compiler crashes and failed ABI witnesses remain failed
 evidence, never a native-runtime semantic verdict.
 
+The runtime library build also writes `runtime.threads`, the thread receipt:
+the exports whose call can reach a thread start (`pthread_create`), a
+returning signal handler (`signal`) or a library load (`dlopen`) through the
+runtime's own calls and function addresses, one per line. A lifecycle hook
+that can reach one runs whenever the program keeps one of its guard
+storages, so the exports that can reach such a storage are listed too; the
+receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
+(`jet-native-runtime/v2`) and every pack reader verifies it. `jet build`
+selects a program's inline RC updates without the lock prefix only when
+that receipt was read, neither the program nor its `main` calls an export it
+names, every foreign C call is a vetted libc leaf, and the program has no
+foreign assembly and no plugin; otherwise the updates stay locked.
+
 Runtime-pack roots are the public defined C-ABI globals of standalone Jet
 runtime objects and explicit extra roots. The Jet object writer publishes
 checked exports as globals and private functions as locals. Undefined symbols,

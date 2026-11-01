@@ -41,7 +41,7 @@ const outer = JSON.parse(fs.readFileSync(path.join(out, 'provenance.json'), 'utf
 if (JSON.stringify(receipt) !== JSON.stringify(outer) || receipt.backend !== 'jet-native' ||
     receipt.runtimeKey !== key || receipt.rustObjects !== 0 || receipt.llvmObjects !== 0) throw Error('pack provenance is not one Jet-only production');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-for (const [file, digest] of [['jet_runtime_jet.o', receipt.objectSha256], ['jet_runtime.pack.o', receipt.packSha256], ['runtime.abi.json', receipt.abiSha256]]) {
+for (const [file, digest] of [['jet_runtime_jet.o', receipt.objectSha256], ['jet_runtime.pack.o', receipt.packSha256], ['runtime.abi.json', receipt.abiSha256], ['runtime.threads', receipt.threadsSha256]]) {
   if (!digest || hash(path.join(dir, file)) !== digest) throw Error('published artifact hash mismatch: ' + file);
 }
 if (hash(${JSON.stringify(jet)}) !== receipt.compilerSha256) throw Error('pack compiler does not match the shared build');
@@ -55,7 +55,7 @@ for (const archive of receipt.cPlatformArchives ?? []) {
 fs.mkdirSync(${JSON.stringify(path.dirname(object))}, {recursive:true});
 fs.copyFileSync(path.join(dir, 'jet_runtime_jet.o'), ${JSON.stringify(object)});
 fs.copyFileSync(path.join(dir, 'jet_runtime.pack.o'), ${JSON.stringify(pack)});
-for (const file of ['provenance.json', 'runtime.abi.json', 'runtime.exports']) fs.copyFileSync(path.join(dir, file), path.join(${JSON.stringify(D)}, file));
+for (const file of ['provenance.json', 'runtime.abi.json', 'runtime.exports', 'runtime.threads']) fs.copyFileSync(path.join(dir, file), path.join(${JSON.stringify(D)}, file));
 console.log('one Jet-only object/pack; checked ABI, compiler and all input hashes verified');
 `]);
 

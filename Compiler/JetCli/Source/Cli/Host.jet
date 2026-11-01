@@ -109,6 +109,7 @@ use jet_ir.[
     IRChecks,
     IRJob,
     IRModule,
+    IR_PLUGIN_GUEST_PREFIX,
     IRProgram,
     IRTestCase,
     IRTestHarness,
@@ -380,6 +381,17 @@ JET_CLI_RUNTIME_KEY_FILE :: "native.key"
 // Written by packaging beside the pack: every symbol the runtime exports, one
 // per line, sorted (Request.jet).
 JET_CLI_RUNTIME_EXPORTS_FILE :: "runtime.exports"
+// Written by packaging beside the pack: the exports whose call can start a
+// second thread, one per line, or `*` when every program can
+// (Request.jet, JetIR BuildLibrary.jet ir_thread_exports).
+JET_CLI_RUNTIME_THREADS_FILE :: "runtime.threads"
+// The C library functions a program's foreign calls may name and still run
+// on one thread only (jet_cli_single_thread): leaves that start no thread,
+// install no handler and call nothing back.
+JET_CLI_SINGLE_THREAD_FOREIGN :: [String]{"abs", "labs", "memchr", "memcmp", "memcpy", "memmove", "memset", "strchr", "strcmp", "strlen", "strncmp", "acos", "asin", "atan", "atan2", "cbrt", "ceil", "cos", "exp", "fabs", "floor", "fmod", "hypot", "log", "log10", "log2", "pow", "round", "sin", "sqrt", "tan", "trunc"}
+// The runtime routes every program's `main` calls besides its IR (JetBackend
+// Image/Object.jet x64_object_main).
+JET_CLI_MAIN_ROUTES :: [String]{"jet_rt_host_arguments", "jet_rt_host_program_start", "jet_rt_main", "jet_rt_main_owned_start", "jet_rt_thread_init", "jet_rt_stdout_flush"}
 // In a package root, beside package.jet: the functions `jet build` lays out
 // first, one name per line (jet_cli_hot_text).
 JET_CLI_HOT_TEXT_FILE :: "hot-text.list"
@@ -656,19 +668,60 @@ fn jet_cli_native_foreign_realize(facts: JetDriverForeignLinkFacts, rust_helper:
     realized
 }
 
-// The runtime's key and its exports file's bytes (one exported symbol per
-// line), else the failure jet_cli_native_object reports where it reads them.
+// The runtime's key, its exports file's bytes (one exported symbol per
+// line) and its thread receipt's (JET_CLI_RUNTIME_THREADS_FILE; None when
+// it can't be read), else the failure jet_cli_native_object reports where
+// it reads them.
 struct JetCLIRuntimeExports {
     key: String
     exports: [U8]
+    threads: [U8]?
     failure: JetCLINativeFailure?
 }
 
 fn jet_cli_runtime_exports(runtime_dir: String) -[FS]> JetCLIRuntimeExports Never! {
-    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
+    key :: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
     exports_path :: "{runtime_dir}/{key}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
-    exports :: cli_files.read_bytes(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
-    JetCLIRuntimeExports{key: key, exports: exports, failure: None}
+    exports :: cli_files.read_bytes(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
+    threads :: cli_files.read_bytes("{runtime_dir}/{key}/{JET_CLI_RUNTIME_THREADS_FILE}") ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
+    JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None}
+}
+
+// Whether program `m` provably runs on one thread only, so x86-64 selection
+// emits its RC updates without the lock prefix (IRModule.single_thread):
+// the runtime's thread receipt was read and has no `*`, neither the program
+// nor its `main` (JET_CLI_MAIN_ROUTES) calls a runtime export the receipt
+// names, each foreign C call it makes (a symbol of `foreign`) is a
+// JET_CLI_SINGLE_THREAD_FOREIGN leaf, and it has no foreign assembly (an
+// `#FFI(asm)` leaf: the compiler's own leaves, a stop poll or a reduction,
+// have no source file) and no plugin. Anything else keeps the locked forms.
+fn jet_cli_single_thread(m: IRModule, runtime: JetCLIRuntimeExports, foreign: [String:Bool]) -> Bool Never! {
+    receipt :: runtime.threads ?? return false
+    called := [Bool]{}
+    loop _ in 0..<m.names.len() -> &called.push(false)
+    loop f in m.functions {
+        if (f.asm != None && f.source_file != "") || f.key.starts_with(IR_PLUGIN_GUEST_PREFIX) -> return false
+        loop (at, op) in f.op {
+            if op == .CallRuntime -> called[f.a[at]] = true
+        }
+    }
+    starts := [String:Bool]{}
+    starts["*"] = false
+    loop route in JET_CLI_MAIN_ROUTES -> starts[route.copy()] = false
+    loop (row, calls) in called {
+        if !calls -> next
+        name :: m.names[row]
+        if foreign.get(name) == None {
+            starts[name.copy()] = false
+        } else if !JET_CLI_SINGLE_THREAD_FOREIGN.contains(name) {
+            return false
+        }
+    }
+    jet_cli_runtime_exports_mark(receipt, &starts)
+    loop start in starts.values() {
+        if start -> return false
+    }
+    true
 }
 
 // The program's object (jet_cli_native_executable), else why the route
@@ -835,6 +888,7 @@ fn jet_cli_native_program(result: JetDriverCompileResult, inputs: ^JetDriverLowe
     lint :: ir_lint_module(&built.program, if level > 0 -> "ir.opt" else -> "ir.build", threads)
     loop finding in lint -> jet_cli_ice_trap(&census, &built.program, finding.key, finding.pass, finding.rule, finding.message)
     if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
+    built.program.single_thread = jet_cli_single_thread(built.program, runtime, closure_symbols)
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
     // A field move shares the module's rows with `built`, which would keep
     // them until the caller's object is written and free them all there; a

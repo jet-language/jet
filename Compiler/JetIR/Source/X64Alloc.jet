@@ -2,12 +2,14 @@
 //
 // Every slot that holds a value has one place for the whole function: a
 // register for the whole of its live range, or its frame home. A General
-// slot's register is callee-saved (rbx, r12-r15); a Float slot's is one of
-// xmm2-xmm15, which the C ABI lets a call clobber, so around every call
-// inside its range the slot is stored to its home and loaded back
-// (X64Select.jet ir_x64_call_out), except a stop poll's, which keeps them.
-// Selection then uses rax, rcx, rdx, rsi, rdi, r8-r11, xmm0 and xmm1 as
-// scratch inside one instruction only (and xmm0-xmm7 for the Float
+// slot's register is callee-saved (rbx, r12-r15), but a leaf's (a function
+// whose selection makes no call, ir_x64_leaf) takes r8 and r9 first, which
+// it never has to save; a Float slot's is one of xmm2-xmm15, which the C
+// ABI lets a call clobber, so around every call inside its range the slot
+// is stored to its home and loaded back (X64Select.jet ir_x64_call_out),
+// except a stop poll's, which keeps them. Selection then uses rax, rcx,
+// rdx, rsi, rdi, r8-r11, xmm0 and xmm1 as scratch inside one instruction
+// only (r8 and r9 only for a call's arguments, and xmm0-xmm7 for the Float
 // arguments of a call), and structured control never needs moves on its
 // edges.
 //
@@ -35,6 +37,8 @@ use jet_foundation.[Type, compiler_threads_single, name_rows_set]
 
 // Callee-saved registers handed to General slots, in preference order.
 IR_X64_SLOT_REGISTERS :: [Int]{3, 12, 13, 14, 15}
+// A leaf's: r8 and r9 first, then the callee-saved ones.
+IR_X64_LEAF_REGISTERS :: [Int]{8, 9, 3, 12, 13, 14, 15}
 // The xmm registers handed to Float slots, in preference order. From row
 // IR_X64_XMM_OPEN on, those a call's third to eighth Float arguments fill:
 // only for a Float slot other than a parameter (whose own arrives in one of
@@ -83,7 +87,8 @@ fn ir_x64_row_class(m: IRModule, row: Int) -> IRX64Class Never! {
 }
 
 struct IRX64Allocation {
-    // Per slot: the callee-saved register holding it, -1 for none.
+    // Per slot: the register holding it (callee-saved, or r8 or r9 in a
+    // leaf), -1 for none.
     regs: [Int]
     // Per slot: the xmm register holding a Float slot, -1 for none; and the
     // slots holding one, in slot order.
@@ -169,6 +174,78 @@ fn ir_x64_write(f: IRFunction, at: Int) -> Int Never! {
         .Drop | .Close | .Store | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Nop -> -1
         else -> f.dst[at]
     }
+}
+
+// Whether value instruction `at` selects with no call and no slow path, in
+// rax, rcx, r10 and r11 (and rdx for an unsigned 64-bit Mul) at most: a
+// plain move (no clone, which calls: X64Select.jet ir_x64_transfer); a
+// word's (or a wrapping Int's) comparison, bitwise operation, wrapping Add,
+// Sub, Mul or negation, `not`, or shift by a wrapping or constant in-range
+// count; a Float's + - * /, comparison or negation; a Bool's `not`; an
+// address; or the inline jet_rt_block_unique (X64Select.jet
+// ir_x64_block_unique). Division, a checked shift and Int arithmetic may
+// stop; a Float `%` or floor division calls. `consts` and `values` are the
+// allocation's (IRX64Allocation).
+fn ir_x64_quiet(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op == .ConstText || op == .DataAddress || op == .FunctionAddress -> return true
+    if op == .CallRuntime -> return ir_x64_inline_unique(m, f, at)
+    // The rest read slot `a`; any other instruction is no quiet value.
+    reads_slot :: if op == {
+        .Copy | .Move | .Add | .Sub | .Mul | .Div | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not -> true
+        else -> false
+    }
+    if !reads_slot || f.a[at] < 0 -> return false
+    row :: m.types[f.slot_type[f.a[at]]]
+    if op == .Copy || op == .Move -> return op == .Move || row.drop == "" || row.kind == .Aggregate || ir_clone_shares(row.clone)
+    kind :: row.kind
+    wrap :: f.c[at] == IR_OVERFLOW_WRAP
+    float :: kind == .Float || kind == .Float32
+    word :: kind == .Word || kind == .Bool || kind == .Char || kind == .Pointer || (kind == .Int && wrap)
+    if op == {
+        .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> float || word
+        .Add | .Sub | .Mul -> float || (word && wrap)
+        .Div -> float
+        .BitAnd | .BitOr | .BitXor -> word
+        .Shl | .Shr -> {
+            if kind != .Word && !(kind == .Int && wrap) -> return false
+            if wrap -> return true
+            count :: f.b[at]
+            bits :: if kind == .Word -> row.bits else -> 64
+            count >= 0 && consts[count] && values[count] >= 0 && values[count] < bits
+        }
+        .Neg -> float || (kind == .Word && wrap)
+        .Not -> kind == .Bool || kind == .Word
+        else -> false
+    }
+}
+
+// Whether `at` calls jet_rt_block_unique, which is selected inline
+// (X64Select.jet ir_x64_block_unique).
+fn ir_x64_inline_unique(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    f.op[at] == .CallRuntime && f.c[at] == 1 && f.dst[at] >= 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_rt_block_unique"
+}
+
+// Whether selecting `f` makes no call, in its body or in a slow path, so
+// its General slots may live in r8 and r9: every instruction is structure,
+// a constant, a memory access, a frame address or byte copy, or a quiet
+// value (ir_x64_quiet), and its General arguments (an aggregate result's
+// hidden pointer first) are at most four, in rdi, rsi, rdx and rcx.
+fn ir_x64_leaf(m: IRModule, f: IRFunction, classes: [IRX64Class], consts: [Bool], values: [Int]) -> Bool Never! {
+    general := if f.result >= 0 && m.types[f.result].kind == .Aggregate -> 1 else -> 0
+    loop slot in 0..<f.param_count {
+        if classes[slot] == .General -> general += 1
+    }
+    if general > 4 -> return false
+    loop at in 0..<f.op.len() {
+        quiet :: if f.op[at] == {
+            .Nop | .Const | .Load | .Store | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
+            .Return -> f.b[at] != IR_TAIL_JUMP
+            else -> ir_x64_quiet(m, f, consts, values, at)
+        }
+        if !quiet -> return false
+    }
+    true
 }
 
 fn ir_x64_align(value: Int, align: Int) -> Int Never! {
@@ -531,7 +608,8 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     partners :: loop slot in 0..<count -> if fresh[slot] && left_reads[starts[slot]] -> f.a[starts[slot]] else -> -1
     phis :: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
     aliases :: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)
-    regs :: ir_x64_scan(starts, ends, weights, general, general, IR_X64_SLOT_REGISTERS.len(), fresh, partners, phis, aliases, IR_X64_SLOT_REGISTERS)
+    pool :: if ir_x64_leaf(m, f, classes, consts, values) -> IR_X64_LEAF_REGISTERS else -> IR_X64_SLOT_REGISTERS
+    regs :: ir_x64_scan(starts, ends, weights, general, general, pool.len(), fresh, partners, phis, aliases, pool)
     // Per instruction, how many before it pass more than two Float
     // arguments.
     crowded := [Int]{0}

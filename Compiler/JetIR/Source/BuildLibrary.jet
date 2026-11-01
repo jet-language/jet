@@ -311,6 +311,87 @@ fn ir_export_abi_json(rows: [IRExportABI]) -> String Never! {
     "[{encoded.join(",")}]"
 }
 
+// The C symbols whose call can run code beside the calling thread: a new
+// thread, a signal handler that returns into the code it interrupted
+// (ProcessSignal.jet), a loaded library.
+IR_THREAD_START_SYMBOLS :: [String]{"pthread_create", "signal", "dlopen"}
+
+// The thread receipt of a library (`<prefix>.threads`): the exports whose
+// call can reach an IR_THREAD_START_SYMBOLS call through direct calls, the
+// runtime routes the library itself defines and the function addresses it
+// takes, sorted. A lifecycle hook that can reach one runs whenever its
+// program keeps one of the hook's guards (ir_lifecycle_rows), so every
+// export that can reach a guard's storage is listed too; the receipt is
+// just "*" when such a hook has no guard, since every program that links
+// the library runs it.
+fn ir_thread_exports(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
+    count :: m.functions.len()
+    defined := [String:Int]{}
+    loop row in exports -> defined[row.symbol.copy()] = row.function
+    callers := [[Int]]{}
+    loop _ in 0..<count -> &callers.push([Int]{})
+    // Each DataAddress: the data row and the function that takes it.
+    data_rows := [Int]{}
+    data_users := [Int]{}
+    reaches := [Bool]{}
+    work := [Int]{}
+    loop (id, f) in m.functions {
+        starts := false
+        loop (at, op) in f.op {
+            callee := -1
+            if op == .Call || op == .FunctionAddress -> callee = f.a[at]
+            if op == .CallRuntime {
+                name :: m.names[f.a[at]]
+                if IR_THREAD_START_SYMBOLS.contains(name) -> starts = true
+                callee = defined.get(name) ?? -1
+            }
+            if op == .DataAddress {
+                &data_rows.push(f.a[at])
+                &data_users.push(id)
+            }
+            if callee >= 0 && callee < count -> &callers[callee].push(id)
+        }
+        &reaches.push(starts)
+        if starts -> &work.push(id)
+    }
+    guarded := [Bool]{}
+    loop _ in exports -> &guarded.push(false)
+    head := 0
+    loop {
+        loop head < work.len() {
+            id :: work[head]
+            head += 1
+            loop caller in callers[id] {
+                if reaches[caller] -> next
+                reaches[caller] = true
+                &work.push(caller)
+            }
+        }
+        // A hook that can reach a thread start: whatever keeps its guard
+        // storage runs it.
+        added := false
+        loop (index, row) in exports {
+            if guarded[index] || !reaches[row.function] || (row.init_priority < 0 && row.fini_priority < 0) -> next
+            if row.guards.len() == 0 -> return [String]{"*"}
+            guarded[index] = true
+            loop (at, data) in data_rows {
+                id :: data_users[at]
+                if !row.guards.contains(data) || reaches[id] -> next
+                reaches[id] = true
+                &work.push(id)
+                added = true
+            }
+        }
+        if !added -> break
+    }
+    symbols := [String]{}
+    loop row in exports {
+        if reaches[row.function] -> &symbols.push(row.symbol.copy())
+    }
+    &symbols.sort()
+    symbols
+}
+
 // Ordered process-lifecycle hooks of the library object. Each row is
 // `<symbol> init <priority> [<guards>]` or `<symbol> fini <priority>
 // [<guards>]`; the symbol must be one of the `#Export(c)` rows and take no

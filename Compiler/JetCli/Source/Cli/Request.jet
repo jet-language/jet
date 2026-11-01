@@ -58,7 +58,7 @@ use jet_eval.[
     jet_eval_native_session,
 ]
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
-use jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
+use jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
 use jet_sema.[SemaOutputIntent]
 use jet_web.[web_runtime_partition]
@@ -128,7 +128,8 @@ fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
 // NativeLibrary program (the compile stopped before lowering, without an
 // entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1,
 // checked by IR Lint after the build and after the optimizer, and written
-// as `{prefix}.o` with its export list and ABI receipt.
+// as `{prefix}.o` with its export list, ABI receipt and thread receipt
+// (ir_thread_exports: the exports that can start a second thread).
 fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
     owned := ^front
     result := ^owned.compile
@@ -152,6 +153,7 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
         loop finding in ir_lint_module(&library.program, "ir.opt", threads) -> &issues.push(jet_cli_runtime_lint_issue(finding))
     }
     if issues.len() == 0 {
+        thread_exports :: ir_thread_exports(library.program, library.exports)
         compiled := ir_x64_compile_module(^library.program, threads)
         // JET_FRONT_RUNTIME_WEB_OUTPUT: the runtime partition of a web build
         // (JetWeb Build.jet), selected from the same lowered module, as
@@ -173,6 +175,7 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
             &symbols.sort()
             cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
             cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
+            cli_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime thread receipt: {err}")
             return jet_cli_runtime_pack(^result, prefix, ^object.bytes)
         }
         compiler_transfer_rows<String>(&issues, &object.errors)

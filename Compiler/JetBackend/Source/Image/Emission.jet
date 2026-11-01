@@ -18,11 +18,14 @@ enum X64RelocTarget {
 // distance from the end of the field to the target.
 struct X64Reloc { at: Int, target: X64RelocTarget }
 
+// `align`: the function's start alignment in `.text`, a power of two of at
+// least X64_FUNCTION_ALIGN; code inside it aligned to `align` stays aligned.
 struct X64CompiledFunction {
     id: X64FunctionID
     name: String
     code: [U8]
     relocs: [X64Reloc]
+    align: Int
 }
 
 // Debug facts of one compiled function for Image/Dwarf.jet: a line row

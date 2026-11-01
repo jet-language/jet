@@ -5,7 +5,11 @@
 # nothing to clean up. `rooted` overflows the same way, but its deferred close
 # must run on the way out, so it keeps the root and prints the close first.
 # `plain` owns its main too but never allocates, so its main thread gets no
-# thread block (JetRuntime Thread.jet jet_rt_thread_init's guards).
+# thread block (JetRuntime Thread.jet jet_rt_thread_init's guards). `exact`
+# (#6498) grows an exact Int past the inline range and then divides by zero:
+# the Int routes are root-free and its stop edges only drop a String and a
+# List of records (drop routines that only free memory) inside cleanup
+# scopes, so it owns its main and links no root, scheduler or deadline code.
 fixture: fixtures/program_owned_main
 env: NO_COLOR=1
 step: jet inspect decisions owned.jet
@@ -59,3 +63,18 @@ step: {work}/.jet/build/rooted
 exit: 70
 stdout: = "body\nclose resource\n"
 stderr: ~ "Stop [E3010]" # the built image runs the close too
+step: jet inspect decisions exact.jet
+exit: 0
+stdout: ~ "main: program-owned" # big Int arithmetic, memory-only drops and cleanup scopes need no root
+step: jet run --release exact.jet
+exit: 70
+stdout: = "big 1000008000032000080000138000168000144000080000026\n"
+stderr: ~ "divided by zero" # the Int division's stop, written with no root
+step: jet build exact.jet
+exit: 0
+file: .jet/build/exact !~ "jet_rt_root_begin" # no process root
+file: .jet/build/exact !~ "jet_rt_cleanup_leave" # an owned main drops its cleanup scopes
+step: {work}/.jet/build/exact
+exit: 70
+stdout: = "big 1000008000032000080000138000168000144000080000026\n"
+stderr: ~ "divided by zero" # the built image stops the same way

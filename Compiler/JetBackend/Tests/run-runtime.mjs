@@ -35,7 +35,7 @@ if (from === 0) {
 if (until === 1) {
   if (!process.env.JET) throw Error('JET must name the actual Jet-hosted CLI from this source tree');
   const prefix = join(out, 'jet_runtime_jet');
-  for (const suffix of ['.o', '.exports', '.abi.json', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
+  for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
   const run = spawnSync(resolve(process.env.JET), ['check', entry], {
     cwd: library,
     env: { ...process.env, JET_TOOLCHAIN_ROOT: repo,
@@ -49,7 +49,7 @@ if (until === 1) {
   if (run.error) throw run.error;
   if (run.status !== 0) throw Error(`hosted runtime lowering failed (${run.status}): ${run.stderr ?? ''}`);
   if (existsSync(prefix + '.issues')) throw Error(readFileSync(prefix + '.issues', 'utf8'));
-  for (const suffix of ['.o', '.exports', '.abi.json']) {
+  for (const suffix of ['.o', '.exports', '.abi.json', '.threads']) {
     if (!existsSync(prefix + suffix)) throw Error(`hosted compiler did not produce ${prefix + suffix}; build the CLI candidate from this tree`);
   }
 }

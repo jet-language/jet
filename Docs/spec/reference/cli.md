@@ -1006,9 +1006,12 @@ the aliasing, early-exit, effect and cross-iteration verdicts, how many list
 accesses sema proved in bounds and how many of them the build lowered with no
 bounds check. Each loop lowers one scalar round per index.
 Last it names the program's `main:`. A program gets `program-owned` when none
-of its stop edges cleans up anything (each edge only returns or frees memory)
-and every runtime route it calls behaves the same with no process root. It
-then runs under a main of its own with no stop points. A stop writes the same
+of its stop edges cleans up anything a process exit could observe. Each edge
+only writes and frees memory (its drops' routines too), enters and leaves a
+cleanup scope, or returns. Every runtime route it calls must also behave the
+same with no process root. Those routes include exact `Int` arithmetic, except
+shifts. It then runs under a main of its own with no stop points and
+no cleanup scopes. A stop writes the same
 report and exits with the same code as under the root. Any other program
 gets `process root:` and the first function, route or stop edge that needs
 the root.
