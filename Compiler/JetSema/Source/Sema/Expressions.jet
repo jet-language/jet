@@ -2564,6 +2564,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         discarded: false,
         foreign_effect_root: foreign_effect_root,
         unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
+        replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
     })
     // Demand: a codec call requires the generated codec it reaches, and a
     // call of a demand-checked derived method requires its body.
@@ -2605,6 +2606,27 @@ fn sema_expr_call_foreign_without_undo(program: SemaProgramTables, callee: Symbo
             .Function(module_index, index) -> return graph.modules[module_index].functions[index].abi.is_extern && graph.modules[module_index].functions[index].declaration.undo == None
             .Foreign(module_index, index) -> return graph.modules[module_index].foreign_functions[index].declaration.undo == None
             else -> return false
+        }
+    }
+    false
+}
+
+// Whether renaming this call to its declared callee's `#Deprecated(use:)`
+// replacement would fail to call it: at the call, the replacement's name
+// resolves to a local or parameter, or to nothing (a function of that name,
+// or an import of it, is the rename).
+fn sema_expr_call_replacement_hidden(program: SemaProgramTables, scopes: SemaScopeTable, callee: SymbolID?, span: Span) -> Bool {
+    symbol :: callee ?? return false
+    if program.registration_graph == .Val(graph) {
+        row :: sema_registration_callable_row(graph, symbol.key) ?? return false
+        if row == .Function(module_index, index) {
+            if graph.modules[module_index].functions[index].declaration.markers.len() == 0 -> return false
+            payload :: sema_lifecycle_marker(graph.modules[module_index].functions[index].declaration.markers, "") ?? return false
+            parts :: payload.replacement.split(".").to_list()
+            leaf :: parts[parts.len() - 1].trim()
+            binding :: sema_scope_resolve_index_at(scopes, leaf, span) ?? return true
+            kind :: scopes.bindings[binding].symbol.kind
+            return kind == SymbolKind.Local || kind == SymbolKind.Parameter
         }
     }
     false
@@ -4782,9 +4804,11 @@ fn sema_expr_check_shared_identifier(name: String, span: Span, expected: Type?, 
     sema_expr_check_copy_typed(checked, span, expected, environment, program, &context, &diagnostics, sema_expr_copy_string_view(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, &scopes), true)
 }
 
+// A raw pointer operation is a low-level memory operation: outside an
+// audited region it is E3101 (E3103 is the call of an `#Unsafe fn`).
 fn sema_expr_require_unsafe(operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if context.unsafe_depth > 0 -> return true
-    &diagnostics.push(sema_error("E3103", span, "`{operation}` requires an `#Unsafe` region", "raw pointer operations can violate memory safety and must be explicitly audited", "put this operation inside `#Unsafe(\"reason\") {{ … }}`"))
+    &diagnostics.push(sema_error("E3101", span, "`{operation}` can only run inside an `#Unsafe` block", "this operation can violate memory safety, so it must sit in an audited region", "wrap it: #Unsafe(\"why this is safe\") {{ … }}"))
     false
 }
 

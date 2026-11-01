@@ -1,7 +1,9 @@
 // Assemble with Compiler and execute once with the real held-directory host.
+use jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
 use jet_cli.[
-    JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes, jet_cli_fix_log,
-    jet_cli_fix_rewrite, jet_cli_transaction_relative, jet_cli_undo_source_changes,
+    JetCLIFix, JetCLIFixSkip, JetCLISemOp, JetCLISourceChange, jet_cli_commit_source_changes,
+    jet_cli_fix_checked, jet_cli_fix_errors, jet_cli_fix_log, jet_cli_fix_rewrite,
+    jet_cli_transaction_relative, jet_cli_undo_source_changes,
 ]
 use core.sys as cli_sys
 use core.files as cli_files
@@ -52,4 +54,31 @@ impl JetCLITransactionFixtureRoot.Close {
     assert(escaped)
     malformed :: jet_cli_transaction_relative(root, "{root}/folder//name.jet") == .Err(_)
     assert(malformed)
+}
+
+// A fix whose edit makes the file stop checking is rolled back on its own,
+// the fixes before it stay, and the fix log records it with the error it added.
+#Test("fix_recheck_rolls_back") {
+    root :: "{cli_sys.temp_dir()}/jet-fix-recheck-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test project")
+    owner :: JetCLITransactionFixtureRoot{path: root}
+    defer close(^owner)
+    file :: "{root}/run.jet"
+    source :: "fn run() {{\n    value :: 1\n    print(value)\n}}\n"
+    cli_files.write(file, source) ?? panic("run source")
+    baseline :: jet_cli_fix_errors(file, source)
+    assert(baseline.len() == 0)
+    literal :: "fn run() {{\n    value :: ".len()
+    use_site :: "fn run() {{\n    value :: 1\n    print(".len()
+    keep :: JetCLIFix{title: "change the value", edit: TextEdit{span: Span{start: literal, end: literal + 1}, new_text: "2"}, applicability: .Safe, safety: .BehaviorPreserving}
+    breaks :: JetCLIFix{title: "rename the use", edit: TextEdit{span: Span{start: use_site, end: use_site + "value".len()}, new_text: "missing"}, applicability: .Safe, safety: .BehaviorPreserving}
+    rejected := [JetCLIFixSkip]{}
+    checked :: jet_cli_fix_checked(file, source, [JetCLIFix]{keep, breaks}, baseline, &rejected)
+    assert(checked.source == "fn run() {{\n    value :: 2\n    print(value)\n}}\n")
+    assert(checked.applied == 1)
+    assert(rejected.len() == 1)
+    assert(rejected[0].title == "rename the use" && rejected[0].reason.starts_with("the edited file no longer checks: "))
+    changes :: [JetCLISourceChange]{{path: file, before: source.bytes(), after: checked.source.bytes()}}
+    log :: String.from_bytes(jet_cli_fix_log(root, "recheck", changes, [JetCLISemOp]{}, rejected)) ?? panic("fix log is UTF-8")
+    assert(log.contains("\"title\":\"rename the use\"") && log.contains("\"replacement\":\"missing\"") && log.contains("\"reason\":\"the edited file no longer checks: "))
 }

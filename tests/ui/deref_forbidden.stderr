@@ -1,8 +1,8 @@
-Error [E0003]: Something unexpected appeared after this line, found the keyword `fn`
-  --> tests/ui/deref_forbidden.jet:2:1
+Error [E3101]: `pointer dereference` can only run inside an `#Unsafe` block
+  --> tests/ui/deref_forbidden.jet:1:28
     |
-  2 | fn run() {
-    | ^^
- Why: Each line ends where the line break is (no `;` needed)
- Fix: Put the next line of code on a new line
-More: jet-lang.dev/e/E0003
+  1 | fn first(p: *Int) -> Int { p.* }
+    |                            ^^^
+ Why: This operation can violate memory safety, so it must sit in an audited region
+ Fix: Wrap it: #Unsafe("why this is safe") { … }
+More: jet-lang.dev/e/E3101

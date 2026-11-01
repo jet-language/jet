@@ -147,9 +147,11 @@ fn sema_lifecycle_edit(payload: CoreMarkerApplication, span: Span) -> TextEdit? 
 }
 
 // `rename`: whether `jet fix` can migrate the use by renaming it
-// (sema_lifecycle_renames; None: not known, and it is offered). A use it
-// can't rename gets no edit, and its Fix says to edit it by hand.
-fn sema_lifecycle_record(payload: CoreMarkerApplication, rename: Bool?, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
+// (sema_lifecycle_renames; None: not known, and it is offered). `hidden`: at
+// this use the replacement's name means a local or parameter, or nothing, so
+// the rename wouldn't call it. A use it can't rename gets no edit, and its Fix
+// says to edit it by hand.
+fn sema_lifecycle_record(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
     key :: "{source}|{span.start}|{span.end}|{payload.member}"
     if seen.get(key) != None -> return
     seen[key] = true
@@ -165,8 +167,8 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, rename: Bool?, source: 
     &result.facts.push(StructureFact{kind: StructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
     item :: payload.member
     since :: sema_lifecycle_version_phrase(payload.since)
-    renamable :: rename ?? true
-    fix :: if !renamable -> "edit this use by hand to use `{payload.replacement}`, which doesn't take the same arguments, so `jet fix` can't rename it." else -> "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
+    renamable :: !hidden && (rename ?? true)
+    fix :: if hidden -> "edit this use by hand to use `{payload.replacement}`: here its name doesn't refer to it, so `jet fix` can't rename it." else if !renamable -> "edit this use by hand to use `{payload.replacement}`, which doesn't take the same arguments, so `jet fix` can't rename it." else -> "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
     diagnostic := if status == "removed" -> sema_error("E2002", span, "`{item}` was removed in {sema_lifecycle_version_phrase(payload.removed_in ?? "this edition")}", "`{item}` was deprecated in {since} and no longer exists in this edition; it has reached the end of its migration window.", fix) else -> {
         why := "`{item}` was deprecated in {since}; it still works for now but should be migrated."
         if payload.removed_in == .Val(removed) -> why = "`{item}` was deprecated in {since} and will be removed in {sema_lifecycle_version_phrase(removed)}; it still works for now but should be migrated."
@@ -214,7 +216,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         loop reference in checked.name_references {
             payload :: payloads.get(reference.symbol.id.key) ?? next
             if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None -> next
-            sema_lifecycle_record(payload, renames.get(reference.symbol.id.key), graph_module.source_file, reference.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, renames.get(reference.symbol.id.key), false, graph_module.source_file, reference.span, edition, &result, &seen)
         }
         loop call in checked.call_facts {
             // A Core member carries its resolved marker; a declared function
@@ -230,7 +232,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             if call.lifecycle != None -> rename = None
             payload :: call.lifecycle ?? declared ?? next
             if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
-            sema_lifecycle_record(payload, rename, graph_module.source_file, call.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, rename, call.replacement_hidden, graph_module.source_file, call.span, edition, &result, &seen)
         }
         sema_attach_diagnostic_source_locations(&result.diagnostics, start, graph_module.source_segments)
     }
