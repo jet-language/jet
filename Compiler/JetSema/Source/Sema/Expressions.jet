@@ -3811,6 +3811,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
                 }
                 &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
                 if !sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return None
+                if sema_compiler_host_value_held(prepared_ty) == .Val(held) -> sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, &diagnostics)
                 prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program, &context) ?? return None
                 return sema_expr_expected_owned(^prepared, expected, environment, program, &diagnostics)
             }
@@ -3897,6 +3898,11 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
     }
     ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
     kind :: scopes.bindings[index].symbol.kind
+    // A constant read in a body is known while compiling; runtime code may
+    // read it unless it holds a compiler value.
+    if kind == SymbolKind.Constant && environment.function_name != "" {
+        if sema_compiler_host_value_held(ty) == .Val(held) -> sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, &diagnostics)
+    }
     result := TExpr?{None}
     if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
         local := checked_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id, ty)

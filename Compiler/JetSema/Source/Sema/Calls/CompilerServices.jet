@@ -112,6 +112,52 @@ fn sema_compiler_services_compile_time_gate(module_name: String, member: String,
     &diagnostics.push(sema_error("E0956", span, "`{module_name}.{member}` is compile-time only", "build graph values are checked facts, not a runtime service", "move this call into `fn build` or a `comptime` binding"))
 }
 
+// A `core.compiler` query result or one of its records. The compiler answers
+// its fields and methods while it serves comptime and build code (JetIR
+// ir_host_method); no runtime layout holds one, so a running program can't
+// read it. A declared type resolves to its canonical `module::Name`, so a
+// bare name here is the compiler's own.
+fn sema_compiler_host_value_name(name: String) -> Bool Never! {
+    if name == {
+        "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
+        "CompilerManifest" | "CompilerPackage" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" -> true
+        "CompilerLock" | "CompilerLockedPackage" | "CompilerProfileSet" | "CompilerProfile" | "CompilerKeyValue" -> true
+        else -> false
+    }
+}
+
+// The compiler value (sema_compiler_host_value_name) `ty` holds anywhere:
+// itself, or an element, payload or member of it.
+fn sema_compiler_host_value_held(ty: Type) -> String? Never! {
+    if ty == {
+        .Tagged(_, inner) -> return sema_compiler_host_value_held(inner)
+        .Named(name) -> {
+            if sema_compiler_host_value_name(name) -> return Val(name.copy())
+        }
+        .List(element) -> return sema_compiler_host_value_held(element)
+        .Option(inner) -> return sema_compiler_host_value_held(inner)
+        .Result(ok, err) -> {
+            if sema_compiler_host_value_held(ok) == .Val(name) -> return Val(name)
+            return sema_compiler_host_value_held(err)
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_compiler_host_value_held(field.ty) == .Val(name) -> return Val(name)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// Runtime code reading `name`, a compile-time value that holds compiler value
+// `held`: no compiler answers its fields and methods once the program runs,
+// so only comptime code and `fn build` read it.
+fn sema_compiler_host_value_runtime_read(name: String, held: String, span: Span, scopes: SemaScopeTable, function_name: String, diagnostics: &[Diagnostic]) {
+    if scopes.comptime_execution_depth > 0 || (scopes.location_function ?? function_name) == "build" -> return
+    &diagnostics.push(sema_error("E0956", span, "`{name}` holds a compiler value (`{held}`), which exists only while compiling", "comptime code and `fn build` read compiler values; the running program has no compiler to answer them", "compute the plain value you need (a Bool, number or String) inside a `comptime` block and read that at runtime"))
+}
+
 // `compiler_api_allowed` is an explicit caller fact for `fn build` and other
 // compiler-approved regions; SemaScopeTable separately records comptime depth.
 // The result/failure carrier remains available for recovery after diagnostics;

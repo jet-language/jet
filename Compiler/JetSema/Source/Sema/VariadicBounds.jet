@@ -30,7 +30,10 @@ fn sema_variadic_bounds_expand(program: &Program) {
         if item == .Func(function) {
             if calls.variadic.get(function.name) != None {
                 bounds :: sema_variadic_bound_traits(function, declared) ?? [String]{}
-                arities :: calls.variadic_arities.get(function.name) ?? [Int]{}
+                // A function nothing calls is still checked once against its
+                // bounds: its one-argument arity is a generic function, so it
+                // is type-checked but never instantiated (#6449).
+                arities :: calls.variadic_arities.get(function.name) ?? [Int]{1}
                 loop arity in arities -> &expanded.push(Item.Func{value: sema_variadic_bound_specialize(function, bounds, arity)})
                 next
             }
@@ -70,6 +73,18 @@ fn sema_inline_note_variadic_arity(rewrite: &SemaInlineRewrite, name: String, ar
     &arities.push(arity)
     rewrite.variadic_arities[name] = ^arities
     "{name}__va{arity}"
+}
+
+// The variadic parameter a slot's generated type parameter stands for
+// (`items__Va0` -> `items`), so diagnostics name the parameter the user wrote.
+fn sema_variadic_bound_slot_parameter(type_name: String) -> String? Never! {
+    parts :: type_name.split("__Va").to_list()
+    if parts.len() != 2 || parts[0] == "" || parts[1] == "" -> return None
+    loop byte in parts[1].bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+    }
+    Val(parts[0].copy())
 }
 
 fn sema_variadic_bound_slot_name(parameter: String, index: Int) -> String Never! {

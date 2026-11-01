@@ -1,0 +1,8 @@
+use core.compiler as compiler
+
+fn run() {
+    parsed :: comptime { compiler.parse("x :: 1") ?? panic("parse") }
+    empty :: comptime { parsed.diagnostics.is_empty() }
+    print(empty)
+    print(parsed.items.len())
+}

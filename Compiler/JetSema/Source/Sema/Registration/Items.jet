@@ -3634,6 +3634,20 @@ fn sema_registration_core_private_error(name: String, module_name: String, span:
     sema_error("E0609", span, "`{name}` is private in module `{module_name}`", "a Core module's API is the names it exports; its other types and helpers belong to Core alone", "use what `{module_name}` exports instead")
 }
 
+// Whether `module_row` declares a child module `name` (`module name` /
+// `priv(package) module name`), whether or not the requester may see it.
+fn sema_registration_module_declares_child(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+    loop import in module_row.imports {
+        if import.declaration.kind == {
+            .File(_, _) | .Module(_, _) -> {
+                if import.declaration.alias == name -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
 // The Core module behind `alias` when `alias.name` names a declaration that
 // module keeps private from `module_identity`: the qualified spelling of an
 // import the E0609 above refuses (`db.SqliteDB{raw: 1}`).
@@ -3881,6 +3895,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                             private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
                             direct != None && sema_registration_core_private(graph.modules[target_index], item.original, source_identity) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_registration_core_private_error(item.original, target_name, declaration.span))
                             direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
+                            sema_registration_module_declares_child(graph.modules[export_index], item.original) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "a `priv module` is usable only by its enclosing module, and a `priv(package) module` only by its own package", "use what `{target_name}` makes public, or import `{item.original}` from inside its package"))
                             else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }
                     }

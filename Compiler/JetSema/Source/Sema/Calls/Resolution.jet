@@ -597,6 +597,11 @@ fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGra
 fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     resolved_receiver :: sema_type_resolve_declared_with_generics(graph, receiver_type, caller_module, generic_params)
     trait_rows := [SemaRegistrationRowRef]{}
+    // A type parameter's bounds dispatch in the order they are written: the
+    // first bound that declares the method answers it, so `...[Inspect, Edit]`
+    // calls `Inspect.touch` (Rust `tests/ownership.rs`
+    // `multi_trait_receiver_access_follows_first_match_dispatch_order`).
+    first_match := false
     if resolved_receiver == {
         .TraitObject(bounds) -> {
             loop bound in bounds {
@@ -617,6 +622,7 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
                 }
             }
             current :: parameter ?? return [SemaCallMethodCandidate]{}
+            first_match = true
             loop bound in current.bounds {
                 row :: sema_call_trait_row_for_symbol(graph, bound) ?? next
                 sema_call_trait_rows_push(graph, &trait_rows, row)
@@ -637,6 +643,7 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
             } ?? false
             if !duplicate -> &candidates.push(candidate)
         }
+        if first_match && candidates.len() > 0 -> break
     }
     candidates
 }
