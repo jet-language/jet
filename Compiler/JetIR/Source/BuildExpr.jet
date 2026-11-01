@@ -3946,6 +3946,20 @@ fn ir_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, shap
         }
         .Range(lo, hi, _) -> return ir_in_range(&m, &b, subject, lo, hi)
         .Or(alternatives, _) -> {
+            // Alternatives that each name one variant of the subject's enum,
+            // binding nothing, test one bit: bit `tag` of the set of their
+            // indexes, a shift and a mask however many they list.
+            if ir_variant_bits(m, p, b, subject, alternatives) == .Val(bits) {
+                discriminant :: ir_enum_tag_of(&m, &b, subject)
+                one :: ir_word_const(&m, &b, 1)
+                bit :: ir_word_op(&m, &b, IROp.Shl, one, discriminant)
+                set :: ir_word_const(&m, &b, bits)
+                hit :: ir_word_op(&m, &b, IROp.BitAnd, bit, set)
+                zero :: ir_word_const(&m, &b, 0)
+                found :: ir_temp(&m, &b, bool_row)
+                ir_emit(&b.f, IROp.Ne, found, hit, zero, -1, b.line)
+                return found
+            }
             // Each alternative binds the same names at its own payload
             // offsets: the matching one loads them into the first
             // alternative's slots, which the arm then binds.
@@ -4028,6 +4042,27 @@ fn ir_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, shap
         .Map(entries, rest, _) -> return ir_map_pattern_test(&m, p, &b, subject, entries, rest, span)
         else -> return ir_fail_slot(&b, span, "pattern {ir_shape_name(shape)}")
     }
+}
+
+// The indexes an Or pattern names as one bit set (bit i: variant i), when
+// every alternative is a variant of the subject's enum (not a group) that
+// binds nothing and the enum has at most 63 variants, so every tag shifts
+// a 1 inside the word; None otherwise.
+fn ir_variant_bits(m: IRModule, p: IRProgram, b: IRBuilder, subject: Int, alternatives: [BodyPatternShape]) -> Int? Never! {
+    row :: ir_enum_def(m, p, b.f.slot_type[subject]) ?? return None
+    count :: if p.types[row].kind == .Enum(variants, _) -> variants.len() else -> { return None }
+    if count > 63 -> return None
+    bits := 0
+    loop alternative in alternatives {
+        if alternative == .Variant(variant, bindings, _, _) {
+            if bindings.len() > 0 || ir_group_leaves(p, row, variant).len() > 0 -> return None
+            index :: ir_variant_index(p, row, variant) ?? return None
+            bits = bits.bit_or(1 << index)
+        } else {
+            return None
+        }
+    }
+    Val(bits)
 }
 
 // `[a, "b", ..rest]`: the length test (exact, or at least the items with a
