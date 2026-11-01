@@ -47,7 +47,7 @@ fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, l
     data := I64{0}
     if (length != I64{0}) {
         if (RT_HOST_U8_STRIDE == I64{1} && length == capacity) { data = bytes } else if (RT_HOST_U8_STRIDE == I64{1}) {
-            data = jet_rt_alloc(length, I64{8})
+            data = jet_rt_alloc_8(length)
             rt_text_bytes_copy(data, bytes, length)
         } else {
             data = jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
@@ -58,7 +58,7 @@ fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, l
             }
         }
     }
-    if (data != bytes) -> jet_rt_free(bytes, capacity, I64{8})
+    if (data != bytes) -> jet_rt_free_8(bytes, capacity)
     rt_text_store(output, data)
     rt_text_store(len, length)
 }

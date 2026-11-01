@@ -17,7 +17,7 @@ ITER_INLINE_OPTION :: I64{4294967296}
 fn iter_meta(iter: I64) -> I64 { trap_word(wrapping(iter + I64{8})) }
 
 fn iter_new(kind: I64, meta: I64) -> I64 {
-    node :: jet_rt_alloc(I64{160}, I64{8})
+    node :: jet_rt_alloc_8(I64{160})
     coll_zero(node, I64{160})
     trap_store(node, kind)
     trap_store(wrapping(node + I64{8}), coll_meta_copy(meta))
@@ -101,7 +101,7 @@ fn iter_drain(source: I64, header: I64) {
     meta :: iter_meta(source)
     slot :: coll_slot_new(meta)
     loop iter_pull(source, slot) -> coll_list_push(header, slot, meta)
-    jet_rt_free(slot, coll_size(meta), I64{8})
+    jet_rt_free_8(slot, coll_size(meta))
     if (jet_rt_session_propagate() != I64{0}) { coll_list_drop(header, meta, I64{0}) }
 }
 
@@ -122,21 +122,25 @@ fn iter_save(node: I64, slot: I64, meta: I64) {
 fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     if (trap_word(wrapping(node + I64{144})) != I64{0}) { return false }
     kind :: trap_word(node)
+    // Sources, hooked kinds and list cursors read nothing else of the node
+    // here, so they dispatch before the other node words are loaded.
+    if (kind == I64{29}) { return iter_source_pull(node, output) }
+    if iter_hooked(kind) { return coll_call2(trap_word(wrapping(node + I64{56})), node, output) != I64{0} }
+    if (kind == I64{0}) {
+        header :: trap_word(wrapping(node + I64{112}))
+        index :: trap_word(wrapping(node + I64{40}))
+        if (index >= trap_word(header)) { return false }
+        meta :: iter_meta(node)
+        coll_copy(wrapping(trap_word(wrapping(header + I64{16})) + index * trap_word(meta)), output, coll_payload(meta))
+        trap_store(wrapping(node + I64{40}), index + I64{1})
+        return true
+    }
     meta :: iter_meta(node)
     source :: trap_word(wrapping(node + I64{16}))
     scratch :: trap_word(wrapping(node + I64{80}))
     second :: trap_word(wrapping(node + I64{88}))
     index :: trap_word(wrapping(node + I64{40}))
     count :: trap_word(wrapping(node + I64{32}))
-    if (kind == I64{29}) { return iter_source_pull(node, output) }
-    if iter_hooked(kind) { return coll_call2(trap_word(wrapping(node + I64{56})), node, output) != I64{0} }
-    if (kind == I64{0}) {
-        header :: trap_word(wrapping(node + I64{112}))
-        if (index >= trap_word(header)) { return false }
-        coll_copy(wrapping(trap_word(wrapping(header + I64{16})) + index * trap_word(meta)), output, coll_payload(meta))
-        trap_store(wrapping(node + I64{40}), index + I64{1})
-        return true
-    }
     if (kind == I64{1}) { return false }
     if (kind == I64{2}) {
         if (index >= count) { return false }
@@ -448,7 +452,7 @@ fn iter_list_release(source: I64, meta: I64) {
     }
     coll_meta_drop(callback_meta)
     coll_meta_drop(meta)
-    jet_rt_free(node, I64{160}, I64{8})
+    jet_rt_free_8(node, I64{160})
 }
 
 #Export(c) fn jet_rt_native_iter_to_list(iter: I64, target: I64) {

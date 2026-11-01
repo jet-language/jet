@@ -38,9 +38,9 @@
                 grown := if (capacity == I64{0}) -> I64{128} else -> capacity
                 if (capacity == I64{0} && found) { grown = count }
                 loop grown < required -> grown *= I64{2}
-                next_bytes :: jet_rt_alloc(grown, I64{8})
+                next_bytes :: jet_rt_alloc_8(grown)
                 if (used != I64{0}) -> rt_text_bytes_copy(next_bytes, bytes, used)
-                if (capacity != I64{0}) -> jet_rt_free(bytes, capacity, I64{8})
+                if (capacity != I64{0}) -> jet_rt_free_8(bytes, capacity)
                 bytes = next_bytes
                 capacity = grown
             }
@@ -52,7 +52,7 @@
     }
     fd_unlock(reader)
     if (failure < I64{0}) {
-        if (capacity != I64{0}) -> jet_rt_free(bytes, capacity, I64{8})
+        if (capacity != I64{0}) -> jet_rt_free_8(bytes, capacity)
         return compiler_fs_errno(HOST_IO_OP_READ, fd_word(reader, I64{24}), -failure, error)
     }
     if (capacity == I64{0}) {

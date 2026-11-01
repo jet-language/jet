@@ -120,7 +120,7 @@ fn rt_text_immortal(value: I64) -> Bool {
 
 fn rt_text_copy(ptr: I64, len: I64) -> I64 {
     header :: rt_text_header_alloc()
-    data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    data :: if (len == I64{0}) -> I64{1} else -> alloc_bytes(len)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
@@ -244,11 +244,11 @@ fn rt_text_reserve_extra(target: I64, old: I64, used: I64, extra: I64) -> I64 {
             return moved
         }
     }
-    data :: jet_rt_alloc(capacity, I64{1})
+    data :: alloc_bytes(capacity)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
     rt_text_bytes_copy(data, old, used)
     before :: jet_rt_session_status()
-    if (cap != I64{0}) -> jet_rt_free(old, cap, I64{1})
+    if (cap != I64{0}) -> free_bytes(old, cap)
     if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
         jet_rt_free(data, capacity, I64{1})
         return I64{0}
@@ -306,11 +306,11 @@ fn rt_text_push_scalar(target: I64, scalar: I64) {
         grown :: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> used + width
         capacity :: if (grown < I64{16}) -> I64{16} else -> grown
         old :: rt_text_data(target)
-        data :: jet_rt_alloc(capacity, I64{1})
+        data :: alloc_bytes(capacity)
         if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
         rt_text_bytes_copy(data, old, used)
         before :: jet_rt_session_status()
-        if (cap != I64{0}) { jet_rt_free(old, cap, I64{1}) }
+        if (cap != I64{0}) { free_bytes(old, cap) }
         if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
             jet_rt_free(data, capacity, I64{1})
             return
@@ -401,7 +401,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     }
     len :: left_len + right_len
     header :: rt_text_header_alloc()
-    data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    data :: if (len == I64{0}) -> I64{1} else -> alloc_bytes(len)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
@@ -473,7 +473,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     if !jet_rt_rc_release(wrapping(value - I64{8})) -> return
     cap :: rt_text_word(wrapping(value + I64{16}))
     before :: jet_rt_session_status()
-    if (cap != I64{0}) { jet_rt_free(rt_text_data(value), cap, I64{1}) }
+    if (cap != I64{0}) { free_bytes(rt_text_data(value), cap) }
     if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
     rt_text_header_free(value)
 }
@@ -825,7 +825,7 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
 
 fn rt_text_builder_with_capacity(cap: I64) -> I64 {
     header :: rt_text_header_alloc()
-    data :: if (cap == I64{0}) -> I64{1} else -> jet_rt_alloc(cap, I64{1})
+    data :: if (cap == I64{0}) -> I64{1} else -> alloc_bytes(cap)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
