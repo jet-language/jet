@@ -3856,6 +3856,123 @@ fn sema_stmt_check_optional_refinement(name: BindName, fallback: OrFallback, spa
     Val(TStmt.Let{local: checked_symbol_local(name.name, name.span, id, value.ty), let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
 }
 
+// One integer local whose interval a guard table narrows for the rest of the
+// block.
+struct SemaStmtBoundsRefinement {
+    name: String
+    name_span: Span
+    bounds: TIntegerBounds
+}
+
+// After `if i >= limit -> exit` with no `else`, the rest of the block runs
+// only where the test was false. A `::` or parameter integer whose
+// interval is already known keeps the part the false test allows:
+// `i >= n` leaves hi n-1, `i > n` leaves hi n, `i < n` leaves lo n,
+// `i <= n` leaves lo n+1, and `a || b` leaves both. `limit` is an integer
+// literal or `.len()` of a fixed-size list. Bounds are only tightened: a
+// name with no known interval gains none, so no index check becomes stricter.
+fn sema_stmt_exit_guard_bound_refinements(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> [SemaStmtBoundsRefinement] {
+    refinements := [SemaStmtBoundsRefinement]{}
+    if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) -> return refinements
+    if !sema_stmt_refutable_block_exits(arms[0].body) -> return refinements
+    sema_stmt_exit_guard_false_bounds(arms[0].cond, environment, scopes, &refinements)
+    refinements
+}
+
+fn sema_stmt_exit_guard_false_bounds(cond: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable, refinements: &[SemaStmtBoundsRefinement]) Never! {
+    if cond == {
+        .Paren(inner, _, _) -> sema_stmt_exit_guard_false_bounds(inner, environment, scopes, &refinements)
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Or {
+                sema_stmt_exit_guard_false_bounds(left, environment, scopes, &refinements)
+                sema_stmt_exit_guard_false_bounds(right, environment, scopes, &refinements)
+                return
+            }
+            if left == .Ident(name, name_span, _) {
+                limit :: sema_stmt_guard_limit(right, environment, scopes) ?? return
+                sema_stmt_note_false_bound(name, name_span, op, limit, scopes, &refinements)
+                return
+            }
+            if right == .Ident(name, name_span, _) {
+                limit :: sema_stmt_guard_limit(left, environment, scopes) ?? return
+                mirrored :: if op == {
+                    .Lt -> BinOp.Gt
+                    .Gt -> BinOp.Lt
+                    .Le -> BinOp.Ge
+                    .Ge -> BinOp.Le
+                    else -> op
+                }
+                sema_stmt_note_false_bound(name, name_span, mirrored, limit, scopes, &refinements)
+            }
+        }
+        else -> {}
+    }
+}
+
+// The constant a guard compares against: an integer literal, or `.len()` of a
+// name whose type is a fixed-size list.
+fn sema_stmt_guard_limit(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Int? {
+    if expr == {
+        .Paren(inner, _, _) -> return sema_stmt_guard_limit(inner, environment, scopes)
+        .Int(value, _, _, _, _) -> return Val(value)
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if method != "len" || args.len() != 0 -> return None
+            if receiver == .Ident(list_name, _, _) {
+                index :: sema_scope_resolve_index(scopes, list_name) ?? return None
+                if sema_scope_binding_type(environment, scopes, index) == .Val(.FixedList(_, length)) -> return measure_literal_value(length)
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn sema_stmt_note_false_bound(name: String, name_span: Span, op: BinOp, limit: Int, scopes: SemaScopeTable, refinements: &[SemaStmtBoundsRefinement]) Never! {
+    index :: sema_scope_resolve_index(scopes, name) ?? return
+    if scopes.bindings[index].mutable -> return
+    kind :: scopes.bindings[index].symbol.kind
+    if kind != SymbolKind.Local && kind != SymbolKind.Parameter -> return
+    known :: scopes.bindings[index].integer_bounds ?? return
+    position := -1
+    loop at in 0..<refinements.len() {
+        if refinements[at].name == name -> position = at
+    }
+    current :: if position >= 0 -> refinements[position].bounds else -> known
+    lo := current.lo
+    hi := current.hi
+    if op == {
+        .Ge -> { if limit - 1 < hi -> hi = limit - 1 }
+        .Gt -> { if limit < hi -> hi = limit }
+        .Lt -> { if limit > lo -> lo = limit }
+        .Le -> { if limit + 1 > lo -> lo = limit + 1 }
+        else -> return
+    }
+    // An empty interval means the rest of the block never runs; leave it alone.
+    if lo > hi -> return
+    narrowed :: TIntegerBounds{lo: lo, hi: hi}
+    if position >= 0 {
+        refinements[position].bounds = narrowed
+    } else {
+        &refinements.push(SemaStmtBoundsRefinement{name: name, name_span: name_span, bounds: narrowed})
+    }
+}
+
+// Rebinds the guarded name for the rest of the block with its narrowed
+// interval, the way sema_stmt_check_optional_refinement rebinds a payload.
+fn sema_stmt_check_bounds_refinement(refinement: SemaStmtBoundsRefinement, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    read :: Expr.Ident{name: refinement.name, span: refinement.name_span, id: AST_NODE_GENERATED}
+    value :: sema_check_expression(read, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    owner :: "{sema_scope_local_owner_key(scopes)}/bounds@{span.start}"
+    id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, refinement.name)
+    symbol :: Symbol{id: id, kind: SymbolKind.Local, name: refinement.name, module_name: environment.module_identity, owner: Val(owner), span: refinement.name_span, ty: Val(value.ty), visibility: 0}
+    sema_scope_refine_local(&scopes, symbol)
+    scopes.bindings[scopes.bindings.len() - 1].integer_bounds = Val(refinement.bounds)
+    sema_ownership_declare_binding(&state, symbol, false)
+    local := checked_symbol_local(refinement.name, refinement.name_span, id, value.ty)
+    local.integer_bounds = Val(refinement.bounds)
+    Val(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span})
+}
+
 // The `else` of a guard table holds the payload of every
 // stable `x == None` arm subject. Each refinement leads the block as
 // `x :: x ?? <no else arm>`, as the Rust frontend prepends the dead-end
@@ -6970,7 +7087,18 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         }
                         if {
                             !checked.complete -> complete = false
-                            else -> loop checked_statement in checked.value -> &output.push(checked_statement)
+                            else -> {
+                                loop checked_statement in checked.value -> &output.push(checked_statement)
+                                if index + 1 < statements.len() {
+                                    loop refinement in sema_stmt_exit_guard_bound_refinements(subject, arms, else_body, span, environment, scopes) {
+                                        refined :: sema_stmt_check_bounds_refinement(refinement, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                                        if refined == {
+                                            .Val(refined_statement) -> &output.push(refined_statement)
+                                            .None -> complete = false
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

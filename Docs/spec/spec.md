@@ -813,6 +813,17 @@ and `clear` on a fixed-size list are **E0964**. A literal index outside
 `0..N-1` is **E0965**. A proven `distinct Int(lo..hi)` or sized-integer
 interval may index without a runtime bounds check when `lo >= 0` and `hi < N`
 (D-TYPE2-REFINE1).
+An immutable integer name whose interval is known keeps, after a guard of the
+form `if i >= N -> return` (also `>`, `<`, `<=`, the mirrored forms and
+`a || b`, with an integer literal or a fixed-size list's `.len()` as the
+bound, and any exit: `return`, `break`, `next`, a diverging call), only the
+part of its interval that the guard lets through, for the rest of the block:
+
+```jet
+channel :: Int.from_u8(byte)
+if channel >= channels.len() -> return Err("bad channel")
+channels[channel] += U64{1}
+```
 Finally, `[T#N]` widens to `[T]`; the length fact is erased at that coercion.
 
 ## Closures and function values
