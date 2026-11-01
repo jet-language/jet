@@ -5682,7 +5682,13 @@ execution waits on sandbox/provenance proof. D-BUILDSCHED1=A: the scheduler is
 deterministic with automatic parallelism and named resource pools (`cpu`,
 `memory`, `linker`, `console`, `gpu`). D-BUILDQUERY1=A: graph inspection is
 `jet inspect graph`, `jet inspect query build`, and `jet inspect explain-build <target/file/action>`,
-with the LSP using the same graph/provenance model.
+with the LSP using the same graph/provenance model. D-EXPLAIN-NORECORD1=A
+(ratified 2026-11-01, #4893): `jet inspect explain-build` always lists the
+planned steps (kind, key, subject, inputs) and lists measured steps only when a
+build record exists. With no record it exits 0, prints `no build recorded for
+<program> yet; planned steps:` and the planned rows, and its JSON has
+`nodes: []` plus the always-present `planned` list; no time or reason is
+printed for a step that has not run. A record for another program keeps E2104.
 
 **D-FFI-BUILD1=A — explicit preview and acceptance activate imported builds**
 *(ratified 2026-09-05, #2933)*:

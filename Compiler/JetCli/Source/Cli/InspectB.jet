@@ -781,7 +781,7 @@ fn jet_cli_inspect_env_host(file: String, source: String, base_dir: String, colo
         .Ok(evaluated) -> evaluated
         .Err(error) -> {
             if json {
-                return jet_cli_inspect_env_output(jet_cli_reports_status_json("inspect.env", false, jet_cli_report_cwd(), file, source, [Diagnostic]{error.diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
+                return jet_cli_inspect_env_output(jet_cli_reports_status_json("inspect.env", false, jet_cli_report_base(file), file, source, [Diagnostic]{error.diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
             }
             return jet_cli_inspect_env_output("", diagnostic_render_all(file, source, [Diagnostic]{error.diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
         }

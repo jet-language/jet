@@ -42,7 +42,7 @@ use core.process as cli_process
         assert_eq(corrupt, absent)
         machine_error :: jet_cli_supply_sbom(project, [String]{}, false, true)
         expected_report :: diagnostic_from_registry("E1202", None, "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again")
-        assert_eq(machine_error.stdout, jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{expected_report}))
+        assert_eq(machine_error.stdout, jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{expected_report}))
         assert_eq(machine_error.stderr, "")
         assert_eq(machine_error.exit_code, JET_DRIVER_EXIT_USER_ERROR)
     }

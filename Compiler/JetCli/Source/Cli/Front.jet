@@ -303,7 +303,7 @@ fn jet_cli_done(stdout: String, stderr: String, exit_code: Int) -> JetCLIPlan Ne
 }
 
 fn jet_cli_diagnostics_output(file: String, source: String, report: Diagnostic, color: Bool, json: Bool, notice: String) -[FS, Env]> JetDriverVerbOutput Never! {
-    if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, [Diagnostic]{report}), stderr: notice, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, [Diagnostic]{report}), stderr: notice, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all(file, source, [Diagnostic]{report}, color)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 

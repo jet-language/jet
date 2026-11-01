@@ -1351,7 +1351,7 @@ fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [
     build_query :: job.action == "graph" || job.action == "query" || job.action == "explain-build"
     if job.json {
         action :: if build_query -> "diagnostics" else -> "inspect"
-        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json(action, false, jet_cli_report_cwd(), job.file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json(action, false, jet_cli_report_base(job.file), job.file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     stderr :: if build_query -> jet_driver_report_problems(job.file, source, errors, job.color, true) else -> diagnostic_render_all(job.file, source, errors, job.color)
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}

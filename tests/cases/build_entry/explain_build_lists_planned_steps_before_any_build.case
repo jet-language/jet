@@ -1,0 +1,35 @@
+# Before any build is recorded, explain-build still answers with the planned
+# steps the compiler knows (kind, key, subject, inputs) and exits 0. A step that
+# has not run carries no time and no reason; JSON keeps one document shape with
+# an empty `nodes` list and the `planned` list.
+fixture: fixtures/compiler-speed
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+step: jet inspect explain-build main.jet
+exit: 0
+stderr: empty
+stdout: lines = 4 # one header line and the check, compile and link rows
+stdout: ~ "no build recorded for main.jet yet; planned steps:\ncheck\t" # header, then the check row; node keys are compiler facts and are not pinned here
+stdout: ~ "\tmain.jet\tmain.jet\ncompile\t" # check row subject and input
+stdout: ~ "\tmain\tcheck:main.jet\nlink\t" # compile row subject and input
+stdout: ~ "\tmain\tcompile:main\n" # link row subject and input
+stdout: !~ "first-run" # no planned step is shown as if it ran
+stdout: !~ "0.000" # no planned step carries a time
+step: jet inspect explain-build main.jet --json
+env: JET_STORE_DIR={work}/store
+exit: 0
+json: stdout doc $.schema = "jet.explain-build/v1"
+json: stdout doc $.program = "main.jet"
+json: stdout doc $.nodes = []
+json: stdout doc $.planned #= 3
+json: stdout doc $.planned[0].kind = "check"
+json: stdout doc $.planned[0].subject = "main.jet"
+json: stdout doc $.planned[0].inputs[0] = "main.jet"
+json: stdout doc $.planned[1].kind = "compile"
+json: stdout doc $.planned[1].subject = "main"
+json: stdout doc $.planned[1].inputs[0] = "check:main.jet"
+json: stdout doc $.planned[2].kind = "link"
+json: stdout doc $.planned[2].subject = "main"
+json: stdout doc $.planned[2].inputs[0] = "compile:main"
+stdout: !~ "duration_ms" # planned steps have no time field
+stdout: !~ "why_ran" # planned steps have no reason field

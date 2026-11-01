@@ -78,7 +78,18 @@ fn sema_cli_entry_expand(program: &Program) {
     parsed :: parse_generated_source("{SEMA_CLI_ENTRY_IMPORTS}\n{entries.join("\n")}".bytes())
     if parsed.diagnostics.len() > 0 -> return
     loop declaration in parsed.program.imports -> &program.imports.push(declaration)
-    loop item in parsed.program.items -> &program.items.push(item)
+    loop item in parsed.program.items {
+        // `T.__jet_cli_decode` and `T.merge` are the compiler's: their spans
+        // index this fragment, not the user's file, so they are no journey
+        // site (JetIR ir_cli_generated_function).
+        if item == .Func(function) && function.external_type != None {
+            projection := function.copy()
+            projection.compiler_generated = true
+            &program.items.push(Item.Func{value: projection})
+            next
+        }
+        &program.items.push(item)
+    }
     loop name in parsed.program.used_import_names -> &program.used_import_names.push(name)
     // A wrapper added after loading uses these aliases.
     if later {

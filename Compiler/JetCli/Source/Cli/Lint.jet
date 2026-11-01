@@ -17,7 +17,7 @@ use jet_driver.[JetDriverIceRow, jet_driver_cost_query, jet_driver_ice_record, j
 use jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, checked_cost_operation, checked_cost_fix]
 
 fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, diagnostics) else -> jet_driver_report_problems(file, source, diagnostics, color, true)
+    rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, diagnostics) else -> jet_driver_report_problems(file, source, diagnostics, color, true)
     JetDriverVerbOutput{stdout: if json -> rendered else -> "", stderr: if json -> "" else -> rendered, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
@@ -37,7 +37,7 @@ fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) -> J
             }
             if lints.len() == 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: if json -> "" else -> "ok: `{file}` has no accessibility problems\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
             count :: lints.len()
-            stderr :: if json -> jet_cli_render_all_json(jet_cli_report_cwd(), file, source, lints) else -> "{diagnostic_render_all(file, source, lints, color)}\n{count} accessibility warning{if count == 1 -> "" else -> "s"} found\n"
+            stderr :: if json -> jet_cli_render_all_json(jet_cli_report_base(file), file, source, lints) else -> "{diagnostic_render_all(file, source, lints, color)}\n{count} accessibility warning{if count == 1 -> "" else -> "s"} found\n"
             jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR})
         }
     }
@@ -206,9 +206,9 @@ fn jet_cli_lint_cost(file: String, source: String, color: Bool, json: Bool) -> J
             if query.compile.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
             report :: query.report ?? jet_cli_finish(jet_cli_lint_cost_gap(file, query.gaps))
             lints :: jet_cli_cost_diagnostics(report, diagnostics)
-            if lints.len() == 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: if json -> jet_cli_render_all_json(jet_cli_report_cwd(), file, source, [Diagnostic]{}) else -> "ok: `{file}` has no hidden dynamic costs in loops\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+            if lints.len() == 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: if json -> jet_cli_render_all_json(jet_cli_report_base(file), file, source, [Diagnostic]{}) else -> "ok: `{file}` has no hidden dynamic costs in loops\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
             count :: lints.len()
-            stderr :: if json -> jet_cli_render_all_json(jet_cli_report_cwd(), file, source, lints) else -> "{diagnostic_render_all(file, source, lints, color)}\n{count} hidden dynamic cost warning{if count == 1 -> "" else -> "s"} found\n"
+            stderr :: if json -> jet_cli_render_all_json(jet_cli_report_base(file), file, source, lints) else -> "{diagnostic_render_all(file, source, lints, color)}\n{count} hidden dynamic cost warning{if count == 1 -> "" else -> "s"} found\n"
             jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR})
         }
     }

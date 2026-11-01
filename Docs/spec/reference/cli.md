@@ -838,7 +838,14 @@ inside loops. View-materialization lints remain sema-owned. Findings exit 1
 on stderr (diagnostic JSON Lines under `--json`); clean invocations exit 0.
 Bare `inspect explain-build <file>` selects the authorized invocation entry
 under its authenticated workspace root, then reads the authenticated last-run
-record. Missing records refuse; static node keys are not execution timings.
+record. It always reports the planned steps the compiler knows: the JSON
+document `jet.explain-build/v1` carries a `planned` list of `{kind, key,
+subject, inputs}` beside `nodes`, the recorded steps with `duration_ms` and
+`why_ran`. A program with no record exits 0 with `nodes: []`; the text form
+prints `no build recorded for <program> yet; planned steps:` and one
+`kind key subject inputs` row per planned step, with no time or reason. With a
+record the text form prints the recorded rows. A record for another program
+is refused with E2104.
 
 Checked build queries use the Driver's invocation-owned build scope and real
 build evaluator; the CLI does not reconstruct a graph from source spellings.

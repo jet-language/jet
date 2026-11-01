@@ -35,7 +35,7 @@ struct JetCLIPackageInput {
 fn jet_cli_dependency_cli_error(code: String, what: String, fix: String?, color: Bool, json: Bool) -[FS, Env]> JetCLIDependencyError Never! {
     shared :: jet_cli_diagnostic_copy(code)
     report :: diagnostic_from_registry(code, None, what, shared.why, fix ?? shared.fix)
-    if json -> return JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{report}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    if json -> return JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{report}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
 }
 fn jet_cli_dependency_source_error(path: String, raw: String, report: Diagnostic) -> JetCLIDependencyError Never! {
@@ -85,7 +85,7 @@ fn jet_cli_package_input_entry(root: String, color: Bool, json: Bool) -[FS, Env]
         .Refused(plan) -> {
             if plan == {
                 .Refused(report, plan_color, code, notice) -> {
-                    if json -> return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{report}), stderr: "{notices.join("")}{notice}", exit_code: code}})
+                    if json -> return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{report}), stderr: "{notices.join("")}{notice}", exit_code: code}})
                     return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: "{notices.join("")}{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, plan_color)}", exit_code: code}})
                 }
                 .Done(output) -> return Err(jet_cli_dependency_with_notice(JetCLIDependencyError{output: output}, notices.join("")))

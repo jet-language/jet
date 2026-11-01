@@ -192,13 +192,13 @@ fn jet_cli_gates_report(ledger: GateLedger, modules: [JetDriverSourceQueryModule
 fn jet_cli_gates_diagnostics(result: JetDriverGateQueryResult, snapshot: JetDriverAuthorizedSourceSnapshot, file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
     reports := [String]{}
     stderr := ""
-    cwd :: if json -> jet_cli_report_cwd() else -> None
+    base :: if json -> jet_cli_report_base(file) else -> None
     diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, [SourceFile]{})
     loop (index, diagnostic) in diagnostics {
         path :: if diagnostic.origin == .Val(origin) -> origin.display else -> file
         source :: if diagnostic.origin == .Val(origin) -> origin.source else -> jet_cli_gates_source(result.source.modules, path)
         if json {
-            loop report in jet_cli_reports_json(cwd, path, source, [Diagnostic]{diagnostic}) -> &reports.push(report)
+            loop report in jet_cli_reports_json(base, path, source, [Diagnostic]{diagnostic}) -> &reports.push(report)
         } else {
             if index > 0 -> stderr = "{stderr}\n"
             stderr = "{stderr}{diagnostic_render_all(path, source, [Diagnostic]{diagnostic}, color)}"

@@ -4990,11 +4990,11 @@ fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line
 
 // A returned `Err(...)` at `span` starts the journey at the span's line. Core
 // library code handing on an error it was given (`reraise`, ir_core_reraise)
-// is not where the failure starts: it only drops a journey an earlier,
-// handled failure left, and the failure joins the journey at the program's
-// `?`.
+// and a generated CLI projection's refusal (ir_cli_generated_function) are
+// not where the failure starts: they only drop a journey an earlier, handled
+// failure left, and the failure joins the journey at the program's `?`.
 fn ir_journey_origin(m: &IRModule, p: IRProgram, b: &IRBuilder, reraise: Bool, span: Span) Never! {
-    if reraise {
+    if reraise || ir_cli_generated_function(p, b) {
         _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
         return
     }
@@ -5016,7 +5016,7 @@ fn ir_journey_hop(m: &IRModule, p: IRProgram, b: &IRBuilder, site: IRTrySite, er
     if site.fresh {
         _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
     }
-    if !framed && (ir_core_function(b) || ir_cli_entry_function(b)) -> return error
+    if !framed && (ir_core_function(b) || ir_cli_generated_function(p, b)) -> return error
     values := ir_journey_site(&m, p, &b, site.file, site.line, site.function, span)
     if ir_failed(b) -> return -1
     note := -1
@@ -5051,13 +5051,17 @@ fn ir_core_function(b: IRBuilder) -> Bool Never! {
     b.f.key.starts_with("<corelib>/") || b.f.source_file.starts_with("<corelib>/")
 }
 
-// Whether the function being built is a generated typed-CLI entry
-// (`__jet_cli_run`, or `__jet_cli_run_<binding>` of an Executable Output; see
-// JetSema Registration/CliEntry.jet): its dispatch to the user's entry or
-// command hands the user's failure on unchanged, so, like Core, it is no
-// journey hop.
-fn ir_cli_entry_function(b: IRBuilder) -> Bool Never! {
-    b.f.key.ends_with("::__jet_cli_run") || b.f.key.contains("::__jet_cli_run_")
+// Whether the function being built is generated typed-CLI code: an entry
+// (`__jet_cli_run`, or `__jet_cli_run_<binding>` of an Executable Output), or
+// a `#CLI` struct's `T.__jet_cli_decode` / `T.merge` projection (see JetSema
+// Registration/CliEntry.jet). An entry's dispatch to the user's entry or
+// command hands the user's failure on unchanged, and a projection's refusal
+// starts at the program's `?` on its call: their spans index the generated
+// fragment, not the user's file, so, like Core, they are no journey hop.
+fn ir_cli_generated_function(p: IRProgram, b: IRBuilder) -> Bool Never! {
+    if b.f.key.ends_with("::__jet_cli_run") || b.f.key.contains("::__jet_cli_run_") -> return true
+    if b.row < 0 || !p.functions[b.row].synthetic -> return false
+    b.f.key.ends_with(":__jet_cli_decode") || b.f.key.ends_with(":merge")
 }
 
 // Whether `Err(error)` in the function being built is Core library code

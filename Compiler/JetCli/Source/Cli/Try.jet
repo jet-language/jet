@@ -317,7 +317,7 @@ fn jet_cli_try_output(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: S
     if failed {
         if json {
             fields :: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(false)), jet_cli_status_field("verdict", jet_cli_status_text("failed")), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
-            reports :: jet_cli_reports_json(jet_cli_report_cwd(), plan.entry, entry_source, verdict.diagnostics)
+            reports :: jet_cli_reports_json(jet_cli_report_base(plan.entry), plan.entry, entry_source, verdict.diagnostics)
             return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("try", false, reports, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
         return JetDriverVerbOutput{stdout: "", stderr: "try `{plan.name}`: verdict failed; rolled back\n{diagnostic_render_all(plan.entry, entry_source, verdict.diagnostics, false)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}

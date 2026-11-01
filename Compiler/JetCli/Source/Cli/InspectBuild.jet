@@ -61,7 +61,7 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     loop diagnostic in diagnostics {
         if verbose || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
     }
-    report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
+    report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
     return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 // `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
@@ -382,43 +382,76 @@ fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Floa
 }
 
 // Only authenticated producer evidence can supply timing/rebuild reasons.
-// Static node keys are not execution receipts (no synthetic first-run rows).
-fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Never! {
-    rows := [JetCLIStatusValue]{}
-    text := ""
-    loop node in record.nodes {
-        duration :: jet_cli_build_duration(node.duration_ms)
-        if json {
+// Planned nodes carry only what the compiler knows before a run (kind, key,
+// subject, inputs): a step that has not run gets no time and no reason, so no
+// row reads as a measured run. `nodes` is empty when no build was recorded.
+fn jet_cli_build_nodes_report(program: String, record: BuildRecord?, planned: [BuildGraphNode], json: Bool) -> String Never! {
+    recorded := [BuildNodeRecord]{}
+    measured := false
+    if record == {
+        .Val(value) -> {
+            recorded = value.nodes
+            measured = true
+        }
+        .None -> measured = false
+    }
+    if json {
+        rows := [JetCLIStatusValue]{}
+        loop node in recorded {
             &rows.push(jet_cli_status_object([
                 jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
                 jet_cli_status_field("key", jet_cli_status_text(node.key)),
                 jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
-                jet_cli_status_field("duration_ms", JetCLIStatusValue.Float{text: duration}),
+                jet_cli_status_field("duration_ms", JetCLIStatusValue.Float{text: jet_cli_build_duration(node.duration_ms)}),
                 jet_cli_status_field("why_ran", jet_cli_status_text(node.why_ran)),
                 jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
             ]))
-        } else { text += "{node.kind}\t{node.key}\t{node.subject}\t{duration}\t{node.why_ran}\t{node.inputs.join(",")}\n" }
-    }
-    if json {
+        }
+        planned_rows := [JetCLIStatusValue]{}
+        loop node in planned {
+            &planned_rows.push(jet_cli_status_object([
+                jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
+                jet_cli_status_field("key", jet_cli_status_text(node.key)),
+                jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
+                jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
+            ]))
+        }
         document :: jet_cli_status_object([
             jet_cli_status_field("schema", jet_cli_status_text("jet.explain-build/v1")),
-            jet_cli_status_field("program", jet_cli_status_text(record.program)),
+            jet_cli_status_field("program", jet_cli_status_text(program)),
             jet_cli_status_field("nodes", jet_cli_status_array(rows)),
+            jet_cli_status_field("planned", jet_cli_status_array(planned_rows)),
         ])
         return "{jet_cli_status_json(document)}\n"
+    }
+    if !measured {
+        text := "no build recorded for {program} yet; planned steps:\n"
+        loop node in planned {
+            text += "{node.kind}\t{node.key}\t{node.subject}\t{node.inputs.join(",")}\n"
+        }
+        return text
+    }
+    text := ""
+    loop node in recorded {
+        text += "{node.kind}\t{node.key}\t{node.subject}\t{jet_cli_build_duration(node.duration_ms)}\t{node.why_ran}\t{node.inputs.join(",")}\n"
     }
     text
 }
 
 // The store-owning host resolves the canonical program and supplies the
-// authenticated last record. Missing evidence follows the existing gap path;
-// the Rust static zero-duration/first-run fallback is not execution evidence.
+// authenticated last record, if any. With no record the command still answers
+// with the planned nodes; a record for another program means the store is
+// damaged and is refused with E2104.
 fn jet_cli_build_nodes_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(^owned_request, &scope)
     request := ^response.request
     query := ^response.query
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
-    retained :: record ?? return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", color, json, JET_DRIVER_EXIT_USER_ERROR))
-    if retained.program != program -> return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
-    return {stdout: jet_cli_build_nodes_report(retained, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if record == {
+        .Val(retained) -> {
+            if retained.program != program -> return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
+            return {stdout: jet_cli_build_nodes_report(program, Val(retained), query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+        .None -> return {stdout: jet_cli_build_nodes_report(program, None, query.nodes, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
 }

@@ -326,7 +326,10 @@ previous run: `green:key` (same check key), `red:source`,
 `red:dependency:<identity>`, `red:toolchain`, or `red:new`, with `+cutoff`
 when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
-owns node identity and dependencies, while the store owns run evidence.
+owns node identity and dependencies, while the store owns run evidence. A
+program with no recorded run still reports the planned nodes (kind, key,
+subject, inputs) under a header saying no build was recorded, and exits 0;
+a node that has not run carries no duration and no reason.
 
 ### The IR and IR Lint (middle end)
 
