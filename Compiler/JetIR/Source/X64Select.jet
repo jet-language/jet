@@ -3380,10 +3380,12 @@ fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
 }
 
 // An `#FFI(asm)` leaf (IRFunction.asm): the template's bytes in the
-// ordinary frame (the old selector's InlineAsm). Every argument (the
-// seventh from the caller's stack) is pushed in order before the template's
-// registers pop, so no binding overwrites an argument not yet read. The
-// template's registers are all caller-saved and it leaves rsp balanced.
+// ordinary frame (the old selector's InlineAsm). The template's registers are
+// all caller-saved and it leaves rsp balanced. Its operand registers are the
+// argument registers in order (ir_x64_asm_bound), so the first six arguments
+// are already bound and a seventh loads from the caller's stack. Any other
+// binding pushes every argument in order before the template's registers
+// pop, so no binding overwrites an argument not yet read.
 fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64FunctionResult Never! {
     code := [U8]{}
     cfi := [U8]{}
@@ -3396,18 +3398,23 @@ fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64Functio
     dwarf_cfa_advance(&cfi, cfa_at, code.len())
     dwarf_cfa_def_cfa_register(&cfi, x64_dwarf_register(X64_RBP))
     body :: code.len()
-    loop index in 0..<leaf.regs.len() {
-        if index < IR_X64_ARGUMENT_REGISTERS.len() {
-            x64_push(&code, IR_X64_ARGUMENT_REGISTERS[index])
-        } else {
-            x64_load(&code, X64_RAX, X64_RBP, 16 + 8 * (index - IR_X64_ARGUMENT_REGISTERS.len()))
-            x64_push(&code, X64_RAX)
+    stacked :: IR_X64_ARGUMENT_REGISTERS.len()
+    if ir_x64_asm_bound(leaf) {
+        loop index in stacked..<leaf.regs.len() -> x64_load(&code, leaf.regs[index], X64_RBP, 16 + 8 * (index - stacked))
+    } else {
+        loop index in 0..<leaf.regs.len() {
+            if index < stacked {
+                x64_push(&code, IR_X64_ARGUMENT_REGISTERS[index])
+            } else {
+                x64_load(&code, X64_RAX, X64_RBP, 16 + 8 * (index - stacked))
+                x64_push(&code, X64_RAX)
+            }
         }
-    }
-    operand := leaf.regs.len() - 1
-    loop operand >= 0 {
-        x64_pop(&code, leaf.regs[operand])
-        operand -= 1
+        operand := leaf.regs.len() - 1
+        loop operand >= 0 {
+            x64_pop(&code, leaf.regs[operand])
+            operand -= 1
+        }
     }
     loop byte in leaf.code -> &code.push(byte)
     if leaf.result > 0 -> x64_mov_rr(&code, X64_RAX, leaf.result)
@@ -3428,6 +3435,21 @@ fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64Functio
         variables: [X64DebugVariable]{},
         errors: [String]{},
     }
+}
+
+// Whether `leaf`'s operand registers are the argument registers in order,
+// any operand past them in a register that is no argument register.
+fn ir_x64_asm_bound(leaf: IRAsmLeaf) -> Bool Never! {
+    loop (index, reg) in leaf.regs {
+        if index < IR_X64_ARGUMENT_REGISTERS.len() {
+            if reg != IR_X64_ARGUMENT_REGISTERS[index] -> return false
+        } else {
+            loop argument in IR_X64_ARGUMENT_REGISTERS {
+                if reg == argument -> return false
+            }
+        }
+    }
+    true
 }
 
 // The line row for code starting at `at`: a new row when the line changes,
