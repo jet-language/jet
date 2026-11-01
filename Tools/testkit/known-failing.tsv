@@ -520,7 +520,7 @@ tests/cases/pure/store_record_generation.case	#5454	exit 2; expected 0 (#5694)
 tests/cases/marker_groups_modules/grouped_file_visibility_does_not_export_another_modules_private_member.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/marker_groups_modules/every_custom_member_expanded_at_one_span_keeps_its_target_and_signature.case	#5990	E0930 is not raised for an invalid group member argument (exit 0; expected 1)
 tests/cases/unit_family/physical_dimension_mismatch_is_rejected_in_sema.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
-tests/cases/unit_family/user_dimensions_compose_and_named_derived_units_share_the_structure.case	#6004	Error [E0003]: Expected `,` between generic parameters
+tests/cases/unit_family/user_dimensions_compose_and_named_derived_units_share_the_structure.case	#6004	the Quantity<Force, .Linear> bound now parses and holds for 1newton and the derived force; still E0112 `accept` wants `Newton` but the value is Time^-2 * Length * Mass (a derived quantity does not convert to the named derived unit), and E0433 on the discarded `keep(^named)` result
 tests/cases/unit_family/imported_public_units_keep_display_metadata_across_tiers.case	#4599	Error [E0626]: Dependency package `measurements` has errors
 tests/cases/unit_family/physical_value_cannot_compare_with_scalar.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/unit_family/exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator.case	#6004	Error [E0127]: This implicit unit conversion would round
@@ -530,7 +530,6 @@ tests/cases/unit_family/rounded_conversion_rejects_float_precision_loss_and_boun
 tests/cases/marker_groups_modules/local_group_expands_before_ordinary_applicability_and_argument_checks.case	#5990	E0930 is not raised for an invalid group member argument (exit 0; expected 1)
 tests/cases/unit_family/poundforce_uses_the_exact_defined_ratio_across_execution_tiers.case	#6004	Error [E2104]: The Jet backend can't build `main.jet` yet:\nrun [function:main.run]: expression UnitConvert at main.jet:25..72
 tests/cases/unit_family/symbolic_and_measured_standard_scales_keep_one_explicit_boundary.case	#6004	internal compiler error: semantic body rechecking did not return a complete resolved package graph
-tests/cases/unit_family/quantity_generic_bound_preserves_concrete_unit_and_kind.case	#6004	Error [E0003]: Expected `,` between generic parameters
 tests/cases/unit_family/exact_same_dimension_conversion_covers_arithmetic_arguments_and_bindings.case	#6004	Error [E0127]: This implicit unit conversion would round
 tests/cases/cli_parts_surface/every_moved_bare_action_is_e2101_in_human_and_json_modes.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/unit_family/scalar_unit_boundaries_and_nominal_currency_stay_rejected.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
@@ -540,7 +539,7 @@ tests/cases/marker_groups_modules/overlapping_groups_and_direct_members_share_th
 tests/cases/unit_family/qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fail.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/unit_family/imported_same_leaf_units_keep_distinct_dimensions.case	#4599	Error [E0626]: Dependency package `length` has errors
 tests/cases/unit_family/multi_word_member_pascal_cases.case	#6004	Error [E0107]: Nothing named `MPerS` exists here
-tests/cases/unit_family/user_dimensions_keep_interpreter_and_resident_jit_parity.case	#6004	Error [E0003]: Expected `,` between generic parameters
+tests/cases/unit_family/user_dimensions_keep_interpreter_and_resident_jit_parity.case	#6004	the Quantity<Force, .Linear> bound now parses and holds; still E0112 `accept` wants `Newton` but the value is Time^-2 * Length * Mass (a derived quantity does not convert to the named derived unit), and E0433 on the discarded `preserve(^force)` result
 tests/cases/unit_family/unit_scalar_rewrap_lint_requires_the_direct_policy_free_identity.case	#6004	Error [E0405]: `??` only works on a fallible value, not Meter
 tests/cases/unit_family/quantities_display_units_styles_and_explicit_overrides.case	#6004	Error [E0112]: `print` doesn't know how to show `Usd`
 tests/cases/marker_groups_modules/a_qualified_marker_with_a_builtin_prefix_does_not_apply_that_builtin.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
@@ -549,8 +548,6 @@ tests/cases/marker_groups_modules/groups_require_two_members_no_parameters_and_n
 tests/cases/unit_family/omitted_base_defaults_to_first_member.case	#6004	Error [E0405]: `??` only works on a fallible value, not Millimeter
 tests/cases/marker_groups_modules/nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed.case	#5454	internal compiler error: semantic declaration checking did not return a complete resolved package graph (q1)
 tests/cases/cli_parts_surface/group_help_and_man_inventory_every_nested_description.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
-tests/cases/unit_family/quantity_generic_bound_rejects_wrong_dimension_and_kind.case	#6004	expected output stream predicate not matched on HEAD (no replayable first error)
-tests/cases/fmt/fmt_preserves_quantity_dimension_kind_bound.case	#6004	Error [E0003]: Expected `,` between generic parameters
 tests/cases/fmt/layout_compiler_fact_rejects_unknown_and_user_owned_at_members.case	#6005	ok: `a.jet` has no problems
 tests/cases/fmt/fmt_layout_block_round_trips_byte_for_byte.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/fmt/fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table.case	#6005	elif/run.jet
@@ -1329,9 +1326,6 @@ tests/cases/http_client_law/unknown_length_upload_uses_h1_chunked_transfer_encod
 tests/cases/http_client_law/upload_streams_before_the_body_source_finishes.case	#3665	streaming upload body not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
 tests/cases/http_client_law/stale_pooled_safe_retries_and_opt_in_are_bounded.source-check.case	#5454	owner ruling q0z3918p: HTTPRequest timeouts take Duration (not built: they still take ms Int, E0112); the source also needs the Body cutover (`.body(Body)`, E0112, #4903) and `.retries(.None)` enum inference (E0330)
 tests/cases/compiler_api/an_unselected_runtime_named_build_cannot_use_the_compiler_api.case	#5454	expects E0956 for core.compiler in a runtime file's `fn build`; the sema gate admits any function named `build`, and `print` can't show CompilerLexed (E0112)
-tests/cases/control_and_data/discarded_result_handler_evaluates_subject_once_without_tail_unification.case	#5454	owner ruling q0z3918p: discarded handler arms Int vs Unit (E0108)
-tests/cases/control_and_data/result_handler_reuses_result_split_on_all_tiers.case	#5454	owner ruling q0z3918p: discarded handler arms Int vs Unit (E0108)
-tests/cases/control_and_data/parenthesized_discarded_if_matches_direct_form.case	#5454	owner ruling q0z3918p: discarded if arms Int vs Unit (E0124)
 tests/cases/corelib/json_decode_lenient_surfaces_coercions.case	#5454	owner ruling q0z3918p C (decoded map values are dynamic, matched with .Int(n)) not built: Dyn.Object carries a [(key: String, value: Dyn)] list, so `m["port"]` is a list index that needs Int (E0108)
 tests/cases/corelib/yaml_full_nested_decode_and_features.case	#5454	owner ruling q0z3918p C (decoded map values are dynamic, matched with .Array(xs)) not built: Dyn.Object carries a [(key: String, value: Dyn)] list, so `top["flowlist"]` is a list index that needs Int (E0108)
 tests/cases/comptime_sequence_parity/sequence_return_shapes_match_rustc_backed_aot.case	#5454	owner ruling q0z3918p F (a Float-annotated lambda makes `[1.5, 2.5]` Float) not built: E0113 Decimal vs Float; the variants also need comptime materializing of Iter values (E0956) and the ParseError conversion under try_collect (E2402)

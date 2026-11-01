@@ -1497,6 +1497,7 @@ fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, boun
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
     if generic_satisfied != None -> return generic_satisfied
+    if bound_name.starts_with("Quantity<") -> return Val(sema_registration_quantity_bound_satisfied(graph, actual_resolved, bound_name))
     // An exact number (a `3.5` literal is a Decimal) interpolates through its
     // Core Display, so it is Renderable even where core.math declares no row.
     if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") -> return Val(true)

@@ -2457,11 +2457,32 @@ fn parser_parse_trait_bounds(state: &JetParserState, list_context: String, close
     }
     loop {
         bound :: parser_expect_name(&state, single_context)
-        &bounds.push(parser_value(state, bound))
+        bound_name :: parser_value(state, bound)
+        if bound_name == "Quantity" && parser_current_kind(&state) == TOKEN_LT {
+            &bounds.push(parser_parse_quantity_bound(&state))
+        } else {
+            &bounds.push(bound_name)
+        }
         if parser_current_kind(&state) != TOKEN_PIPE -> break
         parser_bump(&state)
     }
     bounds
+}
+
+// `Quantity<Dimension, .Kind>` bounds a parameter to the quantities of one
+// dimension and kind. The dimension is any family name; the kind is the
+// closed set `.Linear`, `.Point`, `.Delta`. The bound is kept as its canonical
+// text, `Quantity<Length, .Linear>`.
+fn parser_parse_quantity_bound(state: &JetParserState) -> String {
+    parser_bump(&state)
+    dimension :: parser_expect_name(&state, "for the quantity dimension")
+    parser_expect(&state, TOKEN_COMMA, "`,` between the quantity dimension and kind")
+    parser_expect(&state, TOKEN_DOT, "`.` before the quantity kind")
+    kind_token :: parser_expect_name(&state, "for the quantity kind")
+    kind :: parser_value(state, kind_token)
+    if kind != "Linear" && kind != "Point" && kind != "Delta" -> parser_add_error(&state, kind_token.span, "`.{kind}` is not a quantity kind", "Quantity bounds distinguish linear values, affine points, and affine deltas", "Use `.Linear`, `.Point`, or `.Delta`")
+    if parser_type_close_here(&state) -> parser_take_type_close(&state) else -> parser_expect(&state, TOKEN_GT, "`>` after the quantity kind")
+    "Quantity<{parser_value(state, dimension)}, .{kind}>"
 }
 
 // The one parenthesized right-hand type allowed on an

@@ -860,7 +860,14 @@ fn sema_stmt_check_unit_branch(body: [Stmt], value_expr: Expr, bindings: [SemaCo
     result := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
     if result.complete {
         value_span :: expr_span(value_expr)
-        checked_value := sema_check_expression(value_expr, Val(Type.Named{name: "Unit"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // The arm's value is discarded like an expression statement's, so an
+        // arm may produce a value beside a Unit arm. A form that needs the
+        // surrounding type (`()`, a missing `else`, `.Case`, `None`, an
+        // inferred literal) still reads Unit.
+        discarded :: !sema_stmt_unit_arm_form(value_expr)
+        expected :: if discarded -> None else -> Val(Type.Named{name: "Unit"})
+        fact_start :: context.call_facts.len()
+        checked_value := sema_check_expression(value_expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if {
             checked_value == None -> result.complete = false
             else -> {
@@ -868,12 +875,35 @@ fn sema_stmt_check_unit_branch(body: [Stmt], value_expr: Expr, bindings: [SemaCo
                 // A `()` value statement does nothing.
                 unit := false
                 if value.kind == .Flat(index) -> unit = context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .Unit
-                if !unit -> &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
+                if {
+                    !discarded || sema_stmt_type_is_unit_success(value.ty) -> {
+                        if !unit -> &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
+                    }
+                    sema_stmt_type_is_fallible(value.ty) -> {
+                        &diagnostics.push(sema_error("E0402", value_span, "this call can fail and nothing checks it", "a fallible result can't be ignored — handle it or say failure is impossible", "use `?`, `??`, `panic ...`, or `.drop(\"reason\")` to intentionally discard"))
+                        result.complete = false
+                    }
+                    else -> {
+                        sema_must_use_check_statement(value_expr, value.ty, value_span, environment, program, scopes, &diagnostics)
+                        sema_stmt_mark_discarded_result(program, value, fact_start, &context)
+                        &result.value.push(TStmt.ExprStmt{value: value, span: value_span})
+                    }
+                }
             }
         }
     }
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     result
+}
+
+// An arm value that reads the arm's Unit type rather than producing a value
+// of its own: `()`, a missing `else`, or a form that needs the surrounding
+// type (sema_expr_wants_expected_form).
+fn sema_stmt_unit_arm_form(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Unit(_, _) | .NoElse(_, _) -> true
+        else -> sema_expr_wants_expected_form(expr)
+    }
 }
 
 fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
@@ -7748,6 +7778,8 @@ fn sema_stmt_check_unreachable_statement(statement: Stmt, index: Int, statements
 
 // sema_check_statements's expression statement. False when it is incomplete.
 fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    // A parenthesized `if` statement is the same statement as the bare one.
+    if expr == .Paren(inner, _, _) && sema_stmt_is_paren_if(inner) -> return sema_stmt_check_expression_statement(inner, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
     complete := true
     // `.drop("reason")` is the explicit-discard
     // terminal; it checks its receiver without propagation.
@@ -7842,6 +7874,15 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
         }
     }
     complete
+}
+
+// Whether `expr` is an `if`, under any number of parentheses.
+fn sema_stmt_is_paren_if(expr: Expr) -> Bool Never! {
+    if expr == {
+        .If(_, _, _, _, _, _, _) -> true
+        .Paren(inner, _, _) -> sema_stmt_is_paren_if(inner)
+        else -> false
+    }
 }
 
 // Rust CheckerCore `Stmt::ContextBlock` each field

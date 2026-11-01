@@ -291,6 +291,32 @@ fn sema_registration_unit_fact_for_type(graph: SemaRegistrationGraph, ty: Type) 
     None
 }
 
+// `Quantity<Dimension, .Kind>` (the parser's canonical bound text) holds for a
+// unit type of that family and kind, and for any quantity whose physical
+// dimension equals the dimension of a family named `Dimension` in that kind; a
+// derived quantity such as `kilogram * meter / s / s` is Linear.
+fn sema_registration_quantity_bound_satisfied(graph: SemaRegistrationGraph, actual: Type, bound: String) -> Bool Never! {
+    kind := "Linear"
+    dimension := Dimension?{None}
+    if actual == .Quantity(_, quantity_dimension) {
+        dimension = Val(quantity_dimension.copy())
+    } else {
+        fact :: sema_registration_unit_fact_for_type(graph, actual) ?? return false
+        kind = if fact.kind == {
+            .Linear -> "Linear"
+            .Point -> "Point"
+            .Delta -> "Delta"
+        }
+        if bound == "Quantity<{fact.family}, .{kind}>" -> return true
+        dimension = fact.dimension
+    }
+    if dimension == None -> return false
+    loop fact in graph.unit_facts {
+        if bound == "Quantity<{fact.family}, .{kind}>" && sema_expr_unit_dimensions_equal(fact.dimension, dimension) -> return true
+    }
+    false
+}
+
 fn sema_registration_unit_fact_is_builtin_time(fact: SemaRegistrationUnitFact) -> Bool Never! {
     fact.package == "core.units" && fact.family == "Time" && (fact.name == "Duration" || fact.name == "Instant")
 }
