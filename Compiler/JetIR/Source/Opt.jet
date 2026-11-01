@@ -11,16 +11,18 @@
 // callees bottom-up over the call graph (drop glue too, `glue`), simplifies
 // every function, turns the small boxes that never leave their function
 // into frame storage (`localbox`, OptLocalBox.jet; simplifying again when
-// one moved), replaces frame aggregates by their fields (`scalar`) and
-// simplifies again;
-// level 2 (`--release`) also replaces frame aggregates whose address is
-// only lent out (`promote`), copies counted loops behind a test of their
-// Int bound, and other Int loops and small loopless functions behind
-// IntBig guards (`version`, OptVersion.jet), runs each function through
-// SSA (Ssa.jet, SsaOut.jet) and, once every body is optimized, hands a
-// Loop that sums a List's Int elements, counts its elements equal to a
-// value, or stores one value into each, to an asm leaf (`reduce`,
-// OptReduce.jet) and gives a word slot a
+// one moved), replaces frame aggregates by their fields (`scalar`),
+// simplifies again, copies small counted loops behind a test of their Int
+// bound and other small Int loops behind IntBig guards, in the functions
+// that are not cold (`version`, OptVersion.jet; ir_opt_mark_cold), runs each
+// function through SSA (Ssa.jet, SsaOut.jet) and, once every body is
+// optimized, hands a Loop that sums a List's Int elements, counts its
+// elements equal to a value, or stores one value into each, to an asm leaf
+// (`reduce`, OptReduce.jet). Level 2 (`--release`) runs the same passes with
+// the larger inlining limits, also inlines callees called once (`once`,
+// OptInline.jet), also replaces frame aggregates whose address is only lent
+// out (`promote`), copies small loopless functions behind IntBig guards on
+// their parameters (the entry form of `version`) and gives a word slot a
 // Loop shares with the code around it a slot of its own in the Loop
 // (`split`, OptSplit.jet). Both levels fold polls into later ones before
 // Simplify and again at the end, then move stop points right after their
@@ -240,7 +242,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     // The call graph stays: a guarded call is still the same call.
     if options.inline == .Auto && ir_opt_enabled(options, "entry") -> ir_opt_entry(m, &functions, order.recursive, keys)
     sites :: ir_opt_call_sites(calls)
-    if level >= 2 -> ir_opt_mark_cold(&functions, calls)
+    if level >= 1 -> ir_opt_mark_cold(&functions, calls)
     total := 0
     loop weight in weights -> total += weight
     workers :: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
@@ -254,7 +256,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
         ir_opt_unrows(&functions, &bodies)
     }
     if level >= 2 && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") -> ir_opt_version_entries(m, &functions, options, entry_lint, &report)
-    if level >= 2 && ir_opt_enabled(options, "reduce") {
+    if level >= 1 && ir_opt_enabled(options, "reduce") {
         reduced :: ir_opt_reduce_module(&m, &functions, &report)
         if options.verify && reduced.len() > 0 {
             // The leaf is new: IR Lint reads its signature from the module,
@@ -563,9 +565,9 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 // One function's passes: uniqueness hoisting, then inlining its
 // callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
 // a glue call left is a Drop again), then the polls folded into the next
-// stop point, Simplify, scalar replacement, Simplify again, at level 2
-// the SSA round trip, the polls folded again and the stop points moved
-// after their calls, and last the address sums moved to their accesses.
+// stop point, Simplify, scalar replacement, Simplify again, the versioned
+// copies and the SSA round trip, the polls folded again and the stop points
+// moved after their calls, and last the address sums moved to their accesses.
 // Hoisting, glue, stops and sink match callees by `keys` (every function's key),
 // never by a body a wave may hold. With
 // `options.verify`, IR Lint (`lint`, Lint.jet) checks the body as the
@@ -606,16 +608,17 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
         if checking -> checking = ir_opt_lint(m, lint, out, "simplify", &report)
     }
     // Scalar replacement runs from O1 (an aggregate an inlined call returns
-    // lives in registers there too); its loans (`promote`) wait for O2.
+    // lives in registers there too); its loans (`promote`) wait for O2: the
+    // fields' trips to the storage around each loan grow the code.
     if level >= 1 && ir_opt_enabled(options, "scalar") {
         replaced :: ir_opt_scalar_replace(m, &out, level >= 2 && ir_opt_enabled(options, "promote"))
         report.aggregates_replaced += replaced
         if replaced > 0 -> ir_opt_simplify(m, &out, &report)
         if checking -> checking = ir_opt_lint(m, lint, out, "scalar", &report)
     }
-    if level >= 2 {
+    if level >= 1 {
         if !out.cold && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
-            _ := ir_opt_version_loops(m, &out, &report)
+            _ := ir_opt_version_loops(m, &out, if level >= 2 -> IR_VERSION_BODY else -> IR_VERSION_BODY_SMALL, &report)
             if checking -> checking = ir_opt_lint(m, lint, out, "version", &report)
         }
         // The SSA form is built only from a body IR Lint passed.
@@ -1288,7 +1291,7 @@ fn ir_opt_tarjan_visit(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     _ := ir_emit(&g, IROp.Return, -1, -1, -1, -1, 6)
     versioned := g.copy()
     notes := ir_opt_report(2)
-    assert_eq(ir_opt_version_loops(m, &versioned, &notes), 1)
+    assert_eq(ir_opt_version_loops(m, &versioned, IR_VERSION_BODY, &notes), 1)
     loops := 0
     loop op in versioned.op {
         if op == .Loop -> loops += 1

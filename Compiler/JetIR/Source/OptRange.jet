@@ -1,4 +1,4 @@
-// Integer ranges (O2, pass "range"), on a function's SSA form before it
+// Integer ranges (O1, O2, pass "range"), on a function's SSA form before it
 // leaves SSA: the range [lo, hi] of every Int and word value (a 64-bit word
 // by its signed bits), and from it the reads that can never meet a big
 // integer and the comparisons the ranges decide.
@@ -52,10 +52,10 @@
 // whose result may not be inline is marked IR_OVERFLOW_OPERANDS (X64Select
 // tests only the result), and one with a single operand proven inline
 // IR_OVERFLOW_LEFT or IR_OVERFLOW_RIGHT (X64Select skips that operand's
-// test). An IntBig of an inline Int is false. A FloorDiv
-// or Mod of a nonnegative dividend by a positive divisor, Int or word,
-// inline or not, is the Div or Rem. A comparison the ranges decide (an
-// Int's by whichever bounds it has, even one-sided), or the comparisons
+// test). An IntBig of an inline Int is false. A FloorDiv or Mod of a
+// nonnegative dividend by a positive divisor other than a constant 2^k, Int
+// or word, inline or not, is the Div or Rem. A comparison the ranges decide
+// (an Int's by whichever bounds it has, even one-sided), or the comparisons
 // dominating it decide (ir_range_implied), becomes its constant. Returns
 // the rewritten instructions; `f` and `s` stay one SSA form but for the
 // stop points gone (Opt.jet ir_opt_ssa then ranges the function once more).
@@ -887,9 +887,12 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
             b :: ir_range_at(f, s, r, right, block)
             // A nonnegative dividend's floored quotient and remainder by a
             // positive divisor are its truncated ones, big or not, word or
-            // not.
-            if a.known && b.known && a.lo >= 0 && b.lo > 0 && op == .FloorDiv -> f.op[at] = .Div
-            if a.known && b.known && a.lo >= 0 && b.lo > 0 && op == .Mod -> f.op[at] = .Rem
+            // not. By a constant 2^k the floored ones stay: a shift and a
+            // mask, where the truncated ones of a signed word adjust for a
+            // negative dividend (X64Select ir_x64_power_division).
+            truncates :: a.known && b.known && a.lo >= 0 && b.lo > 0 && !(b.lo == b.hi && b.lo.bit_and(b.lo - 1) == 0)
+            if truncates && op == .FloorDiv -> f.op[at] = .Div
+            if truncates && op == .Mod -> f.op[at] = .Rem
             if f.op[at] != op -> rewritten += 1
             // An Int by a positive divisor: nothing stops, and the result is
             // no larger than the dividend. (A word division keeps its
