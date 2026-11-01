@@ -96,12 +96,14 @@ fn trap_write_word_raw(word: I64, count: I64) {
     }
 }
 
+// An invalid allocation layout is a stop (E3001) and exits 70 like every
+// other (trap_footer): before jet_rt_main or a process exit has claimed a
+// status there is none to finish with (#6416).
 fn rt_trap_invalid_box_layout() {
     trap_root_prepare()
     jet_rt_stdout_flush()
     trap_invalid_layout_head()
-    trap_footer_e3001()
-    jet_rt_process_exit_finish()
+    trap_footer(I64{0})
 }
 
 fn trap_write_handle(handle: I64) {
