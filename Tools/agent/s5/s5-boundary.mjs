@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // S5 proof phase "boundary": the production compiler sources + each gate
 // fixture, run natively by this commit's shared hosted `jet`. The three
-// fixtures run concurrently; no Rust MIR interpreter is an oracle.
+// fixtures run concurrently; no Rust IR interpreter is an oracle.
 import fs from 'node:fs';
 import path from 'node:path';
 import {phase} from './s5-lib.mjs';

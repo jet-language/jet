@@ -5,7 +5,7 @@ use core.crypto.vault as vault
 fn run() -[Secret, IO]> {
     key :: crypto.SigningKey.new_random() ?? return
     plan :: vault.prepare_store<crypto.SigningKey>("__core_conformance_store", ^key) ?? return
-    write :: vault.authorize_write(&plan, "fixed store authorization") ?? return
+    write :: vault.authorize_write(plan, "fixed store authorization") ?? return
     result :: vault.commit_store(^write, ^plan) ?? return
     print(result)
 }

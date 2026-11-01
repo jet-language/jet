@@ -14,21 +14,20 @@ fn s5_trust_gate_diagnostics(error: PackageGateError) {
     assert(found)
 }
 
+fn s5_trust_gate_refuses(result: Bool PackageGateError!) {
+    if result == {
+        .Err(error) -> s5_trust_gate_diagnostics(error)
+        .Ok(_) -> panic("trust writer must refuse")
+    }
+}
+
 #Test("trust writers refuse before touching the store") {
     root :: trust_test_gate_dir("s5-gate-law")
     files.write(files.join(root, "package.jet"), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ trust_grant: .Forbid }}\n") ?? panic("original package policy")
     store :: files.join(root, "trust")
     grant :: trust_parse_grant_selector("build:audited", "repo") ?? panic("original grant selector")
-    results :: [
-        trust_add_grant(store, root, grant),
-        trust_grant_hash(store, root, "audited"),
-        trust_add_pattern(store, root, "/reviewed/*")
-    ]
-    loop result in results {
-        if result == {
-            .Err(error) -> s5_trust_gate_diagnostics(error)
-            .Ok(_) -> panic("trust writer must refuse")
-        }
-    }
+    s5_trust_gate_refuses(trust_add_grant(store, root, grant))
+    s5_trust_gate_refuses(trust_grant_hash(store, root, "audited"))
+    s5_trust_gate_refuses(trust_add_pattern(store, root, "/reviewed/*"))
     assert(!files.exists(store))
 }

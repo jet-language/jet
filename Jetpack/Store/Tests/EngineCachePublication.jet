@@ -48,11 +48,15 @@ fn engine_cache_clear_negative(mirror: String) {
     assert_eq(verified.receipt_version, Val(1))
     assert(verified.receipt_expires_unix != None)
     assert(verified.signed_fingerprint != "")
-    report_json :: verified.json("verify")
+    report_json :: verified.json("verify") ?? panic("verify report")
     fields :: [String]{"\"operation\":\"verify\"", "\"signed_fingerprint\":", "\"builder\":", "\"provenance\":", "\"witness\":", "\"receipt_version\":1", "\"receipt_expires_unix\":"}
     loop field in fields -> assert(report_json.contains(field))
-    explanation :: (store_explain_package(roots, entry.id, ExplainLens.Rebuild) ?? panic("explain")) ?? panic("published explanation")
-    explanation_json :: explanation.to_json()
+    explanation :: if store_explain_package(&verification, roots, entry.id, ExplainLens.Rebuild) == {
+        .Val(found) -> found
+        .None -> panic("published explanation")
+        .Err(_) -> panic("explain")
+    }
+    explanation_json :: explanation.to_json() ?? panic("explanation json")
     explanation_fields :: [String]{"\"cache_admissions\":", "\"decision\":\"accepted\"", "\"receipt_version\":1", "\"receipt_expires_unix\":", published.builder, "\"decision\":\"rebuild-required\"", "producer record lacks the shared provider-facts carrier"}
     loop field in explanation_fields -> assert(explanation_json.contains(field))
     assert(explanation.text().contains("cache-trust public accepted"))
@@ -74,8 +78,12 @@ fn engine_cache_clear_negative(mirror: String) {
     files.remove(info) ?? panic("remove info")
     nar_partial :: files.join(mirror, "nar/{entry.envelope.output_hash}.partial")
     info_partial :: files.join(mirror, "{entry.envelope.output_hash}-{entry.id}.partial")
-    files.write_bytes(nar_partial, nar_bytes[0..<nar_bytes.len().max(2) /% 2]) ?? panic("nar partial")
-    files.write_bytes(info_partial, info_bytes[0..<info_bytes.len().max(2) /% 2]) ?? panic("info partial")
+    nar_cut := 1
+    if nar_bytes.len() > 2 -> nar_cut = nar_bytes.len() /% 2
+    info_cut := 1
+    if info_bytes.len() > 2 -> info_cut = info_bytes.len() /% 2
+    files.write_bytes(nar_partial, nar_bytes[0..<nar_cut]) ?? panic("nar partial")
+    files.write_bytes(info_partial, info_bytes[0..<info_cut]) ?? panic("info partial")
     store_publish_cache_entry(&verification, roots, entry.id, "public") ?? panic("republish")
     assert_eq(files.read_bytes(nar) ?? panic("republished nar"), nar_bytes)
     assert_eq(files.read_bytes(info) ?? panic("republished info"), info_bytes)
@@ -131,7 +139,11 @@ fn engine_cache_clear_negative(mirror: String) {
     assert(revoked.contains("revoked"))
     assert(revoked.contains("rebuild"))
     engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "revoked-rejected/out"))
-    revoked_explanation :: ((store_explain_package(roots, entry.id, ExplainLens.Rebuild) ?? panic("revoked explain")) ?? panic("revoked explanation")).to_json()
+    revoked_explanation :: if store_explain_package(&verification, roots, entry.id, ExplainLens.Rebuild) == {
+        .Val(found) -> found.to_json() ?? panic("revoked explanation json")
+        .None -> panic("revoked explanation")
+        .Err(_) -> panic("revoked explain")
+    }
     assert(revoked_explanation.contains("\"decision\":\"denied\""))
     assert(revoked_explanation.contains("cache builder is revoked"))
     store_make_tree_writable_for_removal(root).drop("cleanup")
@@ -184,10 +196,15 @@ fn engine_cache_clear_negative(mirror: String) {
 #Test("package_explain_matches_failed_provider_reference_target") {
     root :: files.tmpdir("engine-explain-failed-") ?? panic("root")
     roots :: HangarRoots{root, dev_mode: false}
-    attempt := BuildAttempt.new("left-pad", "left-pad#version=2.0.17@npm", "npm", "sha256-recipe", "sha256-source")
+    verification := StoreVerification.new()
+    attempt := BuildAttempt.new("left-pad", "left-pad@npm#version=2.0.17", "npm", "sha256-recipe", "sha256-source")
     &attempt.push_step(StepLog{index: 1, total: 1, name: "fetch", command: "fetch left-pad", cwd: root, status: "failed", stdout: "", stderr: "network unavailable"})
-    attempt.persist(roots.hangar_dir()) ?? panic("persist")
-    explanation :: (store_explain_package(roots, "left-pad#version=2.0.17@npm", ExplainLens.Rebuild) ?? panic("explain")) ?? panic("failed provider explanation")
+    &attempt.persist(roots.hangar_dir()) ?? panic("persist")
+    explanation :: if store_explain_package(&verification, roots, "left-pad@npm#version=2.0.17", ExplainLens.Rebuild) == {
+        .Val(found) -> found
+        .None -> panic("failed provider explanation")
+        .Err(_) -> panic("explain")
+    }
     assert(explanation.entry == None)
     assert_eq(explanation.rebuild.decision, "rebuild-required")
     assert_eq((explanation.rebuild.attempt ?? panic("attempt")).package, "left-pad")

@@ -71,7 +71,6 @@ fn pkg_workspace_lock_load_checked_file(cache: &WorkspaceDeclarationCache, resol
             resolver.revalidate_source(present) ?? return None
             checked :: resolver.checked_package(member.path) ?? return None
             resolver.revalidate_member(checked.member) ?? return None
-            &checked_members.push(checked.member)
             physical_path :: checked.member.directory.path
             canonical_relative :: resolver.relative_identity(checked.member.directory) ?? return None
             if canonical_relative != member.canonical_path -> return None
@@ -81,6 +80,7 @@ fn pkg_workspace_lock_load_checked_file(cache: &WorkspaceDeclarationCache, resol
             if physical_paths.contains(physical_path) || names.contains(member.name) -> return None
             &physical_paths.push(physical_path)
             &names.push(member.name)
+            &checked_members.push(^checked.member)
             resolver.revalidate_source(present) ?? return None
         }
         loop checked_member in checked_members {

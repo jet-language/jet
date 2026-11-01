@@ -336,7 +336,7 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
             loop stmt in function.body {
                 if stmt == .Val(binding) {
                     binding.init == .CallValue(callee, _, _, _) ?? panic("expected collecting loop call, got {binding.init:Debug}")
-                    callee == .Lambda(lambda) ?? panic("expected collecting loop lambda, got {callee:Debug}")
+                    callee == .Lambda(lambda, _) ?? panic("expected collecting loop lambda, got {callee:Debug}")
                     lambda.body == .Block(body) ?? panic("expected collecting loop block")
                     assert(!body.is_empty(), "expected one source loop, got {body:Debug}")
                     body[0] == .For(_, _, _, kind, _, _, _, _, _) ?? panic("expected one source loop, got {body:Debug}")

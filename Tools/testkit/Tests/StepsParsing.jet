@@ -106,6 +106,33 @@ fn kit_test_steps_env() -> KitEnv {
     files.remove_all(root) ?? panic("remove artifact scratch")
 }
 
+#Test("a bare package build names its artifact for the run output's entry file") {
+    root :: kit_test_core_scratch("manifest-entry")
+    kit_exec_write(files.join(root, "selected/package.jet"), "name: \"selected\"\noutputs: {{\n    tool: .Executable{{ entry: helper.go }},\n    release: .Executable{{\n        entry: main.launch // the run output\n    }}\n}}\ndefaults: {{\n    run: release\n}}\n")
+    kit_exec_write(files.join(root, "single/package.jet"), "name: \"single\"\noutputs: {{ app: Executable{{ entry: cli.run }} }}\n")
+    kit_exec_write(files.join(root, "none/package.jet"), "name: \"none\"\nversion: \"0.1.0\"\n")
+    assert_eq(kit_steps_manifest_entry_stem(files.join(root, "selected")), Val("main"))
+    assert_eq(kit_steps_manifest_entry_stem(files.join(root, "single")), Val("cli"))
+    assert_eq(kit_steps_manifest_entry_stem(files.join(root, "none")), None)
+    assert_eq(kit_steps_build_entry(kit_steps_parse("step: jet build\n").steps[0]), "")
+    assert_eq(kit_steps_build_entry(kit_steps_parse("step: jet build --profile release app.jet\n").steps[0]), "app.jet")
+    files.remove_all(root) ?? panic("remove manifest scratch")
+}
+
+#Test("a web build's artifact is app.js whichever way the target is written") {
+    assert(kit_steps_web_build(kit_steps_parse("step: jet build --target web main.jet\n").steps[0]))
+    assert(kit_steps_web_build(kit_steps_parse("step: jet build --target=web main.jet\n").steps[0]))
+    assert(!kit_steps_web_build(kit_steps_parse("step: jet build main.jet\n").steps[0]))
+    assert(!kit_steps_web_build(kit_steps_parse("step: jet build --target linux main.jet\n").steps[0]))
+}
+
+#Test("a build help request expects no artifact") {
+    assert(kit_steps_help_request(kit_steps_parse("step: jet build --help\n").steps[0]))
+    assert(kit_steps_help_request(kit_steps_parse("step: jet build -h\n").steps[0]))
+    assert(!kit_steps_help_request(kit_steps_parse("step: jet build main.jet\n").steps[0]))
+    assert(!kit_steps_help_request(kit_steps_parse("step: jet build main.jet -- --help\n").steps[0]))
+}
+
 #Test("default step hooks resolve built after an explicit successful CLI build") {
     root :: kit_test_core_scratch("steps-built")
     kit_exec_write(files.join(root, "hello.jet"), "fn run() {{ print(\"hello\") }}\n")

@@ -492,13 +492,9 @@ fn recipe_update_text(value: Dyn, label: String) -> String RecipeError! {
 }
 
 fn recipe_update_integer(value: Dyn, label: String) -> Int RecipeError! {
-    if value == {
-        .Int(number) -> {
-            if number < 0 -> return Err(RecipeError.Update("{label} must be a non-negative integer"))
-            Ok(number)
-        }
-        else -> Err(RecipeError.Update("{label} must be an integer"))
-    }
+    number :: foundation_json_integer(value) ?? return Err(RecipeError.Update("{label} must be an integer"))
+    if number < 0 -> return Err(RecipeError.Update("{label} must be a non-negative integer"))
+    Ok(number)
 }
 
 // A channel, platform or target: ASCII alphanumerics and `._+-`, never `.`/`..`.

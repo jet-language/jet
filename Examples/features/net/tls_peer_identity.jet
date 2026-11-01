@@ -11,9 +11,9 @@ use core.net as net
 use core.net.tls as tls
 
 fn run() {
-    ca :: files.read("tests/fixtures/tls/smtp.ca.cert.pem") ?? panic("CA fixture")
-    cert :: files.read("tests/fixtures/tls/smtp.server.cert.pem") ?? panic("server certificate fixture")
-    key :: files.read("tests/fixtures/tls/smtp.server.key.pem") ?? panic("server key fixture")
+    ca :: files.read("fixtures/tls/custom-root.ca.cert.pem") ?? panic("CA fixture")
+    cert :: files.read("fixtures/tls/custom-root.server.cert.pem") ?? panic("server certificate fixture")
+    key :: files.read("fixtures/tls/custom-root.server.key.pem") ?? panic("server key fixture")
     roots :: tls.RootCertificates.from_pem(ca.bytes()) ?? panic("validate CA")
     config :: tls.ClientConfig.default()
         .with_trust(.CustomOnly(roots)) ?? panic("trust policy")

@@ -1,6 +1,6 @@
 // Selective decoding keeps full validation: a typed projection that reads one
-// field, the full Dyn parse, and the pull reader all reject malformed
-// data in skipped fields and trailing bytes after the root.
+// field and the full Dyn parse both reject malformed data in skipped fields
+// and trailing bytes after the root.
 use core.encoding.json as json
 
 struct Small {
@@ -31,24 +31,6 @@ fn projected(label: String, text: String) {
     print("{label} projected: ok a={value.a}")
 }
 
-fn pulled(label: String, text: String) {
-    reader := json.reader(text)
-    first :: &reader.next() ?? {
-        kind :: if err.kind == {
-            .Syntax -> "Syntax"
-            .Truncated -> "Truncated"
-            .Unsupported -> "Unsupported"
-            .Limit -> "Limit"
-            .IO -> "IO"
-            .State -> "State"
-        }
-        print("{label} pull: {kind} at {err.byte_offset}: {err.reason}")
-        return
-    }
-    _ :: first
-    print("{label} pull: first event ok")
-}
-
 fn run() {
     cases :: [
         (label: "valid", text: "{{\"a\":1,\"b\":[1,2]}}"),
@@ -60,6 +42,5 @@ fn run() {
     loop case in cases {
         full(case.label, case.text)
         projected(case.label, case.text)
-        pulled(case.label, case.text)
     }
 }

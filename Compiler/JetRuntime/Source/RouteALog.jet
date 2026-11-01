@@ -28,26 +28,26 @@ log_state_key := I64{0}
 fn rt_log_state_drop_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
-// runtime-init: 3
+// runtime-init: 3 when log_state_key
 #Export(c) fn jet_rt_log_state_init() {
     if (log_state_key != I64{0}) -> return
     closure :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
-    rt_text_store(closure + I64{8}, rt_log_state_drop_address())
-    rt_text_store(closure + I64{16}, I64{0})
+    rt_text_store(wrapping(closure + I64{8}), rt_log_state_drop_address())
+    rt_text_store(wrapping(closure + I64{16}), I64{0})
     log_state_key = jet_rt_tls_key_new(closure)
 }
 #Export(c) fn jet_rt_log_state_drop(_closure: I64, state: I64) -> I64 {
-    log_text_drop(rt_text_word(state + LOG_STATE_SINK))
-    log_text_drop(rt_text_word(state + LOG_STATE_TRACE))
-    spans :: rt_text_word(state + LOG_STATE_SPANS)
-    count :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    log_text_drop(rt_text_word(wrapping(state + LOG_STATE_SINK)))
+    log_text_drop(rt_text_word(wrapping(state + LOG_STATE_TRACE)))
+    spans :: rt_text_word(wrapping(state + LOG_STATE_SPANS))
+    count :: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
     at := I64{0}
     loop at < count {
-        jet_rt_string_drop(rt_text_word(spans + at * I64{16} + I64{8}))
+        jet_rt_string_drop(rt_text_word(wrapping(wrapping(spans + at * I64{16}) + I64{8})))
         at += I64{1}
     }
-    capacity :: rt_text_word(state + LOG_STATE_SPANS_CAP)
+    capacity :: rt_text_word(wrapping(state + LOG_STATE_SPANS_CAP))
     if (capacity != I64{0}) -> jet_rt_free(spans, capacity * I64{16}, I64{8})
     jet_rt_free(state, LOG_STATE_BYTES, I64{8})
     I64{0}
@@ -63,8 +63,8 @@ fn log_state() -> I64 {
     if (state != I64{0}) -> return state
     fresh :: jet_rt_alloc(LOG_STATE_BYTES, I64{8})
     thread_zero(fresh, LOG_STATE_BYTES)
-    rt_text_store(fresh + LOG_STATE_SAMPLE_EVERY, I64{1})
-    rt_text_store(fresh + LOG_STATE_NEXT_SPAN, I64{1})
+    rt_text_store(wrapping(fresh + LOG_STATE_SAMPLE_EVERY), I64{1})
+    rt_text_store(wrapping(fresh + LOG_STATE_NEXT_SPAN), I64{1})
     jet_rt_tls_set(log_state_key, fresh)
     fresh
 }
@@ -75,35 +75,35 @@ fn log_text_cell_store(cell: I64, value: I64) {
     rt_text_store(cell, if (rt_text_len(value) == I64{0}) -> I64{0} else -> jet_rt_string_clone(value))
 }
 
-#Export(c) fn jet_log_level_load() -> I64 { jet_int_owned_from_i64(rt_text_word(log_state() + LOG_STATE_LEVEL)) }
+#Export(c) fn jet_log_level_load() -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(log_state() + LOG_STATE_LEVEL))) }
 #Export(c) fn jet_log_level_store(value: I64) {
     native :: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    rt_text_store(log_state() + LOG_STATE_LEVEL, native)
+    rt_text_store(wrapping(log_state() + LOG_STATE_LEVEL), native)
 }
-#Export(c) fn jet_log_disabled_load() -> Bool { rt_text_word(log_state() + LOG_STATE_DISABLED) != I64{0} }
+#Export(c) fn jet_log_disabled_load() -> Bool { rt_text_word(wrapping(log_state() + LOG_STATE_DISABLED)) != I64{0} }
 #Export(c) fn jet_log_disabled_store(value: Bool) {
-    rt_text_store(log_state() + LOG_STATE_DISABLED, if value -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(log_state() + LOG_STATE_DISABLED), if value -> I64{1} else -> I64{0})
 }
 // Log.rs:67: the cell is a u8 (`value as u8`).
 #Export(c) fn jet_log_format_store(value: I64) {
     native :: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    rt_text_store(log_state() + LOG_STATE_FORMAT, native.bit_and(I64{255}))
+    rt_text_store(wrapping(log_state() + LOG_STATE_FORMAT), native.bit_and(I64{255}))
 }
-#Export(c) fn jet_log_sink_store(value: I64) { log_text_cell_store(log_state() + LOG_STATE_SINK, value) }
+#Export(c) fn jet_log_sink_store(value: I64) { log_text_cell_store(wrapping(log_state() + LOG_STATE_SINK), value) }
 #Export(c) fn jet_log_sample_store(value: I64) {
     native :: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    rt_text_store(log_state() + LOG_STATE_SAMPLE_EVERY, native)
+    rt_text_store(wrapping(log_state() + LOG_STATE_SAMPLE_EVERY), native)
 }
 #Export(c) fn jet_log_sample_count_store(value: I64) {
     native :: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    rt_text_store(log_state() + LOG_STATE_SAMPLE_COUNT, native)
+    rt_text_store(wrapping(log_state() + LOG_STATE_SAMPLE_COUNT), native)
 }
 // LogState.rs:11.
-#Export(c) fn jet_ring_log_set_trace_id(id: I64) { log_text_cell_store(log_state() + LOG_STATE_TRACE, id) }
+#Export(c) fn jet_ring_log_set_trace_id(id: I64) { log_text_cell_store(wrapping(log_state() + LOG_STATE_TRACE), id) }
 
 // std::process::exit(code as i32): rt::cleanup flushes stdout, then exit.
 #Export(c) fn jet_log_process_exit(code: I64) {
@@ -127,7 +127,7 @@ fn log_sink_open(path: I64) -> I64 {
     data :: rt_text_data(path)
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(data + at) == I64{0}) -> return I64{-22}
+        if (rt_text_byte(wrapping(data + at)) == I64{0}) -> return I64{-22}
         at += I64{1}
     }
     name :: fd_c_path(path)
@@ -141,7 +141,7 @@ fn log_sink_open(path: I64) -> I64 {
 // Log.rs:80: flush stderr, then open (creating) and flush the file sink.
 #Export(c) fn jet_ring_log_flush() {
     _ := host_stdio_flush_failure(true)
-    path :: rt_text_word(log_state() + LOG_STATE_SINK)
+    path :: rt_text_word(wrapping(log_state() + LOG_STATE_SINK))
     if (path == I64{0}) -> return
     fd :: log_sink_open(path)
     if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
@@ -150,8 +150,8 @@ fn log_sink_open(path: I64) -> I64 {
 // CoreSlice7LogRaw.rs:5 / Log.rs:153: the thread's next span id, then +1.
 #Export(c) fn jet_log_span_allocate_raw(name: I64, item0: I64, item1: I64) {
     state :: log_state()
-    id :: rt_text_word(state + LOG_STATE_NEXT_SPAN)
-    rt_text_store(state + LOG_STATE_NEXT_SPAN, wrapping(id + I64{1}))
+    id :: rt_text_word(wrapping(state + LOG_STATE_NEXT_SPAN))
+    rt_text_store(wrapping(state + LOG_STATE_NEXT_SPAN), wrapping(id + I64{1}))
     rt_text_store(item0, jet_int_owned_from_i64(id))
     rt_text_store(item1, jet_rt_string_clone(name))
 }
@@ -159,37 +159,37 @@ fn log_sink_open(path: I64) -> I64 {
 // Log.rs:165: push a clone of the span on the thread's active stack.
 #Export(c) fn jet_ring_log_enter(span: I64) {
     state :: log_state()
-    length :: rt_text_word(state + LOG_STATE_SPANS_LEN)
-    capacity :: rt_text_word(state + LOG_STATE_SPANS_CAP)
+    length :: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
+    capacity :: rt_text_word(wrapping(state + LOG_STATE_SPANS_CAP))
     if (length == capacity) {
         grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         data :: jet_rt_alloc(grown * I64{16}, I64{8})
-        old :: rt_text_word(state + LOG_STATE_SPANS)
+        old :: rt_text_word(wrapping(state + LOG_STATE_SPANS))
         coll_copy(old, data, length * I64{16})
         if (capacity != I64{0}) -> jet_rt_free(old, capacity * I64{16}, I64{8})
-        rt_text_store(state + LOG_STATE_SPANS, data)
-        rt_text_store(state + LOG_STATE_SPANS_CAP, grown)
+        rt_text_store(wrapping(state + LOG_STATE_SPANS), data)
+        rt_text_store(wrapping(state + LOG_STATE_SPANS_CAP), grown)
     }
-    slot :: rt_text_word(state + LOG_STATE_SPANS) + length * I64{16}
-    rt_text_store(slot, data_tree_word(span + LOG_SPAN_ID))
-    rt_text_store(slot + I64{8}, jet_rt_string_clone(data_tree_word(span + LOG_SPAN_NAME)))
-    rt_text_store(state + LOG_STATE_SPANS_LEN, length + I64{1})
+    slot :: wrapping(rt_text_word(wrapping(state + LOG_STATE_SPANS)) + length * I64{16})
+    rt_text_store(slot, data_tree_word(wrapping(span + LOG_SPAN_ID)))
+    rt_text_store(wrapping(slot + I64{8}), jet_rt_string_clone(data_tree_word(wrapping(span + LOG_SPAN_NAME))))
+    rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length + I64{1})
 }
 
 // Log.rs:190: remove the last active span with this id (rposition), if any.
 #Export(c) fn jet_ring_log_close(span: I64) {
     state :: log_state()
-    id :: data_tree_word(span + LOG_SPAN_ID)
-    spans :: rt_text_word(state + LOG_STATE_SPANS)
-    length :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    id :: data_tree_word(wrapping(span + LOG_SPAN_ID))
+    spans :: rt_text_word(wrapping(state + LOG_STATE_SPANS))
+    length :: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
     at := length
     loop at > (I64{0}) {
         at -= I64{1}
-        slot :: spans + at * I64{16}
+        slot :: wrapping(spans + at * I64{16})
         if (rt_text_word(slot) == id) {
-            jet_rt_string_drop(rt_text_word(slot + I64{8}))
-            coll_copy(slot + I64{16}, slot, (length - at - I64{1}) * I64{16})
-            rt_text_store(state + LOG_STATE_SPANS_LEN, length - I64{1})
+            jet_rt_string_drop(rt_text_word(wrapping(slot + I64{8})))
+            coll_copy(wrapping(slot + I64{16}), slot, (length - at - I64{1}) * I64{16})
+            rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length - I64{1})
             return
         }
     }
@@ -202,7 +202,7 @@ fn log_json_escape_push(target: I64, value: I64) {
     start := I64{0}
     at := I64{0}
     loop at < length {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         escape :: if {
             (byte == I64{34}) -> rt_static_text("\\\"")
             (byte == I64{92}) -> rt_static_text("\\\\")
@@ -227,17 +227,17 @@ fn log_text_is(value: I64, literal: I64) -> Bool { jet_rt_string_eq(value, liter
 fn log_fields_json_push(target: I64, data: I64, count: I64) {
     at := I64{0}
     loop at < count {
-        field :: rt_text_word(data + at * I64{8})
+        field :: rt_text_word(wrapping(data + at * I64{8}))
         jet_rt_string_builder_push(target, rt_static_text(",\""))
         log_json_escape_push(target, rt_text_word(field))
         jet_rt_string_builder_push(target, rt_static_text("\":"))
-        kind :: rt_text_word(field + I64{16})
+        kind :: rt_text_word(wrapping(field + I64{16}))
         raw :: log_text_is(kind, rt_static_text("int")) || log_text_is(kind, rt_static_text("float")) || log_text_is(kind, rt_static_text("bool")) || log_text_is(kind, rt_static_text("counter"))
         if raw {
-            jet_rt_string_builder_push(target, rt_text_word(field + I64{8}))
+            jet_rt_string_builder_push(target, rt_text_word(wrapping(field + I64{8})))
         } else {
             jet_rt_string_builder_push(target, rt_static_text("\""))
-            log_json_escape_push(target, rt_text_word(field + I64{8}))
+            log_json_escape_push(target, rt_text_word(wrapping(field + I64{8})))
             jet_rt_string_builder_push(target, rt_static_text("\""))
         }
         at += I64{1}
@@ -246,15 +246,15 @@ fn log_fields_json_push(target: I64, data: I64, count: I64) {
 
 // Log.rs:642: `,"spans":["name",...]` for a nonempty active stack.
 fn log_spans_json_push(target: I64, state: I64) {
-    length :: rt_text_word(state + LOG_STATE_SPANS_LEN)
+    length :: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
     if (length == I64{0}) -> return
-    spans :: rt_text_word(state + LOG_STATE_SPANS)
+    spans :: rt_text_word(wrapping(state + LOG_STATE_SPANS))
     jet_rt_string_builder_push(target, rt_static_text(",\"spans\":["))
     at := I64{0}
     loop at < length {
         if (at != I64{0}) -> jet_rt_string_builder_push(target, rt_static_text(","))
         jet_rt_string_builder_push(target, rt_static_text("\""))
-        log_json_escape_push(target, rt_text_word(spans + at * I64{16} + I64{8}))
+        log_json_escape_push(target, rt_text_word(wrapping(wrapping(spans + at * I64{16}) + I64{8})))
         jet_rt_string_builder_push(target, rt_static_text("\""))
         at += I64{1}
     }
@@ -263,7 +263,7 @@ fn log_spans_json_push(target: I64, state: I64) {
 
 // Log.rs:657: append `line` + LF to the file sink, else eprintln to stderr.
 fn log_write(state: I64, line: I64) {
-    path :: rt_text_word(state + LOG_STATE_SINK)
+    path :: rt_text_word(wrapping(state + LOG_STATE_SINK))
     if (path == I64{0}) {
         _ := host_stdio_text_failure(line, true, true, false)
         return
@@ -284,7 +284,7 @@ fn log_drop_space_before_brace(line: I64) -> I64 {
     at := I64{0}
     last :: length - I64{1}
     loop at < last {
-        if (rt_text_byte(data + at) == I64{32} && rt_text_byte(data + at + I64{1}) == I64{125}) {
+        if (rt_text_byte(wrapping(data + at)) == I64{32} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) == I64{125}) {
             rt_text_append(result, data + start, at - start)
             start = at + I64{1}
             at += I64{2}
@@ -303,7 +303,7 @@ fn log_emit_json(state: I64, level: I64, message: I64, ts: I64, fields: I64, cou
     jet_rt_string_builder_push(line, level)
     jet_rt_string_builder_push(line, rt_static_text("\",\"body\":\""))
     log_json_escape_push(line, message)
-    trace :: rt_text_word(state + LOG_STATE_TRACE)
+    trace :: rt_text_word(wrapping(state + LOG_STATE_TRACE))
     if (trace != I64{0}) {
         jet_rt_string_builder_push(line, rt_static_text("\",\"trace_id\":\""))
         log_json_escape_push(line, trace)
@@ -387,7 +387,7 @@ fn log_emit_text(state: I64, level: I64, message: I64, ts: I64, fields: I64, cou
     jet_rt_string_builder_push(line, label)
     jet_rt_string_builder_push(line, rt_static_text("] "))
     log_push_timestamp(line, ts /% I64{1000})
-    trace :: rt_text_word(state + LOG_STATE_TRACE)
+    trace :: rt_text_word(wrapping(state + LOG_STATE_TRACE))
     if (trace != I64{0}) {
         jet_rt_string_builder_push(line, rt_static_text(" trace="))
         jet_rt_string_builder_push(line, trace)
@@ -397,11 +397,11 @@ fn log_emit_text(state: I64, level: I64, message: I64, ts: I64, fields: I64, cou
     if (count != I64{0}) -> jet_rt_string_builder_push(line, rt_static_text(" "))
     at := I64{0}
     loop at < count {
-        field :: rt_text_word(fields + at * I64{8})
+        field :: rt_text_word(wrapping(fields + at * I64{8}))
         if (at != I64{0}) -> jet_rt_string_builder_push(line, rt_static_text(" "))
         jet_rt_string_builder_push(line, rt_text_word(field))
         jet_rt_string_builder_push(line, rt_static_text("="))
-        jet_rt_string_builder_push(line, rt_text_word(field + I64{8}))
+        jet_rt_string_builder_push(line, rt_text_word(wrapping(field + I64{8})))
         at += I64{1}
     }
     log_write(state, line)
@@ -410,7 +410,7 @@ fn log_emit_text(state: I64, level: I64, message: I64, ts: I64, fields: I64, cou
 
 // Log.rs:592: an explicit format code, else text on a terminal stderr.
 fn log_format_active(state: I64) -> I64 {
-    explicit :: rt_text_word(state + LOG_STATE_FORMAT)
+    explicit :: rt_text_word(wrapping(state + LOG_STATE_FORMAT))
     if (explicit != I64{0}) -> return explicit
     if host_is_tty(I64{2}) -> I64{2} else -> I64{1}
 }
@@ -419,10 +419,10 @@ fn log_format_active(state: I64) -> I64 {
 // of `count` LogField32 handles.
 #Export(c) fn jet_log_record_emit_raw(level: I64, message: I64, fields: I64, count: I64) {
     state :: log_state()
-    if (rt_text_word(state + LOG_STATE_DISABLED) != I64{0}) -> return
-    every :: rt_text_word(state + LOG_STATE_SAMPLE_EVERY)
-    next :: wrapping(rt_text_word(state + LOG_STATE_SAMPLE_COUNT) + I64{1})
-    rt_text_store(state + LOG_STATE_SAMPLE_COUNT, next)
+    if (rt_text_word(wrapping(state + LOG_STATE_DISABLED)) != I64{0}) -> return
+    every :: rt_text_word(wrapping(state + LOG_STATE_SAMPLE_EVERY))
+    next :: wrapping(rt_text_word(wrapping(state + LOG_STATE_SAMPLE_COUNT)) + I64{1})
+    rt_text_store(wrapping(state + LOG_STATE_SAMPLE_COUNT), next)
     if (every > I64{1} && (next - I64{1}) % every != I64{0}) -> return
     ts :: deadline_wall_now_ms()
     total :: if (count < I64{0} || fields == I64{0}) -> I64{0} else -> count
@@ -437,28 +437,28 @@ fn log_format_active(state: I64) -> I64 {
 #Export(c) fn jet_rt_record_new_log_field(key: I64, value: I64, kind: I64, redacted: Bool) -> I64 {
     result :: jet_rt_alloc(LOG_FIELD_BYTES, I64{8})
     rt_text_store(result, jet_rt_string_clone(key))
-    rt_text_store(result + I64{8}, jet_rt_string_clone(value))
-    rt_text_store(result + I64{16}, jet_rt_string_clone(kind))
-    rt_text_store(result + I64{24}, if redacted -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(result + I64{8}), jet_rt_string_clone(value))
+    rt_text_store(wrapping(result + I64{16}), jet_rt_string_clone(kind))
+    rt_text_store(wrapping(result + I64{24}), if redacted -> I64{1} else -> I64{0})
     result
 }
 #Export(c) fn jet_rt_record_get_log_field_key(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
-#Export(c) fn jet_rt_record_get_log_field_value(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_log_field_kind(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{16})) }
-#Export(c) fn jet_rt_record_get_log_field_redacted(value: I64) -> Bool { rt_text_word(value + I64{24}) != I64{0} }
+#Export(c) fn jet_rt_record_get_log_field_value(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_rt_record_get_log_field_kind(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(value + I64{16}))) }
+#Export(c) fn jet_rt_record_get_log_field_redacted(value: I64) -> Bool { rt_text_word(wrapping(value + I64{24})) != I64{0} }
 #Export(c) fn jet_rt_handle_clone_log_field(value: I64) -> I64 {
-    jet_rt_record_new_log_field(rt_text_word(value), rt_text_word(value + I64{8}), rt_text_word(value + I64{16}), rt_text_word(value + I64{24}) != I64{0})
+    jet_rt_record_new_log_field(rt_text_word(value), rt_text_word(wrapping(value + I64{8})), rt_text_word(wrapping(value + I64{16})), rt_text_word(wrapping(value + I64{24})) != I64{0})
 }
 #Export(c) fn jet_rt_handle_drop_log_field(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_string_drop(rt_text_word(value))
-    jet_rt_string_drop(rt_text_word(value + I64{8}))
-    jet_rt_string_drop(rt_text_word(value + I64{16}))
+    jet_rt_string_drop(rt_text_word(wrapping(value + I64{8})))
+    jet_rt_string_drop(rt_text_word(wrapping(value + I64{16})))
     jet_rt_free(value, LOG_FIELD_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_log_field(left: I64, right: I64) -> Bool {
     jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) &&
-        jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) &&
-        jet_rt_string_eq(rt_text_word(left + I64{16}), rt_text_word(right + I64{16})) &&
-        rt_text_word(left + I64{24}) == rt_text_word(right + I64{24})
+        jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8}))) &&
+        jet_rt_string_eq(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16}))) &&
+        rt_text_word(wrapping(left + I64{24})) == rt_text_word(wrapping(right + I64{24}))
 }

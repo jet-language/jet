@@ -46,7 +46,8 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
     if env.env_clear -> return None
     if {
         name == "JET_COMPILER_EXTENSION" -> None
-        name == "NO_COLOR" || name == "JET_RECEIPT_BYPASS" -> Val("1")
+        // Every build under test runs IR Lint after each optimizer pass.
+        name == "NO_COLOR" || name == "JET_RECEIPT_BYPASS" || name == "JET_OPT_VERIFY" -> Val("1")
         name == "CLICOLOR" -> Val("0")
         name == "TERM" -> Val("dumb")
         name == "JET_REPL_HISTORY" -> Val("off")
@@ -79,6 +80,7 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
             .env("CLICOLOR", kit_exec_base_value("CLICOLOR", env, scratch) ?? "")
             .env("TERM", kit_exec_base_value("TERM", env, scratch) ?? "")
             .env("JET_RECEIPT_BYPASS", kit_exec_base_value("JET_RECEIPT_BYPASS", env, scratch) ?? "")
+            .env("JET_OPT_VERIFY", kit_exec_base_value("JET_OPT_VERIFY", env, scratch) ?? "")
             .env("JET_REPL_HISTORY", kit_exec_base_value("JET_REPL_HISTORY", env, scratch) ?? "")
             .env("JET_STORE_DIR", kit_exec_base_value("JET_STORE_DIR", env, scratch) ?? "")
             .env("JET_FFI_CACHE_DIR", kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? "")
@@ -114,22 +116,96 @@ fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Strin
         elapsed_ns: elapsed_ns, limit_hit: limit_hit}
 }
 
+// A child that exits before reading its input breaks the pipe; name its exit
+// and first stderr line so the row shows why it stopped reading.
+fn kit_exec_input_detail(error: String, code: Int, errors: String) -> String {
+    first := ""
+    loop line in errors.lines() {
+        if line.trim() == "" -> next
+        first = line.trim().copy()
+        break
+    }
+    if first.count_bytes() > 160 -> first = kit_steps_byte_slice(first, 0, 160)
+    if first == "" -> return "{error}; child exited {code} without reading it"
+    "{error}; child exited {code} without reading it: {first}"
+}
+
 fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+    kit_exec_run(env, argv, cwd, scratch, stdin, overlay, None)
+}
+
+// Runs the child on a terminal: its stdin and stdout share the terminal and
+// stdout is the terminal transcript. `stdin` is typed at spawn and each event
+// at its time from spawn. Input never closes the terminal, which would hang
+// up the child; a close event types the end-of-file character instead.
+fn kit_exec_invoke_terminal(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal) -> KitRun {
+    kit_exec_run(env, argv, cwd, scratch, stdin, overlay, Val(terminal))
+}
+
+// Events by time; events at the same time keep their line order.
+fn kit_exec_terminal_order(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
+    ordered := [KitTerminalEvent]{}
+    loop event in events {
+        &ordered.push(event)
+        position := ordered.len() - 1
+        loop position > 0 && ordered[position - 1].at > ordered[position].at {
+            earlier :: ordered[position - 1]
+            ordered[position - 1] = ordered[position]
+            ordered[position] = earlier
+            position -= 1
+        }
+    }
+    ordered
+}
+
+fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
     files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
     started :: time.instant()
-    child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
+    spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
+    if terminal == .Val(shape) {
+        spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
+    }
+    child := spec.spawn() ?? return kit_exec_failed("spawn: {err}")
     { sender: done, receiver: watching } :: channel<Int>()
-    watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, watching)
+    watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, env.resident_tree, watching)
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
     if stdin != "" {
-        child.stdin.write(stdin) ?? {
+        child.stdin.write_text(stdin) ?? {
             input_error = "stdin: {err}"
             ()
         }
     }
-    child.stdin.close()
+    if terminal == {
+        .Val(shape) -> {
+            eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
+            loop event in kit_exec_terminal_order(shape.events) {
+                remaining :: event.at - started.elapsed().ns
+                if remaining > 0 -> time.sleep(time.duration_ns(remaining))
+                if event.kind == "resize" {
+                    session :: child.terminal ?? {
+                        if input_error == "" -> input_error = "terminal resize: no terminal session"
+                        next
+                    }
+                    session.resize(TerminalSize{cols: event.cols, rows: event.rows}) ?? {
+                        if input_error == "" -> input_error = "terminal resize: {err}"
+                        ()
+                    }
+                } else if event.kind == "close" {
+                    // Like closing a pipe, ending input after the child has
+                    // exited is no error.
+                    child.stdin.write_text(eof).drop("the child may have exited before its input ended")
+                } else {
+                    child.stdin.write_text(event.text) ?? {
+                        if input_error == "" -> input_error = "terminal input: {err}"
+                        ()
+                    }
+                }
+            }
+        }
+        .None -> child.stdin.close()
+    }
     receipt :: child.wait() ?? {
         done.send(0)
         _ :: ^watcher.join() ?? false
@@ -137,7 +213,7 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     }
     done.send(0)
     killed :: ^watcher.join() ?? false
-    run := kit_exec_receipt(receipt, started.elapsed().ns, input_error)
+    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, receipt.errors))
     if killed -> run.limit_hit = "memory"
     run
 }
@@ -145,18 +221,24 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
 // The run-wide memory guard counts resident memory, not address space: a
 // RLIMIT_AS limit fails thread-stack reservations long before the child uses
 // that memory. Polls VmRSS every 100 ms and kills the child above `limit`
-// bytes; true when it did. A case's `limit: memory=` keeps Core memory_limit.
-fn kit_exec_watch_resident(pid: Int, limit: Int, done: Receiver<Int>) -> Bool Never! {
+// bytes; true when it did. Under `tree` (a case's `limit: resident=`) it sums
+// the child and its live descendants and kills them all. A case's
+// `limit: memory=` keeps Core memory_limit.
+fn kit_exec_watch_resident(pid: Int, limit: Int, tree: Bool, done: Receiver<Int>) -> Bool Never! {
     if pid <= 0 -> return false
-    path :: "/proc/{pid}/status"
     tick := 0
     loop {
         if done.is_ready() -> return false
         if tick % 10 == 0 {
-            status :: files.read(path) ?? return false
-            if kit_exec_resident_bytes(status) > limit {
+            pids := [Int]{}
+            used :: kit_exec_tree_resident(pid, tree, &pids)
+            if pids.len() == 0 -> return false
+            if used > limit {
                 #Unsafe("the testkit stops its own step child at the resident-memory guard") {
                     sys.kill(pid, 9) ?? return false
+                    loop descendant in pids {
+                        if descendant != pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
+                    }
                 }
                 return true
             }
@@ -165,6 +247,32 @@ fn kit_exec_watch_resident(pid: Int, limit: Int, done: Receiver<Int>) -> Bool Ne
         time.sleep(10ms)
     }
     false
+}
+
+// The resident bytes of `pid`, plus under `tree` those of its live descendants
+// (`/proc/<pid>/task/<tid>/children`); `pids` lists every process counted,
+// none when `pid` itself is gone.
+fn kit_exec_tree_resident(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
+    used := 0
+    queue := [Int]{pid}
+    at := 0
+    loop at < queue.len() {
+        current :: queue[at]
+        at += 1
+        status :: files.read("/proc/{current}/status") ?? next
+        used += kit_exec_resident_bytes(status)
+        &pids.push(current)
+        if !tree -> next
+        threads :: files.list_dir("/proc/{current}/task") ?? next
+        loop thread in threads {
+            children :: files.read(files.join(thread.path, "children")) ?? next
+            loop word in children.split(" ") {
+                child :: Int.parse(word.trim().copy()) ?? next
+                &queue.push(child)
+            }
+        }
+    }
+    used
 }
 
 fn kit_exec_resident_bytes(status: String) -> Int { kit_exec_kib_field(status, "VmRSS:") }
@@ -210,6 +318,45 @@ fn kit_exec_copy_file(source: String, destination: String) {
     files.write_bytes(destination, bytes) ?? panic("copy {source}: {err}")
     info :: files.stat(source) ?? panic("stat {source}: {err}")
     files.chmod(destination, info.mode % 512) ?? panic("copy mode {source}: {err}")
+}
+
+// Case scratch may hold trees a tool made read-only on purpose (Hangar objects
+// and seals). Removal restores owner access on directories, never following a
+// link, then retries.
+fn kit_exec_remove_tree(path: String) -> Bool Err! {
+    if files.remove_all(path) == .Ok(_) -> return Ok(true)
+    kit_exec_make_writable(path)
+    files.remove_all(path) ?? return Err("{err}")
+    Ok(true)
+}
+
+// A case's descendants that moved to a process group of their own outlive the
+// step that started them. Before its scratch goes, stop every process still
+// running an executable from that scratch or working inside it.
+fn kit_exec_stop_strays(scratch: String) {
+    if sys.name() != "linux" -> return
+    root :: files.canonicalize(scratch) ?? return
+    inside :: "{root}/"
+    own :: process.current_pid()
+    entries :: files.list_dir("/proc") ?? return
+    loop entry in entries {
+        pid :: Int.parse(files.basename(entry.path)) ?? next
+        if pid == own -> next
+        executable :: files.read_link("/proc/{pid}/exe") ?? ""
+        directory :: files.read_link("/proc/{pid}/cwd") ?? ""
+        if !executable.starts_with(inside) && !directory.starts_with(inside) && directory != root -> next
+        #Unsafe("the testkit stops a process its own case left running in the case scratch") {
+            sys.kill(pid, 9).drop("a stray may exit before its signal")
+        }
+    }
+}
+
+fn kit_exec_make_writable(path: String) {
+    info :: files.stat(path) ?? return
+    if info.is_symlink || !info.is_dir -> return
+    files.chmod(path, info.mode % 64 + 448) ?? return
+    entries :: files.list_dir(path) ?? return
+    loop entry in entries -> kit_exec_make_writable(entry.path)
 }
 
 

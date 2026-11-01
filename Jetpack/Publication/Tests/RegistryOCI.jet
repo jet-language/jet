@@ -3,6 +3,26 @@
 // Tests/Tuf.jet. Those genuine entry points retain #4262/#3593/#3598/#4409
 // rather than successful fixtures standing in for Artifacts/Fetch.
 // Reuse Index's actual entry/root helpers; unique suffix is Cache-owned.
+use jet_pkg_model.[pkg_sha256_hex]
+use jetpack_foundation.[
+    FoundationPublicationPhase, FoundationPublicationPolicy, foundation_open_directory_authority,
+    foundation_open_file_authority, foundation_tree_hash, foundation_write_file_nofollow_at_root,
+]
+use jetpack_publication.[
+    PUBLICATION_MAX_OCI_REFERRER_BYTES, PUBLICATION_OCI_PENDING_SBOM, PUBLICATION_OCI_PROVENANCE_TYPE,
+    PUBLICATION_OCI_REFERRER_INDEX, PUBLICATION_OCI_REPRODUCIBILITY_TYPE, PUBLICATION_OCI_SBOM_TYPE,
+    PUBLICATION_OCI_SIGNATURE_TYPE, PublicationIndexEntry, PublicationOCIDescriptor,
+    publication_existing_oci_referrer_root, publication_finalize_oci_referrers,
+    publication_oci_provenance_payload, publication_oci_reconcile_winner, publication_oci_referrer_root,
+    publication_oci_reproducibility_payload, publication_oci_sbom_bound,
+    publication_oci_signature_payload, publication_parse_oci_index, publication_publish_artifact,
+    publication_read_error, publication_read_oci_file, publication_referrer_index_digest,
+    publication_registry_spdx, publication_registry_unique_suffix, publication_render_oci_index,
+    publication_validate_evidence_value, publication_validate_oci_digest,
+    publication_verify_oci_referrers, publication_write_oci_file,
+]
+use core.files as files
+
 fn publication_oci_test_subject() -> String Never! {
     "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }
@@ -51,7 +71,7 @@ fn publication_oci_test_descriptors() -> [PublicationOCIDescriptor] Never! {
 }
 #Test("OCI digest validation exact ASCII prefix length and case") {
     publication_validate_oci_digest(publication_oci_test_subject()) ?? panic("valid")
-    publication_validate_oci_digest(publication_oci_test_subject().replace("a", "A")) ?? panic("uppercase accepted")
+    publication_validate_oci_digest("sha256-{"A".repeat(64)}") ?? panic("uppercase accepted")
     loop value in ([String]{"sha256-tree", "SHA256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) -> assert(publication_validate_oci_digest(value) == .Err(.InvalidInput(_)))
 }
 #Test("OCI parser roundtrip order keys types subject digest size and missing evidence") {
@@ -148,10 +168,10 @@ fn publication_oci_test_write_outcome(path: String, payload: String) -[FS, Env, 
     loop attempt in 0..<16 {
         path :: files.join(repo, "blob-{publication_registry_unique_suffix()}-{attempt}")
         left :: task {
-            return publication_oci_test_write_outcome(path, "left")
+            publication_oci_test_write_outcome(path, "left")
         }
         right :: task {
-            return publication_oci_test_write_outcome(path, "right")
+            publication_oci_test_write_outcome(path, "right")
         }
         a :: left.join() ?? panic("join left")
         b :: right.join() ?? panic("join right")
@@ -281,10 +301,11 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         assert_eq("{actual}", "{failure}")
     }
     files.remove(path) ?? panic("remove winner")
-    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(publication_read_error(.Other, path, "validation refused after fsync")) }), FoundationPublicationPolicy{create: .CreateNew}) == {
-        .Err(error) -> {
-            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
-            assert(error.error == .Other(_))
+    refused_path :: path.copy()
+    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(publication_read_error(.Other, refused_path, "validation refused after fsync")) }), FoundationPublicationPolicy{create: .CreateNew}) == {
+        .Err(refusal) -> {
+            assert_eq(refusal.phase, FoundationPublicationPhase.ValidateSource)
+            assert(refusal.error == .Other(_))
         }
         .Ok(_) -> panic("validation refusal must prevent publication")
     }

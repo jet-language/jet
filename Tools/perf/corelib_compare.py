@@ -17,8 +17,8 @@ Run from the repository root:
 
     python3 Tools/perf/corelib_compare.py --rounds 5000 --samples 5
 
-Add ``--require-parity`` to fail unless every Jet arm is at most the configured
-Rust ratio (default 1.05).
+Add ``--require-win`` to fail unless every Jet arm is strictly faster than
+``rust_native`` (Jet/Rust below 1.00).
 """
 
 from __future__ import annotations
@@ -140,11 +140,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rounds", type=int, default=5000)
     parser.add_argument("--samples", type=int, default=5)
-    parser.add_argument("--max-ratio", type=float, default=1.05)
-    parser.add_argument("--require-parity", action="store_true")
+    parser.add_argument("--require-win", action="store_true")
     args = parser.parse_args()
-    if args.rounds <= 0 or args.samples <= 0 or args.max_ratio <= 0:
-        parser.error("--rounds, --samples, and --max-ratio must be positive")
+    if args.rounds <= 0 or args.samples <= 0:
+        parser.error("--rounds and --samples must be positive")
 
     expected = "344\n"
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
@@ -216,13 +215,12 @@ def main() -> int:
     baseline = medians["rust_native"]
     ratios = {name: ratio(value, baseline) for name, value in medians.items()}
     jet_ratios = {name: ratios[name] for name in ("rust_core_aot", "jet_source_aot")}
-    passed = all(value <= args.max_ratio for value in jet_ratios.values())
+    passed = all(value < 1.0 for value in jet_ratios.values())
     report = {
         "workload": "base64 encode, 257-byte payload",
         "rounds": args.rounds,
         "samples": args.samples,
         "metric": "runtime_only_ns",
-        "max_ratio": args.max_ratio,
         "builds": builds,
         "arms": {
             name: {"samples": values, "median_ns": medians[name], "ratio_to_rust_native": ratios[name]}
@@ -233,7 +231,7 @@ def main() -> int:
         "pass": passed,
     }
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if passed or not args.require_parity else 1
+    return 0 if passed or not args.require_win else 1
 
 
 if __name__ == "__main__":

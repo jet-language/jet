@@ -1,146 +1,265 @@
-// LiveInspect.rs: the closed runtime snapshot codec. Core owns JSON parsing.
-// Duplicate keys are corrupt runtime transport and are rejected by Core's
-// strict parser (Main ruling). No runtime fact is inferred.
-use jet_foundation.[foundation_parse_protocol_json]
-use core.text as live_text
-use core.math as status_math
-use core.encoding.[Dyn]
+// LiveInspect.rs: the closed runtime snapshot codec. The runtime publishes
+// raw facts (JetRuntime ObserveLive.jet, D-SIZE-PAYUSE1 A); this codec
+// validates them and derives the view: record order, effect and resource
+// counters, and the process facts read from /proc. No runtime fact is
+// inferred.
 
 struct JetCLILiveValue { value_id: String, type_identity: String, disposition: String, reason: String, rendered_value: String? }
 struct JetCLILiveTask { id: Int, parent: Int, state: String, wait: String, deadline_ms: Int?, cancelled: Bool }
 struct JetCLILiveChannel { id: Int, depth: Int, capacity: Int?, send_waiters: Int, recv_waiters: Int, closed: Bool }
 struct JetCLILiveRuntime { elapsed_ns: Int, cpu_ns: Int?, exit: Bool }
+struct JetCLILiveEvent {
+    sequence: Int, source: String, event_id: Int, owner_id: Int, subscription_id: Int,
+    dispatch_id: Int, lifecycle: String, queued: Int, blocked: Int, running: Int,
+    capacity: Int, overflow: String, priority: Int, failure: String, terminal: String
+}
+// start_id and runtime.cpu_ns come from the process (jet_cli_live_bind);
+// boot_ns, start_ticks and clock_hz are the writer's facts for that binding.
 struct JetCLILiveSnapshot {
     protocol: String, session_id: String, source_id: String, build_id: String,
     revision: String, world_id: String, pid: Int, start_id: String, captured_ms: Int,
     values: [JetCLILiveValue], tasks: [JetCLILiveTask], channels: [JetCLILiveChannel],
-    effects: [String:Int], resources: [String:Int], runtime: JetCLILiveRuntime?,
-    raw_events: Dyn?, events: String?
+    effects: [String:Int], resources: [String:Int], runtime: JetCLILiveRuntime,
+    event_records: [JetCLILiveEvent], events: String?,
+    boot_ns: U64, start_ticks: U64, clock_hz: Int
 }
 
-fn jet_cli_live_field(value: Dyn, key: String) -> Dyn? Never! {
-    // Dyn.Object is an ordered list of fields, not a String-keyed map.
-    if value == .Object(fields) { loop field in fields { if field.key == key -> return Val(field.value) } }
-    None
+// "JETLIVE1" as a little-endian word.
+JET_CLI_LIVE_MAGIC :: U64{3550338754064696650}
+JET_CLI_LIVE_ABSENT :: U64{18446744073709551615}
+JET_CLI_LIVE_INT_MAX :: U64{9223372036854775807}
+
+struct JetCLILiveCursor { bytes: [U8], at: Int }
+
+fn jet_cli_live_word(cursor: &JetCLILiveCursor) -> U64 JetCLIReadError! {
+    if cursor.bytes.len() - cursor.at < 8 -> return Err(jet_cli_read_error("live runtime snapshot is truncated"))
+    value := U64{0}
+    loop index in 0..<8 -> value = value.bit_or(U64.from_u8(cursor.bytes[cursor.at + index]) << (index * 8))
+    cursor.at += 8
+    Ok(value)
 }
-// JSON.rs::json_int also accepts Float, using Rust's saturating i64 cast.
-// EventObservation's integer validator deliberately does NOT call this.
-fn jet_cli_live_json_int(value: Dyn) -> Int? Never! {
-    if value == {
-        .Int(number) -> { return Val(number) }
-        .Float(number) -> {
-            if number != number -> return Val(0)
-            if number >= 9223372036854775808.0 -> return Val(9223372036854775807)
-            if number <= -9223372036854775808.0 -> return Val(-9223372036854775808)
-            return Val(Int.from_float(status_math.trunc(number)) ?? return None)
+// Unsigned runtime words above Int's range saturate, as the reference
+// codec's i64 cast does.
+fn jet_cli_live_unsigned(cursor: &JetCLILiveCursor) -> Int JetCLIReadError! {
+    value :: jet_cli_live_word(&cursor)
+    if value > JET_CLI_LIVE_INT_MAX -> return Ok(9223372036854775807)
+    Ok(Int.from_u64(value))
+}
+fn jet_cli_live_signed(cursor: &JetCLILiveCursor) -> Int JetCLIReadError! {
+    value :: jet_cli_live_word(&cursor)
+    if value <= JET_CLI_LIVE_INT_MAX -> return Ok(Int.from_u64(value))
+    Ok(Int.from_u64(value - JET_CLI_LIVE_INT_MAX - U64{1}) + (-9223372036854775807 - 1))
+}
+fn jet_cli_live_raw(cursor: &JetCLILiveCursor) -> [U8]? JetCLIReadError! {
+    length :: jet_cli_live_word(&cursor)
+    if length == JET_CLI_LIVE_ABSENT -> return Ok(None)
+    if length > (U64{cursor.bytes.len() - cursor.at}) -> return Err(jet_cli_read_error("live runtime snapshot is truncated"))
+    start :: cursor.at
+    cursor.at += Int.from_u64(length)
+    Ok(Val(cursor.bytes[start..<cursor.at].copy()))
+}
+// Observe's text contract: every Unicode Cc control (C0, DEL, C1) shows as
+// one space. The runtime already bounded the text to 160 scalars.
+fn jet_cli_live_shown(raw: [U8], label: String) -> String JetCLIReadError! {
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        byte :: raw[at]
+        if byte < (U8{32}) || byte == (U8{127}) {
+            &out.push(U8{32})
+            at += 1
+        } else if byte == (U8{194}) && at + 1 < raw.len() && raw[at + 1] >= (U8{128}) && raw[at + 1] <= (U8{159}) {
+            &out.push(U8{32})
+            at += 2
+        } else {
+            &out.push(byte)
+            at += 1
         }
-        else -> { return None }
     }
+    Ok(String.from_bytes(out) ?? return Err(jet_cli_read_error("{label} is not valid UTF-8")))
 }
-fn jet_cli_live_object(value: Dyn, required: [String], optional: [String], label: String) JetCLIReadError! {
-    if value == .Object(fields) {
-        seen := [String:Bool]{}
-        loop field in fields {
-            if !required.contains(field.key) && !optional.contains(field.key) -> return Err(jet_cli_read_error("{label} has missing or unsafe fields"))
-            seen[field.key] = true
-        }
-        loop key in required { if !seen.has_key(key) -> return Err(jet_cli_read_error("{label} has missing or unsafe fields")) }
-        return
+// An absent text shows as "", except where the view keeps absence.
+fn jet_cli_live_read_text(cursor: &JetCLILiveCursor, label: String) -> String JetCLIReadError! {
+    raw :: jet_cli_live_raw(&cursor)
+    jet_cli_live_shown(raw ?? [U8]{}, label)
+}
+fn jet_cli_live_read_optional(cursor: &JetCLILiveCursor, label: String) -> String? JetCLIReadError! {
+    raw :: jet_cli_live_raw(&cursor)
+    if raw == .Val(present) -> return Ok(Val(jet_cli_live_shown(present, label)))
+    Ok(None)
+}
+fn jet_cli_live_starts(raw: [U8], prefix: String) -> Bool Never! {
+    expected :: prefix.bytes()
+    if raw.len() < expected.len() -> return false
+    loop index in 0..<expected.len() { if raw[index] != expected[index] -> return false }
+    true
+}
+fn jet_cli_live_contains(raw: [U8], word: String) -> Bool Never! {
+    expected :: word.bytes()
+    if raw.len() < expected.len() -> return false
+    loop start in 0..<raw.len() - expected.len() + 1 {
+        found := true
+        loop index in 0..<expected.len() { if raw[start + index] != expected[index] -> found = false }
+        if found -> return true
     }
-    Err(jet_cli_read_error("{label} must be an object"))
+    false
 }
-fn jet_cli_live_int(value: Dyn, key: String, label: String, nonnegative: Bool) -> Int JetCLIReadError! {
-    field :: jet_cli_live_field(value, key) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))
-    if jet_cli_live_json_int(field) == .Val(number) {
-        if nonnegative && number < 0 -> return Err(jet_cli_read_error("{label} has negative `{key}`"))
-        return Ok(number)
-    }
-    Err(jet_cli_read_error("{label} has invalid `{key}`"))
-}
-fn jet_cli_live_optional_int(value: Dyn, key: String, label: String) -> Int? JetCLIReadError! {
-    field :: jet_cli_live_field(value, key) ?? return Ok(None)
-    if field == Dyn.Null -> return Ok(None)
-    Ok(Val(jet_cli_live_json_int(field) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))))
-}
-fn jet_cli_live_string(value: Dyn, key: String, label: String) -> String JetCLIReadError! {
-    if jet_cli_live_field(value, key) == .Val(.Text(text)) {
-        if live_text.has_control(text) -> return Err(jet_cli_read_error("{label} has control characters in `{key}`"))
-        return Ok(text)
-    }
-    Err(jet_cli_read_error("{label} has invalid `{key}`"))
-}
-fn jet_cli_live_bool(value: Dyn, key: String, label: String) -> Bool JetCLIReadError! {
-    if jet_cli_live_field(value, key) == .Val(.Bool(flag)) -> return Ok(flag)
-    Err(jet_cli_read_error("{label} has invalid `{key}`"))
-}
-fn jet_cli_live_array(value: Dyn, key: String) -> [Dyn] JetCLIReadError! {
-    if jet_cli_live_field(value, key) == .Val(.Array(items)) {
-        if items.len() > 4096 -> return Err(jet_cli_read_error("live runtime snapshot has too many {key}"))
-        return Ok(items)
-    }
-    Err(jet_cli_read_error("live runtime snapshot {key} are not an array"))
-}
-fn jet_cli_live_counts(root: Dyn, key: String, keys: [String], label: String) -> [String:Int] JetCLIReadError! {
-    value :: jet_cli_live_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
-    jet_cli_live_object(value, keys, [String]{}, label)
-    counts := [String:Int]{}
-    loop count_key in keys -> counts[count_key] = jet_cli_live_int(value, count_key, label, true)
-    Ok(counts)
-}
-fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
-    root :: foundation_parse_protocol_json(text) ?? return Err(jet_cli_read_error("live runtime snapshot is not valid JSON"))
-    jet_cli_live_object(root, [String]{"protocol", "session_id", "source_id", "build_id", "revision", "world_id", "values", "schema_version", "pid", "start_id", "captured_ms", "tasks", "channels", "effects", "resources"}, [String]{"event_observations", "decisions", "runtime"}, "live runtime snapshot")
-    version :: jet_cli_live_int(root, "schema_version", "live runtime snapshot", true)
-    protocol :: jet_cli_live_string(root, "protocol", "live runtime snapshot")
-    if protocol != "jet.live.v1" -> return Err(jet_cli_read_error("live runtime snapshot protocol must be jet.live.v1"))
-    session_id :: jet_cli_live_string(root, "session_id", "live runtime snapshot")
-    source_id :: jet_cli_live_string(root, "source_id", "live runtime snapshot")
-    build_id :: jet_cli_live_string(root, "build_id", "live runtime snapshot")
-    revision :: jet_cli_live_string(root, "revision", "live runtime snapshot")
-    world_id :: jet_cli_live_string(root, "world_id", "live runtime snapshot")
-    if version != 1 -> return Err(jet_cli_read_error("live runtime snapshot has an unsupported schema version"))
-    pid :: jet_cli_live_int(root, "pid", "live runtime snapshot", true)
-    start_id :: jet_cli_live_string(root, "start_id", "live runtime snapshot")
-    captured_ms :: jet_cli_live_int(root, "captured_ms", "live runtime snapshot", true)
+fn jet_cli_live_decode(bytes: [U8]) -> JetCLILiveSnapshot JetCLIReadError! {
+    cursor := JetCLILiveCursor{bytes: bytes, at: 0}
+    if jet_cli_live_word(&cursor) != JET_CLI_LIVE_MAGIC -> return Err(jet_cli_read_error("live runtime snapshot has an unsupported schema version"))
+    _ :: jet_cli_live_word(&cursor)
+    pid :: jet_cli_live_unsigned(&cursor)
+    captured_ms :: jet_cli_live_unsigned(&cursor)
+    elapsed_ns :: jet_cli_live_unsigned(&cursor)
+    boot_ns :: jet_cli_live_word(&cursor)
+    start_ticks :: jet_cli_live_word(&cursor)
+    clock_hz :: jet_cli_live_signed(&cursor)
+    exit :: jet_cli_live_word(&cursor) != U64{0}
+    resources := [String:Int]{}
+    loop key in ([String]{"arenas", "arena_allocations", "arena_bytes", "workers", "queued"}) -> resources[key] = jet_cli_live_unsigned(&cursor)
+    session_id :: jet_cli_live_read_text(&cursor, "live runtime snapshot `session_id`")
+    source_id :: jet_cli_live_read_text(&cursor, "live runtime snapshot `source_id`")
+    build_id :: jet_cli_live_read_text(&cursor, "live runtime snapshot `build_id`")
+    revision :: jet_cli_live_read_text(&cursor, "live runtime snapshot `revision`")
+    world_id :: jet_cli_live_read_text(&cursor, "live runtime snapshot `world_id`")
     values := [JetCLILiveValue]{}
-    loop value in jet_cli_live_array(root, "values") {
-        jet_cli_live_object(value, [String]{"value_id", "type_identity", "disposition", "reason"}, [String]{"rendered_value"}, "live value")
-        disposition :: jet_cli_live_string(value, "disposition", "live value")
-        if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) -> return Err(jet_cli_read_error("live value has an unsupported disposition"))
-        rendered := String?{None}
-        if jet_cli_live_field(value, "rendered_value") == .Val(rendered_field) {
-            if rendered_field == {
-                .Null -> {}
-                .Text(shown) -> {
-                    if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value `rendered_value` exceeds the Prelude limit"))
-                    if live_text.has_control(shown) -> return Err(jet_cli_read_error("live value has control characters in `rendered_value`"))
-                    rendered = Val(shown)
-                }
-                else -> { return Err(jet_cli_read_error("live value has invalid `rendered_value`")) }
-            }
-        }
-        &values.push(JetCLILiveValue{value_id: jet_cli_live_string(value, "value_id", "live value"), type_identity: jet_cli_live_string(value, "type_identity", "live value"), disposition: disposition, reason: jet_cli_live_string(value, "reason", "live value"), rendered_value: rendered})
-    }
     tasks := [JetCLILiveTask]{}
-    loop value in jet_cli_live_array(root, "tasks") {
-        jet_cli_live_object(value, [String]{"id", "parent", "state", "wait", "deadline_ms", "cancelled"}, [String]{"label", "spawn_site"}, "live task")
-        &tasks.push(JetCLILiveTask{id: jet_cli_live_int(value, "id", "live task", true), parent: jet_cli_live_int(value, "parent", "live task", true), state: jet_cli_live_string(value, "state", "live task"), wait: jet_cli_live_string(value, "wait", "live task"), deadline_ms: jet_cli_live_optional_int(value, "deadline_ms", "live task"), cancelled: jet_cli_live_bool(value, "cancelled", "live task")})
-    }
     channels := [JetCLILiveChannel]{}
-    loop value in jet_cli_live_array(root, "channels") {
-        jet_cli_live_object(value, [String]{"id", "depth", "capacity", "send_waiters", "recv_waiters", "closed"}, [String]{}, "live channel")
-        &channels.push(JetCLILiveChannel{id: jet_cli_live_int(value, "id", "live channel", true), depth: jet_cli_live_int(value, "depth", "live channel", true), capacity: jet_cli_live_optional_int(value, "capacity", "live channel"), send_waiters: jet_cli_live_int(value, "send_waiters", "live channel", true), recv_waiters: jet_cli_live_int(value, "recv_waiters", "live channel", true), closed: jet_cli_live_bool(value, "closed", "live channel")})
+    events := [JetCLILiveEvent]{}
+    effects := [String:Int]{}
+    loop key in ([String]{"compute", "waiting", "channel", "time", "io"}) -> effects[key] = 0
+    running := 0
+    cancelled := 0
+    seen := [Int]{}
+    loop {
+        section :: jet_cli_live_unsigned(&cursor)
+        if section == 0 -> break
+        if seen.contains(section) -> return Err(jet_cli_read_error("live runtime snapshot repeats a section"))
+        &seen.push(section)
+        count :: jet_cli_live_unsigned(&cursor)
+        if section == 1 {
+            if count > 4096 -> return Err(jet_cli_read_error("live runtime snapshot has too many tasks"))
+            loop _ in 0..<count {
+                id :: jet_cli_live_unsigned(&cursor)
+                parent :: jet_cli_live_unsigned(&cursor)
+                _ :: jet_cli_live_word(&cursor)
+                state_word :: jet_cli_live_word(&cursor)
+                deadline_present :: jet_cli_live_word(&cursor) != U64{0}
+                deadline :: jet_cli_live_signed(&cursor)
+                task_cancelled :: jet_cli_live_word(&cursor) != U64{0}
+                _ :: jet_cli_live_raw(&cursor)
+                wait_recorded :: jet_cli_live_raw(&cursor)
+                wait_raw :: wait_recorded ?? [U8]{}
+                state :: if state_word == (U64{0}) -> "queued" else if state_word == (U64{1}) -> "running" else if state_word == (U64{2}) -> "blocked" else -> "paused"
+                // The effect counters read the recorded wait, before display.
+                if state_word == (U64{2}) {
+                    effects["waiting"] = (effects.get("waiting") ?? 0) + 1
+                    if jet_cli_live_starts(wait_raw, "channel ") -> effects["channel"] = (effects.get("channel") ?? 0) + 1
+                    if jet_cli_live_starts(wait_raw, "time ") -> effects["time"] = (effects.get("time") ?? 0) + 1
+                    if jet_cli_live_contains(wait_raw, "tcp") || jet_cli_live_contains(wait_raw, "network") || jet_cli_live_starts(wait_raw, "io ") -> effects["io"] = (effects.get("io") ?? 0) + 1
+                }
+                if task_cancelled -> cancelled += 1
+                if state_word == (U64{1}) -> running += 1
+                &tasks.push(JetCLILiveTask{id: id, parent: parent, state: state, wait: jet_cli_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, cancelled: task_cancelled})
+            }
+        } else if section == 2 {
+            loop _ in 0..<count {
+                id :: jet_cli_live_unsigned(&cursor)
+                depth :: jet_cli_live_unsigned(&cursor)
+                bounded :: jet_cli_live_word(&cursor) != U64{0}
+                capacity :: jet_cli_live_unsigned(&cursor)
+                send_waiters :: jet_cli_live_unsigned(&cursor)
+                recv_waiters :: jet_cli_live_unsigned(&cursor)
+                closed :: jet_cli_live_word(&cursor) != U64{0}
+                &channels.push(JetCLILiveChannel{id: id, depth: depth, capacity: if bounded -> Val(capacity) else -> None, send_waiters: send_waiters, recv_waiters: recv_waiters, closed: closed})
+            }
+        } else if section == 3 {
+            if count > 4096 -> return Err(jet_cli_read_error("live runtime snapshot has too many values"))
+            loop _ in 0..<count {
+                value_id :: jet_cli_live_read_text(&cursor, "live value `value_id`")
+                type_identity :: jet_cli_live_read_text(&cursor, "live value `type_identity`")
+                disposition :: jet_cli_live_read_text(&cursor, "live value `disposition`")
+                reason :: jet_cli_live_read_text(&cursor, "live value `reason`")
+                rendered :: jet_cli_live_read_optional(&cursor, "live value `rendered_value`")
+                if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) -> return Err(jet_cli_read_error("live value has an unsupported disposition"))
+                if rendered == .Val(shown) && shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value `rendered_value` exceeds the Prelude limit"))
+                &values.push(JetCLILiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: reason, rendered_value: rendered})
+            }
+        } else if section == 4 {
+            loop _ in 0..<count {
+                sequence :: jet_cli_live_unsigned(&cursor)
+                source :: jet_cli_live_read_text(&cursor, "runtime event observation `source`")
+                event_id :: jet_cli_live_unsigned(&cursor)
+                owner_id :: jet_cli_live_unsigned(&cursor)
+                subscription_id :: jet_cli_live_unsigned(&cursor)
+                dispatch_id :: jet_cli_live_unsigned(&cursor)
+                lifecycle :: jet_cli_live_read_text(&cursor, "runtime event observation `lifecycle`")
+                queued :: jet_cli_live_signed(&cursor)
+                blocked :: jet_cli_live_signed(&cursor)
+                event_running :: jet_cli_live_signed(&cursor)
+                capacity :: jet_cli_live_signed(&cursor)
+                overflow :: jet_cli_live_read_text(&cursor, "runtime event observation `overflow`")
+                priority :: jet_cli_live_signed(&cursor)
+                failure :: jet_cli_live_read_text(&cursor, "runtime event observation `failure`")
+                terminal :: jet_cli_live_read_text(&cursor, "runtime event observation `terminal`")
+                &events.push(JetCLILiveEvent{sequence: sequence, source: source, event_id: event_id, owner_id: owner_id, subscription_id: subscription_id, dispatch_id: dispatch_id, lifecycle: lifecycle, queued: queued, blocked: blocked, running: event_running, capacity: capacity, overflow: overflow, priority: priority, failure: failure, terminal: terminal})
+            }
+        } else {
+            return Err(jet_cli_read_error("live runtime snapshot has an unknown section"))
+        }
     }
-    effects :: jet_cli_live_counts(root, "effects", [String]{"compute", "waiting", "channel", "time", "io"}, "live effects")
-    resources :: jet_cli_live_counts(root, "resources", [String]{"workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"}, "live resources")
-    runtime := JetCLILiveRuntime?{None}
-    if jet_cli_live_field(root, "runtime") == .Val(window) {
-        jet_cli_live_object(window, [String]{"elapsed_ns", "cpu_ns", "exit"}, [String]{}, "live runtime window")
-        elapsed_ns :: jet_cli_live_int(window, "elapsed_ns", "live runtime window", true)
-        cpu_ns :: jet_cli_live_optional_int(window, "cpu_ns", "live runtime window")
-        if cpu_ns == .Val(number) && number < 0 -> return Err(jet_cli_read_error("live runtime window has negative `cpu_ns`"))
-        runtime = Val(JetCLILiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: cpu_ns, exit: jet_cli_live_bool(window, "exit", "live runtime window")})
+    if cursor.at != bytes.len() -> return Err(jet_cli_read_error("live runtime snapshot has trailing bytes"))
+    // The registries are id-ordered views; at most 4096 channels are shown.
+    &tasks.sort_by((left: JetCLILiveTask, right: JetCLILiveTask) -> left.id <=> right.id)
+    &channels.sort_by((left: JetCLILiveChannel, right: JetCLILiveChannel) -> left.id <=> right.id)
+    if channels.len() > 4096 -> channels = channels[0..<4096].copy()
+    effects["compute"] = tasks.len() - (effects.get("waiting") ?? 0)
+    resources["running"] = running
+    resources["cancelled"] = cancelled
+    Ok(JetCLILiveSnapshot{protocol: "jet.live.v1", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetCLILiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
+}
+
+// A /proc/<pid>/stat tick count: decimal digits that fit U64.
+fn jet_cli_live_stat_ticks(text: String) -> U64? Never! {
+    if text == "" -> return None
+    value := U64{0}
+    loop byte in text.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+        digit :: U64.from_u8(byte) - U64{48}
+        if value > (U64{18446744073709551615} - digit) /% (U64{10}) -> return None
+        value = value * U64{10} + digit
     }
-    raw_events :: jet_cli_live_field(root, "event_observations")
-    Ok(JetCLILiveSnapshot{protocol: protocol, session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: start_id, captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: runtime, raw_events: raw_events, events: None})
+    Val(value)
+}
+// Ticks in nanoseconds, only below the reference's overflow bound.
+fn jet_cli_live_ticks_ns(ticks: U64, hz: Int) -> U64? Never! {
+    if hz <= 0 || ticks > (U64{18446744073}) -> return None
+    Val(ticks * U64{1000000000} /% U64{hz})
+}
+// Binds the snapshot to the process from its /proc/<pid>/stat text. The
+// process start (field 22) must not follow the writer's boot-clock start,
+// so a reused pid's stale snapshot is refused; utime and stime (fields 14
+// and 15) less the run's starting ticks are its CPU time.
+fn jet_cli_live_bind(snapshot: &JetCLILiveSnapshot, stat: String) JetCLIReadError! {
+    // comm may contain spaces and ')'; the fields follow the LAST ') '.
+    parts :: stat.split(") ").to_list()
+    if parts.len() < 2 -> return Err(jet_cli_read_error("process identity stat is malformed"))
+    fields :: jet_cli_find_words(parts[parts.len() - 1])
+    if fields.len() <= 19 -> return Err(jet_cli_read_error("process identity stat is truncated"))
+    started :: jet_cli_live_stat_ticks(fields[19]) ?? return Err(jet_cli_read_error("process identity stat is malformed"))
+    hz :: snapshot.clock_hz
+    if hz <= 0 || hz > 1000000000 || started > snapshot.boot_ns /% (U64{1000000000} /% U64{hz}) -> return Err(jet_cli_read_error("live runtime snapshot does not belong to process {snapshot.pid}"))
+    snapshot.start_id = fields[19]
+    utime :: jet_cli_live_stat_ticks(fields[11])
+    stime :: jet_cli_live_stat_ticks(fields[12])
+    snapshot.runtime.cpu_ns = None
+    if (utime == .Val(user) && stime == .Val(system) && user <= U64{18446744073709551615} - system) {
+        now_ns :: jet_cli_live_ticks_ns(user + system, hz)
+        start_ns :: jet_cli_live_ticks_ns(snapshot.start_ticks, hz)
+        if now_ns == .Val(now) && start_ns == .Val(start) {
+            elapsed :: if now < start -> U64{0} else -> now - start
+            snapshot.runtime.cpu_ns = Val(if elapsed > JET_CLI_LIVE_INT_MAX -> 9223372036854775807 else -> Int.from_u64(elapsed))
+        }
+    }
+    return
 }

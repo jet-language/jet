@@ -41,7 +41,6 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
         {module_name: "core.data.sketch.reservoir", dependencies: [String]{"core.data"}},
         {module_name: "core.data.sketch.tdigest", dependencies: [String]{"core.data", "core.math"}},
         {module_name: "core.db", dependencies: [String]{"core.encoding"}},
-        {module_name: "core.email", dependencies: [String]{"core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"}},
         {module_name: "core.encoding", dependencies: [String]{"core"}},
         {module_name: "core.encoding.base32", dependencies: [String]{"core.encoding"}},
         {module_name: "core.encoding.base64", dependencies: [String]{"core.encoding", "core.encoding.hex", "core.encoding.base32"}},
@@ -53,6 +52,7 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
         {module_name: "core.encoding.json", dependencies: [String]{"core.encoding", "core.math"}},
         {module_name: "core.encoding.jsonl", dependencies: [String]{"core.encoding", "core.encoding.json"}},
         {module_name: "core.encoding.toml", dependencies: [String]{"core.encoding"}},
+        {module_name: "core.encoding.validate", dependencies: [String]{"core.encoding"}},
         {module_name: "core.encoding.xml", dependencies: [String]{"core.encoding"}},
         {module_name: "core.event", dependencies: [String]{"core.mem"}},
         {module_name: "core.files", dependencies: [String]{"core.text", "core.sys"}},
@@ -98,7 +98,7 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
         {module_name: "core.ui.host.accessibility", dependencies: [String]{"core.ui.host"}},
         {module_name: "core.units", dependencies: [String]{"core.math"}},
         {module_name: "core.watcher", dependencies: [String]{"core.files"}},
-        {module_name: "core.web", dependencies: [String]{"core.http", "core.web.forms"}},
+        {module_name: "core.web", dependencies: [String]{"core.http", "core.web.forms", "core.encoding.json", "core.reactive.loadable", "core.time"}},
         {module_name: "core.web.browser", dependencies: [String]{"core.web", "core.files"}},
         {module_name: "core.web.devserver", dependencies: [String]{"core.web"}},
         {module_name: "core.web.forms", dependencies: [String]{"core.web"}},
@@ -153,7 +153,7 @@ fn jet_ring_parse_manifest_layer(value: String) -> RuntimeLayer? {
 fn jet_ring_layer_of_module(module_name: String) -> RuntimeLayer Never! {
     if module_name == {
         "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> RuntimeLayer.Core
-        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> RuntimeLayer.Alloc
+        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.validate" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> RuntimeLayer.Alloc
         else -> RuntimeLayer.Std
     }
 }
@@ -194,10 +194,6 @@ fn jet_ring_helper_layer(module_name: String, helper: String) -> RuntimeLayer? {
         }
         "core.archive" -> if helper == {
             "zip_decompress" | "crc32" | "adler32" | "deflate" | "inflate" | "zip_names_json" | "tar_names_json" -> Val(RuntimeLayer.Alloc)
-            else -> None
-        }
-        "core.email" -> if helper == {
-            "Address" | "Message" | "Attachment" | "Envelope" | "RecipientPolicy" | "Limits" | "address" | "attachment" | "message" | "envelope" | "serialize" -> Val(RuntimeLayer.Alloc)
             else -> None
         }
         else -> None

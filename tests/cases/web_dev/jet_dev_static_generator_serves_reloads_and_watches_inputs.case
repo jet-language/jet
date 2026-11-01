@@ -7,7 +7,7 @@ copy: {root}/Examples/features/devloop/static_site_generator/run.jet generate.je
 copy: {root}/Examples/features/devloop/static_site_generator/package.jet package.jet
 session app raw: jet dev generate.jet
 stderr: null
-recv app line until ^= "App preview: " timeout 60s
+recv app line until ^= "App preview: " timeout 60s # original waits for the dev server readiness line
 capture: port = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
 cap:port: is-u32
 json: cap:port doc $ <= 65535

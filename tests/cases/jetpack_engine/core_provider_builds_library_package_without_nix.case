@@ -1,14 +1,16 @@
 # HAND-PORT tests/jetpack_engine.rs:7684-7738 core_provider_builds_library_package_without_nix
 # PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: core_provider_builds_library_package_without_nix.fixture
 env: NO_COLOR=1
 env: JETPACK_ROOT={work}/root
 mkdir: root
 mkdir: project
 write: project/env.jet env.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0
-stderr: ~ "built 1 package(s)" # original contains predicate
+# Live `env --prep` reports each realized package as a `✓ <name>   <version>` row instead of Rust's "built 1 package(s)" summary.
+stderr: ~ "✓ mathlib   0.1.0" # original contains predicate, respelled to the live realized-package row
 

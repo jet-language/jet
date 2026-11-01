@@ -164,8 +164,8 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     async_form := forms.validate_async(form3)
     submission :: forms.submit(&async_form) ?? panic("form submission")
     no_script_body :: forms.no_script(async_form) ?? panic("no-script body")
-    form_html :: "<link rel=\"stylesheet\" href=\"/assets/app.css\">" + forms.html(async_form)
-    form_text :: forms.show(async_form) + typed_form_markup
+    form_html :: "<link rel=\"stylesheet\" href=\"/assets/app.css\">{forms.html(async_form)}"
+    form_text :: "{forms.show(async_form)}{typed_form_markup}"
 
     // Table owns typed rows, deterministic sorting/filtering, and pagination.
     // Virtual consumes only the bounded viewport slice, never the full render
@@ -202,7 +202,7 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     loader_html :: "<section data-panel=\"loader\"><table><tbody>{loaded_markup}</tbody></table></section>"
     table_html :: "<section data-panel=\"table\" data-table-page=\"{search.page}\"><p>rows={row_count} pending={pending_count} page={table_page.rows.len()}</p><table><tbody>{table_markup}</tbody></table></section>"
     virtual_html :: "<section data-panel=\"virtual\"><p>indices={visible_indices.len()} rows={visible_rows.len()}</p><div data-virtual-window=\"0:480\">{virtual_markup}</div><pre>{virtual_text}</pre></section>"
-    return "<main data-jet-edit-loop=\"state-preserved\">" + nav + "<h1>Orders</h1><p data-state=\"edit-loop\">edit-loop: state-preserved</p>" + interactions + "<p data-state=\"loaded\">loaded: {loaded.len()}</p><p data-state=\"error\">error: route/query/form boundaries</p><p data-route=\"/orders/:id\">route search={search.q}</p><pre data-panel=\"router\">{route_text}</pre>" + loader_html + "<pre data-panel=\"query\" data-query-refresh=\"{search.refresh}\">{query_text} invalidation={stale_generation}</pre><section data-panel=\"forms\">{form_html}<pre>{form_text} body={submission} no-script={no_script_body}</pre></section>" + table_html + virtual_html + "<pre data-panel=\"store\" data-cart-count=\"{search.cart}\">{store_text} transaction={transaction.generation}</pre></main>"
+    return "<main data-jet-edit-loop=\"state-preserved\">{nav}<h1>Orders</h1><p data-state=\"edit-loop\">edit-loop: state-preserved</p>{interactions}<p data-state=\"loaded\">loaded: {loaded.len()}</p><p data-state=\"error\">error: route/query/form boundaries</p><p data-route=\"/orders/:id\">route search={search.q}</p><pre data-panel=\"router\">{route_text}</pre>{loader_html}<pre data-panel=\"query\" data-query-refresh=\"{search.refresh}\">{query_text} invalidation={stale_generation}</pre><section data-panel=\"forms\">{form_html}<pre>{form_text} body={submission} no-script={no_script_body}</pre></section>{table_html}{virtual_html}<pre data-panel=\"store\" data-cart-count=\"{search.cart}\">{store_text} transaction={transaction.generation}</pre></main>"
 }
 
 fn home() -> WebPage { web.page("Orders", render_snapshot(41, OrderSearch{q: "pending", page: 0, cart: 0, refresh: 0}, [Order]{})) }

@@ -115,7 +115,7 @@ module cli {}
             .stderr(.Capture)
             .output_limit(128)
             .spawn() ?? panic("cli consumer")
-        loop line in matches -> consumer.stdin.write("{line}\n") ?? panic("cli stdin write")
+        loop line in matches -> consumer.stdin.write_text("{line}\n") ?? panic("cli stdin write")
         consumer.stdin.close()
         consumed :: consumer.wait() ?? panic("cli consumer wait")
 

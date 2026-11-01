@@ -49,15 +49,29 @@ fn sema_coverage_shape_keys(shape: TPatternShape, keys: &[String], ranges: &[Sem
     }
 }
 
-// S31: the head key and single nested payload shape of a partial arm.
-fn sema_coverage_nested_part(shape: TPatternShape) -> (key: String, inner: TPatternShape)? {
+// S31: the head key, payload field and nested shape of a partial arm. A case
+// with several payload fields is partial on one field when that field holds
+// the only nested pattern and every other field is a binding or `_`
+// (`.FailedToFetch{url, cause: .BadURL(why)}`).
+fn sema_coverage_nested_part(shape: TPatternShape) -> (key: String, field: Int, inner: TPatternShape)? {
     if shape == {
-        .Present(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, key: "Val"))
-        .Ok(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, key: "Ok"))
-        .Err(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, key: "Err"))
+        .Present(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, field: 0, key: "Val"))
+        .Ok(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, field: 0, key: "Ok"))
+        .Err(_, _, inner, _) -> if inner == .Val(nested) -> return Val((inner: nested.shape, field: 0, key: "Err"))
         .Variant(variant, bindings, _, _) -> {
-            if bindings.len() == 1 {
-                if bindings[0] == .Nested(nested) -> return Val((inner: nested.shape, key: variant))
+            nested_field := -1
+            loop index in 0..<bindings.len() {
+                if bindings[index] == {
+                    .Wildcard | .Bind(_, _) -> {}
+                    .Nested(_) -> {
+                        if nested_field >= 0 -> return None
+                        nested_field = index
+                    }
+                    .Range(_, _) | .Value(_) -> return None
+                }
+            }
+            if nested_field >= 0 {
+                if bindings[nested_field] == .Nested(nested) -> return Val((inner: nested.shape, field: nested_field, key: variant))
             }
         }
         else -> {}
@@ -75,8 +89,9 @@ fn sema_coverage_collect_nested(shape: TPatternShape, key: String, inner: &[TPat
     if part.key == key -> &inner.push(part.inner)
 }
 
-// The single payload type behind a head key, when nested coverage applies.
-fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+// The payload type of field `field` behind a head key, when nested coverage
+// applies.
+fn sema_coverage_payload_type(subject_ty: Type, key: String, field: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
     if subject_ty == {
         // copy: `inner` is a payload of read parameter `subject_ty`, which keeps the original; the Val carrier owns this one
         .Option(inner) -> if key == "Val" -> return Val(inner.copy())
@@ -91,7 +106,7 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
                 loop row in nominal.variants {
                     if row.symbol.name == key {
                         types :: sema_pattern_variant_types(program.registration_graph, row.payload, nominal, subject_ty)
-                        if types.len() == 1 -> return Val(types[0])
+                        if field < types.len() -> return Val(types[field])
                     }
                 }
             }
@@ -114,9 +129,9 @@ fn sema_coverage_is_closed(ty: Type) -> Bool Never! {
     }
 }
 
-// The S31 nested payload shapes of the arms, grouped by head key in one pass;
-// `partial_keys` lists the keys in first-seen order.
-fn sema_coverage_group_nested(shape: TPatternShape, groups: &[String:[TPatternShape]], partial_keys: &[String]) {
+// The S31 nested payload shapes of the arms, grouped by head key and payload
+// field in one pass; `partial_keys` lists the keys in first-seen order.
+fn sema_coverage_group_nested(shape: TPatternShape, groups: &[String:[(field: Int, inner: TPatternShape)]], partial_keys: &[String]) {
     if shape == .Or(alternatives, _) {
         loop alternative in alternatives -> sema_coverage_group_nested(alternative, &groups, &partial_keys)
         return
@@ -124,18 +139,18 @@ fn sema_coverage_group_nested(shape: TPatternShape, groups: &[String:[TPatternSh
     part :: sema_coverage_nested_part(shape) ?? return
     existing :: groups.get(part.key)
     if existing == None -> &partial_keys.push(part.key)
-    group := existing ?? [TPatternShape]{}
-    &group.push(part.inner)
+    group := existing ?? [(field: Int, inner: TPatternShape)]{}
+    &group.push((field: part.field, inner: part.inner))
     groups[part.key] = group
 }
 
 // S31: the covered keys of a set of arm shapes over `subject_ty`. A head key
-// with only nested payload arms is covered when those nested arms jointly
-// cover its payload type (to any depth).
+// with only nested payload arms is covered when the nested arms on one of
+// its payload fields jointly cover that field's type (to any depth).
 fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables, ranges: &[SemaIntegerRange]) -> [String] {
     keys := [String]{}
     partial_keys := [String]{}
-    groups := [String:[TPatternShape]]{}
+    groups := [String:[(field: Int, inner: TPatternShape)]]{}
     loop shape in shapes {
         sema_coverage_shape_keys(shape, &keys, &ranges)
         sema_coverage_group_nested(shape, &groups, &partial_keys)
@@ -143,25 +158,38 @@ fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: Se
     key_set := sema_coverage_key_set(keys)
     loop key in partial_keys {
         if sema_coverage_leaf_covered(key_set, key) -> next
-        payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment, program) ?? next)
-        if !sema_coverage_is_closed(payload_ty) -> next
-        inner :: groups.get(key) ?? [TPatternShape]{}
-        if payload_ty == .List(_) || payload_ty == .FixedList(_, _) || payload_ty == .Map(_, _, _) {
-            rows :: loop shape in inner -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
-            if sema_pattern_matrix_complete(rows, [Type]{payload_ty}, environment, program) {
+        group :: groups.get(key) ?? [(field: Int, inner: TPatternShape)]{}
+        fields := [Int]{}
+        loop entry in group {
+            if !fields.contains(entry.field) -> &fields.push(entry.field)
+        }
+        loop field in fields {
+            if sema_coverage_field_covers(subject_ty, key, field, group, environment, program) {
                 &keys.push(key)
                 key_set[key] = true
+                break
             }
-            next
-        }
-        inner_ranges := [SemaIntegerRange]{}
-        inner_keys :: sema_coverage_keys(payload_ty, inner, environment, program, &inner_ranges)
-        if sema_coverage_missing(payload_ty, inner_keys, environment, program).len() == 0 {
-            &keys.push(key)
-            key_set[key] = true
         }
     }
     keys
+}
+
+// Whether the nested arms on payload field `field` of head `key` jointly
+// cover that field's closed type.
+fn sema_coverage_field_covers(subject_ty: Type, key: String, field: Int, group: [(field: Int, inner: TPatternShape)], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, field, environment, program) ?? return false)
+    if !sema_coverage_is_closed(payload_ty) -> return false
+    inner := [TPatternShape]{}
+    loop entry in group {
+        if entry.field == field -> &inner.push(entry.inner)
+    }
+    if payload_ty == .List(_) || payload_ty == .FixedList(_, _) || payload_ty == .Map(_, _, _) {
+        rows :: loop shape in inner -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
+        return sema_pattern_matrix_complete(rows, [Type]{payload_ty}, environment, program)
+    }
+    inner_ranges := [SemaIntegerRange]{}
+    inner_keys :: sema_coverage_keys(payload_ty, inner, environment, program, &inner_ranges)
+    sema_coverage_missing(payload_ty, inner_keys, environment, program).len() == 0
 }
 
 // Every condition must be a pattern test on the same subject; otherwise the
@@ -341,7 +369,7 @@ fn sema_coverage_nested_cases(subject_ty: Type, key: String, shapes: [TPatternSh
     seen := [String]{}
     loop shape in shapes -> sema_coverage_collect_nested(shape, key, &inner, &seen)
     if inner.len() == 0 -> return [String]{}
-    payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment, program) ?? return [String]{})
+    payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, 0, environment, program) ?? return [String]{})
     if !(payload_ty == .Named(_) || payload_ty == .Apply(_, _) || payload_ty == .Union(_)) -> return [String]{}
     ranges := [SemaIntegerRange]{}
     keys :: sema_coverage_keys(payload_ty, inner, environment, program, &ranges)
@@ -409,8 +437,8 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
         if sema_coverage_ranges_cover(ranges, bounds.lo, bounds.hi) -> return
     }
     if sema_coverage_is_open_scalar(subject_ty) {
-        domain_note :: if interval != None -> "`{type_name(subject_ty)}` has a finite integer interval, but the range arms do not cover every value" else -> "`{type_name(subject_ty)}` has infinitely many values; range arms only cover a subset"
-        &diagnostics.push(sema_error("E0307", span, "this `if` over `{type_name(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
+        domain_note :: if interval != None -> "`{sema_type_show(subject_ty)}` has a finite integer interval, but the range arms do not cover every value" else -> "`{sema_type_show(subject_ty)}` has infinitely many values; range arms only cover a subset"
+        &diagnostics.push(sema_error("E0307", span, "this `if` over `{sema_type_show(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
         return
     }
     missing := sema_coverage_missing(subject_ty, keys, environment, program)
@@ -420,6 +448,12 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     }
     missing = sema_coverage_nested_witnesses(subject_ty, missing, table.shapes, environment, program)
     if missing.len() == 0 -> return
+    // A case with several payload fields, one of them nested
+    // (`.FailedToFetch{url, cause: .BadURL(why)}`), is proved column by column.
+    if sema_coverage_any_multi_field_nested(table.shapes) {
+        rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
+        if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) -> return
+    }
     names :: missing.join(", ")
     if multi_head {
         &diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every case — missing: {names}", "each multi-head head covers one argument shape, so every variant must appear once", "add a head for: {names}"))
@@ -520,7 +554,7 @@ fn sema_coverage_shape_span(shape: TPatternShape) -> Span Never! {
 // A pattern arm lowered to an IfLet condition reads, for coverage, as the
 // pattern test it was checked from.
 fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never! {
-    sema_tir_node(Type.Bool, TExprKind.PatternMatches{subject: subject, pattern: pattern}, subject.span)
+    sema_tree_node(Type.Bool, TExprKind.PatternMatches{subject: subject, pattern: pattern}, subject.span)
 }
 
 // The value form arrives as a nested `if` chain sharing one span and ending in
@@ -981,6 +1015,31 @@ fn sema_pattern_matrix_needed(shape: TPatternShape) -> Bool Never! {
             }
             false
         }
+        else -> false
+    }
+}
+
+fn sema_coverage_any_multi_field_nested(shapes: [TPatternShape]) -> Bool Never! {
+    loop shape in shapes {
+        if sema_coverage_multi_field_nested(shape) -> return true
+    }
+    false
+}
+
+// Whether `shape` holds, at any depth, a case pattern with more than one
+// payload field where one field is itself a nested pattern.
+fn sema_coverage_multi_field_nested(shape: TPatternShape) -> Bool Never! {
+    if shape == {
+        .Variant(_, slots, _, _) -> {
+            loop slot in slots {
+                if slot == .Nested(inner) {
+                    if slots.len() > 1 || sema_coverage_multi_field_nested(inner.shape) -> return true
+                }
+            }
+            false
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> if inner == .Val(nested) -> sema_coverage_multi_field_nested(nested.shape) else -> false
+        .Or(alternatives, _) -> sema_coverage_any_multi_field_nested(alternatives)
         else -> false
     }
 }

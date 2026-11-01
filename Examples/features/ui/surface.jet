@@ -20,7 +20,7 @@ use core.ui.host.drag_drop as drag_drop
 use core.ui.host.ime as ime
 use core.ui.host.shortcuts as shortcuts
 
-fn preview_body() -> UINode {
+fn preview_body() -> UINode Never! {
     ui.box(
     [
         ui.node_role("Preview label", 160.0, 24.0, ui.aria_role_label()),
@@ -29,7 +29,7 @@ fn preview_body() -> UINode {
     )
 }
 
-fn playground_body() -> UINode { ui.text_input("Try the playground", .Native) }
+fn playground_body() -> UINode Never! { ui.text_input("Try the playground", .Native) }
 
 fn save_command() -> UIShortcut { UIShortcut.cmd("s") }
 
@@ -54,8 +54,14 @@ fn run() {
 
     preview :: ui.preview("surface-preview", () -> preview_body(), viewport: ui.phone())
     playground :: ui.playground("surface-playground", () -> playground_body(), viewport: ui.tablet())
-    _preview_registry :: previews([preview])
-    _playground_registry :: playgrounds([playground])
+    if previews([preview]) == {
+        .Ok(registry) -> print("previews {registry.entries.len()}")
+        .Err(error) -> print("previews failed: {error}")
+    }
+    if playgrounds([playground]) == {
+        .Ok(registry) -> print("playgrounds {registry.entries.len()}")
+        .Err(error) -> print("playgrounds failed: {error}")
+    }
     _phone :: ui.phone()
     _tablet :: ui.tablet()
     _desktop :: ui.desktop()

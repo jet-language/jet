@@ -52,14 +52,16 @@ fn ir_handle_task_route(receiver: Type, carrier: TFailureCarrier) -> IRHandleRou
     }
 }
 
-fn ir_handle_allocator_name(receiver: Type) -> String Never! {
-    if ir_handle_type_without_tags(receiver) == {
-        .Named(name) -> {
-            if name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed" -> return name
+// The core.mem allocator family a checked allocator method's receiver names
+// (`Arena`, `Bump`, `Pool` or `Fixed`, bare or `<corelib>/core.mem::`).
+fn ir_handle_allocator_name(receiver: Type) -> String? Never! {
+    if ir_handle_type_without_tags(receiver) == .Named(name) {
+        families :: [String]{"Arena", "Bump", "Pool", "Fixed"}
+        loop family in families {
+            if name == family || name == ("<corelib>/core.mem::{family}") -> return Val(family)
         }
-        else -> {}
     }
-    panic("checked allocator method has no allocator receiver")
+    None
 }
 
 fn ir_handle_nominal_name(ty: Type) -> String Never! {
@@ -247,19 +249,6 @@ fn ir_handle_precise_route(type_name: String, method: String) -> IRHandleRoute? 
     Val(ir_handle_route(false, type_name, method, "jet_{type_key}_{method}", mask, None))
 }
 
-fn ir_handle_is_simd_lane_type(name: String) -> Bool Never! {
-    if name == {
-        "F32x4" | "F64x2" | "F32x8" | "F64x4" | "I8x16" | "I16x8" | "I32x4" | "I64x2" |
-        "U8x16" | "U16x8" | "U32x4" | "U64x2" | "I8x32" | "I16x16" | "I32x8" | "I64x4" |
-        "U8x32" | "U16x16" | "U32x8" | "U64x4" -> {
-            true
-        }
-        else -> {
-            false
-        }
-    }
-}
-
 fn ir_handle_is_geometry_type(name: String) -> Bool Never! {
     if name == {
         "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
@@ -272,33 +261,12 @@ fn ir_handle_is_geometry_type(name: String) -> Bool Never! {
     }
 }
 
-fn ir_handle_math_route(type_name: String, method: String, reduce_op: String?) -> IRHandleRoute? {
+fn ir_handle_math_route(type_name: String, method: String) -> IRHandleRoute? {
     suffix := ""
     if {
-        method == "reduce" -> {
-            suffix = if reduce_op == {
-                (Val("Add")) -> "reduce_add"
-                (Val("Mul")) -> "reduce_mul"
-                (Val("Min")) -> "reduce_min"
-                (Val("Max")) -> "reduce_max"
-                (Val("Avg")) -> "reduce_avg"
-                else -> {
-                    return None
-                }
-            }
-        }
-        reduce_op != None -> {
-            return None
-        }
         ir_handle_is_geometry_type(type_name) -> {
             if method == {
                 "add" | "sub" | "then" | "ray" | "inverse" | "point" | "point_at_depth" -> suffix = method
-                else -> return None
-            }
-        }
-        ir_handle_is_simd_lane_type(type_name) -> {
-            if method == {
-                "to_array" | "sum" | "product" | "min" | "max" -> suffix = method
                 else -> return None
             }
         }
@@ -347,16 +315,6 @@ fn ir_handle_math_route(type_name: String, method: String, reduce_op: String?) -
     Val(ir_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
-fn ir_handle_layout_route(method: String) -> IRHandleRoute? {
-    if method == {
-        "h" | "v" | "suggest" -> return Val(ir_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true, false, false}, None))
-        "value" -> return Val(ir_handle_core("core.layout", "layout.value", "jet_layout::Handle::value", [Bool]{true, false}, None))
-        "is_feasible" | "conflict" -> return Val(ir_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true}, None))
-        "required" | "strong" | "medium" | "weak" -> return Val(ir_handle_core("core.layout", "layout.{method}", "jet_layout::Constraint::{method}", [Bool]{false}, None))
-        else -> return None
-    }
-}
-
 fn ir_handle_loadable_route(method: String) -> IRHandleRoute? {
     if method == {
         "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" -> return Val(ir_handle_core("core.pending", "loadable.{method}", "JetLoadable::{method}", [Bool]{true}, None))
@@ -399,97 +357,13 @@ fn ir_handle_ui_route(receiver: Type, method: String) -> IRHandleRoute? {
     if (method == "frame_lines" || method == "render_count") && name == "TUIBackend" -> member = method
     if method == "present" && name == "GtkBackend" -> member = "present"
     if member == "" -> return None
+    // The runtime borrows every input (UiBackends.jet), cloning what it keeps.
     mask := if method == {
-        "measure" | "layout" | "mount" -> [Bool]{true, false, false}
-        "paint" | "on_event" | "mount_default" | "set_focus_group" | "present" -> [Bool]{true, false}
+        "measure" | "layout" | "mount" -> [Bool]{true, true, true}
+        "paint" | "on_event" | "mount_default" | "set_focus_group" | "present" -> [Bool]{true, true}
         else -> [Bool]{true}
     }
     Val(ir_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
-}
-
-fn ir_handle_app_route(method: String, source_arg_count: Int) -> IRHandleRoute? {
-    arity := 0
-    if method == {
-        "route" | "page" | "layout" | "form" -> {
-            if {
-                source_arg_count == 2 -> arity = 4
-                else -> {}
-            }
-        }
-        "loader" -> {
-            if {
-                source_arg_count == 2 -> arity = 4
-                source_arg_count == 3 -> arity = 5
-                else -> {}
-            }
-        }
-        "pending" | "not_found" | "error" -> {
-            if {
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        "action" -> {
-            if {
-                source_arg_count == 2 -> arity = 3
-                else -> {}
-            }
-        }
-        "data" -> {
-            if {
-                source_arg_count == 2 -> arity = 3
-                else -> {}
-            }
-        }
-        "mount" -> {
-            if {
-                source_arg_count == 2 -> arity = 3
-                source_arg_count == 3 -> arity = 4
-                source_arg_count == 4 -> arity = 5
-                else -> {}
-            }
-        }
-        "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter" -> {
-            if {
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev" | "hydration_release" | "facts_json" -> {
-            if {
-                source_arg_count == 0 -> arity = 1
-                else -> {}
-            }
-        }
-        "serve" -> {
-            if {
-                source_arg_count == 0 -> arity = 1
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        "serve_on" -> {
-            if {
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        else -> {}
-    }
-    if arity == 0 -> return None
-    mask := [Bool]{}
-    index := 0
-    loop index < arity {
-        &mask.push(index == 0)
-        index += 1
-    }
-    route_effect := if method == "serve" || method == "serve_on" -> Val(Effect.Net) else -> None
-    symbol := "jet_app_{method}"
-    if method == "loader" && source_arg_count == 3 -> symbol = "jet_app_loader_preload"
-    if method == "mount" && source_arg_count == 3 -> symbol = "jet_app_mount_with_effect"
-    if method == "mount" && source_arg_count == 4 -> symbol = "jet_app_mount_with_policy"
-    if method == "serve" && source_arg_count == 1 -> symbol = "jet_app_serve_with_port"
-    Val(ir_handle_core("core.web.app", method, symbol, mask, route_effect))
 }
 
 fn ir_handle_civil_time_route(kind: String, method: String) -> IRHandleRoute? {
@@ -723,36 +597,15 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
         else -> {}
     }
     if operation == {
-        .AllocAlloc | .AllocTryAlloc | .AllocReset -> {
-            allocator := ir_handle_allocator_name(receiver)
-            member := "alloc"
-            symbol := "jet_mem::Jet{allocator}::alloc"
-            mask := [Bool]{true, false}
-            if operation == {
-                .AllocTryAlloc -> {
-                    member = "try_alloc"
-                    symbol = "jet_mem::Jet{allocator}::try_alloc"
-                }
-                .AllocReset -> {
-                    member = "reset"
-                    symbol = "jet_mem::Jet{allocator}::reset"
-                    mask = [Bool]{true}
-                }
-                else -> {}
-            }
-            return Val(ir_handle_h("{allocator}.{member}", symbol, mask, Val(Effect.Mem)))
-        }
         .ReactiveGet -> return ir_handle_reactive_route(receiver, "get")
         .ReactiveSet -> return ir_handle_reactive_route(receiver, "set")
         .TaskJoin -> return Val(ir_handle_task_route(receiver, carrier))
         .PreciseMethod(type_name, method) -> return ir_handle_precise_route(type_name, method)
-        .MathMethod(type_name, method, reduce_op) -> return ir_handle_math_route(type_name, method, reduce_op)
+        .MathMethod(type_name, method) -> return ir_handle_math_route(type_name, method)
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
-        .LayoutMethod(method) -> return ir_handle_layout_route(method)
         .LoadableMethod(method) -> return ir_handle_loadable_route(method)
         .UIBackendMethod(method) -> return ir_handle_ui_route(receiver, method)
         .CivilTimeMethod(kind, method) -> return ir_handle_civil_time_route(kind, method)
-        .AppMethod(method, source_arg_count) -> return ir_handle_app_route(method, source_arg_count)
         .ProcessChildMethod(method) -> {
             if method == {
                 "id" -> return Val(ir_handle_h("process.child.id", "jet_process_child_id", [Bool]{true}, None))
@@ -787,7 +640,6 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
                     if argument_count == 1 -> return Val(ir_handle_h("process.spec.terminal_with_policy", "jet_process_spec_terminal_with_policy", [Bool]{false, true}, None))
                     return None
                 }
-                "abilities" -> return Val(ir_handle_h("process.spec.abilities", "jet_process_spec_abilities", [Bool]{true}, None))
                 "under" -> return Val(ir_handle_h("process.spec.under", "jet_std_process_spec_under", [Bool]{false, true}, None))
                 "plan" -> return Val(ir_handle_h("process.spec.plan", "jet_process_spec_plan", [Bool]{true}, None))
                 "run" -> return Val(ir_handle_h("process.spec.run", "jet_process_spec_run", [Bool]{true}, Val(Effect.Exec)))
@@ -892,8 +744,6 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .RNGWeightedPick -> return Val(ir_handle_h("rng.weighted_pick", "jet_rng_weighted_pick", [Bool]{true, true, true}, Val(Effect.Rand)))
         .RNGSample -> return Val(ir_handle_h("rng.sample", "jet_rng_sample", [Bool]{true, true, false}, Val(Effect.Rand)))
         .RNGShuffle -> return Val(ir_handle_h("rng.shuffle", "jet_rng_shuffle", [Bool]{true, true}, Val(Effect.Rand)))
-        .HistoryRNGNextU64 -> return Val(ir_handle_h("history_rng.next_u64", "jet_testing_history_rng_next_u64", [Bool]{true}, Val(Effect.Rand)))
-        .HistoryRNGBelow -> return Val(ir_handle_h("history_rng.below", "jet_testing_history_rng_below", [Bool]{true, false}, Val(Effect.Rand)))
         .GameSceneNew -> return Val(ir_handle_h("game.scene_new", "jet_game_scene_new", [Bool]{true}, None))
         .GameReplayRecord -> return Val(ir_handle_h("game.replay_record", "jet_game_replay_record", [Bool]{true}, None))
         .GameBackendHeadless -> return Val(ir_handle_core("core.game", "backend_headless", "jet_game_backend_headless", [Bool]{}, None))
@@ -947,33 +797,9 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .UnixStreamClose -> return Val(ir_handle_h("unix_stream.close", "jet_net_unix_close", [Bool]{true}, Val(Effect.Net)))
         .UnixStreamSetTimeout -> return Val(ir_handle_h("unix_stream.set_timeout", "jet_net_unix_set_timeout", [Bool]{true, true}, Val(Effect.Net)))
         .HTTPClientNew -> return Val(ir_handle_h("http.client_new", "jet_http_client_new_impl", [Bool]{}, Val(Effect.Net)))
-        .ArgsSpecFlag -> return Val(ir_handle_h("args.flag", "jet_args_flag", [Bool]{false, true, true}, Val(Effect.Env)))
-        .ArgsSpecFlagShort -> return Val(ir_handle_h("args.flag_short", "jet_args_flag_short", [Bool]{false, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOption -> return Val(ir_handle_h("args.option", "jet_args_option", [Bool]{false, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOptionShort -> return Val(ir_handle_h("args.option_short", "jet_args_option_short", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOptionDefault -> return Val(ir_handle_h("args.option_default", "jet_args_option_default", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOptionEnv -> return Val(ir_handle_h("args.option_env", "jet_args_option_env", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOptionInt -> return Val(ir_handle_h("args.option_int", "jet_args_option_int", [Bool]{false, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOptionFloat -> return Val(ir_handle_h("args.option_float", "jet_args_option_float", [Bool]{false, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecOptionChoice -> return Val(ir_handle_h("args.option_choice", "jet_args_option_choice", [Bool]{false, true, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecRepeat -> return Val(ir_handle_h("args.repeat", "jet_args_repeat", [Bool]{false, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecRequiredOption -> return Val(ir_handle_h("args.required_option", "jet_args_required_option", [Bool]{false, true, true, true}, Val(Effect.Env)))
-        .ArgsSpecPositional -> return Val(ir_handle_h("args.positional", "jet_args_positional", [Bool]{false, true, true}, Val(Effect.Env)))
-        .ArgsSpecDescription -> return Val(ir_handle_h("args.description", "jet_args_description", [Bool]{false, true}, Val(Effect.Env)))
-        .ArgsSpecSubcommand -> return Val(ir_handle_h("args.subcommand", "jet_args_subcommand", [Bool]{false, true, true, false}, Val(Effect.Env)))
-        .ArgsSpecVersion -> return Val(ir_handle_h("args.version", "jet_args_version", [Bool]{false, true}, Val(Effect.Env)))
-        .ArgsSpecCompletion -> return Val(ir_handle_h("args.completion", "jet_args_completion", [Bool]{true, true}, Val(Effect.Env)))
-        .ArgsSpecParse -> return Val(ir_handle_h("args.parse", "jet_args_parse", [Bool]{true, true}, Val(Effect.Env)))
-        .ArgsSpecParseOrExit -> return Val(ir_handle_h("args.parse_or_exit", "jet_args_parse_or_exit", [Bool]{true, true}, Val(Effect.Env)))
-        .ParsedArgsFlag -> return Val(ir_handle_h("parsed.flag", "jet_parsed_flag", [Bool]{true, true}, Val(Effect.Env)))
-        .ParsedArgsOption -> return Val(ir_handle_h("parsed.option", "jet_parsed_option", [Bool]{true, true}, Val(Effect.Env)))
-        .ParsedArgsOptionInt -> return Val(ir_handle_h("parsed.option_int", "jet_parsed_option_int", [Bool]{true, true}, Val(Effect.Env)))
-        .ParsedArgsOptionFloat -> return Val(ir_handle_h("parsed.option_float", "jet_parsed_option_float", [Bool]{true, true}, Val(Effect.Env)))
-        .ParsedArgsOptions -> return Val(ir_handle_h("parsed.options", "jet_parsed_options", [Bool]{true, true}, Val(Effect.Env)))
-        .ParsedArgsPositional -> return Val(ir_handle_h("parsed.positional", "jet_parsed_positional", [Bool]{true, false}, Val(Effect.Env)))
-        .ParsedArgsSubcommand -> return Val(ir_handle_h("parsed.subcommand", "jet_parsed_subcommand", [Bool]{true}, Val(Effect.Env)))
         .TerminalSessionResize -> return Val(ir_handle_h("terminal.resize", "jet_terminal_session_resize", [Bool]{true, true}, Val(Effect.IO)))
         .ProcessStdinWrite -> return Val(ir_handle_h("process.stdin_write", "jet_process_stdin_write", [Bool]{true, true}, Val(Effect.Exec)))
+        .ProcessStdinWriteText -> return Val(ir_handle_h("process.stdin_write_text", "jet_process_stdin_write_text", [Bool]{true, true}, Val(Effect.Exec)))
         .ProcessStdinClose -> return Val(ir_handle_h("process.stdin_close", "jet_process_stdin_close", [Bool]{true}, Val(Effect.Exec)))
         .ProcessStdinWriteAll -> return Val(ir_handle_h("process.stdin_write_all", "jet_process_stdin_write_all", [Bool]{true, true}, Val(Effect.Exec)))
         .ProcessStdoutRead -> return Val(ir_handle_h("process.stdout_read", "jet_process_stdout_read", [Bool]{true, false}, Val(Effect.Exec)))
@@ -987,7 +813,6 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .PathStem -> return Val(ir_handle_h("path.stem", "jet_path_stem", [Bool]{true}, None))
         .PathNormalize -> return Val(ir_handle_h("path.normalize", "jet_path_normalize", [Bool]{true}, None))
         .PathIsWithin -> return Val(ir_handle_h("path.is_within", "jet_path_is_within", [Bool]{true, true}, None))
-        .PathWriteAtomic -> return Val(ir_handle_h("path.write_atomic", "jet_path_write_atomic", [Bool]{true, true}, Val(Effect.FS)))
         .PathWalk -> return Val(ir_handle_h("path.walk", "jet_path_walk", [Bool]{true}, Val(Effect.FS)))
         .ReaderOver(owned) -> {
             symbol := if owned -> "jet_reader_over_owned" else -> "jet_reader_over"
@@ -1047,7 +872,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
             if sender_receiver -> return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
-        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .EmailMethod(_) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .ServiceRuntimeSend | .ServiceRuntimeRetry | .ServiceRuntimeDeadLetter | .ServiceRuntimeRetain | .ServiceRuntimeCommit | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
         else -> return None
     }
 }

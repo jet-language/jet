@@ -7,7 +7,7 @@ copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
 write: app.jet app.source
 session app raw: jet dev app.jet
 stderr: null
-recv app line until ^= "App preview: " timeout 60s
+recv app line until ^= "App preview: " timeout 60s # original waits for the dev server readiness line
 capture: served = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
 json: cap:served doc $ = {free-port:web}
 step: jet test claims

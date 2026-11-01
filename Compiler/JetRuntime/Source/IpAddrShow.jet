@@ -5,14 +5,14 @@
 // 1995-2000,2136-2195: decimal v4; mapped ::ffff:dotted; otherwise shortest
 // lowercase hex, earliest longest zero span only if length>1 (compat stays hex).
 fn ip_show_segment(value: I64, index: I64) -> I64 {
-    at :: value + I64{8} + index * I64{2}
-    (rt_text_byte(at) << I64{8}).bit_or(rt_text_byte(at + I64{1}))
+    at :: wrapping(wrapping(value + I64{8}) + index * I64{2})
+    (rt_text_byte(at) << I64{8}).bit_or(rt_text_byte(wrapping(at + I64{1})))
 }
 fn ip_show_v4(target: I64, value: I64, offset: I64) {
     at := I64{0}
     loop at < (I64{4}) {
         if (at != I64{0}) -> rt_text_push_scalar(target, I64{46})
-        rt_text_push_number(target, rt_text_byte(value + I64{8} + offset + at))
+        rt_text_push_number(target, rt_text_byte(wrapping(wrapping(wrapping(value + I64{8}) + offset) + at)))
         at += I64{1}
     }
 }
@@ -34,7 +34,7 @@ fn ip_show_into(result: I64, value: I64) {
     }
     // Native x64 aligned word loads identify the mapped prefix without a
     // scratch array or a separate scan: octets0..9 zero, octets10..11 ff ff.
-    if (rt_text_word(value + I64{8}) == I64{0} && (rt_text_word(value + I64{16}).bit_and(I64{4294967295})) == I64{4294901760}) {
+    if (rt_text_word(wrapping(value + I64{8})) == I64{0} && (rt_text_word(wrapping(value + I64{16})).bit_and(I64{4294967295})) == I64{4294901760}) {
         rt_text_push_word(result, I64{14906}, I64{2})
         rt_text_push_word(result, I64{1717986918}, I64{4})
         rt_text_push_scalar(result, I64{58})

@@ -29,14 +29,13 @@ struct JetCLIActionSpec {
 }
 
 // One top-level command: a bare leaf (`build`) or a group with nested
-// actions (`registry`). `headline` rows are the greeting's commands.
+// actions (`registry`).
 // `exhaustive` (groups only) means every subword is modeled by `actions`;
 // `os`, `env`, and `db` expose a wider downstream verb surface.
 // `usage` is the positional shape; None renders the generic `[args]`.
 struct JetCLICommandSpec {
     name: String
     summary: String
-    headline: Bool
     frequency_rank: Int
     exhaustive: Bool
     usage: String?
@@ -94,7 +93,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "registry",
         summary: "Publish and manage packages",
-        headline: false,
         frequency_rank: 16,
         exhaustive: true,
         usage: None,
@@ -109,7 +107,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "db",
         summary: "Run a bounded SQL console and manage database migrations",
-        headline: false,
         frequency_rank: 56,
         exhaustive: false,
         usage: Val("db [PATH] [--query SQL | --script PATH]"),
@@ -120,7 +117,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "inspect",
         summary: "Explore code, builds, packages, and bindings",
-        headline: false,
         frequency_rank: 4,
         exhaustive: true,
         usage: None,
@@ -161,7 +157,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "bind",
         summary: "Resolve and record a checked foreign binding plan",
-        headline: false,
         frequency_rank: 41,
         exhaustive: false,
         usage: Val("bind <name> [--shape automatic|native] [--freeze]\nbind --policy automatic|frozen\nbind <name> --update --preview\nbind <name> --update --accept <candidate-digest>"),
@@ -170,7 +165,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "project",
         summary: "Inspect project files and modules",
-        headline: false,
         frequency_rank: 53,
         exhaustive: true,
         usage: None,
@@ -181,7 +175,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "self",
         summary: "Manage the Jet installation and editor tools",
-        headline: false,
         frequency_rank: 8,
         exhaustive: true,
         usage: None,
@@ -199,7 +192,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "diff",
         summary: "Compare two Jet programs by meaning",
-        headline: false,
         frequency_rank: 43,
         exhaustive: false,
         usage: None,
@@ -208,7 +200,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "merge",
         summary: "Merge Jet programs without losing code structure",
-        headline: false,
         frequency_rank: 33,
         exhaustive: false,
         usage: None,
@@ -217,7 +208,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "review",
         summary: "Review meaning, authority, and proof changes",
-        headline: false,
         frequency_rank: 24,
         exhaustive: false,
         usage: Val("review <base.jet> <head.jet>"),
@@ -226,7 +216,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "run",
         summary: "Run a program or project",
-        headline: true,
         frequency_rank: 1,
         exhaustive: false,
         usage: Val("run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>]"),
@@ -235,7 +224,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "jobs",
         summary: "List, inspect, or watch named project jobs",
-        headline: false,
         frequency_rank: 29,
         exhaustive: false,
         usage: Val("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>]"),
@@ -246,7 +234,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "generate",
         summary: "Run an explicit source generator with authority and a receipt",
-        headline: false,
         frequency_rank: 60,
         exhaustive: false,
         usage: Val("generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json]"),
@@ -255,7 +242,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "check",
         summary: "Check code without creating a binary",
-        headline: true,
         frequency_rank: 3,
         exhaustive: false,
         usage: Val("check [<file.jet|dir>]"),
@@ -264,7 +250,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "fill",
         summary: "Propose checked code for typed goals",
-        headline: false,
         frequency_rank: 57,
         exhaustive: false,
         usage: Val("fill <file.jet[:line]>"),
@@ -273,7 +258,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "test",
         summary: "Run tests",
-        headline: false,
         frequency_rank: 5,
         exhaustive: false,
         usage: Val("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>]"),
@@ -282,7 +266,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "test-compare",
         summary: "Compare one recorded observation corpus against its relation",
-        headline: false,
         frequency_rank: 59,
         exhaustive: false,
         usage: Val("test-compare <corpus.json> [--relation=<name>] [--json]"),
@@ -291,7 +274,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "prove",
         summary: "Create a proof report for code and tests",
-        headline: false,
         frequency_rank: 13,
         exhaustive: false,
         usage: None,
@@ -302,7 +284,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "status",
         summary: "Show what the project has proved",
-        headline: false,
         frequency_rank: 35,
         exhaustive: false,
         usage: Val("status [<file.jet|dir>]"),
@@ -311,7 +292,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "build",
         summary: "Create a native executable",
-        headline: false,
         frequency_rank: 2,
         exhaustive: false,
         usage: Val("build [<file.jet|dir>] | build --verify <receipt-id>"),
@@ -320,7 +300,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "package",
         summary: "Create a desktop or game application bundle",
-        headline: false,
         frequency_rank: 46,
         exhaustive: false,
         usage: Val("package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>]"),
@@ -329,7 +308,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "flash",
         summary: "Flash firmware to a target board",
-        headline: false,
         frequency_rank: 48,
         exhaustive: false,
         usage: Val("flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"),
@@ -338,7 +316,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "cc",
         summary: "Compile and link C with the pinned Jetpack toolchain",
-        headline: false,
         frequency_rank: 42,
         exhaustive: false,
         usage: Val("cc [options] <sources>"),
@@ -347,7 +324,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "c++",
         summary: "Compile and link C++ with the pinned Jetpack toolchain",
-        headline: false,
         frequency_rank: 47,
         exhaustive: false,
         usage: Val("c++ [options] <sources>"),
@@ -356,7 +332,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "dev",
         summary: "Watch and run a program; optionally open Canvas or a local app",
-        headline: false,
         frequency_rank: 7,
         exhaustive: false,
         usage: Val("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
@@ -365,7 +340,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "try",
         summary: "Speculatively apply a plan and re-check its claims",
-        headline: false,
         frequency_rank: 55,
         exhaustive: false,
         usage: Val("try <plan.json>"),
@@ -374,7 +348,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "debug",
         summary: "Debug a program from Jet source",
-        headline: false,
         frequency_rank: 15,
         exhaustive: false,
         usage: Val("debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames]"),
@@ -383,7 +356,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "repl",
         summary: "Try Jet code interactively",
-        headline: false,
         frequency_rank: 9,
         exhaustive: false,
         usage: Val("repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>]"),
@@ -392,7 +364,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "notebook",
         summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
-        headline: false,
         frequency_rank: 32,
         exhaustive: false,
         usage: None,
@@ -401,7 +372,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "import",
         summary: "Convert supported source code into editable Jet",
-        headline: false,
         frequency_rank: 28,
         exhaustive: false,
         usage: Val("import <language> <dir> [--dry-run|--update]"),
@@ -410,7 +380,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "new",
         summary: "Create a Jet project or backend source scaffold",
-        headline: true,
         frequency_rank: 18,
         exhaustive: false,
         usage: Val("new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove]"),
@@ -419,7 +388,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "fmt",
         summary: "Format Jet and configured project files",
-        headline: false,
         frequency_rank: 10,
         exhaustive: false,
         usage: None,
@@ -428,7 +396,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "fix",
         summary: "Apply safe automatic fixes, including `fix memory`",
-        headline: false,
         frequency_rank: 12,
         exhaustive: false,
         usage: Val("fix <file.jet|dir>"),
@@ -437,7 +404,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "audit",
         summary: "Inspect implicit copies, exercised memory witnesses, or dependencies",
-        headline: false,
         frequency_rank: 26,
         exhaustive: false,
         usage: None,
@@ -446,7 +412,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "lint",
         summary: "Run optional code-quality checks",
-        headline: false,
         frequency_rank: 38,
         exhaustive: false,
         usage: Val("lint --a11y|--complexity|--cost <file.jet>"),
@@ -455,7 +420,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "doc",
         summary: "Generate reference documentation",
-        headline: false,
         frequency_rank: 36,
         exhaustive: false,
         usage: Val("doc [--json|--check] [<file.jet|dir>]"),
@@ -464,7 +428,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "explain",
         summary: "Explain a diagnostic code, build fact, generic-module value, or typed cost",
-        headline: false,
         frequency_rank: 6,
         exhaustive: false,
         usage: Val("explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir>"),
@@ -473,7 +436,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "env",
         summary: "Open the project development shell",
-        headline: false,
         frequency_rank: 17,
         exhaustive: false,
         usage: None,
@@ -491,7 +453,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "shared-store",
         summary: "Manage the optional shared package broker",
-        headline: false,
         frequency_rank: 61,
         exhaustive: true,
         usage: None,
@@ -505,7 +466,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "cache",
         summary: "Manage the machine-wide artifact store",
-        headline: false,
         frequency_rank: 52,
         exhaustive: true,
         usage: None,
@@ -518,7 +478,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "remote",
         summary: "Manage host-owned remote builders",
-        headline: false,
         frequency_rank: 54,
         exhaustive: false,
         usage: None,
@@ -529,7 +488,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "trust",
         summary: "Review or change trusted authority",
-        headline: false,
         frequency_rank: 45,
         exhaustive: false,
         usage: None,
@@ -538,7 +496,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "image",
         summary: "Build a declared container image",
-        headline: false,
         frequency_rank: 27,
         exhaustive: false,
         usage: None,
@@ -547,7 +504,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "os",
         summary: "Manage Jetos machines and images",
-        headline: false,
         frequency_rank: 11,
         exhaustive: false,
         usage: None,
@@ -565,7 +521,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "add",
         summary: "Add and download a dependency",
-        headline: false,
         frequency_rank: 34,
         exhaustive: false,
         usage: None,
@@ -574,7 +529,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "remove",
         summary: "Remove a dependency",
-        headline: false,
         frequency_rank: 58,
         exhaustive: false,
         usage: None,
@@ -583,7 +537,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "fetch",
         summary: "Download locked dependencies",
-        headline: false,
         frequency_rank: 14,
         exhaustive: false,
         usage: None,
@@ -592,7 +545,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "search",
         summary: "Search the local package catalog",
-        headline: false,
         frequency_rank: 49,
         exhaustive: false,
         usage: Val("search <query>"),
@@ -601,7 +553,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "find",
         summary: "Find code by type, effect, or example",
-        headline: false,
         frequency_rank: 44,
         exhaustive: false,
         usage: Val("find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>]"),
@@ -610,7 +561,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "update",
         summary: "Update dependency or toolchain pins",
-        headline: false,
         frequency_rank: 22,
         exhaustive: false,
         usage: None,
@@ -619,7 +569,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "init",
         summary: "Create package settings in this directory",
-        headline: false,
         frequency_rank: 25,
         exhaustive: false,
         usage: None,
@@ -628,7 +577,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "split",
         summary: "Extract closed Package facts into Configs or members",
-        headline: false,
         frequency_rank: 51,
         exhaustive: false,
         usage: None,
@@ -637,7 +585,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "fold",
         summary: "Reverse a recorded Package source transition",
-        headline: false,
         frequency_rank: 50,
         exhaustive: false,
         usage: None,
@@ -647,7 +594,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "gc",
         summary: "Show values moved into automatic memory management",
-        headline: false,
         frequency_rank: 30,
         exhaustive: false,
         usage: None,
@@ -658,7 +604,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "clean",
         summary: "Remove unused package-store data",
-        headline: false,
         frequency_rank: 31,
         exhaustive: false,
         usage: None,
@@ -670,7 +615,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "emit",
         summary: "Print generated build output",
-        headline: false,
         frequency_rank: 37,
         exhaustive: false,
         usage: None,
@@ -679,7 +623,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "eval",
         summary: "Evaluate pure Jet and print the value (`--json` for JSON)",
-        headline: false,
         frequency_rank: 23,
         exhaustive: false,
         usage: Val("eval <file.jet|expression>"),
@@ -688,7 +631,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "budget",
         summary: "Check performance limits or update baselines",
-        headline: false,
         frequency_rank: 20,
         exhaustive: false,
         usage: None,
@@ -697,7 +639,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "perf",
         summary: "Collect and inspect performance traces",
-        headline: false,
         frequency_rank: 19,
         exhaustive: true,
         usage: None,
@@ -717,7 +658,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "fuzz",
         summary: "Find failing inputs for property tests",
-        headline: false,
         frequency_rank: 40,
         exhaustive: false,
         usage: Val("fuzz <file.jet> [<test>]"),
@@ -726,7 +666,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "version",
         summary: "Show the Jet version",
-        headline: false,
         frequency_rank: 39,
         exhaustive: false,
         usage: None,
@@ -735,7 +674,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "help",
         summary: "Show command help",
-        headline: false,
         frequency_rank: 21,
         exhaustive: false,
         usage: Val("help [<command>] [--sort frequency|az|za]"),

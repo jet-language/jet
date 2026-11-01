@@ -81,7 +81,7 @@ fn provider_core_test_is_bad_output(error: ProviderError) -> Bool {
 }
 
 #Test("provider git uses the shared source fetch policy") {
-    policy :: HardenedGitPolicy.current()
+    policy :: FoundationHardenedGitPolicy.current()
     pairs :: [String]{"credential.helper=", "protocol.ext.allow=never", "protocol.file.allow=always"}
     loop value in pairs {
         found := false
@@ -496,6 +496,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     assert_eq(shared.resolved_source, realized.producer.immutable_source)
     assert(shared.native_document != "")
     assert_eq(realized.producer.facts.get(PROVIDER_SHARED_FACTS_DIGEST), Val(shared.digest()))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -518,6 +519,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     library :: provider_realize(&verification, provider_core_test_spec_in("mathlib@mine", table), table, ctx) ?? panic("library")
     assert_eq(library.bin, "")
     assert(files.is_file(files.join(library.out, "mathlib.jet")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -536,6 +538,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     realized :: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("remote realization")
     assert_eq(realized.name, "hello")
     assert(files.is_file(files.join(realized.bin, "hello")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -599,6 +602,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     realized :: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("inferred realization")
     assert_eq(realized.name, "hello")
     assert(files.is_file(files.join(realized.bin, "hello")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -695,7 +699,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     provider_core_test_write(files.join(repo, "packages/hello/package.jet"), "name: \"hello\"\nversion: \"0.1.0\"\nsource: \"src\"\noutputs: {{ hello: .Executable{{ entry: run }} }}\ndefaults: {{ run: hello }}\n")
     provider_core_test_write(files.join(source, "main.jet"), "fn run() {{ print(\"hello\") }}\n")
     provider_core_test_write(files.join(repo, "stray/package.jet"), "name: \"stray\"\nversion: \"0.1.0\"\n")
-    found :: provider_find_canonical_package(repo, "hello") ?? panic("canonical lookup")
+    found :: provider_find_canonical_package(repo, "hello") ? located -> located ! error -> panic("canonical lookup")
     package :: found ?? panic("member Package must be discoverable")
     assert_eq(package.root, files.join(repo, "packages/hello"))
     assert_eq(package.facts.name, "hello")
@@ -749,6 +753,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     assert_eq(stored.envelope.platform, realized.envelope.platform)
     assert_eq(stored.envelope.provenance, realized.envelope.provenance)
     assert_eq((ProducerRecord.decode(stored.producer_record) ?? panic("producer")).provider, "core")
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 

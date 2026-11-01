@@ -1,0 +1,427 @@
+// One WebAssembly module from an IR module. A program is two modules over one
+// environment the JavaScript host makes (Host.jet): the runtime module (the
+// runtime library, selected when the toolchain is packaged) and the program
+// module (selected at `jet build`). Both import from `env` the one linear
+// memory, the one function table and the globals WEB_GLOBAL_SP (the stack
+// pointer), WEB_GLOBAL_TLS (the thread pointer) and WEB_GLOBAL_EDX (the stop
+// global). The program imports the runtime's exports from `rt`; both import
+// the host's system call from `host` and the C library functions the host
+// provides from `c`.
+//
+// Memory: the bytes below WEB_DATA_BASE are the host's (WEB_HOST_ERRNO is
+// errno), then the runtime's data, then the program's, then the stack, then
+// the heap the host's mmap grows. The table: the runtime's slots from 0, then
+// the program's. Each module places its data and slots where the module
+// before it ended (WebLayout).
+
+use jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
+use jet_wasm.[WASM_I32, WASM_I64, WASM_PAGE, wasm_put_fixed, wasm_put_signed, wasm_put_unsigned, wasm_sig_side, wat_put_name, wat_put_section, wat_put_vec_section]
+
+// The first byte either module's data may take.
+WEB_DATA_BASE :: 1024
+
+// The host's errno word (Host.jet `__errno_location`).
+WEB_HOST_ERRNO :: 1016
+
+// Where a module's data and table slots start.
+struct WebLayout {
+    data_base: Int
+    table_base: Int
+}
+
+// A lifecycle hook of the runtime module: IR function `row`, run by
+// `jet_web_init` (init) or `jet_web_fini` (fini) in priority order.
+struct WebHook {
+    row: Int
+    priority: Int
+    fini: Bool
+}
+
+struct WebModule {
+    bytes: [U8]
+    errors: [String]
+    // The first byte after the module's data, and its table slots.
+    data_end: Int
+    slots: Int
+    // The functions it imports, `space\tname\tsig` rows, and exports,
+    // `name\tsig` rows.
+    imports: [String]
+    exports: [String]
+}
+
+// Lowers `m` as every backend's selection reads it (JetIR X64Module.jet
+// ir_x64_compile_module).
+fn web_lower(m: &IRModule) Never! {
+    ir_drop_early(&m)
+    ir_tail_calls(&m)
+}
+
+fn web_find_key(m: IRModule, key: String) -> Int Never! {
+    loop (row, f) in m.functions {
+        if f.key == key -> return row
+    }
+    -1
+}
+
+// An emitter for a function the module builds itself: `params` i64
+// parameters, `extra` more i64 locals, result `result`.
+fn web_plain_emitter(params: Int, extra: Int, result: String) -> WebEmitter Never! {
+    types := [Int]{}
+    loop _ in 0..<(params + extra) -> &types.push(WASM_I64)
+    WebEmitter{
+        code: [U8]{}, fixups: [Int]{}, locals: [Int]{}, local_types: types, params: params, result: result, sret: -1,
+        t0: 0, t1: 0, t2: 0, t3: 0, d0: 0, s0: 0, frame: 0, flag: 0, ok: 0,
+        frame_size: 0, areas: [Int]{}, pad_ends: [Int]{}, trap_next: false, wired: false,
+    }
+}
+
+// The body of C memory routine `name` (web_helper_sig): bulk memory for the
+// copies and fill, a byte loop for memcmp.
+fn web_helper_body(name: String) -> WebBody Never! {
+    if name == "memcmp" {
+        e := web_plain_emitter(3, 2, "l")
+        web_op(&e, 0x02)
+        web_op(&e, WEB_VOID)
+        web_op(&e, 0x03)
+        web_op(&e, WEB_VOID)
+        web_get(&e, 3)
+        web_get(&e, 2)
+        web_op(&e, 0x5a)
+        web_op(&e, 0x0d)
+        web_op(&e, 1)
+        loop pointer in 0..<2 {
+            web_get(&e, pointer)
+            web_get(&e, 3)
+            web_op(&e, 0x7c)
+            web_wrap(&e)
+            web_mem(&e, 0x31, 0)
+        }
+        web_op(&e, 0x7d)
+        web_tee(&e, 4)
+        web_i64(&e, 0)
+        web_op(&e, 0x52)
+        web_if(&e)
+        web_get(&e, 4)
+        web_op(&e, 0x0f)
+        web_end(&e)
+        web_get(&e, 3)
+        web_i64(&e, 1)
+        web_op(&e, 0x7c)
+        web_set(&e, 3)
+        web_op(&e, 0x0c)
+        web_op(&e, 0)
+        web_end(&e)
+        web_end(&e)
+        web_i64(&e, 0)
+        return web_finish(e)
+    }
+    e := web_plain_emitter(3, 0, "l")
+    loop local in 0..<3 {
+        web_get(&e, local)
+        web_wrap(&e)
+    }
+    if name == "memset" -> web_memory_fill(&e) else -> web_memory_copy(&e)
+    web_get(&e, 0)
+    web_finish(e)
+}
+
+// Calls IR function `row` with no arguments, dropping any result.
+fn web_call_dropping(e: &WebEmitter, st: WebState, row: Int) Never! {
+    web_call(&e, row)
+    if web_sig_result(st.sigs[row]) != "" -> web_op(&e, 0x1a)
+}
+
+// The table entry of IR function `row` (signature `sig`, no result): calls it
+// with its parameters and returns 0, the word web_slot_sig promises.
+fn web_adapter_body(sig: String, row: Int) -> WebBody Never! {
+    params :: wasm_sig_side(sig, false)
+    e := web_plain_emitter(params.len(), 0, "l")
+    e.local_types = params.copy()
+    loop k in 0..<params.len() -> web_get(&e, k)
+    web_call(&e, row)
+    web_i64(&e, 0)
+    web_finish(e)
+}
+
+// `jet_web_init` or `jet_web_fini`: the runtime's hooks of that kind, lowest
+// priority first, in export order within one priority.
+fn web_hooks_body(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never! {
+    e := web_plain_emitter(0, 0, "")
+    priorities := [Int]{}
+    loop hook in hooks {
+        if hook.fini == fini && !priorities.contains(hook.priority) -> &priorities.push(hook.priority)
+    }
+    &priorities.sort()
+    loop priority in priorities {
+        loop hook in hooks {
+            if hook.fini != fini || hook.priority != priority -> next
+            if st.sigs[hook.row].starts_with(":") -> web_call_dropping(&e, st, hook.row) else -> &st.errors.push("lifecycle hook {hook.row} takes parameters")
+        }
+    }
+    web_finish(e)
+}
+
+// `jet_export_run`: the program's entry under the runtime, as the native
+// `main` runs it (JetBackend Image/Object.jet x64_object_main) once the host
+// has passed the arguments (`jet_rt_host_arguments`): program start, the
+// entry by its table index, the stdout flush; the entry's exit code.
+fn web_run_body(st: &WebState, entry: Int) -> WebBody Never! {
+    e := web_plain_emitter(0, 1, "l")
+    start :: web_symbol(&st, "jet_rt_host_program_start", ":")
+    web_call(&e, start.callee)
+    if web_sig_result(start.sig) != "" -> web_op(&e, 0x1a)
+    web_i64(&e, web_table_index(&st, entry))
+    main :: web_symbol(&st, "jet_rt_main", "l:l")
+    web_call(&e, main.callee)
+    web_set(&e, 0)
+    flush :: web_symbol(&st, "jet_rt_stdout_flush", ":")
+    web_call(&e, flush.callee)
+    if web_sig_result(flush.sig) != "" -> web_op(&e, 0x1a)
+    web_get(&e, 0)
+    web_finish(e)
+}
+
+// Places every data row from `base`: per row its address, at its alignment.
+fn web_place_data(tables: IRX64Tables, base: Int) -> [Int] Never! {
+    at := base
+    places := [Int]{}
+    loop object in tables.data {
+        align :: if object.align > 1 -> object.align else -> 1
+        at = web_align_up(at, align)
+        &places.push(at)
+        at += if object.bytes.len() > 0 -> object.bytes.len() else -> 1
+    }
+    &places.push(at)
+    places
+}
+
+// The module of lowered IR module `m` (web_lower). The runtime module
+// (`app` false) exports `exports` (symbol -> IR function) and builds its
+// `hooks`; the program module calls the runtime's exports `runtime`
+// (symbol -> signature) and runs `m.entry`. `hosts` are the C functions the
+// host provides.
+fn web_module(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:String], hosts: [String:Bool], exports: [String:Int], hooks: [WebHook]) -> WebModule Never! {
+    tables :: ir_x64_tables(m)
+    places := web_place_data(tables, layout.data_base)
+    data_end :: &places.pop() ?? layout.data_base
+    st := WebState{
+        app: app, stop_points: m.stop_points, data_at: places, table_base: layout.table_base, slots: [Int]{}, slot_rows: [Int]{},
+        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
+        exports: runtime, hosts: hosts, sigs: [String]{}, poll: web_find_key(m, IR_STOP_POLL_KEY), trap: web_find_key(m, IR_STOP_TRAP_KEY), errors: [String]{},
+    }
+    loop (row, f) in m.functions {
+        &st.slots.push(-1)
+        &st.sigs.push(web_function_sig(m, f))
+        if f.symbol != "" -> st.internal[f.symbol.copy()] = row
+    }
+    loop (symbol, row) in exports -> st.internal[symbol.copy()] = row
+    bodies := [WebBody]{}
+    loop row in 0..<m.functions.len() -> &bodies.push(web_select_function(&st, m, tables, row))
+    // The module's own functions after the IR functions: the export glue,
+    // then the helpers its calls named.
+    names := [String]{}
+    sigs := [String]{}
+    if app {
+        if m.entry < 0 || m.entry >= m.functions.len() {
+            &st.errors.push("the program has no entry function")
+        } else {
+            &bodies.push(web_run_body(&st, m.entry))
+            &names.push("jet_export_run")
+            &sigs.push(":l")
+        }
+    } else {
+        &bodies.push(web_hooks_body(&st, hooks, false))
+        &names.push("jet_web_init")
+        &sigs.push(":")
+        &bodies.push(web_hooks_body(&st, hooks, true))
+        &names.push("jet_web_fini")
+        &sigs.push(":")
+    }
+    glue :: names.len()
+    // Function indices: the imports in ref order, the IR functions, the glue,
+    // then the helpers.
+    // Per ref: its import index, or -1 - (its helper's place after the IR
+    // functions).
+    ref_index := [Int]{}
+    import_count := 0
+    loop ref in st.refs {
+        if ref.space != "" {
+            &ref_index.push(import_count)
+            import_count += 1
+        } else {
+            &ref_index.push(-1 - (m.functions.len() + names.len()))
+            &bodies.push(web_helper_body(ref.name))
+            &names.push(ref.name.copy())
+            &sigs.push(ref.sig.copy())
+        }
+    }
+    // Per table slot its function: the IR function, or the adapter of one
+    // that returns nothing (web_adapter_body).
+    slot_callees := [Int]{}
+    loop row in st.slot_rows {
+        sig :: st.sigs[row].copy()
+        if web_sig_result(sig) != "" {
+            &slot_callees.push(row)
+            next
+        }
+        &slot_callees.push(m.functions.len() + names.len())
+        &bodies.push(web_adapter_body(sig, row))
+        &names.push("{web_function_name(m.functions[row])}__slot")
+        &sigs.push(web_slot_sig(sig))
+    }
+    defined_base :: import_count
+    // Every signature is a type before the type section is written.
+    func_types := [Int]{}
+    loop row in 0..<m.functions.len() {
+        sig :: st.sigs[row].copy()
+        &func_types.push(web_type_index(&st, sig))
+    }
+    loop sig in sigs -> &func_types.push(web_type_index(&st, sig))
+    import_sigs := [String]{}
+    loop ref in st.refs {
+        if ref.space != "" -> &import_sigs.push(ref.sig.copy())
+    }
+    import_types := loop sig in import_sigs -> web_type_index(&st, sig)
+    out := [U8]{}
+    wasm_put_fixed(&out, 0x6d736100, 4)
+    wasm_put_fixed(&out, 1, 4)
+    // Types.
+    section := [U8]{}
+    loop key in st.types -> web_put_func_type(&section, key)
+    wat_put_vec_section(&out, WEB_SECTION_TYPE, st.types.len(), section)
+    // Imports: memory, table, the three globals, then the functions.
+    section = [U8]{}
+    count := 5
+    wat_put_name(&section, "env")
+    wat_put_name(&section, "memory")
+    &section.push(0x02)
+    &section.push(0x00)
+    wasm_put_unsigned(&section, (data_end + WASM_PAGE - 1) /% WASM_PAGE)
+    wat_put_name(&section, "env")
+    wat_put_name(&section, "table")
+    &section.push(0x01)
+    &section.push(0x70)
+    &section.push(0x00)
+    wasm_put_unsigned(&section, layout.table_base + st.slot_rows.len())
+    global_names :: [String]{"sp", "tls", "edx"}
+    global_types :: [Int]{WASM_I64, WASM_I64, WASM_I32}
+    loop (k, global) in global_names {
+        wat_put_name(&section, "env")
+        wat_put_name(&section, global)
+        &section.push(0x03)
+        &section.push(U8{global_types[k]})
+        &section.push(0x01)
+    }
+    imports := [String]{}
+    position := 0
+    loop ref in st.refs {
+        if ref.space == "" -> next
+        wat_put_name(&section, ref.space)
+        wat_put_name(&section, ref.name)
+        &section.push(0x00)
+        wasm_put_unsigned(&section, import_types[position])
+        &imports.push("{ref.space}\t{ref.name}\t{ref.sig}")
+        position += 1
+        count += 1
+    }
+    wat_put_vec_section(&out, WEB_SECTION_IMPORT, count, section)
+    // Functions.
+    section = [U8]{}
+    loop ty in func_types -> wasm_put_unsigned(&section, ty)
+    wat_put_vec_section(&out, WEB_SECTION_FUNCTION, func_types.len(), section)
+    // Exports: the glue, and the runtime's symbols.
+    section = [U8]{}
+    export_rows := [String]{}
+    loop k in 0..<glue {
+        wat_put_name(&section, names[k])
+        &section.push(0x00)
+        wasm_put_unsigned(&section, defined_base + m.functions.len() + k)
+        &export_rows.push("{names[k]}\t{sigs[k]}")
+    }
+    symbols := loop (symbol, _) in exports -> symbol.copy()
+    &symbols.sort()
+    loop symbol in symbols {
+        row :: exports.get(symbol) ?? next
+        wat_put_name(&section, symbol)
+        &section.push(0x00)
+        wasm_put_unsigned(&section, defined_base + row)
+        &export_rows.push("{symbol}\t{st.sigs[row]}")
+    }
+    wat_put_vec_section(&out, WEB_SECTION_EXPORT, export_rows.len(), section)
+    // The table slots: one active segment at the module's first slot.
+    if st.slot_rows.len() > 0 {
+        section = [U8]{}
+        &section.push(0x00)
+        web_put_const_i32(&section, layout.table_base)
+        wasm_put_unsigned(&section, st.slot_rows.len())
+        loop callee in slot_callees -> wasm_put_unsigned(&section, defined_base + callee)
+        wat_put_vec_section(&out, WEB_SECTION_ELEMENT, 1, section)
+    }
+    // Code, every call's index patched.
+    section = [U8]{}
+    loop body in bodies {
+        code := body.code.copy()
+        loop pair in 0..<(body.fixups.len() /% 2) -> web_patch_padded(&code, body.fixups[2 * pair], web_function_index(body.fixups[2 * pair + 1], defined_base, ref_index))
+        wasm_put_unsigned(&section, code.len())
+        &section.extend(code)
+    }
+    wat_put_vec_section(&out, WEB_SECTION_CODE, bodies.len(), section)
+    // Data: one active segment per row, its address words resolved.
+    section = [U8]{}
+    segments := 0
+    loop (row, object) in tables.data {
+        if object.bytes.len() == 0 -> next
+        bytes := object.bytes.copy()
+        loop reloc in object.relocs {
+            word := [U8]{}
+            wasm_put_fixed(&word, st.data_at[reloc.target.value] + reloc.addend, 8)
+            loop k in 0..<8 -> bytes[reloc.offset + k] = word[k]
+        }
+        &section.push(0x00)
+        web_put_const_i32(&section, st.data_at[row])
+        wasm_put_unsigned(&section, bytes.len())
+        &section.extend(bytes)
+        segments += 1
+    }
+    wat_put_vec_section(&out, WEB_SECTION_DATA, segments, section)
+    // Function names, for the host's stack traces.
+    section = [U8]{}
+    wat_put_name(&section, "name")
+    entries := [U8]{}
+    total := m.functions.len() + names.len()
+    loop row in 0..<total {
+        wasm_put_unsigned(&entries, defined_base + row)
+        if row < m.functions.len() -> wat_put_name(&entries, web_function_name(m.functions[row])) else -> wat_put_name(&entries, names[row - m.functions.len()])
+    }
+    names_body := [U8]{}
+    wasm_put_unsigned(&names_body, total)
+    &names_body.extend(entries)
+    &section.push(0x01)
+    wasm_put_unsigned(&section, names_body.len())
+    &section.extend(names_body)
+    wat_put_section(&out, WEB_SECTION_CUSTOM, section)
+    WebModule{bytes: ^out, errors: ^st.errors, data_end: data_end, slots: st.slot_rows.len(), imports: ^imports, exports: ^export_rows}
+}
+
+// A function's name as the native object names it.
+fn web_function_name(f: IRFunction) -> String Never! {
+    if f.symbol != "" -> return f.symbol.copy()
+    if f.key != "" -> return f.key.copy()
+    f.name.copy()
+}
+
+// An `i32.const value; end` constant expression.
+fn web_put_const_i32(out: &[U8], value: Int) Never! {
+    &out.push(0x41)
+    wasm_put_signed(&out, value)
+    &out.push(0x0b)
+}
+
+// The function index of callee `callee` (an IR function row, or -1 - k for
+// ref k) in a module whose defined functions start at `defined_base`.
+fn web_function_index(callee: Int, defined_base: Int, ref_index: [Int]) -> Int Never! {
+    if callee >= 0 -> return defined_base + callee
+    at :: ref_index[0 - callee - 1]
+    if at >= 0 -> return at
+    defined_base + (0 - at - 1)
+}

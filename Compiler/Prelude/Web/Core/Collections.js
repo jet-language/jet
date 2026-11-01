@@ -199,7 +199,7 @@ function jet_list_insert(xs, index, value) {
       "E3010",
       "<core.collections>",
       0,
-      `the list has ${xs.length} items, so position ${index} doesn't exist`,
+      `the list has ${xs.length} ${xs.length === 1 ? "item" : "items"}, so position ${index} doesn't exist`,
     );
   }
   xs.splice(position, 0, value);
@@ -220,7 +220,7 @@ function jet_list_remove_slot(xs, index, file, line) {
       "E3010",
       file,
       line,
-      `the list has ${xs.length} items, so position ${index} doesn't exist`,
+      `the list has ${xs.length} ${xs.length === 1 ? "item" : "items"}, so position ${index} doesn't exist`,
     );
   }
   return jet_option_some(xs.splice(position, 1)[0]);
@@ -312,6 +312,15 @@ function jet_list_try_filter(xs, f) {
     if (keep) out.push(value);
   }
   return { tag: "Ok", values: [out] };
+}
+
+function jet_list_try_each(xs, f) {
+  const values = xs && xs.__jet_iter ? xs.to_list() : xs;
+  for (const value of values) {
+    const result = f(value);
+    if (result && result.tag === "Err") return result;
+  }
+  return jet_outcome_ok(null);
 }
 
 function jet_iter_try_map(view, f) {

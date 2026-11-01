@@ -1,0 +1,44 @@
+// A parameter or local read only as the subject of an `if x == { … }` table, or only on a path that leaves, is used; only `unused` is reported.
+// The arm-tail returns are the regression shape for the old L0102 false positive on return-arm tables, so redundant_final_return is allowed there.
+enum Format { JSON CSV MsgPack }
+
+#allow(redundant_final_return, "the arm returns are the L0102 regression shape") fn extension(format: Format) -> String {
+    if format == {
+        .MsgPack -> return "msgpack"
+        else -> return "other"
+    }
+}
+
+#allow(redundant_final_return, "the arm returns are the L0102 regression shape") fn pair(outer: Format, inner: Format) -> String {
+    if outer == {
+        .JSON -> {
+            if inner == {
+                .CSV -> return "json/csv"
+                else -> return "json/other"
+            }
+        }
+        else -> return "other"
+    }
+}
+
+fn early(ready: Bool, value: Int, unused: Int) -> Int {
+    if ready {
+        return value
+    }
+    0
+}
+
+#allow(redundant_final_return, "the arm returns are the L0102 regression shape") fn local_subject(ready: Bool) -> String {
+    format :: if ready -> Format.MsgPack else -> Format.CSV
+    if format == {
+        .MsgPack -> return "msgpack"
+        else -> return "other"
+    }
+}
+
+fn run() {
+    print(extension(Format.MsgPack))
+    print(pair(Format.JSON, Format.CSV))
+    print(early(true, 1, 2))
+    print(local_subject(false))
+}

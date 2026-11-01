@@ -1,5 +1,18 @@
 // Original Sign.rs tests are retained, including provider-gated native cases.
 // Pure codec/env/frame proof does not claim entropy or protected publication.
+use jet_foundation.[diagnostic_registry_row, diagnostic_render]
+use jetpack_publication.[
+    publication_e1248, publication_e1292, publication_keygen, publication_keys_dir,
+    publication_read_public_key, publication_sign_base64_decode, publication_sign_bytes,
+    publication_sign_hex_decode, publication_verify, publication_write_private_seed,
+]
+use core.encoding.base64 as base64
+use core.crypto as crypto
+use core.files as files
+use core.encoding.hex as hex
+use core.sys as sys
+
+PUBLICATION_SIGN_E1292_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr") }
 
 #Test("publication sign hex_roundtrips") {
     data :: [U8]{0, 1, 2, 250, 255, 16, 128}
@@ -27,10 +40,8 @@
     assert_eq(actual, "/tmp/jet_keys_test_dir")
 }
 #Test("publication sign e1292_command_frame_is_exact") {
-    // Original acceptance retained pending Main's canonical-renderer fixture
-    // rebless (Rust hand frame was a defect), not a local lowercase prose fork.
-    golden :: files.read("tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr") ?? panic("original fixture")
-    assert_eq(diagnostic_render(publication_e1292(), "", "", false), golden)
+    // The CLI keygen cases compare their stderr with this same fixture.
+    assert_eq(diagnostic_render(publication_e1292(), "", "", false), PUBLICATION_SIGN_E1292_SNAPSHOT)
     assert_eq(publication_e1292().code, "E1292")
 }
 #Test("publication sign entropy diagnostic uses canonical registry and renderer") {
@@ -150,10 +161,11 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Original Sign.rs :499, retained behind Core #3597. The existing consuming
-// Close wipe cannot be observed through a moved owner. Core must provide the
-// audited in-place volatile wipe contract for this assertion; assignments of
-// zero bytes in Jet would not prove the optimizer-resistant secret erase.
+// Original Sign.rs :499 (#6117). Rust's private volatile_zeroize wiped only the
+// retired helper-process stdout and seed temporaries; Core secret owners now
+// wipe on Close. `crypto.wipe` is Core's public in-place erase: every element
+// and the spare capacity take stores the optimizer cannot drop, and the length
+// stays. Plain zero assignments would not prove it.
 #Test("publication sign secret_temporary_zeroization_clears_every_byte") {
     secret := [U8]{}
     expected := [U8]{}
@@ -161,8 +173,6 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
         &secret.push(U8{165})
         &expected.push(U8{0})
     }
-    #Unsafe("original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)") {
-        publication_sign_expert.zeroize(&secret)
-    }
+    crypto.wipe(&secret)
     assert_eq(secret, expected)
 }

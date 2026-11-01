@@ -109,8 +109,11 @@ struct KitEnv {
     timeout: Duration
     // A case's `limit: memory=`, Core memory_limit semantics; 0 is none.
     memory_limit: Int
-    // Run-wide resident-memory (VmRSS) guard in bytes; 0 is none.
+    // Run-wide resident-memory (VmRSS) guard in bytes; 0 is none. A case's
+    // `limit: resident=` tightens it and sets `resident_tree`.
     resident_limit: Int{0}
+    // Count the child's live descendants too, not only the child.
+    resident_tree: Bool{false}
     env_clear: Bool{false}
     version: String{""}
     version_error: String{""}
@@ -242,6 +245,11 @@ struct KitPendingChild {
     joined: Bool
     input_error: String
     signalled: Bool{false}
+    // Stdout bytes recv steps consumed; wait and close report only what follows.
+    taken: Int{0}
+    // Bytes a recv read past its last whole unit, kept for the next recv.
+    buffer: [U8]{[U8]{}}
+    ended: Bool{false}
 }
 
 struct KitLinePredicate {
@@ -336,6 +344,26 @@ struct KitProcessInput {
     overlay: [KitEnvVar]
 }
 
+// A step's terminal. A 0x0 size leaves the terminal's size unset. Events run
+// in time order, each `at` nanoseconds after spawn; `clock` is when the
+// latest send or close runs, which the next `after` delay counts from.
+struct KitTerminal {
+    rows: Int
+    cols: Int
+    events: [KitTerminalEvent]{[KitTerminalEvent]{}}
+    clock: Int{0}
+}
+
+// One scheduled terminal input: "send" types `text`, "close" types the
+// terminal's end-of-file character and "resize" sets `rows` x `cols`.
+struct KitTerminalEvent {
+    kind: String
+    text: String{""}
+    at: Int
+    rows: Int{0}
+    cols: Int{0}
+}
+
 struct KitStep {
     argv: [String]
     stdin: String
@@ -353,10 +381,12 @@ struct KitStep {
     instruction: String{""}
     limit_time: Int{0}
     limit_memory: Int{0}
+    limit_resident: Int{0}
     isolate: String{""}
     isolate_network: String{"disabled"}
     env_clear: Bool{false}
     refused_capability: String{""}
+    terminal: KitTerminal?{None}
     stdout_target: String{""}
     stderr_target: String{""}
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
@@ -379,6 +409,8 @@ struct KitPlan {
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     free_ports: [String]{[String]{}}
+    // A fixed TCP port the case binds; 0 is none.
+    host_port: Int{0}
 }
 
 struct KitOutcome {
@@ -435,6 +467,8 @@ struct KitStepState {
     inventories: [KitInventory]{[KitInventory]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     free_ports: [KitFreePort]{[KitFreePort]{}}
+    // A step that already compared the case's expected streams ends it.
+    settled: Bool{false}
 }
 
 struct KitStepResult {
@@ -465,6 +499,11 @@ fn kit_steps_hook_check(hooks: KitStepHooks, step: KitStep, index: Int, context:
         .Steps -> kit_steps_check_state(step, index, context, state)
     }
 }
+
+// The host-wide lock file for a fixed TCP port. Ports are host-wide, so the
+// name is fixed instead of living under a run's scratch, and
+// Tools/agent/run-feature-examples.mjs takes the same flock.
+fn kit_steps_host_port_path(port: Int) -> String { "/tmp/jet-host-port-{port}.lock" }
 
 // All suites share this sequencing loop. Hooks supply only suite-specific
 // invocation and expectations, never an alternative parser or executor.
@@ -505,11 +544,21 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         .None -> {}
     }
     files.create_dir_all(files.join(context.scratch, "tmp")) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "create case temp directory: {err}"))
-    if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
-    if plan.free_ports.len() > 0 {
-        ports :: kit_steps_free_ports(context, plan.free_ports.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-        loop index in 0..<plan.free_ports.len() -> &state.free_ports.push(KitFreePort{name: plan.free_ports[index], port: ports[index]})
+    if plan.fixture != "" {
+        fixture :: files.join(context.snapshots, plan.fixture)
+        // A missing fixture would stop the copy, and with it the pool task, without a verdict.
+        if !files.is_dir(fixture) -> return kit_steps_finish(state, kit_expect_verdict("ERROR", "fixture directory is missing: {plan.fixture}"))
+        kit_exec_copy_tree(fixture, context.work, true)
     }
+    port_names :: kit_steps_case_port_names(context)
+    if port_names.len() > 0 {
+        ports :: kit_steps_free_ports(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        loop index in 0..<port_names.len() -> &state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
+    }
+    // A case that binds a fixed host port holds its lock until the case ends,
+    // waiting at most one step timeout, so concurrent kit and feature-example
+    // runs on this host take turns.
+    port_lock :: if plan.host_port == 0 -> None else -> Val(files.lock(kit_steps_host_port_path(plan.host_port), timeout: Val(context.env.timeout)) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "host port {plan.host_port} lock: {err}")))
     loop index in 0..<context.plan.environment.len() {
         context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
     }
@@ -621,7 +670,8 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
             kit_steps_action(step, context, state) else -> kit_steps_hook_invoke(hooks, step, index, context, state)
         state = invoked.state
-        if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
+        if invoked.verdict.status != "PASS" || state.settled -> return kit_steps_finish(state, invoked.verdict)
+        if step.action == "capture" || step.action == "await" -> step.assertions = kit_steps_resolve_assertions(step.assertions, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
         if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
         if kit_expect_named(["", "wait", "close", "poll"], step.action) {
             wired :: kit_steps_wiring_finish(step, context, state)
@@ -821,10 +871,10 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     loop result in results -> kit_report_row(result)
     if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
     if env.trace_node == "" {
-        files.remove_all(run_scratch) ?? {
+        kit_exec_remove_tree(run_scratch) ?? {
             &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
             kit_report_row(results[results.len() - 1])
-            ()
+            false
         }
     }
     failures := [String]{}
@@ -912,10 +962,11 @@ fn kit_execute_entry(index: Int, item: KitSelected, options: KitOptions, env: Ki
     loop outcome in kit_suite_run(item.suite, entry, context) {
         &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
     }
+    kit_exec_stop_strays(scratch)
     if env.trace_node == "" {
-        files.remove_all(scratch) ?? {
+        kit_exec_remove_tree(scratch) ?? {
             &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
-            ()
+            false
         }
     }
     run
@@ -938,6 +989,12 @@ fn kit_gate_suite(suite: String) -> String {
     loop word in words -> &args.push(word)
     options := kit_parse_options(args)
     if options.error != "" -> return "REFUSED\tselection\t\t{options.error}"
+    // The compiler under test is $JET, as Tools/agent/jet-env resolves it, or
+    // TESTKIT_ARGS --jet; without one a suite cannot run on this host.
+    if options.jet == "" && !options.list {
+        print("SKIP-HOST\tselection\t\tsuite {suite}: JET is unset; run `JET=<compiler> Tools/agent/jet-env jet test Tools/testkit`")
+        return ""
+    }
     options.opt_in = true
     evidence :: sys.get("JET_CI_EVIDENCE_DIR") ?? ""
     if options.results == "" && evidence != "" -> options.results = files.join(evidence, "{suite}.json")
@@ -947,7 +1004,7 @@ fn kit_gate_suite(suite: String) -> String {
 
 // `jet test Tools/testkit [<filter>]`: the repository's fixture gate. Each suite is one test;
 // a failing test lists every failing case.
-//   JET                  the compiler under test (required)
+//   JET                  the compiler under test (unset: each suite test reports SKIP-HOST)
 //   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
 //                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --shard I/N,
 //                        --scratch DIR, --jetpack BIN, --list, --coverage (ui), --bless ID,

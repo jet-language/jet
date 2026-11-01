@@ -11,10 +11,9 @@ use core.service as service
 use core.encoding.json as json
 use core.web as web
 use core.time as time
-use core.tasks as tasks
 
 #Codable
-struct RequestId {
+struct RequestID {
     value: String
 }
 
@@ -154,9 +153,9 @@ fn session_value(req: HTTPRequest, policy: SessionPolicy) -> String {
 }
 
 
-fn request_id(raw: String) -> RequestId {
-    if raw == "" -> return RequestId{value: "unassigned"}
-    return RequestId{value: raw}
+fn request_id(raw: String) -> RequestID {
+    if raw == "" -> return RequestID{value: "unassigned"}
+    return RequestID{value: raw}
 }
 
 
@@ -186,7 +185,7 @@ fn decode_order(req: HTTPRequest) -> OrderRequest HTTPError! {
     return req.json<OrderRequest>()
 }
 
-fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now: Int) Bool Never! -[DB, Time]> {
+fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now: Int) -[DB, Time]> Bool {
     policy :: session_policy()
     provided :: session_value(req, policy)
     if provided == "" || provided != session_id -> return false
@@ -196,7 +195,7 @@ fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now
     return true
 }
 
-fn issue_session(user: String, password: String, now: Int, ttl_ms: Int) String Never! -[DB, Time]> {
+fn issue_session(user: String, password: String, now: Int, ttl_ms: Int) -[DB, Rand, Time]> String {
     session :: auth.password_login(user, password, now, ttl_ms) ?? return ""
     return auth.session_id(session)
 }
@@ -218,10 +217,9 @@ fn sqlite_fixture() -> MigrationReceipt {
     if !scoped.begin() -> panic("db.begin")
     transient :: "rolled-back"
     _transient :: scoped.execute(SQL{"INSERT INTO orders (item) VALUES ({transient})"}) ?? panic("db.execute")
-    if !&scoped.rollback() -> panic("db.rollback")
-    row_opt :: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id LIMIT 1"}) ?? panic("db.query_one")
-    first_item := "missing"
-    if row_opt == .Val(row) -> first_item = db.row_text(row, "item") ?? "missing"
+    if !scoped.rollback() -> panic("db.rollback")
+    row :: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id LIMIT 1"}) ?? panic("db.query_one")
+    first_item :: db.row_text(row, "item") ?? "missing"
     if !scoped.close() -> panic("db.close")
     return MigrationReceipt{
         name: migration_name,
@@ -234,12 +232,12 @@ fn sqlite_fixture() -> MigrationReceipt {
 }
 
 fn pool_fixture(path: String) -> PoolReceipt {
-    pool :: db.pool(path, 2) ?? panic("db.pool")
+    pool :: db.pool(path, max: 2) ?? panic("db.pool")
     ready :: pool.ready() ?? panic("db.pool.ready")
     if !ready -> panic("db.pool.not-ready")
     lease :: pool.acquire(deadline: 1s) ?? panic("db.pool.acquire")
     before :: "{pool.receipt()}"
-    close(^lease)
+    lease.close() ?? panic("db.pool.release")
     drained_receipt :: pool.drain() ?? panic("db.pool.drain")
     after :: "{drained_receipt}"
     return PoolReceipt{
@@ -252,7 +250,7 @@ fn pool_fixture(path: String) -> PoolReceipt {
 }
 
 
-fn queue_state(delivery: ^Delivery) String Never! -[DB]> {
+fn queue_state(delivery: ^Delivery) -[DB]> String {
     state :: delivery.status() ?? return "unknown"
     if state == {
         .Pending -> return "pending"
@@ -271,19 +269,17 @@ fn backend_worker() {
 
 fn durable_queue(state_path: String, payload: String, key: String) -> QueueReceipt {
     tree := service.tree("backend-battery")
-    tree.set_delivery(service.delivery_durable()) ?? panic("service.delivery_durable")
+    &tree.set_delivery(service.delivery_durable()) ?? panic("service.delivery_durable")
     store :: service.state_store(state_path) ?? panic("service.state_store")
-    tree.set_state_event_log(store, "backend-events", 1, "reversible") ?? panic("service.event_log")
-    endpoint :: tree.worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
-    tree.start() ?? panic("service.start")
-    delivery :: tree.send_durable(endpoint, payload, key: key) ?? panic("service.send_durable")
-    retry :: delivery.retry() ?? panic("service.retry")
+    &tree.set_state_event_log(store, "backend-events", 1, "reversible") ?? panic("service.event_log")
+    endpoint :: &tree.worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
+    &tree.start() ?? panic("service.start")
+    delivery :: &tree.send_durable(endpoint, payload.copy(), key: key.copy()) ?? panic("service.send_durable")
+    retry :: ^delivery.retry() ?? panic("service.retry")
     status :: queue_state(^retry)
-    delivered :: tree.receive(endpoint) ?? panic("service.receive")
-    runtime :: service.runtime("{state_path}.delivery", retention: Duration.seconds(60))
-    runtime.commit(delivery) ?? panic("service.commit")
-    tree.append_event("order-received") ?? panic("service.append_event")
-    tree.stop() ?? panic("service.stop")
+    delivered :: &tree.receive(endpoint) ?? panic("service.receive")
+    &tree.append_event("order-received") ?? panic("service.append_event")
+    &tree.stop() ?? panic("service.stop")
     return QueueReceipt{
         key: key,
         payload: delivered,
@@ -363,12 +359,12 @@ fn openapi_document(router: HTTPRouter) -> String {
 }
 
 fn load_one(address: String) -> LoadSample {
-    started := time.now()
+    started :: time.instant()
     request :: http_client.request("GET", "http://{address}/health")
         .connect_timeout(1000)
         .read_timeout(1000)
-    response :: request.send() ?? return LoadSample{latency_ms: time.now() - started, status: 599}
-    return LoadSample{latency_ms: time.now() - started, status: response.status()}
+    response :: request.send() ?? return LoadSample{latency_ms: started.elapsed_millis(), status: 599}
+    return LoadSample{latency_ms: started.elapsed_millis(), status: response.status()}
 }
 
 fn load_worker(address: String, count: Int, sender: Sender<LoadSample>) {
@@ -383,7 +379,7 @@ fn percentile(samples: [Int], percent: Int) -> Int {
     if samples.len() == 0 -> return 0
     ordered := samples.copy()
     &ordered.sort()
-    index := ((ordered.len() - 1) * percent) / 100
+    index :: (ordered.len() - 1) * percent /% 100
     return ordered[index]
 }
 
@@ -394,7 +390,7 @@ fn load_test(address: String) -> LoadSummary {
     workers := [Task<()>]{ }
     worker := 0
     loop worker < worker_limit {
-        count := users / worker_limit
+        count := users /% worker_limit
         if worker < users % worker_limit -> count += 1
         tx :: sender.copy()
         addr :: address.copy()

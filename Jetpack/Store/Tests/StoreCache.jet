@@ -112,7 +112,7 @@
     assert(lease.projected_executable("tool") != None)
     assert(lease.executable_for_command(files.join(dev_object, "unrecorded")) == .Err(_))
     lease.validate() ?? panic("validate")
-    if sys.os() == "linux" {
+    if sys.is_linux() {
         loop pair in lease.nix_store_projection() -> assert(pair.source.starts_with("/proc/self/fd/"))
     }
     lease.release()
@@ -170,10 +170,10 @@
     store_quarantine_invalid_entry(&verification, roots, stale.entry, mismatch) ?? panic("quarantine")
     assert(files.exists(survivor.entry.out))
     assert(store_find_by_reference(&verification, roots, stale.entry.reference) == None)
-    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(survivor.entry.out)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(survivor.entry.out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("survivor must verify")
     verified.lease.validate() ?? panic("validate")
-    verified.lease.release()
+    ^verified.lease.release()
     store_test_drop_roots(roots)
 }
 
@@ -199,10 +199,10 @@
     graph :: store_closure_graph(&verification, roots) ?? panic("graph")
     assert(!graph.records.has_key(stale.entry.id))
     assert(graph.deleted_records.contains(stale.entry.id))
-    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(object)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, survivor.entry.reference, store_test_expectation(object)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("survivor must verify")
     verified.lease.validate() ?? panic("validate")
-    verified.lease.release()
+    ^verified.lease.release()
     store_test_drop_roots(roots)
 }
 
@@ -276,14 +276,14 @@
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
     envelope :: Envelope.for_output(out, "leased@mine", "core-source")
     store_record_verified(&verification, roots, "leased", "1.0", "leased@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
-    hit :: store_find_verified_by_reference(&verification, roots, "leased@mine", store_test_expectation(out)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, "leased@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("record must verify")
     lease_root :: files.dirname(verified.lease.snapshot_root)
     files.write(files.join(out, "payload"), "mutated outside cooperative lock") ?? panic("mutate")
     verified.lease.validate() ?? panic("validate")
     stable :: verified.lease.stable_path(files.join(out, "payload")) ?? panic("stable path")
     assert_eq(files.read(stable) ?? panic("read stable"), "trusted")
-    verified.lease.release()
+    ^verified.lease.release()
     assert(!files.exists(lease_root))
     store_test_drop_roots(roots)
 }
@@ -292,13 +292,13 @@
     verification := StoreVerification.new()
     roots :: store_test_temp_roots()
     ingested :: store_test_ingest_fixture(&verification, roots, "lease-tree", [String: String]{"out": "trusted"}, [String]{})
-    hit :: store_find_verified_by_reference(&verification, roots, ingested.entry.reference, store_test_expectation(ingested.entry.out)) ?? panic("lookup")
-    verified :: hit ?? panic("record must verify")
+    hit :: store_find_verified_by_reference(&verification, roots, ingested.entry.reference, store_test_expectation(ingested.entry.out)) ? found -> found ! error -> panic("lookup")
+    verified := hit ?? panic("record must verify")
     lease_root :: files.dirname(verified.lease.snapshot_root)
-    verified.lease.mark_process_handoff()
+    &verified.lease.mark_process_handoff()
     child :: process.cmd([String]{"/bin/sh", "-c", "/bin/sleep 2 >/dev/null 2>&1 &"}).run() ?? panic("spawn")
     assert(child.success)
-    verified.lease.release()
+    ^verified.lease.release()
     assert(files.exists(lease_root))
     assert_eq(store_recover_hangar(&verification, roots) ?? panic("recover"), 0)
     assert(files.exists(lease_root))
@@ -326,16 +326,16 @@
     assert_eq(fresh.lease.nix_store_projection(), [NixProjectionPath]{})
     assert(fresh.lease.stable_path(files.join(out, "payload")) == .Ok(_))
     if fresh.lease.profile_install_receipt() == {
-        .Err(error) -> assert_eq(error, IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified tool lease has no executables")}))
+        .Err(error) -> store_test_assert_other_read_error(error, "verified tool lease has no executables")
         .Ok(_) -> panic("empty lease acquired a profile receipt")
     }
     if fresh.lease.copy_profile_executable("missing", files.join(roots.root, "unused-profile-copy")) == {
-        .Err(error) -> assert_eq(error, IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
         .Ok(_) -> panic("missing member produced a profile copy")
     }
-    hit :: store_find_verified_by_reference(&verification, roots, "typed@mine", store_test_expectation(out)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, "typed@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("record must verify")
-    cached :: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease}
+    cached :: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease}
     assert(cached.consumption_status() == ConsumptionStatus.Consumable)
     assert_eq(cached.source_state(), SourceState.Cached)
 
@@ -377,25 +377,24 @@
         }
         .Ok(_) -> panic("non-consumable lease handed a path to the consumer")
     }
-    validation_error :: IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val(reason)})
     if missing.lease.profile_install_receipt() == {
-        .Err(error) -> assert_eq(error, validation_error)
+        .Err(error) -> store_test_assert_other_read_error(error, reason)
         .Ok(_) -> panic("non-consumable lease acquired a profile receipt")
     }
     if missing.lease.copy_profile_executable("tool", files.join(roots.root, "unpublished-copy")) == {
-        .Err(error) -> assert_eq(error, validation_error)
+        .Err(error) -> store_test_assert_other_read_error(error, reason)
         .Ok(_) -> panic("non-consumable lease produced a profile copy")
     }
     assert(!files.exists(files.join(roots.root, "unpublished-copy")))
-    fresh.lease.release()
-    cached.lease.release()
-    missing.lease.release()
+    ^fresh.lease.release()
+    ^cached.lease.release()
+    ^missing.lease.release()
     store_test_drop_roots(roots)
 }
 
 #Test("store leased fd view executes original after rename symlink swap") {
     verification := StoreVerification.new()
-    if sys.os() != "linux" -> return
+    if !sys.is_linux() -> return
     roots :: store_test_temp_roots()
     out :: files.join(roots.root, "fd-view-output")
     tool :: files.join(out, "bin/tool")
@@ -405,7 +404,7 @@
     files.symlink("tool-real", tool) ?? panic("symlink")
     envelope :: Envelope.for_output(out, "fd-view@mine", "core-source")
     store_record_verified(&verification, roots, "fd-view", "1", "fd-view@mine", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
-    hit :: store_find_verified_by_reference(&verification, roots, "fd-view@mine", store_test_expectation(out)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, "fd-view@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("record must verify")
     lease :: verified.lease
     projected_bin :: lease.projected_bin_dir() ?? panic("projected bin")
@@ -446,7 +445,7 @@
     assert(nested.success)
     assert_eq(nested.output, "trusted")
     assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("read attacker"), "#!/bin/sh\nprintf attacker")
-    lease.release()
+    ^verified.lease.release()
     store_test_drop_roots(roots)
 }
 
@@ -488,7 +487,7 @@
     }
     assert_eq(files.read(destination) ?? panic("read refused destination"), "abc")
     if lease.copy_profile_executable("not-a-member", files.join(roots.root, "unused-copy")) == {
-        .Err(error) -> assert_eq(error, IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
         .Ok(_) -> panic("unrecorded member produced a profile copy")
     }
     if store_profile_file_proof(files.join(roots.root, "missing-profile")) == {
@@ -496,17 +495,30 @@
         .Ok(_) -> panic("missing profile file acquired a proof")
     }
     if store_profile_file_proof(bin) == {
-        .Err(error) -> assert_eq(error, IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile projection is not a no-follow file")}))
+        .Err(error) -> store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
         .Ok(_) -> panic("directory acquired a profile proof")
     }
     if sys.is_unix() {
         link :: files.join(roots.root, "profile-link")
         files.symlink(destination, link) ?? panic("fixture profile symlink")
         if store_profile_file_proof(link) == {
-            .Err(error) -> assert_eq(error, IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("profile projection is not a no-follow file")}))
+            .Err(error) -> store_test_assert_other_read_error(error, "profile projection is not a no-follow file")
             .Ok(_) -> panic("symlink acquired a profile proof")
         }
     }
     lease.release()
     store_test_drop_roots(roots)
+}
+
+// The `IOError.Other` read refusal a lease or profile proof reports for `cause`.
+fn store_test_assert_other_read_error(error: IOError, cause: String) {
+    if error == {
+        .Other(context) -> {
+            assert(context.operation == .Read)
+            assert(context.resource == None)
+            assert(context.os_code == None)
+            assert_eq(context.cause, Val(cause))
+        }
+        else -> panic("expected the Other read error \"{cause}\"")
+    }
 }

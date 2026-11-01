@@ -17,6 +17,8 @@ struct Event {
     latency_ms: Float
 }
 
+PARQUET_FIXTURE :: comptime { embed_bytes("int32_with_null_pages.parquet") }
+
 fn loader_kind_name(kind: data.DataLoaderKind) -> String {
     if kind == {
         .File -> { return "File" }
@@ -43,10 +45,12 @@ fn run() {
     print("rows:{file_snapshot.value.len()}")
     print("reusable:{data_loader.snapshot_reusable(file_snapshot.identity, file_snapshot.identity)}")
 
-    // Keep the pinned URL as source identity; bind the checked-in fixture locally.
+    // Keep the pinned URL as source identity; bind the fixture bytes, a copy of
+    // tests/fixtures/parquet_reader/int32_with_null_pages.parquet embedded at
+    // compile time.
     parquet_path :: "tests/fixtures/parquet_reader/int32_with_null_pages.parquet"
     parquet_url :: "https://raw.githubusercontent.com/apache/parquet-testing/4b1ce4502afff8d20c9b4bb08d07e04e21cdeff3/data/int32_with_null_pages.parquet"
-    parquet_bytes :: files.read_bytes(parquet_path) ?? panic("read parquet fixture")
+    parquet_bytes :: PARQUET_FIXTURE
     url_loader := data.url<[Dyn]>(parquet_url, "parquet", "network", limits) ?? panic("url loader")
     data_loader.bind(&url_loader, parquet_bytes) ?? panic("bind parquet")
     url_snapshot :: snapshot<[Dyn]>(&url_loader) ?? panic("url snapshot")
@@ -98,15 +102,26 @@ fn run() {
     data_loader.cancel(&default_loaded)
     _ :: data_loader.status(default_loaded)
 
-    stream := data_loader.stream(loaded) ?? panic("stream")
-    first :: data_stream.next(&stream) ?? panic("next")
-    rest :: data_stream.collect(&stream) ?? panic("collect")
-    print("stream:true:{rest.len()}")
+    // A loader with no bound payload has nothing to stream; that is an error.
+    if data_loader.stream(loaded) == {
+        .Ok(opened) -> {
+            stream := opened
+            first :: data_stream.next(&stream) ?? panic("next")
+            rest :: data_stream.collect(&stream) ?? panic("collect")
+            print("stream:true:{rest.len()}")
+        }
+        .Err(err) -> { print("stream:{err.kind:Debug} {err.reason}") }
+    }
 
     cancel_loader := data.file<[Event]>(csv_path, "csv", limits) ?? panic("cancel loader")
-    cancel_stream := data_loader.stream(cancel_loader) ?? panic("cancel stream")
-    data_stream.cancel(&cancel_stream)
-    print("stream cancelled")
+    if data_loader.stream(cancel_loader) == {
+        .Ok(opened) -> {
+            cancel_stream := opened
+            data_stream.cancel(&cancel_stream)
+            print("stream cancelled")
+        }
+        .Err(err) -> { print("cancel stream:{err.kind:Debug} {err.reason}") }
+    }
 
     json_path :: Path.from(root).join("events.json").to_string()
     files.write(json_path, `[{"service":"cache","latency_ms":2.0}]`) ?? panic("write json")

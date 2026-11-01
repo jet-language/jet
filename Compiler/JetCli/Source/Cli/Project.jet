@@ -34,17 +34,30 @@ fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> Je
     names := [String]{}
     loop file in files {
         filename :: jet_cli_file_name(file.relative_path)
-        if filename == "package.jet" || filename == "pkg.jet" || filename == "@run.jet" || filename == "@build.jet" || filename == "@test.jet" || filename == "@dev.jet" {
+        if filename == "package.jet" || filename == "pkg.jet" || (jet_cli_relative_parent(file.relative_path) == "" && JET_CLI_COMMAND_ROLE_FILES.contains(filename)) {
             next
         }
         program :: jet_cli_parsed_program(file.source) ?? next
         &sources.push(file.relative_path)
+        // An exact `use project._name` opts a skipped part in (spec.md,
+        // module discovery). Two segments parse as a member import of
+        // `project`; a longer path parses as a module import.
         loop imported in program.imports {
-            if imported.kind == .Module(name, _) {
-                if name.starts_with("project.") {
-                    leaf :: name.slice(8..<name.len())
-                    if !explicit.contains(leaf) -> &explicit.push(leaf)
+            if imported.kind == {
+                .Module(name, _) -> {
+                    if name.starts_with("project.") {
+                        leaf :: name.slice(8..<name.len())
+                        if !explicit.contains(leaf) -> &explicit.push(leaf)
+                    }
                 }
+                .Unqualified(module_alias, _, items, _, _) -> {
+                    if module_alias == "project" {
+                        loop item in items {
+                            if !explicit.contains(item.original) -> &explicit.push(item.original.copy())
+                        }
+                    }
+                }
+                else -> {}
             }
         }
         loop item in program.items {

@@ -11,7 +11,15 @@ fn kit_steps_compare(left: Int, op: String, right: Int) -> Bool {
     false
 }
 
+// Deadlines and timeouts need a positive span.
 fn kit_steps_duration_ns(text: String) -> Int? {
+    ns :: kit_steps_offset_ns(text) ?? return None
+    if ns == 0 -> return None
+    Val(ns)
+}
+
+// A zero offset is a real instant: an immediate terminal event or an elapsed bound of 0ns.
+fn kit_steps_offset_ns(text: String) -> Int? {
     scale := 0
     suffix := ""
     if text.ends_with("ns") {
@@ -55,9 +63,7 @@ fn kit_steps_duration_ns(text: String) -> Int? {
     base :: whole * scale
     tail :: fraction * (scale /% denominator) + fraction * (scale % denominator) /% denominator
     if tail > 9223372036854775807 - base -> return None
-    ns :: base + tail
-    if ns <= 0 -> return None
-    Val(ns)
+    Val(base + tail)
 }
 
 fn kit_steps_octal(text: String) -> Int? {
@@ -132,7 +138,7 @@ fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String
             else {
                 a :: Int.from_u8(bytes[offset + index])
                 b :: Int.from_u8(byte)
-                bytes[offset + index] = U8{a + b - 2 * kit_steps_bit_and(a, b)}
+                bytes[offset + index] = U8{a + b - 2 * a.bit_and(b)}
             }
         }
         files.write_bytes(path, bytes) ?? return kit_expect_verdict("ERROR", "poke write: {err}")

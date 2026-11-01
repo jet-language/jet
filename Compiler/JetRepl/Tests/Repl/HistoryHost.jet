@@ -152,7 +152,7 @@ fn repl_history_parent_swap_stays_on_held_directory() Never! -[FS, Env, Exec, Ti
     held :: "{state}/held-jet"
     repl_history_host_test_files.rename("{state}/jet", held) ?? panic("rename held root")
     repl_history_host_test_files.symlink(outside, "{state}/jet") ?? panic("swap to symlink")
-    child.stdin.write("4 + 4\n:quit\n") ?? panic("submit after swap")
+    child.stdin.write_text("4 + 4\n:quit\n") ?? panic("submit after swap")
     child.stdin.close() ?? panic("close original piped input")
     output :: child.wait() ?? panic("finish actual process")
     assert(output.success)

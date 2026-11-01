@@ -21,7 +21,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1419
 #Test("suffix_failure_contracts_cover_nested_type_positions") {
-    parsed :: program("struct Holder {{\noptional: Int?\nunit: IOError!\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: Never!\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
+    parsed :: program("struct Holder {{\noptional: Int?\nunit: IOError!\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: Never!\n}}\nBox<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
     holder :: loop item in parsed.items {
         if item == .Struct(def) && def.name == "Holder" -> break def
     } ?? panic("Holder")
@@ -106,7 +106,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
     parsed :: program("fn run() {{ d :: 5 - 3 }}")
     func :: loop item in parsed.items { if item == .Func(f) -> break f } ?? panic("a run function")
     binding :: loop stmt in func.body { if stmt == .Val(b) -> break b } ?? panic("a val binding")
-    assert(if binding.init == { .Binary(op, _, _, _) -> op == BinOp.Sub else -> false })
+    assert(if binding.init == { .Binary(op, _, _, _, _) -> op == BinOp.Sub else -> false })
 }
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1637
@@ -152,7 +152,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> {
             assert(method == parser_test_task_name("spawn"))
             assert(args.len() == 1)
-            assert(if args[0].expr == { .Lambda(_) -> true else -> false })
+            assert(if args[0].expr == { .Lambda(_, _) -> true else -> false })
         }
         else -> panic("expected task work() MethodCall")
     }

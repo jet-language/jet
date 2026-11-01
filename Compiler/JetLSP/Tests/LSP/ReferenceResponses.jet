@@ -180,7 +180,7 @@ fn lsp_action_inline(server: LSPServer, uri: String, src: String, name: String) 
 #Test("code_action_imports_one_unique_workspace_symbol") {
     src :: "fn run() {{ print(answer()) }}\n"
     root :: lsp_action_root("jet-lsp-import-action")
-    server :: lsp_action_fixture(root, src, 3, [(name: String, text: String)]{(name: "helper.jet", text: "pub fn answer() -> Int {{ return 42 }}\n")})
+    server :: lsp_action_fixture(root, src, 3, [(name: String, text: String)]{(name: "helper.jet", text: "fn answer() -> Int {{ return 42 }}\n")})
     actions :: lsp_action_extract(server, lsp_action_uri(root), src, "answer")
     assert(actions.contains("\"title\":\"Import `helper`\""))
     assert(actions.contains("\"newText\":\"use helper\\n\""))
@@ -188,10 +188,21 @@ fn lsp_action_inline(server: LSPServer, uri: String, src: String, name: String) 
     _ :: lsp_action_fs.remove_dir_all(root)
 }
 
+// #6341: the import quick-fix reads Sema's visibility, so a function inside a
+// `priv module` is never offered.
+#Test("code_action_import_skips_a_private_module_member") {
+    src :: "fn run() {{ print(answer()) }}\n"
+    root :: lsp_action_root("jet-lsp-private-import-action")
+    server :: lsp_action_fixture(root, src, 3, [(name: String, text: String)]{(name: "helper.jet", text: "priv module vault {{ fn answer() -> Int {{ return 42 }} }}\n")})
+    actions :: lsp_action_extract(server, lsp_action_uri(root), src, "answer")
+    assert(!actions.contains("Import `helper`"))
+    _ :: lsp_action_fs.remove_dir_all(root)
+}
+
 #Test("code_action_import_excludes_a_dirty_dependency_overlay") {
     src :: "fn run() {{ print(answer()) }}\n"
     root :: lsp_action_root("jet-lsp-dirty-import-action")
-    server := lsp_action_fixture(root, src, 1, [(name: String, text: String)]{(name: "helper.jet", text: "pub fn answer() -> Int {{ return 42 }}\n")})
+    server := lsp_action_fixture(root, src, 1, [(name: String, text: String)]{(name: "helper.jet", text: "fn answer() -> Int {{ return 42 }}\n")})
     helper_path :: lsp_action_child(root, "helper.jet")
     helper_uri :: lsp_path_to_uri(lsp_workspace_path.display(helper_path))
     server.diagnostic_state.docs[helper_uri] = LSPDocument.new(helper_path, "fn answer() -> Int {{ return 42 }}\n", 2)
@@ -202,7 +213,7 @@ fn lsp_action_inline(server: LSPServer, uri: String, src: String, name: String) 
 #Test("card_3200_import_edit_uses_checked_document_version_and_respects_existing_import_boundary") {
     src :: "fn run() {{ print(answer()) }}\n"
     root :: lsp_action_root("jet-lsp-card-3200-import-version")
-    server := lsp_action_fixture(root, src, 12, [(name: String, text: String)]{(name: "helper.jet", text: "pub fn answer() -> Int {{ return 42 }}\n")})
+    server := lsp_action_fixture(root, src, 12, [(name: String, text: String)]{(name: "helper.jet", text: "fn answer() -> Int {{ return 42 }}\n")})
     uri :: lsp_action_uri(root)
     actions :: lsp_action_extract(server, uri, src, "answer")
     assert(actions.contains("\"title\":\"Import `helper`\""))
@@ -219,7 +230,7 @@ fn lsp_action_inline(server: LSPServer, uri: String, src: String, name: String) 
 #Test("card_3200_import_edit_declines_ambiguous_workspace_symbols") {
     src :: "fn run() {{ print(answer()) }}\n"
     root :: lsp_action_root("jet-lsp-card-3200-import-ambiguous")
-    server :: lsp_action_fixture(root, src, 4, [(name: String, text: String)]{(name: "left.jet", text: "pub fn answer() -> Int {{ return 1 }}\n"), (name: "right.jet", text: "pub fn answer() -> Int {{ return 2 }}\n")})
+    server :: lsp_action_fixture(root, src, 4, [(name: String, text: String)]{(name: "left.jet", text: "fn answer() -> Int {{ return 1 }}\n"), (name: "right.jet", text: "fn answer() -> Int {{ return 2 }}\n")})
     actions :: lsp_action_extract(server, lsp_action_uri(root), src, "answer")
     assert(!actions.contains("\"title\":\"Import `"))
     assert(!actions.contains("\"newText\":\"use "))

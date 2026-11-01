@@ -98,12 +98,10 @@ extern int64_t jet_rt_record_new_jet_browser_locked(int64_t, int64_t, int64_t, i
 extern int64_t jet_rt_record_new_jet_browser_timeout(int64_t);
 extern int64_t jet_rt_record_new_jet_date(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_period(int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_jet_delivery(int64_t, int64_t, uint8_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_memo_stats(int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_log_span(int64_t, int64_t);
 extern int64_t jet_rt_record_new_plugin_frame(int64_t, int64_t, int64_t);
-extern int64_t message_parts(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_string_repeat(int64_t, int64_t);
 extern int64_t jet_string_slice_builtin(int64_t, int64_t, int64_t);
 extern void jet_rt_native_channel(int64_t, int64_t, int64_t, int64_t);
@@ -178,7 +176,7 @@ static const char *expected_reason(int64_t mode) {
         return range_reason;
     }
     if (mode == 2 || (mode >= 33 && mode <= 36)) return numeric_reason;
-    if (mode == 3) return "the list has 1 items, so position 1 doesn't exist";
+    if (mode == 3) return "the list has 1 item, so position 1 doesn't exist";
     if (mode == 4) return "the list has 9223372036854775807 items, so position -9223372036854775808 doesn't exist";
     if (mode >= 5 && mode <= 17) return range_reason;
     if ((mode >= 18 && mode <= 25) || mode == 30 || mode == 31) return overflow_reason;
@@ -264,14 +262,14 @@ static void run_int_stop(int64_t test) {
     else if (test == 42) assert(jet_rt_record_new_jet_browser_timeout(big) == 0);
     else if (test == 43) assert(jet_rt_record_new_jet_date(2026, 10, big) == 0);
     else if (test == 44) assert(jet_rt_record_new_jet_period(1, 1, big) == 0);
-    else if (test == 45) assert(jet_rt_record_new_jet_delivery(WORD(&key), WORD(&key), 0, 0, big) == 0);
+    else if (test == 45) assert(jet_rt_record_new_jet_memo_stats(big, 1, 1, 0) == 0);
     else if (test == 46) assert(jet_rt_record_new_jet_memo_stats(1, 1, big, 0) == 0);
     else if (test == 47) assert(jet_rt_record_new_limits(1, 1, 1, 1, 1, big) == 0);
     else if (test == 48) assert(jet_rt_record_new_log_span(big, WORD(&key)) == 0);
     else if (test == 49) assert(jet_rt_record_new_plugin_frame(WORD(&key), WORD(&key), big) == 0);
     else if (test == 50) assert(jet_rt_record_new_terminal_size(80, big) == 0);
     else if (test == 51) assert(jet_rt_record_new_watch_event(0, 0, WORD(&key), WORD(&key), 0, big) == 0);
-    else if (test == 52) assert(message_parts(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, big) == 0);
+    else if (test == 52) assert(jet_rt_record_new_limits(1, 1, 1, 1, big, 1) == 0);
     else if (test == 53) assert(jet_string_repeat(WORD(&key), big) == 0);
     else if (test >= 54 && test <= 56) {
         assert(jet_string_slice(WORD(&key), test == 54 ? big : 0, test == 55 ? big : 1, WORD(&key), test == 56 ? big : 0) == 0);

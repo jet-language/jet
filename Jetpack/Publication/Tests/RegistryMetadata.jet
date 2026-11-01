@@ -4,6 +4,18 @@
 // Full fetch/locked replay/tamper-before-Hangar and staging depend on the
 // mandatory artifact/fetch composition #4262; no fake store or hash here.
 // Native reader/error-kind gates #3593/#4409; JSON #3598; SemVer #4414/#4303.
+use jet_pkg_model.[pkg_json_texts]
+use jetpack_publication.[
+    PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES, PublicationRegistryDependency,
+    PublicationRegistryPackageMetadata, publication_artifact_path,
+    publication_merge_registry_dependency, publication_parse_registry_package_metadata,
+    publication_publish_artifact, publication_read_registry_package_metadata,
+    publication_registry_artifact_hash, publication_validate_registry_dependency_name,
+    publication_validate_registry_metadata_file, publication_verify_artifact,
+]
+use core.files as files
+use core.sys as sys
+
 fn publication_metadata_test_dependency(name: String, roles: [String], enabled: Bool) -> PublicationRegistryDependency Never! {
     PublicationRegistryDependency{name: name, requirements: [String]{"*"}, roles: roles, prefer: [String]{}, reject: [String]{}, strict: false, enabled_by_default: enabled}
 }
@@ -188,11 +200,10 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
 }
 #Test("publication metadata checked reader missing and validation") {
     root :: publication_metadata_test_root("missing")
-    assert_eq(publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ?? panic("missing metadata"), None)
+    assert((publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ? found -> found ! error -> panic("missing metadata")) == None)
     publication_validate_registry_metadata_file(root, "rolekit", "1.0.0") ?? panic("missing metadata permitted")
     files.write(files.join(root, "registry.json"), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}") ?? panic("metadata fixture")
-    model :: publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ?? panic("read held metadata")
-    assert(model != None)
+    assert((publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ? found -> found ! error -> panic("read held metadata")) == .Val(_))
     publication_validate_registry_metadata_file(root, "rolekit", "1.0.0") ?? panic("publish validation")
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -200,10 +211,11 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     root :: publication_metadata_test_root("bounds")
     path :: files.join(root, "registry.json")
     valid :: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\"}}"
-    files.write(path, valid + " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES - valid.bytes().len())) ?? panic("exact byte limit")
-    boundary :: publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ?? panic("boundary allowed")
-    assert(boundary != None)
-    files.write(path, valid + " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1 - valid.bytes().len())) ?? panic("over byte limit")
+    exact_padding :: " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES - valid.bytes().len())
+    files.write(path, "{valid}{exact_padding}") ?? panic("exact byte limit")
+    assert((publication_read_registry_package_metadata(root, "rolekit", "1.0.0") ? found -> found ! error -> panic("boundary allowed")) == .Val(_))
+    over_padding :: " ".repeat(PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1 - valid.bytes().len())
+    files.write(path, "{valid}{over_padding}") ?? panic("over byte limit")
     if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
         .Ok(_) -> panic("oversized metadata accepted")
         .Err(error) -> if error == {

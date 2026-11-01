@@ -41,7 +41,7 @@ fn store_test_nix_projection_record(id: String, output_name: String, digest: Str
     loop digest in digests -> &objects.push(ClosureObject{digest: digest, path: "/nix/store/{digest}", external: true})
     graph := ClosureGraph.empty()
     store_apply_entry(&graph, ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: objects, records: [ClosureRecord]{out, dev}, deleted_records: [String]{}}) ?? panic("delta must apply")
-    assert_eq(graph.action_outputs("sha256-same-action"), [String: String]{"dev": "sha256-dev", "out": "sha256-out"})
+    assert(graph.action_outputs("sha256-same-action") == [String: String]{"dev": "sha256-dev", "out": "sha256-out"})
 
     conflict :: store_test_nix_projection_record("alias-dev-conflict", "dev", "sha256-other-dev", "other:pkg.dev")
     actions := [String: CanonicalActionRecord]{}

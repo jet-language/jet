@@ -98,6 +98,22 @@ fn is_global(addr: IPv4) -> Bool Never! {
     true
 }
 
+// Safe to fetch, which is stricter than reachable: also refuses carrier-grade
+// NAT, 192.0.0.0/24 whole, benchmarking, documentation and every address from
+// 224.0.0.0 up, then requires is_global.
+fn is_public_destination(addr: IPv4) -> Bool Never! {
+    if addr.a == 0 || addr.a == 10 || addr.a == 127 || addr.a >= 224 -> return false
+    if addr.a == 100 && addr.b >= 64 && addr.b <= 127 -> return false
+    if addr.a == 169 && addr.b == 254 -> return false
+    if addr.a == 172 && addr.b >= 16 && addr.b <= 31 -> return false
+    if addr.a == 192 && addr.b == 0 && (addr.c == 0 || addr.c == 2) -> return false
+    if addr.a == 192 && addr.b == 168 -> return false
+    if addr.a == 198 && (addr.b == 18 || addr.b == 19) -> return false
+    if addr.a == 198 && addr.b == 51 && addr.c == 100 -> return false
+    if addr.a == 203 && addr.b == 0 && addr.c == 113 -> return false
+    is_global(addr)
+}
+
 fn network(cidr: String) -> Network IOError! {
     slash := -1
     raw :: cidr.bytes()
@@ -466,8 +482,46 @@ fn ipv6_is_private(addr: IPv6) -> Bool Never! {
     addr.words.len() == 8 && (addr.words[0]).bit_and(65024) == 64512
 }
 
+// IANA IPv6 Special-Purpose Address Registry, updated 2025-10-09: reject
+// Globally Reachable=False rows, with more-specific True exceptions. Rows
+// marked N/A (6to4 2002::/16) stay global; Teredo 2001::/32 sits inside the
+// False 2001::/23 parent. Multicast, link-local and unique-local are never
+// global.
 fn ipv6_is_global(addr: IPv6) -> Bool Never! {
-    !ipv6_is_loopback(addr) && !ipv6_is_unspecified(addr) && !ipv6_is_link_local(addr) && !ipv6_is_multicast(addr) && !ipv6_is_private(addr)
+    if addr.words.len() != 8 -> return false
+    if ipv6_is_loopback(addr) || ipv6_is_unspecified(addr) || ipv6_is_link_local(addr) || ipv6_is_multicast(addr) || ipv6_is_private(addr) -> return false
+    w :: addr.words
+    if w[0] == 0 && w[1] == 0 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 65535 -> return false // IPv4-mapped ::ffff:0:0/96.
+    if w[0] == 100 && w[1] == 65435 && w[2] == 1 -> return false // Local-use translation 64:ff9b:1::/48.
+    if w[0] == 256 && w[1] == 0 && w[2] == 0 && (w[3] == 0 || w[3] == 1) -> return false // Discard 100::/64 and dummy 100:0:0:1::/64.
+    if w[0] == 8193 {
+        if w[1] == 3512 -> return false // Documentation 2001:db8::/32.
+        if w[1] < 512 {
+            // IETF protocol assignments 2001::/23 and their reachable rows.
+            if w[1] == 1 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 0 && w[6] == 0 -> return w[7] >= 1 && w[7] <= 3
+            if w[1] == 3 -> return true // AMT 2001:3::/32.
+            if w[1] == 4 && w[2] == 274 -> return true // AS112-v6 2001:4:112::/48.
+            return w[1] >= 32 && w[1] <= 63 // ORCHIDv2 2001:20::/28 and DETs 2001:30::/28.
+        }
+    }
+    if w[0] == 16383 && w[1] < 4096 -> return false // Documentation 3fff::/20.
+    if w[0] == 24320 -> return false // SRv6 SIDs 5f00::/16.
+    true
+}
+
+// Safe to fetch, which is stricter than reachable: an IPv4-mapped address
+// takes the IPv4 rule; anything else must sit in global unicast 2000::/3
+// (refusing every NAT64 prefix), must not be 6to4 2002::/16 or Teredo
+// 2001::/32, and must be global.
+fn ipv6_is_public_destination(addr: IPv6) -> Bool Never! {
+    if addr.words.len() != 8 -> return false
+    w :: addr.words
+    if w[0] == 0 && w[1] == 0 && w[2] == 0 && w[3] == 0 && w[4] == 0 && w[5] == 65535 {
+        return is_public_destination(IPv4{a: w[6] /% 256, b: w[6] %% 256, c: w[7] /% 256, d: w[7] %% 256})
+    }
+    if w[0].bit_and(57344) != 8192 -> return false
+    if w[0] == 8194 || (w[0] == 8193 && w[1] == 0) -> return false
+    ipv6_is_global(addr)
 }
 
 fn ipv6_packed(addr: IPv6) -> [U8] Never! {

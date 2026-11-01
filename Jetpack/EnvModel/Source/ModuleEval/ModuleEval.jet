@@ -292,8 +292,10 @@ fn envmodel_evaluate_hosts(entries: [HostEntry], src: String, scope: ModuleEvalS
         override_source := String?{None}
         if entry.overrides == {
             .Val(span) -> {
-                source :: pkg_bytes_text(bytes, span.start, span.end).trim()
-                overrides = Val(envmodel_evaluate_host_override(source, span, scope, globals))
+                raw :: pkg_bytes_text(bytes, span.start, span.end)
+                source :: raw.trim()
+                at :: span.start + raw.bytes().len() - raw.trim_start().bytes().len()
+                overrides = Val(envmodel_evaluate_host_override(source, at, span, scope, globals))
                 override_source = Val(source)
             }
             .None -> {}
@@ -306,8 +308,14 @@ fn envmodel_evaluate_hosts(entries: [HostEntry], src: String, scope: ModuleEvalS
 // Rust ModuleEval/System.rs:615-753. Reuse the System parser and the pure
 // named-field graph, resolving generic fields before typed nested values.
 // Port reused from 45acf6f8f SystemFleetEval.jet, matched to the current oracle.
-fn envmodel_evaluate_host_override(source: String, original_span: Span, scope: ModuleEvalScope, globals: [String: CtValue]) -> HostOverride EnvModelEvalError! {
-    wrapped :: "module system.fleet_override {source}"
+// The synthetic module is padded so the record (`source`, at byte `at` of the
+// module source) keeps its own offsets: its expressions are evaluated against
+// the module source and its functions exactly as module fields are.
+fn envmodel_evaluate_host_override(source: String, at: Int, original_span: Span, scope: ModuleEvalScope, globals: [String: CtValue]) -> HostOverride EnvModelEvalError! {
+    head :: "module system.fleet_override "
+    if at < head.bytes().len() -> return Err(envmodel_error("E0003", "host override is not a record", "fleet overrides use the same record evaluator as system fields", "write `{{ field: value }}` right after the system reference: `system.web{{ field: value }}`", Val(original_span)))
+    pad :: " ".repeat(at - head.bytes().len())
+    wrapped :: "{pad}{head}{source}"
     program :: envmodel_parse_program(wrapped) ?? {
         diagnostic := err.diagnostic
         diagnostic.span = Val(original_span)
@@ -323,11 +331,11 @@ fn envmodel_evaluate_host_override(source: String, original_span: Span, scope: M
             else -> {}
         }
     }
-    decl :: found ?? return Err(envmodel_error("E0003", "host override is not a record", "fleet overrides use the same record evaluator as system fields", "write `.{{ field: value }}` after the system reference", Val(original_span)))
+    decl :: found ?? return Err(envmodel_error("E0003", "host override is not a record", "fleet overrides use the same record evaluator as system fields", "write `{{ field: value }}` right after the system reference: `system.web{{ field: value }}`", Val(original_span)))
     if decl.contributions.len() == 0 -> return Err(envmodel_error("E0003", "host override is empty", "a host override must contain at least one typed field", "add a field inside the override record", Val(original_span)))
     lit :: if decl.contributions[0].value == {
         .System(lit) -> lit
-        else -> { return Err(envmodel_error("E0003", "host override is not a system record", "fleet overrides use System field semantics", "write named fields inside `.{{ … }}`", Val(original_span))) }
+        else -> { return Err(envmodel_error("E0003", "host override is not a system record", "fleet overrides use System field semantics", "write named fields inside `system.<name>{{ … }}`", Val(original_span))) }
     }
     definitions := [String: NamedFieldExpr]{}
     loop field in lit.fields {

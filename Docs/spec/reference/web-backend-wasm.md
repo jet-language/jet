@@ -3,9 +3,10 @@
 The web backend partitions the checked program between JavaScript for browser/DOM work
 and WebAssembly for eligible logic. This page is for web application authors
 and compiler contributors choosing a target, reading partition diagnostics, and
-checking the source-backed examples. The Jet-hosted CLI does not build the web
-target yet: `jet build --target=web` is refused with E2104. Web diagnostics are
-registered in
+checking the source-backed examples. The Jet-hosted CLI builds the web target
+from the IR (see [architecture](../architecture.md), the IR consumers): today
+it selects the whole program to WebAssembly, and the JavaScript/WebAssembly
+partition below is not built yet. Web diagnostics are registered in
 [`Compiler/Prelude/Diagnostics.jet`](../../../Compiler/Prelude/Diagnostics.jet).
 
 The ratified decisions are D-WEBBACKEND1, D-WASM1, D-JSBIND1, D-WEBKIND1, and
@@ -14,18 +15,27 @@ D-DOMGEN1. Per-function partition pins use `#Target(JS)` and `#Target(Wasm)`;
 
 ## Build and inspect
 
-Build JavaScript and WebAssembly artifacts explicitly:
+`jet build --target web FILE` (also `--os=web`, or `os: web` in the selected
+profile) writes five files beside the entry in `.jet/build/`, whatever the
+entry is named: `app.wasm` (the program partition), `rt.wasm` (the runtime
+partition), `web.manifest.json`, the entry `app.js` and its host
+`jet_dom_runtime.js`. `node .jet/build/app.js` runs the program with the
+process's arguments and environment and exits with its status. A page or a
+harness imports `jet_main` from `app.js`: it resolves when the program exits 0
+and rejects with `JetHostExitError` (its `status`) otherwise, or
+`JetHostWasmError` on a trap. `instantiateWasm` and `takeWasmError` from
+`jet_dom_runtime.js` drive the modules directly.
 
 ```sh
-jet build --target=web Examples/features/web/web_compute.jet
-jet build --target=web --explain-partition Examples/features/web/web_compute.jet
-jet dev --target=web Examples/features/web/ui_web_click.jet
+jet build --target web Examples/features/basics/hello.jet
+node Examples/features/basics/.jet/build/app.js
 ```
 
-`--explain-partition` reports the module-to-bucket assignment used by the
-loader. A web-targeted `jet run` is not a browser runner: attempting to execute
-one produces `E-WEB-RUN`. Use `jet build` for artifacts and `jet dev` for the
-browser development surface rather than relying on a native run fallback.
+`jet run`, `jet dev` and `jet test` run Linux x86-64 images only and refuse
+`os: web`; a package's `fn build` targets refuse it too. Under node the host
+file system is the program's; a page has none, so file calls fail with
+ENOSYS. The host runs one thread: a program that starts a `task` stops with
+E3001 (`tasks are not available on the web target yet`).
 
 ## Partition and ABI
 

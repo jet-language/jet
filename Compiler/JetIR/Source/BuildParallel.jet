@@ -154,8 +154,9 @@ fn ir_para_list_clear(m: &IRModule, b: &IRBuilder, list: Int) Never! {
 
 // `xs.para_map(f[, limit])`, `xs.para_filter(f)`, `xs.para_partition(f)` and
 // `xs.para_fold(seed, step, merge)` over the List at `list`. `operands` are
-// the built arguments in order.
-fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], span: Span) -> Int Never! {
+// the built arguments in order; `args` the checked ones, whose callback type
+// (I3, as the sequential methods read it) gives the helper's signature.
+fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], args: [Int], span: Span) -> Int Never! {
     if m.types[element].kind == .Unit -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} over Unit items")
     length :: ir_load_word(&m, &b, list, 0)
     data :: ir_load_word(&m, &b, list, 16)
@@ -166,7 +167,7 @@ fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     callback :: operands[0]
-    callback_ty :: m.types[b.f.slot_type[callback]].ty.copy()
+    callback_ty :: ir_ty(p, b, args[0])
     signature :: ir_para_signature(callback_ty) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
     out_row :: ir_value_type(&m, p, signature.result) ?? return ir_type_fail(&b, span, signature.result)
     id :: ir_para_helper(&m, p, &b, "map", callback_ty, span)
@@ -196,6 +197,7 @@ fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     _ :: ir_runtime(&m, &b, "jet_rt_native_para_walk", [Int]{length, limit, env, invoke}, -1)
     if limited -> ir_release(&m, &b, limit)
     if operation == .ParaMap {
+        if ir_untag(ty) == .Result(list_ty, _) -> return ir_para_map_settle(&m, p, &b, ty, list_ty, signature.result, output, length, bytes, span)
         mapped_row :: ir_list_element_of(&m, p, result_row) ?? return ir_type_fail(&b, span, ty)
         if mapped_row != out_row -> return ir_fail_slot(&b, span, "para_map to {ir_type_name(ty)} through {ir_type_name(callback_ty)}")
         result :: ir_list_empty(&m, &b, result_row)
@@ -210,7 +212,7 @@ fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     true_list := -1
     false_list := -1
     if partition {
-        fields :: if ir_untag(ir_subst(m, ty)) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(&b, span, ty) }
+        fields :: if ir_untag(ty) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(&b, span, ty) }
         members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, ty)
         false_offset := -1
         true_offset := -1
@@ -243,6 +245,75 @@ fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     ir_walk_close(&m, &b, walk)
     ir_open_if(&b.f, some, b.line)
     _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{output, bytes, align}, -1)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// A fallible `xs.para_map(f)` (checked type `ty`, the Result of `list_ty`):
+// slot i of `output` (`length` slots, `bytes` bytes) holds item i's callback
+// Result box (`item_ty`). In source order each Ok payload moves into the
+// mapped List; the lowest-index Err becomes the call's Err and drops the List
+// built so far, and every later payload ends, so no partial result escapes
+// (D-PARCAPTURE1). Every box and the slot buffer are freed.
+fn ir_para_map_settle(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list_ty: Type, item_ty: Type, output: Int, length: Int, bytes: Int, span: Span) -> Int Never! {
+    ok_ty := Type.Int
+    err_ty := Type.Int
+    if ir_untag(item_ty) == .Result(ok, err) {
+        ok_ty = ok
+        err_ty = err
+    } else {
+        return ir_fail_slot(&b, span, "para_map to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
+    }
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    list_row :: ir_value_type(&m, p, list_ty) ?? return ir_type_fail(&b, span, list_ty)
+    item_row :: ir_value_type(&m, p, item_ty) ?? return ir_type_fail(&b, span, item_ty)
+    ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    if m.types[ok_row].kind == .Unit -> return ir_fail_slot(&b, span, "para_map to {ir_type_name(ty)} over Unit results")
+    mapped :: ir_list_empty(&m, &b, list_row)
+    produced :: ir_list_element(&m, p, b, mapped) ?? return ir_type_fail(&b, span, list_ty)
+    if produced != ok_row -> return ir_fail_slot(&b, span, "para_map to {ir_type_name(ty)} through a callback making {ir_type_name(item_ty)}")
+    result :: ir_fresh_temp(&m, &b, result_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    shell_bytes :: ir_result_box_bytes(&m, p, item_ty)
+    shell :: ir_word_const(&m, &b, shell_bytes)
+    zero :: ir_word_const(&m, &b, 0)
+    stride :: ir_list_stride(m, item_row)
+    index :: ir_para_range_open(&m, &b, zero, length)
+    at :: ir_element_address(&m, &b, output, index, stride)
+    called :: ir_load_at(&m, &b, at, 0, item_row)
+    selector :: ir_load_word(&m, &b, called, 0)
+    failed :: ir_bool_op(&m, &b, IROp.Eq, selector, zero)
+    pending :: ir_is_null(&m, &b, result)
+    ir_open_if(&b.f, failed, b.line)
+    error :: ir_load_at(&m, &b, called, 8, err_row)
+    ir_open_if(&b.f, pending, b.line)
+    if error >= 0 -> b.fresh[error] = true
+    failure :: ir_result_box(&m, p, &b, ty, false, error)
+    ir_emit(&b.f, IROp.Copy, result, failure, -1, -1, b.line)
+    if ir_has_drop(m, b, mapped) -> ir_emit(&b.f, IROp.Drop, -1, mapped, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    if error >= 0 && ir_has_drop(m, b, error) -> ir_emit(&b.f, IROp.Drop, -1, error, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_else(&b.f, b.line)
+    value :: ir_load_at(&m, &b, called, 8, ok_row)
+    ir_open_if(&b.f, pending, b.line)
+    b.fresh[value] = true
+    ir_list_push(&m, p, &b, mapped, ok_row, value)
+    ir_else(&b.f, b.line)
+    if ir_has_drop(m, b, value) -> ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_free(&m, &b, called, shell)
+    ir_walk_close(&m, &b, IRWalk{index: index, item: called})
+    some :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+    ir_open_if(&b.f, some, b.line)
+    ir_free(&m, &b, output, bytes)
+    ir_end(&b.f, b.line)
+    clean :: ir_is_null(&m, &b, result)
+    ir_open_if(&b.f, clean, b.line)
+    success :: ir_result_box(&m, p, &b, ty, true, mapped)
+    ir_emit(&b.f, IROp.Copy, result, success, -1, -1, b.line)
     ir_end(&b.f, b.line)
     result
 }

@@ -1,10 +1,43 @@
 // Real filesystem and process-identity witnesses. No producer or runtime
 // publication is claimed: these are hostile/valid transport inputs.
-use jet_foundation.[foundation_json_quote]
-use jet_cli.[jet_cli_live_process_start, jet_cli_live_read_at]
+use jet_cli.[jet_cli_live_read_at]
+use core.sys as cli_sys
+use core.process as cli_process
+use core.files as cli_files
+use core.time as live_time
 
-fn live_transport_fixture(pid: Int, start: String, captured: Int, events: String) -> String Never! {
-    "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":{pid},\"start_id\":{foundation_json_quote(start)},\"captured_ms\":{captured},\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{events}}}"
+// The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
+// words; a text is its byte length and its bytes.
+fn live_transport_u64(out: &[U8], value: U64) Never! {
+    loop index in 0..<8 -> &out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
+}
+fn live_transport_text(out: &[U8], text: String) Never! {
+    live_transport_u64(&out, U64{text.bytes().len()})
+    loop byte in text.bytes() -> &out.push(byte)
+}
+// A writer whose boot-clock start is `boot_ns`, at 100 ticks per second,
+// with no tasks and optionally one event record.
+fn live_transport_fixture(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
+    out := [U8]{}
+    loop word in ([U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{0}, boot_ns, U64{0}, U64{100}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}}) -> live_transport_u64(&out, word)
+    loop text in ([String]{"s", "app.jet", "b", "r", "w"}) -> live_transport_text(&out, text)
+    live_transport_u64(&out, U64{1})
+    live_transport_u64(&out, U64{0})
+    if event_sequence == .Val(sequence) {
+        live_transport_u64(&out, U64{4})
+        live_transport_u64(&out, U64{1})
+        live_transport_u64(&out, U64{sequence})
+        live_transport_text(&out, "Event")
+        loop _ in 0..<4 -> live_transport_u64(&out, U64{1})
+        live_transport_text(&out, "Queued")
+        loop _ in 0..<4 -> live_transport_u64(&out, U64{0})
+        live_transport_text(&out, "None")
+        live_transport_u64(&out, U64{0})
+        live_transport_text(&out, "None")
+        live_transport_text(&out, "None")
+    }
+    live_transport_u64(&out, U64{0})
+    out
 }
 fn live_transport_rejected(pid: Int, path: String, message: String) {
     if jet_cli_live_read_at(pid, path) == {
@@ -21,13 +54,16 @@ fn live_transport_rejected(pid: Int, path: String, message: String) {
     cli_files.create_dir(root) ?? panic("exclusive transport fixture directory")
     path :: "{root}/snapshot.json"
     alias :: "{root}/alias.json"
-    start :: jet_cli_live_process_start(pid) ?? panic("actual process start")
+    // Any process start precedes a writer that started at the latest boot time.
+    latest :: U64{9223372036854775807}
     now :: max(0, live_time.unix_ns() /% 1000000)
-    bytes :: live_transport_fixture(pid, start, now, ",\"event_observations\":[]")
-    cli_files.write(path, bytes) ?? panic("snapshot fixture")
+    cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, None)) ?? panic("snapshot fixture")
     cli_files.set_mode(path, 0o600) ?? panic("private snapshot fixture")
     actual :: jet_cli_live_read_at(pid, path) ?? panic("actual private retained-descriptor read")
-    assert(actual.pid == pid && actual.start_id == start && actual.events == Val(""))
+    assert(actual.pid == pid && actual.start_id != "" && actual.events == Val("") && actual.runtime.cpu_ns != None)
+    cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, Val(1))) ?? panic("event fixture")
+    with_event :: jet_cli_live_read_at(pid, path) ?? panic("event record read")
+    assert(with_event.events == Val("sequence=1 source=Event event=1 owner=1 subscription=1 dispatch=1 lifecycle=Queued queued=0 blocked=0 running=0 capacity=0 overflow=None priority=0 failure=None terminal=None"))
     // The snapshot is never accepted merely because it is a regular file.
     cli_files.set_mode(path, 0o644) ?? panic("hostile snapshot mode")
     live_transport_rejected(pid, path, "permissions expose runtime state")
@@ -35,22 +71,21 @@ fn live_transport_rejected(pid: Int, path: String, message: String) {
     cli_files.symlink(path, alias) ?? panic("hostile final link")
     live_transport_rejected(pid, alias, "not a regular file")
     live_transport_rejected(pid, root, "not a regular file")
-    cli_files.write(path, live_transport_fixture(pid, "wrong-start", now, ",\"event_observations\":[]")) ?? panic("stale process start fixture")
+    // A writer that started before this process is a reused pid's snapshot.
+    cli_files.write_bytes(path, live_transport_fixture(pid, U64{0}, now, None)) ?? panic("stale process start fixture")
     live_transport_rejected(pid, path, "does not belong to process")
-    cli_files.write(path, live_transport_fixture(pid, start, max(0, now - 2001), ",\"event_observations\":[]")) ?? panic("stale publication fixture")
+    cli_files.write_bytes(path, live_transport_fixture(pid, latest, max(0, now - 2001), None)) ?? panic("stale publication fixture")
     live_transport_rejected(pid, path, "not publishing a live runtime snapshot")
-    cli_files.write(path, live_transport_fixture(pid + 1, start, now, ",\"event_observations\":[]")) ?? panic("wrong pid fixture")
+    cli_files.write_bytes(path, live_transport_fixture(pid + 1, latest, now, None)) ?? panic("wrong pid fixture")
     live_transport_rejected(pid, path, "does not belong to process")
     // PID error precedes event-validation error, exactly as LiveInspect::read.
-    cli_files.write(path, live_transport_fixture(pid + 1, start, now, ",\"event_observations\":false")) ?? panic("wrong pid plus invalid event fixture")
+    cli_files.write_bytes(path, live_transport_fixture(pid + 1, latest, now, Val(0))) ?? panic("wrong pid plus invalid event fixture")
     live_transport_rejected(pid, path, "does not belong to process")
-    cli_files.write(path, live_transport_fixture(pid, start, now, "")) ?? panic("missing event sequence fixture")
-    live_transport_rejected(pid, path, "live runtime event observations are invalid: runtime observation has no event sequence")
-    cli_files.write(path, live_transport_fixture(pid, start, now, ",\"event_observations\":false")) ?? panic("invalid event sequence fixture")
-    live_transport_rejected(pid, path, "live runtime event observations are invalid")
+    cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, Val(0))) ?? panic("invalid event sequence fixture")
+    live_transport_rejected(pid, path, "live runtime event observations are invalid: runtime event observation sequence is not strictly increasing")
     cli_files.write(path, " ".repeat(1048577)) ?? panic("oversized snapshot fixture")
     live_transport_rejected(pid, path, "1 MiB safety limit")
-    cli_files.write_bytes(path, [U8]{U8{255}}) ?? panic("invalid UTF-8 fixture")
-    live_transport_rejected(pid, path, "not contain valid UTF-8")
+    cli_files.write_bytes(path, [U8]{U8{255}}) ?? panic("short snapshot fixture")
+    live_transport_rejected(pid, path, "invalid or unsafe schema: live runtime snapshot is truncated")
     cli_files.remove_all(root) ?? panic("transport fixture cleanup")
 }

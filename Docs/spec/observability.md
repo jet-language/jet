@@ -1,10 +1,6 @@
 # Jet observation guide
 
-Use one query when a program is slow:
-
-```text
-jet ? why is my program slow
-```
+Start here when a program is slow.
 
 This page is the terminal guide for package authors and toolchain maintainers.
 It covers live runtime facts, GC evidence, wall-clock traces, browser rows, and
@@ -18,7 +14,7 @@ question it answers.
 
 | Surface | Question answered | Start here | Flag or recorder | Artifact envelope and convergence |
 |---|---|---|---|---|
-| Live scheduler | What runs, waits, or queues now? | `jet run app.jet --observe`, then `jet inspect structure --live <pid>` or another named inspect plane | `--observe` publishes bounded `jet.devtools.v1` facts. Use `--json` for a machine projection. | The live snapshot is `jet-observe-<pid>.json` in the host temporary directory; it carries freshness and process identity and exposes no unpublished values. |
+| Live scheduler | What runs, waits, or queues now? | `jet run app.jet --observe`, then `jet inspect structure --live <pid>` or another named inspect plane | `--observe` publishes bounded `jet.devtools.v1` facts. Use `--json` for a machine projection. | The live snapshot is `jet-observe-<pid>.json` in the host temporary directory. Despite the `.json` name, it holds the runtime's raw records, which `jet inspect` decodes. It carries freshness and process identity and exposes no unpublished values. |
 | GC promotions | Which allocations enter automatic memory management, and what ownership rewrite helps? | `jet run app.jet --gc-trace`, then `jet gc report` | `--gc-trace` records promotion evidence. | `.jet/gc/trace-v1.json` uses `jet.gc.trace` v1. The separate `jet.gc.report` v1 projection requires complete promotion and identity evidence and rejects dropped rows. |
 | Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach <pid> --source app.jet` record sessions. The ratified user-verb recorder is `--record=<name>` on `run`, `dev`, and `test`. | The default artifact is `.jet/perf/<stamp>-<short-id>.jettrace`, with schema `jet.trace` v1. |
 | Browser rows | Which browser, WebAssembly, or DOM rows consume time? | `jet dev --target=web`, then `jet perf attach <pid>` | The dev server sends bounded, payload-free relay rows; `jet perf attach` requests collection. | The request transport uses `jet.browser.request.v1`; `jet perf attach` merges rows into the canonical `.jettrace` rather than creating a second trace format. |
@@ -180,6 +176,3 @@ the program through time, or keep a standing per-variable history buffer.
 - Wall-clock session: `Compiler/JetCli/Source/Cli/Perf/` and `Compiler/JetFoundation/Source/Trace/JetTrace.jet`
 - Browser rows: `Compiler/JetDevserver/Source/BrowserTrace.jet`, merged by `Compiler/JetCli/Source/Cli/Perf/BrowserCapture.jet`
 - Devtools protocol and panel policy: `Compiler/JetFoundation/Source/Devtools/` and the panel catalog projection in `Compiler/JetDevserver/Source/Session.jet`
-
-The `jet ? why is my program slow` route prints this file verbatim. The guide
-and the CLI output therefore have one home.

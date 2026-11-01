@@ -1,0 +1,25 @@
+// Card #6037: a binding read only inside a deferred body (a `task f(x)`
+// spawn, a `task { … }` block or a lambda) is read, so it gets no L0101 and
+// a parameter read that way no L0102. The truly unused binding beside them
+// still warns.
+fn work(n: Int) -> Int {
+    n * 2
+}
+
+fn spawn_with(seed: Int) -> Int {
+    handle :: task work(seed)
+    handle.join() ?? 0
+}
+
+fn run() {
+    count :: 21
+    block_input :: 2
+    captured :: 3
+    unused :: 5
+    spawned :: task work(count)
+    blocked :: task {
+        work(block_input)
+    }
+    scale :: (x: Int) -> work(captured) + x
+    print((spawned.join() ?? 0) + (blocked.join() ?? 0) + scale(1) + spawn_with(4))
+}

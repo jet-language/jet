@@ -5,7 +5,10 @@ fn run() {
     loop hostile in hostiles {
         rejected :: if ws.connect(hostile) == {
             .Ok(_) -> false
-            .Err(error) -> if error == { .InvalidURL -> true; else -> false }
+            .Err(error) -> if error == {
+                .InvalidURL -> true
+                else -> false
+            }
         }
         assert(rejected)
     }

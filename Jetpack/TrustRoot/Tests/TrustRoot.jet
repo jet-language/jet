@@ -1,5 +1,5 @@
 // Claims ported from crates/jetpack/src/TrustRoot.rs #[cfg(test)]. Scratch
-// roots come from `files.temp_dir` instead of the Rust per-process counter.
+// roots come from `files.tmpdir` instead of the Rust per-process counter.
 use jetpack_trust_root.[
     BoundIdentity, CacheProvenance, CacheReceipt, IdentityKind, Keyring, MetadataRole,
     PublicTrustKey, PublisherIdentity, RootBootstrap, SignedMetadata, SnapshotMetaEntry,
@@ -14,9 +14,10 @@ use core.files as files
 
 TRUST_TEST_NOW :: 1700000000
 
+// The directory outlives this helper, so it is a `tmpdir`: a `temp_dir` would
+// remove it when its `TempDir` drops at return (#6119).
 fn trust_test_scratch(label: String) -> String {
-    scratch :: files.temp_dir("jet-trustroot-{label}") ?? panic("scratch directory")
-    scratch.path
+    files.tmpdir("jet-trustroot-{label}") ?? panic("scratch directory")
 }
 
 fn trust_test_fixture(version: Int, expires_unix: Int) -> TrustFixtureRoot {

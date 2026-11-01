@@ -12,12 +12,13 @@ fn rt_journey_destructor_address() -> I64 {
 // exports.list: allocator init 0 -> Host init 1 -> Thread init 2 (publishes
 // thread_tls_registry and attaches main) -> Journey init 3. Thus key/alloc
 // operations here cannot precede their actual providers' initialization.
-// runtime-init: 3
+// runtime-init: 3 when journey_tls_key,journey_report_wire_word
 #Export(c) fn jet_rt_journey_init() {
+    if (journey_tls_key != I64{0}) -> return
     closure :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
-    rt_text_store(closure + I64{8}, rt_journey_destructor_address())
-    rt_text_store(closure + I64{16}, I64{0})
+    rt_text_store(wrapping(closure + I64{8}), rt_journey_destructor_address())
+    rt_text_store(wrapping(closure + I64{16}), I64{0})
     journey_tls_key = jet_rt_tls_key_new(closure)
     journey_report_wire_word = jet_rt_alloc(I64{8}, I64{8})
     sync_store(journey_report_wire_word, I64{0})
@@ -30,11 +31,11 @@ fn journey_tls_value() -> I64 {
     }
     held
 }
-#Export(c) fn jet_journey_origin(file: I64, line: I64, column: I64, function: I64) {
-    jet_rt_native_journey_origin(journey_tls_value(), file, line, column, function)
+#Export(c) fn jet_journey_origin(file: I64, line: I64, column: I64, function: I64, source: I64) {
+    jet_rt_native_journey_origin(journey_tls_value(), file, line, column, function, source)
 }
-#Export(c) fn jet_journey_frame_text(file: I64, line: I64, column: I64, function: I64, note: I64) {
-    jet_rt_native_journey_frame(journey_tls_value(), file, line, column, function, note)
+#Export(c) fn jet_journey_frame_text(file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) {
+    jet_rt_native_journey_frame(journey_tls_value(), file, line, column, function, source, note)
 }
 #Export(c) fn jet_journey_reset() {
     held :: jet_rt_tls_get(journey_tls_key)
@@ -46,8 +47,8 @@ fn journey_tls_value() -> I64 {
     held
 }
 #Export(c) fn jet_journey_adopt(carried: I64) { jet_rt_native_journey_adopt(journey_tls_value(), carried) }
-#Export(c) fn jet_err_with_context_frame(error: I64, file: I64, line: I64, column: I64, function: I64, note: I64) -> I64 {
-    jet_rt_native_err_context_frame(error, journey_tls_value(), file, line, column, function, note)
+#Export(c) fn jet_err_with_context_frame(error: I64, file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) -> I64 {
+    jet_rt_native_err_context_frame(error, journey_tls_value(), file, line, column, function, source, note)
 }
 #Export(c) fn jet_report_use_wire() { sync_store(journey_report_wire_word, I64{1}) }
 
@@ -95,7 +96,7 @@ fn journey_stderr_columns(tty: Bool) -> I64 {
     if (length != I64{0} && rt_text_byte(data) == I64{43}) -> at = I64{1}
     if (at == length) -> valid = false
     loop at < length {
-        digit :: rt_text_byte(data + at) - I64{48}
+        digit :: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9} || columns < I64{0} || columns > I64{1844674407370955161} || (columns == I64{1844674407370955161} && digit > I64{5})) {
             valid = false
             break
@@ -114,7 +115,7 @@ fn journey_trim_newlines(text: I64) -> I64 {
     length := rt_text_len(text)
     loop {
         if (length == I64{0}) -> break
-        if (rt_text_byte(data + length - I64{1}) != I64{10}) -> break
+        if (rt_text_byte(wrapping(wrapping(data + length) - I64{1})) != I64{10}) -> break
         length -= I64{1}
     }
     rt_text_copy(data, length)

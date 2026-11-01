@@ -53,6 +53,24 @@ struct LeasedDirectory {
     fn holds_handle(self) -> Bool Never! {
         self.directory != None
     }
+
+    // Each entry as `name\ttarget`, read through the held handle. The path
+    // can die first: a wrapper's is the mount keeper's /proc root.
+    fn link_entries(self) -> [String] IOError! {
+        // The handle is read where it is held: a copy out of the borrowed
+        // receiver would own, and close, the lease's descriptor.
+        if self.directory == {
+            .Val(directory) -> {
+                out := [String]{}
+                loop entry in directory.list() {
+                    target :: directory.read_link(entry.name)
+                    &out.push("{entry.name}\t{target}")
+                }
+                Ok(out)
+            }
+            .None -> Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased directory `{self.path}` lost its handle")}))
+        }
+    }
 }
 
 // A held Nix projection source: its directory or regular file.
@@ -409,8 +427,10 @@ struct CacheLease {
             if !store_reuse_same_path(self.snapshot_root, expected) -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease does not name its digest path")}))
             info :: files.stat(self.snapshot_root)
             if info.is_symlink || !info.is_dir -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease root is not a real directory")}))
-            held :: self.snapshot_dir ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease lost its directory handle")}))
-            if sys.family() != "windows" && info.id != held.id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease root changed while leased")}))
+            if self.snapshot_dir == {
+                .Val(held) -> { if sys.family() != "windows" && info.id != held.id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease root changed while leased")})) }
+                .None -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("direct CAS lease lost its directory handle")}))
+            }
         } else {
             if self.protocol_lease_id != "" {
                 protocol :: ExecutableLeaseProtocol.open(self.store_root)
@@ -561,13 +581,10 @@ fn store_lease_output_for(roots: [LeasedOutputRoot], path: String) -> LeasedOutp
 }
 
 // The protected wrapper directory still holds exactly one link per
-// executable, each naming that executable's descriptor path.
+// executable, each naming that executable's descriptor path. It is read
+// through the held handle: the keeper that exposed its path has exited.
 fn store_lease_validate_wrappers(wrapper: LeasedDirectory, executables: [SnapshotFile]) IOError! {
-    actual := [String]{}
-    loop entry in files.list_dir(wrapper.path) {
-        target :: files.read_link(entry.path)
-        &actual.push("{entry.name}\t{target}")
-    }
+    actual := wrapper.link_entries()
     &actual.sort()
     expected := [String]{}
     loop executable in executables -> &expected.push("{executable.relative}\t/proc/self/fd/{executable.slot}")

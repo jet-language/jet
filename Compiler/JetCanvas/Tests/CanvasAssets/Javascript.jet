@@ -8,7 +8,7 @@ use jet_canvas.[canvas_js]
     child :: canvas_javascript_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/javascript-assets.mjs"})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
         .spawn() ?? panic("Canvas JavaScript proof requires Node and its asset harness")
-    child.stdin.write(canvas_js()) ?? panic("Canvas JavaScript proof input failed")
+    child.stdin.write_text(canvas_js()) ?? panic("Canvas JavaScript proof input failed")
     child.stdin.close()
     receipt :: child.wait() ?? panic("Canvas JavaScript proof failed to finish")
     if !receipt.success -> panic("Canvas JavaScript syntax/order proof: {receipt.errors}")

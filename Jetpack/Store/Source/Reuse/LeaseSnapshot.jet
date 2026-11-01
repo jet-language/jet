@@ -205,7 +205,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
             }
         }
     }
-    executables :: store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative)
+    executables := store_reuse_open_snapshot_executables(projected_bin_root ?? snapshot_root, bin_relative)
     wrappers :: if direct_cas -> ExecWrappers?{None} else -> store_reuse_create_exec_wrappers(lease_snapshot_root, executables)
     protocol_lease_id := ""
     protocol_generation := 0
@@ -215,19 +215,19 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         protocol :: ExecutableLeaseProtocol.open(roots.root)
         protocol_lease_id = protocol.new_lease_id()
         protocol_owner_scope = ExecutableLeaseProtocol.owner_scope(protocol_lease_id)
-        members :: store_reuse_executable_lease_members(executables)
+        members :: store_reuse_executable_lease_members(&executables)
         prepared :: protocol.prepare_snapshot(protocol_lease_id, protocol_owner_scope, snapshot_root, entry.name, entry.version, entry.reference, sealed_digest, members)
         frame :: protocol.encode_request(prepared.request)
         receipt :: protocol.accept_snapshot(frame, sealed_digest, snapshot_root)
         protocol_generation = receipt.generation
-        protocol_owner_lock = Val(prepared.owner_lock)
+        protocol_owner_lock = Val(^prepared.owner_lock)
     }
     wrapper_root := String?{None}
     wrapper_dir := LeasedDirectory?{None}
     if wrappers == {
         .Val(found) -> {
             wrapper_root = Val(found.root)
-            wrapper_dir = Val(found.directory)
+            wrapper_dir = Val(^found.directory)
         }
         .None -> {}
     }
@@ -259,7 +259,7 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
         leased_output_roots: leased_output_roots,
         bin_output_root: bin_output_root,
         projected_bin_root: projected_bin_root,
-        nix_projection_bindings: opened.bindings,
+        nix_projection_bindings: ^opened.bindings,
         wrapper_directory_handle: wrapper_dir
     })
 }
@@ -313,19 +313,23 @@ fn store_reuse_open_snapshot_executables(snapshot_root: String, bin: String?) ->
     Ok(out)
 }
 
-// The digest of every executable, read through its opened handle.
-fn store_reuse_executable_lease_members(executables: [SnapshotFile]) -> [LeaseMember] StoreError! {
+// The digest of every executable, read through its opened handle in place:
+// the lease keeps these handles open.
+fn store_reuse_executable_lease_members(executables: &[SnapshotFile]) -> [LeaseMember] StoreError! {
     members := [LeaseMember]{}
-    loop executable in executables {
-        input := executable.file ?? return Err(StoreError.Other("lease executable `{executable.relative}` lost its handle"))
-        &input.seek(0)
-        hasher := StreamingSHA256.new()
-        loop {
-            chunk :: input.read(65536)
-            if chunk.len() == 0 -> break
-            &hasher.update(chunk)
+    loop index in 0..<executables.len() {
+        relative :: executables[index].relative
+        if executables[index].file == None -> return Err(StoreError.Other("lease executable `{relative}` lost its handle"))
+        if &executables[index].file == .Val(input) {
+            &input.seek(0)
+            hasher := StreamingSHA256.new()
+            loop {
+                chunk :: input.read(65536)
+                if chunk.len() == 0 -> break
+                &hasher.update(chunk)
+            }
+            &members.push(LeaseMember{name: relative, digest: "sha256-{hasher.finalize_hex()}"})
         }
-        &members.push(LeaseMember{name: executable.relative, digest: "sha256-{hasher.finalize_hex()}"})
     }
     Ok(members)
 }
@@ -361,7 +365,7 @@ fn store_reuse_create_exec_wrappers(snapshot_root: String, executables: [Snapsho
     if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(^child, "creating private executable mount"))
     root :: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink("/proc/self/fd/{executable.slot}", files.join(root, executable.relative))
-    child.stdin.write("seal\n")
+    child.stdin.write_all("seal\n".bytes())
     sealed :: store_reuse_keeper_line(&child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
     directory :: store_reuse_hold_directory(root)

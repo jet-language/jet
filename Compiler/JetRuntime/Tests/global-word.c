@@ -1,4 +1,4 @@
-// Foreign caller of the actual checked MIR .Global export fixture.
+// Foreign caller of the actual checked IR .Global export fixture.
 #include <assert.h>
 #include <stdint.h>
 extern void native_global_store(int64_t value);

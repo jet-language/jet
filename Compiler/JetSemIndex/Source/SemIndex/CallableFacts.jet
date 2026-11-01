@@ -7,7 +7,7 @@ use jet_foundation.[
     ParamZone,
     Type,
     TypeParam,
-    failure_contract_effective_type,
+    failure_contract_shown_type,
     failure_contract_source,
     type_name,
     Field,
@@ -186,7 +186,7 @@ struct CallableSignatureFact {
     fn error_types(self) -> [Type]? Never! {
         if self.failure_contract == {
             .Checked(contract) -> {
-                effective :: failure_contract_effective_type(contract)
+                effective :: failure_contract_shown_type(contract)
                 errors := [Type]{}
                 if effective == .Result(_, error) {
                     // AST::Type::is_never matches only the Named Never variant.
@@ -210,7 +210,7 @@ struct CallableSignatureFact {
 
     fn failure_contract_name(self) -> String? Never! {
         if self.failure_contract == {
-            .Checked(contract) -> Val(type_name(failure_contract_effective_type(contract)))
+            .Checked(contract) -> Val(type_name(failure_contract_shown_type(contract)))
             .Unavailable(_) -> None
         }
     }

@@ -1,0 +1,36 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_recovery_reclaims_crashed_stages_and_idle_leases_without_following_escape at tests/jetpack_hangar_store_v2.rs:1462; hand-port
+# Claim: recovery reclaims an abandoned archive stage and a dead lease and counts both (rs:1468-1477)
+# Claim: a symlinked archive-stage root or lease root is refused and the outside bytes survive (rs:1479-1503)
+# Migrated: the Rust API Store::recover_hangar is `jetpack hangar recover --json`, whose result is STATUS_SCHEMA
+# jet.status/v1 with `recovered`. The refusal is a jet.report/v3 finding. The Rust error text "lease directory"
+# (rs:1497) is now "executable lease containers are not a real directory"; the case asserts the lease subject and
+# the not-a-directory refusal. step-1.sh, step-3.sh, step-5.sh and step-7.sh are the Rust filesystem setup and checks.
+requires: os:unix
+fixture: hangar_recovery_reclaims_crashed_stages_and_idle_leases_without_following_escape.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/root
+step: sh {work}/step-1.sh
+exit: 0 # rs:1468-1473
+step: jetpack hangar recover --json --no-color
+exit: 0 # rs:1475
+stdout: ~ "\"schema\":\"jet.status/v1\"" # rs:1475 the recover result
+json: stdout doc $.recovered = 2 # rs:1475
+stderr: empty # JSON result leaks no stderr
+step: sh {work}/step-3.sh
+exit: 0 # rs:1476-1477 both reclaimed; rs:1481-1484 archive-stage root becomes a symlink to outside
+step: jetpack hangar recover --json --no-color
+exit: 2 # rs:1485
+stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1485 the refusal finding
+stdout: ~ "archive staging" # rs:1486
+stderr: empty # JSON failure leaks no stderr
+step: sh {work}/step-5.sh
+exit: 0 # rs:1487-1491 outside survives; rs:1492-1496 lease root becomes a symlink to outside
+step: jetpack hangar recover --json --no-color
+exit: 2 # rs:1496
+stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1496 the refusal finding
+stdout: ~ "lease" # rs:1497 the lease root is the subject
+stdout: ~ "not a real directory" # rs:1497 refused as a non-directory
+stderr: empty # JSON failure leaks no stderr
+step: sh {work}/step-7.sh
+exit: 0 # rs:1498-1502 outside survives

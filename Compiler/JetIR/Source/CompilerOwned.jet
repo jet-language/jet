@@ -57,6 +57,14 @@ IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "EncodingCause", fields: [String]{"kind", "os_code", "message"}},
     {name: "EncodingError", fields: [String]{"format", "kind", "byte_offset", "line", "column", "path", "reason", "cause"}},
     {name: "EncodingLimits", fields: [String]{"buffer_bytes", "max_depth", "max_item_bytes", "max_total_bytes", "max_expansion_depth", "max_expansion_bytes"}},
+    // Core/Compute's CPU oracle storage record (core-library.md
+    // `core.compute`: the registered vocabulary is the sole nominal owner),
+    // private to Core like its device, stream and CSR storage (core_only
+    // field rows).
+    {name: "Tensor", fields: [String]{"shape", "data", "device", "numeric_profile", "requested", "reason", "transfer"}},
+    {name: "ComputeDevice", fields: [String]{"name"}},
+    {name: "ComputeStream", fields: [String]{"device"}},
+    {name: "SparseTensor", fields: [String]{"rows", "cols", "row_ptr", "col_idx", "values"}},
     {name: "CBOROptions", fields: [String]{"max_depth", "max_items", "max_bytes", "require_canonical"}},
     {name: "CBORError", fields: [String]{"kind", "byte_offset", "path", "reason"}},
     {name: "XMLLimits", fields: [String]{"max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"}},
@@ -68,8 +76,6 @@ IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "DataSchema", fields: [String]{"identity", "format", "columns", "projection"}},
     {name: "DataSnapshotIdentity", fields: [String]{"id", "source", "content", "schema", "format"}},
     {name: "DataLoaderStatus", fields: [String]{"identity", "freshness", "invalidated_by", "error", "cleanup", "buffered_bytes", "backpressure", "last_good"}},
-    {name: "WebFormFieldSpec", fields: [String]{"name", "value_type", "required", "default", "label", "control", "group", "wire_name"}},
-    {name: "WebFormFieldState", fields: [String]{"name", "value_type", "required", "value", "touched", "validating", "errors"}},
     {name: "WebTableState", fields: [String]{"sort", "filter", "page_index", "page_size", "selected_keys", "selection_anchor", "focus_key", "page_mode"}},
     {name: "WebTablePage", fields: [String]{"rows", "row_keys", "total_rows", "page_index", "page_size", "page_count"}},
     {name: "WebVirtualPlan", fields: [String]{"total_count", "scroll_offset", "viewport_width", "viewport_height", "estimated_item_size", "overscan", "start", "end", "total_size", "measured_count", "anchor_index", "anchor_offset", "measurements"}},
@@ -90,16 +96,6 @@ IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "ProcessChild", fields: [String]{"stdin", "stdout", "stderr", "terminal"}},
     {name: "TerminalSize", fields: [String]{"cols", "rows"}},
     {name: "TerminalPolicy", fields: [String]{"size", "mode"}},
-    {name: "Address", fields: [String]{}},
-    {name: "Message", fields: [String]{}},
-    {name: "Attachment", fields: [String]{}},
-    {name: "RecipientReport", fields: [String]{"address", "accepted", "code", "message"}},
-    {name: "SendReport", fields: [String]{"server", "accepted", "rejected", "response_code", "response", "accepted_at"}},
-    {name: "Limits", fields: [String]{"max_reply_line_bytes", "max_reply_lines", "max_capabilities", "max_recipients", "max_message_bytes", "max_auth_challenge_bytes"}},
-    {name: "Mailer", fields: [String]{}},
-    {name: "Envelope", fields: [String]{"from", "recipients"}},
-    {name: "DKIMConfig", fields: [String]{"domain", "selector", "private_key", "signed_headers"}},
-    {name: "SMTPConfig", fields: [String]{"host", "port", "security", "auth", "recipient_policy", "trust", "limits", "dkim"}},
     {name: "XMLCanonical", fields: [String]{"mode", "comments", "inclusive_prefixes"}},
     {name: "Size", fields: [String]{"width", "height"}},
     {name: "UINode", fields: [String]{"label", "width", "height", "accessibility", "ime", "shortcut"}},
@@ -168,6 +164,7 @@ IR_COMPILER_OWNED_CORE_RECORDS :: comptime { [IRCompilerOwnedRecord]{
     {name: "TypeParamInfo", fields: [String]{"name", "bounds", "span"}},
     {name: "SourceSpan", fields: [String]{"start", "end"}},
     {name: "ModGrant", fields: [String]{"read"}},
+    {name: "Expired", fields: [String]{}},
 } }
 
 // The compiler-owned records whose fields are typed by the Core record rows
@@ -340,8 +337,6 @@ IR_COMPILER_OWNED_ENUMS :: comptime { [IRCompilerOwnedEnum]{
     {name: "DurationUnit", variants: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}},
     {name: "FontStyle", variants: [String]{"Body", "Title", "Monospace"}},
     {name: "GlyphShaper", variants: [String]{"HarfBuzz", "HeadlessFallback"}},
-    {name: "WebFormValueType", variants: [String]{"String", "Int", "Bool", "Float"}},
-    {name: "WebFormControl", variants: [String]{"Text", "Email", "URL", "Password", "Number", "Date", "Checkbox", "Hidden"}},
     {name: "DataLoaderKind", variants: [String]{"File", "URL", "Database", "Value"}},
     {name: "DataErrorKind", variants: [String]{"Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge", "Unsupported", "DuplicateKey", "MissingKey", "WrongOwner", "StaleRevision", "InvalidValue"}},
     {name: "DataFormat", variants: [String]{"CSV", "JSON", "JSONL", "Parquet", "Arrow"}},
@@ -352,11 +347,6 @@ IR_COMPILER_OWNED_ENUMS :: comptime { [IRCompilerOwnedEnum]{
     {name: "XMLCanonicalMode", variants: [String]{"Inclusive11", "Exclusive10"}},
     {name: "PluginLimit", variants: [String]{"Fuel", "Memory", "Table", "Time", "Wire"}},
     {name: "PluginError", variants: [String]{"Guest", "Denied", "Budget", "Defect"}},
-    {name: "EmailError", variants: [String]{"Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected", "Transient", "TimedOut", "Cancelled", "DeliveryUnknown"}},
-    {name: "SMTPSecurity", variants: [String]{"StartTLS", "TLS"}},
-    {name: "RecipientPolicy", variants: [String]{"RequireAll", "DeliverAccepted"}},
-    {name: "SMTPAuth", variants: [String]{"None", "Password"}},
-    {name: "TLSTrust", variants: [String]{"System", "SystemPlusCa"}},
     {name: "NetDNSError", variants: [String]{"NotFound", "Failure"}},
     {name: "NetError", variants: [String]{"InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable", "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout", "Cancelled", "Unsupported", "TLS", "Protocol", "Other", "DNS"}},
     {name: "NetShutdown", variants: [String]{"Read", "Write", "Both"}},
@@ -370,6 +360,13 @@ IR_COMPILER_OWNED_ENUMS :: comptime { [IRCompilerOwnedEnum]{
     // math's `reduce(op)`). The runtime pack does, so its `op == .Add` test,
     // its `.Add` literals and its `ReduceOp` parameters need this canonical row.
     {name: "ReduceOp", variants: [String]{"Add", "Mul", "Min", "Max", "Avg"}},
+    // The closed reflection detail menus sema types fact reads with
+    // (sema_fact_enum_variants): a read `EXACTNESS.kind` or
+    // `OBLIGATION.param_contract[0].zone` is a runtime value of these rows.
+    {name: "FactKind", variants: [String]{"Effect", "State", "Tag", "Nominal", "Range", "Layout", "Measure", "Dimension", "Classification", "Exactness", "Obligation", "Flow", "Taint", "Duty", "Effects", "States", "Sendability", "ViewProvenance", "Movedness", "Attribution", "Origin", "UnitScaleProvenance", "Maturity"}},
+    {name: "ExactnessKind", variants: [String]{"Exact", "Approximate", "Measured"}},
+    {name: "ParamZone", variants: [String]{"PositionalOnly", "Either", "LabelOnly"}},
+    {name: "UnitScaleProvenanceKind", variants: [String]{"Rational", "SymbolicPi", "Conventional", "Measured"}},
 } }
 
 // The payload of one compiler-owned enum variant.
@@ -428,16 +425,6 @@ fn ir_compiler_owned_enum_payload(name: String, variant: String) -> IRCompilerOw
         if variant == "Budget" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Named{name: "PluginLimit"}}, TypeTupleField{name: "fault", ty: Type.Named{name: "PluginFault"}}})
         return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
-    if name == "EmailError" {
-        return ir_compiler_owned_named([TypeTupleField]{
-            {name: "operation", ty: Type.String},
-            {name: "server", ty: Type.Option{inner: Type.String}},
-            {name: "code", ty: Type.Option{inner: Type.Int}},
-            {name: "reason", ty: Type.String},
-        })
-    }
-    if name == "SMTPAuth" && variant == "Password" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "username", ty: Type.String}, TypeTupleField{name: "password", ty: Type.Named{name: "Secret"}}})
-    if name == "TLSTrust" && variant == "SystemPlusCa" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "pem", ty: bytes}})
     // The canonical twelve DataEvent payloads are the
     // generated Core payload rows (Rust core_types.rs data_event_payload).
     if name == "DataEvent" {

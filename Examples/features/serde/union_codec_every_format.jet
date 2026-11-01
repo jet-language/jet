@@ -1,0 +1,55 @@
+// An anonymous union field round-trips through every Core codec that both
+// encodes and decodes: Dyn, JSON, TOML, YAML, CBOR and CSV (card #6105).
+// XML only decodes; its element text carries no scalar type, so `7` there
+// picks the `String` member.
+use core.encoding.json
+use core.encoding.toml
+use core.encoding.yaml
+use core.encoding.cbor
+use core.encoding.csv
+use core.encoding.xml
+
+struct Reading {
+    label: String
+    value: Int | String
+}
+
+fn show(value: Int | String) -> String {
+    copied :: value.copy() // copy: match consumes the scrutinee; the caller keeps its value
+    if copied == {
+        .Int(n) -> { return "int {n}" }
+        .String(s) -> { return "text {s}" }
+    }
+    return "unknown"
+}
+
+fn line(codec: String, back: Reading) {
+    print("{codec}: {back.label} {show(back.value)}")
+}
+
+fn run() {
+    rows :: [Reading]{Reading{label: "n", value: 7}, Reading{label: "s", value: "seven"}}
+    loop row in rows {
+        // Dyn: encode() and Dyn.decode<T>().
+        tree :: row.encode()
+        line("dyn", tree.decode<Reading>() ?? panic("dyn"))
+        // JSON text.
+        line("json", json.decode<Reading>(json.to_string(row) ?? panic("json enc")) ?? panic("json"))
+        // TOML text.
+        line("toml", (toml.parse(toml.to_string(row)) ?? panic("toml parse")).decode<Reading>() ?? panic("toml"))
+        // YAML text.
+        line("yaml", (yaml.parse(yaml.to_string(row)) ?? panic("yaml parse")).decode<Reading>() ?? panic("yaml"))
+        // CBOR bytes.
+        line("cbor", (cbor.parse(cbor.to_bytes(row) ?? panic("cbor enc")) ?? panic("cbor parse")).decode<Reading>() ?? panic("cbor"))
+    }
+    // CSV rows.
+    loop back in csv.decode<Reading>(csv.to_string(rows)) ?? panic("csv") {
+        line("csv", back)
+    }
+    // A bare union value through JSON.
+    number :: json.decode<Int | String>("7") ?? panic("bare int")
+    word :: json.decode<Int | String>("\"seven\"") ?? panic("bare text")
+    print("bare: {show(number)} / {show(word)}")
+    // XML decode.
+    line("xml", xml.decode<Reading>("<Reading><label>n</label><value>7</value></Reading>") ?? panic("xml"))
+}

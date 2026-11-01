@@ -28,14 +28,14 @@ fn storage_put(address: I64, value: I64) {
 fn storage_zero(address: I64, bytes: I64) {
     offset := I64{0}
     loop offset < bytes {
-        storage_put(address + offset, I64{0})
+        storage_put(wrapping(address + offset), I64{0})
         offset += I64{8}
     }
 }
 fn storage_copy(source: I64, target: I64, bytes: I64) {
     offset := I64{0}
     loop offset < bytes {
-        storage_put(target + offset, storage_word(source + offset))
+        storage_put(wrapping(target + offset), storage_word(wrapping(source + offset)))
         offset += I64{8}
     }
 }
@@ -65,20 +65,20 @@ fn storage_capacity(word: I64) -> I64 {
 // a minimum nonzero capacity of four. Copy initialized words only.
 fn storage_grow(list: I64, stride: I64) {
     count :: storage_word(list)
-    capacity :: storage_word(list + I64{8})
+    capacity :: storage_word(wrapping(list + I64{8}))
     if (count < capacity) -> return
     if (capacity > I64{9223372036854775807} /% stride /% I64{2}) -> panic("capacity overflow")
     next_capacity :: if (capacity < I64{2}) -> I64{4} else -> capacity * I64{2}
     next_data :: jet_rt_alloc(next_capacity * stride, I64{8})
-    prior :: storage_word(list + I64{16})
+    prior :: storage_word(wrapping(list + I64{16}))
     storage_copy(prior, next_data, count * stride)
     if (capacity != I64{0}) -> jet_rt_free(prior, capacity * stride, I64{8})
-    storage_put(list + I64{8}, next_capacity)
-    storage_put(list + I64{16}, next_data)
+    storage_put(wrapping(list + I64{8}), next_capacity)
+    storage_put(wrapping(list + I64{16}), next_data)
 }
 fn storage_list_free(list: I64, stride: I64) {
-    capacity :: storage_word(list + I64{8})
-    if (capacity != I64{0}) -> jet_rt_free(storage_word(list + I64{16}), capacity * stride, I64{8})
+    capacity :: storage_word(wrapping(list + I64{8}))
+    if (capacity != I64{0}) -> jet_rt_free(storage_word(wrapping(list + I64{16})), capacity * stride, I64{8})
 }
 fn storage_drop_at(code: I64, pointer: I64) {
     #Unsafe("code is the Lower-generated address-based lazy.drop thunk for the initialized value at pointer; its SysV result is Unit and discarded, and no allocator lock is held") {
@@ -86,38 +86,38 @@ fn storage_drop_at(code: I64, pointer: I64) {
     }
 }
 fn storage_record(handle: I64, pointer: I64, bytes: I64, drop_fn: I64) {
-    drops :: handle + I64{32}
+    drops :: wrapping(handle + I64{32})
     storage_grow(drops, I64{24})
     count :: storage_word(drops)
-    entry :: storage_word(drops + I64{16}) + count * I64{24}
+    entry :: wrapping(storage_word(wrapping(drops + I64{16})) + count * I64{24})
     storage_put(entry, pointer)
-    storage_put(entry + I64{8}, drop_fn)
-    storage_put(entry + I64{16}, bytes)
+    storage_put(wrapping(entry + I64{8}), drop_fn)
+    storage_put(wrapping(entry + I64{16}), bytes)
     storage_put(drops, count + I64{1})
     jet_rt_sentry_register_allocation(pointer, bytes)
     storage_arena_alloc(bytes)
-    live :: storage_saturating_add(storage_word(handle + I64{56}), bytes)
-    storage_put(handle + I64{56}, live)
-    storage_put(handle + I64{64}, storage_u_max(storage_word(handle + I64{64}), live))
+    live :: storage_saturating_add(storage_word(wrapping(handle + I64{56})), bytes)
+    storage_put(wrapping(handle + I64{56}), live)
+    storage_put(wrapping(handle + I64{64}), storage_u_max(storage_word(wrapping(handle + I64{64})), live))
 }
 fn storage_reset_entries(handle: I64) {
-    drops :: handle + I64{32}
+    drops :: wrapping(handle + I64{32})
     count := storage_word(drops)
     allocations :: count
-    data :: storage_word(drops + I64{16})
+    data :: storage_word(wrapping(drops + I64{16}))
     // The length is zero before any user destructor runs.
     storage_put(drops, I64{0})
     loop count > (I64{0}) {
         count -= I64{1}
-        entry :: data + count * I64{24}
+        entry :: wrapping(data + count * I64{24})
         pointer :: storage_word(entry)
-        code :: storage_word(entry + I64{8})
+        code :: storage_word(wrapping(entry + I64{8}))
         if (code != I64{0}) -> storage_drop_at(code, pointer)
-        jet_rt_sentry_quarantine(pointer, storage_word(entry + I64{16}))
+        jet_rt_sentry_quarantine(pointer, storage_word(wrapping(entry + I64{16})))
     }
     // Drops run BEFORE the observation counters update.
-    storage_arena_reset(allocations, storage_word(handle + I64{56}))
-    storage_put(handle + I64{56}, I64{0})
+    storage_arena_reset(allocations, storage_word(wrapping(handle + I64{56})))
+    storage_put(wrapping(handle + I64{56}), I64{0})
 }
 
 // b0ce72d64 Alloc.jet:381's alloc_try ALREADY probes. Only the validated
@@ -132,34 +132,34 @@ fn storage_block_init(block: I64, bytes: I64, alignment: I64, fallible: Bool) ->
     pointer :: storage_heap(bytes, alignment, fallible)
     if (pointer == I64{0}) -> return false
     storage_put(block, pointer)
-    storage_put(block + I64{8}, bytes)
-    storage_put(block + I64{16}, alignment)
-    storage_put(block + I64{24}, I64{0})
+    storage_put(wrapping(block + I64{8}), bytes)
+    storage_put(wrapping(block + I64{16}), alignment)
+    storage_put(wrapping(block + I64{24}), I64{0})
     storage_arena_retain(bytes)
     true
 }
 fn storage_block_drop(block: I64) {
     pointer :: storage_word(block)
     if (pointer == I64{0}) -> return
-    bytes :: storage_word(block + I64{8})
+    bytes :: storage_word(wrapping(block + I64{8}))
     storage_arena_release(bytes)
-    jet_rt_free(pointer, bytes, storage_word(block + I64{16}))
+    jet_rt_free(pointer, bytes, storage_word(wrapping(block + I64{16})))
 }
 fn storage_block_offset(block: I64, bytes: I64, alignment: I64) -> I64 {
-    if (alignment > storage_word(block + I64{16})) -> return I64{-1}
-    used :: storage_word(block + I64{24})
+    if (alignment > storage_word(wrapping(block + I64{16}))) -> return I64{-1}
+    used :: storage_word(wrapping(block + I64{24}))
     address :: storage_word(block) + used
     padding :: (alignment - address % alignment) % alignment
     if (used > I64{9223372036854775807} - padding) -> return I64{-1}
     start :: used + padding
     reserved :: if (bytes == I64{0}) -> I64{1} else -> bytes
-    capacity :: storage_word(block + I64{8})
+    capacity :: storage_word(wrapping(block + I64{8}))
     if (start > capacity || reserved > capacity - start) -> return I64{-1}
     start
 }
 fn storage_block_reserve(block: I64, offset: I64, bytes: I64) -> I64 {
     reserved :: if (bytes == I64{0}) -> I64{1} else -> bytes
-    storage_put(block + I64{24}, offset + reserved)
+    storage_put(wrapping(block + I64{24}), offset + reserved)
     storage_word(block) + offset
 }
 
@@ -169,25 +169,25 @@ fn storage_block_reserve(block: I64, offset: I64, bytes: I64) -> I64 {
     first :: if (capacity == I64{0}) -> I64{1} else -> capacity
     storage_arena_open()
     handle :: jet_rt_alloc(I64{80}, I64{8})
-    storage_zero(handle + I64{24}, I64{48})
+    storage_zero(wrapping(handle + I64{24}), I64{48})
     data :: jet_rt_alloc(I64{32}, I64{8})
     _ := storage_block_init(data, first, I64{4096}, false)
     storage_put(handle, I64{1})
-    storage_put(handle + I64{8}, I64{1})
-    storage_put(handle + I64{16}, data)
-    storage_put(handle + I64{72}, storage_saturating_twice(first))
+    storage_put(wrapping(handle + I64{8}), I64{1})
+    storage_put(wrapping(handle + I64{16}), data)
+    storage_put(wrapping(handle + I64{72}), storage_saturating_twice(first))
     handle
 }
 fn storage_arena_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, fallible: Bool) -> I64 {
     if fallible && jet_fault_should_fail_allocation() -> return I64{0}
-    current := storage_word(handle + I64{24})
+    current := storage_word(wrapping(handle + I64{24}))
     count :: storage_word(handle)
-    data := storage_word(handle + I64{16})
+    data := storage_word(wrapping(handle + I64{16}))
     loop current < count {
         block :: data + current * I64{32}
         offset :: storage_block_offset(block, bytes, alignment)
         if (offset >= I64{0}) {
-            storage_put(handle + I64{24}, current)
+            storage_put(wrapping(handle + I64{24}), current)
             pointer :: storage_block_reserve(block, offset, bytes)
             storage_record(handle, pointer, bytes, drop_fn)
             return pointer
@@ -195,22 +195,22 @@ fn storage_arena_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
         current += I64{1}
     }
     required :: storage_saturating_add(if (bytes == I64{0}) -> I64{1} else -> bytes, alignment)
-    next :: storage_u_max(storage_word(handle + I64{72}), required)
+    next :: storage_u_max(storage_word(wrapping(handle + I64{72})), required)
     block_align :: if (alignment > I64{4096}) -> alignment else -> I64{4096}
     // Obtain fallible payload storage BEFORE mutating the block vector/state.
     pointer :: storage_heap(next, block_align, fallible)
     if (pointer == I64{0}) -> return I64{0}
     storage_arena_retain(next)
     storage_grow(handle, I64{32})
-    data = storage_word(handle + I64{16})
+    data = storage_word(wrapping(handle + I64{16}))
     block :: data + count * I64{32}
     storage_put(block, pointer)
-    storage_put(block + I64{8}, next)
-    storage_put(block + I64{16}, block_align)
-    storage_put(block + I64{24}, I64{0})
+    storage_put(wrapping(block + I64{8}), next)
+    storage_put(wrapping(block + I64{16}), block_align)
+    storage_put(wrapping(block + I64{24}), I64{0})
     storage_put(handle, count + I64{1})
-    storage_put(handle + I64{24}, count)
-    storage_put(handle + I64{72}, storage_saturating_twice(next))
+    storage_put(wrapping(handle + I64{24}), count)
+    storage_put(wrapping(handle + I64{72}), storage_saturating_twice(next))
     offset :: storage_block_offset(block, bytes, alignment)
     kept :: storage_block_reserve(block, offset, bytes)
     storage_record(handle, kept, bytes, drop_fn)
@@ -221,27 +221,27 @@ fn storage_arena_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
 #Export(c) fn jet_rt_mem_arena_storage_reset(handle: I64) {
     storage_reset_entries(handle)
     count :: storage_word(handle)
-    data :: storage_word(handle + I64{16})
+    data :: storage_word(wrapping(handle + I64{16}))
     index := I64{0}
     loop index < count {
-        storage_put(data + index * I64{32} + I64{24}, I64{0})
+        storage_put(wrapping(wrapping(data + index * I64{32}) + I64{24}), I64{0})
         index += I64{1}
     }
-    storage_put(handle + I64{24}, I64{0})
+    storage_put(wrapping(handle + I64{24}), I64{0})
 }
 #Export(c) fn jet_rt_handle_drop_jet_arena(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_arena_storage_reset(handle)
     storage_arena_close()
     count :: storage_word(handle)
-    data :: storage_word(handle + I64{16})
+    data :: storage_word(wrapping(handle + I64{16}))
     index := I64{0}
     loop index < count {
-        storage_block_drop(data + index * I64{32})
+        storage_block_drop(wrapping(data + index * I64{32}))
         index += I64{1}
     }
     storage_list_free(handle, I64{32})
-    storage_list_free(handle + I64{32}, I64{24})
+    storage_list_free(wrapping(handle + I64{32}), I64{24})
     jet_rt_free(handle, I64{80}, I64{8})
 }
 
@@ -251,7 +251,7 @@ fn storage_arena_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     first :: if (capacity == I64{0}) -> I64{1} else -> capacity
     storage_arena_open()
     handle :: jet_rt_alloc(I64{72}, I64{8})
-    storage_zero(handle + I64{32}, I64{40})
+    storage_zero(wrapping(handle + I64{32}), I64{40})
     _ := storage_block_init(handle, first, I64{4096}, false)
     handle
 }
@@ -270,14 +270,14 @@ fn storage_bump_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
 #Export(c) fn jet_rt_mem_bump_storage_try_alloc(handle: I64, size: I64, align: I64, drop_fn: I64) -> I64 { storage_bump_reserve(handle, size, align, drop_fn, true) }
 #Export(c) fn jet_rt_mem_bump_storage_reset(handle: I64) {
     storage_reset_entries(handle)
-    storage_put(handle + I64{24}, I64{0})
+    storage_put(wrapping(handle + I64{24}), I64{0})
 }
 #Export(c) fn jet_rt_handle_drop_jet_bump(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_bump_storage_reset(handle)
     storage_arena_close()
     storage_block_drop(handle)
-    storage_list_free(handle + I64{32}, I64{24})
+    storage_list_free(wrapping(handle + I64{32}), I64{24})
     jet_rt_free(handle, I64{72}, I64{8})
 }
 
@@ -287,32 +287,32 @@ fn storage_bump_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
     if (slots > I64{9223372036854775807} /% I64{40}) -> panic("capacity overflow")
     storage_arena_open()
     handle :: jet_rt_alloc(I64{72}, I64{8})
-    storage_zero(handle + I64{32}, I64{40})
+    storage_zero(wrapping(handle + I64{32}), I64{40})
     data :: if (slots == I64{0}) -> I64{0} else -> jet_rt_alloc(slots * I64{40}, I64{8})
     storage_zero(data, slots * I64{40})
     storage_put(handle, slots)
-    storage_put(handle + I64{8}, slots)
-    storage_put(handle + I64{16}, data)
-    storage_put(handle + I64{24}, I64{1})
+    storage_put(wrapping(handle + I64{8}), slots)
+    storage_put(wrapping(handle + I64{16}), data)
+    storage_put(wrapping(handle + I64{24}), I64{1})
     handle
 }
 fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, fallible: Bool) -> I64 {
     if fallible && jet_fault_should_fail_allocation() -> return I64{0}
     required :: if (bytes == I64{0}) -> I64{1} else -> bytes
     count :: storage_word(handle)
-    data :: storage_word(handle + I64{16})
+    data :: storage_word(wrapping(handle + I64{16}))
     compatible := I64{-1}
     empty := I64{-1}
     vacant := I64{-1}
     index := I64{0}
     loop index < count {
         slot :: data + index * I64{40}
-        if (storage_word(slot + I64{32}) == I64{0}) {
+        if (storage_word(wrapping(slot + I64{32})) == I64{0}) {
             if (vacant < I64{0}) -> vacant = index
             if (storage_word(slot) == I64{0}) {
                 if (empty < I64{0}) -> empty = index
             } else {
-                if (storage_word(slot + I64{8}) >= required && storage_word(slot + I64{16}) >= alignment) {
+                if (storage_word(wrapping(slot + I64{8})) >= required && storage_word(wrapping(slot + I64{16})) >= alignment) {
                     compatible = index
                     break
                 }
@@ -326,7 +326,7 @@ fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
         panic("Pool allocator exhausted its slab slots")
     }
     slot :: data + selected * I64{40}
-    if (storage_word(slot) == I64{0} || storage_word(slot + I64{8}) < required || storage_word(slot + I64{16}) < alignment) {
+    if (storage_word(slot) == I64{0} || storage_word(wrapping(slot + I64{8})) < required || storage_word(wrapping(slot + I64{16})) < alignment) {
         pointer :: storage_heap(required, alignment, fallible)
         if (pointer == I64{0}) -> return I64{0}
         // Assignment constructs the replacement before dropping its old
@@ -334,11 +334,11 @@ fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
         storage_arena_retain(required)
         storage_block_drop(slot)
         storage_put(slot, pointer)
-        storage_put(slot + I64{8}, required)
-        storage_put(slot + I64{16}, alignment)
+        storage_put(wrapping(slot + I64{8}), required)
+        storage_put(wrapping(slot + I64{16}), alignment)
     }
-    storage_put(slot + I64{24}, required)
-    storage_put(slot + I64{32}, I64{1})
+    storage_put(wrapping(slot + I64{24}), required)
+    storage_put(wrapping(slot + I64{32}), I64{1})
     pointer :: storage_word(slot)
     storage_record(handle, pointer, bytes, drop_fn)
     pointer
@@ -348,30 +348,30 @@ fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
 #Export(c) fn jet_rt_mem_pool_storage_reset(handle: I64) {
     storage_reset_entries(handle)
     count :: storage_word(handle)
-    data :: storage_word(handle + I64{16})
+    data :: storage_word(wrapping(handle + I64{16}))
     index := I64{0}
     loop index < count {
-        slot :: data + index * I64{40}
-        storage_put(slot + I64{24}, I64{0})
-        storage_put(slot + I64{32}, I64{0})
+        slot :: wrapping(data + index * I64{40})
+        storage_put(wrapping(slot + I64{24}), I64{0})
+        storage_put(wrapping(slot + I64{32}), I64{0})
         index += I64{1}
     }
-    next :: wrapping(storage_word(handle + I64{24}) + I64{1})
-    storage_put(handle + I64{24}, if (next == I64{0}) -> I64{1} else -> next)
+    next :: wrapping(storage_word(wrapping(handle + I64{24})) + I64{1})
+    storage_put(wrapping(handle + I64{24}), if (next == I64{0}) -> I64{1} else -> next)
 }
 #Export(c) fn jet_rt_handle_drop_jet_pool(handle: I64) {
     if (handle == I64{0}) -> return
     jet_rt_mem_pool_storage_reset(handle)
     storage_arena_close()
     count :: storage_word(handle)
-    data :: storage_word(handle + I64{16})
+    data :: storage_word(wrapping(handle + I64{16}))
     index := I64{0}
     loop index < count {
-        storage_block_drop(data + index * I64{40})
+        storage_block_drop(wrapping(data + index * I64{40}))
         index += I64{1}
     }
     storage_list_free(handle, I64{40})
-    storage_list_free(handle + I64{32}, I64{24})
+    storage_list_free(wrapping(handle + I64{32}), I64{24})
     jet_rt_free(handle, I64{72}, I64{8})
 }
 
@@ -382,21 +382,21 @@ fn storage_pool_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, f
     storage_arena_open()
     storage_arena_retain(length)
     handle :: jet_rt_alloc(I64{64}, I64{8})
-    storage_put(handle + I64{16}, I64{0})
-    storage_put(handle + I64{40}, I64{0})
-    storage_put(handle + I64{48}, I64{0})
-    storage_put(handle + I64{56}, I64{0})
+    storage_put(wrapping(handle + I64{16}), I64{0})
+    storage_put(wrapping(handle + I64{40}), I64{0})
+    storage_put(wrapping(handle + I64{48}), I64{0})
+    storage_put(wrapping(handle + I64{56}), I64{0})
     storage_put(handle, data)
-    storage_put(handle + I64{8}, length)
-    storage_put(handle + I64{24}, length)
-    storage_put(handle + I64{32}, I64{-1})
+    storage_put(wrapping(handle + I64{8}), length)
+    storage_put(wrapping(handle + I64{24}), length)
+    storage_put(wrapping(handle + I64{32}), I64{-1})
     handle
 }
 fn storage_fixed_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, fallible: Bool) -> I64 {
     if fallible && jet_fault_should_fail_allocation() -> return I64{0}
     base :: storage_word(handle)
-    used :: storage_word(handle + I64{16})
-    boundary :: storage_word(handle + I64{24})
+    used :: storage_word(wrapping(handle + I64{16}))
+    boundary :: storage_word(wrapping(handle + I64{24}))
     value_offset := alignment // Fixed ZST pointer = NonNull<T>::dangling().
     end := used + I64{1}
     if (bytes != I64{0}) {
@@ -414,18 +414,18 @@ fn storage_fixed_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
         if fallible -> return I64{0}
         panic("Fixed allocator exhausted its inline backing buffer")
     }
-    header :: base + metadata
-    storage_put(header, storage_word(handle + I64{32}))
-    storage_put(header + I64{8}, value_offset)
-    storage_put(header + I64{16}, drop_fn)
-    storage_put(header + I64{24}, bytes)
-    storage_put(handle + I64{16}, end)
-    storage_put(handle + I64{24}, metadata)
-    storage_put(handle + I64{32}, metadata)
-    storage_put(handle + I64{40}, storage_saturating_add(storage_word(handle + I64{40}), I64{1}))
-    live :: storage_saturating_add(storage_word(handle + I64{48}), bytes)
-    storage_put(handle + I64{48}, live)
-    storage_put(handle + I64{56}, storage_u_max(storage_word(handle + I64{56}), live))
+    header :: wrapping(base + metadata)
+    storage_put(header, storage_word(wrapping(handle + I64{32})))
+    storage_put(wrapping(header + I64{8}), value_offset)
+    storage_put(wrapping(header + I64{16}), drop_fn)
+    storage_put(wrapping(header + I64{24}), bytes)
+    storage_put(wrapping(handle + I64{16}), end)
+    storage_put(wrapping(handle + I64{24}), metadata)
+    storage_put(wrapping(handle + I64{32}), metadata)
+    storage_put(wrapping(handle + I64{40}), storage_saturating_add(storage_word(wrapping(handle + I64{40})), I64{1}))
+    live :: storage_saturating_add(storage_word(wrapping(handle + I64{48})), bytes)
+    storage_put(wrapping(handle + I64{48}), live)
+    storage_put(wrapping(handle + I64{56}), storage_u_max(storage_word(wrapping(handle + I64{56})), live))
     pointer :: if (bytes == I64{0}) -> alignment else -> base + value_offset
     jet_rt_sentry_register_allocation(pointer, bytes)
     storage_arena_alloc(bytes)
@@ -435,25 +435,25 @@ fn storage_fixed_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
 #Export(c) fn jet_rt_mem_fixed_storage_try_alloc(handle: I64, size: I64, align: I64, drop_fn: I64) -> I64 { storage_fixed_reserve(handle, size, align, drop_fn, true) }
 #Export(c) fn jet_rt_mem_fixed_storage_reset(handle: I64) {
     base :: storage_word(handle)
-    at := storage_word(handle + I64{32})
+    at := storage_word(wrapping(handle + I64{32}))
     loop at != (I64{-1}) {
-        header :: base + at
+        header :: wrapping(base + at)
         previous :: storage_word(header)
-        offset :: storage_word(header + I64{8})
-        code :: storage_word(header + I64{16})
-        bytes :: storage_word(header + I64{24})
+        offset :: storage_word(wrapping(header + I64{8}))
+        code :: storage_word(wrapping(header + I64{16}))
+        bytes :: storage_word(wrapping(header + I64{24}))
         pointer :: if (bytes == I64{0}) -> offset else -> base + offset
         if (code != I64{0}) -> storage_drop_at(code, pointer)
         jet_rt_sentry_quarantine(pointer, bytes)
         at = previous
     }
-    allocations :: storage_word(handle + I64{40})
-    bytes :: storage_word(handle + I64{48})
-    storage_put(handle + I64{16}, I64{0})
-    storage_put(handle + I64{24}, storage_word(handle + I64{8}))
-    storage_put(handle + I64{32}, I64{-1})
-    storage_put(handle + I64{40}, I64{0})
-    storage_put(handle + I64{48}, I64{0})
+    allocations :: storage_word(wrapping(handle + I64{40}))
+    bytes :: storage_word(wrapping(handle + I64{48}))
+    storage_put(wrapping(handle + I64{16}), I64{0})
+    storage_put(wrapping(handle + I64{24}), storage_word(wrapping(handle + I64{8})))
+    storage_put(wrapping(handle + I64{32}), I64{-1})
+    storage_put(wrapping(handle + I64{40}), I64{0})
+    storage_put(wrapping(handle + I64{48}), I64{0})
     storage_arena_reset(allocations, bytes)
 }
 #Export(c) fn jet_rt_handle_drop_jet_fixed(handle: I64) {
@@ -461,7 +461,7 @@ fn storage_fixed_reserve(handle: I64, bytes: I64, alignment: I64, drop_fn: I64, 
     jet_rt_mem_fixed_storage_reset(handle)
     // Fixed never frees its borrowed backing; it releases its retained
     // observation BEFORE closing the arena.
-    storage_arena_release(storage_word(handle + I64{8}))
+    storage_arena_release(storage_word(wrapping(handle + I64{8})))
     storage_arena_close()
     jet_rt_free(handle, I64{64}, I64{8})
 }

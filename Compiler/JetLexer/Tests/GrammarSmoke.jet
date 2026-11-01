@@ -1,0 +1,21 @@
+// Ports of the lexer smoke tests from the deleted tests/grammar.rs (#6096).
+use jet_lexer.[TOKEN_DOT, TOKEN_INT, lex]
+
+// tests/grammar.rs:620: `p.0` lexes as a dot followed by the integer 0, not a
+// float, so the parser can teach E0049 at the field position.
+#Test("dot_zero_in_statement_lexes_as_dot_then_int") {
+    lexed :: lex("fn run() {{ x :: p.0 }}".bytes())
+    assert(lexed.diagnostics.is_empty(), "lex diagnostics for `p.0`")
+    dot := -1
+    loop (index, token) in lexed.tokens {
+        if token.kind == TOKEN_DOT {
+            dot = index
+            break
+        }
+    }
+    assert(dot >= 0, "expected a dot token")
+    zero :: lexed.tokens[dot + 1]
+    assert(zero.kind == TOKEN_INT, "the token after the dot is an integer")
+    assert(zero.literal >= 0, "the integer carries a literal row")
+    assert((lexed.tables.literals[zero.literal].integer ?? -1) == 0, "the integer after the dot is 0")
+}

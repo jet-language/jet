@@ -12,17 +12,20 @@
 #Export(c) fn jet_rt_test_unit(name: I64, expected: Bool, env: I64, invoke: I64) -> I64 {
     jet_rt_test_capture_begin()
     jet_rt_testing_clear_failure()
+    // A failed expectation latches its state for the rest of its own test
+    // only; the next unit starts with no expectation frames and no latch.
+    jet_rt_test_expect_fail_abort()
     save :: jet_rt_alloc(I64{40}, I64{8})
     root :: jet_rt_root_begin(save)
     returned :: coll_call1(invoke, env)
-    record :: jet_rt_root_take_stop(root, save + I64{32})
+    record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     jet_rt_root_leave(root, save)
     error := returned
     if (record != I64{0}) {
         error = scheduler_stop_take_message(record)
         scheduler_stop_drop(record)
         if (error == I64{0}) {
-            _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, trap_word(save + I64{32}))
+            _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, trap_word(wrapping(save + I64{32})))
             error = test_text_new(I64{0})
         }
     }
@@ -58,12 +61,12 @@
 // The harness wrote this file itself, so its bytes are the text it appended.
 #Export(c) fn jet_rt_test_read(path: I64, ok: I64, error: I64) -> I64 {
     cells :: jet_rt_alloc(I64{16}, I64{8})
-    if (jet_files_read_bytes_os(path, cells, cells + I64{8}, error) == I64{0}) {
+    if (jet_files_read_bytes_os(path, cells, wrapping(cells + I64{8}), error) == I64{0}) {
         jet_rt_free(cells, I64{16}, I64{8})
         return I64{0}
     }
     data :: rt_text_word(cells)
-    length :: rt_text_word(cells + I64{8})
+    length :: rt_text_word(wrapping(cells + I64{8}))
     jet_rt_free(cells, I64{16}, I64{8})
     rt_text_store(ok, rt_text_copy(data, length))
     if (length != I64{0}) -> jet_rt_free(data, length, I64{8})

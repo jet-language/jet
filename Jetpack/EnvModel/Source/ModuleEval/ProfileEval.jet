@@ -24,6 +24,7 @@ enum ProfileField {
 
 // A `profile.<name>: Profile{ … }` contribution written as an expression.
 fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+    if envmodel_record_literal(value) == .Val(record) -> return Ok(envmodel_evaluate_package_profile_expr(name, record, src, scope, globals, module_name))
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name != "" && type_name != TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
@@ -95,7 +96,7 @@ fn envmodel_string_names_from(value: CtValue) -> [String]? Never! {
 }
 
 fn envmodel_invalid_collisions(name: String, span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E1333", "package generation `{name}` has invalid `collisions`", "collision policy is an exact string path-to-provider map", "write `collisions: {{ \"bin/editor\": \"editor@nixpkgs\" }}`", Val(span))
+    envmodel_error("E1333", "package generation `{name}` has invalid `collisions`", "collision policy is an exact string path-to-provider map", "write `collisions: {{ \"bin/editor\": \"editor@jetpack\" }}`", Val(span))
 }
 
 // `collisions: { "path": "provider", … }` read from its exact source text, so

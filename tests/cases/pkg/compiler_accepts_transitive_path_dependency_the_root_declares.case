@@ -1,8 +1,8 @@
-# KNOWN-FAILING #4833: Jet CLI does not resolve the original declared path dependency graph.
-# Exact public subclaim of pkg.rs:3545-3574: success is NOT required.
-# The original allows any returned failure provided every code differs E1206.
+# Port of pkg.rs:3544-3573 (D-MOD-CYCLE1=A sibling packages): a transitive path
+# may leave its declaring package only to reach a directory the root also
+# declares. The original asserted only that no E1206 escape was reported; the
+# title promises acceptance, so the build must succeed too.
 fixture: fixtures/compiler_transitive_path_root_declared
 step: jet build run.jet
-exit: any
-# Reason: original result.as_ref().err().map_or(true, errors.all(code != E1206)).
-stderr: !~ "[E1206]"
+exit: 0
+stderr: !~ "[E1206]" # original predicate: a path the root declares is not an escape

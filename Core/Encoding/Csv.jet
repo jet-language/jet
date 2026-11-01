@@ -1,9 +1,11 @@
 use core as core
 use core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
+use core.encoding.base64 as base64
 use __core_encoding_stream as stream
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
+use core.files as files
 use core.mem as mem
 use core.data.[Query]
 use core.db.[SQL]
@@ -71,12 +73,16 @@ fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: B
 
 /// Header-named typed rows. Missing cells become empty text; extra cells are
 /// ignored, and failures from every data record are accumulated in row order.
+/// Cells decode inside the runtime's text-cell scope (Rust
+/// `jet_decode_text_cells`): a Text cell parses as an Int, Float or Bool
+/// target, and the previous scope is restored before returning.
 fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
     rows :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     if rows.len() == 0 -> return Ok([T]{})
     header :: rows[0]
     values := [T]{}
     errors := [FieldError]{}
+    previous :: encoding.__text_cells_enter()
     loop index in 1..<rows.len() {
         row :: rows[index]
         entries := [(key: String, value: Dyn)]{}
@@ -96,6 +102,7 @@ fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
             }
         }
     }
+    encoding.__text_cells_leave(previous)
     if errors.len() == 0 -> Ok(values) else -> Err(errors)
 }
 
@@ -241,16 +248,21 @@ fn parse(text: String) -> Dyn EncodingError! {
     Ok(Dyn.Array(items))
 }
 
-fn to_string<T: Encode>(rows: [T]) -> String Never! {
-    if rows.len() == 0 -> return ""
-    first :: rows[0].encode()
+// `rows` is a list of row arrays or records, or the row-array tree `parse`
+// returns; each encodes to one array of rows, so `parse` round-trips.
+fn to_string<T: Encode>(rows: T) -> String Never! {
+    encoded :: rows.encode()
+    items :: if encoded == {
+        .Array(values) -> values
+        else -> panic("csv.to_string needs rows or records")
+    }
+    if items.len() == 0 -> return ""
     out := ""
-    if first == .Object(_) {
+    if items[0] == .Object(_) {
         header := [String]{}
-        loop entry in stream.object_entries(first) -> &header.push(entry.key)
+        loop entry in stream.object_entries(items[0]) -> &header.push(entry.key)
         out = encode_row(header)
-        loop i in 0..<rows.len() {
-            tree :: if i == 0 -> first else -> rows[i].encode()
+        loop tree in items {
             if !(tree == .Object(_)) -> panic("csv.to_string needs rows or records")
             fields := [String]{}
             loop key in header {
@@ -266,9 +278,8 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
             out = "{out}\n{encode_row(fields)}"
         }
     } else {
-        loop i in 0..<rows.len() {
-            tree :: if i == 0 -> first else -> rows[i].encode()
-            if tree == {
+        loop i in 0..<items.len() {
+            if items[i] == {
                 .Array(cells) -> {
                     fields := [String]{}
                     loop cell in cells -> &fields.push(csv_cell(cell))
@@ -282,6 +293,8 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
     out
 }
 
+// A cell is text: Bytes and DateTime carry the base64 and RFC 3339 texts JSON
+// writes for them, and any other tree is its JSON text.
 fn csv_cell(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
@@ -289,6 +302,8 @@ fn csv_cell(value: Dyn) -> String Never! {
         .Float(n) -> "{n:Debug}"
         .Bool(b) -> "{b}"
         .Null -> ""
+        .Bytes(bytes) -> base64.encode(bytes)
+        .DateTime(_) -> value.to_text() ?? ""
         else -> json.to_string(value) ?? panic("CSV cell cannot be represented as JSON")
     }
 }
@@ -299,29 +314,25 @@ fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldErro
     text :: query_text(path) ?? return Err(err)
     physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     header :: if physical.len() == 0 -> [String]{} else -> physical[0]
-    encoding.__query_validate_fields(header, sql) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    core.data.__query_validate_fields(header, sql) ?? return Err(err)
     values :: decode<T>(text) ?? return Err(err)
     values.query(sql)
-}
-
-// A private plain record on the existing raw record rails, not a file handle.
-struct __QueryRead {
-    size: U64
-    bytes: [U8]
 }
 
 fn query_read_error(path: String, reason: String) -> [FieldError] Never! {
     [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
 }
 
+// An oversized file is refused from its reported size before any byte is read.
 fn query_text(path: String) -[FS]> String [FieldError]! {
     max :: 536870912
-    sample := encoding.__query_read_bounded(path, max) ?? return Err(query_read_error(path, err))
-    if sample.size > (U64{max}) -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
-    if sample.bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
-    encoding.__utf8_validate(sample.bytes) ?? return Err(query_read_error(path, err))
+    info :: files.stat(path, links: .Follow) ?? return Err(query_read_error(path, "{err}"))
+    if info.size > max -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    bytes :: files.read_at(path, 0, max + 1) ?? return Err(query_read_error(path, "{err}"))
+    if bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    encoding.__utf8_validate(bytes) ?? return Err(query_read_error(path, err))
     #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
-        return Ok(encoding.__bytes_into_text(^sample.bytes))
+        return Ok(encoding.__bytes_into_text(^bytes))
     }
 }
 
@@ -960,4 +971,8 @@ fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, de
 
 #Test("CSV structured cells retain compact JSON text") {
     assert_eq(csv_cell(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Bool(true)})), "[1,true]")
+}
+
+#Test("CSV Bytes cells are base64 text") {
+    assert_eq(csv_cell(Dyn.Bytes([U8]{104, 105})), "aGk=")
 }

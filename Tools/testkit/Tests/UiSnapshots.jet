@@ -122,6 +122,33 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI driver scratch: {err}")
 }
 
+#Test("UI known-failing ledger rows own real snapshot failures and reject stale passes") {
+    root :: kit_ui_test_scratch("known-failing")
+    loop path in ["tests/ui/owned.jet", "tests/ui/stale.jet", "tests/ui/unowned.jet", "tests/ui/dir_owned/run.jet"] -> kit_exec_write(files.join(root, path), "fn run() {{}}\n")
+    loop path in ["tests/ui/owned.stderr", "tests/ui/unowned.stderr", "tests/ui/dir_owned/stderr"] -> kit_exec_write(files.join(root, path), "Error [E0107]: other\n")
+    kit_exec_write(files.join(root, "tests/ui/stale.stderr"), "Error [E0109]: mismatch\n")
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "# repo-relative ID\tcard\treason\ntests/ui/owned\t#4868\towned ui mismatch\ntests/ui/stale\t#4869\tstale ui row\ntests/ui/dir_owned\t#4870\towned ui project\n")
+    kit_ui_stage(root, files.join(root, "ui-source"))
+    entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.len(), 4)
+    loop (index, entry) in entries {
+        outcome :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))[0]
+        if entry.path == "tests/ui/owned.jet" {
+            assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+            assert(outcome.verdict.detail.starts_with("#4868 owned ui mismatch: "))
+        } else if entry.path == "tests/ui/dir_owned/run.jet" {
+            assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+        } else if entry.path == "tests/ui/stale.jet" {
+            assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+            assert_eq(outcome.verdict.detail, "#4869 stale ui row: remove stale known-failing annotation")
+        } else {
+            assert_eq(entry.path, "tests/ui/unowned.jet")
+            assert_eq(outcome.verdict.status, "FAIL")
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI known-failing scratch: {err}")
+}
+
 #Test("UI shared staging preserves imported modules and route trees without discovering them") {
     root :: kit_ui_test_scratch("imports")
     main :: "use \"./modules/helper\" as helper\nfn run() {{ print(helper.value()) }}\n"
@@ -199,9 +226,12 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_plane_coverage([row, other], "jet 0 1 1\nsema 0 1 1\n").status, "FAIL")
     uncovered :: KitUIRegistryRow{code: "E9999", plane: "sema", active: true, edit: false, reason: false}
     assert_eq(kit_ui_plane_coverage([row, other, uncovered], baseline).status, "FAIL")
-    parsed :: kit_ui_registry("    DiagnosticRegistryRow{{\n        code: \"E0109\",\n        stage: \"sema\",\n        status: DiagnosticRegistryStatus.Active,\n        structured_fix: Val(DiagnosticRegistryFix.CryptoMisuse),\n        no_fix_reason: Val(DiagnosticNoFixReason{{kind: DiagnosticNoFixReasonKind.Design}}),\n    }},\n")
-    assert_eq(parsed.len(), 1)
+    parsed :: kit_ui_registry("// header\ndiagnostic\tE0109\tsema\terror\tcompile\tactive\tm\tw\ty\tf\tfalse\tcrypto_misuse\ndiagnostic\tE0001\tjet\terror\tcompile\tactive\tm\tw\ty\tf\tfalse\tsource_edit\ndiagnostic\tE0004\tparse\terror\tcompile\tretired\tm\tw\ty\tf\tfalse\t-\n")
+    assert_eq(parsed.len(), 3)
     assert_eq(parsed[0].code, "E0109")
+    assert_eq(parsed[0].plane, "sema")
     assert(!parsed[0].edit)
     assert(parsed[0].reason)
+    assert(parsed[1].edit && !parsed[1].reason)
+    assert(!parsed[2].active && !parsed[2].edit && !parsed[2].reason)
 }

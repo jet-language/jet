@@ -1,0 +1,23 @@
+package {
+    name: "decimal_math_args"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
+// A decimal literal is a Decimal. A math function given one converts it to
+// the nearest Float first, so a literal with more digits than a Float holds
+// gives the same result as the shortest literal of that nearest Float.
+use core.math as math
+
+fn run() {
+    angle := 36.844070105782698
+    print(math.sin(angle) == math.sin(36.8440701057827))
+    print(math.cos(angle) == math.cos(36.8440701057827))
+    small := 0.12345678901234567
+    print(math.sqrt(small))
+    print(math.sqrt(6.2500000000000000))
+    print(math.sqrt(1.00000000000000000000000001))
+    print(math.sqrt(0.000000000000000000000000025))
+    print(math.sqrt(12345678901234567890.5))
+    print(math.sqrt(9007199254740993.0))
+}

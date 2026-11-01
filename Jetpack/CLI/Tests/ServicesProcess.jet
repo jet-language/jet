@@ -1,9 +1,9 @@
 // Process claims ported from tests/jetpack_services.rs (U12, supervised dev
 // services): `jetpack services up/health/logs/wait/down` round-trips a
-// fixture daemon; the project dev health gate blocks until a service is
-// healthy and reports a clean E1261 when it never becomes so; an unknown
-// `services:` field is a clean E1262; and the production Linux path persists
-// its authority, dependency, and descendant lifecycle.
+// fixture daemon; an untrusted dev-services project is refused before any
+// service starts; a service that never becomes healthy is a clean E1261; an
+// unknown `services:` field is a clean E1262; and the production Linux path
+// persists its authority, dependency, and descendant lifecycle.
 
 #Test("services up health logs down roundtrip") {
     claim :: ServicesClaim.new("roundtrip")
@@ -22,6 +22,20 @@
     // Stopped now: a fresh health check must report unhealthy (exit 1).
     health_after :: claim.run([String]{"services", "health", "--no-color"}, cli_test_no_env())
     assert(!health_after.success)
+    claim.remove()
+}
+
+// Dev services make the env a typed environment: with no recorded trust and
+// no terminal to ask, `services up` refuses with E1255 and starts nothing.
+#Test("services up refuses an untrusted dev services project without a terminal") {
+    claim :: ServicesClaim.new("untrusted")
+    claim.write_untrusted_project("fixture: {{ run: [\"sh\", \"-c\", \"echo fixture-started; sleep 30\"] }}", "fn run() {{}}\n")
+    child := claim.jetpack_in(claim.project, [String]{"services", "up", "--no-color"}, cli_test_no_env()).stdin(.Stream).spawn() ?? panic("spawn services up")
+    child.stdin.close()
+    out :: child.wait() ?? panic("wait for services up")
+    assert_eq(out.code, 2)
+    assert(out.errors.contains("E1255"), "stderr: {out.errors}")
+    assert(!files.exists(claim.service_dir("fixture")), "an untrusted project must not start its services")
     claim.remove()
 }
 
@@ -65,44 +79,6 @@
     assert(lifecycle.contains("recovery=startup-failed"), lifecycle)
     assert(files.is_file(files.join(service_dir, "supervisor.error")))
     assert(!files.exists(files.join(service_dir, "pid")))
-    claim.remove()
-}
-
-// The project dev path health-gates on its declared services (U19's plug
-// point) and must not run `fn dev()` until the service is healthy.
-#Test("dev health gate waits for service before running") {
-    claim :: ServicesClaim.new("health-gate")
-    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"] }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
-    out :: claim.run([String]{"dev", "--no-color"}, cli_test_no_env())
-    assert(out.success, "stderr: {out.errors}")
-    assert(out.output.contains("DEV-RAN"), "stdout: {out.output}")
-    // Clean up the fixture daemon `dev` left running.
-    claim.jetpack_in(claim.project, [String]{"services", "down", "--no-color"}, cli_test_no_env()).run().drop("cleanup of the dev fixture daemon")
-    claim.remove()
-}
-
-// A service whose readiness never passes is a clean E1261, never a hang.
-#Test("dev service never healthy is E1261") {
-    claim :: ServicesClaim.new("e1261")
-    // `ready: "false"` never passes (exit 1), so this never reports healthy.
-    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], ready: \"false\" }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
-    out :: claim.run([String]{"dev", "--no-color"}, cli_test_health_timeout("500"))
-    assert_eq(out.code, 2)
-    assert(out.errors.contains("E1261"), "stderr: {out.errors}")
-    assert(!out.output.contains("DEV-RAN"))
-    claim.jetpack_in(claim.project, [String]{"services", "down", "--no-color"}, cli_test_no_env()).run().drop("cleanup of the dev fixture daemon")
-    claim.remove()
-}
-
-// An unrecognized `services:` field (a typo such as `prot`) is a clean E1262
-// from the project dev path: a supervision-time check, not a parse error.
-#Test("dev unrecognized service field is E1262") {
-    claim :: ServicesClaim.new("e1262")
-    claim.write_project("fixture: {{ run: [\"sleep\", \"30\"], prot: 5432 }}", "fn dev() {{ print(\"DEV-RAN\") }}\n")
-    out :: claim.run([String]{"dev", "--no-color"}, cli_test_no_env())
-    assert_eq(out.code, 2)
-    assert(out.errors.contains("E1262"), "stderr: {out.errors}")
-    assert(!out.output.contains("DEV-RAN"))
     claim.remove()
 }
 

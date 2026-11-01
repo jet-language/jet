@@ -40,19 +40,19 @@ step: jetpack explain ripgrep@nixpkgs --json
 exit: 0
 capture: package_id stdout doc $.explain.entry.id
 capture: index_proof stdout doc $.explain.provider.producer_facts["nix.index.proof.v1"]
-cap:index_proof: nonempty
+cap:index_proof: nonempty # original proof value is present
 capture: output_proof stdout doc $.explain.provider.producer_facts["nix.cache.output.out.proof.sha256"]
-cap:output_proof: nonempty
+cap:output_proof: nonempty # original proof value is present
 capture: closure_receipt stdout doc $.explain.provider.producer_facts["nix.cache.closure.receipt.sha256"]
-cap:closure_receipt: nonempty
+cap:closure_receipt: nonempty # original proof value is present
 json: stdout doc $.explain.entry.output_hash = "{cap:root_digest}"
 json: stdout doc $.explain.graph.direct_dependencies #= 1
 json: stdout doc $.explain.graph.direct_dependencies[0].digest = "{cap:library_digest}"
-json: stdout doc $.explain.graph.dependencies has {"digest":"{cap:runtime_digest}"}
+json: stdout doc $.explain.graph.dependencies has {"digest":"{cap:runtime_digest}"} # original dependency digest membership
 step: jetpack audit --no-color
 exit: 0
 capture: refs stdout.split("{cap:package_id}", 1) after "Closure:" trim
-cap:refs: first-line = "{cap:library_digest}"
+cap:refs: first-line = "{cap:library_digest}" # original first reference line
 step: jetpack explain ripgrep-lib-1.0@nixpkgs --json
 exit: 0
 json: stdout doc $.explain.graph.direct_dependencies #= 1

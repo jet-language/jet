@@ -29,7 +29,7 @@ fn gc_report_require(ok: Bool, name: String) Never! {
         .Ok(_) -> panic("old trace accepted")
     }
     // Ordered Dyn object fields must be projected by key, never list index.
-    object :: Dyn.Object([(key: String, value: Dyn)]{(key: "other", value: Dyn.Int(9)), (key: "wanted", value: Dyn.Text("evidence"))})
+    object :: Dyn.Object([String:Dyn]{"other": Dyn.Int(9), "wanted": Dyn.Text("evidence")})
     gc_report_require((jet_cli_gc_text(object, "wanted") ?? panic(err.detail)) == "evidence", "ordered object field lookup")
     if jet_cli_gc_field(object, "absent") == {
         .Err(error) -> { gc_report_require(error.kind == "malformed", "missing object field") }

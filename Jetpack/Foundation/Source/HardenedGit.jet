@@ -1,0 +1,83 @@
+// The one hardened Git subprocess policy shared by every provider, Source
+// Fetch and registry transport operation (Rust Provider.rs
+// `hardened_git_command`). It lives in Foundation so both the engine and the
+// publication package reach the same policy.
+use core.process as process
+use core.sys as sys
+
+// Git environment that could reintroduce ambient configuration, helpers,
+// proxies, or traces. Every hardened command removes all of them.
+FOUNDATION_GIT_REMOVED_ENV :: comptime { [String]{
+    "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR", "GIT_DIR", "GIT_WORK_TREE",
+    "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE", "GIT_ALLOW_PROTOCOL", "GIT_PROTOCOL_FROM_USER", "GIT_SSH", "GIT_SSH_VARIANT",
+    "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY", "SSH_ASKPASS", "GIT_PAGER", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
+    "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_TRACE", "GIT_TRACE_PERFORMANCE", "GIT_TRACE_SETUP",
+    "GIT_TRACE_PACKET", "GIT_TRACE_CURL", "GIT_TRACE_CURL_NO_DATA", "GIT_TRACE2", "GIT_TRACE2_EVENT",
+    "GIT_TRACE2_PERF", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+    "ALL_PROXY", "NO_PROXY"
+} }
+
+// Command-line configuration wins over a repository-local credential helper.
+FOUNDATION_GIT_CONFIG_ARGS :: [String]{"-c", "credential.helper=", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=always"}
+
+// The one hardened Git subprocess policy: its fixed working directory, the
+// environment it sets, the ambient variables it removes, and the leading
+// configuration arguments. No caller can create a weaker policy.
+struct FoundationHardenedGitPolicy {
+    cwd: String
+    env: [String: String]
+    removed_env: [String]
+    args: [String]
+
+    fn current() -[Env]> FoundationHardenedGitPolicy Never! {
+        null_device :: foundation_git_null_device()
+        FoundationHardenedGitPolicy{
+            cwd: foundation_git_safe_cwd(),
+            env: [String: String]{
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_SYSTEM": null_device,
+                "GIT_CONFIG_GLOBAL": null_device,
+                "GIT_CONFIG_LOCAL": null_device,
+                "GIT_CONFIG_COUNT": "0",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": null_device,
+                "GIT_SSH_COMMAND": foundation_hardened_ssh_command(),
+            },
+            removed_env: FOUNDATION_GIT_REMOVED_ENV,
+            args: FOUNDATION_GIT_CONFIG_ARGS,
+        }
+    }
+
+    // The captured `git` process specification of this policy. Environment
+    // keys are applied in byte order (a `BTreeMap` walk).
+    fn spec(self) -[Exec]> ProcessSpec Never! {
+        spec := process.cmd([String]{"git"}).cwd(self.cwd)
+        keys := self.env.keys().to_list()
+        &keys.sort()
+        loop key in keys -> spec = spec.env(key, self.env[key])
+        loop variable in self.removed_env -> spec = spec.env_remove(variable)
+        spec.args_extend(self.args).stdout(.Capture).stderr(.Capture)
+    }
+}
+
+// The hardened Git command every provider, Source Fetch and registry
+// transport operation runs.
+fn foundation_hardened_git_command() -[Env, Exec]> ProcessSpec Never! {
+    FoundationHardenedGitPolicy.current().spec()
+}
+
+// The non-interactive SSH policy shared by every hardened Git command.
+fn foundation_hardened_ssh_command() -[Env]> String Never! {
+    if sys.is_windows() -> return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
+    "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
+}
+
+fn foundation_git_null_device() -[Env]> String Never! {
+    if sys.is_windows() -> "NUL" else -> "/dev/null"
+}
+
+fn foundation_git_safe_cwd() -[Env]> String Never! {
+    if sys.is_windows() -> "\\" else -> "/"
+}

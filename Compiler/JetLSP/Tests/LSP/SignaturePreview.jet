@@ -2,7 +2,7 @@
 // versions remain the original Server/1108–1110 tests, not mocked here.
 use jet_foundation.[Span, Type, TypeParam, CallablePolicy, FailureContract]
 use jet_lexer.[lex, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN]
-use jet_semindex.[SymbolDB, SymbolDef, SymbolRef, SymRef, DefinitionAnchor, TraitContractFact, CallEdge, EffectFact, MemberFact, StructuralNode, DefinitionFact, SourceSpan, CallableFactUnavailable, CallableFactAvailability, CallableEffectFact, CallableSignatureFact, CallableParameterFact, ViewProvenanceFact, SemIndexNameTypeFact, SemIndexCallContractEntry, SemIndex]
+use jet_semindex.[SymbolDB, SymbolDef, SymbolRef, SymRef, DefinitionAnchor, DeclarationKey, TraitContractFact, CallEdge, EffectFact, MemberFact, StructuralNode, DefinitionFact, SourceSpan, CallableFactUnavailable, CallableFactAvailability, CallableEffectFact, CallableSignatureFact, CallableParameterFact, ViewProvenanceFact, SemIndexNameTypeFact, SemIndexCallContractEntry, SemIndex]
 
 fn lsp_signature_test_definition() -> SymbolDef Never! {
     signature :: CallableSignatureFact{
@@ -50,21 +50,27 @@ fn lsp_signature_test_db(definition: ^SymbolDef) -> SymbolDB Never! {
 }
 
 #Test("signature preview carries exact declaration insertion and trims only parameter type") {
-    db :: lsp_signature_test_db(lsp_signature_test_definition())
+    // #6341: a Public declaration may have callers outside the workspace.
+    exposed := lsp_signature_test_db(lsp_signature_test_definition())
+    exposed.visibility[DeclarationKey{module_path: "main.jet", start: 3, end: 6}] = .Public
     source :: "fn run() {{}}\n"
-    preview :: lsp_compute_signature_change_preview(db, [String:String]{"main.jet": source}, "fn:main::run", "extra", "  Int  ", [String:String]{}) ?? panic("preview")
+    preview :: lsp_compute_signature_change_preview(exposed, [String:String]{"main.jet": source}, "fn:main::run", "extra", "  Int  ", [String:String]{}) ?? panic("preview")
     assert_eq(preview.parameter_type, "Int")
     assert_eq(preview.edits.len(), 1)
     assert_eq(preview.edits[0].span, Span{start: 7, end: 7})
     assert_eq(preview.edits[0].new_text, "extra: Int")
-    assert(preview.can_apply())
-    public :: "pub fn run() {{}}\n"
+    assert_eq(preview.unknown, [String]{"external_callers_outside_checked_workspace"})
+    assert(!preview.can_apply())
+    // A function inside a `priv module` is private, so the preview applies.
+    hidden :: "priv module m {{ fn run() {{}} }}\n"
     definition := lsp_signature_test_definition()
-    definition.def_span = SourceSpan{start: 7, end: 10}
-    exported :: lsp_signature_test_db(definition)
-    boundary :: lsp_compute_signature_change_preview(exported, [String:String]{"main.jet": public}, "fn:main::run", "extra", "Int", [String:String]{}) ?? panic("public preview")
-    assert_eq(boundary.unknown, [String]{"external_callers_outside_checked_workspace"})
-    assert(!boundary.can_apply())
+    definition.def_span = SourceSpan{start: 19, end: 22}
+    sealed := lsp_signature_test_db(definition)
+    sealed.visibility[DeclarationKey{module_path: "main.jet", start: 19, end: 22}] = .Private
+    inside :: lsp_compute_signature_change_preview(sealed, [String:String]{"main.jet": hidden}, "fn:main::run", "extra", "Int", [String:String]{}) ?? panic("private preview")
+    assert_eq(inside.edits[0].span, Span{start: 23, end: 23})
+    assert(inside.unknown.is_empty())
+    assert(inside.can_apply())
 }
 
 // #4499: actual composite-key map must be available to exercise this body.

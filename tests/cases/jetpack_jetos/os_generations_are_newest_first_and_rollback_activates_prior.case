@@ -25,13 +25,13 @@ cap:lifecycle: count "external-consumer" >= 2 # original lifecycle roots predica
 step: jet os generations halcyon --no-color
 exit: 0
 stdout: before "second" "first" # original newest-first order
-file: package-root/systems/activation-proofs/halcyon/second.txt ~ "service-risk"
-file: package-root/systems/activation-proofs/halcyon/second.txt ~ "rollback-proof: pass previous=first"
+file: package-root/systems/activation-proofs/halcyon/second.txt ~ "service-risk" # original contains predicate
+file: package-root/systems/activation-proofs/halcyon/second.txt ~ "rollback-proof: pass previous=first" # original contains predicate
 step: jet os rollback halcyon first --no-color
 exit: 0
-stderr: ~ "rolled back"
+stderr: ~ "rolled back" # original contains predicate
 capture: after = tree-contents package-root/hangar/lifecycle-db/journal
 cap:after: = "{cap:before}" # original sorted(name,bytes) journal equality; no mtime
 step: jet os rollback halcyon first --no-color
 exit: 2
-stderr: ~ "no generation is available"
+stderr: ~ "no generation is available" # original contains predicate

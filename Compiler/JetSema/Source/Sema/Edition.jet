@@ -97,15 +97,16 @@ fn sema_lifecycle_record(payload: CoreMarkerApplication, source: String, span: S
     key :: "{source}|{span.start}|{span.end}|{payload.member}"
     if seen.get(key) != None -> return
     seen[key] = true
+    // One language edition and no edition-gated behaviour (7bef65ccd4): a
+    // `since:` label never silences the warning. Only a named removal edition
+    // that the package edition has reached turns use into E2002.
     status := "deprecated"
-    if sema_lifecycle_edition_label(payload.since) && sema_lifecycle_edition_year(edition) < sema_lifecycle_edition_year(payload.since) -> status = "active"
     if payload.removed_in == .Val(removed) {
         if sema_lifecycle_edition_label(removed) && sema_lifecycle_edition_year(edition) >= sema_lifecycle_edition_year(removed) -> status = "removed"
     }
     detail := "since {payload.since}; use `{payload.replacement}`"
     if payload.removed_in == .Val(removed) -> detail = "{detail}; removed in {removed}"
     &result.facts.push(StructureFact{kind: StructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
-    if status == "active" -> return
     item :: payload.member
     since :: sema_lifecycle_version_phrase(payload.since)
     fix :: "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
@@ -153,7 +154,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         loop reference in checked.name_references {
             payload :: payloads.get(reference.symbol.id.key) ?? next
             if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None -> next
-            sema_lifecycle_record(payload, graph_module.module_path, reference.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, graph_module.source_file, reference.span, edition, &result, &seen)
         }
         loop call in checked.call_facts {
             // A Core member carries its resolved marker; a declared function
@@ -164,7 +165,7 @@ fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             }
             payload :: call.lifecycle ?? declared ?? next
             if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
-            sema_lifecycle_record(payload, graph_module.module_path, call.span, edition, &result, &seen)
+            sema_lifecycle_record(payload, graph_module.source_file, call.span, edition, &result, &seen)
         }
         sema_attach_diagnostic_source_locations(&result.diagnostics, start, graph_module.source_segments)
     }

@@ -3,7 +3,7 @@
 // scheduler deadlines/Sync still use their existing absolute clocks.
 // Root32: SyncOnce0, epoch seconds8, epoch nanoseconds16, provider TLS key24.
 time_host_root := I64{0}
-// runtime-init: 4
+// runtime-init: 4 when time_host_root
 #Export(c) fn jet_rt_time_host_init() {
     if (time_host_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{32}, I64{8})
@@ -78,20 +78,20 @@ fn time_host_monotonic_sample() -> I64 {
         nanos = I64{0}
     }
     sync_store(sample, seconds)
-    sync_store(sample + I64{8}, nanos)
+    sync_store(wrapping(sample + I64{8}), nanos)
     sample
 }
 fn time_host_monotonic_i64() -> I64 {
     sample :: time_host_monotonic_sample()
     seconds :: sync_load(sample)
-    nanos :: sync_load(sample + I64{8})
+    nanos :: sync_load(wrapping(sample + I64{8}))
     if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) -> return I64{9223372036854775807}
     seconds * I64{1000000000} + nanos
 }
 #Export(c) fn jet_time_raw_host_monotonic_ns() -> I64 {
     sample :: time_host_monotonic_sample()
     seconds :: sync_load(sample)
-    nanos :: sync_load(sample + I64{8})
+    nanos :: sync_load(wrapping(sample + I64{8}))
     seconds_word :: jet_int_owned_from_i64(seconds)
     whole :: jet_int_mul(seconds_word, I64{1000000000})
     jet_rt_int_drop(seconds_word)
@@ -212,4 +212,17 @@ fn time_optional_i64(present: Bool, output: I64) -> I64 {
     native :: host_native_int(nanos)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     jet_task_sleep_duration_ns_defaulted(native)
+}
+// WorkflowSleep.rs jet_services_workflow_sleep_wait (D-SERVICE-WORKFLOW1=D):
+// a workflow sleep ends in a code instead of unwinding, so Core records a
+// cancelled or deadline-blown sleep before the workflow fails. 0 slept,
+// 1 cancelled, 2 deadline. This leaf takes that stop; the task's cancel flag
+// stays set, so its next wait point delivers the cancel again. Any other
+// stop stays published for the caller's propagate.
+#Export(c) fn jet_services_workflow_sleep_wait(nanos: I64) -> I64 {
+    jet_std_time_sleep_duration_ns(nanos)
+    status :: jet_scheduler_native_propagate()
+    if (status != I64{1} && status != I64{2}) -> return I64{0}
+    scheduler_control_discard_stop(scheduler_control_current())
+    status
 }

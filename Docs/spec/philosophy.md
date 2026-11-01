@@ -1,5 +1,7 @@
 # Philosophy
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 Jet is a pragmatic language. It should let beginners build useful programs
 safely and give experts explicit control without making everyone learn the
 low-level machinery first. It is a memory-safe compiled language for human

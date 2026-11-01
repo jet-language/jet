@@ -9,7 +9,7 @@ function jet_game_option(value) {
   if (value == null || (value != null && value.tag === "Err")) {
     return { present: false, value: undefined };
   }
-  // Keep the projection total for a direct host call. Canonical MIR emits an
+  // Keep the projection total for a direct host call. Canonical IR emits an
   // Option carrier, but a plain value is still an explicitly present option.
   return { present: true, value };
 }

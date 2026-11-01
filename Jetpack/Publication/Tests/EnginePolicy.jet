@@ -1,4 +1,11 @@
 // Exact public engine-policy claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+use jet_foundation.[Diagnostic]
+use jet_pkg_model.[Manifest, PackagePolicy, PackagePolicyException, PolicySourceMap]
+use jetpack_publication.[
+    publication_authorize_package_candidate, publication_package_policy_diagnostic,
+    publication_policy_receipt_summary, publication_validate_published_license,
+]
+
 fn engine_policy_manifest_error(raw: String) -> Diagnostic {
     if Manifest.parse("package.jet", raw) == {
         .Ok(_) -> panic("expected manifest refusal")
@@ -56,6 +63,6 @@ fn engine_policy_manifest_error(raw: String) -> Diagnostic {
     malformed :: engine_policy_manifest_error("name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n")
     assert_eq(malformed.code, "E1206")
     assert(malformed.what.contains("package.jet"))
-    assert(malformed.why.contains("package metadata policy is malformed"))
+    assert(malformed.why.contains("Package metadata policy is malformed"))
     assert(malformed.fix.contains("syntax-decisions.md"))
 }

@@ -162,11 +162,15 @@ fn cli_environment_member_expectations(verification: &StoreVerification, roots: 
 
 // Whether `warm` realizes every plan ref and adapter (with multiplicity).
 fn cli_warm_realizations_complete(plan: RunPlan, warm: [VerifiedRealization]?) -> Bool Never! {
-    realized :: warm ?? return false
     available := [String: Int]{}
-    loop entry in realized {
-        reference :: entry.original_reference()
-        available[reference] = (available.get(reference) ?? 0) + 1
+    // `warm` is read where the caller holds it: a copy of its leases would
+    // own, and close, their held handles.
+    if warm == {
+        .Val(realized) -> loop entry in realized {
+            reference :: entry.original_reference()
+            available[reference] = (available.get(reference) ?? 0) + 1
+        }
+        .None -> return false
     }
     required := [String: Int]{}
     loop reference in cli_env_entry_plan_references(plan) -> required[reference] = (required.get(reference) ?? 0) + 1

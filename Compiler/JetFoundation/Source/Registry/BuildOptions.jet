@@ -83,7 +83,8 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // refuse (E3415).
     {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
     // The operating system the image runs on. The native backend writes Linux
-    // x86-64 ELF images, so every other value is refused (E2104).
+    // x86-64 ELF images, and `jet build` also writes web builds
+    // (`--target web`), so every other value is refused (E2104).
     {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web or freestanding"},
     // The oldest OS version the image runs on (a Mach-O image's minimum
     // version). A Linux ELF image has no versioned ABI floor, so a non-empty
@@ -130,7 +131,7 @@ enum BuildOptionLayer {
 
 // One written value of a row. `written` is its spelling (`--optimize=full`,
 // `b.optimize(.Full)`, `optimize: full`) and `site` the phrase placing it
-// (`at @build.jet:3`, "in profile `fast` of package.jet"); both are "" at the
+// (`at build.jet:3`, "in profile `fast` of package.jet"); both are "" at the
 // stock layer and for a flag. `pinned` marks a `b.pin` call.
 struct BuildOptionChoice {
     name: String
@@ -401,9 +402,13 @@ fn build_options_resolve(command: String, profile: String, written: [BuildOption
         debug_place :: if debug_info.site == "" -> "`{debug_info.written}`" else -> "`{debug_info.written}` {debug_info.site}"
         return BuildOptionsResolved.Refused{code: "E2104", what: "{backtrace_place} needs debug info, which {debug_place} leaves out", fix: "write `backtrace: brief` or `backtrace: off`, or drop `debug_info: false`"}
     }
-    // The native backend writes Linux x86-64 ELF images (JetBackend Image/).
+    // The native backend writes Linux x86-64 ELF images (JetBackend Image/);
+    // `jet build` also writes a web build (JetWeb), which only it writes.
     os :: values[build_option_index("os")].copy()
-    if os.value != "linux" {
+    if os.value == "web" && command != "build" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a web build, and `jet {command}` runs Linux x86-64 ELF images only", fix: "drop it, or use `jet build`"}
+    }
+    if os.value != "linux" && os.value != "web" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a {os.value} image, and the native backend writes Linux x86-64 ELF images only", fix: "drop it, or write `os: linux`"}
     }
     min_os :: values[build_option_index("min_os")].copy()

@@ -4,7 +4,7 @@
 // arm of `CheckerInfer/fallible.rs`.
 use jet_foundation.[
     AccessConvention,
-    BodyTree,
+    BodyNode,
     CallArg,
     Diagnostic,
     DiagnosticFixApplicability,
@@ -26,7 +26,6 @@ use jet_foundation.[
     TextEdit,
     Type,
     ast_func,
-    body_node,
     core_call_typed_signature,
     core_module_export,
     core_module_has_type,
@@ -36,6 +35,7 @@ use jet_foundation.[
     expr_span,
     symbol_id,
     type_name,
+    foundation_named_type,
 ]
 use jet_parser.[
     parse_source,
@@ -48,7 +48,7 @@ use jet_parser.[
 // `[FieldError]` and component types stay outside on purpose.
 JET_CORE_ERROR_FAMILY :: comptime { [String]{
     "AppError", "ArchiveError", "Base32Error", "Base64Error", "BuildError", "BrowserError", "CBORError", "ComputeError", "CryptoError", "DBError", "DataError",
-    "EncodingError", "EmailError", "EnvError", "FileCryptoError", "HTTPError", "HexError", "IOError", "MIMEError", "ModError", "NetError", "PerfError",
+    "EncodingError", "EnvError", "FileCryptoError", "HTTPError", "HexError", "IOError", "MIMEError", "ModError", "NetError", "PerfError",
     "PluginError",
     "RangeError", "RegexError", "TextError", "TimeError", "UIHostError", "URLError", "UTF8Error", "UUIDError", "WsError", "XMLError",
 } }
@@ -57,7 +57,7 @@ JET_CORE_ERROR_FAMILY :: comptime { [String]{
 // of an explicit `!` contract (the Rust reference's `is_core_error_type`).
 JET_CORE_ERROR_TYPES :: comptime { [String]{
     "AllocError", "AuthError", "BuildError", "BrowserError", "CBORError", "Closed", "CompilerError", "CompilerPackageError", "ComputeError",
-    "CryptoError", "DBError", "DataError", "EmailError", "EncodingError", "EnvError", "EventConfigError", "Expired",
+    "CryptoError", "DBError", "DataError", "EncodingError", "EnvError", "EventConfigError", "Expired",
     "FileCryptoError", "HTTPError", "IOError", "UIHostError", "KeyWrapError", "NetError", "RangeError", "ServiceError",
     "ParseError", "PluginError",
     "TaskFailure", "TextError", "UTF8Error", "VaultError", "WsError", "XMLError", "FieldError",
@@ -258,7 +258,9 @@ fn sema_error_conversion_routine(definition: ErrorConvDef, local_types: [String]
         &diagnostics.push(sema_error("E2419", span, "Error conversion is ambiguous: `{pair.source}` already reaches `{pair.target}`", "A source and target may have one unique declared conversion route.", "remove the direct edge or remove one of the intermediate conversion edges."))
         return None
     }
-    Val(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, Type.Named{name: from_ty}, definition.body, definition.body_span)})
+    // The source is a written type name; a primitive name is that primitive
+    // (`impl String -> Err` takes a `String` self).
+    Val(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, foundation_named_type(from_ty), definition.body, definition.body_span)})
 }
 
 // The canonical Prelude conversion of one family member into
@@ -316,10 +318,10 @@ struct SemaPreludeDemandWalk {
 
 // One node of the demand walk: a propagation site whose conversion is
 // this module's prelude routine for a Core error family member reaching `Err`
-// demands it (first site per routine), then its children are walked
-// (sema_effect_walk_expr_children), in the order body_each_expr_child visits them.
-fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<SemaPreludeDemandWalk>, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
-    node :: body_node(tree, expression)
+// demands it (first site per routine); the effect walk then walks its
+// children (Effects/Checks.jet sema_effect_walk_enter), in the order
+// body_each_expr_child visits them.
+fn sema_prelude_conversion_demands_enter(state: Shared<SemaPreludeDemandWalk>, node: BodyNode) {
     conversion :: if node.kind == {
         // copy: `value` is a payload of the borrowed node row; the Val carrier owns this one
         .Try(_, value, _) -> Val(value.copy())
@@ -330,7 +332,6 @@ fn sema_prelude_conversion_demands_visit(walk: SemaEffectWalk, state: Shared<Sem
     if conversion == .Val(value) {
         if value == .Typed(key, source, target) -> sema_prelude_conversion_demand_add(state, key, source, target, node.span)
     }
-    sema_effect_walk_expr_children(walk, &nodes, facts, &diagnostics, caller, tree, node)
 }
 
 fn sema_prelude_conversion_demand_add(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
@@ -463,7 +464,7 @@ fn sema_failure_items_nominal_is_error(items: [Item], module_identity: String, l
                 inner := seen
                 &inner.push(seen_key)
                 // Rust `resolve_type`: a re-export alias
-                // (`alias HexError :: encoding.HexError`) names its target
+                // (`HexError :: encoding.HexError`) names its target
                 // from the alias's own module, never this module's leaf.
                 if definition.target == .Named(target_name) && (target_name.contains("::") || target_name.contains(".")) {
                     home :: sema_failure_alias_target_is_error(target_name, module_identity, inner, environment, program)
@@ -489,13 +490,16 @@ fn sema_failure_alias_target_is_error(target_name: String, module_identity: Stri
     None
 }
 
-// The declaring module wins; other graph modules supply imported nominals.
+// The declaring module wins, then a name it imports
+// (`use core.encoding.[HexError]`); other graph modules supply the rest.
 fn sema_failure_nominal_is_error(leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
         if sema_scope_caller_index(environment, graph) == .Val(module_index) {
             local :: sema_failure_items_nominal_is_error(graph.modules[module_index].program.items, environment.module_identity, leaf, seen, environment, program)
             if local != None -> return local
         }
+        named :: sema_failure_alias_target_is_error(leaf, environment.module_identity, seen, environment, program)
+        if named != None -> return named
         loop module_row_index in 0..<graph.modules.len() {
             if graph.modules[module_row_index].module_identity == environment.module_identity -> next
             imported :: sema_failure_items_nominal_is_error(graph.modules[module_row_index].program.items, graph.modules[module_row_index].module_identity, leaf, seen, environment, program)
@@ -566,11 +570,12 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
                 if environment.registration_graph == .Val(graph) {
                     declared = sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None
                 }
-                if !declared -> &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first"))
+                if !declared -> &diagnostics.push(sema_unknown_type_name(name, span))
             }
+            if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) -> &diagnostics.push(sema_unknown_type_name(name, span))
         }
         // An alias can hide a second optional layer: `Maybe<Int>?` where
-        // `alias Maybe<T> :: T?` is `Int??`, which has no meaning.
+        // `Maybe<T> :: T?` is `Int??`, which has no meaning.
         .Option(inner) -> {
             if program.registration_graph == .Val(graph) && !(inner == .Option(_)) {
                 resolved :: sema_type_resolve_declared_recursive(graph, inner, sema_scope_caller_row(environment, graph), environment.generic_params)
@@ -606,6 +611,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         }
         .Apply(name, args) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            if sema_failure_written_name_unknown(name, generic_names, environment, program) -> sema_unknown_generic_type_name(name, span, &diagnostics)
             sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, &diagnostics)
             loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, &diagnostics)
         }
@@ -638,6 +644,35 @@ fn sema_check_expiring_secret_declared_type(ty: Type, span: Span, generic_names:
 // the same E0119 from its declared-type walk.
 fn sema_type_hole(span: Span) -> Diagnostic {
     sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
+}
+
+// E0119: a written type name that names nothing. A name that writes a
+// lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
+// The common guess `Text` points at `String` (D-TEXT-NAMES1=A).
+fn sema_unknown_type_name(name: String, span: Span) -> Diagnostic {
+    if name == "Text" -> return sema_error("E0119", span, "there's no type called `Text`", "Jet's text type is `String`", "write `String` instead of `Text`")
+    sema_casing_acronym_diagnostic(name, span) ?? sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")
+}
+
+// E0119 twice for `Name<…>` where `Name` names nothing: the missing type,
+// then the type arguments it cannot take. A word-cased acronym head
+// (`Id<Node>`) gets the one E0358 instead.
+fn sema_unknown_generic_type_name(name: String, span: Span, diagnostics: &[Diagnostic]) {
+    if sema_casing_acronym_diagnostic(name, span) == .Val(acronym) {
+        &diagnostics.push(acronym)
+        return
+    }
+    &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "generic types must name a struct or enum you defined", "check the spelling, or define the type first"))
+    &diagnostics.push(sema_error("E0119", span, "`{name}` isn't generic", "only types declared with type parameters accept `<…>`", "use `{name}` without type arguments"))
+}
+
+// Whether signature type name `name` names nothing (#6294), judged on the
+// pass's registration graph: the program tables carry it in the module check,
+// the environment in the comptime passes.
+fn sema_failure_written_name_unknown(name: String, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
+    if environment.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
+    false
 }
 
 fn sema_no_any_type(span: Span) -> Diagnostic {

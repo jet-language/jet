@@ -676,11 +676,8 @@ fn provider_cc_manifest_string(object: [String: Dyn], field: String) -> String C
 }
 
 fn provider_cc_manifest_number(object: [String: Dyn], field: String) -> Int CcToolchainError! {
-    value :: object.get(field) ?? Dyn.Null
-    if value == {
-        .Int(number) -> Ok(number)
-        else -> Err(CcToolchainError.Invalid("C toolchain manifest field `{field}` is not a number"))
-    }
+    number :: foundation_json_integer(object.get(field) ?? Dyn.Null) ?? return Err(CcToolchainError.Invalid("C toolchain manifest field `{field}` is not a number"))
+    Ok(number)
 }
 
 fn provider_cc_manifest_object(value: Dyn) -> [String: Dyn]? Never! {

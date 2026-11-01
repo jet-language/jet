@@ -21,7 +21,7 @@ struct Writer {
     index: Int
     final: Bool
 }
-struct Reader {
+struct ChunkReader {
     header_hash: [U8]
     key: crypto.Secret
     nonce_prefix: [U8]
@@ -113,11 +113,11 @@ fn derive_key(shared: crypto.SharedSecret, salt: [U8], context: [U8], width: Int
         material := expert.shared_secret_bytes(shared)
         if crypto.hkdf_sha256(material, salt, context, width) == {
             .Ok(value) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Err(error)
             }
         }
@@ -128,11 +128,11 @@ fn seal_key(key: crypto.Secret, nonce: [U8], plain: [U8], aad: [U8]) -> [U8] cry
         material := expert.secret_bytes(key)
         if seal(material, nonce, plain, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Err(error)
             }
         }
@@ -143,11 +143,11 @@ fn open_key(key: crypto.Secret, nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] cr
         material := expert.secret_bytes(key)
         if open_record(material, nonce, cipher, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&material)
+                crypto.wipe(&material)
                 return Err(error)
             }
         }
@@ -159,13 +159,13 @@ fn seal_wrap(key: crypto.Secret, nonce: crypto.Secret, plain: crypto.Secret, aad
         plain_bytes := expert.secret_bytes(plain)
         if seal_key(key, nonce_bytes, plain_bytes, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&nonce_bytes)
-                crypto.__zeroize(&plain_bytes)
+                crypto.wipe(&nonce_bytes)
+                crypto.wipe(&plain_bytes)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&nonce_bytes)
-                crypto.__zeroize(&plain_bytes)
+                crypto.wipe(&nonce_bytes)
+                crypto.wipe(&plain_bytes)
                 return Err(error)
             }
         }
@@ -176,11 +176,11 @@ fn open_wrap(key: crypto.Secret, nonce: crypto.Secret, cipher: [U8], aad: [U8]) 
         nonce_bytes := expert.secret_bytes(nonce)
         if open_key(key, nonce_bytes, cipher, aad) == {
             .Ok(value) -> {
-                crypto.__zeroize(&nonce_bytes)
+                crypto.wipe(&nonce_bytes)
                 return Ok(^value)
             }
             .Err(error) -> {
-                crypto.__zeroize(&nonce_bytes)
+                crypto.wipe(&nonce_bytes)
                 return Err(error)
             }
         }
@@ -233,7 +233,7 @@ fn secret_length(secret: crypto.Secret) -> Int Never! {
     #Unsafe("Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy") {
         material := expert.secret_bytes(secret)
         length :: material.len()
-        crypto.__zeroize(&material)
+        crypto.wipe(&material)
         return length
     }
 }
@@ -336,7 +336,7 @@ fn header_length(fixed: [U8], total: Int) -> Int crypto.FileCryptoError! {
     if length < BASE + STANZA + TAG || length > 33554432 || plain_length(body) == None || 20 + length + body != total -> return Err(.OpenFailed)
     Ok(length)
 }
-fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: Int) -> Reader crypto.FileCryptoError! {
+fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: Int) -> ChunkReader crypto.FileCryptoError! {
     length :: header_length(fixed, total)
     if header.len() != length -> return Err(.OpenFailed)
     count :: integer(header, 68, 2)
@@ -378,10 +378,10 @@ fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: In
     if opened.len() != 0 -> return Err(.OpenFailed)
     all := fixed.copy()
     append(&all, header)
-    Ok(Reader{header_hash: crypto.sha256(all).bytes, key: ^key, nonce_prefix: prefix,
+    Ok(ChunkReader{header_hash: crypto.sha256(all).bytes, key: ^key, nonce_prefix: prefix,
         remaining: integer(fixed, 12, 8), index: 1, final: false})
 }
-fn open_chunk(state: &Reader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
+fn open_chunk(state: &ChunkReader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
     if state.final || state.index > MAX_RECORDS || framing.len() != 5 -> return Err(.OpenFailed)
     length :: integer(framing, 0, 4)
     flags :: framing[4]
@@ -394,7 +394,7 @@ fn open_chunk(state: &Reader, framing: [U8], encrypted: [U8]) -> crypto.Secret c
     state.final = flags == (U8{1})
     Ok(^clear)
 }
-fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
+fn finish(state: ChunkReader, trailing: [U8]) crypto.FileCryptoError! {
     if !state.final || state.remaining != 0 || trailing.len() != 0 -> return Err(.OpenFailed)
     Ok()
 }

@@ -1,18 +1,23 @@
 # tests/jetpack_hangar_store_v2.rs::hangar_verify_reports_corrupt_store_instead_of_empty_success at tests/jetpack_hangar_store_v2.rs:1508; hand-port
-# Claim: verify --json on a corrupt store exits 2 with empty stderr, schema jet.report/v1, code E1340, what could not read the Hangar (rs:1557-1573)
+# Claim: verify --json on a corrupt store exits 2 with empty stderr, schema jet.report/v3 (Rust asserted v1; REPORT_SCHEMA is now v3), code E1340, what could not read the Hangar (rs:1557-1573)
 # Claim: stdout does not contain no hangar object (rs:1574)
-# Fixture migrated: verify uses the jet binary as in rs:1544
-# Not ported: closure-db journal corruption before verify and restore after (rs:1531-1556): needs in-place mutation of store files, not expressible as a step; without it the exit-2 step cannot hold
-# Not ported: payload unchanged check (rs:1575-1577) reduced
+# Claim: the source payload is unchanged (rs:1575-1578)
+# Fixture migrated: the Rust jet-binary verify (rs:1544) runs as `jetpack hangar verify`; `jet hangar` is not a jet command on current dev (E2101)
+# step-2.sh is the Rust journal corruption (rs:1535-1542); step-4.sh restores it (rs:1556) and checks the payload.
 fixture: hangar_verify_reports_corrupt_store_instead_of_empty_success.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jetpack hangar ingest source --name verify-corrupt --ref verify-corrupt@fixture --no-color
 exit: 0 # rs:1515-1529 exit 0
-step: jet hangar verify verify-corrupt@fixture --json --no-color
+step: sh {work}/step-2.sh
+exit: 0 # rs:1535-1542 corrupt the committed closure transaction
+step: jetpack hangar verify verify-corrupt@fixture --json --no-color
 exit: 2 # rs:1544-1574
-stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1544-1574
+stdout: ~ "\"schema\":\"jet.report/v3\"" # rs:1544-1574
 stdout: ~ "\"code\":\"E1340\"" # rs:1544-1574
 stdout: ~ "\"what\":\"could not read the Hangar\"" # rs:1544-1574
-stderr: !~ "no hangar object" # rs:1544-1574
+stdout: !~ "no hangar object" # rs:1574
+stderr: empty # rs:1564-1568 JSON verify leaks no stderr
+step: sh {work}/step-4.sh
+exit: 0 # rs:1556,1575-1578 journal restored; payload unchanged

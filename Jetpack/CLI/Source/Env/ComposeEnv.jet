@@ -262,7 +262,7 @@ fn cli_compose_env(verification: &StoreVerification, theme: Theme, roots: Hangar
 // against the project the shell happens to stand in.
 fn cli_compose_env_scoped(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
     composed :: cli_compose_env_scoped_with_stats(&verification, theme, roots, flags, plan, scope, confirm_download)
-    Ok(composed.env)
+    Ok(^composed.env)
 }
 
 fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
@@ -354,7 +354,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         step_outcome :: if warm_hit == {
             .Val(realized) -> {
                 parts :: ^realized.into_parts()
-                RefOutcome.Realized{entry: parts.entry, state: parts.source_state, line: "", lease: parts.lease}
+                RefOutcome.Realized{entry: parts.entry, state: parts.source_state, line: "", lease: ^parts.lease}
             }
             .None -> {
                 step_started :: time.start()
@@ -404,7 +404,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
                 }
                 &realized_outputs.push((name: entry.name, output: leased_output))
                 &realized_refs.push(entry.reference)
-                &cache_leases.push(lease)
+                &cache_leases.push(^lease)
             }
             .NeedsNix(need) -> &holes.push(need)
             .Unavailable -> unavailable = true
@@ -420,7 +420,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         adapter_outcome :: if warm_hit == {
             .Val(realized) -> {
                 parts :: ^realized.into_parts()
-                Val((entry: parts.entry, state: parts.source_state, lease: parts.lease))
+                Val((entry: parts.entry, state: parts.source_state, lease: ^parts.lease))
             }
             .None -> cli_realize_adapter(&verification, theme, roots, flags, adapter, plan.table, true)
         }
@@ -429,7 +429,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
                 if needs_stats -> &ready_stats.record(realized.entry, realized.state)
                 if realized.lease.projected_bin_dir() == .Val(bin) -> &bin_dirs.push(bin)
                 &realized_refs.push(realized.entry.reference)
-                &cache_leases.push(realized.lease)
+                &cache_leases.push(^realized.lease)
             }
             .None -> failed = true
         }

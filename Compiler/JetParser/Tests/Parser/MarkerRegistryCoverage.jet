@@ -1,0 +1,200 @@
+// Ports of the marker-row walks from the deleted tests/marker_registry_coverage.rs
+// (#6096 marker-registry-coverage). Each active row of the one marker source
+// (Compiler/Prelude/Markers.jet, read as MARKER_SOURCE) is written at one of its
+// own declared sites and driven through the parser, formatter and reflection.
+use jet_foundation.[Diagnostic, MARKER_SOURCE, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, foundation_core_argument_menus, rule_arg_declaration]
+use jet_lexer.[lex, lex_generated]
+use jet_parser.[jet_format_source, parse_generated_source, parse_source]
+use jet_sema.[SemaScopeMembersMarkerRegistry, SemaScopeMembersMarkerRule, sema_comptime_reflection_marker_rule, sema_marker_rules_build_catalog, sema_scope_members_registry_add_applied_catalog, sema_taint_builtin_tag_names]
+
+// The applied-rule catalog the checker builds (MarkerModules.jet
+// `sema_marker_module_check`). The effect menu is seeded with the roots the
+// placeholders need; the Rust walk read EFFECT_ROOTS the same way.
+fn mrc_catalog() -> TAppliedRuleCatalog {
+    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
+    assert(parsed.diagnostics.is_empty(), "the marker source must parse")
+    menus :: foundation_core_argument_menus(["IO", "FS"], sema_taint_builtin_tag_names()) ?? panic("the applied-rule argument menus must build")
+    sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, menus) ?? panic("the applied-rule catalog must build")
+}
+
+// tests/marker_registry_coverage.rs:19-24: sites no source text can spell.
+// An operator impl spells the Impl site after its header
+// (`impl W.Add(Int) #Commutative { … }`).
+fn mrc_site_is_source_renderable(site: String) -> Bool { site != "Package" && site != "Operation" && site != "Text" }
+
+// tests/marker_registry_coverage.rs:28-44: one placeholder per parameter; a
+// closed menu offers its first variant.
+fn mrc_placeholder(kind: TAppliedRuleArgKind, source_type: String, menus: [TAppliedRuleArgumentMenu]) -> String {
+    if rule_arg_declaration(source_type, menus) == .Val(menu) && menu.variants.len() > 0 -> return menu.variants[0].copy()
+    if kind == {
+        .String -> "\"x\""
+        .Path -> "Path{{\"x\"}}"
+        .Int -> "1"
+        .Bool -> "true"
+        .DurationOrString -> "1s"
+        .Ident -> "x"
+        .Any -> "1"
+        .EffectRoots -> "[FS.Write]"
+    }
+}
+
+fn mrc_arguments_required(rule: TAppliedRule) -> Bool {
+    loop param in rule.signature.params {
+        if param.default_source == None -> return true
+    }
+    rule.signature.params.is_empty() && rule.signature.variadic != None
+}
+
+// tests/marker_registry_coverage.rs:47-96 (D-MARK-FORM1=A): parentheses
+// exactly when the signature needs them.
+fn mrc_spelling(rule: TAppliedRule, menus: [TAppliedRuleArgumentMenu]) -> String {
+    if rule.name == "Test" -> return "#Test(\"coverage\")"
+    if !mrc_arguments_required(rule) -> return "#{rule.name}"
+    if rule.name == "UnitFamily" -> return "#UnitFamily(Length, dimension)"
+    args := [String]{}
+    loop param in rule.signature.params {
+        if param.default_source == None -> &args.push(mrc_placeholder(param.kind, param.source_type, menus))
+    }
+    if args.is_empty() && rule.signature.variadic == .Val(kind) -> &args.push(mrc_placeholder(kind, rule.signature.variadic_source_type ?? "", menus))
+    first :: if rule.name == {
+        "Scrub" -> "X"
+        "Undo" -> "inverse"
+        "Short" -> "\"p\""
+        "Env" -> "\"PORT\""
+        "FX" -> "IO"
+        "Target" -> "Web"
+        "Pre" | "Post" -> "true"
+        else -> ""
+    }
+    if first != "" -> args[0] = first
+    if rule.name == "Every" -> return "#[Job, Every({args.join(", ")})]"
+    "#{rule.name}({args.join(", ")})"
+}
+
+// tests/marker_registry_coverage.rs:99-160: the smallest whole program that
+// puts `marker` at `site`.
+fn mrc_program_at(marker: String, rule: TAppliedRule, site: String) -> String? {
+    if site == {
+        "File" -> if marker.starts_with("#NoPrelude") -> return Val("#NoPrelude\nuse core.term as io\nfn run() {{\n    io.print(\"ok\")\n}}\n") else -> return Val("{marker}\nfn run() {{\n    print(\"ok\")\n}}\n")
+        // The Rust walk wrote `module c.lib`; a dotted user module now needs a
+        // declared namespace (E0960), so the smallest module is `module lib`.
+        "Module" -> if marker.starts_with("#Bindgen") -> return Val("{marker} module c.coverage.__bindgen__ {{\n}}\n") else -> return Val("{marker} module lib {{\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n")
+        "Function" -> {
+            if marker.starts_with("#Scrub") -> return Val("tag X {{ deny: [IO] }}\n{marker} fn helper(raw: #X String) -[]> String {{ return raw.copy() }}\n\nfn run() {{\n}}\n")
+            if marker.starts_with("#Undo") -> return Val("fn inverse() {{}}\n#[Unsafe(\"coverage\"), FFI(c), Undo(inverse)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n")
+            if marker.starts_with("#ABI") -> return Val("#Import module c.demo {{\n    {marker} fn helper(value: I32) -> I32 = \"helper\"\n}}\n\nfn run() {{\n}}\n")
+            if marker.starts_with("#FFI") -> return Val("#[Unsafe(\"coverage\"), FFI(c)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n")
+            if rule.name == "Memo" -> return Val("{marker}\nfn helper() -[]> {{\n}}\n\nfn run() {{\n}}\n")
+            return Val("{marker}\nfn helper() {{\n}}\n\nfn run() {{\n}}\n")
+        }
+        "Method" -> return Val("W :: struct {{\n    a: Int\n\n    {marker}\n    fn helper(self) {{\n    }}\n}}\n\nfn run() {{\n}}\n")
+        "Type" -> if marker.starts_with("#UnitFamily") -> return Val("{marker} {{ meter }}\n\nfn run() {{\n}}\n") else -> return Val("{marker}\nstruct W {{\n    a: Int\n}}\n\nfn run() {{\n}}\n")
+        "Field" -> if marker.starts_with("#Short") || marker.starts_with("#Env") || marker.starts_with("#Flag") -> return Val("#CLI\nstruct W {{\n    {marker} a: String\n}}\n\nfn run() {{\n}}\n") else -> return Val("struct W {{\n    {marker} a: Int\n}}\n\nfn run() {{\n}}\n")
+        "Variant" -> return Val("enum E {{\n    {marker} A\n    B\n}}\n\nfn run() {{\n}}\n")
+        "Impl" -> return Val("struct W {{\n    a: Int\n}}\n\nimpl W.Add(Int) {marker} {{\n    fn add(self, rhs: Int) -> W {{ return W{{a: self.a + rhs}} }}\n}}\n\nfn run() {{\n}}\n")
+        "Block" -> return Val("fn run() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n")
+        "Statement" -> return Val("fn run() {{\n    {marker} print(\"ok\")\n}}\n")
+        "Declaration" -> if marker.starts_with("#Persist") -> return Val("{marker} value := 1\n\nfn run() {{\n}}\n") else -> return Val("fn run() {{\n    {marker} value :: 1\n}}\n")
+        "Constant" -> return Val("{marker} VALUE :: comptime {{ 1 }}\n\nfn run() {{\n}}\n")
+        "Parameter" -> return Val("fn helper({marker} a: Int) {{\n}}\n\nfn run() {{\n}}\n")
+        "Expression" -> return Val("fn run() {{\n    value :: {marker}\n}}\n")
+        "Test" -> return Val("{marker} {{\n    print(\"ok\")\n}}\n\nfn run() {{\n}}\n")
+        else -> return None
+    }
+}
+
+fn mrc_render(diagnostics: [Diagnostic]) -> [String] { diagnostics.map(diagnostic -> "{diagnostic.code}: {diagnostic.what}") }
+
+// tests/marker_registry_coverage.rs:181-202: diagnostics meaning "this marker
+// did not reach its rule": any lex diagnostic, or the parser's closed
+// vocabulary (E0927) or scope table (E0355) rejecting it.
+fn mrc_rejected_the_marker(source: String) -> [String] {
+    generated :: source.contains("#Bindgen")
+    lexed :: if generated -> lex_generated(source.bytes()) else -> lex(source.bytes())
+    if !lexed.diagnostics.is_empty() -> return mrc_render(lexed.diagnostics)
+    parsed :: if generated -> parse_generated_source(source.bytes()) else -> parse_source(source.bytes())
+    rejected := [String]{}
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.code == "E0927" || diagnostic.code == "E0355" -> &rejected.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    rejected
+}
+
+// tests/marker_registry_coverage.rs:224 (law zero, the reachable half): every
+// active row can be written at one of its own declared sites and is
+// recognized there.
+// Known failing: #6192 (#Commutative declares only the Impl site).
+#Test("every_active_row_is_reachable_at_a_declared_site") {
+    catalog :: mrc_catalog()
+    assert(catalog.rows.len() > 20, "the marker catalog must hold the active rows")
+    ghosts := [String]{}
+    loop rule in catalog.rows {
+        marker :: mrc_spelling(rule, catalog.argument_menus)
+        renderable := [String]{}
+        loop site in rule.sites {
+            if mrc_site_is_source_renderable(site) -> &renderable.push(site)
+        }
+        if renderable.is_empty() {
+            &ghosts.push("#{rule.name} declares only interior sites {rule.sites.join(", ")}, so no source can reach it")
+            next
+        }
+        rejections := [String]{}
+        reached := false
+        loop site in renderable {
+            source :: mrc_program_at(marker, rule, site) ?? next
+            rejected :: mrc_rejected_the_marker(source)
+            if rejected.is_empty() {
+                reached = true
+                break
+            }
+            &rejections.push("  at {site}: {rejected.join("; ")}")
+        }
+        if !reached -> &ghosts.push("`{marker}` is rejected at every site it declares:\n{rejections.join("\n")}")
+    }
+    assert_eq(ghosts.join("\n"), "")
+}
+
+// tests/marker_registry_coverage.rs:280: every active row parses at a declared
+// site without a marker rejection, formats to a fixed point, and resolves
+// through the comptime reflection registry. The highlight half is
+// tests/guards/grammar_highlight.jet `every_highlight_token_is_in_each_generated_section`,
+// which checks every active marker row in each generated editor grammar.
+// Known failing: #6191 (#Local/#Shared declarations fail to parse).
+#Test("every_active_row_walks_parse_validate_format_highlight_reflect") {
+    catalog :: mrc_catalog()
+    registry := SemaScopeMembersMarkerRegistry{applied_rules: catalog.rows, argument_menus: catalog.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
+    assert(sema_scope_members_registry_add_applied_catalog(&registry, catalog), "the applied catalog must register once")
+    failures := [String]{}
+    loop rule in catalog.rows {
+        marker :: mrc_spelling(rule, catalog.argument_menus)
+        found := String?{None}
+        loop site in rule.sites {
+            if !mrc_site_is_source_renderable(site) -> next
+            source :: mrc_program_at(marker, rule, site) ?? next
+            if mrc_rejected_the_marker(source).is_empty() {
+                found = Val(source)
+                break
+            }
+        }
+        source :: found ?? {
+            &failures.push("`{marker}` has no parseable declared site")
+            next
+        }
+        if !source.contains("#Bindgen") {
+            once :: jet_format_source(source, false)
+            if !once.ok {
+                &failures.push("`{marker}` format: {mrc_render(once.diagnostics).join("; ")}")
+            } else {
+                twice :: jet_format_source(once.text, false)
+                if !twice.ok || twice.text != once.text -> &failures.push("`{marker}` formatted source does not round-trip")
+            }
+        }
+        reflected :: sema_comptime_reflection_marker_rule(registry, rule.name)
+        if reflected == .Val(row) {
+            if row.name != rule.name -> &failures.push("`{marker}` reflects as `{row.name}`")
+        } else {
+            &failures.push("`{marker}` is missing from reflection")
+        }
+    }
+    assert_eq(failures.join("\n"), "")
+}

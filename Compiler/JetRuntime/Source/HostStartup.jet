@@ -3,7 +3,7 @@
 // argv arrays/bytes remain borrowed for the runtime lifetime. Environment
 // arrays/bytes are lent only during capture, then copied into one owned block.
 // The native logical cell alone owns environment writes; this index is startup.
-// All storage uses the one MIR .Global mechanism, never foreign data imports.
+// All storage uses the one IR .Global mechanism, never foreign data imports.
 
 host_argc := I64{-1}
 
@@ -14,6 +14,22 @@ host_envp := I64{0}
 host_env_rows := I64{0}
 
 host_env_length := I64{0}
+
+// jet_rt_host_env_capture, installed by jet_rt_host_env_init: the
+// before-user-code environment snapshot (D-EFF-ENV-SNAPSHOT1 A) is taken
+// exactly when the program links a reader of it; a program with none cannot
+// tell the copy was never made (D-EFF-CORE-INIT1 A).
+host_env_capture_code := I64{0}
+
+// runtime-init: 4 when host_env_rows,host_env_length,logical_env_root
+#Export(c) fn jet_rt_host_env_init() {
+    host_env_capture_code = rt_host_env_capture_address()
+}
+
+fn rt_host_env_capture_address() -> I64 {
+    // Native-approved RuntimeLibrary FunctionAddress intrinsic (arity 1).
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
 
 // Rust 1.90.0 library/std/src/sys/env/unix.rs, env()::parse:
 // search '=' AFTER byte zero, permit names starting '=', skip malformed rows.
@@ -41,6 +57,16 @@ fn host_environment_split(bytes: I64) -> I64 {
         }
         return
     }
+    host_argv = argv
+    host_envp = envp
+    capture :: host_env_capture_code
+    if (capture != I64{0}) -> _ := coll_call1(capture, envp)
+    host_argc = count
+}
+
+// Copies the startup environment `envp` into the owned index host_env_rows /
+// host_env_length and seeds the logical environment from it.
+#Export(c) fn jet_rt_host_env_capture(envp: I64) -> I64 {
     raw_count := I64{0}
     #Unsafe("startup lends the immutable, null-terminated envp pointer array") {
         if (envp != I64{0}) {
@@ -90,10 +116,8 @@ fn host_environment_split(bytes: I64) -> I64 {
     }
     host_env_rows = rows
     host_env_length = valid
-    host_argv = argv
-    host_envp = envp
     logical_environment_startup()
-    host_argc = count
+    I64{0}
 }
 
 fn host_arguments_require() {
@@ -193,6 +217,24 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
         bytes :: os_load_i64(wrapping(host_argv + index * I64{8}))
         host_startup_list(bytes, host_startup_byte_length(bytes), output)
     }
+}
+
+// D-JOB-SUBCMD1=C: 1 when the program's first word (argv[1]) is the
+// `length` bytes at `data`, the name of a job the entry function runs in
+// place of `fn run` (JetIR ir_entry_function); 0 otherwise.
+#Export(c) fn jet_rt_entry_job_selected(data: I64, length: I64) -> I64 {
+    host_arguments_require()
+    if (host_argc < I64{2}) { return I64{0} }
+    bytes :: host_argument_bytes(I64{1})
+    if (host_startup_byte_length(bytes) != length) { return I64{0} }
+    #Unsafe("argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes") {
+        at := I64{0}
+        loop at < length {
+            if (os_load_u8(wrapping(bytes + at)) != os_load_u8(wrapping(data + at))) { return I64{0} }
+            at = wrapping(at + I64{1})
+        }
+    }
+    I64{1}
 }
 
 // FSIoEnvOsTesting.rs jet_std_io_args: std::env::args().collect(), argv[0]

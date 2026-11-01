@@ -1,5 +1,5 @@
 // D-TYPEDTEXT1: one Web representation of the checked typed-text kernels.
-// MIR carries literal and hole order; this module owns only the shared value
+// IR carries literal and hole order; this module owns only the shared value
 // representation and encoding rules.
 function jet_typed_sql_raw(template) {
   return { template: String(template), params: [] };

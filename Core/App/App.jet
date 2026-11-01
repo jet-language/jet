@@ -9,9 +9,17 @@ package {
     }
 }
 AUTH_MAX_PROVIDERS :: 64
-// Process-wide live queries and sync sessions retain runtime-owned identity.
-// Source publishes the vocabulary and delegates to that one ambient registry.
-use app as provider
+SYNC_MAX_SESSION :: 256
+SYNC_MAX_DOCUMENT :: 4194304
+SYNC_MAX_TEXT :: 1048576
+SYNC_MAX_ENTRIES :: 100000
+SYNC_MAX_REPLICAS :: 4096
+SYNC_MAX_INT :: 9223372036854775807
+// Live bindings are core.web's process-wide registry: `app` names the same
+// bindings. Sync sessions are records of that registry under
+// web.LIVE_SYNC_SOURCE.
+use core.web as web
+use core.text as unicode
 
 #Error
 enum AppError {
@@ -31,7 +39,8 @@ struct Session {
     expires_at: Int
 }
 
-use provider.[LiveQuery]
+use core.web.[Live]
+use core.reactive.loadable.[Loadable]
 fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
@@ -85,23 +94,362 @@ fn canonical_providers(values: [String]) -> [String] {
     providers
 }
 
-fn live(key: String, data: String) -> LiveQuery Never! { provider.live(key, data) }
+fn state<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! { web.state<T, E>(binding) }
 
-fn live_get(q: LiveQuery) -> String Never! { provider.live_get(q) }
+fn live_stats() -> String Never! { web.live_stats() }
 
-fn live_show(q: LiveQuery) -> String Never! { provider.live_show(q) }
+fn __live_bind<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^fn() -> T E!) -> Live<T, E> Never! { web.__live_bind<T, E>(source, args, ^run) }
 
-fn live_stats() -> String Never! { provider.live_stats() }
+fn __live_poll<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^fn() -> T E!) -> Live<T, E> Never! { web.__live_poll<T, E>(source, args, every, ^run) }
 
-fn subscribe(source: String) -> LiveQuery Never! { provider.subscribe(source) }
+fn __live_push<T: Encode>(source: String, args: [String], value: T) Never! { web.__live_push<T>(source, args, value) }
 
-fn invalidate(footprint: String) -> Int Never! { provider.invalidate(footprint) }
+fn __live_invalidate(source: String, args: [String]) Never! { web.__live_invalidate(source, args) }
 
-fn transact_invalidate(write_set: String) -> Int Never! { provider.transact_invalidate(write_set) }
+fn __live_invalidate_all(source: String) Never! { web.__live_invalidate_all(source) }
 
-fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { provider.signal_push(q, payload) }
+fn __live_arg<A: Encode>(value: A) -> String Never! { web.__live_arg<A>(value) }
 
-fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over: over) }
+// D-SYNC1: publish the canonical display of a CRDT document onto session
+// `over` (SyncPublish.rs jet_sync_publish). A session keeps its generation and
+// merged document; a publication that changes the document advances the
+// generation, and a duplicate delivery returns the existing receipt. The
+// document merges only facts that survive the display: map keys with equal
+// values, list members and counter components. A conflicting map value or a
+// differing text document is denied rather than replaced by a lexical winner.
+// The Rust adapter also handed each change to the installed live transport
+// subscribers (LiveQuery.rs:511); the native runtime installs none.
+fn sync(doc_show: String, over: String) -> String Never! {
+    if over.trim() == "" || over.len() > SYNC_MAX_SESSION || unicode.has_control(over) -> return "SyncError(invalid session)"
+    document :: sync_document_parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
+    loop {
+        seen :: web.live_cell_load()
+        registry := web.live_decode(seen) ?? return "SyncError(session registry is unavailable)"
+        found := -1
+        sessions := 0
+        loop index in 0..<registry.records.len() {
+            if registry.records[index].source != web.LIVE_SYNC_SOURCE -> next
+            sessions += 1
+            if registry.records[index].key == over -> found = index
+        }
+        generation := 0
+        current := document.copy()
+        if found >= 0 {
+            stored :: sync_session_decode(registry.records[found].value) ?? return "SyncError(session registry is unavailable)"
+            generation = stored.generation
+            current = stored.document.copy()
+        } else if sessions >= SYNC_MAX_ENTRIES {
+            return "SyncError(session limit exceeded)"
+        }
+        changed := false
+        if current != document {
+            merged :: sync_document_merge(current, document) ?? return "SyncError(document merge denied)"
+            if merged != current {
+                if generation >= SYNC_MAX_INT -> return "SyncError(session generation exhausted)"
+                generation += 1
+                current = merged
+                changed = true
+            }
+        } else if generation == 0 {
+            generation = 1
+            changed = true
+        }
+        receipt :: "SyncOver(session={over}, generation={generation}, doc={current})"
+        if !changed -> return receipt
+        value :: "{generation}:{current}"
+        if found >= 0 {
+            registry.records[found].value = value
+        } else {
+            id :: registry.next_id + 1
+            registry.next_id = id
+            &registry.records.push(web.LiveRecord{id: id, source: web.LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, every_ns: 0, ran_ns: 0})
+        }
+        if web.live_cell_replace(seen, web.live_encode(registry)) -> return receipt
+    }
+}
+
+struct SyncSession {
+    generation: Int
+    document: String
+}
+
+fn sync_session_decode(value: String) -> SyncSession? {
+    colon :: value.find(":")
+    if colon < 0 -> return None
+    generation :: Int.parse(value.slice(0, colon)) ?? return None
+    Val(SyncSession{generation: generation, document: value.slice(colon + 1, value.len())})
+}
+
+// The canonical document `value` names, or None when it is malformed or not
+// in canonical order (SyncPublish.rs JetSyncDocument::parse).
+fn sync_document_parse(value: String) -> String? {
+    if value == "" || value.trim() != value || value.len() > SYNC_MAX_DOCUMENT || unicode.has_control(value) -> return None
+    if !value.ends_with(")") -> return None
+    if value.starts_with("SyncText(") -> return Val(value.copy())
+    canonical := ""
+    if value.starts_with("SyncMap(") {
+        canonical = sync_map_show(sync_map_entries(value) ?? return None)
+    } else if value.starts_with("SyncList(") {
+        canonical = sync_list_show(sync_list_items(value) ?? return None)
+    } else if value.starts_with("PNCounter(") {
+        canonical = sync_counter_show(sync_counter_entries(value) ?? return None)
+    } else {
+        return None
+    }
+    if canonical != value -> return None
+    Val(canonical)
+}
+
+// SyncPublish.rs JetSyncDocument::merge.
+fn sync_document_merge(left: String, right: String) -> String? {
+    if left == right -> return Val(left.copy())
+    merged := ""
+    if left.starts_with("SyncMap(") && right.starts_with("SyncMap(") {
+        entries := sync_map_entries(left) ?? return None
+        other :: sync_map_entries(right) ?? return None
+        loop key in other.keys() {
+            value :: other.get(key) ?? next
+            if entries.get(key) == .Val(existing) {
+                if existing != value -> return None
+            } else {
+                _ :: &entries.add(key, value)
+            }
+        }
+        if entries.len() > SYNC_MAX_ENTRIES -> return None
+        merged = sync_map_show(entries)
+    } else if left.starts_with("SyncList(") && right.starts_with("SyncList(") {
+        items := sync_list_items(left) ?? return None
+        loop item in sync_list_items(right) ?? return None {
+            items = sync_pair_insert(items, item) ?? items
+        }
+        if items.len() > SYNC_MAX_ENTRIES -> return None
+        merged = sync_list_show(items)
+    } else if left.starts_with("PNCounter(") && right.starts_with("PNCounter(") {
+        counts := sync_counter_entries(left) ?? return None
+        other :: sync_counter_entries(right) ?? return None
+        loop replica in other.keys() {
+            count :: other.get(replica) ?? next
+            slot :: counts.get(replica) ?? SyncCount{positive: 0, negative: 0}
+            positive :: if count.positive > slot.positive -> count.positive else -> slot.positive
+            negative :: if count.negative > slot.negative -> count.negative else -> slot.negative
+            _ :: &counts.add(replica, SyncCount{positive: positive, negative: negative})
+        }
+        if counts.len() > SYNC_MAX_REPLICAS -> return None
+        merged = sync_counter_show(counts)
+    } else {
+        return None
+    }
+    sync_document_parse(merged)
+}
+
+struct SyncPair {
+    first: String
+    second: String
+}
+
+struct SyncCount {
+    positive: Int
+    negative: Int
+}
+
+fn sync_map_entries(value: String) -> [String:String]? {
+    body :: sync_document_body(value, "SyncMap(") ?? return None
+    entries := [String:String]{}
+    if body == "" -> return Val(entries)
+    loop entry in sync_split(body, ",") ?? return None {
+        pair :: sync_split_once(entry, "=") ?? return None
+        key :: sync_unescape(pair.first) ?? return None
+        item :: sync_unescape(pair.second) ?? return None
+        if !sync_token_valid(key) || item.len() > SYNC_MAX_TEXT || entries.get(key) != .None -> return None
+        _ :: &entries.add(key, item)
+    }
+    Val(entries)
+}
+
+fn sync_map_show(entries: [String:String]) -> String {
+    keys := [String]{}
+    loop key in entries.keys() -> &keys.push(key)
+    &keys.sort()
+    shown := [String]{}
+    loop key in keys {
+        value :: entries.get(key) ?? next
+        &shown.push("{sync_escape(key)}={sync_escape(value)}")
+    }
+    "SyncMap({shown.join(",")})"
+}
+
+fn sync_list_items(value: String) -> [SyncPair]? {
+    body :: sync_document_body(value, "SyncList(") ?? return None
+    items := [SyncPair]{}
+    if body == "" -> return Val(items)
+    loop raw in sync_split(body, "|") ?? return None {
+        pair :: sync_split_once(raw, ":") ?? return None
+        replica :: sync_unescape(pair.first) ?? return None
+        item :: sync_unescape(pair.second) ?? return None
+        if !sync_token_valid(replica) || item.len() > SYNC_MAX_TEXT -> return None
+        items = sync_pair_insert(items, SyncPair{first: replica, second: item}) ?? return None
+    }
+    if items.len() > SYNC_MAX_ENTRIES -> return None
+    Val(items)
+}
+
+// `items` with `item` in (first, second) order; None when already present.
+fn sync_pair_insert(items: [SyncPair], item: SyncPair) -> [SyncPair]? {
+    out := [SyncPair]{}
+    placed := false
+    loop existing in items {
+        if existing.first == item.first && existing.second == item.second -> return None
+        later :: if existing.first == item.first -> existing.second > item.second else -> existing.first > item.first
+        if !placed && later {
+            &out.push(item)
+            placed = true
+        }
+        &out.push(existing)
+    }
+    if !placed -> &out.push(item)
+    Val(out)
+}
+
+fn sync_list_show(items: [SyncPair]) -> String {
+    shown := [String]{}
+    loop item in items -> &shown.push("{sync_escape(item.first)}:{sync_escape(item.second)}")
+    "SyncList({shown.join("|")})"
+}
+
+fn sync_counter_entries(value: String) -> [String:SyncCount]? {
+    body :: sync_document_body(value, "PNCounter(") ?? return None
+    counts := [String:SyncCount]{}
+    if body == "" -> return Val(counts)
+    loop entry in sync_split(body, ",") ?? return None {
+        pair :: sync_split_once(entry, "=") ?? return None
+        replica :: sync_unescape(pair.first) ?? return None
+        sides :: sync_split_once(pair.second, "/") ?? return None
+        positive :: sync_count_parse(sync_unescape(sides.first) ?? return None, "+") ?? return None
+        negative :: sync_count_parse(sync_unescape(sides.second) ?? return None, "-") ?? return None
+        if !sync_token_valid(replica) || counts.get(replica) != .None -> return None
+        _ :: &counts.add(replica, SyncCount{positive: positive, negative: negative})
+    }
+    if counts.len() > SYNC_MAX_REPLICAS -> return None
+    // The checked total of positive minus negative counts must stay an Int.
+    total := 0
+    loop replica in counts.keys() {
+        count :: counts.get(replica) ?? next
+        if total > 0 && count.positive > SYNC_MAX_INT - total -> return None
+        total = total + count.positive
+        if total < 0 && count.negative > SYNC_MAX_INT + total + 1 -> return None
+        total = total - count.negative
+    }
+    Val(counts)
+}
+
+fn sync_counter_show(counts: [String:SyncCount]) -> String {
+    replicas := [String]{}
+    loop replica in counts.keys() -> &replicas.push(replica)
+    &replicas.sort()
+    shown := [String]{}
+    loop replica in replicas {
+        count :: counts.get(replica) ?? next
+        &shown.push("{sync_escape(replica)}=+{count.positive}/-{count.negative}")
+    }
+    "PNCounter({shown.join(",")})"
+}
+
+// `text` is `sign` then decimal digits; its value.
+fn sync_count_parse(text: String, sign: String) -> Int? {
+    if !text.starts_with(sign) || text.len() == 1 -> return None
+    digits :: text.slice(1, text.len())
+    loop byte in digits.bytes() {
+        n :: Int.from_u8(byte)
+        if n < 48 || n > 57 -> return None
+    }
+    Val(Int.parse(digits) ?? return None)
+}
+
+fn sync_document_body(value: String, prefix: String) -> String? {
+    if !value.starts_with(prefix) || !value.ends_with(")") || value.len() < prefix.len() + 1 -> return None
+    Val(value.slice(prefix.len(), value.len() - 1))
+}
+
+fn sync_token_valid(value: String) -> Bool {
+    value.trim() != "" && value.len() <= SYNC_MAX_TEXT && !unicode.has_control(value)
+}
+
+fn sync_is_separator(scalar: String) -> Bool {
+    scalar == "," || scalar == "=" || scalar == "|" || scalar == ":" || scalar == "/"
+}
+
+fn sync_escape(value: String) -> String {
+    out := ""
+    loop scalar in unicode.scalars(value) {
+        if scalar == "\\" || sync_is_separator(scalar) -> out = "{out}\\"
+        out = "{out}{scalar}"
+    }
+    out
+}
+
+// None when an escape is dangling or names no separator, or when a separator
+// appears unescaped.
+fn sync_unescape(value: String) -> String? {
+    out := ""
+    escaped := false
+    loop scalar in unicode.scalars(value) {
+        if escaped {
+            if scalar != "\\" && !sync_is_separator(scalar) -> return None
+            out = "{out}{scalar}"
+            escaped = false
+        } else if scalar == "\\" {
+            escaped = true
+        } else if sync_is_separator(scalar) {
+            return None
+        } else {
+            out = "{out}{scalar}"
+        }
+    }
+    if escaped -> return None
+    Val(out)
+}
+
+// The parts of `value` between unescaped `separator`s, escapes kept.
+fn sync_split(value: String, separator: String) -> [String]? {
+    parts := [String]{}
+    current := ""
+    escaped := false
+    loop scalar in unicode.scalars(value) {
+        if escaped {
+            current = "{current}\\{scalar}"
+            escaped = false
+        } else if scalar == "\\" {
+            escaped = true
+        } else if scalar == separator {
+            &parts.push(current)
+            current = ""
+        } else {
+            current = "{current}{scalar}"
+        }
+    }
+    if escaped -> return None
+    &parts.push(current)
+    Val(parts)
+}
+
+// `value` split at its first unescaped `separator`; None without one.
+fn sync_split_once(value: String, separator: String) -> SyncPair? {
+    before := ""
+    escaped := false
+    at := 0
+    loop scalar in unicode.scalars(value) {
+        at += scalar.len()
+        if escaped {
+            escaped = false
+        } else if scalar == "\\" {
+            escaped = true
+        } else if scalar == separator {
+            return Val(SyncPair{first: before, second: value.slice(at, value.len())})
+        }
+        before = "{before}{scalar}"
+    }
+    None
+}
 
 fn valid_provider(value: String) -> Bool {
     if value == "" || value.len() > 64 -> return false

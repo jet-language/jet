@@ -8,9 +8,11 @@ the driver implementation is in [`Jetpack/CLI/Source/CcDriver`](../../../Jetpack
 and the focused fixtures are in [`tests/guards/cc_driver_hosts.jet`](../../../tests/guards/cc_driver_hosts.jet).
 
 `jet-cc` is the installed alias for `jet cc`; `jet-cxx` and `jet-c++` are
-aliases for `jet c++`. The aliases are real binaries, not shell wrappers. They
-select one Jetpack toolchain descriptor and pass the resulting action through
-Jet's build graph.
+aliases for `jet c++`. The aliases are real binaries, not shell wrappers: each
+release ships them as hard links of `jet` in the same directory, and `jet`
+selects the verb from the name it was invoked as (`argv[0]`). They select one
+Jetpack toolchain descriptor and pass the resulting action through Jet's build
+graph.
 
 ## Toolchain admission
 

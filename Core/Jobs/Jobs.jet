@@ -124,7 +124,7 @@ struct JobQueueStatus {
 fn queue() -[DB, Env, FS, Time]> JobQueue ServiceError! {
     endpoint :: core.service.__active_endpoint() ?? return Err(err)
     service.__authority_validate(endpoint) ?? return Err(err)
-    parts :: core.service.__endpoint_authority_parts(endpoint) ?? return Err(err)
+    authority :: core.service.__endpoint_authority(endpoint)
     name :: "default"
     queue_validate_text(name, "job queue", 256, false) ?? return Err(err)
     path :: queue_default_path()
@@ -138,14 +138,14 @@ fn queue() -[DB, Env, FS, Time]> JobQueue ServiceError! {
     }
     driver := db.__driver_open(path) ?? return Err(queue_unavailable("queue SQLite open failed"))
     queue_begin(driver) ?? return Err(err)
-    initialized :: queue_initialize_on_driver(&driver, parts.authority, name, 1024) ?? {
+    initialized :: queue_initialize_on_driver(&driver, authority, name, 1024) ?? {
         _ :: db.__driver_rollback(driver)
         return Err(err)
     }
     queue_finish(driver, ^initialized) ?? return Err(err)
     queue := JobQueue{
         data: shared QueueData{driver: ^driver}, endpoint: endpoint,
-        authority: parts.authority, name: name,
+        authority: authority, name: name,
     }
     _ :: queue.status() ?? return Err(err)
     Ok(queue)

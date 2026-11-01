@@ -15,6 +15,7 @@ use jet_foundation.[
     Program,
     Span,
     Stmt,
+    expr_binary_operands,
     expr_span,
     type_name,
 ]
@@ -303,10 +304,7 @@ fn sema_budget_scene_expr(expr: Expr, scenes: &[String]) Never! {
         }
         .Field(base, _, _, _) -> sema_budget_scene_expr(base, &scenes)
         .Unary(_, operand, _, _) -> sema_budget_scene_expr(operand, &scenes)
-        .Binary(_, left, right, _, _) -> {
-            sema_budget_scene_expr(left, &scenes)
-            sema_budget_scene_expr(right, &scenes)
-        }
+        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_budget_scene_expr(operand, &scenes)
         else -> {}
     }
 }

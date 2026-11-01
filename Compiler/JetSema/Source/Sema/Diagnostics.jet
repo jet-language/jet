@@ -9,9 +9,11 @@ use jet_foundation.[
     Type,
     core_module_for_alias,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
+    type_identity_equal,
     type_name,
 ]
 
@@ -203,6 +205,25 @@ fn sema_err_shadow_lint(span: Span) -> Diagnostic {
     sema_lint("L0511", span, "Binding `err` shadows the fallback's ambient failure report", "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there", "Rename the binding, or use it outside a fallback")
 }
 
+// E0610: `use alias.item` whose alias names no module in scope.
+fn sema_unknown_module_alias(module_alias: String, span: Span) -> Diagnostic {
+    row :: diagnostic_registry_row("E0610") ?? panic("E0610 has no registry row")
+    sema_error("E0610", span, row.what.replace("{{alias}}", module_alias), row.why.replace("{{alias}}", module_alias), row.fix.replace("{{alias}}", module_alias))
+}
+
+// E0628: `name.member` where `name` is the item this module takes from its
+// file module `name` (`module wrap` with `pub use wrap.wrap`).
+fn sema_taken_over_file_member(name: String, member: String, span: Span) -> Diagnostic {
+    row :: diagnostic_registry_row("E0628") ?? panic("E0628 has no registry row")
+    sema_error("E0628", span, row.what.replace("{{name}}", name).replace("{{member}}", member), row.why.replace("{{name}}", name).replace("{{member}}", member), row.fix.replace("{{name}}", name).replace("{{member}}", member))
+}
+
+// E0629: a module (`text`, `lib.inner`) read where a value is expected.
+fn sema_module_used_as_value(name: String, span: Span) -> Diagnostic {
+    row :: diagnostic_registry_row("E0629") ?? panic("E0629 has no registry row")
+    sema_error("E0629", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
+}
+
 fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
@@ -253,11 +274,19 @@ fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Dia
 
 fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    // Rust type_assign.rs:1430: a plain value offered to a `T?` slot is a payload mismatch (D-OPT-LIFT1=A).
+    if required == .Option(payload) {
+        offered_optional :: offered == .Option(_)
+        if !offered_optional {
+            fix :: if type_identity_equal(payload, offered) -> "this position does not lift a plain value; write `Val(...)`" else -> sema_type_fix_hint(payload, offered)
+            return sema_error("E0108", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "`{type_name(required)}` means a `{type_name(payload)}` or `None`", fix)
+        }
+    }
     required_name :: type_name(required)
     offered_name :: type_name(offered)
     // `/` of two whole numbers is an exact Fraction; storing it in an Int
     // most often wants floor division.
-    fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down, or convert the Fraction explicitly" else -> "use a value of the required type or convert it explicitly"
+    fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down, or convert the Fraction explicitly" else -> sema_integer_narrowing_fix(required, offered) ?? "use a value of the required type or convert it explicitly"
     sema_error(
         "E0108",
         span,
@@ -267,11 +296,41 @@ fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     )
 }
 
+// (Rust `check_type_assignable`) A carrier offered where its plain payload
+// is required: an unchecked fallible result (E0401) or an optional value
+// (E0310) must be tested before its value is used.
+fn sema_plain_carrier_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic? {
+    if offered == .Result(ok, _) {
+        if !(required == .Result(_, _)) && type_identity_equal(ok, required) -> return Val(sema_error("E0401", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a fallible result must be checked before its value is used", "use `?`, `??`, or test with `== Ok(...)` / `== Err(...)`"))
+    }
+    if offered == .Option(inner) {
+        if !(required == .Option(_)) && type_identity_equal(inner, required) -> return Val(sema_error("E0310", span, "this needs {sema_type_show(required)}, but the value is {sema_type_show(offered)}", "a plain value is required here, not an optional one", "test with `== Val(...)` or `== None` first, e.g. `if x == Val(n) {{ ... }}`"))
+    }
+    None
+}
+
 // E0108: a write whose value doesn't fit the binding or field it lands in;
 // `holder` is "binding" or "field".
 fn sema_slot_holds_mismatch(slot: String, holder: String, required: Type, offered: Type, span: Span) -> Diagnostic {
     fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down (`/%=` in place), or make the {holder} a Float" else -> sema_type_fix_hint(required, offered)
     sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(offered)}", "a {holder} keeps one type for its whole life", fix)
+}
+
+// The repair for a whole number where a narrower fixed width is required
+// (`Int` or `I64` into `U8`): narrowing is never implicit, and the
+// destination-owned conversion is fallible.
+fn sema_integer_narrowing_fix(want: Type, got: Type) -> String? {
+    fixed :: if want == {.IntN(_, _) -> true else -> false}
+    if !fixed -> return None
+    source := "int"
+    if got == .IntN(signed, bits) {
+        prefix :: if signed -> "i" else -> "u"
+        source = "{prefix}{bits}"
+    } else if got != Type.Int {
+        return None
+    }
+    target :: type_name(want)
+    Val("convert it with `{target}.from_{source}(value) ?? fallback`; the conversion is `None` when the value doesn't fit in {target}")
 }
 
 // (Rust `typed_text_mismatch`): a runtime `String` never becomes a checked
@@ -383,6 +442,7 @@ fn sema_type_fix_hint(want: Type, got: Type) -> String Never! {
     if want_show == sema_type_show(got) -> return "these are two different declarations that both print as {want_show}; make both sides name the same one (import it once and use that name)"
     want_leaf :: sema_type_nominal_leaf(want)
     if want_leaf != "" && want_leaf == sema_type_nominal_leaf(got) -> return "these names may refer to one declaration; make both sides use one spelling for `{want_leaf}`"
+    if sema_integer_narrowing_fix(want, got) == .Val(narrowing) -> return narrowing
     if want == {
         .Float -> {
             if got == Type.Int -> return "write the number with a decimal part, like `2.0`"
@@ -408,6 +468,11 @@ fn sema_type_fix_hint(want: Type, got: Type) -> String Never! {
 // is taught as a fault in the value itself (its conversion or wrap), never as
 // a prompt to change the declared return type.
 fn sema_return_value_fix(want: Type, got: Type) -> String Never! {
+    // The written result may still carry an open error rail here; a whole
+    // number narrowed into its fixed-width success is taught as the
+    // fallible conversion.
+    success :: if sema_expr_unwrap_tag(want) == .Result(ok, _) -> sema_expr_unwrap_tag(ok) else -> sema_expr_unwrap_tag(want)
+    if sema_integer_narrowing_fix(success, sema_expr_unwrap_tag(got)) == .Val(narrowing) -> return narrowing
     if want == Type.Int && got == (Type.Named{name: "Fraction"}) -> return "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
     if want == .List(item) && item == got -> return "wrap the value in a list: `[value]`"
     if got == .List(item) && item == want -> return "this is a whole list; hand back one element, or combine the elements into one value"

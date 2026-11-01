@@ -1,0 +1,269 @@
+// Entry guards (O1, O2, pass "entry", before the call graph's passes): a
+// recursive function, which inlining never takes, whose body starts by
+// testing its parameters and returning at once,
+//
+//     fn g(n: Int) -> Int { if n < 2 -> return n; ... }
+//
+// is called only when that test fails. Each direct call of it, with the
+// drops after it and its stop point,
+//
+//     r := g(t); drop t; stopped := poll(); if stopped { E }
+//
+// becomes
+//
+//     if t < 2 { r := t; drop t } else { r := g(t); drop t; stopped := poll(); if stopped { E } }
+//
+// so the calls that would return at once are never made. The test and the
+// return are g's own head as built, with its parameters reading the call's
+// arguments: constants, comparisons and Nots of scalars, then constants,
+// copies and moves of scalars and the runtime's Int clone, none of which
+// writes a parameter or can publish a stop. E is the edge as built: drops
+// and Returns, no branch, so its nesting one level deeper changes nothing.
+
+use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_value]
+
+// The most instructions a head (its test, If, arm and Return) may have.
+IR_OPT_ENTRY_LIMIT :: 8
+
+fn ir_opt_entry(m: IRModule, functions: &[IRFunction], recursive: [Bool], keys: [String]) Never! {
+    clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    guards := [[IRFunction]]{}
+    any := false
+    loop id in 0..<functions.len() {
+        row := [IRFunction]{}
+        if recursive[id] {
+            if ir_opt_entry_guard(m, functions[id], clone) == .Val(guard) {
+                &row.push(guard)
+                any = true
+            }
+        }
+        &guards.push(^row)
+    }
+    if !any -> return
+    loop id in 0..<functions.len() {
+        out := ir_opt_entry_build(functions[id], guards, keys) ?? { next }
+        functions[id] = ^out
+    }
+}
+
+// The head of `g` as a function of g's parameters: its instructions up to
+// the End of the If that returns, each reading only parameters and what an
+// instruction before it wrote; None when g does not start so.
+fn ir_opt_entry_guard(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Never! {
+    if g.asm != None || g.op.len() == 0 -> return None
+    known := [Bool]{}
+    loop slot in 0..<g.slot_type.len() -> &known.push(slot < g.param_count)
+    at := 0
+    loop at < g.op.len() && at < IR_OPT_ENTRY_LIMIT && ir_opt_entry_test(g.op[at]) {
+        if !ir_opt_entry_reads(m, g, known, at) -> return None
+        known[g.dst[at]] = true
+        at += 1
+    }
+    if at >= g.op.len() || g.op[at] != .If || g.b[at] >= 0 || !ir_opt_entry_known(known, g.a[at]) -> return None
+    branch :: at
+    at += 1
+    loop at < g.op.len() && at < IR_OPT_ENTRY_LIMIT && ir_opt_entry_arm(g, clone, at) {
+        if !ir_opt_entry_reads(m, g, known, at) -> return None
+        known[g.dst[at]] = true
+        at += 1
+    }
+    if at >= IR_OPT_ENTRY_LIMIT || at + 1 >= g.op.len() || g.op[at] != .Return || g.op[at + 1] != .End || g.a[at + 1] != branch -> return None
+    value :: g.a[at]
+    // A parameter is the caller's argument, which the caller drops: the head
+    // may return one only when it owns nothing (not an Int).
+    if value >= 0 && (!ir_opt_entry_known(known, value) || !ir_opt_entry_scalar(m, g, value) || (value < g.param_count && m.types[g.slot_type[value]].kind == .Int)) -> return None
+    guard := ir_function_new(g.name, g.key, "", g.source_file, g.line)
+    map := [Int]{}
+    loop slot in 0..<g.slot_type.len() {
+        &map.push(if slot < g.param_count -> ir_slot(&guard, g.slot_type[slot], IRSlotKind.Param, -1, 0) else -> -1)
+    }
+    guard.result = g.result
+    loop k in 0..<at {
+        written :: g.dst[k]
+        if written >= 0 && map[written] < 0 -> map[written] = ir_slot(&guard, g.slot_type[written], IRSlotKind.Temp, -1, 0)
+        ir_opt_emit_mapped(&guard, g, k, map, g.code_line[k])
+    }
+    _ := ir_emit(&guard, IROp.Return, -1, if value >= 0 -> map[value] else -> -1, -1, -1, g.code_line[at])
+    _ := ir_emit(&guard, IROp.End, -1, -1, -1, -1, g.code_line[at + 1])
+    ir_opt_compact(&guard)
+    Val(guard)
+}
+
+fn ir_opt_entry_test(op: IROp) -> Bool Never! {
+    op == .Const || op == .Not || op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
+}
+
+fn ir_opt_entry_arm(g: IRFunction, clone: Int, at: Int) -> Bool Never! {
+    op :: g.op[at]
+    op == .Const || op == .Copy || op == .Move || (op == .CallRuntime && g.a[at] == clone && g.c[at] == 1)
+}
+
+fn ir_opt_entry_known(known: [Bool], slot: Int) -> Bool Never! {
+    slot >= 0 && slot < known.len() && known[slot]
+}
+
+fn ir_opt_entry_scalar(m: IRModule, g: IRFunction, slot: Int) -> Bool Never! {
+    kind :: m.types[g.slot_type[slot]].kind
+    kind == .Bool || kind == .Int || kind == .Word || kind == .Float || kind == .Float32 || kind == .Char
+}
+
+// Whether instruction `at` of a head writes a scalar slot other than a
+// parameter and reads only known scalar slots, moving none out of a
+// parameter (the caller's argument, which the caller still drops).
+fn ir_opt_entry_reads(m: IRModule, g: IRFunction, known: [Bool], at: Int) -> Bool Never! {
+    written :: g.dst[at]
+    if written < g.param_count || written >= g.slot_type.len() || !ir_opt_entry_scalar(m, g, written) -> return false
+    op :: g.op[at]
+    if op == .Const -> return true
+    if op == .CallRuntime {
+        loop index in g.b[at]..<(g.b[at] + g.c[at]) {
+            slot :: g.args[index]
+            if !ir_opt_entry_known(known, slot) || !ir_opt_entry_scalar(m, g, slot) -> return false
+        }
+        return true
+    }
+    if !ir_opt_entry_known(known, g.a[at]) || !ir_opt_entry_scalar(m, g, g.a[at]) -> return false
+    if op == .Move -> return g.a[at] >= g.param_count
+    if op == .Not || op == .Copy -> return true
+    ir_opt_entry_known(known, g.b[at]) && ir_opt_entry_scalar(m, g, g.b[at])
+}
+
+// `caller` with its calls of guarded functions (`guards[g]`: g's head, or
+// no row) guarded; None when it has none.
+fn ir_opt_entry_build(caller: IRFunction, guards: [[IRFunction]], keys: [String]) -> IRFunction? Never! {
+    lasts := [Int]{}
+    any := false
+    loop at in 0..<caller.op.len() {
+        last :: ir_opt_entry_site(caller, guards, keys, at)
+        &lasts.push(last)
+        if last >= 0 -> any = true
+    }
+    if !any -> return None
+    out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
+    out.inline_always = caller.inline_always
+    out.symbol_hash = caller.symbol_hash
+    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    out.result = caller.result
+    loop value in caller.args -> &out.args.push(value)
+    at := 0
+    loop at < caller.op.len() {
+        last :: lasts[at]
+        if last < 0 {
+            _ := ir_emit(&out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
+            at += 1
+            next
+        }
+        ir_opt_entry_splice(&out, caller, guards[caller.a[at]][0], at, last)
+        at = last + 1
+    }
+    ir_opt_compact(&out)
+    Val(out)
+}
+
+// When instruction `at` is a direct call of a guarded function that can take
+// its guard: the last instruction the guard's Else holds (the call, the
+// drops after it, and its stop point when one follows them); else -1. A
+// call whose result the function returns stays as it is: it is a tail call
+// (TailCalls.jet), a jump that a guard around it would turn back into a
+// call growing the stack.
+fn ir_opt_entry_site(caller: IRFunction, guards: [[IRFunction]], keys: [String], at: Int) -> Int Never! {
+    if caller.op[at] != .Call -> return -1
+    callee :: caller.a[at]
+    if callee < 0 || callee >= guards.len() || guards[callee].len() == 0 -> return -1
+    params :: guards[callee][0].param_count
+    if caller.c[at] != params -> return -1
+    dst :: caller.dst[at]
+    returned :: guards[callee][0].a[guards[callee][0].op.len() - 2]
+    if (dst >= 0) != (returned >= 0) -> return -1
+    if dst >= 0 && caller.slot_type[dst] != guards[callee][0].result -> return -1
+    loop slot in 0..<params {
+        if caller.slot_type[caller.args[caller.b[at] + slot]] != guards[callee][0].slot_type[slot] -> return -1
+    }
+    count :: caller.op.len()
+    last := at
+    loop last + 1 < count && caller.op[last + 1] == .Drop -> last += 1
+    if ir_opt_stops_poll(caller, keys, last + 1) {
+        end :: caller.c[last + 2]
+        loop k in (last + 3)..<end {
+            op :: caller.op[k]
+            if op != .Drop && op != .Return -> return -1
+        }
+        last = end
+    }
+    after := last + 1
+    loop after < count && (caller.op[after] == .Drop || caller.op[after] == .Move || caller.op[after] == .Copy) -> after += 1
+    if after < count && caller.op[after] == .Return -> return -1
+    last
+}
+
+// The call at `at` of `caller` behind its guard: the head with its
+// parameters reading the call's arguments, the returned value into the
+// call's result and the drops after the call; Else the call through `last`.
+fn ir_opt_entry_splice(f: &IRFunction, caller: IRFunction, guard: IRFunction, at: Int, last: Int) Never! {
+    line :: caller.code_line[at]
+    map := [Int]{}
+    loop slot in 0..<guard.slot_type.len() {
+        &map.push(if slot < guard.param_count -> caller.args[caller.b[at] + slot] else -> ir_slot(&f, guard.slot_type[slot], IRSlotKind.Temp, -1, 0))
+    }
+    returning :: guard.op.len() - 2
+    loop k in 0..<returning -> ir_opt_emit_mapped(&f, guard, k, map, line)
+    value :: guard.a[returning]
+    if value >= 0 -> _ := ir_emit(&f, IROp.Move, caller.dst[at], map[value], -1, -1, line)
+    k := at + 1
+    loop k <= last && caller.op[k] == .Drop {
+        _ := ir_emit(&f, IROp.Drop, -1, caller.a[k], -1, -1, caller.code_line[k])
+        k += 1
+    }
+    _ := ir_emit(&f, IROp.Else, -1, -1, -1, -1, line)
+    loop held in at..<(last + 1) -> _ := ir_emit(&f, caller.op[held], caller.dst[held], caller.a[held], caller.b[held], caller.c[held], caller.code_line[held])
+    _ := ir_emit(&f, IROp.End, -1, -1, -1, -1, line)
+}
+
+// g(n) = if n < 2 -> n else g(n - 1) + n over I64 words: at O1 and O2 g's
+// call of itself sits in the Else of a copy of its test, and IR Lint finds
+// nothing after any pass.
+#Test("A call of a recursive function that starts by returning sits behind its test") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        flag :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+        g := ir_function_new("g", "test:entry.jet::g", "", "entry.jet", 1)
+        n :: ir_slot(&g, word, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+        g.result = word
+        two :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, two, 2, -1, -1, 2)
+        small :: ir_slot(&g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Lt, small, n, two, -1, 2)
+        _ := ir_emit(&g, IROp.If, -1, small, -1, -1, 2)
+        _ := ir_emit(&g, IROp.Return, -1, n, -1, -1, 2)
+        _ := ir_emit(&g, IROp.End, -1, -1, -1, -1, 2)
+        one :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Const, one, 1, -1, -1, 3)
+        less :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Sub, less, n, one, IR_OVERFLOW_WRAP, 3)
+        got :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        args :: ir_args(&g, [Int]{less})
+        _ := ir_emit(&g, IROp.Call, got, 0, args, 1, 3)
+        sum :: ir_slot(&g, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&g, IROp.Add, sum, got, n, IR_OVERFLOW_WRAP, 3)
+        _ := ir_emit(&g, IROp.Return, -1, sum, -1, -1, 3)
+        ir_opt_compact(&g)
+        m.entry = 0
+        name_rows_set(&m.function_rows, g.key, 0)
+        &m.functions.push(g)
+        options := ir_opt_options(level)
+        options.verify = true
+        report :: ir_optimize_module(&m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        f :: m.functions[0]
+        calls := 0
+        guarded := false
+        loop at in 0..<f.op.len() {
+            if f.op[at] != .Call -> next
+            calls += 1
+            guarded = at > 0 && f.op[at - 1] == .Else
+        }
+        assert_eq(calls, 1)
+        assert(guarded)
+    }
+}

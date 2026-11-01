@@ -7,6 +7,6 @@ mkdir: store
 env: JET_PACKAGE_STORE_DIR={work}/store
 step: jet fetch
 exit: nonzero
-stderr.after_first("Error ["): ^= "E1206]"
-stderr.after_first("Error [E1206]:").split("\n", 0): ~ "escapes"
+stderr.after_first("Error ["): ^= "E1206]" # original first_diag_code predicate
+stderr.after_first("Error [E1206]:").split("\n", 0): ~ "escapes" # original error[0].what contains predicate
 file: store/outside absent

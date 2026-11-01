@@ -15,7 +15,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
     elements := [Type]{}
     loop input in inputs {
         input_ty :: ir_ty(p, b, input)
-        element :: ir_zip_element(ir_subst(m, input_ty)) ?? return ir_fail_slot(&b, span, "builtin Zip over {ir_type_name(input_ty)}")
+        element :: ir_zip_element(input_ty) ?? return ir_fail_slot(&b, span, "builtin Zip over {ir_type_name(input_ty)}")
         &elements.push(element)
     }
     pointer_row :: ir_pointer_row(&m)
@@ -30,19 +30,19 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
     if fill_count == 1 {
         fill = ir_expr(&m, p, &b, args[input_count - 1])
         if ir_failed(b) || fill < 0 -> return -1
-        fill_ty = ir_subst(m, ir_ty(p, b, args[input_count - 1]))
+        fill_ty = ir_ty(p, b, args[input_count - 1])
     }
     // Owned values this build made and drops once the zip holds its copies.
     made := [Int]{}
     if fill >= 0 -> &made.push(fill)
     fills := [Int]{}
     loop index in 0..<input_count {
-        if ir_iter_element(ir_subst(m, ir_ty(p, b, inputs[index]))) == None {
+        if ir_iter_element(ir_ty(p, b, inputs[index])) == None {
             columns[index] = ir_lazy_from_list(&m, p, &b, columns[index], pointer_row, span)
             if columns[index] < 0 -> return -1
         }
         if mode != .Pad -> next
-        target :: ir_subst(m, field_types[index])
+        target :: field_types[index].copy()
         if fill_mode == .DefaultNone {
             // Each element becomes Present; the ended side stands in Absent.
             local :: ir_zip_local(&b, "zip_0", elements[index], span)
@@ -54,8 +54,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
             release :: mapped.release
             iter_row :: ir_value_type(&m, p, Type.Apply{name: "Iter", args: [Type]{target}}) ?? return ir_type_fail(&b, span, target)
             source :: columns[index]
-            columns[index] = ir_runtime(&m, &b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row)
-            ir_lazy_consumed(&m, &b, source)
+            columns[index] = ir_lazy_runtime(&m, &b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row, source)
             absent_node :: ir_node(&b, target, NodeKind.Absent, span)
             absent :: ir_expr(&m, p, &b, absent_node)
             if ir_failed(b) || absent < 0 -> return -1
@@ -80,13 +79,13 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
         &fills.push(column_fill)
     }
     left := columns[0]
-    left_type := ir_subst(m, field_types[0])
+    left_type := field_types[0].copy()
     left_fill := if fills.len() > 0 -> fills[0] else -> -1
     loop index in 1..<input_count {
         row_fields := [TypeTupleField]{}
-        loop column in 0..<(index + 1) -> &row_fields.push(TypeTupleField{name: fields[column], ty: ir_subst(m, field_types[column])})
+        loop column in 0..<(index + 1) -> &row_fields.push(TypeTupleField{name: fields[column], ty: field_types[column].copy()})
         row_type :: Type.Tuple{fields: row_fields}
-        right_type :: ir_subst(m, field_types[index])
+        right_type :: field_types[index].copy()
         // The row so far and this column's value make the next row.
         values := [Int]{}
         prefix :: ir_zip_local(&b, "zip_0", left_type, span)
@@ -103,7 +102,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
         joined :: ir_zip_adapter(&m, p, &b, "zip_{index}", [Type]{left_type, right_type}, [String]{"zip_0", "zip_1"}, row_type, body, span)
         if joined.closure < 0 -> return -1
         last :: index + 1 == input_count
-        result_ty :: if last -> ir_subst(m, ty) else -> Type.Apply{name: "Iter", args: [Type]{row_type}}
+        result_ty :: if last -> ty.copy() else -> Type.Apply{name: "Iter", args: [Type]{row_type}}
         result_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
         meta :: ir_lazy_meta(&m, p, &b, row_type, span)
         if meta < 0 -> return -1
@@ -164,11 +163,10 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
 
 // `rows.unzip()`: one List per row field, each row's fields pushed in order;
 // an Iter is drained into a List first.
-fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
-    result_ty :: ir_subst(m, ty)
+fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver: Int, span: Span) -> Int Never! {
     columns_shape := [TypeTupleField]{}
     if ir_untag(result_ty) == .Tuple(fields) -> columns_shape = fields
-    input_ty :: ir_subst(m, ir_ty(p, b, receiver))
+    input_ty :: ir_ty(p, b, receiver)
     receiver_ty :: ir_ty(p, b, receiver)
     item :: ir_zip_element(input_ty) ?? return ir_fail_slot(&b, span, "builtin Unzip over {ir_type_name(receiver_ty)}")
     rows_are_tuples :: if ir_untag(item) == { .Tuple(_) -> true else -> false }
@@ -184,7 +182,7 @@ fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, 
     columns := [Int]{}
     element_rows := [Int]{}
     loop field in columns_shape {
-        element :: ir_zip_list_element(field.ty) ?? return ir_fail_slot(&b, span, "builtin Unzip column {field.name} of {ir_type_name(field.ty)}")
+        element :: ir_sequence_element(field.ty) ?? return ir_fail_slot(&b, span, "builtin Unzip column {field.name} of {ir_type_name(field.ty)}")
         column_row :: ir_value_type(&m, p, field.ty) ?? return ir_type_fail(&b, span, field.ty)
         element_row :: ir_value_type(&m, p, element) ?? return ir_type_fail(&b, span, element)
         &columns.push(ir_list_from(&m, p, &b, column_row, element_row, [Int]{}))
@@ -215,15 +213,8 @@ fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, 
 
 // A zip input's element: a List's, a fixed List's or an Iter's.
 fn ir_zip_element(ty: Type) -> Type? Never! {
-    if ir_zip_list_element(ty) == .Val(element) -> return Val(element)
+    if ir_sequence_element(ty) == .Val(element) -> return Val(element)
     ir_iter_element(ty)
-}
-
-fn ir_zip_list_element(ty: Type) -> Type? Never! {
-    if ir_untag(ty) == {
-        .List(element) | .FixedList(element, _) -> Val(element.copy())
-        else -> None
-    }
 }
 
 fn ir_zip_tuple_field(ty: Type, name: String) -> Type? Never! {
@@ -236,7 +227,7 @@ fn ir_zip_tuple_field(ty: Type, name: String) -> Type? Never! {
 }
 
 fn ir_zip_local(b: &IRBuilder, name: String, ty: Type, span: Span) -> Int Never! {
-    ir_node(&b, ty, NodeKind.Local{local: checked_generated_local(name, span)}, span)
+    ir_node(&b, ty, NodeKind.Local{local: checked_generated_local(name, span, ty.copy())}, span)
 }
 
 struct IRZipAdapter {
@@ -281,7 +272,7 @@ fn ir_zip_adapter(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, param
     id :: m.functions.len()
     key :: "{b.f.key}#{role}@{span.start}"
     &m.functions.push(ir_hashed_function("{b.f.name}.{role}@{span.start}", key, "{b.f.symbol}__{role}_", b.f.source_file, b.line))
-    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{}, source_file: b.f.source_file, line: b.line, subst_names: m.subst_names, subst_types: m.subst_types, row: b.row, made: b.made, next_node: b.next_node})
+    &m.lambdas.push(IRLambdaJob{lambda: lambda, captures: [IRCaptureSlot]{}, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node})
     &m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row :: ir_pointer_row(&m)
     code :: ir_temp(&m, &b, pointer_row)

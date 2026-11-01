@@ -14,8 +14,8 @@ IGNORE_HAS_SEPARATOR :: I64{8}
 fn ignore_matcher_alloc(count: I64) -> I64 {
     matcher :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(matcher, I64{1})
-    rt_text_store(matcher + I64{8}, count)
-    rt_text_store(matcher + I64{16}, if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8}))
+    rt_text_store(wrapping(matcher + I64{8}), count)
+    rt_text_store(wrapping(matcher + I64{16}), if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8}))
     matcher
 }
 
@@ -32,8 +32,8 @@ fn ignore_rule_drop(rule: I64) {
         rt_text_store(rule, refs)
         return
     }
-    jet_rt_string_drop(rt_text_word(rule + I64{8}))
-    jet_rt_string_drop(rt_text_word(rule + I64{16}))
+    jet_rt_string_drop(rt_text_word(wrapping(rule + I64{8})))
+    jet_rt_string_drop(rt_text_word(wrapping(rule + I64{16})))
     jet_rt_free(rule, I64{32}, I64{8})
 }
 
@@ -44,11 +44,11 @@ fn ignore_matcher_drop(matcher: I64) {
         rt_text_store(matcher, refs)
         return
     }
-    count :: rt_text_word(matcher + I64{8})
-    rules :: rt_text_word(matcher + I64{16})
+    count :: rt_text_word(wrapping(matcher + I64{8}))
+    rules :: rt_text_word(wrapping(matcher + I64{16}))
     at := I64{0}
     loop at < count {
-        ignore_rule_drop(rt_text_word(rules + at * I64{8}))
+        ignore_rule_drop(rt_text_word(wrapping(rules + at * I64{8})))
         at += I64{1}
     }
     if (count != I64{0}) -> jet_rt_free(rules, count * I64{8}, I64{8})
@@ -59,7 +59,7 @@ fn ignore_matcher_drop(matcher: I64) {
 fn ignore_backslashes_before(data: I64, index: I64) -> I64 {
     count := I64{0}
     at := index
-    loop at > (I64{0}) && rt_text_byte(data + at - I64{1}) == (I64{92}) {
+    loop at > (I64{0}) && rt_text_byte(wrapping(wrapping(data + at) - I64{1})) == (I64{92}) {
         count += I64{1}
         at -= I64{1}
     }
@@ -69,9 +69,9 @@ fn ignore_backslashes_before(data: I64, index: I64) -> I64 {
 // JetFsIgnoreRule::parse on one `lines()` item; 0 for no rule.
 fn ignore_rule_parse(data: I64, length: I64, base: I64) -> I64 {
     end := length
-    if (end > I64{0} && rt_text_byte(data + end - I64{1}) == I64{13}) -> end -= I64{1}
+    if (end > I64{0} && rt_text_byte(wrapping(wrapping(data + end) - I64{1})) == I64{13}) -> end -= I64{1}
     // trim_unescaped_trailing_spaces
-    loop end > (I64{0}) && rt_text_byte(data + end - I64{1}) == (I64{32}) {
+    loop end > (I64{0}) && rt_text_byte(wrapping(wrapping(data + end) - I64{1})) == (I64{32}) {
         if (ignore_backslashes_before(data, end - I64{1}).bit_and(I64{1}) != I64{0}) -> break
         end -= I64{1}
     }
@@ -84,11 +84,11 @@ fn ignore_rule_parse(data: I64, length: I64, base: I64) -> I64 {
     }
     if (start == end) -> return I64{0}
     // ends_with_unescaped('/')
-    if (rt_text_byte(data + end - I64{1}) == I64{47} && (ignore_backslashes_before(data + start, end - I64{1} - start).bit_and(I64{1})) == I64{0}) {
+    if (rt_text_byte(wrapping(wrapping(data + end) - I64{1})) == I64{47} && (ignore_backslashes_before(wrapping(data + start), end - I64{1} - start).bit_and(I64{1})) == I64{0}) {
         flags = flags.bit_or(IGNORE_DIRECTORY_ONLY)
         end -= I64{1}
     }
-    if (start < end && rt_text_byte(data + start) == I64{47}) {
+    if (start < end && rt_text_byte(wrapping(data + start)) == I64{47}) {
         flags = flags.bit_or(IGNORE_ANCHORED)
         start += I64{1}
     }
@@ -97,7 +97,7 @@ fn ignore_rule_parse(data: I64, length: I64, base: I64) -> I64 {
     escaped := false
     at := start
     loop at < end {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         if escaped {
             escaped = false
         } else if (byte == I64{92}) {
@@ -112,13 +112,13 @@ fn ignore_rule_parse(data: I64, length: I64, base: I64) -> I64 {
     base_data :: rt_text_data(base)
     base_start := I64{0}
     base_end := rt_text_len(base)
-    loop base_start < base_end && rt_text_byte(base_data + base_start) == (I64{47}) -> base_start += I64{1}
-    loop base_end > base_start && rt_text_byte(base_data + base_end - I64{1}) == (I64{47}) -> base_end -= I64{1}
+    loop base_start < base_end && rt_text_byte(wrapping(base_data + base_start)) == (I64{47}) -> base_start += I64{1}
+    loop base_end > base_start && rt_text_byte(wrapping(wrapping(base_data + base_end) - I64{1})) == (I64{47}) -> base_end -= I64{1}
     rule :: jet_rt_alloc(I64{32}, I64{8})
     rt_text_store(rule, I64{1})
-    rt_text_store(rule + I64{8}, rt_text_copy(base_data + base_start, base_end - base_start))
-    rt_text_store(rule + I64{16}, rt_text_copy(data + start, end - start))
-    rt_text_store(rule + I64{24}, flags)
+    rt_text_store(wrapping(rule + I64{8}), rt_text_copy(wrapping(base_data + base_start), base_end - base_start))
+    rt_text_store(wrapping(rule + I64{16}), rt_text_copy(wrapping(data + start), end - start))
+    rt_text_store(wrapping(rule + I64{24}), flags)
     rule
 }
 
@@ -126,10 +126,10 @@ fn ignore_rule_parse(data: I64, length: I64, base: I64) -> I64 {
 // `str::lines()` item of the lossy text parsed against `base`.
 fn ignore_matcher_extend(matcher: I64, base: I64, text: I64) -> I64 {
     rules :: files_words_new()
-    inherited :: rt_text_word(matcher + I64{8})
+    inherited :: rt_text_word(wrapping(matcher + I64{8}))
     at := I64{0}
     loop at < inherited {
-        rule :: rt_text_word(rt_text_word(matcher + I64{16}) + at * I64{8})
+        rule :: rt_text_word(wrapping(rt_text_word(wrapping(matcher + I64{16})) + at * I64{8}))
         rt_text_store(rule, rt_text_word(rule) + I64{1})
         files_words_push(rules, rule)
         at += I64{1}
@@ -139,19 +139,19 @@ fn ignore_matcher_extend(matcher: I64, base: I64, text: I64) -> I64 {
     start := I64{0}
     loop start < length {
         end := start
-        loop end < length && rt_text_byte(data + end) != (I64{10}) -> end += I64{1}
+        loop end < length && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
         line_end := end
         // lines(): "\r\n" drops the '\r'; an unterminated last line keeps it.
-        if (end < length && line_end > start && rt_text_byte(data + line_end - I64{1}) == I64{13}) -> line_end -= I64{1}
-        rule :: ignore_rule_parse(data + start, line_end - start, base)
+        if (end < length && line_end > start && rt_text_byte(wrapping(wrapping(data + line_end) - I64{1})) == I64{13}) -> line_end -= I64{1}
+        rule :: ignore_rule_parse(wrapping(data + start), line_end - start, base)
         if (rule != I64{0}) -> files_words_push(rules, rule)
         start = end + I64{1}
     }
-    count :: rt_text_word(rules + I64{8})
+    count :: rt_text_word(wrapping(rules + I64{8}))
     result :: ignore_matcher_alloc(count)
     at = I64{0}
     loop at < count {
-        rt_text_store(rt_text_word(result + I64{16}) + at * I64{8}, rt_text_word(rt_text_word(rules) + at * I64{8}))
+        rt_text_store(wrapping(rt_text_word(wrapping(result + I64{16})) + at * I64{8}), rt_text_word(wrapping(rt_text_word(rules) + at * I64{8})))
         at += I64{1}
     }
     files_words_free(rules)
@@ -163,7 +163,7 @@ fn ignore_scalars(data: I64, length: I64) -> I64 {
     words :: files_words_new()
     at := I64{0}
     loop at < length {
-        scalar :: trap_scalar(data + at)
+        scalar :: trap_scalar(wrapping(data + at))
         files_words_push(words, scalar.code)
         at += scalar.width
     }
@@ -175,21 +175,21 @@ fn ignore_bracket(pattern: I64, count: I64, start: I64, text: I64) -> I64 {
     index := start + I64{1}
     negated := false
     if (index < count) {
-        first :: rt_text_word(pattern + index * I64{8})
+        first :: rt_text_word(wrapping(pattern + index * I64{8}))
         negated = first == I64{33} || first == I64{94}
     }
     if negated -> index += I64{1}
     matched := false
     has_item := false
-    loop index < count && rt_text_word(pattern + index * I64{8}) != (I64{93}) {
-        if (rt_text_word(pattern + index * I64{8}) == I64{92} && index + I64{1} < count) -> index += I64{1}
-        first :: rt_text_word(pattern + index * I64{8})
+    loop index < count && rt_text_word(wrapping(pattern + index * I64{8})) != (I64{93}) {
+        if (rt_text_word(wrapping(pattern + index * I64{8})) == I64{92} && index + I64{1} < count) -> index += I64{1}
+        first :: rt_text_word(wrapping(pattern + index * I64{8}))
         index += I64{1}
         has_item = true
-        if (index + I64{1} < count && rt_text_word(pattern + index * I64{8}) == I64{45} && rt_text_word(pattern + (index + I64{1}) * I64{8}) != I64{93}) {
+        if (index + I64{1} < count && rt_text_word(wrapping(pattern + index * I64{8})) == I64{45} && rt_text_word(wrapping(pattern + (index + I64{1}) * I64{8})) != I64{93}) {
             index += I64{1}
-            if (rt_text_word(pattern + index * I64{8}) == I64{92} && index + I64{1} < count) -> index += I64{1}
-            last :: rt_text_word(pattern + index * I64{8})
+            if (rt_text_word(wrapping(pattern + index * I64{8})) == I64{92} && index + I64{1} < count) -> index += I64{1}
+            last :: rt_text_word(wrapping(pattern + index * I64{8}))
             index += I64{1}
             if (text >= I64{0} && first <= text && text <= last) -> matched = true
         } else if (text >= I64{0} && first == text) {
@@ -207,9 +207,9 @@ fn ignore_component_matches(pattern_data: I64, pattern_length: I64, text_data: I
     pattern_words :: ignore_scalars(pattern_data, pattern_length)
     text_words :: ignore_scalars(text_data, text_length)
     pattern :: rt_text_word(pattern_words)
-    count :: rt_text_word(pattern_words + I64{8})
+    count :: rt_text_word(wrapping(pattern_words + I64{8}))
     text :: rt_text_word(text_words)
-    total :: rt_text_word(text_words + I64{8})
+    total :: rt_text_word(wrapping(text_words + I64{8}))
     width :: total + I64{1}
     cells :: (count + I64{1}) * width
     memo :: jet_rt_alloc(cells, I64{1})
@@ -218,30 +218,30 @@ fn ignore_component_matches(pattern_data: I64, pattern_length: I64, text_data: I
         ti := total
         loop ti >= (I64{0}) {
             present :: ti < total
-            scalar :: if present -> rt_text_word(text + ti * I64{8}) else -> I64{-1}
+            scalar :: if present -> rt_text_word(wrapping(text + ti * I64{8})) else -> I64{-1}
             result := false
             if (pi == count) {
                 result = ti == total
             } else {
-                wanted :: rt_text_word(pattern + pi * I64{8})
+                wanted :: rt_text_word(wrapping(pattern + pi * I64{8}))
                 if {
-                    (wanted == I64{42}) -> result = rt_text_byte(memo + (pi + I64{1}) * width + ti) != I64{0} || (present && rt_text_byte(memo + pi * width + ti + I64{1}) != I64{0})
-                    (wanted == I64{63}) -> result = present && rt_text_byte(memo + (pi + I64{1}) * width + ti + I64{1}) != I64{0}
-                    (wanted == I64{92} && pi + I64{1} < count) -> result = present && rt_text_word(pattern + (pi + I64{1}) * I64{8}) == scalar && rt_text_byte(memo + (pi + I64{2}) * width + ti + I64{1}) != I64{0}
-                    (wanted == I64{92}) -> result = present && scalar == I64{92} && rt_text_byte(memo + (pi + I64{1}) * width + ti + I64{1}) != I64{0}
+                    (wanted == I64{42}) -> result = rt_text_byte(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti)) != I64{0} || (present && rt_text_byte(wrapping(wrapping(wrapping(memo + pi * width) + ti) + I64{1})) != I64{0})
+                    (wanted == I64{63}) -> result = present && rt_text_byte(wrapping(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti) + I64{1})) != I64{0}
+                    (wanted == I64{92} && pi + I64{1} < count) -> result = present && rt_text_word(wrapping(pattern + (pi + I64{1}) * I64{8})) == scalar && rt_text_byte(wrapping(wrapping(wrapping(memo + (pi + I64{2}) * width) + ti) + I64{1})) != I64{0}
+                    (wanted == I64{92}) -> result = present && scalar == I64{92} && rt_text_byte(wrapping(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti) + I64{1})) != I64{0}
                     (wanted == I64{91}) -> {
                         bracket :: ignore_bracket(pattern, count, pi, scalar)
                         if (bracket >= I64{0}) {
                             // Even a negated class consumes one existing scalar.
-                            result = present && (bracket.bit_and(I64{1})) != I64{0} && rt_text_byte(memo + (bracket / I64{2}) * width + ti + I64{1}) != I64{0}
+                            result = present && (bracket.bit_and(I64{1})) != I64{0} && rt_text_byte(wrapping(wrapping(wrapping(memo + (bracket / I64{2}) * width) + ti) + I64{1})) != I64{0}
                         } else {
-                            result = present && scalar == I64{91} && rt_text_byte(memo + (pi + I64{1}) * width + ti + I64{1}) != I64{0}
+                            result = present && scalar == I64{91} && rt_text_byte(wrapping(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti) + I64{1})) != I64{0}
                         }
                     }
-                    else -> result = present && scalar == wanted && rt_text_byte(memo + (pi + I64{1}) * width + ti + I64{1}) != I64{0}
+                    else -> result = present && scalar == wanted && rt_text_byte(wrapping(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti) + I64{1})) != I64{0}
                 }
             }
-            rt_text_put(memo + pi * width + ti, if result -> I64{1} else -> I64{0})
+            rt_text_put(wrapping(wrapping(memo + pi * width) + ti), if result -> I64{1} else -> I64{0})
             ti -= I64{1}
         }
         pi -= I64{1}
@@ -259,7 +259,7 @@ fn ignore_parts(data: I64, length: I64) -> I64 {
     at := I64{0}
     loop at < length {
         end := at
-        loop end < length && rt_text_byte(data + end) != (I64{47}) -> end += I64{1}
+        loop end < length && rt_text_byte(wrapping(data + end)) != (I64{47}) -> end += I64{1}
         if (end > at) {
             files_words_push(parts, at)
             files_words_push(parts, end)
@@ -269,16 +269,16 @@ fn ignore_parts(data: I64, length: I64) -> I64 {
     parts
 }
 
-fn ignore_part_start(parts: I64, index: I64) -> I64 { rt_text_word(rt_text_word(parts) + index * I64{16}) }
-fn ignore_part_end(parts: I64, index: I64) -> I64 { rt_text_word(rt_text_word(parts) + index * I64{16} + I64{8}) }
-fn ignore_part_count(parts: I64) -> I64 { rt_text_word(parts + I64{8}) / I64{2} }
+fn ignore_part_start(parts: I64, index: I64) -> I64 { rt_text_word(wrapping(rt_text_word(parts) + index * I64{16})) }
+fn ignore_part_end(parts: I64, index: I64) -> I64 { rt_text_word(wrapping(wrapping(rt_text_word(parts) + index * I64{16}) + I64{8})) }
+fn ignore_part_count(parts: I64) -> I64 { rt_text_word(wrapping(parts + I64{8})) / I64{2} }
 
 // glob_path_matches over the first `limit` pattern parts.
 fn ignore_path_matches(pattern: I64, pattern_parts: I64, limit: I64, path: I64, path_parts: I64) -> Bool {
     if (limit > I64{1}) {
         last_start :: ignore_part_start(pattern_parts, limit - I64{1})
         last_end :: ignore_part_end(pattern_parts, limit - I64{1})
-        globstar :: last_end - last_start == I64{2} && rt_text_byte(pattern + last_start) == I64{42} && rt_text_byte(pattern + last_start + I64{1}) == I64{42}
+        globstar :: last_end - last_start == I64{2} && rt_text_byte(wrapping(pattern + last_start)) == I64{42} && rt_text_byte(wrapping(wrapping(pattern + last_start) + I64{1})) == I64{42}
         // A trailing `dir/**` names the contents of `dir`, not `dir` itself.
         if (globstar && ignore_path_matches(pattern, pattern_parts, limit - I64{1}, path, path_parts)) -> return false
     }
@@ -296,14 +296,14 @@ fn ignore_path_matches(pattern: I64, pattern_parts: I64, limit: I64, path: I64, 
             } else {
                 start :: ignore_part_start(pattern_parts, pi)
                 end :: ignore_part_end(pattern_parts, pi)
-                if (end - start == I64{2} && rt_text_byte(pattern + start) == I64{42} && rt_text_byte(pattern + start + I64{1}) == I64{42}) {
-                    result = rt_text_byte(memo + (pi + I64{1}) * width + ti) != I64{0} || (ti < total && rt_text_byte(memo + pi * width + ti + I64{1}) != I64{0})
-                } else if (ti < total && rt_text_byte(memo + (pi + I64{1}) * width + ti + I64{1}) != I64{0}) {
+                if (end - start == I64{2} && rt_text_byte(wrapping(pattern + start)) == I64{42} && rt_text_byte(wrapping(wrapping(pattern + start) + I64{1})) == I64{42}) {
+                    result = rt_text_byte(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti)) != I64{0} || (ti < total && rt_text_byte(wrapping(wrapping(wrapping(memo + pi * width) + ti) + I64{1})) != I64{0})
+                } else if (ti < total && rt_text_byte(wrapping(wrapping(wrapping(memo + (pi + I64{1}) * width) + ti) + I64{1})) != I64{0}) {
                     part_start :: ignore_part_start(path_parts, ti)
-                    result = ignore_component_matches(pattern + start, end - start, path + part_start, ignore_part_end(path_parts, ti) - part_start)
+                    result = ignore_component_matches(wrapping(pattern + start), end - start, wrapping(path + part_start), ignore_part_end(path_parts, ti) - part_start)
                 }
             }
-            rt_text_put(memo + pi * width + ti, if result -> I64{1} else -> I64{0})
+            rt_text_put(wrapping(wrapping(memo + pi * width) + ti), if result -> I64{1} else -> I64{0})
             ti -= I64{1}
         }
         pi -= I64{1}
@@ -315,7 +315,7 @@ fn ignore_path_matches(pattern: I64, pattern_parts: I64, limit: I64, path: I64, 
 
 // JetFsIgnoreRule::matches.
 fn ignore_rule_matches(rule: I64, relative: I64, length: I64, is_dir: Bool) -> Bool {
-    base :: rt_text_word(rule + I64{8})
+    base :: rt_text_word(wrapping(rule + I64{8}))
     base_length :: rt_text_len(base)
     local := relative
     local_length := length
@@ -323,24 +323,24 @@ fn ignore_rule_matches(rule: I64, relative: I64, length: I64, is_dir: Bool) -> B
         if (length == base_length && rt_text_equal_bytes(relative, rt_text_data(base), base_length)) {
             local_length = I64{0}
         } else {
-            if (length <= base_length || !rt_text_equal_bytes(relative, rt_text_data(base), base_length) || rt_text_byte(relative + base_length) != I64{47}) -> return false
+            if (length <= base_length || !rt_text_equal_bytes(relative, rt_text_data(base), base_length) || rt_text_byte(wrapping(relative + base_length)) != I64{47}) -> return false
             local = relative + base_length + I64{1}
             local_length = length - base_length - I64{1}
         }
     }
     parts :: ignore_parts(local, local_length)
     count :: ignore_part_count(parts)
-    flags :: rt_text_word(rule + I64{24})
+    flags :: rt_text_word(wrapping(rule + I64{24}))
     result := false
     if (count != I64{0} && ((flags.bit_and(IGNORE_DIRECTORY_ONLY)) == I64{0} || is_dir)) {
-        pattern :: rt_text_word(rule + I64{16})
+        pattern :: rt_text_word(wrapping(rule + I64{16}))
         if ((flags.bit_and(IGNORE_HAS_SEPARATOR.bit_or(IGNORE_ANCHORED))) != I64{0}) {
             pattern_parts :: ignore_parts(rt_text_data(pattern), rt_text_len(pattern))
             result = ignore_path_matches(rt_text_data(pattern), pattern_parts, ignore_part_count(pattern_parts), local, parts)
             files_words_free(pattern_parts)
         } else {
             last_start :: ignore_part_start(parts, count - I64{1})
-            result = ignore_component_matches(rt_text_data(pattern), rt_text_len(pattern), local + last_start, ignore_part_end(parts, count - I64{1}) - last_start)
+            result = ignore_component_matches(rt_text_data(pattern), rt_text_len(pattern), wrapping(local + last_start), ignore_part_end(parts, count - I64{1}) - last_start)
         }
     }
     files_words_free(parts)
@@ -350,11 +350,11 @@ fn ignore_rule_matches(rule: I64, relative: I64, length: I64, is_dir: Bool) -> B
 // Ordered precedence: a later negation or ignore replaces the earlier answer.
 fn ignore_rules_answer(matcher: I64, relative: I64, length: I64, is_dir: Bool) -> Bool {
     ignored := false
-    count :: rt_text_word(matcher + I64{8})
+    count :: rt_text_word(wrapping(matcher + I64{8}))
     at := I64{0}
     loop at < count {
-        rule :: rt_text_word(rt_text_word(matcher + I64{16}) + at * I64{8})
-        if ignore_rule_matches(rule, relative, length, is_dir) -> ignored = (rt_text_word(rule + I64{24}).bit_and(IGNORE_NEGATED)) == I64{0}
+        rule :: rt_text_word(wrapping(rt_text_word(wrapping(matcher + I64{16})) + at * I64{8}))
+        if ignore_rule_matches(rule, relative, length, is_dir) -> ignored = (rt_text_word(wrapping(rule + I64{24})).bit_and(IGNORE_NEGATED)) == I64{0}
         at += I64{1}
     }
     ignored
@@ -367,8 +367,8 @@ fn ignore_matcher_ignored(matcher: I64, relative: I64, is_dir: Bool) -> Bool {
     replaced :: jet_rt_alloc(length + I64{1}, I64{1})
     at := I64{0}
     loop at < length {
-        byte :: rt_text_byte(rt_text_data(relative) + at)
-        rt_text_put(replaced + at, if (byte == I64{92}) -> I64{47} else -> byte)
+        byte :: rt_text_byte(wrapping(rt_text_data(relative) + at))
+        rt_text_put(wrapping(replaced + at), if (byte == I64{92}) -> I64{47} else -> byte)
         at += I64{1}
     }
     parts :: ignore_parts(replaced, length)
@@ -380,12 +380,12 @@ fn ignore_matcher_ignored(matcher: I64, relative: I64, is_dir: Bool) -> Bool {
         index := I64{1}
         loop index < count && !result {
             if (index > I64{1}) {
-                rt_text_put(prefix + used, I64{47})
+                rt_text_put(wrapping(prefix + used), I64{47})
                 used += I64{1}
             }
             start :: ignore_part_start(parts, index - I64{1})
             part_length :: ignore_part_end(parts, index - I64{1}) - start
-            rt_text_bytes_copy(prefix + used, replaced + start, part_length)
+            rt_text_bytes_copy(wrapping(prefix + used), wrapping(replaced + start), part_length)
             used += part_length
             result = ignore_rules_answer(matcher, prefix, used, true)
             index += I64{1}

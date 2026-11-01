@@ -41,6 +41,12 @@ fn provider_graph_json_string(object: [String: Dyn], key: String) -> String? Nev
     Val(text)
 }
 
+// Rust `as_i64`: a JSON whole number (no fraction or exponent). Strict
+// `json.parse` keeps every number as its exact lexeme (#4602).
+fn provider_graph_json_int(value: Dyn) -> Int? Never! {
+    foundation_json_integer(value)
+}
+
 // The first non-blank string among `keys`.
 fn provider_graph_json_first_string(object: [String: Dyn], keys: [String]) -> String? Never! {
     loop key in keys {
@@ -575,15 +581,15 @@ impl ProviderFactReport {
         &facts.add_json_projection("provider.swiftpm.native", root)
         if root.get("version") == {
             .Val(raw_version) -> {
-                if raw_version == {
-                    .Int(version) -> {
+                if provider_graph_json_int(raw_version) == {
+                    .Val(version) -> {
                         if version >= 1 && version <= 3 {
                             &facts.add_typed_text("provider.swiftpm.lock.version", "{version}")
                         } else {
                             &losses.push("SwiftPM lock version `{version}` is unsupported; expected v1, v2, or v3")
                         }
                     }
-                    else -> &losses.push("SwiftPM lock `version` must be numeric")
+                    .None -> &losses.push("SwiftPM lock `version` must be numeric")
                 }
             }
             .None -> &losses.push("SwiftPM lock has no numeric `version`")

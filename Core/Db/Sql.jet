@@ -358,6 +358,13 @@ fn compare_sql_cell(left: String, operator: String, right: String) -> Bool Never
     sql_compare(value ?? JetSQLValue.Text(left.copy()), operator, literal)
 }
 
+// The analytics row queries of `core.data` and CSV check every field a query
+// reads against their row schema's field names.
+fn __validate_query_fields(query: JetSQLQuery, fields: [String], label: String) Err! {
+    names :: Set.from(fields)
+    validate_sql_query_schema(query, (field: String) -> names.has(field), label)
+}
+
 // Rust sql_aggregate_value:794–889. Numeric nonfinite inputs are skipped even
 // for MIN/MAX; COUNT(column) counts every present non-Null value instead.
 fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, cell: fn(U64, String) -> JetSQLValue?) -> JetSQLValue Never! {

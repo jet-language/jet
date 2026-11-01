@@ -98,7 +98,7 @@ struct RNG {
     fn normal(&self, mean: Float, stddev: Float) -> Float Never! {
         first :: &self.float_open()
         second :: &self.float()
-        sample :: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.tau() * second)
+        sample :: math.sqrt((Float{-2.0}) * math.ln(first)) * math.cos(math.TAU * second)
         mean + sample * math.max_float(stddev, 0.0)
     }
 
@@ -226,7 +226,7 @@ fn bounded(span: Int) -[Rand]> Int Never! {
     }
 }
 fn normalize_angle(angle: Float) -> Float Never! {
-    tau :: math.tau()
+    tau :: math.TAU
     reduced := math.fmod(angle, tau)
     if reduced < (Float{0.0}) -> return reduced + tau
     reduced
@@ -378,7 +378,7 @@ fn normal(mean: Float, stddev: Float) -[Rand]> Float Never! {
     if nonfinite(stddev) || stddev <= (Float{0.0}) -> return mean
     u1 :: unit_open()
     u2 :: unit()
-    mean + stddev * math.sqrt((Float{-2.0}) * math.ln(u1)) * math.cos(math.tau() * u2)
+    mean + stddev * math.sqrt((Float{-2.0}) * math.ln(u1)) * math.cos(math.TAU * u2)
 }
 
 fn exponential(lambda: Float) -[Rand]> Float Never! {
@@ -510,13 +510,13 @@ fn vonmisesvariate(mu: Float, kappa: Float) -[Rand]> Float Never! {
     if mu != mu || nonfinite(mu) -> return (Float{0.0})
     if kappa != kappa || nonfinite(kappa) || kappa < (Float{0.0}) -> return normalize_angle(mu)
     if kappa <= (Float{0.00000001}) {
-        return normalize_angle(mu + math.tau() * ((Float{2.0}) * unit() - (Float{1.0})))
+        return normalize_angle(mu + math.TAU * ((Float{2.0}) * unit() - (Float{1.0})))
     }
     s :: (Float{0.5}) / kappa
     r :: s + math.sqrt((Float{1.0}) + s * s)
     loop {
         u1 :: unit()
-        z :: math.cos(math.pi() * u1)
+        z :: math.cos(math.PI * u1)
         f :: ((Float{1.0}) + r * z) / (r + z)
         c :: kappa * (r - f)
         u2 :: unit()
@@ -608,7 +608,7 @@ struct RNGAnswer {
     assert_eq(stream.state, U64{17418742259747381458})
     assert_eq(&stream.pick([String]{"a", "b", "c", "d"}), Val("b"))
     assert_eq(stream.state, U64{10372713005361028327})
-    assert_eq(&stream.weighted_pick([String]{"a", "b", "c", "d"}, [Float]{math.nan(), -1.0, 0.25, 1.75}), Val("d"))
+    assert_eq(&stream.weighted_pick([String]{"a", "b", "c", "d"}, [Float]{math.NAN, -1.0, 0.25, 1.75}), Val("d"))
     assert_eq(stream.state, U64{3326683750974675196})
     assert_eq(&stream.sample([String]{"a", "b", "c", "d", "e"}, 3), [String]{"b", "c", "d"})
     assert_eq(stream.state, U64{635340061525167419})
@@ -630,16 +630,16 @@ struct RNGAnswer {
     assert_eq(&stream.int(7, 7), 7)
     assert_eq(&stream.__bool_p(0.0), false)
     assert_eq(&stream.__bool_p(1.0), true)
-    assert_eq(&stream.__bool_p(math.nan()), false)
+    assert_eq(&stream.__bool_p(math.NAN), false)
     assert_eq(&stream.float_range(3.0, 2.0), 3.0)
-    assert_eq(&stream.float_range(3.0, math.nan()), 3.0)
+    assert_eq(&stream.float_range(3.0, math.NAN), 3.0)
     assert_eq(&stream.exponential(0.0), 0.0)
-    assert_eq(&stream.exponential(math.nan()), 0.0)
+    assert_eq(&stream.exponential(math.NAN), 0.0)
     assert_eq(&stream.bytes(-1), [U8]{})
     assert_eq(&stream.pick([String]{}), None)
     assert_eq(&stream.pick([String]{"only"}), Val("only"))
     assert_eq(&stream.weighted_pick([String]{"a"}, [Float]{}), None)
-    assert_eq(&stream.weighted_pick([String]{"a", "b", "c"}, [Float]{math.infinity(), math.nan(), -1.0}), None)
+    assert_eq(&stream.weighted_pick([String]{"a", "b", "c"}, [Float]{math.INFINITY, math.NAN, -1.0}), None)
     assert_eq(&stream.sample([String]{"a", "b"}, -1), [String]{})
     assert_eq(&stream.sample([String]{}, 5), [String]{})
     empty := [String]{}
@@ -655,7 +655,7 @@ struct RNGAnswer {
     stream := rng(0)
     assert_eq(&stream.normal(7.0, -1.0), 7.0)
     assert_eq(stream.state, U64{4354685564936845354})
-    assert_eq(&stream.normal(7.0, math.nan()), 7.0)
+    assert_eq(&stream.normal(7.0, math.NAN), 7.0)
     assert_eq(stream.state, U64{8709371129873690708})
 }
 

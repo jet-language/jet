@@ -6,8 +6,14 @@ use jet_cli.[
 use jetpack_artifact_store.[ArtifactEntryStatus, ArtifactPruneReport]
 
 #Test("cache") {
-    if jet_cli_cache_parse([String]{"prune", "--to=+1024", "--json"}) != .Ok(JetCLICacheRequest.Prune{bytes: 1024}) -> panic("cache prune parse")
-    if jet_cli_cache_parse([String]{"limit", "--host", "4MiB"}) != .Ok(JetCLICacheRequest.Limit{bytes: 4194304}) -> panic("cache limit parse")
+    if jet_cli_cache_parse([String]{"prune", "--to=+1024", "--json"}) == {
+        .Ok(request) -> { if request != (JetCLICacheRequest.Prune{bytes: 1024}) -> panic("cache prune parse") }
+        .Err(_) -> panic("cache prune parse")
+    }
+    if jet_cli_cache_parse([String]{"limit", "--host", "4MiB"}) == {
+        .Ok(request) -> { if request != (JetCLICacheRequest.Limit{bytes: 4194304}) -> panic("cache limit parse") }
+        .Err(_) -> panic("cache limit parse")
+    }
     if jet_cli_cache_parse([String]{"status", "--host=1"}) == {
         .Err(error) -> { if error.message != "`jet cache status` does not take a size option" -> panic("cache status options") }
         .Ok(_) -> panic("cache status options")

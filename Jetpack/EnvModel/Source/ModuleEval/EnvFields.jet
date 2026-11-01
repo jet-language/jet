@@ -85,6 +85,7 @@ enum EnvFieldKind {
 // `Env { … }` stays legal. A non-record value (or the wrong type name) is
 // E0966.
 fn envmodel_evaluate_env_contribution(value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], source: String) -> EnvCapture EnvModelEvalError! {
+    if envmodel_record_literal(value) == .Val(record) -> return Ok(envmodel_evaluate_env_contribution(record, src, scope, globals, source))
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name != "" && type_name != TYPE_ENV -> return Err(envmodel_wrong_namespace_type(TYPE_ENV, type_name, expr_span(value)))
@@ -132,7 +133,7 @@ fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: ModuleE
             }
             .Presets -> {
                 value :: resolved.get(field.name) ?? next
-                presets :: envmodel_presets_from_value(value) ?? return Err(envmodel_error("E1332", "environment preset declaration is invalid: {err.message}", "presets are named typed records with string package, variable, and inheritance facts", "use `presets: {{ dev: .{{ packages: [\"tool@nixpkgs\"] }} }}`", Val(span)))
+                presets :: envmodel_presets_from_value(value) ?? return Err(envmodel_error("E1332", "environment preset declaration is invalid: {err.message}", "presets are named typed records with string package, variable, and inheritance facts", "use `presets: {{ dev: .{{ packages: [\"tool@jetpack\"] }} }}`", Val(span)))
                 loop preset in presets -> &capture.presets.push(preset)
             }
             .Languages -> {
@@ -162,6 +163,7 @@ fn envmodel_evaluate_env_fields(fields: [NamedExpr], src: String, scope: ModuleE
 // identifiers as strings while still evaluating ordinary literals and the
 // explicit expert record's scalar fields.
 fn envmodel_evaluate_lifecycle_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
+    if envmodel_record_literal(expr) == .Val(record) -> return Ok(envmodel_evaluate_lifecycle_value(record, scope, globals))
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(_, _, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
@@ -258,6 +260,10 @@ enum PromptField {
 // `Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`, each recorded as
 // one environment-layer setting.
 fn envmodel_capture_prompt_setting(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String: CtValue], source: String) EnvModelEvalError! {
+    if envmodel_record_literal(value) == .Val(record) {
+        envmodel_capture_prompt_setting(&entry, record, scope, globals, source)
+        return
+    }
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name == TYPE_PROMPT {

@@ -136,16 +136,6 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
-Email address, attachment, envelope, and message construction validates in
-`Core/Email/Email.jet`: control-character refusal precedes address parsing,
-mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
-limits precede attachment size, and envelopes require 1–100 recipients.
-The same source computes the native conservative wire bound and assembles MIME:
-UTF-8 encoded words never split a scalar, transfer base64 folds at 76 bytes,
-and native-order SHA-256 absorption determines mixed/alternative boundaries.
-BCC participates in envelope and boundary generation, never visible headers.
-Private whole-carrier views and builders only marshal native storage; refusal
-errors retain the original Configuration operation strings.
 The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
 directory-creation host operation without a second fault probe; source callers
 retain their own FS.Write preflight and the host's Write/path error context.
@@ -303,6 +293,12 @@ provide a runtime path-loading fallback. A runtime call is E0956.
 
 The source declarations supply the public typed vocabulary; calls retain the
 compiler-owned compile-time provider route even when that source package is loaded.
+In a `comptime` binding or `fn build`, the evaluator hands each `lex`, `parse`,
+or `check` call to the compiler, which answers with its own lexer, parser, and
+check query over the call's argument (the same check `jet inspect compiler
+check` runs). A comptime constant that holds one of these values is read back
+as the compiler's value for that constant, so `PARSED :: comptime { … }` can
+feed `compiler.check(PARSED)`.
 
 The package-view field matrix is versioned by
 `PACKAGE_MODEL_SCHEMA_VERSION = 1` (D-PACKAGE-MODEL1). The four views have
@@ -458,7 +454,7 @@ records the shipped surface without adding aliases:
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | Double-ended push/pop and peek, capacity, lookup/delete, list conversion, join, reverse, split, and size/clear operations. |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. |
-| `Cache<K,V>` | `Cache.new(capacity)` | Bounded `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, and size/clear operations. |
+| `Cache<K,V>` | `Cache<K,V>.new(capacity)` | Bounded least-recently-used `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, and size/clear operations. The constructor names its key and value types (`Cache<String, Int>.new(2)`): no argument carries them, and a later line never settles them (D-INFER-LEVEL1). `add` and `get` make a key the most recent; `add` returns a held key's old value, and a new key into a full cache evicts the least recent entry. `add_new` on a held key and `has_key` leave the order alone. `keys` lists the most recent first. A negative capacity is 0, which keeps nothing. |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | Counting `add`, `remove`, `has`, `count`, list conversion, and size/clear operations. |
 | `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, copying, and size/clear operations. |
 | `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | Byte-buffer reads/writes, cursor movement, text conversion, splitting/joining, comparison, copying, flushing, and closing. |
@@ -925,67 +921,6 @@ fn run() {
 `uuid1` and an unqualified `uuid4` spelling are not Core APIs; use `v7` or
 `v4` respectively.
 
-### `core.email` — bounded messages and SMTP submission
-
-`core.email` separates checked address/message construction from SMTP
-transport. It rejects controls before serialization and bounds recipients,
-attachments, headers, body, and total message size before producing wire bytes.
-
-```jet
-use core.email as email
-
-fn run() {
-    from :: email.address("Mara <mara@example.com>") ?? return
-    to :: email.address("Ada <ada@example.net>") ?? return
-    message :: email.message(from, [to], [Address]{}, "Welcome", "Hello", HTML{""}, [Attachment]{}) ?? return
-    bytes :: email.serialize(message) ?? return
-    print(bytes.len())
-}
-```
-
-`HTML{...}` is checked text; interpolation values are escaped. Use `HTML{""}`
-for a plain-text-only message. Bcc recipients enter the default `Envelope` but
-are not emitted as message headers. Serialization uses CRLF, bounded Base64
-lines, and deterministic content-derived multipart boundaries.
-
-| API | Result | Description |
-| --- | --- | --- |
-| `limits()` | `Limits` | Return the checked reply, capability, recipient, message, and challenge limits. |
-| `smtp_auth(user, password)` | `SMTPAuth` | Build password authentication from a nominal `Secret`. |
-| `dkim(domain, selector, key, signed_headers)` | `DKIMConfig` | Configure one signing identity and its signed-header list. |
-| `address(text)` | `Address !EmailError` | Parse and validate a mailbox or display-name address. |
-| `attachment(name, mime, bytes)` | `Attachment !EmailError` | Validate an attachment name/type/size and normalize its MIME spelling. |
-| `message(from, to, bcc, subject, text, html, attachments)` | `Message !EmailError` | Validate fields, create the default envelope, and compute a wire bound. |
-| `envelope(from, recipients)` | `Envelope !EmailError` | Validate SMTP recipients independently of message headers. |
-| `serialize(message)` | `[U8] !EmailError` | Render bounded MIME bytes without Bcc headers. |
-| `smtp(config)` | `Mailer !EmailError` | Validate configuration and create a transport handle. |
-| `smtp_from_env()` | `Mailer !EmailError` | Read the checked SMTP configuration from environment variables. |
-
-`smtp_from_env` requires `SMTP_HOST`. `SMTP_SECURITY` accepts `starttls` (the
-default) or `tls`; the corresponding default ports are 587 and 465.
-`SMTP_PORT`, `SMTP_CA_PEM`, `SMTP_RECIPIENT_POLICY`, and paired
-`SMTP_USERNAME`/`SMTP_PASSWORD` are optional. Recipient policy is
-`require_all` by default or `deliver_accepted`. DKIM configuration uses
-`SMTP_DKIM_DOMAIN`, `SMTP_DKIM_SELECTOR`, `SMTP_DKIM_PRIVATE_KEY_BASE64`, and
-optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
-connecting.
-
-The safe limits, environment configuration, and private configuration predicates
-live in `Core/Email`. Before creating a mailer, `smtp_from_env` checks limits,
-host, port/security pairing, authentication name, CA PEM, and DKIM header policy,
-in that order. The first invalid limit is reported in field declaration order.
-`Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
-environment keys require canonical standard base64 independently of edition.
-The decoder borrows the encoded `Secret`, uses whole four-byte groups, and
-keeps partial decoded output in a `Secret` so malformed input follows the same
-zeroizing ownership path as successful decoding.
-
-`Mailer.send(message)` reports relay acceptance in `SendReport`, not inbox
-delivery. A cancellation after message submission is `DeliveryUnknown`; Core
-does not retry an uncertain submission. Use separate mailers for separate DKIM
-identities. Custom CA material extends system roots without disabling hostname
-verification.
-
 ### `core.http` — bounded HTTP values and one-shot calls
 
 `core.http` owns bounded HTTP/1.1 message semantics and one-shot request helpers;
@@ -1085,7 +1020,8 @@ belongs to the listener's TLS setup, not to construction.
 `HTTPServer`, panicking when the address cannot be bound.
 
 An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
-`shutdown(grace)`. Each request is answered before the next is accepted, so a
+`shutdown(grace)`, where `grace` defaults to zero. Each request is answered
+before the next is accepted, so a
 shutdown has no in-flight request to cancel. Every caller of `serve` and
 `shutdown` receives the same `HTTPShutdownReport{accepted, overloaded,
 completed, cancelled}`; a second `serve` is an `HTTPError.IO`. The connection
@@ -1268,7 +1204,7 @@ fn run() {
 
 | API | Result | Description |
 | --- | --- | --- |
-| `sha256(bytes)` / `sha512(bytes)` / `blake3(bytes)` | `Digest256` / `Digest512` | Produce typed digests; use `.hex()` or `.as_bytes()`. |
+| `sha256(input)` / `sha512(bytes)` / `blake3(bytes)` | `Digest256` / `Digest512` | Produce typed digests; use `.hex()` or `.as_bytes()`. `sha256` takes `[U8] \| String`; a `String` hashes its UTF-8 bytes. |
 | `sha1(bytes)` / `sha224(bytes)` / `sha384(bytes)` | `String` | Produce legacy SHA hex digests; SHA-1 remains for UUID v5 and legacy checks. |
 | `sha3_224` / `sha3_256` / `sha3_384` / `sha3_512` | `String` | Produce SHA-3 hex digests. |
 | `hmac_sha256(key, data)` | `[U8]` | Produce HMAC-SHA256 bytes. |
@@ -1276,6 +1212,7 @@ fn run() {
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8] !CryptoError` | Derive a bounded PBKDF2-HMAC-SHA256 byte sequence. |
 | `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the incremental SHA-256 hasher. |
 | `constant_time_equal(a, b)` / `constant_time_equal_bytes(a, b)` | `Bool` | Compare nominal secrets or byte lists without early equality branching. |
+| `wipe(&bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
 | `generatekey()` | `X25519SecretKey !CryptoError` | Generate an X25519 secret through the random provider. |
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
@@ -1293,6 +1230,16 @@ boundary and use `FS` plus `Rand` where indicated.
 only a text data-tree value is accepted, and its UTF-8 bytes become the secret.
 There is no corresponding `Encode` implementation. A user-defined type named
 `Secret` does not inherit this codec by name.
+
+`wipe(&bytes)` erases key bytes that must stay a plain `[U8]`, such as a seed
+handed to a C library. A buffer the List alone owns is zeroed in place,
+including its spare capacity. A buffer another List still shares keeps its
+bytes for that List: the wiped List takes a fresh zeroed buffer of the same
+capacity, and the shared buffer is marked to be zeroed when its last owner
+releases it. A copy a writer makes of a marked buffer, before a write or when
+it grows, is marked too. Frozen literal bytes cannot be written, so a List
+over them takes fresh zeroes of its length. Buffers a List gave up while
+growing before the wipe are not reached; reserve the capacity first.
 
 The native `Secret` carrier owns the canonical List header `[len, cap, data]`
 (three words, 24 bytes); `U8` elements use the canonical host U8 stride. Creating
@@ -1383,8 +1330,11 @@ provider failure and a bounded rejection-sampling exhaustion fail with
 
 `core.crypto.vault` keeps the untyped `get(name) -> ?String` repository-secret
 lookup separate from typed `KeyRef<T>` generations. Every vault operation
-carries the `Secret` effect. A `KeyRef<T>` contains name/version identity, not
-key bytes; the provider owns persistence and key-material lifetimes.
+carries the `Secret` effect. A `KeyRef<T>` contains its public name/version and
+the private repository identity it was issued under (store, record and record
+hash), not key bytes; every operation on it re-verifies that identity, so a
+same-named generation in a restored or re-imported repository never answers
+for it. The provider owns persistence and key-material lifetimes.
 Its `Display` is `repo:{name}@v{version}` for every key type `T`; rendering never
 reads key material or private provider metadata and imposes no `Display` bound
 on `T`.
@@ -1395,7 +1345,7 @@ use core.crypto.vault as vault
 
 fn provision() -[Secret, IO]> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
-    write :: vault.authorize_write(&plan, "create release signer") ?? return
+    write :: vault.authorize_write(plan, "create release signer") ?? return
     key_ref :: vault.commit_generate(^write, ^plan) ?? return
     print("created {key_ref}")
 }
@@ -1459,7 +1409,7 @@ It samples that observer under the storage guard, and expires only when
 `now > deadline`; at equality the credential remains available. Expiry takes
 the payload out of its slot and ends the owned payload's scope, so its
 `Close` follows the same zeroization path as dropping still-live storage.
-The sole wipe host operation is the existing plain-byte `__zeroize` leaf.
+The sole wipe host operation is the plain-byte `crypto.wipe` kernel.
 No observer or loan callback crosses that host boundary.
 Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
 is the fallible credential accessor. This is Main's owner-approved, veto-able
@@ -1539,7 +1489,16 @@ values, and replica names escape `\`, `,`, `=`, `|`, `:`, and `/`.
 
 A mutation on an invalid carrier, or one with a malformed replica, key, index,
 or size, returns the carrier unchanged. `app.sync(doc, over: session)` carries
-a shown document over the live-query channel. This module is not an
+a shown document over the live-query channel and returns the session's receipt
+`SyncOver(session=…, generation=…, doc=…)`. A session keeps its merged
+document in the process-wide live registry; a publication that changes it
+advances the generation, and a duplicate delivery returns the same receipt.
+Map keys with equal values, list members, and counter components merge; a
+conflicting map value, a differing `SyncText`, or a mixed pair answers
+`SyncError(document merge denied)`. A blank or over-long session is
+`SyncError(invalid session)`, and a display that is not canonical (sorted,
+escaped, no duplicates) is `SyncError(document is not a canonical CRDT
+value)`. This module is not an
 authenticated remote transport or
 a general thread-lock API; use the typed transport and task modules for those
 contracts. The thread-lock ledger names (`broadcast`, `clear`, `lock`, `rlock`,
@@ -1641,7 +1600,7 @@ fn run() {
 | `terminal_width()` / `terminal_height()` | `Int` | Query terminal dimensions with the provider fallback. |
 | `style(style, text)` / `style_force(style, text)` | `String` | Render known ANSI styles conditionally or unconditionally. |
 | `read_key()` | `Key` | Read a decoded key event. |
-| `progress(label)` | `!IOError` | Write a progress update through the terminal stream. |
+| `progress(label)` | `!IOError` | Write a progress update through the terminal stream: a carriage-return frame on a terminal stderr, otherwise the label as a plain stdout line. |
 
 `style` is a no-op when output is not a TTY unless `style_force` is used.
 `Key` carries `Char(Char)`, `F(Int)`, and `Ctrl(Char)` payloads. Its unit variants
@@ -1663,7 +1622,7 @@ they do not require a bespoke Rust test or direct `rustc` invocation.
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
 `core.args` provides an `ArgsSpec` builder, explicit `decode_argv` tree parsing,
-and typed `decode<T>` / `merge<T>` using the target's checked `#CLI` shape.
+and typed `decode<T>()` / `T.merge` using the target's checked `#CLI` shape.
 `ArgsSpec` is the checked builder handle, not a record containing only flag
 names. The builder consumes a spec and returns a new value at each method call;
 parsing is separate from process execution so tests can pass an explicit
@@ -1697,18 +1656,27 @@ fn run() {
 | `spec.subcommand(name, help, spec)` | `ArgsSpec` | Add a named nested command specification. |
 | `spec.description(text)` / `spec.version(text)` | `ArgsSpec` | Add help text or enable `--version`. |
 | `spec.help()` / `spec.completion(shell)` | `String` | Render help or shell completion text. |
-| `spec.parse(argv)` | `ParsedArgs !String` | Parse without exiting, suitable for tests and custom errors. |
+| `spec.parse(argv)` | `ParsedArgs !Err` | Parse without exiting, suitable for tests and custom errors. |
 | `spec.parse_or_exit(argv)` | `ParsedArgs` | Handle `--help` and usage errors through process exit. |
 | `parsed.flag(name)` / `parsed.option(name)` | `Bool` / `?String` | Read a boolean or optional string value. |
 | `parsed.option_int(name)` / `parsed.option_float(name)` | `?Int` / `?Float` | Read a typed numeric option. |
 | `parsed.options(name)` / `parsed.positional(index)` | `[String]` / `?String` | Read repeated values or a zero-based positional. |
 | `parsed.subcommand()` | `?String` | Read the matched subcommand name. |
 
-`--help` and `--version` are recognized automatically. `parse` returns an error
-string rather than exiting; `parse_or_exit` prints help and exits zero for
+`--help` and `--version` are recognized automatically. `parse` returns an `Err`
+whose message is the refusal text rather than exiting; `parse_or_exit` prints help and exits zero for
 `--help`, or prints usage and exits two for invalid arguments. The decoder also
 handles `--key=value`, `--key value`, `--flag`, `--no-flag`, clustered short
 flags, negative numeric values, and `--` as the end-of-options marker.
+
+`args.decode<T>()` parses the process arguments into the `#CLI` struct `T`
+through the same spec as `fn run(args: T)`, so help and refusal text are
+identical. `--help` and `--version` print and exit zero; a refused argument
+returns `[FieldError]`. Every `#CLI` struct also gets
+`T.merge(args, settings) -> T ![FieldError]`, unless it declares its own
+`merge`. A field given explicitly on the command line takes its `args` value.
+Every other field takes its `settings` value, which is the environment value
+or the field default when `settings` comes from `env.decode<T>()`.
 
 The direct functions are useful when a typed builder is unnecessary:
 
@@ -1824,6 +1792,25 @@ fn run() {
 | `sync()` | `Unit -[FS, Env]>` | Flush filesystem buffers. |
 | `getpgid(pid)` / `getsid(pid)` | `Int !IOError -[Env]>` | Inspect POSIX process-group or session state. |
 
+Resource limits and usage (D-CORE-RLIMIT1, D-CORE-RLIMIT-NAME1, #5072) apply
+to the running program, and the children it starts afterwards inherit them.
+Each getter returns `(soft:, hard:)`; `None` is unlimited. Sizes are bytes. The
+kernel counts CPU time in whole seconds, so a fractional `Duration` rounds up
+when set. Lowering a limit needs no privilege; raising a hard limit without
+privilege is `IOError.PermissionDenied`. A soft limit above the hard one, or a
+negative value, is `IOError.InvalidInput`. A target without these limits
+refuses with an `IOError`. Setting a limit changes the process tree, so setters
+need `Env, Exec`, as `fork()` does.
+
+| API | Result | Description |
+| --- | --- | --- |
+| `cpu_time_limit()` / `set_cpu_time_limit(soft, hard)` | `(soft: Duration?, hard: Duration?) !IOError -[Env]>` / `!IOError -[Env, Exec]>` | CPU time (`RLIMIT_CPU`). |
+| `memory_limit()` / `set_memory_limit(soft, hard)` | `(soft: Int?, hard: Int?) !IOError -[Env]>` / `!IOError -[Env, Exec]>` | Address space (`RLIMIT_AS`), the limit `ProcessSpec.memory_limit` sets for one child. |
+| `open_file_limit()` / `set_open_file_limit(soft, hard)` | as above | Open descriptors (`RLIMIT_NOFILE`). |
+| `core_file_limit()` / `set_core_file_limit(soft, hard)` | as above | Core-file size (`RLIMIT_CORE`); `set_core_file_limit(0, hard)` turns off core dumps. |
+| `stack_limit()` / `set_stack_limit(soft, hard)` | as above | Stack size (`RLIMIT_STACK`). |
+| `usage(of: UsageOf{.Program})` | `ResourceUsage !IOError -[Env]>` | `getrusage`: `user` and `system` CPU time as `Duration`, `peak_memory` in bytes. `.Children` sums every child the program has waited for. |
+
 `usize_max()` is a pure `U64` constant derived at compile time from the
 selected target's pointer layout (#4483), not from the
 compiler process's environment or the inspected executable. Missing layouts
@@ -1927,6 +1914,7 @@ fn run() -[Exec, Time.Wait]> {
 | `process.shell(line)` | `ProcessSpec -[Exec, Env]>` | Explicit shell escape hatch: `sh -c` on Unix-like targets and `cmd /C` on Windows. |
 | `process.run_spec(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run a specification and return its receipt without treating a nonzero exit as a thrown error. |
 | `process.pipeline(steps)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run a sequence of specifications and return the pipeline receipt. |
+| `process.run_all(specs, jobs)` | `[Result<ProcessReceipt, IOError>] !IOError -[Exec, Time.Wait]>` | Run every specification through a bounded worker pool, at most `jobs` at once, and return one result per spec in input order. |
 | `process.call(spec)` | `Int !IOError -[Exec, Time.Wait]>` | Run a specification and return its exit code. |
 | `process.capture(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run with captured output. |
 | `process.check_call(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run and check the resulting status. |
@@ -1962,6 +1950,16 @@ resource and the OS error code. An empty command (`process.cmd([])`) or an
 empty `process.pipeline([])` is `InvalidInput` naming that empty call. A
 program that starts and then exits nonzero, 127 included, is a receipt.
 
+`process.run_all(specs, jobs)` is the bounded worker pool. It runs the specs
+in one task group with at most `jobs` children alive at once and returns the
+results in input order, whatever order the children finish in. Each slot is
+independent: a nonzero exit is an `Ok` receipt, a spec that cannot start is
+an `Err` in its own slot, and a spec's own `.timeout(...)` is its per-job
+timeout (the receipt reports `timed_out`). Every child is marked to die with
+the calling process (Linux `PR_SET_PDEATHSIG`, `SIGKILL`), except a
+`.detached()` spec, which is meant to outlive it. `jobs` below 1 is
+`InvalidInput`.
+
 #### Building a process policy
 
 `ProcessSpec` builder methods return a modified specification. `.arg(value)`
@@ -1970,15 +1968,23 @@ directory; `.env(name, value)`, `.env_remove(name)`, and `.env_clear()` control
 the child environment. `.stdin(mode)`, `.stdout(mode)`, and `.stderr(mode)`
 select one of `.Stream`, `.Inherit`, or `.Capture`. `.terminal()` requests a
 terminal session, while `.terminal(policy)` supplies an explicit
-`TerminalPolicy`. `.detached()` allows the child to outlive the caller, and
-`.abilities(...)` records the requested child abilities.
+`TerminalPolicy`. `.detached()` allows the child to outlive the caller.
+`.abilities()` returns the open `Set<String>` report of what a terminal-backed
+launch can use. Its stable keys are `TerminalFact.terminal`,
+`TerminalFact.resize` and `TerminalFact.raw`; any other string key is a preview
+fact. A string key one or two edits from a stable key is E0302 naming that
+`TerminalFact` key, and an unknown `TerminalFact.name` is E0302 too.
 
 A specification can also carry `.timeout(duration)`, `.cpu_time_limit(value)`,
 `.memory_limit(value)`, `.open_file_limit(value)`, and `.output_limit(value)`.
 The limits are part of the process plan and receipt. `.under(authority)`
 places the child under an `Authority`; `.plan()` returns the planned executable
 identity, redacted argument vector, input digest, policy digest, backend,
-authority, descendants, and limits without starting the child.
+authority, descendants, and limits without starting the child. Inside
+`#FX(grant: …) { … }`, `.under(grant)` delegates the scoped grant, so the
+specification it returns is scoped like the grant: build on it and run it
+(`.run()`, `.run_checked()`, `.plan()`) inside the block; storing, returning,
+or passing it is E0711.
 
 Resource-limit support is typed and fail-closed. Wall time and output limits
 are represented in the process policy. Native CPU-time, memory, and open-file
@@ -2051,7 +2057,11 @@ child to the parent's corresponding stream.
 | `child.wait()` | `ProcessReceipt !IOError` | Wait for completion and return the receipt. |
 | `child.exited()` | `Bool !IOError` | Poll without waiting. |
 | `child.kill()` / `.terminate()` / `.interrupt()` | `Unit !IOError` | Send the corresponding termination request. |
-| `child.stdin.write(text)` / `.close()` | `Unit !IOError` | Write to or close a streamed child input. |
+| `child.stdin.write(bytes)` | `Int !IOError` | Write once to a streamed child input and return how many bytes the pipe took. |
+| `child.stdin.write_all(bytes)` / `.write_text(text)` | `Unit !IOError` | Write every byte, or the UTF-8 bytes of the text. |
+| `child.stdin.close()` | `Unit` | Close a streamed child input; repeated close is harmless. |
+| `child.stdout.read(limit)` / `child.stderr.read(limit)` | `[U8] !IOError` | Read up to `limit` bytes from the shared buffered pipe position; an empty list is end of input, and a limit below one is `IOError.InvalidInput` before any read. |
+| `child.stdout.chunks(size)` / `child.stderr.chunks(size)` | loop source of `[U8]` | Yield each non-empty piece of at most `size` bytes (default 65536) from the shared buffered pipe position. The loop ends at end of input or at the first failed read; a size below one ends it before any read. |
 | `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read from the shared buffered pipe position, removing one LF and its preceding CR only. A final bare CR remains; invalid UTF-8 is `IOError.Other` on `process output`. The parent remains responsible for draining it. |
 
 A terminal session is an opt-in process mode. It supplies terminal-sized input
@@ -2063,8 +2073,9 @@ captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
 
 `core.math` supplies integer operations, IEEE floating-point wrappers, numeric
 predicates, checked and saturating arithmetic, and elementary functions. The
-floating-point constant-like values are functions, so use `math.pi()` and
-`math.e()` rather than treating them as fields.
+floating-point constants `math.PI`, `math.E`, `math.TAU`, `math.INFINITY` and
+`math.NAN` are comptime values read as fields, not calls, so they also work in
+`comptime` contexts.
 The numeric `/%` operator rounds division toward negative infinity for both
 exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
 form is `/%=`, and whole-number floor division pairs with floored `%`.
@@ -2079,7 +2090,7 @@ an `abs` method nor a Core identity to a same-spelled user type.
 use core.math as math
 
 fn run() {
-    angle := math.pi() / 4.0
+    angle := math.PI / 4.0
     print(math.sin_cos(angle))
     print(math.checked_add(2, 3) ?? 0)
     print(math.is_finite(math.sqrt(2.0)))
@@ -2109,10 +2120,8 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | Function | Returns | Description |
 | --- | --- | --- |
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
-| `math.abs(value: Int)` / `math.abs_float(value: Float)` | `Int` / `Float` | Absolute value for integer or floating-point input. |
+| `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
-| `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
-| `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
 | `math.sign(value: Int)` | `Int` | Return `-1`, `0`, or `1` for a negative, zero, or positive integer. |
 | `math.isqrt(value)` | `?Int` | Return the integer square root when the input is nonnegative. |
@@ -2138,8 +2147,8 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |
 | `math.ilogb(x)` / `math.ldexp(x, exponent)` / `math.scaleb(x, exponent)` / `math.radix(x)` | `?Int` or `Float` | Inspect or scale the floating-point exponent and radix. |
-| `math.pi()` / `math.e()` / `math.tau()` / `math.tau_const()` | `Float` | Mathematical constants exposed as functions. |
-| `math.infinity()` / `math.nan()` / `math.zero()` | `Float` | Construct the corresponding special floating-point values. |
+| `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI :: Float{…}`); usable in `comptime` contexts. |
+| `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
 | `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together. |
@@ -2220,6 +2229,17 @@ Arithmetic results are ordinary math values: lane reads, swizzles, and methods
 operate directly on them, including temporary receivers such as `(a + a).dot(a)`.
 See [`vector_result_values.jet`](../../../Examples/features/lowlevel/vector_result_values.jet).
 
+Swizzles (D-SWIZZLE1) name lanes with `x`, `y`, `z`, and `w` on `Vec2`,
+`Vec3`, `Vec4`, `F32x4`, and `F64x2`. A read of one lane is `lane`; a read of
+N lanes is the declaration's `__swizzleN` and yields `Vec2`/`Vec3`/`Vec4`
+(`F64x2` for an `F64x2` pair, `F32x4` for four `F32x4` lanes). A write
+`v.zx = e` — on a local or any field path — is the declaration's
+`__swizzle_setN` and takes the type the read yields; `v.zx += e` writes
+`v.zx + e`. An `F32x4` write narrows each `Float` with `F32.from_float` and
+stops when a value is outside the F32 range. A lane the type does not have is
+E3110, and a write that names a lane twice (`v.xx = …`) is E3111. See
+[`swizzle.jet`](../../../Examples/features/lowlevel/swizzle.jet).
+
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
     unit :: v.normalize()
@@ -2233,9 +2253,22 @@ The SIMD-like lane types have fixed-array semantics independent of whether a
 backend selects vector instructions. Floating types are `F32x4`, `F64x2`,
 `F32x8`, and `F64x4`. Signed integer types are `I8x16`, `I16x8`, `I32x4`,
 `I64x2`, `I8x32`, `I16x16`, `I32x8`, and `I64x4`; unsigned types use the
-corresponding `U` prefixes. Every lane type supports `splat`,
-`from_array`, `to_array`, checked indexing, and `+`, `-`, `*`, and `/` with
+corresponding `U` prefixes. Each is a `core.math` struct over its `lanes`
+fixed array, declared once in Core source, so every tier runs the same
+implementation. Every lane type supports a positional constructor, `splat`,
+`from_array`, `to_array`, checked indexing (`v[i]` or `v.lane(i)`; a literal
+index outside the lanes is a compile error), and `+`, `-`, `*`, and `/` with
 matching lane types (D-SIMD1/D-SIMD2/D-SIMD3).
+
+Each lane operator is the scalar operator applied lane by lane, so integer
+lanes overflow and divide (truncating toward zero) as their scalar type does. The reductions `sum`, `product`,
+`min`, `max`, and `reduce(op)` with a `ReduceOp` (`.Add`, `.Mul`, `.Min`,
+`.Max`, `.Avg`) are the scalar left-to-right fold over the lanes, so a float
+reduction is bit-exact with writing `((l0 + l1) + l2) + l3`. Float `min` and
+`max` skip NaN lanes as `min_float`/`max_float` do; `.Avg` is `sum` divided
+by the lane count, an integer division for integer lanes. Operands of
+different lane types are error E2511, and a `reduce` argument that is not a
+`ReduceOp` value is error E2510.
 
 ### `core.units` — measured quantities
 
@@ -2407,20 +2440,58 @@ resource loading requires the corresponding file and GPU authority.
 | `core.game.raylib.window_open(width, height, title)` | `RaylibWindow -[GPU]>` | Open a window; dimensions are clamped to `1..2,147,483,647`. |
 | `raylib.window_ready(window)` / `window_should_close(window)` | `Bool -[GPU]>` | Query window readiness or close state. |
 | `raylib.begin_drawing(window)` | `Unit -[GPU]>` | Begin a frame for a window. |
-| `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame. |
-| `raylib.clear_background(color)` | `Unit -[GPU]>` | Clear the active frame. |
-| `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle. |
+| `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame; with `JET_RAYLIB_CAPTURE` set, write the canvas to that path as a PAM image. |
+| `raylib.clear_background(color)` | `Unit -[GPU]>` | Set every canvas pixel to the color, alpha included. |
+| `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle, its canvas and every decoded texture; as in raylib, atlases loaded before the close draw nothing afterwards. |
 | `raylib.color(r, g, b, a)` | `RaylibColor` | Clamp each component to `0..255` and construct a color. |
-| `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Draw a rectangle. |
-| `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text. |
-| `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Draw a sprite from a texture atlas. |
-| `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load a texture atlas through the authority boundary. |
+| `raylib.vector2(x, y)` / `raylib.rectangle(x, y, width, height)` | `RaylibVector2` / `RaylibRectangle` | Construct raylib's `Float` point and rectangle. Shapes that take them fill the pixels whose centers lie inside, with coordinates snapped to 1/256 pixel; a pixel whose center lies on a left or top edge is inside, one on a right or bottom edge is not. |
+| `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Fill a rectangle, clipped to the canvas and blended src-over. |
+| `raylib.draw_line(start_x, start_y, end_x, end_y, color)` | `Unit -[GPU]>` | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
+| `raylib.draw_circle(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
+| `raylib.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | `Unit -[GPU]>` | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
+| `raylib.draw_pixel(x, y, color)` | `Unit -[GPU]>` | Blend one pixel. |
+| `raylib.draw_rectangle_rec(rec, color)` | `Unit -[GPU]>` | Fill a `RaylibRectangle`; an empty or negative side draws nothing. |
+| `raylib.draw_rectangle_lines(x, y, width, height, color)` | `Unit -[GPU]>` | Draw the rectangle's one-pixel border inside its bounds, each pixel once. |
+| `raylib.draw_rectangle_lines_ex(rec, line_thick, color)` | `Unit -[GPU]>` | Draw a border `line_thick` wide inside `rec` as raylib's four bands: top and bottom full width, the sides between them. A thickness past either side becomes half the shorter side. Bands are blended one after another. |
+| `raylib.draw_rectangle_gradient_v(x, y, width, height, top, bottom)` / `draw_rectangle_gradient_h(x, y, width, height, left, right)` | `Unit -[GPU]>` | Fill a rectangle shaded from the first color to the second, top to bottom or left to right. |
+| `raylib.draw_rectangle_gradient_ex(rec, top_left, bottom_left, bottom_right, top_right)` | `Unit -[GPU]>` | Fill a rectangle shaded between its four corner colors, given counter-clockwise from the top left. Each pixel's color is interpolated at its center across the two triangles split along the top-left to bottom-right diagonal, rounded half up per channel. |
+| `raylib.draw_rectangle_rounded(rec, roundness, segments, color)` | `Unit -[GPU]>` | Fill a rectangle whose corners are arcs of radius `roundness` (clamped to `1`) times half the shorter side, each arc a polygon of `segments` steps, or of raylib's automatic count when `segments` is below 4. A `roundness` of 0 or below, or a side below 1, fills the plain rectangle. |
+| `raylib.draw_rectangle_rounded_lines(rec, roundness, segments, color)` | `Unit -[GPU]>` | Draw the one-pixel band just outside the rounded rectangle, as raylib does. A `roundness` of 0 or below draws the one-pixel band around `rec`. |
+| `raylib.draw_circle_lines(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_circle`'s disc that touch a pixel outside it. |
+| `raylib.draw_ellipse(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Fill the pixels at offset `(dx, dy)` from the center with `(dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2`; a radius of 0 or below draws nothing. |
+| `raylib.draw_ellipse_lines(center_x, center_y, radius_h, radius_v, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ellipse`'s fill that touch a pixel outside it. |
+| `raylib.draw_ring(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Fill the ring between the radii from `start_angle` to `end_angle` (degrees), built of raylib's segments; with an inner radius of 0 or below it fills a circle sector. raylib's argument fixes apply: swapped radii and angles are reordered and an outer radius of 0 or below becomes 0.1. Each pixel is blended once. |
+| `raylib.draw_ring_lines(center, inner_radius, outer_radius, start_angle, end_angle, segments, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_ring`'s fill that touch a pixel outside it. |
+| `raylib.draw_poly(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Fill a regular polygon with vertex `i` at angle `rotation + 360 * i / sides` degrees; fewer than 3 sides draw 3. |
+| `raylib.draw_poly_lines(center, sides, radius, rotation, color)` | `Unit -[GPU]>` | Draw the pixels of `draw_poly`'s fill that touch a pixel outside it. |
+| `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
+| `raylib.measure_text(text, size)` | `Int` | The width in pixels that `draw_text` covers for its widest line: `(6 × scalars − 1) × scale`, with the same scale and the same `\n` line breaks. Empty text or empty lines measure 0. Needs no effect. |
+| `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
+| `raylib.check_collision_recs(rec1, rec2)` / `check_collision_point_rec(point, rec)` | `Bool` | Whether two rectangles overlap, or a point lies inside a rectangle. A rectangle includes its left and top edges and excludes its right and bottom edges, so rectangles that only touch do not collide. |
+| `raylib.check_collision_circles(center1, radius1, center2, radius2)` / `check_collision_point_circle(point, center, radius)` | `Bool` | Whether two circles overlap or touch, or a point lies within `radius` of the center. |
+| `raylib.check_collision_circle_rec(center, radius, rec)` / `check_collision_circle_line(center, radius, p1, p2)` | `Bool` | Whether a circle reaches a rectangle or the segment from `p1` to `p2`. |
+| `raylib.check_collision_point_triangle(point, p1, p2, p3)` / `check_collision_point_poly(point, points)` | `Bool` | Whether a point lies strictly inside a triangle, or inside a polygon by the even-odd rule; fewer than 3 points enclose nothing. |
+| `raylib.check_collision_point_line(point, p1, p2, threshold)` | `Bool` | Whether a point lies between `p1` and `p2` along the line's longer axis and within `threshold` pixels of the line, using raylib's cross-product test. |
+| `raylib.check_collision_lines(start1, end1, start2, end2)` | `RaylibVector2?` | The point where two segments cross, or `None` when they are parallel or cross outside either segment. |
+| `raylib.get_collision_rec(rec1, rec2)` | `RaylibRectangle` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
+| `raylib.gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `RaylibImage` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
+| `raylib.get_image_color(image, x, y)` | `RaylibColor` | The pixel at `(x, y)`, or a zero color outside the image. |
+| `raylib.image_clear_background(&image, color)` / `image_draw_pixel(&image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `raylib.image_draw_rectangle(&image, x, y, width, height, color)` / `image_draw_rectangle_rec(&image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
+| `raylib.image_crop(&image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
+| `raylib.image_resize_nn(&image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `raylib.image_flip_vertical(&image)` / `image_flip_horizontal(&image)` / `image_rotate_cw(&image)` / `image_rotate_ccw(&image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
+| `raylib.image_color_tint(&image, color)` / `image_color_invert(&image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `raylib.image_color_brightness(&image, amount)` / `image_color_replace(&image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
+| `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
 | `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
 | `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
 | `raylib.set_target_fps(fps)` | `Unit -[GPU]>` | Set a target frame rate, clamped to `1..240`. |
 | `raylib.key_down(key)` / `gamepad_down(pad, button)` | `Bool -[GPU]>` | Read keyboard or gamepad button state. |
 | `raylib.gamepad_axis(pad, axis)` | `Float -[GPU]>` | Read a gamepad axis. |
 | `RaylibColor`, `RaylibWindow`, `RaylibTextureAtlas`, `RaylibSound` | types | Typed bridge handles; they are not interchangeable with ordinary strings or integers. |
+| `RaylibVector2`, `RaylibRectangle` | types | raylib's `Vector2` (`x`, `y`) and `Rectangle` (`x`, `y`, `width`, `height`), with `Float` fields. |
+| `RaylibImage` | type | An RGBA8 image held in memory: `width`, `height` and `pixels` (four `U8` per pixel, row by row). A width of 0 means no image. |
 
 ### `core.perf` — fidelity scaling
 
@@ -2470,6 +2541,8 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.scalars(value)` | `[String]` | Return decoded Unicode scalars. |
 | `text.lower(value)` / `upper(value)` / `casefold(value)` | `String` | Apply Unicode-aware scalar case mappings supported by the runtime. |
 | `text.caseless_eq(a, b)` | `Bool` | Compare after case folding. |
+| `text.collate(a, b)` | `Ordering Never!` | Compare in the Unicode default order (D-TEXT-COLLATE1=A): case and accents only break ties, so `apple` < `Banana` < `éclair` < `zebra` < `Zulu`. `Equal` only for canonically equivalent text. |
+| `text.collation_key(value)` | `[U8] Never!` | A sort key whose byte order is `text.collate` order; build one key per item to sort a long list. |
 | `text.nfc(value)` / `nfd(value)` / `nfkc(value)` / `nfkd(value)` | `String` | Apply the named normalization form. |
 | `text.graphemes(value)` / `words(value)` / `sentences(value)` | `[String]` | Return grapheme segments or Unicode 17.0.0 UAX #29 words/sentences. Words keep only segments containing an Alphabetic or Numeric scalar; sentences trim Unicode White_Space and drop empty segments. |
 | `text.char_indices(value)` | `[String]` | Return scalar strings with their UTF-8 byte indexes. |
@@ -2484,6 +2557,18 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.splitn(value, separator, limit)` / `rsplitn(value, separator, limit)` | `[String]` | Split from the left or right with a maximum part count. |
 | `text.inspect(value)` | `[String]` | Return each scalar as `U+XXXX NAME`, using pinned Unicode names (Unicode 1.0 names for controls, `UNASSIGNED` where no name is recorded). |
 | `text.Cursor` / `text.cursor(value)` / `text.cursor_advance(text, cursor)` | type / cursor | Construct and advance a text cursor. |
+
+`text.collate` is the Unicode Collation Algorithm (UTS #10) with the CLDR root
+table for Unicode 17.0.0, which is also English order. Variable weighting is
+non-ignorable, the CLDR default, so punctuation and spaces sort as characters
+before digits and letters. Levels 1 to 3 (base letter, accent, case) are
+followed by an identical level on the NFD scalars. Implicit weights for Han,
+Tangut, Nüshu, Khitan and unassigned code points are computed, not stored.
+`Tools/agent/CollationTable.jet` generates `Core/Text/CollationTable.jet` from
+the vendored, checksum-verified `tests/data/unicode/uca/allkeys_CLDR.txt`;
+the table is linked only into programs that collate. There is no
+locale-specific tailoring. String `<`, `<=>` and `sort()` keep byte order,
+which is code point order and the order `LC_COLLATE=C` gives.
 
 `String.len()` is the compiler-owned receiver-first method and counts Unicode
 scalars, the items `loop c in s.chars()` visits (S41); it means the same with
@@ -2510,7 +2595,9 @@ particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
 The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
 formatting, and text codecs are implemented in `Core/Time/Time.jet` on all
-tiers. `Date` aliases `LocalDate`; immutable zone tables are plain values,
+tiers. `Date` is the prelude's name for `LocalDate`
+(`pub use core.time.[LocalDate as Date]`); `core.time` declares only
+`LocalDate`. Immutable zone tables are plain values,
 copied with their zone, and borrowed reads need no shared-memory guard or
 `Time.Wait` effect. Native seams supply raw clock samples, environment values
 and TZif bytes. `sleep` resolves to its loaded source declaration before
@@ -2741,6 +2828,7 @@ public typed-text carrier.
 `#Codable` requests both directions; `#Encode` and `#Decode` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
 
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
+The use-site escape is the bare Core builder `Validate.over(value)` (declared in `core.encoding.validate`, which the bare name loads on demand): `.check(condition, at: field, "message")` takes the same rule shape, where `at:` must name a field of the validated type (E0353/E0354). `.finish()` returns `T ![FieldError]` with every failed rule (`D-VALIDATE1`).
 
 The concrete format sources live under
 [`Core/Encoding/`](../../../Core/Encoding/), and typed CSV/JSON convenience
@@ -2757,28 +2845,24 @@ syntax is rejected. Typed `decode<T>` checks numbers when projecting into `T`;
 quoted numbers stay text. Compact output retains insertion order, pretty output
 uses two-space indentation, and `canonical` is RFC 8785 JCS with UTF-16 key
 order. `parse`, `decode`, and `reader` reject a repeated object name with its
-path and position; the `_allow_duplicates` siblings are the explicit opt-in.
+path and position; `parse_allow_duplicates` is the explicit opt-in.
 The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `json.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse one strict JSON value. |
 | `json.loads(text)` / `load(text)` | `Dyn !EncodingError` | Compatibility aliases for parsing text. |
-| `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String` | Emit compact JSON. |
-| `json.to_string_pretty(value)` | `String` | Emit two-space pretty JSON. |
+| `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String !EncodingError` | Emit compact JSON; a non-finite `Float` is an `EncodingError`. |
+| `json.to_string_pretty(value)` | `String !EncodingError` | Emit two-space pretty JSON; a non-finite `Float` is an `EncodingError`. |
 | `json.canonical(value)` | `String !EncodingError` | Emit RFC 8785 JCS bytes: UTF-16 key order, ECMAScript numbers; reject NaN, infinities, and an `Int` that binary64 cannot hold exactly. |
 | `json.parse_allow_duplicates(text)` | `Dyn !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
 | `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(text)` / `reader_allow_duplicates(text)` | `JSONReader` | Pull events over text already held in memory; the duplicate-permitting reader reports each key occurrence. Its `next()` returns `DataEvent !EncodingError`, including an error after exhaustion. |
-| `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `json.reader(^input, limits)` / `reader_allow_duplicates(^input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
+| `json.writer(^output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
 | `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
-
-The text and file overloads retain separate checked layouts. A consumed
-`^FileReader` selects the bounded file contract; a `String` selects the source
-text parser. Neither overload constructs the other overload's handle.
 
 Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
 number lexemes until `Decode<T>` selects the destination representation. Its
@@ -2800,7 +2884,6 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(text)` | `JSONLReader` | Pull one nonblank record at a time from text already in memory; parse no record beyond the last requested one. |
 | `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
@@ -2817,13 +2900,14 @@ The filesystem query helper decodes header-named records into a typed query;
 it is distinct from the physical row parser.
 The public file-backed `CSVReader` and `CSVWriter` are ordinary source-owned
 holders, not native resource-table handles. The typed `core.data.csv_reader<T>`
-stream retains its separate native callback carrier.
+is Core source over the same `CSVReader`: each `next` reads one record (the
+header on the first pull) and decodes it, so rows stream one at a time.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays. |
-| `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays or typed records; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
+| `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
 | `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
 | `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
 | `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
@@ -2885,7 +2969,8 @@ error is reported by the ordinary compile-time-stop diagnostic.
 `core.encoding.cbor` handles RFC 8949 integer, text, array, map, simple,
 and float16/32/64 values, including indefinite strings and containers.
 Dynamic `parse` rejects byte strings; typed `decode<[U8]>` preserves them.
-Tags and duplicate text map keys are unsupported. Canonical mode requires
+Tags other than the date-time tags 0 and 1 (which decode to `DateTime`) and
+duplicate text map keys are unsupported. Canonical mode requires
 shortest arguments and float widths, a canonical NaN, definite containers,
 and bytewise map-key order. Encoding uses the shortest exact float width.
 Whole-value parsing and preferred float-width checks share a sealed source
@@ -3344,7 +3429,8 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
 | `const_bool(value: Bool, ignored: Bool) -> Bool` | Boolean | Select the first Boolean in a constant-evaluation expression. |
 | `not_bool(value: Bool) -> Bool` | Boolean | Negate a Boolean. |
-| `min_int(a: Int, b: Int) -> Int` / `max_int(a: Int, b: Int) -> Int` | integer | Select the smaller or larger integer. |
+| `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values; a NaN argument is the result. Prelude names: no import. |
+| `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds; reversed bounds are accepted, and a NaN argument is the result. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
 
 ### `core.testing` — deterministic test helpers
@@ -3370,6 +3456,7 @@ or golden file. The public source is
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
 | `test_suite() -> Test` | suite | Create the default suite record. |
 | `world(body: fn(DeterministicWorld))` | — | Run a body with deterministic world services. |
+| `histories<Command>(seed: Int, cases: Int, strategy: HistoryStrategy<Command>?, model: fn([Command]) -> Dyn, actual: fn([Command]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestComparison Err!` | comparison | Run a typed history campaign (`D-TEST-HISTORY1`, `D-TEST-STRATEGY1`): one `HistoryRNG` seeded by `seed` feeds every `generate`; invalid or out-of-bounds cases are discarded, a mismatch shrinks to a valid reduced case and fails with `history mismatch in case `<id>`: <op> -> <op> …`, whose cause carries the replayable `history-artifact {…}` JSON. Without `strategy`, the compiler derives one from an enum whose payloads are `Int`, `Bool` or `String`; any other command type is `unsupported`. The artifact's source, tool and target identities come from the compiler. `HistoryRNG` is a Core SplitMix64 generator whose copies share one stream; `next_u64()` and `below(bound)` return `Int` (`D-TEST-COUNT1`). |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
 
 `#Test` is the only test declaration syntax (`D-TESTKIT1`).
@@ -3506,9 +3593,11 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node(label: String, width: Float, height: Float) -> UINode` | node | Construct a sized node. |
 | `box(children: [UINode]) -> UINode` | node | Group child nodes. |
 | `text(value: String) -> UINode` | node | Construct a text node. |
-| `preview(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named preview. |
-| `playground(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named interactive playground. |
-| `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions. |
+| `preview(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named preview; `viewport:` defaults to `desktop()`. |
+| `playground(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named interactive playground; `viewport:` defaults to `desktop()`. |
+| `previews(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!`, `playgrounds(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!` | registry | Register at most 64 previews, each with a non-empty unique name. |
+| `UIPreviewRegistry.render(name: String) -> UINode UIPreviewError!` | node | Call the named preview's body. |
+| `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions: 1280×800 at scale 1, 390×844 at scale 2, 834×1119 at scale 2. |
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
@@ -3520,9 +3609,13 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
 
-Preview viewport arguments keep the single optional carrier inserted by the
-checker; lowering does not wrap an already promoted argument again. Preview and
-playground registries can be imported directly as `core.ui.[previews, playgrounds]`.
+`UIPreviewViewport` is `{device: UIPreviewDevice, width: Int, height: Int,
+scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
+UIPreviewViewport, body: fn() -> UINode}`; both are plain Jet values on every
+tier. Registration fails with `UIPreviewError.EmptyName`, `.TooManyPreviews`,
+or `.DuplicatePreview(name)`; rendering an unregistered name fails with
+`.UnknownPreview(name)`. Preview and playground registries can be imported
+directly as `core.ui.[previews, playgrounds]`.
 Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
 their corresponding `UI.*` authority needs and use the current failure carrier;
 IME polling yields an optional event after host failure propagation.
@@ -3542,9 +3635,16 @@ unchanged. Lexical filesystem grants and accessibility metadata construction
 are Jet policy, not host facade calls.
 Terminal/GTK backend allocation, shortcut registration/dispatch, and host
 accessibility attach/project also enter their Jet public functions first.
-`attach` preserves its public `Unit !UIHostError` contract: Core discards the
-private provider's returned canonical node only on success and propagates
-the same typed host error on failure.
+`attach` returns the provider's canonical node with the metadata attached,
+`UINode UIHostError!`, and propagates the typed host error on failure.
+`project` returns `UIAccessibilityProjection{node: UINodeID, metadata:
+UIAccessibility}` when the node carries metadata.
+`UIHostError` has the variants `Cancelled(UICancellation)`,
+`CapabilityUnavailable(capability: String)`, `CapabilityDenied(capability:
+UICapability)`, `InvalidRequest(String)`, `HostFailure(service: String,
+message: String)`, `ResourceDenied(String)`, `ShortcutConflict(shortcut:
+UIShortcut, existing_action: String)`, and `QueueFull(service: String)`; a
+headless host reports `Cancelled(.Headless)`.
 TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
 dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the
@@ -3665,18 +3765,24 @@ boundary. The renderer consumes those facts instead of copying the route list.
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
 | `auth_routes(auth: Auth) -> [String]` | paths | Return authentication route paths. |
 | `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
-| `live(key: String, data: String) -> LiveQuery` | query | Create a live-query carrier. |
-| `subscribe(key: String) -> LiveQuery` | query | Create a subscribed live-query carrier. |
-| `invalidate(key: String) -> Int` / `transact_invalidate(key: String) -> Int` | token | Create invalidation tokens. |
-| `live_get(q: LiveQuery) -> String` / `live_show(q: LiveQuery) -> String` | text | Read or display live-query data. |
-| `live_stats() -> String` | text | Read provider live-query statistics. |
-| `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Push data and advance query generation. |
+| `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
+| `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind any named `source: fn(args...) -> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. |
+| `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
+| `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
+| `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
+| `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
-`app` and `core.web` live-query operations retain the same runtime-owned
-registry as database and data-loader consumers. `LiveQuery` is an opaque
-identity, not a source record snapshot; invalidation, generations, statistics,
-and sync-session publication always inspect or mutate that one registry.
+`app` and `core.web` live bindings share one process-wide registry. A source
+must be a named function, not a closure: its module path and name identify it
+on the wire. `T` and `E` must be `Encode` and `Decode`, and the encoded
+arguments tell bindings of one source apart (an argument type without
+`Encode`, such as a database scope, does not). A stored value that equals the
+previous one is not a change, so readers wake only when the value changed.
+`Live<T, E>` is an identity, not a snapshot: reads, invalidation and
+statistics always use the one registry. A full registry evicts its oldest
+binding. The type is `core.web.Live`; `app` returns the same type and does
+not declare its own, so a signature names it after `use core.web.[Live]`.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
@@ -4009,20 +4115,22 @@ UTF-8 decoding. Compiler-private, audited leaves transfer only native address
 representation; they do not choose validation, defaults, or error policy.
 `SRVRecord` is explicitly assembled from resolver fields.
 
-`socket_addr` checks the port range `0..=65535` and parses numeric IPv4/IPv6
-addresses in Jet. Ordinary host names use the platform resolver, including its
-configured name-service sources; answers retain platform order and the first
-answer is selected without sorting or deduplication. An empty successful
-answer reports the existing “no address” network error, rather than a fabricated
-address. Explicit `DnsResolver.at` lookups remain separate from ordinary
-platform resolution.
+`socket_addrs` checks the port range `0..=65535` and parses numeric IPv4/IPv6
+addresses in Jet; a numeric host is its one address, without a lookup. Ordinary
+host names use the platform resolver, including its configured name-service
+sources; every answer is returned in platform order, without sorting,
+deduplication or filtering. An empty successful answer reports the existing
+“no address” network error rather than an empty list, so the list is never
+empty. `socket_addr` is the first element of `socket_addrs`. Explicit
+`DnsResolver.at` lookups remain separate from ordinary platform resolution.
 
 | Signature | Result | Description |
 |---|---|---|
 | `gethostname() -[Env]> String` | text | Read the local host name. |
 | `ip_addr(text: String) -> IPAddr !NetError` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
-| `socket_addr(host: String, port: Int) -[Net]> SocketAddr !NetError` | address | Build an address after checking the port. |
+| `socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] !NetError` | addresses | Every address the host names, in resolver order. |
+| `socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr !NetError` | address | The first of `socket_addrs`. |
 | `socket_addr_parse(text: String) -> SocketAddr !NetError` | address | Parse a rendered socket address. |
 | `socket_host(addr: SocketAddr) -> String` / `socket_port(addr) -> Int` | scalar | Read address components. |
 | `socket_to_string(addr: SocketAddr) -> String` / `socket_type(stream: TCPStream) -> String` | text | Render an address or identify a stream. |
@@ -4123,6 +4231,34 @@ not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
 the native access contract: reads and writes borrow the named stream with `&`,
 not a copied local handle.
 
+### `core.net.ip` — IPv4/IPv6 values and address classes
+
+`core.net.ip` parses, renders and classifies `IPv4` and `IPv6` values and IPv4
+networks. The implementation is [`Core/Net/Ip.jet`](../../../Core/Net/Ip.jet).
+Two address classes are distinct:
+
+- **Reachable** (`is_global`, `ipv6_is_global`) follows the IANA IPv4 and IPv6
+  Special-Purpose Address Registries (IPv6 registry updated 2025-10-09): an
+  address is global unless a registry row marks it not globally reachable,
+  with the more-specific reachable rows (for example `2001:3::/32` and
+  `2001:20::/28`) as exceptions. 6to4 `2002::/16` and NAT64 `64:ff9b::/96`
+  are reachable; IPv4-mapped `::ffff:0:0/96`, `64:ff9b:1::/48`, Teredo inside
+  `2001::/23`, documentation `2001:db8::/32` and `3fff::/20`, and `5f00::/16`
+  are not.
+- **Safe to fetch** (`is_public_destination`, `ipv6_is_public_destination`)
+  is stricter and requires the reachable class as well. IPv4 also refuses
+  `0/8`, `10/8`, carrier-grade NAT `100.64/10`, `127/8`, `169.254/16`,
+  `172.16/12`, all of `192.0.0/24`, `192.0.2/24`, `192.168/16`,
+  benchmarking `198.18/15`, `198.51.100/24`, `203.0.113/24` and everything
+  from `224/4` up. An IPv4-mapped IPv6 address takes the IPv4 rule; any other
+  IPv6 address must be in `2000::/3` (refusing every NAT64 prefix) and must
+  not be 6to4 or Teredo.
+
+| Signature | Result | Description |
+|---|---|---|
+| `is_global(addr: IPv4) -> Bool` / `ipv6_is_global(addr: IPv6) -> Bool` | Boolean | Reachable per the IANA registries. |
+| `is_public_destination(addr: IPv4) -> Bool` / `ipv6_is_public_destination(addr: IPv6) -> Bool` | Boolean | Safe to fetch: the strict outbound class. |
+
 ### `core.net.tls` — TLS stream wrapper
 
 `core.net.tls` upgrades a connected TCP stream to a verified TLS 1.2/1.3
@@ -4175,6 +4311,11 @@ requires the explicit `SQL.raw` escape. Database operations carry `DB` (and,
 when they wait, `Time.Wait`) effects. The module source is
 [`Core/Db/Db.jet`](../../../Core/Db/Db.jet).
 The backend-neutral driver/policy boundary keeps query operations and the user policy attached to the typed scope (`D-DBDRIVER1=A`; `D-DBPOLICY-BIND1=A`).
+A row policy constrains only the rows of its own table: inside a policy scope,
+SQL that targets no table (`SELECT 1`) or another table runs unchanged, SQL on
+the policy's table must name it as its one simple target and gets the policy
+predicate, and SQL that reads the policy's table any other way (a join or
+subquery from another table) is refused.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4188,7 +4329,7 @@ The backend-neutral driver/policy boundary keeps query operations and the user p
 | `row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError!` | value | Read an untyped row value. |
 | `row_int(row: [String: DBValue], column: String) -[DB]> Int DBError!` / `row_float(row, column) -[DB]> Float DBError!` | scalar | Read numeric row values. |
 | `row_text(row: [String: DBValue], column: String) -[DB]> String DBError!` / `row_bool(row, column) -[DB]> Bool DBError!` | scalar | Read text or Boolean row values. |
-| `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. |
+| `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. A field's column is its `Rename(db:)` name, else its shared name. |
 | `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Execute a checked transaction. |
 | `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
 
@@ -4292,8 +4433,6 @@ those bounds and the enclosing source location, rather than a copied slice.
 | `abs`, `negate`, `exp`, `log`, `sqrt` | tensor | Apply checked elementwise math. |
 | `matmul(a, b) -> Tensor !ComputeError` / `matmul_f32_tile(a, b) -> Tensor !ComputeError` | tensor | Multiply compatible matrices under a profile. |
 | `sum_axis(tensor, axis: Int) -> Tensor !ComputeError` | tensor | Reduce one axis. |
-| `mse_loss(pred, target) -> Tensor !ComputeError` | tensor | Compute a one-element mean-squared-error tensor. |
-| `sgd_step(weights, grad, lr: Float) -> Tensor !ComputeError` | tensor | Apply a value-based SGD step. |
 | `value_and_gradient(pred, target) -> VJPRun !ComputeError`, `vjp(pred, target) -> VJPRun !ComputeError` | result | Evaluate the fixed MSE value and gradient. |
 | `gradient(pred, target) -> Tensor !ComputeError`, `jvp(pred, target, tangent) -> Tensor !ComputeError` | tensor | Return gradient or tangent result for that contract. |
 | `det(tensor) -> Float !ComputeError`, `inv(tensor) -> Tensor !ComputeError`, `solve(a, b) -> Tensor !ComputeError` | linear algebra | Perform checked square-matrix operations. |
@@ -4321,13 +4460,28 @@ structured values, not an untyped supervisor log. The source is
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
+The whole service runtime is Jet source: no native service runtime, handle or
+route remains. It reaches the host only through the Core-private `__host_*`
+leaves (wall clock, entropy, sleep, and file metadata, read, append, create,
+rename, sync, remove and mode operations). The process-wide endpoint registry,
+pending-delivery registry, durable-store gate and state sequence are Core
+Process Shared sites (`Docs/spec/stdlib-api-laws.md`, "Internal Core Shared
+publication"). Service calls name the file and wait effects they reach
+(`D-SERVICE-EFFECTS1=A`): the `__host_*` file leaves carry `FS.Read` or
+`FS.Write`, the sleep leaves carry `Time.Wait`, and a service call's row is
+inferred from its Core source body like any other call. `service.tree` stays
+`-[]>`; `start` and the workflow waits reach `FS.Read`, `FS.Write` and
+`Time.Wait`. A cancelled or deadline-blown
+`workflow.sleep` ends its wait without unwinding, so the workflow records
+`sleep-cancelled` or `sleep-deadline` before the call fails.
+
 Restart/delivery policy constructors and runtime retention projection are Jet
 policy. `state_store` requires `FS.Read`: it inspects the target and lexical
 ancestors with metadata-only reads, without normalizing away `..`, refusing
-symbolic links and unsuitable file kinds while allowing absent paths. Generation/event/dead-letter getters
-read native storage metadata without reconstructing scheduler state.
-The private metadata carrier does not acquire a Windows identity handle;
-constructor validation therefore adds no identity-open failures.
+symbolic links and unsuitable file kinds while allowing absent paths.
+Generation/event/dead-letter getters read the tree's own fields. The metadata
+read does not acquire a Windows identity handle; constructor validation
+therefore adds no identity-open failures.
 
 `ServiceError` and `DeliveryReceipt` are ordinary Jet enum/record values.
 All ten error cases carry a String; their service display is the message alone.
@@ -4336,82 +4490,62 @@ their service display preserves the existing field order and labels.
 `TaskOutcome` retains Finished, Panicked(String), Cancelled and DeadlineBlown:
 display uses the raw panic reason, while Debug quotes and escapes that String.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
-original positional order.
+original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
+`Delivery.show()` and `DeliveryReceipt.show()` return that same display text.
 
 Restart/delivery/state-empty selection and dead-letter draining enforce their
-original validation order in Jet. Private single-field host leaves only read
-or write the existing service tree storage, under the caller's exclusive borrow.
-The signing key remains the exact 32 bytes decoded from the current `sa-`
-authority token; this port adds no key cache or security-policy change.
+original validation order. The signing key remains the exact 32 bytes decoded
+from the current `sa-` authority token, with no key cache.
 The Core-internal `__authority_signing_key` shares that one decoder with jobs;
-it is source policy, not a second host signer or an additional authority store.
+it is source policy, not a second signer or an additional authority store.
 Endpoint input and authority-status validation also live in that module.
-The reserved `__authority_validate` preserves native check order, including
-partition-before-generation for an exact registry entry, and reads one
-consistent snapshot of the existing endpoint registry for its fallback scans.
-The fresh-tree constructor supplies all initial fields in Jet, in their native
+The reserved `__authority_validate` preserves the original check order,
+including partition-before-generation for an exact registry entry, and reads
+one consistent snapshot of the endpoint registry for its fallback scans.
+The fresh-tree constructor supplies all initial fields in their original
 evaluation order: generation 1, OneForOne restart with a 5/60000ms budget,
 AtMostOnce delivery, no authority/snapshot/upgrade, and empty topology/state
-stores. Its two temporary host leaves only allocate the existing task runtime
-and materialize those supplied fields. Seven private type-name bindings expose
-the existing field types without introducing a new carrier; both compiler
-mappers bind the same names and retire at the Jet-runtime cutover.
-
-Retaining service transports receive copies of borrowed caller values
-(names, policies, messages, and endpoint identities). A `.copy()` result is
-fresh and passes without a `^` receiver mark; `^` moves locally owned
-mailboxes and queues instead, preserving their channel identity.
+stores.
 
 Worker registration, failure/restart selection, restart-window counting and
-mailbox-depth selection are Jet policy. Registration retains the checked
-top-level function item, validates before entropy/allocation/publication, and
-supplies every worker seed. Failure retains declaration-order group scope,
-strict `at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
-escalation, durable-mailbox preservation and partition reassertion in native
-write order (`Services.rs:2917–3078`, restart helper `1983–2012`). The depth and
-count readers deliberately retain native's weaker name/tree match after
+mailbox-depth selection are Jet policy. Registration checks the top-level
+handler function item and keeps only its name (no handler task runs
+in-process), validates before entropy/allocation/publication, and supplies
+every worker seed. Failure retains declaration-order group scope, strict
+`at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
+escalation, durable-mailbox preservation and partition reassertion in the
+original write order (`Services.rs:2917–3078`, restart helper `1983–2012`).
+The restart helper replaces the worker's mailbox, so a restarted worker's new
+channel is the one its registry entry publishes and endpoint sends reach. The
+depth and count readers deliberately retain the weaker name/tree match after
 endpoint validation; they do not substitute the stricter routing predicate.
-
-Worker mechanical transports **die at the Jet-runtime cutover**: one aggregate
-parts leaf supplies only absent worker/group supervision facts; setters write
-the existing fields, and partition status/failure share the original single
-mutex acquisition (`3070–3073`). Seven paired private aliases preserve exact
-native shapes: `__WorkerMailbox` (`JetServiceMailbox`, `758–762`, fields
-endpoint/capacity/channel), `__WorkerChannel` (the Arc channel at `761`),
-`__WorkerHandler` (`JetServiceWorkerHandler = fn()`, `821`), `__WorkerStatus`
-(`JetServiceSupervisorStatus`, `123–130`), `__WorkerTopologyKind`
-(`JetServiceTopologyKind`, `134–137`), `__WorkerTopologyState` and
-`__WorkerRestartReason` (the existing DevtoolsTopologyPanel enums at `62–70`
-and `282–288`). Only the existing checked worker parameter forwards a function
-pointer. Mailboxes move: native `Mailbox::clone` forks its channel and is not
-a valid source transfer. Alias, checked-slot and no-clone fixtures cover these
-seams; they introduce no state, policy cache or replacement runtime carrier.
+Mailboxes move rather than fork their channel.
 
 Snapshot/event-log selection, replay framing, topology/observation text, and
-workflow history/outcome selection are Jet policies. Durable reads retain the
-existing host storage/replay operation during the Rust-seed tier; field
-projections expose only existing facts and retire at the Jet-runtime cutover.
+workflow history/outcome selection are Jet policies.
 Group membership validation and chaos-failure ordering are Jet policies.
 Group reparenting retains its original per-worker order, and chaos increments
 its checked counter before selecting the first running worker.
 Event append and snapshot commit validate their adapter, authority, payload,
-and limits in Jet and frame UTF-8 byte lengths there. Snapshot persistence and
-the snapshot field assignment remain inside the same existing host mutex;
-event persistence retains the existing locked store append before the local
-event record is appended. No lock guard or second authority is exposed.
+and limits and frame UTF-8 byte lengths. Snapshot persistence and the
+snapshot field assignment happen under the durable-store gate; event
+persistence appends to the store before the local event record is appended.
+No lock guard or second authority is exposed.
 Directory resolution owns lookup, generation errors, expiration remapping,
-and running/draining checks in Jet; its proof check calls the existing
-authority operation without adding a registry or signing-key cache.
-Tree sends validate routing and payloads in Jet, preserve the native repeated
-authority checks, remap mailbox-capacity failures to the worker-specific text,
-and update accounting only after successful atomic authority sends.
+and running/draining checks; its proof check calls the authority operation
+without adding a registry or signing-key cache.
+Tree sends validate routing and payloads, preserve the repeated authority
+checks, remap mailbox-capacity failures to the worker-specific text, and
+update accounting only after successful atomic authority sends.
 Durable tree sends and receives own local deduplication, pending-message
-admission, receipt marking, and rollback orchestration in Jet. Each existing
-authority/storage operation retains its internal locks; a failed pending send
+admission, receipt marking, and rollback orchestration. A failed pending send
 requeues the remaining authority suffix before restoring the pre-send mailbox.
 Combined rollback failures preserve the original diagnostic and recovery text.
-Generation rollout and start/stop policies remain native pending a reviewed
-lock-lifetime seam; this source port does not claim those rows are complete.
+Generation rollout, start and stop are Jet policy; each registry change takes
+the registry guard, the one linearization point for drain, partition, handoff
+and endpoint send.
+No job or service invocation runs in-process, so no execution scope binds an
+endpoint and `core.jobs.queue()` reports `ServiceError.NotStarted`.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4622,7 +4756,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.data.sketch.tdigest`
 - `core.db`
 - `core.db.sql`
-- `core.email`
 - `core.encoding`
 - `core.encoding.base32`
 - `core.encoding.base64`

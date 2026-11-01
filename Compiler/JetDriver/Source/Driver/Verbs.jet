@@ -72,16 +72,19 @@ fn jet_driver_shift_span(span: Span, shift: Int) -> Span Never! {
 }
 
 // `path` is the diagnostic's display path (`jet_driver_display_path`); a disk
-// origin keeps its canonical path beside the root-relative display, as the
-// Rust driver's origins do.
+// origin keeps its canonical path beside the display, as the Rust driver's
+// origins do. A file of the entry root displays root-relative; a file of
+// another root (a dependency package's error, reported inline before its
+// E0626) keeps the entry-relative display path, so it names that package.
 fn jet_driver_present_origin(path: String, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> DiagnosticOrigin? Never! {
     loop file in generated {
         if file.path == path -> return Val(DiagnosticOrigin{display: path, path: path, source: file.source, revision: sha256_hex(file.source)})
     }
     physical :: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), path)
     loop root in snapshot.roots {
+        entry :: root.identity == snapshot.entry_root_identity
         loop file in root.files {
-            if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: sha256_hex(file.source)})
+            if file.path == physical -> return Val(DiagnosticOrigin{display: if entry -> file.relative_path else -> path, path: physical, source: file.source, revision: sha256_hex(file.source)})
         }
         loop file in root.foreign_cache_files {
             if file.path == physical -> return Val(DiagnosticOrigin{display: file.relative_path, path: physical, source: file.source, revision: sha256_hex(file.source)})

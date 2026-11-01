@@ -71,8 +71,29 @@ struct LinearSolver {
     device: String
 }
 
+// LU with partial pivoting and the scale-relative singular test of
+// `factorize`, then forward and back substitution per right-hand column.
+// The solution is built through `from_list`/`reshape` in b's shape.
 fn dense(a: Tensor, b: Tensor) -> Tensor ComputeError! {
-    compute.solve(a, b)
+    shape :: compute.shape(a)
+    data :: compute.to_list(a)
+    profile :: tensor_profile(a)
+    validate_matrix(shape, data, profile)
+    rhs_shape :: compute.shape(b)
+    rhs :: compute.to_list(b)
+    validate_rhs(rhs_shape, rhs, tensor_profile(b))
+    device :: compute.device(a)
+    if device != compute.device(b) -> return Err(ComputeError.Device)
+    if device != "CPU" -> return Err(ComputeError.Unsupported)
+    if tensor_profile(b) != profile -> return Err(ComputeError.Device)
+    n :: shape[0]
+    if rhs_shape[0] != n -> return Err(ComputeError.Shape)
+    rhs_cols := 1
+    if rhs_shape.len() == 2 -> rhs_cols = rhs_shape[1]
+    factors :: factorize(^data, n, profile)
+    solution :: solve_factors(factors, n, rhs, rhs_cols, profile)
+    flat :: compute.from_list(solution)
+    compute.reshape(flat, rhs_shape)
 }
 
 fn lu(a: Tensor) -> LinearSolver ComputeError! {
@@ -100,6 +121,23 @@ fn validate_matrix(shape: [Int], data: [Float], profile: String) ComputeError! {
     if shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     if shape[0] != shape[1] -> return Err(ComputeError.Shape)
     if shape[0] < 0 || shape[1] < 0 -> return Err(ComputeError.Shape)
+    expected :: checked_numel(shape)
+    if expected != data.len() -> return Err(ComputeError.Shape)
+    if profile != "F64Strict+Reproducible" && profile != "F32Strict+Reproducible" {
+        return Err(ComputeError.Serialization)
+    }
+    loop value in data {
+        if !math_is_finite(value) -> return Err(ComputeError.Arithmetic)
+        if profile == "F32Strict+Reproducible" {
+            representable :: f32_representable(value)
+            if !representable -> return Err(ComputeError.Arithmetic)
+        }
+    }
+    return
+}
+
+fn validate_rhs(shape: [Int], data: [Float], profile: String) ComputeError! {
+    if shape.len() != 1 && shape.len() != 2 -> return Err(ComputeError.RankMismatch)
     expected :: checked_numel(shape)
     if expected != data.len() -> return Err(ComputeError.Shape)
     if profile != "F64Strict+Reproducible" && profile != "F32Strict+Reproducible" {
@@ -170,6 +208,46 @@ fn factorize(input: ^[Float], n: Int, profile: String) -> Factorization ComputeE
         }
     }
     Ok(Factorization{factors: factors, pivots: pivots, pivot_threshold: pivot_threshold})
+}
+
+// Apply the factorization's row swaps to the right-hand side, solve L*y = P*b
+// with L's unit diagonal, then U*x = y.
+fn solve_factors(factors: Factorization, n: Int, rhs: [Float], rhs_cols: Int, profile: String) -> [Float] ComputeError! {
+    work := rhs.copy()
+    loop k in 0..<factors.pivots.len() {
+        pivot :: factors.pivots[k]
+        if pivot != k {
+            loop j in 0..<rhs_cols {
+                tmp := work[k * rhs_cols + j]
+                work[k * rhs_cols + j] = work[pivot * rhs_cols + j]
+                work[pivot * rhs_cols + j] = tmp
+            }
+        }
+    }
+    loop i in 0..<n {
+        loop j in 0..<rhs_cols {
+            value := work[i * rhs_cols + j]
+            loop k in 0..<i {
+                value = profile_round(value - factors.factors[i * n + k] * work[k * rhs_cols + j], profile) ?? return Err(ComputeError.Arithmetic)
+            }
+            work[i * rhs_cols + j] = value
+        }
+    }
+    i := n
+    loop i > 0 {
+        i = i - 1
+        diagonal :: factors.factors[i * n + i]
+        if abs_f(diagonal) <= factors.pivot_threshold -> return Err(ComputeError.Singular)
+        loop j in 0..<rhs_cols {
+            value := work[i * rhs_cols + j]
+            loop k in (i + 1)..<n {
+                value = profile_round(value - factors.factors[i * n + k] * work[k * rhs_cols + j], profile) ?? return Err(ComputeError.Arithmetic)
+            }
+            value = profile_round(value / diagonal, profile) ?? return Err(ComputeError.Arithmetic)
+            work[i * rhs_cols + j] = value
+        }
+    }
+    work
 }
 
 

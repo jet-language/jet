@@ -583,7 +583,9 @@ fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
         .Apply(name, args) -> {
             if name == "Iter" && args.len() == 1 -> return Val(SemaCollectionKind.Iter{element: args[0]})
             if name == "ViewIter" && args.len() == 1 -> return Val(SemaCollectionKind.ViewIter{element: args[0]})
-            if name == "View" && args.len() == 1 -> return Val(SemaCollectionKind.View{element: args[0]})
+            // A write window reads like the view it is; its writes go through
+            // its elements.
+            if (name == "View" || name == "ViewMut") && args.len() == 1 -> return Val(SemaCollectionKind.View{element: args[0]})
             if name == "Set" && args.len() == 1 -> return Val(SemaCollectionKind.Set{element: args[0]})
             if name == "Rank" && args.len() == 1 -> return Val(SemaCollectionKind.Rank{element: args[0]})
             if name == "Tally" && args.len() == 1 -> return Val(SemaCollectionKind.Tally{element: args[0]})
@@ -634,6 +636,18 @@ fn sema_collection_family(kind: SemaCollectionKind) -> CollectionReceivers Never
 fn collection_receivers_accept(receivers: CollectionReceivers, family: CollectionReceivers) -> Bool Never! {
     if receivers == family -> return true
     receivers == CollectionReceivers.Sequence && (family == CollectionReceivers.List || family == CollectionReceivers.Iter)
+}
+
+// A write window (`ViewMut<T>`, `&xs[a..b]`) has a fixed length: of the list
+// writes it takes only those that rearrange its elements in place.
+fn collection_window_write(receiver: Type, row: CollectionOperationRow) -> Bool Never! {
+    if row.receivers != CollectionReceivers.List -> return false
+    window :: if receiver == .Apply(name, _) -> name == "ViewMut" else -> false
+    if !window -> return false
+    if row.op == {
+        .Builtin(op) -> op == TBuiltinOp.Sort || op == TBuiltinOp.SortDesc || op == TBuiltinOp.Reverse
+        else -> false
+    }
 }
 
 fn collection_access_convention(access: CollectionAccess, family: CollectionReceivers) -> AccessConvention Never! {
@@ -705,7 +719,7 @@ fn sema_collection_method_contract_in(rows: [CollectionOperationRow], receiver: 
     kind :: sema_collection_kind(receiver) ?? return None
     family := sema_collection_family(kind)
     loop row in rows {
-        if row.name == method && row.status != CollectionStatus.Proposed && collection_receivers_accept(row.receivers, family) {
+        if row.name == method && row.status != CollectionStatus.Proposed && (collection_receivers_accept(row.receivers, family) || collection_window_write(receiver, row)) {
             callbacks := [Int]{}
             seeds := [Int]{}
             comparator := false
@@ -792,7 +806,13 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
     eager := family == CollectionReceivers.List || family == CollectionReceivers.View
     callback :: callback_return ?? Type.Named{name: "Unit"}
     if contract.row.result == {
-        .Unit -> Val(Type.Named{name: "Unit"})
+        // A Result callback's first error ends a sequence `each` (`Unit E!`).
+        .Unit -> {
+            if contract.row.op == .SeqEach && callback == .Result(_, err) {
+                if err != (Type.Named{name: "Never"}) -> return Val(Type.Result{ok: Type.Named{name: "Unit"}, err: err})
+            }
+            Val(Type.Named{name: "Unit"})
+        }
         .Bool -> Val(Type.Bool)
         .Int -> Val(Type.Int)
         .Float -> Val(Type.Float)
@@ -823,11 +843,15 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
                 else -> None
             }
         }
-        // A Result callback's error ends the mapping (`[U] E!`); any other
-        // callback, an Option one included, is the element type itself.
+        // A Result callback's error ends the mapping (`[U] E!`); a `Never`
+        // error cannot, and any other callback, an Option one included, is
+        // the element type itself.
         .Mapped -> {
             if callback == {
-                .Result(ok, err) -> Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
+                .Result(ok, err) -> {
+                    if err == (Type.Named{name: "Never"}) -> return Val(if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok))
+                    Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
+                }
                 else -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
             }
         }
@@ -837,7 +861,10 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         }
         .ListMapped -> {
             if callback == {
-                .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
+                .Result(ok, err) -> {
+                    if err == (Type.Named{name: "Never"}) -> return Val(Type.List{element: ok})
+                    Val(Type.Result{ok: Type.List{element: ok}, err: err})
+                }
                 else -> Val(Type.List{element: callback})
             }
         }
@@ -892,6 +919,7 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         .TryCollected -> {
             if element == {
                 .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
+                .Option(inner) -> Val(Type.Option{inner: Type.List{element: inner}})
                 else -> None
             }
         }
@@ -901,8 +929,9 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
 fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
     if callback == {
         .Result(ok, err) -> {
-            if ok == Type.Bool -> return Val(Type.Result{ok: filtered, err: err})
-            return None
+            if ok != Type.Bool -> return None
+            if err == (Type.Named{name: "Never"}) -> return Val(filtered)
+            return Val(Type.Result{ok: filtered, err: err})
         }
         else -> {}
     }
@@ -938,7 +967,11 @@ fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argu
             else -> TClosureOp.Map
         }}
         .SeqFilter -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
-        .SeqEach -> SemaCollectionOperation.Closure{operation: if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each}
+        .SeqEach -> SemaCollectionOperation.Closure{operation: if {
+            fallible -> TClosureOp.TryEach
+            callback_mutable -> TClosureOp.EachMut
+            else -> TClosureOp.Each
+        }}
         // A list folds through the borrowed view route (the step reads each
         // element), so the receiver is never copied to be consumed.
         .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view || sema_collection_family(contract.kind) == CollectionReceivers.List -> TClosureOp.ViewFold else -> TClosureOp.Fold}

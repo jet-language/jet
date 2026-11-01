@@ -101,3 +101,13 @@ fn run() {
     assert(!rendered.contains("read()?"))
     assert(fmt_core_ok(rendered) == rendered)
 }
+
+// A field's markers format to themselves, so `#Redact` is written once
+// however often `jet fmt` runs.
+#Test("field_markers_format_to_themselves") {
+    loop source in [
+        "struct Login {{\n    user: String\n    #Redact password: String\n}}\n",
+        "struct Login {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
+        "struct Login {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
+    ] -> assert_eq(fmt_core_stable(source), source)
+}

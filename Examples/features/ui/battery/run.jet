@@ -38,15 +38,7 @@ fn run() {
     render_backend :: tui_backend.copy()
     ui.reactive_render(
     () -> {
-        save_action :: ui.node_shortcut(
-        ui.button(
-        "Save",
-        on_click: () -> {
-            &save_requested.set(true)
-        },
-        ),
-        gui.save_shortcut(),
-        )
+        save_action :: ui.node_shortcut(ui.button("Save") { save_requested.set(true) }, gui.save_shortcut())
         editor :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
         tree :: ui.box(
         [
@@ -106,11 +98,11 @@ fn run() {
     state = gui.set_theme(state, "light")
     state = gui.set_settings_open(state, true)
     edited_state :: state
-    &draft.set(gui.body_of(edited_state))
-    &selected.set(1)
-    &theme.set(gui.theme_of(edited_state))
-    &settings_open.set(gui.settings_open_of(edited_state))
-    &saved.set(false)
+    draft.set(gui.body_of(edited_state))
+    selected.set(1)
+    theme.set(gui.theme_of(edited_state))
+    settings_open.set(gui.settings_open_of(edited_state))
+    saved.set(false)
     print("reactive renders after edit: {tui_backend.render_count()}")
     print("editor status: {gui.status_label(edited_state)} ({status.get()})")
 
@@ -142,31 +134,22 @@ fn run() {
     // rather than marking a cancelled service as a completed save.
     _caps :: gui.host_capabilities()
     _filter :: gui.text_filter()
-    _custom_filter :: gui.file_filter("Notes", ["jet", "md"], ["text/plain"])
     _rights :: gui.fs_rights()
-    _grant :: gui.request_grant(root)
-    _clipboard_write :: gui.write_clipboard(gui.selected_text(gui.body_of(edited_state), gui.selection_of(edited_state)))
-    _clipboard_read :: gui.read_clipboard()
-    _ime :: gui.poll_ime()
-    _drop :: gui.poll_drag_drop()
-    save_shortcut :: gui.save_shortcut()
-    _shortcut :: gui.host_shortcut()
-    _a11y :: gui.accessibility_metadata("Editor", "Multiline note editor")
+    _save_shortcut :: gui.save_shortcut()
 
-    if _custom_filter == {
+    if gui.file_filter("Notes", ["jet", "md"], ["text/plain"]) == {
         .Ok(filter) -> { print("file filter ready: {filter.extensions.len()} extensions") }
         .Err(_) -> {
             error_state :: gui.mark_error(edited_state, "file filter cancelled or failed")
             print("file filter outcome: {gui.status_label(error_state)}")
         }
     }
-    if _grant == {
+    if gui.request_grant(root) == {
         .Ok(grant) -> {
             print("filesystem grant: {grant.root}")
             open_request :: gui.open_request(grant.copy())
             save_request :: gui.save_request(grant.copy())
-            open_result :: gui.open_file(open_request)
-            if open_result == {
+            if gui.open_file(open_request) == {
                 .Ok(selection) -> {
                     opened_path :: selection.files.get(0) ?? panic("open dialog returned no files")
                     opened_body :: fs.read(opened_path.path) ?? panic("read selected note")
@@ -174,13 +157,12 @@ fn run() {
                 }
                 .Err(_) -> print("open dialog outcome: cancelled or failed")
             }
-            save_result :: gui.save_file(save_request)
-            if save_result == {
+            if gui.save_file(save_request) == {
                 .Ok(selection) -> {
                     selected_path :: selection.files.get(0) ?? panic("save dialog returned no files")
                     fs.write(selected_path.path, gui.persisted_body(edited_state)) ?? panic("save selected note")
                     saved_state :: gui.mark_saved(edited_state)
-                    &saved.set(true)
+                    saved.set(true)
                     print("save dialog files: {selection.files.len()}")
                     print("editor status after save: {gui.status_label(saved_state)} ({status.get()})")
                 }
@@ -192,50 +174,47 @@ fn run() {
         }
         .Err(_) -> print("filesystem grant outcome: cancelled or failed")
     }
-    if _clipboard_write == {
+    if gui.write_clipboard(gui.selected_text(gui.body_of(edited_state), gui.selection_of(edited_state))) == {
         .Ok(receipt) -> { print("clipboard write characters: {receipt.characters}") }
         .Err(_) -> print("clipboard write outcome: cancelled or failed")
     }
-    if _clipboard_read == {
+    if gui.read_clipboard() == {
         .Ok(value) -> { print("clipboard read scalars: {text.scalar_count(value.text)}") }
         .Err(_) -> print("clipboard read outcome: cancelled or failed")
     }
-    if _ime == {
+    if gui.poll_ime() == {
         .Ok(_) -> { print("IME poll completed (event may be absent)") }
         .Err(_) -> print("IME poll outcome: cancelled or failed")
     }
-    if _drop == {
+    if gui.poll_drag_drop() == {
         .Ok(_) -> { print("drag/drop poll completed (event may be absent)") }
         .Err(_) -> print("drag/drop poll outcome: cancelled or failed")
     }
-    if _shortcut == {
+    if gui.host_shortcut() == {
         .Ok(shortcut) -> {
             print("host shortcut: {shortcut.key}")
-            binding_result :: gui.bind_shortcut(shortcut.copy(), "save")
-            if binding_result == {
+            if gui.bind_shortcut(shortcut.copy(), "save") == {
                 .Ok(binding) -> {
-                    register_result :: gui.register_shortcut(binding)
-                    if register_result == {
+                    if gui.register_shortcut(binding) == {
                         .Ok(_) -> { print("shortcut registration completed") }
                         .Err(_) -> print("shortcut registration outcome: cancelled or failed")
                     }
                 }
                 .Err(_) -> print("shortcut binding outcome: cancelled or failed")
             }
-            dispatch_result :: gui.dispatch_shortcut(shortcut.copy())
-            if dispatch_result == {
+            if gui.dispatch_shortcut(shortcut.copy()) == {
                 .Ok(_) -> { print("shortcut dispatch completed") }
                 .Err(_) -> print("shortcut dispatch outcome: cancelled or failed")
             }
         }
         .Err(_) -> print("host shortcut outcome: cancelled or failed")
     }
-    if _a11y == {
+    if gui.accessibility_metadata("Editor", "Multiline note editor") == {
         .Ok(metadata) -> {
             a11y_node :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
             accessible_tree :: ui.node_accessibility(a11y_node, metadata.copy())
             if accessible_tree.accessibility == {
-                .Some(_) -> {
+                .Val(_) -> {
                     print("accessibility metadata on labeled node: {accessible_tree.label}")
                 }
                 .None -> panic("accessibility metadata missing")
@@ -243,8 +222,7 @@ fn run() {
             accessibility_backend :: ui.null_backend()
             ui.mount(accessibility_backend, accessible_tree.copy(), ui.constraint(0.0, 0.0, 80.0, 24.0))
             print("accessibility mount commands: {accessibility_backend.commands().len()}")
-            attached :: gui.attach_accessibility(a11y_node, metadata)
-            if attached == {
+            if gui.attach_accessibility(a11y_node, metadata) == {
                 .Ok(_) -> { print("host accessibility attachment completed") }
                 .Err(_) -> print("accessibility attachment outcome: cancelled or failed")
             }

@@ -14,12 +14,12 @@ fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
         result.negative = first == I64{45}
         at += I64{1}
     }
-    if scan_ascii(data + at * stride, len - at, stride, I64{6712937}, I64{3}) || scan_ascii(data + at * stride, len - at, stride, I64{8751735898823356009}, I64{8}) {
+    if scan_ascii(wrapping(data + at * stride), len - at, stride, I64{6712937}, I64{3}) || scan_ascii(wrapping(data + at * stride), len - at, stride, I64{8751735898823356009}, I64{8}) {
         result.valid = true
         result.special = I64{1}
         return result
     }
-    if scan_ascii(data + at * stride, len - at, stride, I64{7233902}, I64{3}) {
+    if scan_ascii(wrapping(data + at * stride), len - at, stride, I64{7233902}, I64{3}) {
         result.valid = true
         result.special = I64{2}
         return result

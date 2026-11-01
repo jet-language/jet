@@ -62,11 +62,11 @@ fn rt_age_label_byte(label: I64, i: I64) -> I64 {
     }
 }
 fn rt_age_derive(ikm: I64, ikm_len: I64, salt: I64, salt_len: I64, label: I64, output: I64, scratch: I64) {
-    info :: scratch + I64{744}
+    info :: wrapping(scratch + I64{744})
     count :: if (label == I64{2}) -> I64{28} else -> if (label == I64{0}) -> I64{6} else -> I64{7}
     i := I64{0}
     loop i < count {
-        rt_text_put(info + i, rt_age_label_byte(label, i))
+        rt_text_put(wrapping(info + i), rt_age_label_byte(label, i))
         i += I64{1}
     }
     rt_crypto_hkdf(ikm, ikm_len, salt, salt_len, info, count, output, I64{32}, scratch)
@@ -77,15 +77,15 @@ fn rt_age_stream_nonce(counter: I64, last: Bool, nonce: I64) {
     i := I64{3}
     loop {
         if (i >= I64{11}) -> break
-        rt_text_put(nonce + i, (counter >> ((I64{10} - i) * I64{8})).bit_and(I64{255}))
+        rt_text_put(wrapping(nonce + i), (counter >> ((I64{10} - i) * I64{8})).bit_and(I64{255}))
         i += I64{1}
     }
-    rt_text_put(nonce + I64{11}, if last -> I64{1} else -> I64{0})
+    rt_text_put(wrapping(nonce + I64{11}), if last -> I64{1} else -> I64{0})
 }
 fn rt_age_line_end(input: I64, length: I64, at: I64) -> I64 {
     end := at
     loop end < length {
-        if (rt_text_byte(input + end) == I64{10}) -> return end
+        if (rt_text_byte(wrapping(input + end)) == I64{10}) -> return end
         end += I64{1}
     }
     I64{-1}
@@ -95,17 +95,17 @@ fn rt_age_line_end(input: I64, length: I64, at: I64) -> I64 {
 fn rt_age_body_end(input: I64, length: I64, start: I64) -> I64 {
     at := start
     loop at < length {
-        if (rt_text_byte(input + at) == I64{45}) -> return at
+        if (rt_text_byte(wrapping(input + at)) == I64{45}) -> return at
         end :: rt_age_line_end(input, length, at)
         if (end < I64{0} || end - at > I64{64} || (end - at) % I64{4} == I64{1}) -> return I64{-1}
         i := at
         loop i < end {
-            if (rt_age_b64_value(rt_text_byte(input + i)) < I64{0}) -> return I64{-1}
+            if (rt_age_b64_value(rt_text_byte(wrapping(input + i))) < I64{0}) -> return I64{-1}
             i += I64{1}
         }
         rem :: (end - at) % I64{4}
-        if (rem == I64{2} && (rt_age_b64_value(rt_text_byte(input + end - I64{1})).bit_and(I64{15})) != I64{0}) -> return I64{-1}
-        if (rem == I64{3} && (rt_age_b64_value(rt_text_byte(input + end - I64{1})).bit_and(I64{3})) != I64{0}) -> return I64{-1}
+        if (rem == I64{2} && (rt_age_b64_value(rt_text_byte(wrapping(wrapping(input + end) - I64{1}))).bit_and(I64{15})) != I64{0}) -> return I64{-1}
+        if (rem == I64{3} && (rt_age_b64_value(rt_text_byte(wrapping(wrapping(input + end) - I64{1}))).bit_and(I64{3})) != I64{0}) -> return I64{-1}
         width :: end - at
         at = end + I64{1}
         if (width < I64{64}) -> return at
@@ -118,7 +118,7 @@ fn rt_age_header_scan(input: I64, length: I64) -> I64 {
     i := I64{0}
     loop {
         if (i >= I64{22}) -> break
-        if (rt_text_byte(input + i) != rt_age_magic_byte(i)) -> return I64{-1}
+        if (rt_text_byte(wrapping(input + i)) != rt_age_magic_byte(i)) -> return I64{-1}
         i += I64{1}
     }
     at := I64{22}
@@ -126,15 +126,15 @@ fn rt_age_header_scan(input: I64, length: I64) -> I64 {
     loop at < length {
         end :: rt_age_line_end(input, length, at)
         if (end < I64{0}) -> return I64{-1}
-        if (end - at == I64{47} && rt_text_byte(input + at) == I64{45} && rt_text_byte(input + at + I64{1}) == I64{45} && rt_text_byte(input + at + I64{2}) == I64{45} && rt_text_byte(input + at + I64{3}) == I64{32}) {
+        if (end - at == I64{47} && rt_text_byte(wrapping(input + at)) == I64{45} && rt_text_byte(wrapping(wrapping(input + at) + I64{1})) == I64{45} && rt_text_byte(wrapping(wrapping(input + at) + I64{2})) == I64{45} && rt_text_byte(wrapping(wrapping(input + at) + I64{3})) == I64{32}) {
             if (stanzas == I64{0}) -> return I64{-1}
             return at
         }
-        if (end - at < I64{4} || rt_text_byte(input + at) != I64{45} || rt_text_byte(input + at + I64{1}) != I64{62} || rt_text_byte(input + at + I64{2}) != I64{32}) -> return I64{-1}
+        if (end - at < I64{4} || rt_text_byte(wrapping(input + at)) != I64{45} || rt_text_byte(wrapping(wrapping(input + at) + I64{1})) != I64{62} || rt_text_byte(wrapping(wrapping(input + at) + I64{2})) != I64{32}) -> return I64{-1}
         token := false
         i = at + I64{3}
         loop i < end {
-            c :: rt_text_byte(input + i)
+            c :: rt_text_byte(wrapping(input + i))
             if (c == I64{32}) {
                 if (!token) -> return I64{-1}
                 token = false
@@ -158,22 +158,22 @@ fn rt_age_unwrap(identity: I64, own_public: I64, input: I64, at: I64, line_end: 
     xline := true
     loop {
         if (i >= I64{9}) -> break
-        if (at + i >= line_end || rt_text_byte(input + at + i) != rt_age_xline_byte(i)) -> xline = false
+        if (at + i >= line_end || rt_text_byte(wrapping(wrapping(input + at) + i)) != rt_age_xline_byte(i)) -> xline = false
         i += I64{1}
     }
-    if (!xline || (line_end > at + I64{9} && rt_text_byte(input + at + I64{9}) != I64{32})) -> return I64{0}
+    if (!xline || (line_end > at + I64{9} && rt_text_byte(wrapping(wrapping(input + at) + I64{9})) != I64{32})) -> return I64{0}
     if (line_end - at != I64{53} || body_end - line_end != I64{45}) -> return I64{-1}
-    ephemeral :: scratch + I64{1600}
-    shared :: scratch + I64{1632}
-    salt :: scratch + I64{1664}
-    wrap_key :: scratch + I64{1728}
-    nonce :: scratch + I64{1760}
-    wrapped :: scratch + I64{1776}
-    if (rt_age_b64_decode(input + at + I64{10}, I64{43}, ephemeral, I64{32}) != I64{32}) -> return I64{-1}
-    if (rt_age_b64_decode(input + line_end + I64{1}, I64{43}, wrapped, I64{32}) != I64{32}) -> return I64{-1}
+    ephemeral :: wrapping(scratch + I64{1600})
+    shared :: wrapping(scratch + I64{1632})
+    salt :: wrapping(scratch + I64{1664})
+    wrap_key :: wrapping(scratch + I64{1728})
+    nonce :: wrapping(scratch + I64{1760})
+    wrapped :: wrapping(scratch + I64{1776})
+    if (rt_age_b64_decode(wrapping(wrapping(input + at) + I64{10}), I64{43}, ephemeral, I64{32}) != I64{32}) -> return I64{-1}
+    if (rt_age_b64_decode(wrapping(wrapping(input + line_end) + I64{1}), I64{43}, wrapped, I64{32}) != I64{32}) -> return I64{-1}
     if (rt_crypto_x25519(identity, ephemeral, shared, scratch) == I64{0}) -> return I64{-1}
     rt_text_bytes_copy(salt, ephemeral, I64{32})
-    rt_text_bytes_copy(salt + I64{32}, own_public, I64{32})
+    rt_text_bytes_copy(wrapping(salt + I64{32}), own_public, I64{32})
     rt_age_derive(shared, I64{32}, salt, I64{64}, I64{2}, wrap_key, scratch)
     rt_crypto_wipe(nonce, I64{12})
     if (rt_crypto_aead_open(wrap_key, nonce, I64{1}, I64{0}, wrapped, I64{32}, file_key, scratch)) -> return I64{1}
@@ -185,10 +185,10 @@ fn rt_age_open(identity: I64, input: I64, length: I64, output: I64, capacity: I6
     rt_crypto_wipe(scratch, I64{2048})
     footer :: rt_age_header_scan(input, length)
     if (footer < I64{0} || length - footer < I64{80}) -> return I64{-1}
-    own_public :: scratch + I64{1568}
-    file_key :: scratch + I64{1808}
-    auth_tag :: scratch + I64{1824}
-    payload_key :: scratch + I64{1856}
+    own_public :: wrapping(scratch + I64{1568})
+    file_key :: wrapping(scratch + I64{1808})
+    auth_tag :: wrapping(scratch + I64{1824})
+    payload_key :: wrapping(scratch + I64{1856})
     rt_crypto_x25519_public(identity, own_public, scratch)
     at := I64{22}
     found := false
@@ -197,8 +197,8 @@ fn rt_age_open(identity: I64, input: I64, length: I64, output: I64, capacity: I6
         body_end :: rt_age_body_end(input, length, line_end + I64{1})
         // scrypt files are intentionally not accepted by the recipient provider.
         if (line_end - at >= I64{9}) {
-            scrypt :: rt_text_byte(input + at + I64{3}) == I64{115} && rt_text_byte(input + at + I64{4}) == I64{99} && rt_text_byte(input + at + I64{5}) == I64{114} && rt_text_byte(input + at + I64{6}) == I64{121} && rt_text_byte(input + at + I64{7}) == I64{112} && rt_text_byte(input + at + I64{8}) == I64{116}
-            if (scrypt && (line_end == at + I64{9} || rt_text_byte(input + at + I64{9}) == I64{32})) {
+            scrypt :: rt_text_byte(wrapping(wrapping(input + at) + I64{3})) == I64{115} && rt_text_byte(wrapping(wrapping(input + at) + I64{4})) == I64{99} && rt_text_byte(wrapping(wrapping(input + at) + I64{5})) == I64{114} && rt_text_byte(wrapping(wrapping(input + at) + I64{6})) == I64{121} && rt_text_byte(wrapping(wrapping(input + at) + I64{7})) == I64{112} && rt_text_byte(wrapping(wrapping(input + at) + I64{8})) == I64{116}
+            if (scrypt && (line_end == at + I64{9} || rt_text_byte(wrapping(wrapping(input + at) + I64{9})) == I64{32})) {
                 rt_crypto_wipe(scratch, I64{2048})
                 return I64{-1}
             }
@@ -213,12 +213,12 @@ fn rt_age_open(identity: I64, input: I64, length: I64, output: I64, capacity: I6
         }
         at = body_end
     }
-    if (!found || rt_age_b64_decode(input + footer + I64{4}, I64{43}, auth_tag, I64{32}) != I64{32}) {
+    if (!found || rt_age_b64_decode(wrapping(wrapping(input + footer) + I64{4}), I64{43}, auth_tag, I64{32}) != I64{32}) {
         rt_crypto_wipe(scratch, I64{2048})
         return I64{-1}
     }
-    wrap_key :: scratch + I64{1728}
-    calculated :: scratch + I64{1600}
+    wrap_key :: wrapping(scratch + I64{1728})
+    calculated :: wrapping(scratch + I64{1600})
     rt_age_derive(file_key, I64{16}, I64{1}, I64{0}, I64{0}, wrap_key, scratch)
     rt_crypto_hmac(wrap_key, I64{32}, input, footer + I64{3}, calculated, scratch)
     if (!rt_crypto_equal(calculated, auth_tag, I64{32})) {
@@ -234,8 +234,8 @@ fn rt_age_open(identity: I64, input: I64, length: I64, output: I64, capacity: I6
         rt_crypto_wipe(scratch, I64{2048})
         return I64{-1}
     }
-    rt_age_derive(file_key, I64{16}, input + footer + I64{48}, I64{16}, I64{1}, payload_key, scratch)
-    nonce :: scratch + I64{1760}
+    rt_age_derive(file_key, I64{16}, wrapping(wrapping(input + footer) + I64{48}), I64{16}, I64{1}, payload_key, scratch)
+    nonce :: wrapping(scratch + I64{1760})
     emitted := I64{0}
     counter := I64{0}
     at = payload
@@ -243,7 +243,7 @@ fn rt_age_open(identity: I64, input: I64, length: I64, output: I64, capacity: I6
         count := I64{65552}
         if (length - at < count) -> count = length - at
         rt_age_stream_nonce(counter, at + count == length, nonce)
-        if (!rt_crypto_aead_open(payload_key, nonce, I64{1}, I64{0}, input + at, count, output + emitted, scratch)) {
+        if (!rt_crypto_aead_open(payload_key, nonce, I64{1}, I64{0}, wrapping(input + at), count, wrapping(output + emitted), scratch)) {
             rt_crypto_wipe(output, emitted)
             rt_crypto_wipe(scratch, I64{2048})
             return I64{-1}
@@ -269,20 +269,20 @@ fn rt_age_seal(recipients: I64, recipient_count: I64, ephemeral_scalars: I64, fi
     i := I64{0}
     loop {
         if (i >= I64{22}) -> break
-        rt_text_put(output + i, rt_age_magic_byte(i))
+        rt_text_put(wrapping(output + i), rt_age_magic_byte(i))
         i += I64{1}
     }
-    ephemeral :: scratch + I64{1568}
-    shared :: scratch + I64{1632}
-    salt :: scratch + I64{1664}
-    wrap_key :: scratch + I64{1728}
-    nonce :: scratch + I64{1760}
-    wrapped :: scratch + I64{1776}
+    ephemeral :: wrapping(scratch + I64{1568})
+    shared :: wrapping(scratch + I64{1632})
+    salt :: wrapping(scratch + I64{1664})
+    wrap_key :: wrapping(scratch + I64{1728})
+    nonce :: wrapping(scratch + I64{1760})
+    wrapped :: wrapping(scratch + I64{1776})
     at := I64{22}
     recipient := I64{0}
     loop recipient < recipient_count {
-        scalar :: ephemeral_scalars + recipient * I64{32}
-        public :: recipients + recipient * I64{32}
+        scalar :: wrapping(ephemeral_scalars + recipient * I64{32})
+        public :: wrapping(recipients + recipient * I64{32})
         rt_crypto_x25519_public(scalar, ephemeral, scratch)
         if (rt_crypto_x25519(scalar, public, shared, scratch) == I64{0}) {
             rt_crypto_wipe(output, at)
@@ -290,38 +290,38 @@ fn rt_age_seal(recipients: I64, recipient_count: I64, ephemeral_scalars: I64, fi
             return I64{-1}
         }
         rt_text_bytes_copy(salt, ephemeral, I64{32})
-        rt_text_bytes_copy(salt + I64{32}, public, I64{32})
+        rt_text_bytes_copy(wrapping(salt + I64{32}), public, I64{32})
         rt_age_derive(shared, I64{32}, salt, I64{64}, I64{2}, wrap_key, scratch)
         rt_crypto_wipe(nonce, I64{12})
         rt_crypto_aead_seal(wrap_key, nonce, I64{1}, I64{0}, file_key, I64{16}, wrapped, scratch)
         i = I64{0}
         loop {
             if (i >= I64{10}) -> break
-            rt_text_put(output + at + i, rt_age_xline_byte(i))
+            rt_text_put(wrapping(wrapping(output + at) + i), rt_age_xline_byte(i))
             i += I64{1}
         }
-        rt_age_b64_encode(ephemeral, I64{32}, output + at + I64{10})
-        rt_text_put(output + at + I64{53}, I64{10})
-        rt_age_b64_encode(wrapped, I64{32}, output + at + I64{54})
-        rt_text_put(output + at + I64{97}, I64{10})
+        rt_age_b64_encode(ephemeral, I64{32}, wrapping(wrapping(output + at) + I64{10}))
+        rt_text_put(wrapping(wrapping(output + at) + I64{53}), I64{10})
+        rt_age_b64_encode(wrapped, I64{32}, wrapping(wrapping(output + at) + I64{54}))
+        rt_text_put(wrapping(wrapping(output + at) + I64{97}), I64{10})
         at += I64{98}
         recipient += I64{1}
     }
-    rt_text_bytes_copy(output + at, grease, grease_len)
+    rt_text_bytes_copy(wrapping(output + at), grease, grease_len)
     at += grease_len
-    rt_text_put(output + at, I64{45})
-    rt_text_put(output + at + I64{1}, I64{45})
-    rt_text_put(output + at + I64{2}, I64{45})
+    rt_text_put(wrapping(output + at), I64{45})
+    rt_text_put(wrapping(wrapping(output + at) + I64{1}), I64{45})
+    rt_text_put(wrapping(wrapping(output + at) + I64{2}), I64{45})
     rt_age_derive(file_key, I64{16}, I64{1}, I64{0}, I64{0}, wrap_key, scratch)
-    auth_tag :: scratch + I64{1824}
+    auth_tag :: wrapping(scratch + I64{1824})
     rt_crypto_hmac(wrap_key, I64{32}, output, at + I64{3}, auth_tag, scratch)
-    rt_text_put(output + at + I64{3}, I64{32})
-    rt_age_b64_encode(auth_tag, I64{32}, output + at + I64{4})
-    rt_text_put(output + at + I64{47}, I64{10})
+    rt_text_put(wrapping(wrapping(output + at) + I64{3}), I64{32})
+    rt_age_b64_encode(auth_tag, I64{32}, wrapping(wrapping(output + at) + I64{4}))
+    rt_text_put(wrapping(wrapping(output + at) + I64{47}), I64{10})
     at += I64{48}
-    rt_text_bytes_copy(output + at, file_nonce, I64{16})
+    rt_text_bytes_copy(wrapping(output + at), file_nonce, I64{16})
     at += I64{16}
-    payload_key :: scratch + I64{1856}
+    payload_key :: wrapping(scratch + I64{1856})
     rt_age_derive(file_key, I64{16}, file_nonce, I64{16}, I64{1}, payload_key, scratch)
     position := I64{0}
     counter := I64{0}
@@ -330,7 +330,7 @@ fn rt_age_seal(recipients: I64, recipient_count: I64, ephemeral_scalars: I64, fi
         if (plain_len - position < count) -> count = plain_len - position
         last :: position + count == plain_len
         rt_age_stream_nonce(counter, last, nonce)
-        rt_crypto_aead_seal(payload_key, nonce, I64{1}, I64{0}, plain + position, count, output + at, scratch)
+        rt_crypto_aead_seal(payload_key, nonce, I64{1}, I64{0}, wrapping(plain + position), count, wrapping(output + at), scratch)
         at += count + I64{16}
         position += count
         counter += I64{1}

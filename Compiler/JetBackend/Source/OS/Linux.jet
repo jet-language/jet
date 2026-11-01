@@ -370,6 +370,74 @@ fn os_spin_pause() {
     """
 }
 
+// One register of CPUID leaf `leaf`, subleaf `subleaf`: processor
+// identification only, nothing is read or written in memory. cpuid writes
+// ebx, which is callee-saved, so each leaf saves rbx and restores it.
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_eax_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    pop rbx
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_ebx_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    mov rax, rbx
+    pop rbx
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_ecx_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    pop rbx
+    mov rax, rcx ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_edx_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    pop rbx
+    mov rax, rdx ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+// Extended control register `register` (0 is XCR0, the state the OS saves).
+// xgetbv faults unless CPUID.1:ECX.OSXSAVE is set; callers check it first.
+#[Unsafe("xgetbv only reads an extended control register; the caller has seen CPUID.1:ECX.OSXSAVE"), FFI(asm)]
+fn os_xgetbv_i64(register: I64) -> I64 {
+    """
+    mov rcx, {register}
+    xgetbv
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
 // The calling thread's stack pointer. Thread stacks are disjoint mappings, so
 // its high bits tell threads running at the same time apart (the runtime
 // heap's arena choice, Alloc.jet alloc_arena). An rsp read needs a
@@ -440,6 +508,23 @@ fn os_copy_descending_words_i64(target_last: I64, source_last: I64, count: I64) 
     """
 }
 
+// String store for the runtime's word fills (RouteAGame.jet canvas spans):
+// writes `count` copies of the 8-byte `value` from `target` upward.
+#[Unsafe("the caller owns count writable 8-byte words at target"), FFI(asm)]
+fn os_fill_words_i64(target: I64, value: I64, count: I64) {
+    """
+    push {target}
+    push {value}
+    push {count}
+    pop rcx
+    pop rax
+    pop rdi
+    cld
+    rep stosq
+    ; clobbers rax, rcx, rdi
+    """
+}
+
 #[Unsafe("reads one byte from a live readable mapped address supplied by the caller"), FFI(asm)]
 fn os_load_u8(address: I64) -> I64 {
     """
@@ -450,12 +535,8 @@ fn os_load_u8(address: I64) -> I64 {
 #[Unsafe("writes one byte to a live writable mapped address supplied by the caller"), FFI(asm)]
 fn os_store_u8(address: I64, value: I64) {
     """
-    push {address}
-    push {value}
-    pop rdx
-    pop rcx
-    mov byte ptr [rcx], dl
-    ; clobbers rcx, rdx
+    mov rax, {value}
+    mov byte ptr [{address}], al
     """
 }
 

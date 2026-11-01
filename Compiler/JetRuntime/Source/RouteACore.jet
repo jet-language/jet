@@ -1,54 +1,65 @@
-// Small raw leaves of core.auth, core.tui, core.jobs and core.tasks. Rust
-// providers: CoreLib/Top/AuthSession.rs:16-39 (the store byte cell),
+// Small raw leaves of core.auth, app, core.tui, core.jobs and core.tasks.
+// Rust providers: CoreLib/Top/AuthSession.rs:16-39 (the store byte cell),
 // Ui.rs:514 (TUI capability environment bytes), ServiceAuthority.rs:3772-3794
 // (job-queue devtools event, raw sleep), Scheduler.rs:2271-2286 (task flags)
-// and MathTaskMem.rs:3146-3152 (Condition notify).
+// and MathTaskMem.rs:3146-3152 (Condition notify). The app live-query
+// registry (Core/App/App.jet) keeps its state in a second byte cell.
 
-// AuthSession.rs:16: one process-global byte cell. Root32: mutex0, data8,
-// length16 (bytes are packed; capacity == length).
+// A process-global byte cell. Root32: mutex0, data8, length16 (bytes are
+// packed; capacity == length).
 auth_store_root := I64{0}
+web_live_store_root := I64{0}
 
-// runtime-init: 3
-#Export(c) fn jet_rt_auth_store_init() {
-    if (auth_store_root != I64{0}) -> return
+fn byte_cell_new() -> I64 {
     root :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(root, I64{32})
-    auth_store_root = root
+    root
+}
+
+// runtime-init: 3 when auth_store_root
+#Export(c) fn jet_rt_auth_store_init() {
+    if (auth_store_root != I64{0}) -> return
+    auth_store_root = byte_cell_new()
+}
+
+// runtime-init: 3 when web_live_store_root
+#Export(c) fn jet_rt_web_live_store_init() {
+    if (web_live_store_root != I64{0}) -> return
+    web_live_store_root = byte_cell_new()
 }
 
 // A fresh List<U8> copy of `length` packed bytes; its data word, length returned.
-fn auth_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
+fn packed_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
     data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
     loop at < length {
-        host_u8_put(data, at, rt_text_byte(bytes + at))
+        host_u8_put(data, at, rt_text_byte(wrapping(bytes + at)))
         at += I64{1}
     }
     rt_text_store(output, data)
     length
 }
 
-// AuthSession.rs:26: a copy of the current store bytes.
-#Export(c) fn jet_auth_store_load(output: I64) -> I64 {
-    root :: auth_store_root
+// A copy of the cell's current bytes. AuthSession.rs:26.
+fn byte_cell_load(root: I64, output: I64) -> I64 {
     sync_mutex_lock(root)
-    length :: auth_bytes_out(rt_text_word(root + I64{8}), rt_text_word(root + I64{16}), output)
+    length :: packed_bytes_out(rt_text_word(wrapping(root + I64{8})), rt_text_word(wrapping(root + I64{16})), output)
     sync_mutex_unlock(root)
     length
 }
 
-// AuthSession.rs:32: install `next` only while the cell still equals `expected`.
-#Export(c) fn jet_auth_store_replace(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
-    root :: auth_store_root
+// Installs `next` only while the cell still equals `expected`.
+// AuthSession.rs:32.
+fn byte_cell_replace(root: I64, expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
     old_length :: if (expected_length < I64{0} || expected == I64{0}) -> I64{0} else -> expected_length
     new_length :: if (next_length < I64{0} || next == I64{0}) -> I64{0} else -> next_length
     sync_mutex_lock(root)
-    data :: rt_text_word(root + I64{8})
-    length :: rt_text_word(root + I64{16})
+    data :: rt_text_word(wrapping(root + I64{8}))
+    length :: rt_text_word(wrapping(root + I64{16}))
     same := length == old_length
     at := I64{0}
     loop same && at < length {
-        same = rt_text_byte(data + at) == host_u8_get(expected, at)
+        same = rt_text_byte(wrapping(data + at)) == host_u8_get(expected, at)
         at += I64{1}
     }
     if !same {
@@ -58,21 +69,34 @@ fn auth_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
     replacement :: if (new_length == I64{0}) -> I64{0} else -> jet_rt_alloc(new_length, I64{1})
     at = I64{0}
     loop at < new_length {
-        rt_text_put(replacement + at, host_u8_get(next, at))
+        rt_text_put(wrapping(replacement + at), host_u8_get(next, at))
         at += I64{1}
     }
     if (length != I64{0}) -> jet_rt_free(data, length, I64{1})
-    rt_text_store(root + I64{8}, replacement)
-    rt_text_store(root + I64{16}, new_length)
+    rt_text_store(wrapping(root + I64{8}), replacement)
+    rt_text_store(wrapping(root + I64{16}), new_length)
     sync_mutex_unlock(root)
     true
+}
+
+#Export(c) fn jet_auth_store_load(output: I64) -> I64 { byte_cell_load(auth_store_root, output) }
+
+#Export(c) fn jet_auth_store_replace(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
+    byte_cell_replace(auth_store_root, expected, expected_length, next, next_length)
+}
+
+// core.web's live-query registry (Core/Web/Web.jet), shared by `app`.
+#Export(c) fn jet_web_live_store_load(output: I64) -> I64 { byte_cell_load(web_live_store_root, output) }
+
+#Export(c) fn jet_web_live_store_replace(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
+    byte_cell_replace(web_live_store_root, expected, expected_length, next, next_length)
 }
 
 // Ui.rs:514: std::env::var_os(name) as its encoded bytes, None when unset.
 #Export(c) fn jet_tui_cap_env_bytes(name: I64, some: I64, some_len: I64) -> I64 {
     value :: host_environment_value(name)
     if (value == I64{0}) -> return I64{0}
-    rt_text_store(some_len, auth_bytes_out(value, host_startup_byte_length(value), some))
+    rt_text_store(some_len, packed_bytes_out(value, host_startup_byte_length(value), some))
     I64{1}
 }
 
@@ -94,13 +118,13 @@ fn auth_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
     seconds :: ((native >> I64{1}).bit_and(I64{9223372036854775807})) /% I64{500}
     remainder :: wrapping(native - seconds * I64{1000})
     rt_text_store(request, seconds)
-    rt_text_store(request + I64{8}, remainder * I64{1000000})
+    rt_text_store(wrapping(request + I64{8}), remainder * I64{1000000})
     loop {
-        if (rt_text_word(request) == I64{0} && rt_text_word(request + I64{8}) == I64{0}) -> break
+        if (rt_text_word(request) == I64{0} && rt_text_word(wrapping(request + I64{8})) == I64{0}) -> break
         result :: host_call(I64{35}, request, request + I64{16}, I64{0})
         if (result != I64{-4}) -> break
-        rt_text_store(request, rt_text_word(request + I64{16}))
-        rt_text_store(request + I64{8}, rt_text_word(request + I64{24}))
+        rt_text_store(request, rt_text_word(wrapping(request + I64{16})))
+        rt_text_store(wrapping(request + I64{8}), rt_text_word(wrapping(request + I64{24})))
     }
     jet_rt_free(request, I64{32}, I64{8})
 }
@@ -109,13 +133,13 @@ fn auth_bytes_out(bytes: I64, length: I64, output: I64) -> I64 {
 #Export(c) fn jet_scheduler_task_paused(some: I64) -> I64 {
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
-    rt_text_store(some, if (sync_load(control + I64{8}) != I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(some, if (sync_load(wrapping(control + I64{8})) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
 #Export(c) fn jet_scheduler_task_cancelled_state(some: I64) -> I64 {
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
-    rt_text_store(some, if (sync_load(control + I64{16}) != I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(some, if (sync_load(wrapping(control + I64{16})) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
 

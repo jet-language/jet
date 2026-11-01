@@ -1,0 +1,22 @@
+# Arena and Bump run each allocated value's Close and drop when they reset or
+# end, latest allocation first; a view never closes the value it reads.
+fixture: allocated_values_close_in_reverse_order_at_reset_and_end.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = allocated_values_close_in_reverse_order_at_reset_and_end.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = allocated_values_close_in_reverse_order_at_reset_and_end.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = allocated_values_close_in_reverse_order_at_reset_and_end.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = allocated_values_close_in_reverse_order_at_reset_and_end.out

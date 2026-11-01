@@ -55,7 +55,7 @@ fn pipeline_cleanup(rows: I64, count: I64, scratch: I64) {
         row :: pipeline_row(rows, at)
         native :: fd_word(row, I64{0})
         if (native != I64{0}) {
-            _ := jet_process_wait_raw(native, false, scratch, scratch + I64{8})
+            _ := jet_process_wait_raw(native, false, scratch, wrapping(scratch + I64{8}))
             fd_put(row, I64{8}, I64{1})
         }
         at += I64{1}
@@ -115,14 +115,14 @@ fn pipeline_drain(top: I64, rows: I64, slot: I64, text: I64, error: I64, budget:
     moved
 }
 fn pipeline_relay_fail(top: I64, rows: I64, row: I64, errno: I64) {
-    if (fd_word(row, I64{104}) == I64{0}) -> _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(rt_static_text("pipeline stdout")), host_errno_cause(errno), row + I64{104})
+    if (fd_word(row, I64{104}) == I64{0}) -> _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(rt_static_text("pipeline stdout")), host_errno_cause(errno), wrapping(row + I64{104}))
     fd_put(top, I64{32}, I64{1})
     pipeline_stop_groups(rows, fd_word(top, I64{48}))
     pipeline_relay_end(row)
 }
 fn pipeline_relay_end(row: I64) {
-    pipeline_close(row + I64{56})
-    pipeline_close(row + I64{64})
+    pipeline_close(wrapping(row + I64{56}))
+    pipeline_close(wrapping(row + I64{64}))
     fd_put(row, I64{112}, I64{0})
 }
 // Process.rs:1975-2016 jet_process_forward_pipeline_output into stage `row`
@@ -177,10 +177,10 @@ fn pipeline_pump(top: I64, rows: I64) -> Bool {
     loop at < count {
         row :: pipeline_row(rows, at)
         if (at != I64{0} && pipeline_relay(top, rows, row, pipeline_row(rows, at - I64{1}))) -> moved = true
-        if pipeline_drain(top, rows, row + I64{24}, fd_word(row, I64{32}), row + I64{120}, row, rt_static_text("pipeline stderr")) -> moved = true
+        if pipeline_drain(top, rows, wrapping(row + I64{24}), fd_word(row, I64{32}), wrapping(row + I64{120}), row, rt_static_text("pipeline stderr")) -> moved = true
         at += I64{1}
     }
-    if pipeline_drain(top, rows, top, fd_word(top, I64{8}), top + I64{16}, pipeline_row(rows, count - I64{1}), rt_static_text("pipeline stdout")) -> moved = true
+    if pipeline_drain(top, rows, top, fd_word(top, I64{8}), wrapping(top + I64{16}), pipeline_row(rows, count - I64{1}), rt_static_text("pipeline stdout")) -> moved = true
     moved
 }
 fn pipeline_open(top: I64, rows: I64) -> Bool {
@@ -214,7 +214,7 @@ fn pipeline_free(top: I64, rows: I64) {
     at := I64{0}
     loop at < count {
         row :: pipeline_row(rows, at)
-        pipeline_close(row + I64{24})
+        pipeline_close(wrapping(row + I64{24}))
         pipeline_relay_end(row)
         jet_rt_string_drop(fd_word(row, I64{32}))
         if (fd_word(row, I64{72}) != I64{0}) -> jet_rt_free(fd_word(row, I64{72}), PIPELINE_CHUNK_BYTES, I64{1})
@@ -386,7 +386,7 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
     wait_error := I64{0}
     cancelled := false
     park :: sync_park_new()
-    wait :: scratch + I64{16384}
+    wait :: wrapping(scratch + I64{16384})
     index := I64{0}
     loop index < count {
         if (fd_word(pipeline_row(rows, index), I64{8}) != I64{0}) {
@@ -423,11 +423,11 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
                         break
                     }
                 }
-                result :: jet_process_wait_raw(fd_word(row, I64{0}), true, wait, wait + I64{8})
+                result :: jet_process_wait_raw(fd_word(row, I64{0}), true, wait, wrapping(wait + I64{8}))
                 if (result < I64{0}) {
                     errno :: fd_word(wait, I64{16})
                     pipeline_cleanup(rows, count, wait)
-                    _ := host_io_other_take(HOST_IO_OP_CLOSE, jet_rt_string_clone(rt_static_text("pipeline process")), host_errno_cause(errno), scratch + I64{16376})
+                    _ := host_io_other_take(HOST_IO_OP_CLOSE, jet_rt_string_clone(rt_static_text("pipeline process")), host_errno_cause(errno), wrapping(scratch + I64{16376}))
                     wait_error = fd_word(scratch, I64{16376})
                     stop = true
                     break
@@ -486,7 +486,7 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
         index += I64{1}
     }
     if (cancelled || fd_word(top, I64{32}) != I64{0}) -> pipeline_cleanup(rows, count, wait)
-    pipeline_finish_io(top, rows, scratch + I64{16440})
+    pipeline_finish_io(top, rows, wrapping(scratch + I64{16440}))
     sync_park_drop(park)
     if cancelled {
         jet_rt_handle_drop_io_error(wait_error)
@@ -506,7 +506,7 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
         at -= I64{1}
     }
     // Drains: stdout first, then stderr in stage order (Process.rs:1399-1432).
-    drained :: scratch + I64{16384}
+    drained :: wrapping(scratch + I64{16384})
     fd_put(drained, I64{0}, I64{0})
     if (fd_word(top, I64{16}) != I64{0}) {
         fd_put(drained, I64{0}, fd_word(top, I64{16}))
@@ -523,7 +523,7 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
             failed = fd_word(row, I64{120})
             fd_put(row, I64{120}, I64{0})
         } else {
-            slot :: scratch + I64{16392}
+            slot :: wrapping(scratch + I64{16392})
             fd_put(slot, I64{0}, I64{0})
             if process_execution_validate_text(fd_word(row, I64{32}), rt_static_text("pipeline stderr"), slot) {
                 text :: fd_word(row, I64{32})

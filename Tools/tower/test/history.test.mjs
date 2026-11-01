@@ -372,3 +372,30 @@ test('archived cards still drive milestone review readiness', () => {
   assert.equal(st.load().milestones[0].status, 'review-ready', 'archived done work makes the milestone review-ready');
   assert.deepEqual(st.project().milestones[0].progress, { total: 1, done: 1, reviewReady: true, met: false });
 });
+
+// ---- open ballots keep their card live ---------------------------------------
+
+test('an agent cannot close a card while a ballot on it is still open', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'ballot posted', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'posted', by: 'builder' }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 't', ...ballot() }));
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg)),
+    (e) => e instanceof TowerError && e.code === 'E_CRITERIA' && /open ballots \(D-1\)/.test(e.message));
+  st.mutate((s) => db.ratify(s, 'D-1', 'A', null, 'owner'));
+  const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg));
+  assert.equal(result.phase, 'done');
+});
+
+test('questions on an open ballot stay on the board after its card closes', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 't', ...ballot() }));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
+  st.mutate((s) => db.addQuestion(s, { cardId: '#1', decisionId: 'D-1', text: 'why?', kind: 'question', by: 'owner' }));
+  const board = db.projectBoard(st.load());
+  assert.equal(board.cards.length, 0, 'the done card leaves the board');
+  assert.deepEqual(board.questions.map(q => q.text), ['why?'], 'the open ballot keeps its question visible');
+});

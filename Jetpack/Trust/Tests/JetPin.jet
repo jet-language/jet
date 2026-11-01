@@ -1,8 +1,8 @@
 // Claims ported from crates/jetpack/src/JetPin.rs #[cfg(test)]. Each claim
-// works in its own scratch project from `files.temp_dir`. Claims that set
+// works in its own scratch project from `files.tmpdir`. Claims that set
 // the process-global toolchain object variable restore it before return.
 use jetpack_foundation.[
-    BINARY_NAME, PACKAGE_FILE, PAYLOAD_FILE, TOOLCHAIN_EXEC_MARKER_ENV, TOOLCHAIN_OBJECT_ENV,
+    BINARY_NAME, PACKAGE_FILE, TOOLCHAIN_EXEC_MARKER_ENV, TOOLCHAIN_OBJECT_ENV,
 ]
 use jetpack_trust.[
     TrustError, trust_pin_channel_of, trust_pin_classify_channel, trust_pin_decide,
@@ -15,14 +15,17 @@ use core.files as files
 use core.process as process
 use core.sys as sys
 
+// The project outlives this helper, so it is a `tmpdir`: a `temp_dir` would
+// remove it when its `TempDir` drops at return (#6119).
 fn trust_pin_test_root(label: String) -> String {
-    scratch :: files.temp_dir("jetpin_{label}") ?? panic("scratch directory")
-    files.create_dir_all(files.join(scratch.path, ".jet")) ?? panic("scratch .jet directory")
-    scratch.path
+    root :: files.tmpdir("jetpin_{label}") ?? panic("scratch directory")
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("scratch .jet directory")
+    root
 }
 
+// The project manifest is `package.jet`; the retired `pkg.jet` is not read.
 fn trust_pin_test_manifest(root: String, text: String) {
-    files.write(files.join(root, PAYLOAD_FILE), text) ?? panic("write manifest")
+    files.write(files.join(root, PACKAGE_FILE), text) ?? panic("write manifest")
 }
 
 fn trust_pin_test_code(result: String TrustError!) -> String {
@@ -69,7 +72,7 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
 #Test("classify channel rejects ranges with E1249") {
     rejected :: [String]{">=1.0.0", "^1.2", "1", "", "0.", "1.x", "Main"}
     loop bad in rejected {
-        assert_eq(trust_pin_test_code(trust_pin_classify_channel(bad)), "E1249", "should reject {bad}")
+        assert(trust_pin_test_code(trust_pin_classify_channel(bad)) == "E1249", "should reject {bad}")
     }
 }
 
@@ -137,7 +140,7 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
     sys.set(TOOLCHAIN_EXEC_MARKER_ENV, "0.4.0")
     assert(trust_pin_decide(root, "0.4.0", false) == .RunNative)
     sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
-    sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
+    _ :: sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
 }
 
 #Test("matched version runs native") {

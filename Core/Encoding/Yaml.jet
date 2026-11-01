@@ -26,6 +26,14 @@ fn parse(text: String) -> Dyn EncodingError! { parse_yaml(text) }
 
 fn decode(text: String) -> Dyn EncodingError! { parse_yaml(text) }
 
+// Compiler-private typed entry for `yaml.decode<T>(text)`: the document's
+// tree decodes into the target, a parse failure as one root FieldError.
+fn __decode_typed<Target: Decode>(text: String) -> Target [FieldError]! {
+    tree :: parse_yaml(text) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid YAML: {err.reason}"}})
+    value :: tree.decode<Target>() ?? return Err(err)
+    Ok(value)
+}
+
 fn to_string<T: Encode>(value: T) -> String Never! {
     text :: render_yaml(value.encode(), 0).trim_end()
     if text == "" -> "{{}}" else -> text
@@ -439,14 +447,8 @@ fn yaml_leaf(value: Dyn) -> String Never! {
             .Text(s) -> yaml_scalar(s)
             // A YAML timestamp is its plain RFC 3339 scalar, as the parser reads one.
             .DateTime(_) -> value.to_text() ?? panic("DateTime always has an RFC 3339 representation")
-            .Bytes(bytes) -> {
-                out := "["
-                loop i in 0..<bytes.len() {
-                    if i > 0 -> out = "{out}, "
-                    out = "{out}{Int.from_u8(bytes[i])}"
-                }
-                "{out}]"
-            }
+            // Bytes are a `!!binary` base64 scalar, as the parser reads one.
+            .Bytes(bytes) -> "!!binary {base64.encode(bytes)}"
             .Array(items) -> {
                 out := "["
                 loop i in 0..<items.len() {

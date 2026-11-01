@@ -81,9 +81,7 @@ The generated `run.jet` prints a greeting and carries one smoke `#Test`:
 ```jet
 fn greeting(name: String) -> String { "hello, {name}" }
 
-fn run() {
-    print(greeting("world"))
-}
+fn run() { print(greeting("world")) }
 
 #Test("the greeting stays stable") {
     assert_eq(greeting("world"), "hello, world")
@@ -93,7 +91,8 @@ fn run() {
 Richer starters are opt-in templates: `jet new hello --template cli` adds a
 typed `#CLI` argument struct, `--template ui` a native UI tree, `--template web`
 the browser app for `jet dev`, and `--template overrides` the commented
-`@run.jet`/`@build.jet`/`@dev.jet`/`@test.jet` command-override homes.
+`build.jet`/`dev.jet`/`test.jet` command-override homes beside `run.jet`, which
+is the `jet run` home itself.
 
 If `hello` already exists, choose another name. `jet new` does not overwrite
 an existing directory.
@@ -257,10 +256,10 @@ controls.
 | Offline or unsupported host | No editor path is usable until Jet is installed on a supported host. | Reconnect and finish install/fetch; on an unsupported release host, use the platform-specific track. | Do not continue with a partial install or replace the local workflow with a manual remote rebuild. |
 | Learn next | Open the executable first-hour example. | `jet run Examples/features/basics/first_hour.jet` | Continue with the golden-tested example and then choose the next example from its index. |
 
-When the terminal is not attached to a TTY, `jet ?` renders a static command
-palette and `jet ? run` searches commands. `--color=never` or `NO_COLOR` keeps
-captured output plain. Interactive TTY use adds safe command-prefill guidance;
-it never runs the selected example for you.
+Bare `jet`, with no command, prints the command palette: every command under
+its category, as the same static text whether or not a terminal is attached.
+`jet help` adds each command's usage and the flags. `--color=never` or
+`NO_COLOR` keeps captured output plain. Only `jet repl` starts the REPL.
 
 
 ## 9. Recover when the path breaks

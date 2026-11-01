@@ -1,20 +1,26 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
 use jet_driver.[
+    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
-    JetDriverVerbOutput, jet_driver_query_build_plan,
+    JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
     jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
     jet_driver_report_problems, JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
 ]
 use jet_foundation.[
-    BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile,
+    BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
     build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
+    diagnostic_render_all,
 ]
-use core.build.[BuildGraphNode as InspectBuildGraphNode]
+use core.build.[BuildGraphNode]
 use core.files as build_files
 use core.math as build_math
 use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-use jet_build_session.[BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, build_plan_generated, build_plan_selection]
+use jet_build_session.[BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_generated, build_plan_selection]
+use jet_pkg_model.[
+    ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
+    pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_sorted_contributions,
+]
 
 fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
     plan :: query.plan ?? {
@@ -59,7 +65,9 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 // `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
-// then compile each selected executable target from its source, named after the target.
+// record the values it contributes to the package's declared settings
+// (jet_cli_record_build_contributions), then compile each selected executable
+// target from its source, named after the target.
 // The options fn build set go between `options`' profile values and its flags;
 // `build_args` (the words after `--`) are what its `b.args()` returns. Under
 // `write_generated: on` each generated source is first written to its
@@ -70,7 +78,7 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     if ^prepared == {
         .Refused(output) -> return output
-        .Prepared(request, _) -> {
+        .Prepared(request, snapshot) -> {
             scope := JetDriverBuildQueryScope{next_session_id: 1}
             query_request := ^request
             query_request.build_args = build_args.copy()
@@ -78,6 +86,11 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
             query := ^response.query
             if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(response.request, query, file, false, color, false)
             plan :: query.plan ?? return jet_cli_ice("the completed build query has no plan")
+            if jet_cli_settings_package(snapshot) == .Val(package) {
+                recorded :: jet_cli_record_build_contributions(plan, package, color)
+                // copy: `refusal` is a payload view of `recorded`.
+                if recorded == .Val(refusal) -> return refusal.copy()
+            }
             selection = Val(build_plan_selection(plan))
             generated = build_plan_generated(plan)
         }
@@ -100,6 +113,11 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
         }
     }
     selected_options :: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
+    // A web build is one entry's `app.*` files (BuildWeb.jet), so a package's
+    // build targets are built native only.
+    if build_options_value(selected_options, "os") == "web" {
+        return jet_cli_build_failed("`jet build` writes a web build of one entry file, not of a package's `fn build` targets", jet_cli_why("E2105"), "build the entry file with `jet build --target web <file>`", color)
+    }
     root :: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
     if build_options_value(selected_options, "write_generated") == "on" {
         loop source_file in generated {
@@ -118,8 +136,139 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
+// The entry root's package when its manifest declares `settings:`. The values
+// its `fn build` contributes to them (`b.contribute`) are the package's
+// `[[build.contribution]]` rows of the project lock under `root`, which every
+// compile of the package folds (jet_cli_driver_request).
+struct JetCLISettingsPackage {
+    root: String
+    name: String
+}
+
+// The settings package of `snapshot`'s entry root, read from the snapshot's
+// bytes of its manifest; None when the root declares no setting.
+fn jet_cli_settings_package(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLISettingsPackage? Never! {
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        facts :: jet_cli_root_package_facts(root) ?? return None
+        if facts.settings.len() == 0 -> return None
+        return Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.copy()})
+    }
+    None
+}
+
+// The package facts `root` declares: its `package.jet`, else a stock entry's
+// leading inline `package { … }` block. None for an unparsable manifest: the
+// compile reports it.
+fn jet_cli_root_package_facts(root: JetDriverAuthorizedSourceRoot) -> PackageFacts? Never! {
+    loop file in root.files {
+        if file.relative_path != "package.jet" -> next
+        facts :: PackageFacts.parse_uncomposed(file.source, file.path) ?? return None
+        return Val(facts)
+    }
+    loop relative in JET_CLI_STOCK_ENTRIES {
+        loop file in root.files {
+            if file.relative_path != relative -> next
+            inline :: if PackageFacts.parse_inline(file.source, file.path) == {
+                .Ok(value) -> value
+                .Err(_) -> { return None }
+            }
+            // copy: `carrier` is a payload view of `inline`.
+            if inline == .Val(carrier) -> return Val(carrier.facts.copy())
+        }
+    }
+    None
+}
+
+// The request a compile of `owned_request` folds settings from. When its entry
+// package declares settings and a `fn build`, that build is evaluated first and
+// the values it contributes are recorded (jet_cli_record_build_contributions),
+// so the compile reads the rows of this evaluation. `refusal` is set when the
+// build or the lock write failed.
+struct JetCLIContributedRequest {
+    request: JetDriverCompileRequest
+    refusal: JetDriverVerbOutput?
+}
+
+fn jet_cli_contributed_request(owned_request: ^JetDriverCompileRequest, color: Bool) -> JetCLIContributedRequest {
+    request := ^owned_request
+    package :: jet_cli_settings_package(request.authorized_sources) ?? return {request: ^request, refusal: None}
+    if !jet_driver_entry_package_has_build(request) -> return {request: ^request, refusal: None}
+    scope := JetDriverBuildQueryScope{next_session_id: 1}
+    response := jet_driver_query_build_plan(^request, &scope)
+    query := ^response.query
+    if !query.complete || query.internal_problem != None {
+        failure :: jet_cli_build_query_failure(response.request, query, response.request.authorized_sources.entry_path, false, color, false)
+        return {request: ^response.request, refusal: Val(failure)}
+    }
+    contributed := ^response.request
+    plan :: query.plan ?? return {request: ^contributed, refusal: None}
+    recorded :: jet_cli_record_build_contributions(plan, package, color)
+    if recorded == .Val(refusal) {
+        // copy: `refusal` is a payload view of `recorded`.
+        return JetCLIContributedRequest{request: ^contributed, refusal: Val(refusal.copy())}
+    }
+    if pkg_lock_load(package.root) == .Val(lock) {
+        // copy: `lock` is a payload view of the loaded lock.
+        contributed.build_stamp = lock.build_stamp.copy()
+        contributed.build_contributions = lock.build_contributions.copy()
+    }
+    {request: ^contributed, refusal: None}
+}
+
+// Record what `plan`'s `fn build` contributed as `package`'s
+// `[[build.contribution]]` rows of the project lock: each one a function-scope
+// writer at the environment layer, computed by `fn build`. The lock is
+// rewritten only when the rows changed; a new lock captures its build stamp.
+// None when the rows are recorded, else the refusal.
+fn jet_cli_record_build_contributions(plan: BuildSessionPlan, package: JetCLISettingsPackage, color: Bool) -> JetDriverVerbOutput? {
+    facts := [FactContribution]{}
+    loop contribution in build_plan_contributions(plan) {
+        value :: jet_cli_build_fact_value(contribution.value) ?? return Val(jet_cli_ice("`fn build` contributed `{contribution.key}` a value no setting holds"))
+        &facts.push(FactContribution{
+            key: contribution.key.copy(),
+            value: value,
+            scope: SourceScope.Function,
+            layer: ContributionLayer.Environment,
+            span: Span{start: contribution.start, end: contribution.end},
+            source: contribution.source.copy(),
+            reason: Val("computed by fn build"),
+        })
+    }
+    if pkg_lock_load(package.root) == .Val(lock) && lock.build_stamp != None {
+        recorded := [LockedBuildContribution]{}
+        loop row in lock.build_contributions {
+            if row.package == package.name -> &recorded.push(row.copy())
+        }
+        if pkg_lock_sorted_contributions(recorded) == pkg_lock_locked_build_contribution_set(package.name, facts) -> return None
+    }
+    stamp :: pkg_lock_build_stamp(package.root, false) ?? return Val(jet_cli_lock_refusal(err, color))
+    if pkg_lock_record_build_contributions(package.root, package.name, facts, false, stamp) == .Err(error) -> return Val(jet_cli_lock_refusal(error, color))
+    None
+}
+
+// The fact value of a `b.contribute` value: the build session admits only
+// these kinds, so any other is None.
+fn jet_cli_build_fact_value(value: BuildSessionValue) -> FactValue? Never! {
+    if value == {
+        .Bool(flag) -> Val(FactValue.Bool{value: flag})
+        .Int(number) -> Val(FactValue.Int{value: number})
+        .Char(character) -> Val(FactValue.Char{value: character})
+        .Text(text) -> Val(FactValue.Text{value: text.copy()})
+        .Enum(variant) -> Val(FactValue.Enum{variant: variant.copy()})
+        else -> None
+    }
+}
+
+// A lock update the project refused: its registered diagnostic.
+fn jet_cli_lock_refusal(error: LockError, color: Bool) -> JetDriverVerbOutput Never! {
+    // copy: `diagnostic` is a payload view of `error`.
+    if error == .Reported(diagnostic) -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{diagnostic.copy()}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_ice("the project lock refused the build contributions: {error.message()}")
+}
+
 // fn build's layer of the build options: each option `selected` set, placed
-// at its call in `file` (`at @build.jet:3`, relative to the package root).
+// at its call in `file` (`at build.jet:3`, relative to the package root).
 fn jet_cli_build_code_options(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {
     choices := [BuildOptionChoice]{}
     if set.len() == 0 -> return choices
@@ -216,7 +365,7 @@ struct JetCLICompileNodeObservation {
     object: ObjectHandle
 }
 
-fn jet_cli_build_compile_observation(executed: InspectBuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
+fn jet_cli_build_compile_observation(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
     if executed.kind != "compile" -> return Err(jet_cli_read_error("native object production requires a compile node"))
     if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
     // CmdCompile15122-15129 names the first canonical input when a prior

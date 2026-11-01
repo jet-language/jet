@@ -6,13 +6,13 @@ fixture: public_build_product.fixture
 file: programmable_build/run.jet ~ "fn build(b: Build)" # original example-source predicate
 file: programmable_build/run.jet ~ "b.generate" # original example-source predicate
 file: programmable_build/run.jet ~ "b.add_executable" # original example-source predicate
-file: programmable_build/run.jet ~ "b.plan" # original example-source predicate
+file: programmable_build/run.jet ~ "b.default" # a Unit `fn build` selects its default target with `b.default(target)` (spec.md:4738)
 step: jet build programmable_build/run.jet
 exit: 0
 artifact: programmable_build
 step: built
 exit: 0
-stdout.trim: = public_build_product.expected.bytes.trim
+stdout.trim: = public_build_product.expected.bytes.trim # original compares trimmed output
 step: jet inspect graph programmable_build/run.jet --json
 exit: 0
 stdout: ~ "programmable_build" # original graph predicate

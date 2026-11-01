@@ -2,7 +2,7 @@
 # Exact source and compiler-published L0507 fix_edits; no hand-written fixed text.
 # Original2edits/applied tail-table/no repeat lint and original+fixed all3tiers remain.
 fixture: l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.fixture
-copy: run.jet classic.jet
+copy: run.jet classic/classic.jet
 step: jet check {work}/run.jet --json
 exit: 0
 json: stdout doc $.reports[?code="L0507"][?fix_edits!=null] #= 2
@@ -11,13 +11,13 @@ file: run.jet ~ "    if {\n        score >= 90 -> {" # original ed77c235f tests/
 step: jet check {work}/run.jet --json
 exit: 0
 json: stdout doc $.reports[?code="L0507"] #= 0
-step: jet run --release classic.jet
+step: jet run --release classic/classic.jet
 env: JET_STORE_DIR={work}/cache-classic.jet-0
 env: JETPACK_ENV=1
 env: NO_COLOR=1
 exit: 0
 stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out
-step: jet run classic.jet
+step: jet run classic/classic.jet
 env: JET_STORE_DIR={work}/cache-classic.jet-1
 env: JETPACK_ENV=1
 env: NO_COLOR=1

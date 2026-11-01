@@ -1,0 +1,30 @@
+# Card #6114: core.data.loader.authority is the Core source function
+# Core/Data/Loader.jet `authority<T>(loader)`, so its registry row is
+# source-owned (one argument) and names no runtime route. The same program
+# runs and prints the same authority at O0, O1 and O2, run and built.
+fixture: fixtures/loader_authority
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "authority: scope=local revision=\n"
+step: jet run main.jet
+exit: 0
+stdout: == o0
+step: jet run --release main.jet
+exit: 0
+stdout: == o0
+step: jet build --optimize=none main.jet
+exit: 0
+step: built
+exit: 0
+stdout: == o0
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: == o0
+step: jet build --release main.jet
+exit: 0
+step: built
+exit: 0
+stdout: == o0

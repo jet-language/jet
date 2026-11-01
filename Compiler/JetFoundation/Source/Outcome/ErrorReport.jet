@@ -134,15 +134,11 @@ fn jet_error_json_optional_array(fields: [(key: String, value: Dyn)], name: Stri
     }
 }
 fn jet_error_json_u32(value: Dyn, name: String) -> Int JetErrorReportError! {
-    if value == {
-        .Int(number) -> {
-            // Rust's JSON Int is i64; wider tokens are a Number, not an integer.
-            if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(jet_error_report_error("error report {name} is not an integer"))
-            if number < 0 || number > 4294967295 -> return Err(jet_error_report_error("error report {name} is not a u32"))
-            Ok(number)
-        }
-        else -> Err(jet_error_report_error("error report {name} is not an integer"))
-    }
+    number :: foundation_json_integer(value) ?? return Err(jet_error_report_error("error report {name} is not an integer"))
+    // Rust's JSON Int is i64; wider tokens are not an integer.
+    if number < -9223372036854775808 || number > 9223372036854775807 -> return Err(jet_error_report_error("error report {name} is not an integer"))
+    if number < 0 || number > 4294967295 -> return Err(jet_error_report_error("error report {name} is not a u32"))
+    Ok(number)
 }
 fn jet_error_context_from_json(value: Dyn) -> JetErrorContextFrame JetErrorReportError! {
     fields :: jet_error_json_object(value, "context frame")

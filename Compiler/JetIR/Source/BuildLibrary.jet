@@ -4,20 +4,22 @@
 // export law; no list, name heuristic or source scan selects them. The
 // lifecycle list (Compiler/JetRuntime/lifecycle.list) only orders the
 // constructor/destructor hooks among them. The runtime's intrinsics (float
-// bit casts, static texts, export addresses) are recognized by name and
-// validated by signature here; ir_call builds each call of one as its
-// machine operation (ir_intrinsic_call).
+// bit casts, static texts, export addresses, the fault report's machine
+// code) are recognized by name and validated by signature here; ir_call
+// builds each call of one as its machine operation (ir_intrinsic_call).
 
-use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_value]
+use jet_backend.[X64_FAULT_REPORT, X64_RAX]
+use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_set, name_rows_value]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One `#Export(c)` row of the entry module: its checked function's key and
 // its C symbol.
 struct IRLibraryExportRow { key: String, symbol: String }
 
-// One global symbol of the library object: IR function `function`, and its
-// constructor/destructor priority (-1: not a hook).
-struct IRLibraryExport { function: Int, symbol: String, init_priority: Int, fini_priority: Int }
+// One global symbol of the library object: IR function `function`, its
+// constructor/destructor priority (-1: not a hook), and the data rows of
+// its hook's guards (none: an unconditional hook; ir_lifecycle_rows).
+struct IRLibraryExport { function: Int, symbol: String, init_priority: Int, fini_priority: Int, guards: [Int] }
 
 // The C ABI of an export: the layout of each parameter and of its result
 // (None: void), as the runtime ABI receipt records it.
@@ -43,6 +45,8 @@ enum IRRuntimeIntrinsic {
     FunctionAddress(key: String)
     // The immortal String of a literal (the value a ConstText gives).
     StaticText
+    // A call of the fault report's machine code (ir_fault_report_call).
+    FaultReport
 }
 
 enum IRIntrinsicShape {
@@ -50,11 +54,12 @@ enum IRIntrinsicShape {
     FloatFromBits
     FunctionAddress(symbol: String, arity: Int)
     StaticText
+    FaultReport
 }
 
 struct IRIntrinsicSpec { name: String, shape: IRIntrinsicShape }
 
-struct IRLifecycle { init_priority: Int, fini_priority: Int }
+struct IRLifecycle { init_priority: Int, fini_priority: Int, guards: [String] }
 
 // The one reviewed recognizer table; every address row uses the same
 // I64-only target validation.
@@ -67,8 +72,28 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
         {name: "rt_tls_shared_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_tls_shared_destructor", arity: 2}},
         {name: "rt_layout_registry_drop_address", shape: .FunctionAddress{symbol: "jet_rt_layout_registry_drop", arity: 1}},
         {name: "rt_scheduler_worker_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_worker", arity: 1}},
+        {name: "rt_async_entry_invoke_address", shape: .FunctionAddress{symbol: "jet_async_entry_invoke", arity: 2}},
+        {name: "rt_async_entry_release_address", shape: .FunctionAddress{symbol: "jet_async_entry_release", arity: 1}},
         {name: "rt_scheduler_timer_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_timer", arity: 1}},
+        {name: "rt_scheduler_compensate_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_compensate", arity: 1}},
+        {name: "rt_comptime_serve_stop_address", shape: .FunctionAddress{symbol: "jet_rt_comptime_serve_stop", arity: 5}},
+        {name: "rt_task_exit_run_address", shape: .FunctionAddress{symbol: "jet_rt_task_exit_run", arity: 1}},
+        {name: "rt_observe_parked_tasks_report_address", shape: .FunctionAddress{symbol: "jet_rt_observe_parked_tasks_report", arity: 2}},
+        {name: "rt_test_capture_print_address", shape: .FunctionAddress{symbol: "jet_rt_test_capture_print_hook", arity: 1}},
+        {name: "rt_main_stopped_address", shape: .FunctionAddress{symbol: "jet_rt_main_stopped", arity: 2}},
+        {name: "rt_host_env_capture_address", shape: .FunctionAddress{symbol: "jet_rt_host_env_capture", arity: 1}},
+        {name: "rt_secret_scrub_address", shape: .FunctionAddress{symbol: "jet_rt_secret_scrub", arity: 1}},
+        {name: "rt_alloc_check_take_address", shape: .FunctionAddress{symbol: "jet_rt_alloc_check_take", arity: 2}},
+        {name: "rt_alloc_check_give_address", shape: .FunctionAddress{symbol: "jet_rt_alloc_check_give", arity: 3}},
+        {name: "rt_alloc_check_sweep_address", shape: .FunctionAddress{symbol: "jet_rt_alloc_check_sweep", arity: 1}},
         {name: "rt_observe_writer_address", shape: .FunctionAddress{symbol: "jet_rt_observe_writer", arity: 1}},
+        {name: "rt_observe_start_address", shape: .FunctionAddress{symbol: "jet_rt_observe_start", arity: 1}},
+        {name: "rt_task_panic_publish_address", shape: .FunctionAddress{symbol: "jet_rt_task_panic_publish", arity: 2}},
+        {name: "rt_trap_root_address", shape: .FunctionAddress{symbol: "jet_rt_trap_root", arity: 4}},
+        {name: "rt_test_scope_record_stop_address", shape: .FunctionAddress{symbol: "jet_rt_test_scope_record_stop", arity: 4}},
+        {name: "rt_observe_raw_channels_address", shape: .FunctionAddress{symbol: "jet_rt_observe_raw_channels", arity: 1}},
+        {name: "rt_observe_raw_values_address", shape: .FunctionAddress{symbol: "jet_rt_observe_raw_values", arity: 1}},
+        {name: "rt_observe_raw_events_address", shape: .FunctionAddress{symbol: "jet_rt_observe_raw_events", arity: 1}},
         {name: "rt_parallel_worker_address", shape: .FunctionAddress{symbol: "jet_rt_native_para_worker", arity: 1}},
         {name: "rt_task_exit_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_task_exit_destructor", arity: 2}},
         {name: "rt_test_capture_abort_address", shape: .FunctionAddress{symbol: "jet_rt_test_capture_abort", arity: 2}},
@@ -87,7 +112,17 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
         {name: "rt_process_signal_mark_address", shape: .FunctionAddress{symbol: "jet_rt_process_signal_mark", arity: 1}},
         {name: "rt_process_signal_dispatcher_address", shape: .FunctionAddress{symbol: "jet_rt_process_signal_dispatcher", arity: 1}},
         {name: "rt_interval_worker_address", shape: .FunctionAddress{symbol: "jet_rt_interval_worker", arity: 1}},
+        {name: "rt_after_worker_address", shape: .FunctionAddress{symbol: "jet_rt_after_worker", arity: 1}},
+        {name: "rt_timer_int_drop_address", shape: .FunctionAddress{symbol: "jet_rt_timer_int_drop", arity: 1}},
+        {name: "rt_realtime_worker_address", shape: .FunctionAddress{symbol: "jet_rt_native_realtime_worker", arity: 1}},
         {name: "rt_fault_signal_address", shape: .FunctionAddress{symbol: "jet_rt_fault_signal", arity: 3}},
+        {name: "rt_iter_channel_pull_address", shape: .FunctionAddress{symbol: "jet_rt_native_iter_channel_pull", arity: 2}},
+        {name: "rt_iter_channel_release_address", shape: .FunctionAddress{symbol: "jet_rt_native_iter_channel_release", arity: 1}},
+        {name: "rt_iter_progress_pull_address", shape: .FunctionAddress{symbol: "jet_rt_native_iter_progress_pull", arity: 2}},
+        {name: "rt_iter_progress_release_address", shape: .FunctionAddress{symbol: "jet_rt_native_iter_progress_release", arity: 1}},
+        {name: "rt_generator_pull_address", shape: .FunctionAddress{symbol: "jet_rt_native_generator_pull", arity: 2}},
+        {name: "rt_generator_release_address", shape: .FunctionAddress{symbol: "jet_rt_native_generator_release", arity: 1}},
+        {name: "rt_fault_print", shape: .FaultReport},
     }
 }
 
@@ -180,6 +215,12 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
                     key :: target ?? return ir_library_failed([String]{"runtime intrinsic {spec.name} requires #Export(c) {symbol}"})
                     intrinsics[function.key] = IRRuntimeIntrinsic.FunctionAddress{key: key}
                 }
+                .FaultReport -> {
+                    if !ir_address_target_signature(function, IR_X64_ARGUMENT_REGISTERS.len()) {
+                        return ir_library_failed([String]{"runtime intrinsic {spec.name} must read six I64 values and return I64"})
+                    }
+                    intrinsics[function.key] = IRRuntimeIntrinsic.FaultReport
+                }
             }
         }
     }
@@ -204,11 +245,24 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     if recursive.len() > 0 -> return ir_library_failed(recursive)
     globals := [IRLibraryExport]{}
     abis := [IRExportABI]{}
+    guard_problems := [String]{}
     loop (index, row) in exports {
-        hook :: lifecycle.get(row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1}
-        &globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority})
+        hook :: lifecycle.get(row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1, guards: [String]{}}
+        guards := [Int]{}
+        loop name in hook.guards {
+            guard :: ir_lifecycle_guard(m, p, name)
+            if guard < 0 {
+                &guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no module storage the library reads")
+            } else if !ir_names_data(m, roots[index], guard) {
+                &guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no state the hook sets up")
+            } else {
+                &guards.push(guard)
+            }
+        }
+        &globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: ^guards})
         &abis.push(ir_export_abi(m, roots[index], row.symbol))
     }
+    if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
     &abis.sort_by((left: IRExportABI, right: IRExportABI) -> left.symbol <=> right.symbol)
     IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, abis: abis}
 }
@@ -258,10 +312,14 @@ fn ir_export_abi_json(rows: [IRExportABI]) -> String Never! {
 }
 
 // Ordered process-lifecycle hooks of the library object. Each row is
-// `<symbol> init <priority>` or `<symbol> fini <priority>`; the symbol must
-// be one of the `#Export(c)` rows and take no parameters and return
-// nothing. The rows order constructors/destructors; they never select
-// exports. Returns the first problem, else "".
+// `<symbol> init <priority> [<guards>]` or `<symbol> fini <priority>
+// [<guards>]`; the symbol must be one of the `#Export(c)` rows and take no
+// parameters and return nothing. The rows order constructors/destructors;
+// they never select exports. Guards (comma-separated) name the module
+// storage the hook sets up its service's state in: a linked program runs
+// the hook exactly when it keeps one of them (D-EFF-CORE-INIT1), once per
+// kept guard, so a guarded hook starts idempotently. Returns the first
+// problem, else "".
 fn ir_lifecycle_rows(lines: [String], lifecycle: &[String:IRLifecycle]) -> String Never! {
     loop line in lines {
         text :: line.trim()
@@ -270,13 +328,56 @@ fn ir_lifecycle_rows(lines: [String], lifecycle: &[String:IRLifecycle]) -> Strin
         loop field in text.split(" ").to_list() {
             if field != "" -> &fields.push(field)
         }
-        if fields.len() != 3 || (fields[1] != "init" && fields[1] != "fini") -> return "invalid runtime lifecycle row `{text}`"
+        if (fields.len() != 3 && fields.len() != 4) || (fields[1] != "init" && fields[1] != "fini") -> return "invalid runtime lifecycle row `{text}`"
         priority :: Int.parse(fields[2]) ?? return "invalid runtime lifecycle priority in `{text}`"
         if priority < 0 || priority > 65535 -> return "runtime lifecycle priority must be in 0..65535 in `{text}`"
         if lifecycle.get(fields[0]) != None -> return "duplicate runtime lifecycle row `{fields[0]}`"
-        lifecycle[fields[0]] = if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1} else -> IRLifecycle{init_priority: -1, fini_priority: priority}
+        guards := [String]{}
+        if fields.len() == 4 {
+            loop name in fields[3].split(",").to_list() {
+                if name == "" || guards.contains(name) -> return "invalid runtime lifecycle guards in `{text}`"
+                &guards.push(name)
+            }
+        }
+        lifecycle[fields[0]] = if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1, guards: guards} else -> IRLifecycle{init_priority: -1, fini_priority: priority, guards: guards}
     }
     ""
+}
+
+// The data row of the library's module storage named `name` (one 8-byte
+// cell, BuildStatic.jet ir_storage_address), or -1 when no storage has that
+// name, more than one does, or no built function reads or writes it.
+fn ir_lifecycle_guard(m: IRModule, p: IRProgram, name: String) -> Int Never! {
+    found := -1
+    loop definition in p.constant_defs {
+        if !definition.is_storage || definition.name != name -> next
+        if found != -1 -> return -1
+        found = name_rows_value(m.constant_rows, "storage:{definition.key}") ?? -2
+    }
+    if found < 0 -> return -1
+    found
+}
+
+// Whether IR function `id`, or a function it calls or takes the address of
+// (code it installs), takes the address of data row `row`: the hook sets
+// that state up.
+fn ir_names_data(m: IRModule, id: Int, row: Int) -> Bool Never! {
+    seen := [Int:Bool]{}
+    seen[id] = true
+    work := [Int]{id}
+    loop work.len() > 0 {
+        next_id :: &work.pop() ?? break
+        f :: m.functions[next_id]
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .DataAddress && f.a[at] == row -> return true
+            callee :: f.a[at]
+            if (f.op[at] == .Call || f.op[at] == .FunctionAddress) && callee >= 0 && callee < m.functions.len() && seen.get(callee) == None {
+                seen[callee] = true
+                &work.push(callee)
+            }
+        }
+    }
+    false
 }
 
 // The C primitive `ty` is: "Int", "Float", "Bool",
@@ -413,8 +514,8 @@ fn ir_bitcast_signature(function: FnBody, to_bits: Bool) -> Bool Never! {
     ir_i64_type(Val(input)) && ir_float_type(ir_executable_return(function))
 }
 
-// The export an address intrinsic names: `arity` read I64 parameters and an
-// I64 result.
+// `arity` read I64 parameters and an I64 result: the export an address
+// intrinsic names, and rt_fault_print.
 fn ir_address_target_signature(function: FnBody, arity: Int) -> Bool Never! {
     if !ir_intrinsic_signature(function, arity) -> return false
     loop param in function.params {
@@ -427,7 +528,8 @@ fn ir_address_target_signature(function: FnBody, arity: Int) -> Bool Never! {
 // rt_static_text of a literal is the literal's immortal String (the
 // ConstText of its data row) as an I64; a bit cast stores its operand in a
 // frame word and loads it back in the other class; an address intrinsic is
-// the FunctionAddress of its export.
+// the FunctionAddress of its export; rt_fault_print is a call of the fault
+// report's machine code.
 fn ir_intrinsic_call(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, args: [BodyCallArg], span: Span) -> Int Never! {
     word_row :: ir_word_row(&m)
     float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "type Float")
@@ -436,7 +538,36 @@ fn ir_intrinsic_call(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRun
         .FloatBits -> ir_bitcast(&m, p, &b, args, float_row, word_row, span)
         .FloatFromBits -> ir_bitcast(&m, p, &b, args, word_row, float_row, span)
         .FunctionAddress(key) -> ir_address_call(&m, p, &b, key, args, word_row, span)
+        .FaultReport -> ir_fault_report_call(&m, p, &b, args, word_row, span)
     }
+}
+
+// A call of rt_fault_print: the native fault report's machine code
+// (JetBackend X64/FaultReport.jet, from JetRuntime Assets/FaultReport/
+// report.S) as an asm leaf, its six I64 arguments in the C argument
+// registers and its I64 result in rax. Built once per module, by key.
+fn ir_fault_report_call(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
+    if args.len() != IR_X64_ARGUMENT_REGISTERS.len() -> return ir_fail_slot(&b, span, "rt_fault_print reads six I64 values")
+    leaf := name_rows_value(m.function_rows, IR_FAULT_REPORT_KEY) ?? -1
+    if leaf < 0 {
+        f := ir_function_new("rt_fault_print", IR_FAULT_REPORT_KEY, "jet_rt_fault_print__asm", "", 0)
+        loop index in 0..<args.len() -> _ := ir_slot(&f, word_row, IRSlotKind.Param, ir_intern_name(&m, "a{index}"), 0)
+        f.result = word_row
+        f.asm = Val(IRAsmLeaf{code: X64_FAULT_REPORT, regs: IR_X64_ARGUMENT_REGISTERS, result: X64_RAX})
+        leaf = m.functions.len()
+        &m.functions.push(^f)
+        name_rows_set(&m.function_rows, IR_FAULT_REPORT_KEY, leaf)
+    }
+    values := [Int]{}
+    loop arg in args {
+        value :: ir_value_as(&m, p, &b, arg.value, word_row, span)
+        if ir_failed(b) -> return -1
+        &values.push(value)
+    }
+    out :: ir_temp(&m, &b, word_row)
+    start :: ir_args(&b.f, values)
+    ir_emit(&b.f, IROp.Call, out, leaf, start, values.len(), b.line)
+    out
 }
 
 fn ir_static_text_call(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {

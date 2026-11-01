@@ -1,7 +1,26 @@
 // core-conformance: core.web.live
 use core.web as web
+use core.reactive.loadable.[Loadable]
+
+#Error
+enum LoadError {
+    Negative
+}
+
+fn load(id: Int) -[DB.Read]> Int LoadError! {
+    if id < 0 -> return Err(LoadError.Negative)
+    id * 10
+}
+
+fn shown(state: Loadable<Int, LoadError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(_) -> "failed"
+        else -> "pending"
+    }
+}
 
 fn run() {
-    query :: web.live("users", "alice")
-    print(web.live_get(query))
+    binding :: web.live(load, 4)
+    print(shown(web.state(binding)))
 }

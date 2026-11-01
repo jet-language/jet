@@ -36,17 +36,14 @@ enum UIFSAccess {
 
 #Error
 enum UIHostError {
-    Cancelled
-    Headless
-    Denied
-    Missing
+    Cancelled(UICancellation)
+    CapabilityUnavailable(capability: String)
+    CapabilityDenied(capability: UICapability)
     InvalidRequest(String)
-    CapabilityUnavailable
-    CapabilityDenied
-    HostFailure
+    HostFailure(service: String, message: String)
     ResourceDenied(String)
-    ShortcutConflict
-    QueueFull
+    ShortcutConflict(shortcut: UIShortcut, existing_action: String)
+    QueueFull(service: String)
 }
 
 struct UICapabilityFact {
@@ -59,7 +56,7 @@ struct UICapabilityFacts {
 }
 
 struct UIFSRights {
-    bits: U8
+    bits: U8{0}
 }
 
 struct UIFSGrant {
@@ -119,8 +116,10 @@ struct UINodeID {
 }
 
 struct UIAccessibilityProjection {
-    lines: [String]
+    node: UINodeID
+    metadata: UIAccessibility
 }
+
 struct UIShortcutBinding {
     shortcut: UIShortcut
     action: String
@@ -239,6 +238,16 @@ fn shortcut(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHos
     normalized :: core.text.lower(core.text.trim(key))
     if normalized.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut key must not be empty"))
     Ok(UIShortcut{key: normalized, modifiers: modifiers})
+}
+
+impl UIShortcut {
+    /// D-FOUND-PLATFORM1=A: `UIShortcut.cmd("s")` binds a key to the logical
+    /// platform-command modifier (Control on Unix/Windows, Meta on macOS).
+    fn cmd(key: String) -> UIShortcut Never! {
+        normalized :: core.text.lower(core.text.trim(key))
+        if normalized.len() == 0 -> panic("UIShortcut.cmd needs a non-empty key")
+        UIShortcut{key: normalized, modifiers: UIShortcutModifiers{bits: 16}}
+    }
 }
 
 /// The existing two-string API always names the node; an empty description

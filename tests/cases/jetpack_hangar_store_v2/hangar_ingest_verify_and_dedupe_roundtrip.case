@@ -1,7 +1,7 @@
 # tests/jetpack_hangar_store_v2.rs::hangar_ingest_verify_and_dedupe_roundtrip at tests/jetpack_hangar_store_v2.rs:101; hand-port
 # Claim: ingest prints ingested and sha256-; identical second ingest prints deduplicated (rs:137-170)
 # Claim: hangar list stderr contains hello (rs:180)
-# Claim: list --json has schema jet.report/v1, action list, packages array (rs:196-198)
+# Claim: list --json is a jet.status/v1 result (Rust asserted jet.report/v1; command results now use STATUS_SCHEMA, Jetpack/Foundation/Source/Report.jet) with action list and a packages array (rs:196-198)
 # Claim: verify prints verified (rs:217)
 # Claim: recover exits 0 (rs:245)
 # Fixture migrated: bin/hello mode 0755 not representable in fixtures; written 0644 (script body unchanged)
@@ -23,7 +23,7 @@ exit: 0 # rs:180
 stderr: ~ "hello" # rs:180
 step: jetpack hangar list --json --no-color
 exit: 0 # rs:196-198
-stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:196-198
+stdout: ~ "\"schema\":\"jet.status/v1\"" # rs:196-198
 stdout: ~ "\"action\":\"list\"" # rs:196-198
 stdout: ~ "\"packages\":[" # rs:196-198
 step: jetpack hangar verify --no-color

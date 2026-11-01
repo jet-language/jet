@@ -283,7 +283,7 @@ fn ir_static_word(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, row: 
 // An enum value (ir_comptime_enum): a payload-free enum's variant index, else
 // a box with the discriminant and each payload member.
 fn ir_static_enum(m: &IRModule, p: IRProgram, s: &IRStaticBuild, ty: Type, slot_type: Int, variant: String, args: [TComptimeEnumArg]) -> IRStaticWord? Never! {
-    nominal :: ir_nominal_name(ir_untag(ir_subst(m, ty))) ?? return None
+    nominal :: ir_nominal_name(ir_untag(ty)) ?? return None
     row :: ir_type_def(p, nominal) ?? ir_enum_def(m, p, slot_type) ?? return None
     index :: ir_variant_index(p, row, variant) ?? return None
     if m.types[slot_type].kind != .Pointer {
@@ -400,7 +400,7 @@ fn ir_static_fill(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, of
         }
         .Bytes(bytes) -> {
             element_row := -1
-            if ir_untag(ir_subst(m, ty)) == .List(element) {
+            if ir_untag(ty) == .List(element) {
                 element_row = ir_value_type(&m, p, element) ?? -1
             }
             if element_row < 0 || m.types[element_row].kind != .Word || m.types[element_row].size != 1 -> return false
@@ -451,14 +451,18 @@ fn ir_static_map_order(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Nev
     // Each key with its position; ordering the pairs by key, then position,
     // makes the last of a run the later duplicate. The comparator is
     // explicit because a named tuple's own order compares its members in
-    // name order (S73), which would put `at` before `key`. "uword" keys are
-    // Int keys below 2^63 (a larger one is a BigInt key), so their signed
-    // order is their unsigned order.
+    // name order (S73), which would put `at` before `key`. A key beyond 64
+    // bits (an Int's, or a uword's at 2^63 and above) is a BigInt decimal,
+    // ordered by its exact value, so uword keys keep their unsigned order.
     words := [(key: Int, at: Int)]{}
     texts := [(key: String, at: Int)]{}
     loop (index, entry) in entries {
         if entry.key == {
             .Int(value) | .Char(value) -> &words.push((key: value, at: index))
+            .BigInt(decimal) -> {
+                if kind != "int" && kind != "uword" -> return None
+                &words.push((key: Int.parse(decimal) ?? return None, at: index))
+            }
             .Bool(flag) -> &words.push((key: if flag -> 1 else -> 0, at: index))
             .String(text) -> &texts.push((key: text, at: index))
             else -> return None

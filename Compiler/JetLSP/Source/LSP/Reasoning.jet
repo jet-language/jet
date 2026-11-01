@@ -1,6 +1,6 @@
 // Rust: Source/LSP/Features.rs:213–661,978–1045. Checked relation projections.
 use core.text as reasoning_text
-use jet_foundation.[Span, DerivationRecord, DerivationObservation, foundation_json_quote, derivation_method_raw, derivation_payload_json, failure_contract_effective_type, failure_contract_source, type_name]
+use jet_foundation.[Span, DerivationRecord, DerivationObservation, foundation_json_quote, derivation_method_raw, derivation_payload_json, failure_contract_shown_type, failure_contract_source, type_name]
 use jet_semindex.[SymbolDB, SymbolDef, SemanticSymbol, InlayHint]
 
 // Rust: Source/LSP/Features.rs:213
@@ -230,7 +230,7 @@ fn lsp_callable_summary_json(db: SymbolDB, selection: String?) -> String Never! 
     callable :: "{{\"identity\":{foundation_json_quote(definition.identity)},\"qualified_name\":{foundation_json_quote(definition.qualified_name)},\"module_path\":{foundation_json_quote(definition.module_path)},\"span\":{{\"start\":{definition.def_span.start},\"end\":{definition.def_span.end}}}}}"
     declaration :: "{{\"kind\":\"checked_declaration\",\"module_path\":{foundation_json_quote(definition.module_path)}}}"
     failure :: if signature.failure_contract == {
-        .Checked(contract) -> "{{\"status\":\"checked\",\"type\":{foundation_json_quote(type_name(failure_contract_effective_type(contract)))},\"source\":{foundation_json_quote(failure_contract_source(contract))},\"evidence\":\"checked_contract\"}}"
+        .Checked(contract) -> "{{\"status\":\"checked\",\"type\":{foundation_json_quote(type_name(failure_contract_shown_type(contract)))},\"source\":{foundation_json_quote(failure_contract_source(contract))},\"evidence\":\"checked_contract\"}}"
         .Unavailable(unavailable) -> "{{\"status\":\"unavailable\",\"required_stage\":{foundation_json_quote(compiler_stage_as_str(unavailable.required_stage))},\"reason\":{foundation_json_quote(unavailable.reason)}}}"
     }
     producer_status :: if signature.metadata_producer_status == {

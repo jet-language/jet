@@ -1,4 +1,4 @@
-// Direct-call resolution and TIR construction.
+// Direct-call resolution and checked-tree construction.
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
@@ -27,6 +27,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     expr_span,
     checked_generated_local,
+    type_identity_equal,
     type_name,
     Func,
 ]
@@ -81,7 +82,7 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
     }
     line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
     result_ty :: if call.name == "checked" -> Type.Option{inner: lhs_value.ty} else -> lhs_value.ty
-    value :: sema_tir_node(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, lhs: lhs_value, rhs: rhs_value}, call.name_span)
+    value :: sema_tree_node(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, lhs: lhs_value, rhs: rhs_value}, call.name_span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
@@ -124,6 +125,9 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, progra
         .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment, program) && sema_call_debug_traceable(err, environment, program)
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
+            // The game asset handles carry a Debug form (Rust Game.rs
+            // `JetDebug for GameImage`/`GameSound`: `GameImage(<path>)`).
+            if name == "GameImage" || name == "GameSound" -> return true
             if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
             sema_call_debug_implemented(ty, environment, program)
         }
@@ -175,7 +179,7 @@ fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment, prog
 fn sema_call_try_debug_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "debug" || args.len() != 0 || type_args.len() != 0 || !sema_call_debug_traceable(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    text :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: receiver_value, format: TStrFormat.Debug}}}, span)
+    text :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: receiver_value, format: TStrFormat.Debug}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(text, expected, environment, program, &diagnostics)}
 }
 
@@ -234,13 +238,13 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     traced := checked
     if !sema_call_is_scalar(checked.ty) {
         if checked.kind == {
-            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_node(checked.ty, TExprKind.Clone{value: checked, fact: CopyFact.Materialize}, checked.span)
+            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tree_node(checked.ty, TExprKind.Clone{value: checked, fact: CopyFact.Materialize}, checked.span)
             else -> {}
         }
     }
-    local :: checked_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span)
-    read :: sema_tir_node(checked.ty, TExprKind.Local{local: local}, call.name_span)
-    line :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
+    local :: checked_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span, checked.ty)
+    read :: sema_tree_node(checked.ty, TExprKind.Local{local: local}, call.name_span)
+    line :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
     unavailable :: sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route")
     unit :: Type.Named{name: "Unit"}
     // The trace adds no effect: its stderr write is a known-pure call site, so
@@ -263,13 +267,13 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
         &diagnostics.push(unavailable)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    write :: sema_tir_node(unit, kind, call.name_span)
+    write :: sema_tree_node(unit, kind, call.name_span)
     body :: [TStmt]{
         TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
         TStmt.ExprStmt{value: write, span: call.name_span},
         TStmt.ExprStmt{value: read, span: call.name_span},
     }
-    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
 fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -319,6 +323,12 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
         }
         // The benchmark identity sink `keep(value)` calls `core.prelude.keep`.
         "keep" -> sema_call_ambient_source_alias(call, "core.prelude", "keep", expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // The readable prelude's ordered extrema call their `core.prelude`
+        // generics (`min(a, b, ...rest)`, `max(...)`, `clamp(x, lo, hi)`).
+        "min" | "max" | "clamp" -> {
+            if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            sema_call_ambient_source_alias(call, "core.prelude", call.name, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {
@@ -367,15 +377,19 @@ fn sema_call_check_ambient_close(call: Call, environment: SemaScopeEnvironment, 
         return None
     }
     if program.registration_graph == .Val(graph) {
-        satisfies_close :: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params) ?? return None
-        if !satisfies_close {
+        // An undecided bound (a Core native carrier such as `TCPListener`
+        // has no nominal row to carry a `Close` impl) is no `Close`
+        // implementation, and the user can't add one (#6120).
+        decided :: sema_type_bound_satisfied_at(graph, value.ty, "Close", sema_scope_caller_row(environment, graph), context.generic_params)
+        if decided != .Val(true) {
             shown :: type_name(value.ty)
-            &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
+            fix :: if decided == None -> "remove the `close` call; `{shown}` has no `Close` implementation to run" else -> "write `impl {shown}.Close {{ … }}` with every required method"
+            &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", fix))
             return None
         }
     }
     if !sema_stmt_move_direct(argument.expr, &state, scopes, "`close`", &diagnostics) -> return None
-    Val(sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
+    Val(sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
 }
 
 // The scalar slots of a built-in math value type's
@@ -413,7 +427,7 @@ fn sema_call_math_scalar_type(name: String) -> Type Never! {
 // `Decimal("12.34")` `Complex(re, im)` and
 // `Vec3(x, y, z)`-style math constructors each argument
 // is checked against its component type in order and the call becomes the
-// type's precise or math builtin, as Rust TIR lowering builds it.
+// type's precise or math builtin, as the Rust reference lowering builds it.
 fn sema_call_check_value_constructor(call: Call, type_name_value: String, components: [Type], math: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != components.len() {
         what := if {
@@ -460,7 +474,7 @@ fn sema_call_check_value_constructor(call: Call, type_name_value: String, compon
         type_name_value == "Decimal" -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_str", args: values}
         else -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_parts", args: values}
     }
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_expr(result_ty, kind, call.name_span), expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tree_expr(result_ty, kind, call.name_span), expected, environment, program, &diagnostics)}
 }
 
 // An ambient row's IO effect, recorded as its call-site fact so the effect
@@ -527,49 +541,64 @@ fn sema_call_check_ambient_print(call: Call, environment: SemaScopeEnvironment, 
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     unit :: Type.Named{name: "Unit"}
     if !sema_call_ambient_record_io("print", unit, call.name_span, environment, program, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    if values.len() == 1 -> return SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(unit, TExprKind.Print{value: values[0]}, call.name_span))}
+    if values.len() == 1 -> return SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.Print{value: values[0]}, call.name_span))}
     body := [TStmt]{}
     prints := [TStmt]{}
     loop index in 0..<values.len() {
-        local :: checked_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span)
+        local :: checked_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span, values[index].ty)
         &body.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: values[index], gc_promotion: None, gc_transferred: false, span: call.name_span})
-        read :: sema_tir_node(values[index].ty, TExprKind.Local{local: local}, call.name_span)
-        &prints.push(TStmt.ExprStmt{value: sema_tir_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})
+        read :: sema_tree_node(values[index].ty, TExprKind.Local{local: local}, call.name_span)
+        &prints.push(TStmt.ExprStmt{value: sema_tree_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})
     }
     loop statement in prints -> &body.push(statement)
-    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
-// `input(prompt?)` reads one line: `Result<String, IOError>`, like `io.input`.
+// `input(prompt?)` reads one line: `Result<String, IOError>`. It calls the
+// source `core.term.input` declaration (I9: one meaning with `term.input`),
+// with the ambient I/O check; the bare name loads core.term
+// (CORE_BARE_SOURCE_MODULES).
 fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := true
     if call.args.len() > 1 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`input` expects 1 argument, got {call.args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
         complete = false
     }
-    prompt := TExpr?{None}
+    values := [TExpr]{}
     if call.args.len() > 0 {
-        checked := sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if checked == None -> complete = false
-        prompt = checked
+        checked :: sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if checked == .Val(value) -> &values.push(value) else -> complete = false
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}
     if !sema_call_ambient_record_io("input", result, call.name_span, environment, program, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.AmbientInput{prompt: prompt}, call.name_span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    unavailable :: sema_error("E0906", call.name_span, "the source `core.term.input` declaration for `input` is unavailable", "an ambient `input` reads through the Core terminal source", "restore the `core.term` source module")
+    identity :: sema_call_core_module_identity(environment, program, "core.term") ?? {
+        &diagnostics.push(unavailable)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    target :: sema_call_core_source_target(environment, program, identity, "input", [Type]{}, call.name_span, false, &diagnostics) ?? {
+        &diagnostics.push(unavailable)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    callee :: sema_call_callee_decl(program, target.symbol.id, call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    prompt :: if values.len() > 0 -> values[0].copy() else -> sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{}}, call.name_span)
+    argument :: TCallArg{value: prompt, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    value :: sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, call.name_span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
 // Rust core_call.rs `("core.term", "eprint")` / `("core.term", "input")`:
 // fixed rows with no typed Source contract. `eprint` is variadic: every
 // printable argument joins, one per line, into the row's single stderr write
-// (Rust TIR `join_print_args`); `input` takes an optional String prompt and
+// (the Rust reference lowering's `join_print_args`); `input` takes an optional String prompt and
 // returns `Result<String, IOError>`.
 fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.term" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if record.member == {
         "eprint" -> sema_call_check_term_eprint(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "input" -> sema_call_check_term_input(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "progress" -> if args.len() == 1 -> SemaDirectSpecialCheck{handled: false, value: None} else -> sema_call_check_term_progress_iter(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }
@@ -598,8 +627,8 @@ fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Sp
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    joined :: sema_tir_node(Type.String, TExprKind.StrLit{parts: parts}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, unit, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
+    joined :: sema_tree_node(Type.String, TExprKind.StrLit{parts: parts}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tree(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, unit, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
 }
 
 fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -618,7 +647,37 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     failure :: sema_call_failure_carrier(Val(result))
     if !sema_call_core_record_effects(record, span, [Type]{}, result, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     widen_to_vec :: loop _ in values -> false
-    value :: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, result, failure, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tree(record, values, span, [Type]{}, widen_to_vec, result, failure, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
+}
+
+// Rust core_call.rs `("core.term", "progress")` over a sequence: a List or
+// Iter source with a description and an optional template is the
+// `progress_iter` row, which hands the items on as the loop pulls them. A
+// List is read through its `lazy()` iterator; a missing template is empty.
+fn sema_call_check_term_progress_iter(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    record :: core_call("core.term", "progress_iter") ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if args.len() > 3 {
+        &diagnostics.push(sema_error("E0104", span, "`progress` expects at most 3 arguments, got {args.len()}", "a progress source takes its items, a description and a template", "check the call to `progress`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    source :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    items :: sema_call_collections_list_as_iter(source, span)
+    is_iter :: if items.ty == .Apply(name, _) -> name == "Iter" else -> false
+    if !is_iter {
+        &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`progress` with a description reads a List or an Iter, not `{type_name(items.ty)}`", "the described progress form reports each item the loop pulls", "pass the items to report, or call `progress(label)` alone"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    result :: items.ty.copy()
+    if !sema_stmt_move_direct(args[0].expr, &state, scopes, "`progress`", &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    values := [TExpr]{items}
+    loop index in 1..<args.len() {
+        text :: sema_check_expression(args[index].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        &values.push(text)
+    }
+    loop values.len() < 3 -> &values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{}}, span))
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tree(record, values, span, [Type]{}, [Bool]{false, false, false}, result, TFailureCarrier.Infallible, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
@@ -637,12 +696,21 @@ fn sema_call_try_reflect_core_call(record: CoreCallRecord, args: [CallArg], span
     if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Named{name: "Value"}
     if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{checked}, span, [Type]{}, [Bool]{false}, result, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
+    names :: sema_call_reflection_name_args(checked.ty, span, environment, program, &scopes)
+    values := [TExpr]{checked}
+    &values.extend(names)
+    widen_to_vec :: loop _ in values -> false
+    value := sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: widen_to_vec, fallibility: TFailureCarrier.Infallible}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
 // `panic(message)` stops with one String message; the stop is a `Never`
-// value and its `__jet_panic__` reachability edge comes from the TIR walk.
+// value and its `__jet_panic__` reachability edge comes from the checked-tree walk.
 fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    // A direct panic is never a Tensor operation's failure route (Rust
+    // `check_panic_call`): autodiff rejects a differentiated function that
+    // reaches it.
+    sema_compute_note_panic(&context, false)
     complete := call.args.len() == 1
     if !complete -> &diagnostics.push(sema_error("E0103", call.name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "e.g. panic(\"something went wrong\")"))
     message := TExpr?{None}
@@ -662,7 +730,7 @@ fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, 
     text :: message ?? return SemaDirectSpecialCheck{handled: true, value: None}
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
     location.locals = sema_expression_panic_locals(scopes, call.name_span)
-    stop := sema_tir_node(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: text}, location: location, always_stops: true}, call.name_span)
+    stop := sema_tree_node(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: text}, location: location, always_stops: true}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
@@ -700,7 +768,7 @@ fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment,
     checked_condition :: condition ?? return SemaDirectSpecialCheck{handled: true, value: None}
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
     location.locals = sema_expression_panic_locals(scopes, call.name_span)
-    stop := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: checked_condition, msg: message}, location: location, always_stops: false}, call.name_span)
+    stop := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: checked_condition, msg: message}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
@@ -718,7 +786,9 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     right := sema_check_expression(call.args[1].expr, right_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     left_value :: left ?? return SemaDirectSpecialCheck{handled: true, value: None}
     right_value :: right ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    if left_value.ty != right_value.ty {
+    // Declaration identity, not structure: a map type carries the span its
+    // key was written at, so two `[String: Int]` maps differ structurally.
+    if !type_identity_equal(left_value.ty, right_value.ty) {
         &diagnostics.push(sema_error("E0108", call.name_span, "`assert_eq` compared {sema_type_show(left_value.ty)} and {sema_type_show(right_value.ty)}, which don't match", "both sides must be the same type to compare them", "convert one side, or compare fields that have the same type"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
@@ -728,7 +798,7 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     }
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
     location.locals = sema_expression_panic_locals(scopes, call.name_span)
-    stop := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
+    stop := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
@@ -755,7 +825,7 @@ fn sema_call_try_scope_guard(module_name: String, member: String, alias: String,
         &diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`scope.guard` needs a zero-parameter lambda, got {arity} parameter{if arity == 1 -> "" else -> "s"}", "the guard body takes no arguments — it captures what it needs via closure", "write `scope.guard(() -> {{ cleanup_code }})` with no parameters"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    value :: sema_tir_node(Type.Named{name: "ScopeGuard"}, TExprKind.CoreClosureCall{kind: TCoreClosureKind.Guard{executable: cleanup}}, span)
+    value :: sema_tree_node(Type.Named{name: "ScopeGuard"}, TExprKind.CoreClosureCall{kind: TCoreClosureKind.Guard{executable: cleanup}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 // Core registry rows are selected by the caller's canonical route.  These
@@ -765,7 +835,8 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
     // Both compiler facts and active build-plan graphs use the checked
     // compile-time service path. Receipt diff remains ordinary Core source.
     if (record.module_name == "core.compiler" || (record.module_name == "core.build" && record.member == "graph")) && sema_compiler_services_call_contract(record.module_name, record.member) != None {
-        compiler_allowed := scopes.comptime_execution_depth > 0 || environment.function_name == "build"
+        // A body checked on a compiler thread keeps its name in location_function (Control.jet).
+        compiler_allowed := scopes.comptime_execution_depth > 0 || (scopes.location_function ?? environment.function_name) == "build"
         check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !check.arguments_complete {
@@ -803,6 +874,14 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+    before :: diagnostics.len()
+    unbuilt := SemaCoreUnbuiltCall?{None}
+    checked :: sema_call_core_direct_checked(call, expected, environment, program, &scopes, &state, &tail_store, &context, &unbuilt, &diagnostics)
+    if checked.handled -> sema_call_core_unbuilt_settle(unbuilt, before, &diagnostics)
+    checked
+}
+
+fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, unbuilt: &SemaCoreUnbuiltCall?, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     alias := call.name
     member := ""
     if call.name.contains(".") {
@@ -820,11 +899,23 @@ fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: Sema
         member = imported.item ?? return SemaDirectSpecialCheck{handled: false, value: None}
     }
     module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if sema_call_core_math_exact_crossing(module_name, member, call.args, environment, program, &scopes, &state, &tail_store, &context) == .Val(crossed) {
+        return sema_call_try_core_direct_call(Call{name: call.name, name_span: call.name_span, type_args: call.type_args, args: crossed}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     guard := sema_call_try_scope_guard(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if guard.handled -> return guard
     mount := sema_call_try_ui_mount(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return mount
+    live := sema_call_try_live(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if live.handled -> return live
+    // `reactive.derived/computed/effect` are retained-closure calls with no
+    // Core call record: they check here, not by route.
+    if module_name == "core.reactive" && (member == "derived" || member == "computed" || member == "effect") {
+        return sema_call_try_reactive_core_call(module_name, member, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     sema_call_core_crypto_expert_gate(module_name, member, call.name_span, context, &diagnostics)
+    if sema_call_core_vault_build_time_gate(module_name, member, call.name_span, scopes, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    sema_call_core_unbuilt_note(module_name, member, call.name_span, environment, program, &unbuilt)
     if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     diagnostics_before := diagnostics.len()
     route := sema_call_core_resolve_import_route(environment, program, scopes, alias, member, call.type_args, call.args.len(), sema_call_core_first_is_move(call.args), call.name_span, call.name_span, &context, &diagnostics)
@@ -839,6 +930,10 @@ fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: Sema
             if math_abs.handled -> return math_abs
             float_class :: sema_call_try_core_math_float_class(module_name, member, call.type_args, call.args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if float_class.handled -> return float_class
+            f32_math :: sema_call_try_core_math_f32(module_name, member, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if f32_math.handled -> return f32_math
+            compute_alias :: sema_call_try_compute_alias(module_name, member, target, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if compute_alias.handled -> return SemaDirectSpecialCheck{handled: true, value: compute_alias.value}
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1
@@ -906,7 +1001,7 @@ fn sema_call_default_err_contextual_result(call: Call, result: Type, ok: Type, e
         &diagnostics.push(sema_type_mismatch(err, payload.ty, expr_span(call.args[0].expr)))
         return None
     }
-    value :: sema_tir_node(result, TExprKind.Err{value: payload}, sema_call_default_err_span(call))
+    value :: sema_tree_node(result, TExprKind.Err{value: payload}, sema_call_default_err_span(call))
     sema_expr_expected(value, Val(result), environment, program, &diagnostics)
 }
 
@@ -985,7 +1080,7 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
                 &diagnostics.push(sema_type_mismatch(err, payload.ty, span))
                 return None
             }
-            value :: sema_tir_node(Type.Result{ok: ok, err: err}, TExprKind.Err{value: payload}, span)
+            value :: sema_tree_node(Type.Result{ok: ok, err: err}, TExprKind.Err{value: payload}, span)
             sema_expr_expected(value, expected, environment, program, &diagnostics)
         }
         else -> Val(payload)
@@ -1037,9 +1132,13 @@ fn sema_call_local_default_values(target: SemaCallDirectTarget, binding: SemaCal
     Val(defaults)
 }
 
+// `waiting` is the first argument whose probe checked to no value without an
+// error: a read still waiting on a compile-time value (another module's
+// constant not staged yet) that gives inference no type.
 struct SemaCallInferenceFacts {
     parameter_types: [Type]
     argument_types: [Type]
+    waiting: Int?
 }
 
 fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
@@ -1054,6 +1153,7 @@ fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
 fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
     parameter_types := [Type]{}
     argument_types := [Type]{}
+    waiting := Int?{None}
     loop index in 0..<args.len() {
         slot :: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if slot >= 0 && slot < params.len() {
@@ -1064,6 +1164,8 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
                     if value == .Val(checked) {
                         &parameter_types.push(required)
                         &argument_types.push(checked.ty)
+                    } else if waiting == None && !sema_has_error_since(probe_diagnostics, 0) {
+                        waiting = Val(index)
                     }
                 } else if sema_call_lambda_params_written(args[index].expr) {
                     sema_call_lambda_return_fact(required, args[index].expr, &parameter_types, &argument_types, environment, program, &scopes, &state, &tail_store, &context)
@@ -1071,7 +1173,7 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
             }
         }
     }
-    SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types}
+    SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types, waiting: waiting}
 }
 
 fn sema_call_lambda_params_written(expr: Expr) -> Bool Never! {
@@ -1165,6 +1267,19 @@ fn sema_call_direct_target_abi(target: SemaCallDirectTarget, environment: SemaSc
     }
 }
 
+// Rust `check_direct_call` (L0202 shared_auto_clone): a bare `Shared` name
+// passed to a direct call inside a loop retains the handle once per pass.
+fn sema_call_lint_shared_loop_arguments(args: [CallArg], environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if scopes.loop_depth <= 0 -> return
+    loop argument in args {
+        if argument.expr == .Ident(name, span, _) {
+            index :: sema_scope_resolve_index_at(scopes, name, span) ?? next
+            ty :: sema_scope_binding_type(environment, scopes, index) ?? next
+            if ty == .Shared(_) -> &diagnostics.push(sema_lint("L0202", span, "Auto-cloned `{name}` inside a loop; consider hoisting or caching", "Shared handles are cloned when used across a loop boundary", "Hoist `{name}` before the loop, or clone once outside"))
+        }
+    }
+}
+
 fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     candidate := target
     params := sema_call_params_from_type(candidate.signature) ?? {
@@ -1193,7 +1308,19 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
                 }
             }
         }
-        inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, program, &scopes, call.name_span, &diagnostics) ?? return None
+        inference_diagnostics := [Diagnostic]{}
+        inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, program, &scopes, call.name_span, &inference_diagnostics) ?? {
+            // An argument still waiting on a compile-time value has no type
+            // yet. Checking it records the wait, so the call is checked again
+            // once the value lands, not reported as uninferrable.
+            if inferred_facts.waiting == .Val(index) {
+                _ := sema_check_expression(source_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return None
+            }
+            loop diagnostic in inference_diagnostics -> &diagnostics.push(diagnostic)
+            return None
+        }
+        loop diagnostic in inference_diagnostics -> &diagnostics.push(diagnostic)
         candidate = inferred
         params = sema_call_params_from_type(candidate.signature) ?? {
             &diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))
@@ -1229,13 +1356,18 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     }
     abi :: sema_call_direct_target_abi(candidate, environment, program)
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    sema_call_lint_shared_loop_arguments(source_args, environment, scopes, &diagnostics)
+    callee_facts :: sema_contract_function_facts(environment, program, candidate.symbol.id)
+    if callee_facts == .Val(facts) {
+        if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, resolved_binding.slots, source_args, scopes, &state, &diagnostics) -> return None
+    }
     result_type_raw :: sema_call_signature_return(candidate.signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment, program)
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     // The callee's declaration is copied only when it has `pre` clauses.
     contract_callee := Func?{None}
-    if sema_contract_function_has_pre(environment, program, candidate.symbol.id) -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
+    if callee_facts == .Val(facts) && facts.pre_count > 0 -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
     if contract_callee == .Val(contract) {
         slots :: loop slot in 0..<params.len() -> slot
         checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -1246,17 +1378,17 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     policy_value :: sema_policy_direct_value(candidate, call.name_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if sema_has_error_since(diagnostics, policy_diagnostic_count) -> return None
     call_value :: if policy_value == .Val(callee) -> {
-        sema_tir_node(result_type, TExprKind.IndirectCall{callee: callee, type_args: candidate.type_args, args: lowered, signature: candidate.signature}, call.name_span)
+        sema_tree_node(result_type, TExprKind.IndirectCall{callee: callee, type_args: candidate.type_args, args: lowered, signature: candidate.signature}, call.name_span)
     } else -> {
         callee :: sema_call_callee_decl(program, candidate.symbol.id, call.name_span, &diagnostics) ?? return None
-        sema_tir_node(result_type, TExprKind.Call{callee: callee, type_args: candidate.type_args, args: lowered}, call.name_span)
+        sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: candidate.type_args, args: lowered}, call.name_span)
     }
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
             &wrapped.push(TStmt.ExprStmt{value: call_value, span: call.name_span})
-            sema_tir_node(result_type, TExprKind.InlineBlock{body: wrapped}, call.name_span)
+            sema_tree_node(result_type, TExprKind.InlineBlock{body: wrapped}, call.name_span)
         }
         else -> call_value
     }
@@ -1265,6 +1397,54 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+// D-MEMPROVENANCE3=A (Rust `check_param_view_from_requirements`): a
+// parameter `word: View<str> from corpus` takes only an argument whose view
+// owners stay inside the places of the arguments passed for the named sibling
+// parameters (E2305). `slots` maps each written argument to its parameter.
+fn sema_call_check_param_view_from(callee: SemaContractCalleeFacts, slots: [Int], args: [CallArg], scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop (index, required) in callee.param_view_from {
+        names :: required ?? next
+        written :: sema_call_written_arg_for_slot(slots, index) ?? next
+        argument_span :: expr_span(args[written].expr)
+        actual :: sema_ownership_places_from_expr_in_state(args[written].expr, scopes, &state)
+        if actual.len() == 0 -> next
+        allowed := [SemaOwnershipPlace]{}
+        loop name in names {
+            source_index :: loop (position, param_name) in callee.param_names {
+                if param_name == name -> break Val(position)
+            } ?? None
+            source :: source_index ?? {
+                &diagnostics.push(sema_error("E2305", argument_span, "`from {name}` does not name a parameter", "a parameter `from` clause names sibling parameters (or `self`) that own the view", "use a parameter name from this function's signature"))
+                valid = false
+                next
+            }
+            source_written :: sema_call_written_arg_for_slot(slots, source) ?? next
+            loop place in sema_ownership_places_from_expr_in_state(args[source_written].expr, scopes, &state) -> &allowed.push(place)
+        }
+        if allowed.len() == 0 -> next
+        inside :: loop place in actual {
+            covered :: loop owner in allowed {
+                if place.root_key != "" && place.root_key == owner.root_key && sema_ownership_path_starts(place.projections, owner.projections) -> break true
+            } ?? false
+            if !covered -> break false
+        } ?? true
+        if !inside {
+            &diagnostics.push(sema_error("E2305", argument_span, "`{callee.param_names[index]}` must borrow from its declared `from` sources", "this argument's view owners are outside the sources named after `from`", "pass a view derived from those sources, or widen the `from` clause"))
+            valid = false
+        }
+    }
+    valid
+}
+
+// The written argument bound to parameter `slot`, or None for a default.
+fn sema_call_written_arg_for_slot(slots: [Int], slot: Int) -> Int? Never! {
+    loop (written, bound) in slots {
+        if bound == slot -> return Val(written)
+    }
+    None
 }
 
 fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
@@ -1350,9 +1530,59 @@ fn sema_call_check_freeze(call: Call, expected: Type?, environment: SemaScopeEnv
     if !already_frozen {
         if sema_copy_memory_operation(facts) != None || sema_copy_effect_name(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: call.name_span, facts: facts})
         kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: CopyFact.Explicit}
-        result = sema_tir_expr(facts.target, kind, call.name_span)
+        result = sema_tree_expr(facts.target, kind, call.name_span)
     }
     &state.freeze_sites.push(SemaOwnershipFreezeSite{span: call.name_span, line: sema_source_line_at(environment.source_segments, call.name_span) ?? 1, column: sema_source_column_at(environment.source_segments, call.name_span) ?? 1})
     checked_result := sema_expression_call_expected(result, expected, environment, program, context, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked_result}
+}
+
+// E2475 (Rust core_call.rs `core.web.table.column`): a literal column name
+// is checked against the one row schema the table sorts, filters and renders.
+fn sema_call_web_table_column_schema(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if args.len() == 0 -> return
+    column := String?{None}
+    if sema_registration_cli_without_parens(args[0].expr) == .Str(parts, _, _) {
+        if parts.len() == 1 && parts[0] == .Lit(text) -> column = Val(text.copy())
+    }
+    column_name :: column ?? return
+    schema := Type?{None}
+    // The checked call keeps its `Never!` carrier (`WebTableColumn<Order> Never!`).
+    column_ty := sema_expr_unwrap_tag(checked.ty)
+    if column_ty == .Result(ok, _) -> column_ty = sema_expr_unwrap_tag(ok)
+    if column_ty == .Apply(_, type_args) {
+        if type_args.len() == 1 -> schema = Val(type_args[0])
+    }
+    row := schema ?? return
+    loop {
+        if row == .Tagged(_, inner) {
+            row = inner
+        } else {
+            break
+        }
+    }
+    span :: args[0].span
+    row_name := ""
+    if row == .Named(name) -> row_name = name
+    if row == .Apply(name, _) -> row_name = name
+    if row_name == "" {
+        &diagnostics.push(sema_error("E2475", span, "table column `{column_name}` needs a declared row schema, got `{sema_type_show(row)}`", "table columns are checked against row fields before a renderer can consume them", "declare a row struct, then use one of its fields as the column name"))
+        return
+    }
+    definition :: sema_http_route_find_struct(environment, program, row, environment.module_identity) ?? {
+        &diagnostics.push(sema_error("E2475", span, "table column `{column_name}` needs fields from row type `{row_name}`", "a typed table column must resolve against a declared row schema", "declare the row fields before constructing the table column"))
+        return
+    }
+    known :: definition.fields.map(field -> field.name)
+    loop field in known {
+        if field == column_name -> return
+    }
+    suggestion :: sema_suggest_field(column_name, known)
+    what := "table column `{column_name}` is not a field on `{row_name}`"
+    fix := "rename the column to one of the existing fields: {known.join(", ")}"
+    if suggestion == .Val(field) {
+        what = "table column `{column_name}` is not a field on `{row_name}`; did you mean `{field}`?"
+        fix = "rename the column to the existing field `{field}`"
+    }
+    &diagnostics.push(sema_error("E2475", span, what, "the table keeps one row schema for sorting, filtering, and every renderer", fix))
 }

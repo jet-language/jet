@@ -497,7 +497,6 @@ def main() -> int:
     parser.add_argument("--sizes", default="8,32,64")
     parser.add_argument("--json", type=Path, required=True)
     parser.add_argument("--jet", default=str(DEFAULT_JET))
-    parser.add_argument("--max-ratio", type=float, default=1.05)
     args = parser.parse_args()
     sizes = [int(s) for s in args.sizes.split(",")]
     if args.samples < 1 or args.rounds < 8 or any(s < 1 or s > 64 for s in sizes):
@@ -514,7 +513,7 @@ def main() -> int:
         "rustc": sh([str(JET_ENV), "rustc", "--version"], ROOT).stdout.strip(),
         "machine": {"platform": platform.platform(), "cpu": platform.processor() or platform.machine(), "cpus": os.cpu_count()},
         "samples": args.samples, "rounds": args.rounds, "phases": list(PHASES),
-        "parity_band_vs_rust": args.max_ratio, "cells": [],
+        "win_rule": "Jet/rust_native < 1.00 on every phase", "cells": [],
     }
     for k in sizes:
         cells: dict[str, dict[str, object]] = {}
@@ -533,9 +532,9 @@ def main() -> int:
                 cell["parity"] = "unknown"
                 continue
             cell["parity"] = "match" if cell["stdout"] == reference["stdout"] else "MISMATCH"
-            cell["ratio_to_rust_native"] = {
-                p: round(cell["phase_median_ns"][p] / max(1, reference["phase_median_ns"][p]), 3) for p in PHASES}
-            cell["losing_phases"] = [p for p, v in cell["ratio_to_rust_native"].items() if v > args.max_ratio]
+            raw_ratios = {p: cell["phase_median_ns"][p] / max(1, reference["phase_median_ns"][p]) for p in PHASES}
+            cell["ratio_to_rust_native"] = {p: round(v, 3) for p, v in raw_ratios.items()}
+            cell["losing_phases"] = [p for p, v in raw_ratios.items() if v >= 1.0]
             report["cells"].append(cell)
         report["cells"].extend(c for c in cells.values() if c not in report["cells"])
     args.json.parent.mkdir(parents=True, exist_ok=True)

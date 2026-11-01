@@ -12,7 +12,7 @@ Scope: unordered collections in the foundation import path, codegen context and 
 - `crates/jet-codegen/src/Codegen/Items.rs:1051-1061`: CLI decode initializers use sorted memo field names.
 - `crates/jet-codegen/src/Codegen/Items.rs:1103-1110`: patch apply fields use sorted memo field names.
 - `crates/jet-codegen/src/Codegen/mod.rs:178-186`: bundle Core aliases use `BTreeMap`; callers cannot observe HashMap iteration order.
-- `crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:5042-5055,5075-5136,5250-5255,5598-5655`: runtime interpreter Core import maps now use `BTreeMap`; the legacy `run_program` HashMap API is copied into ordered storage once at the boundary.
+- `crates/jet-codegen/src/Codegen/` (Rust interpreter `eval/mod.rs:5042-5055,5075-5136,5250-5255,5598-5655`, since deleted): runtime interpreter Core import maps now use `BTreeMap`; the legacy `run_program` HashMap API is copied into ordered storage once at the boundary.
 
 ## Proven order-free sites
 
@@ -27,7 +27,7 @@ Scope: unordered collections in the foundation import path, codegen context and 
 
 ## Landed owner handoffs
 
-- `crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs:4340-4344,8133-8140,8181-8189` now sorts memo fields and chooses FFI metadata by minimum key; HotLoop2254 landed the fixes.
+- `crates/jet-codegen/src/Codegen/` (Rust emitter `emit/expressions.rs:4340-4344,8133-8140,8181-8189`, since deleted) now sorts memo fields and chooses FFI metadata by minimum key; HotLoop2254 landed the fixes.
 
 ## Additional landed handoff
 

@@ -746,11 +746,13 @@ fn append_all(path: String | Path, text: String) IOError! -[FS.Write]> {
 }
 
 
-fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
-    file_writer_refusal(path)
-    file_fault("FS.Write", .Write, path)
+// `Path.write_atomic(bytes)` calls this with its receiver (one atomic writer).
+fn write_atomic(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
+    destination :: path_text(path)
+    file_writer_refusal(destination)
+    file_fault("FS.Write", .Write, destination)
     platform :: file_path_platform()
-    target :: host_path.from_text(path, platform)
+    target :: host_path.from_text(destination, platform)
     parent_span :: host_path.parent_span(target)
     // A bare relative name ("data.bin") has an empty parent: the current directory.
     parent :: if parent_span == {
@@ -763,7 +765,7 @@ fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
         candidate := parent.copy()
         host_path.push(&candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
         candidate_text :: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
-        if core.files.__atomic_reserve(path, candidate_text) == {
+        if core.files.__atomic_reserve(destination, candidate_text) == {
             .Err(error) -> {
                 if error == {
                     .AlreadyExists(_) -> {}
@@ -771,7 +773,7 @@ fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
                 }
             }
             .Ok(handle) -> {
-                if core.files.__atomic_finish(handle, bytes, path, candidate_text) == {
+                if core.files.__atomic_finish(handle, bytes, destination, candidate_text) == {
                     .Err(error) -> {
                         _ :: core.files.__atomic_remove(candidate_text)
                         core.files.__atomic_close(handle)
@@ -780,19 +782,19 @@ fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
                     .Ok(_) -> {}
                 }
                 core.files.__atomic_close(handle)
-                if core.files.__atomic_rename(candidate_text, path) == {
+                if core.files.__atomic_rename(candidate_text, destination) == {
                     .Err(error) -> {
                         _ :: core.files.__atomic_remove(candidate_text)
                         return Err(error)
                     }
                     .Ok(_) -> {}
                 }
-                return core.files.__atomic_sync_parent(parent_text, path)
+                return core.files.__atomic_sync_parent(parent_text, destination)
             }
         }
     }
     Err(IOError.Other(IOContext{
-        operation: .Write, resource: Val(path), os_code: None,
+        operation: .Write, resource: Val(destination), os_code: None,
         cause: Val("could not reserve an atomic-write temporary file"),
     }))
 }
@@ -1123,9 +1125,10 @@ fn dirname_impl(path: String) -> String Never! {
 fn dirname(path: String) -> String Never! { dirname_impl(path) }
 
 
-fn create_dir_all(path: String) IOError! -[FS]> {
-    file_fault("FS.Write", .Write, path)
-    core.files.__create_dirs_os(path)
+fn create_dir_all(path: String | Path) IOError! -[FS]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__create_dirs_os(target)
 }
 
 
@@ -1531,17 +1534,17 @@ fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry]
 }
 
 
-fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, false)
 }
 
 
-fn walk_parallel(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk_parallel(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, false)
 }
 
 
-fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+fn walk_files(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, true)
 }
 
@@ -2223,9 +2226,10 @@ fn realpath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(
 fn pwd() -[FS, Env]> String IOError! { cwd() }
 
 
+/// A fresh directory under the system temp directory that stays until the caller removes it.
+/// `temp_dir` is the form that removes its directory when the `TempDir` drops.
 fn tmpdir(prefix: String) -[FS]> String IOError! {
-    temp :: core.files.temp_dir(prefix)
-    Ok(temp.path)
+    mkdtemp(prefix)
 }
 
 

@@ -178,7 +178,8 @@ fn store_test_register_locked(verification: &StoreVerification, roots: HangarRoo
     consumer :: store_test_ingest_fixture(&verification, roots, "receipt-consumer", [String: String]{"out": "consumer"}, [String]{middle.entry.envelope.output_hash})
     project :: files.join(roots.root, "receipt-closure-project")
     store_test_write_lock(project, store_test_receipt_lock("receipt-consumer", "1", consumer.entry.reference, consumer.entry.receipt))
-    live :: store_live_roots_from(roots, project) ?? panic("live roots")
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
+    live :: store_live_roots_from_graph(&verification, roots, project, graph) ?? panic("live roots")
     entries :: [StoreEntry]{base.entry, middle.entry, consumer.entry}
     loop entry in entries {
         meta :: pkg_parse_meta(entry.meta_json()) ?? panic("meta")
@@ -194,7 +195,8 @@ fn store_test_register_locked(verification: &StoreVerification, roots: HangarRoo
     entry :: store_test_ingest_fixture(&verification, roots, "receipt-mismatch", [String: String]{"out": "bytes"}, [String]{})
     project :: files.join(roots.root, "receipt-mismatch-project")
     store_test_write_lock(project, store_test_receipt_lock("wrong-package", "1", entry.entry.reference, entry.entry.receipt))
-    if store_live_roots_from(roots, project) == {
+    graph :: store_closure_graph(&verification, roots) ?? panic("graph")
+    if store_live_roots_from_graph(&verification, roots, project, graph) == {
         .Ok(_) -> panic("mismatched receipt identity must be refused")
         .Err(error) -> assert(error.message().contains("disagrees with Hangar closure record"))
     }
@@ -320,11 +322,11 @@ fn store_test_register_locked(verification: &StoreVerification, roots: HangarRoo
     second_hash :: second.entry.envelope.output_hash
     witness :: "sha256-{store_test_repeat("1", 64)}"
     key :: store_test_nul_join("host", "generation")
-    prepared :: store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 1) ?? panic("prepare")
+    prepared :: store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 1) ? found -> found ! error -> panic("prepare")
     assert(prepared != None)
-    resumed :: store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 9) ?? panic("resume")
+    resumed :: store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 9) ? found -> found ! error -> panic("resume")
     store_commit_external_consumer_root(&verification, roots, resumed ?? panic("resumed prepare"), 10) ?? panic("commit")
-    assert((store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 11) ?? panic("retry")) == None)
+    assert((store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{first_hash}, 11) ? found -> found ! error -> panic("retry")) == None)
     assert(store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, "sha256-{store_test_repeat("2", 64)}", [String]{second_hash}, 12) == .Err(_))
     assert(store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", store_test_nul_join("other-host", "generation"), witness, [String]{"/nix/store/not-a-hangar-object"}, 12) == .Err(_))
     assert(store_reconcile_external_consumer_root(&verification, roots, "jetos-generation", key, witness, [String]{second_hash}, 12) == .Err(_))

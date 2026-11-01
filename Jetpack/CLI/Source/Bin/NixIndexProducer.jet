@@ -569,16 +569,12 @@ fn cli_nix_index_find_integer(value: Dyn, names: [String]) -> Int? Never! {
         .Object(fields) -> {
             loop entry in fields {
                 if names.contains(entry.key) {
-                    if entry.value == {
-                        .Int(number) -> {
-                            if number >= 0 -> return Val(number)
-                        }
-                        else -> {
-                            found :: cli_nix_index_find_integer(entry.value, names) ?? next
-                            return Val(found)
-                        }
+                    if foundation_json_integer(entry.value) == .Val(number) {
+                        if number >= 0 -> return Val(number)
+                        next
                     }
-                    next
+                    found :: cli_nix_index_find_integer(entry.value, names) ?? next
+                    return Val(found)
                 }
                 if entry.value == {
                     .Object(_) | .Array(_) -> {

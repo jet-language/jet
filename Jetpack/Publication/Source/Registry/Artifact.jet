@@ -1,5 +1,9 @@
 // Registry source objects use every visible regular file, including registry.json.
 // SourceStore's held tree hash has exactly this path/NUL/u64be/content wire form.
+use jet_pkg_model.[LockFile, PKG_MAX_LOCK_BYTES, PackageSourceSnapshot, pkg_lock_parse, pkg_lock_write, pkg_source_snapshot_into]
+use jetpack_foundation.[FoundationDirectoryAuthority, UNIFIED_LOCK_FILE, foundation_open_directory_authority, foundation_read_file_nofollow_at_root, foundation_write_file_nofollow_at_root]
+use core.files as files
+
 fn publication_artifact_path(repo: String, name: String, version: String) -> String IOError! {
     publication_validate_index_component(name, "package name")
     publication_validate_index_component(version, "package version")

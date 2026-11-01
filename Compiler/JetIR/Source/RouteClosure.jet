@@ -70,6 +70,9 @@ fn ir_collection_closure_route(operation: TClosureOp, receiver: Type) -> IRClosu
                 return ir_closure_route_row("core.list", "each_mut", "jet_list_each_mut", 2, [Bool]{false, false}, None)
             }
         }
+        .TryEach -> {
+            if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "try_each", "jet_list_try_each", 2, [Bool]{false, false}, None)
+        }
         .Find -> {
             if kind == "list" || kind == "iter" -> return ir_closure_route_row("core.list", "find", "jet_list_find", 2, [Bool]{false, false}, None)
         }
@@ -154,7 +157,7 @@ fn ir_closure_route(operation: TClosureOp, receiver: Type) -> IRClosureRoute Nev
         .ViewMap -> return ir_closure_route_row("core.view", "map", "jet_view_map", 2, [Bool]{true, false}, None)
         .UpdateFirst -> return ir_closure_route_row("core.list", "update_first", "jet_list_update_first", 3, [Bool]{true, false, false}, Val(Effect.Mem))
         .Partition -> return ir_closure_route_row("core.list", "partition", "jet_list_partition", 2, [Bool]{false, false}, None)
-        .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .FilterMap | .Scan | .OptionMap -> return ir_collection_closure_route(operation, receiver)
+        .Map | .MapMut | .TryMap | .Filter | .TryFilter | .Each | .EachMut | .TryEach | .Find | .Any | .BagAny | .All | .Reduce | .TakeWhile | .SkipWhile | .FlatMap | .Position | .MinBy | .MaxBy | .GroupBy | .CountBy | .FilterMap | .Scan | .OptionMap -> return ir_collection_closure_route(operation, receiver)
         else -> panic("checked TClosureOp has no canonical Prelude route")
     }
 }

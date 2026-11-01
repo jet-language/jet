@@ -34,7 +34,7 @@ use core.sys as sys
     root :: cases_test_root("await-entry")
     source :: "mkdir: entries/other\nwrite: entries/ready/marker = \"x\"\nwrite: entries/ready/readable = \"y\"\nawait: entry entries with-file \"marker\" readable \"readable\" timeout 1s every 1ms capture selected\nfile: {{cap:selected}}/marker = \"x\"\n"
     assert_eq(cases_test_advanced(root, "entry", source).verdict.status, "PASS")
-    failed :: "remove: entries\nmkdir: entries/other\nawait: entry entries with-file \"marker\" timeout 2ms every 1ms capture selected\n"
+    failed :: "mkdir: entries/other\nawait: entry entries with-file \"marker\" timeout 2ms every 1ms capture selected\n"
     assert_eq(cases_test_advanced(root, "no-match", failed).verdict.status, "FAIL")
     loop invalid in ["await: file ../escape timeout 1s", "await: file value timeout 1s timeout 2s", "await: entry entries capture invalid-name", "await: entry entries", "await: process 1 timeout 1s", "await: dir entries capture selected"] {
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")

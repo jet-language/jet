@@ -18,6 +18,7 @@ use jet_foundation.[
     DeriveDef,
     Diagnostic,
     Func,
+    ImplConstValue,
     ImplDef,
     Item,
     LValue,
@@ -325,7 +326,7 @@ fn sema_user_derive_expand_struct(graph: SemaRegistrationGraph, module_index: In
         // The provider name selects the derive; its body supplies ordinary
         // members on the target, not a trait conformance.
         if methods.len() > 0 {
-            &generated.push(Item.Impl{value: ImplDef{span: definition.span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}})
+            &generated.push(Item.Impl{value: ImplDef{span: definition.span, type_name: definition.name, type_span: definition.name_span, trait_name: None, trait_span: None, operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
         }
     }
 }

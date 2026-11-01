@@ -63,11 +63,18 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
     None
 }
 
-// A `(name:T,…)` return's labels in row (kernel declaration) order; the
-// parsed Type sorts them canonically. Empty for any other return field.
+// A `(name:T,…)` return's labels, or a `Result<T,(name:T,…)>` return's error
+// labels, in row (kernel declaration) order; the parsed Type sorts them
+// canonically. Empty for any other return field.
 fn core_sig_row_tuple_labels(field: String) -> [String] Never! {
     bytes :: field.bytes()
     labels := [String]{}
+    if field.starts_with("Result<") && field.ends_with(">") {
+        result_args :: String.from_bytes(bytes.slice(7, bytes.len() - 1)) ?? return labels
+        sides :: core_sig_row_parameters(result_args)
+        if sides.len() != 2 -> return labels
+        return core_sig_row_tuple_labels(sides[1])
+    }
     if bytes.len() < 2 || core_sig_row_code(bytes, 0) != 40 || core_sig_row_code(bytes, bytes.len() - 1) != 41 -> return labels
     inner :: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? return labels
     if inner == "" -> return labels
@@ -260,7 +267,6 @@ core.files __atomic_close Int Unit
 core.files __scope_roots FileScope [(encoded:[u8],absolute:Bool)]
 core.files __scope_read_at FileScope,Int,String,String Result<[u8],IOError>
 core.sys __dotenv_read String Result<String,(not_found:Bool,cause:String)>
-core.sys __config_object ^[(key:String,value:Dyn)] Dyn
 core.files __reader_path FileReader String
 core.files __reader_line_bytes &FileReader Result<[u8],IOError>
 core.process __stdout_line_bytes ProcessStdoutStream Result<[u8],IOError>
@@ -361,8 +367,8 @@ core.web.browser __server_stop &BrowserTestServer -
 core.web __openapi_inputs HTTPRouter Result<[OpenApiRouteInput],String>
 core.web __openapi_render ^[OpenApiRouteInput],^String,^String,^[OpenApiServer] Result<String,String>
 core.web __contract_stop String Never
-core.web __live_stats_snapshot - (queries:Int,active:Int,refreshing:Int,evictions:u64,invalidations:u64,ws_pushes:u64)?
-core.web.store __facts_snapshot WebStore<T> (generation:u64,cursor:u64,history_length:Int,history_limit:Int,event_length:Int,history_enabled:Bool) T
+core.web __live_load - [u8]
+core.web __live_replace [u8],^[u8] Bool
 core.files __walk_context String,String,Bool Int
 core.files __walk_close|__walk_matcher_new Int Unit
 core.files __walk_validation_path Int,Int Int
@@ -377,13 +383,6 @@ core.files __walk_metadata Int,Int (directory:Bool,symlink:Bool,kind:Int,code:In
 core.files __walk_next Int,Int (end:Bool,child:Int,directory:Bool,file:Bool,path:String,relative:String,ignore_file:Bool,kind:Int,code:Int?,cause:String?)
 
 core.devtools __publish_payload ^String,^String,^String,^String,^T - T
-core.email __address_parts ^String?,^String Address
-core.email __attachment_parts ^String,^String,^[u8] Attachment
-core.email __envelope_parts ^Address,^[Address] Envelope
-core.email __address_view Address __EmailAddressView
-core.email __attachment_view Attachment __EmailAttachmentView
-core.email __message_view Message __EmailMessageView
-core.email __message_parts ^Address,^[Address],^[Address],^String,^String,^String,^[Attachment],^Envelope,^Int Message
 core.mod __supported - Bool
 core.mod __os - String
 core.mod __read_context String,ModGrant Result<Int,String>
@@ -396,7 +395,7 @@ core.mod __resolve_export Int,Int Result<(),String>
 core.mod __resolve_symbol Int,String Result<(),String>
 core.mod __close_context Int -
 core.mod __finish_context Int Mod
-core.crypto sha256 [u8] Digest256
+core.crypto sha256 Union<[u8],String> Digest256
 core.crypto sha1|sha224|sha384|sha3_224|sha3_256|sha3_384|sha3_512 [u8] String
 core.crypto hmac_sha256 [u8],[u8] [u8]
 core.crypto pbkdf2_hmac [u8],[u8],Int,Int [u8]
@@ -533,6 +532,7 @@ core.http basic_auth String,String String
 core.http bearer_auth String String
 core.http get String Result<HTTPResponse,HTTPError>
 core.http post String,String Result<HTTPResponse,HTTPError>
+core.http serve HTTPMux,Duration HTTPServer
 core.http.server bind String,HTTPMux,HTTPServerTLS?,Duration? Result<HTTPServer,HTTPError>
 core.http.server serve String,HTTPMux,HTTPServerTLS?,Duration? Result<Unit,HTTPError>
 core.http.server static_files HTTPMux,String,String,Bool?,Bool?,Bool? Unit
@@ -570,9 +570,49 @@ core.archive.zstd compress_file|decompress_file String,String Result<Bool,ZstdFi
 core.game.raylib window_open|__window_open Int,Int,String RaylibWindow
 core.game.raylib window_should_close|window_ready|__window_should_close|__window_ready RaylibWindow Bool
 core.game.raylib begin_drawing|__begin_drawing RaylibWindow -
-core.game.raylib clear_background|__clear_background RaylibColor -
-core.game.raylib draw_rectangle|__draw_rectangle Int,Int,Int,Int,RaylibColor -
-core.game.raylib draw_text|__draw_text String,Int,Int,Int,RaylibColor -
+core.game.raylib clear_background RaylibColor -
+core.game.raylib draw_rectangle|draw_line|draw_rectangle_lines Int,Int,Int,Int,RaylibColor -
+core.game.raylib draw_circle|draw_circle_lines Int,Int,Int,RaylibColor -
+core.game.raylib draw_triangle Int,Int,Int,Int,Int,Int,RaylibColor -
+core.game.raylib draw_text String,Int,Int,Int,RaylibColor -
+core.game.raylib draw_pixel Int,Int,RaylibColor -
+core.game.raylib draw_rectangle_rec RaylibRectangle,RaylibColor -
+core.game.raylib draw_rectangle_lines_ex RaylibRectangle,Float,RaylibColor -
+core.game.raylib draw_rectangle_gradient_v|draw_rectangle_gradient_h Int,Int,Int,Int,RaylibColor,RaylibColor -
+core.game.raylib draw_rectangle_gradient_ex RaylibRectangle,RaylibColor,RaylibColor,RaylibColor,RaylibColor -
+core.game.raylib draw_rectangle_rounded|draw_rectangle_rounded_lines RaylibRectangle,Float,Int,RaylibColor -
+core.game.raylib draw_ellipse|draw_ellipse_lines Int,Int,Float,Float,RaylibColor -
+core.game.raylib draw_ring|draw_ring_lines RaylibVector2,Float,Float,Float,Float,Int,RaylibColor -
+core.game.raylib draw_poly|draw_poly_lines RaylibVector2,Int,Float,Float,RaylibColor -
+core.game.raylib vector2 Float,Float RaylibVector2
+core.game.raylib rectangle Float,Float,Float,Float RaylibRectangle
+core.game.raylib check_collision_recs RaylibRectangle,RaylibRectangle Bool
+core.game.raylib check_collision_circles RaylibVector2,Float,RaylibVector2,Float Bool
+core.game.raylib check_collision_circle_rec RaylibVector2,Float,RaylibRectangle Bool
+core.game.raylib check_collision_circle_line RaylibVector2,Float,RaylibVector2,RaylibVector2 Bool
+core.game.raylib check_collision_point_rec RaylibVector2,RaylibRectangle Bool
+core.game.raylib check_collision_point_circle RaylibVector2,RaylibVector2,Float Bool
+core.game.raylib check_collision_point_triangle RaylibVector2,RaylibVector2,RaylibVector2,RaylibVector2 Bool
+core.game.raylib check_collision_point_line RaylibVector2,RaylibVector2,RaylibVector2,Int Bool
+core.game.raylib check_collision_point_poly RaylibVector2,[RaylibVector2] Bool
+core.game.raylib check_collision_lines RaylibVector2,RaylibVector2,RaylibVector2,RaylibVector2 RaylibVector2?
+core.game.raylib get_collision_rec RaylibRectangle,RaylibRectangle RaylibRectangle
+core.game.raylib gen_image_color Int,Int,RaylibColor RaylibImage
+core.game.raylib gen_image_checked Int,Int,Int,Int,RaylibColor,RaylibColor RaylibImage
+core.game.raylib get_image_color RaylibImage,Int,Int RaylibColor
+core.game.raylib image_clear_background|image_color_tint &RaylibImage,RaylibColor -
+core.game.raylib image_draw_pixel &RaylibImage,Int,Int,RaylibColor -
+core.game.raylib image_draw_rectangle &RaylibImage,Int,Int,Int,Int,RaylibColor -
+core.game.raylib image_draw_rectangle_rec &RaylibImage,RaylibRectangle,RaylibColor -
+core.game.raylib image_crop &RaylibImage,RaylibRectangle -
+core.game.raylib image_resize_nn &RaylibImage,Int,Int -
+core.game.raylib image_flip_vertical|image_flip_horizontal|image_rotate_cw|image_rotate_ccw|image_color_invert &RaylibImage -
+core.game.raylib image_color_brightness &RaylibImage,Int -
+core.game.raylib image_color_replace &RaylibImage,RaylibColor,RaylibColor -
+core.game.raylib measure_text String,Int Int
+core.game.raylib __canvas_extent - Int
+core.game.raylib __fill_mask Int,Int,Int,Int,Int -
+core.game.raylib __fill_rect Int,Int,Int,Int,Int,Bool -
 core.game.raylib end_drawing|__end_drawing - -
 core.game.raylib close_window|__close_window RaylibWindow -
 core.game.raylib key_down|__key_down String Bool
@@ -583,6 +623,8 @@ core.game.raylib play_sound RaylibSound Bool
 core.game.raylib gamepad_down|__gamepad_down Int,String Bool
 core.game.raylib gamepad_axis|__gamepad_axis Int,String Float
 core.game.raylib load_texture_atlas|__load_texture_atlas String RaylibTextureAtlas
+core.game.raylib __atlas_texture_path RaylibTextureAtlas String
+core.game.raylib __atlas_bind_texture RaylibTextureAtlas,[u8],Int RaylibTextureAtlas
 core.game.raylib draw_sprite|__draw_sprite RaylibTextureAtlas,String,Int,Int -
 core.db row_value [String:DBValue],String Result<DBValue,DBError>
 core.db row_int [String:DBValue],String Result<Int,DBError>
@@ -593,6 +635,7 @@ core.jobs __publish_parts Int,String,String,String,String Unit
 core.jobs __sleep_ms Int Unit
 core.files __create_dir_all_raw String Result<Unit,IOError>
 core.plugin load String,Authority Plugin
+core.plugin __authority_to_wire Authority String
 core.mod load String,ModGrant Result<Mod,String>
 core.encoding.binary pack_u8|pack_i8|pack_u16le|pack_u16be|pack_u32le|pack_u32be|pack_u64le|pack_u64be Int [u8]
 core.encoding.binary unpack_u8|unpack_u16le|unpack_u16be|unpack_u32le|unpack_u32be|unpack_u64le|unpack_u64be [u8],Int Int?
@@ -624,7 +667,6 @@ core.crypto.uuid v4 - String
 core.crypto.uuid v5 String,String Result<String,String>
 core.crypto.uuid parse String Result<String,String>
 core.crypto.uuid v7 Clock String
-core.args spec - ArgsSpec
 core.term read_key - Key
 core.perf __read_bits - Int
 core.perf __write_bits Int Unit
@@ -635,7 +677,8 @@ core.math decimal String Decimal
 core.math isqrt|factorial Int Int?
 core.math fraction Int,Int Fraction?
 core.ui phone|tablet|desktop - UIPreviewViewport
-core.ui preview|playground String,Result<UIPreviewViewport,Absent>,fn(;UINode) UIPreview
+core.ui preview|playground String,fn(;UINode),UIPreviewViewport? UIPreview
+core.ui previews|playgrounds [UIPreview] Result<UIPreviewRegistry,UIPreviewError>
 core.ui null_backend|__null_backend - NullBackend
 core.ui.host capabilities|__capabilities - UICapabilityFacts
 core.ui.host open_file|save_file|__open_file|__save_file UIFileDialogRequest Result<UIFileDialogSelection,UIHostError>
@@ -706,27 +749,17 @@ core.ui.host.drag_drop poll - Result<UIDragEvent?,UIHostError>
 core.ui.host.shortcuts binding UIShortcut,String Result<UIShortcutBinding,UIHostError>
 core.ui.host.shortcuts register UIShortcutBinding Result<UIShortcutBinding,UIHostError>
 core.ui.host.shortcuts dispatch UIShortcut Result<UIShortcutDispatch,UIHostError>
-core.ui.host.accessibility attach UINode,UIAccessibility Result<Unit,UIHostError>
+core.ui.host.accessibility attach UINode,UIAccessibility Result<UINode,UIHostError>
 core.ui.host.accessibility project UINode,UINodeID Result<UIAccessibilityProjection?,UIHostError>
 core.web on String,String,fn(WebEvent) -
 core.web value String String
 core.web app - App
 core.web page String,String WebPage
-core.web live String,String LiveQuery
-core.web subscribe String LiveQuery
-core.web invalidate|transact_invalidate String Int
-core.web signal_push LiveQuery,String LiveQuery
-core.web live_get|live_show LiveQuery String
 core.web live_stats - String
 core.web auth String Auth
 core.web auth_oauth Auth,String Auth
 core.web auth_routes|auth_show Auth String
 core.web sync String,String String
-app live String,String LiveQuery
-app subscribe String LiveQuery
-app invalidate|transact_invalidate String Int
-app signal_push LiveQuery,String LiveQuery
-app live_get|live_show LiveQuery String
 app live_stats - String
 app auth String Auth
 app auth_oauth Auth,String Auth

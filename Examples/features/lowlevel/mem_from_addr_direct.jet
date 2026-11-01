@@ -1,0 +1,19 @@
+// `mem.from_addr<T>(addr)` is the direct-import spelling of
+// `mem.Ptr<T>.from_addr(addr)`: the same audited address-to-pointer step,
+// inside `#Unsafe`. Reading the pointer back returns the value at the address.
+use core.mem
+use core.mem.[from_addr, volatile_read]
+
+fn read(value: &Int) -> Int {
+    cell :: value
+    #Unsafe("the borrowed value is live in the caller and the pointer never escapes") {
+        addr :: mem.address_of(cell)
+        pointer :: from_addr<Int>(addr)
+        volatile_read(pointer)
+    }
+}
+
+fn run() {
+    value := 23
+    print(read(&value))
+}

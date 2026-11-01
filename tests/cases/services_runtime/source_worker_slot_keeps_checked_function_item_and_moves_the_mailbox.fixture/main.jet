@@ -2,7 +2,7 @@ use core.service as service
 fn named_worker() {}
 fn run() {
     tree := service.tree("slot")
-    endpoint :: &tree.worker("worker", ^named_worker, capacity: 2) ?? panic("worker")
+    endpoint :: &tree.worker("worker", named_worker, capacity: 2) ?? panic("worker")
     &tree.group("group", ["worker"]) ?? panic("group")
     &tree.start() ?? panic("start")
     &tree.send(endpoint, "message") ?? panic("send")

@@ -2,7 +2,7 @@
 // (presets, languages, lifecycle, formatter, dotenv, hooks, reload), plus the
 // small shared helpers the Environment files use.
 use jet_foundation.[CtEnumArg, CtValue, NamedCtValue]
-use jetpack_foundation.[ENV_FIELD_FORMATTER, ENV_FIELD_GIT_HOOKS_PATH]
+use jetpack_foundation.[ENV_FIELD_FORMATTER, ENV_FIELD_GIT_HOOKS_PATH, REF_SOURCE_JETPACK]
 use jet_pkg_model.[
     Pkg, pkg_ascii_lower, pkg_bytes_is_word, pkg_bytes_space_width, pkg_text_has_control,
 ]
@@ -241,11 +241,11 @@ fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: String,
 }
 
 // Parse the one-package formatter fact. `pkgs.nixfmt` is the ratified
-// spelling; `nixpkgs.nixfmt` and an explicit `name@source` remain the same
-// typed package references used by `packages:`.
+// spelling and names the public Jetpack source; an explicit `name@source`
+// remains the same typed package reference used by `packages:`.
 fn envmodel_formatter_from_value(value: CtValue) -> FormatterSpec EnvironmentFactError! {
     raw :: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("formatter must be one typed package reference"))
-    normalized :: if raw.starts_with("pkgs.") -> "nixpkgs.{raw.removeprefix("pkgs.")}" else -> raw
+    normalized :: if raw.starts_with("pkgs.") -> "{REF_SOURCE_JETPACK}.{raw.removeprefix("pkgs.")}" else -> raw
     packages :: Pkg.parse_list(normalized)
     if packages.len() != 1 -> return Err(EnvironmentFactError.new("formatter must contain exactly one package reference"))
     package :: envmodel_pkg_ref(packages[0])

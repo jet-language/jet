@@ -1,0 +1,58 @@
+// L0533 (D-TAIL-CALL1=A): a call the function returns is a tail call and
+// reuses the caller's frame, unless a value with a Close cleanup is still
+// open there: it closes after the call returns, so the call keeps its frame.
+// The lint names each open value: a live local, one a `defer close` takes at
+// scope exit, and a taken parameter the call doesn't take. A value closed
+// before the call, or moved into it, blocks nothing.
+struct Res {
+    name: String
+}
+
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn count(n: Int, acc: Int) -> Int {
+    if n == 0 -> return acc
+    r :: Res{name: "r{n}"}
+    count(n - 1, acc + r.name.len())
+}
+
+fn deferred(n: Int) -> Int {
+    if n == 0 -> return 0
+    d :: Res{name: "d{n}"}
+    defer close(^d)
+    return deferred(n - 1)
+}
+
+fn closed_first(n: Int, acc: Int) -> Int {
+    if n == 0 -> return acc
+    r :: Res{name: "c{n}"}
+    size :: r.name.len()
+    close(^r)
+    closed_first(n - 1, acc + size)
+}
+
+fn handed(n: Int, r: ^Res) -> Int {
+    if n == 0 {
+        close(^r)
+        return 0
+    }
+    handed(n - 1, ^r)
+}
+
+fn kept(n: Int, r: ^Res) -> Int {
+    if n == 0 {
+        close(^r)
+        return 0
+    }
+    kept(n - 1, Res{name: "k{n}"})
+}
+
+fn run() {
+    print(count(3, 0))
+    print(deferred(2))
+    print(closed_first(2, 0))
+    print(handed(2, Res{name: "h"}))
+    print(kept(2, Res{name: "k"}))
+}

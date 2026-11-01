@@ -1,0 +1,88 @@
+// A String place that always holds its value (a variable that owns it, or a
+// write parameter's place) is emptied by `s = ""` in place and grown by
+// `s += text` in place. A refill through `&String` therefore reuses the
+// buffer the last fill grew: the peak resident set (VmHWM, reset to the
+// current one by `5` to clear_refs) must not grow by half a SIZE-byte string
+// during the second fill. A value another owner still holds, or a static
+// one, keeps its bytes.
+package {
+    name: "strings_refill_in_place"
+    authority: { allow: [FS.Read, FS.Write] }
+}
+
+use core.files as files
+
+CHUNK :: 1000000
+CHUNKS :: 50
+SIZE :: CHUNK * CHUNKS
+
+fn status_kb(field: String) -> Int {
+    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+fn fill(out: &String, chunk: String) {
+    out = ""
+    loop _ in 0..<CHUNKS {
+        out += chunk
+    }
+}
+
+fn render_into(out: &String, seed: Int) {
+    out = ""
+    loop i in 0..<(3 + seed % 4) {
+        if (seed + i) % 2 == 0 -> out += "ab" else -> out += "xyz"
+    }
+}
+
+fn twice(out: &String) {
+    out += out
+}
+
+fn run() {
+    text := ""
+    loop i in 0..<4 {
+        render_into(&text, i)
+        print(text)
+    }
+    // Other owners keep their text when the place is emptied or grown.
+    keep :: text.copy()
+    render_into(&text, 5)
+    print("{keep} {text}")
+    shared :: text
+    render_into(&text, 6)
+    print("{shared} {text}")
+    twice(&text)
+    print(text)
+    // An owned local, emptied and refilled.
+    local := "start"
+    local += "-more"
+    print(local)
+    local = ""
+    print("[{local}]")
+    local += "again"
+    print(local)
+    // A static text, emptied.
+    s := "static"
+    s = ""
+    s += "x"
+    print(s)
+    // The second fill reuses the first fill's buffer.
+    chunk :: "c".repeat(CHUNK)
+    out := ""
+    fill(&out, chunk)
+    print(out.len())
+    files.write("/proc/self/clear_refs", "5") ?? panic("reset the peak resident set")
+    start :: status_kb("VmRSS:")
+    fill(&out, chunk)
+    grown :: status_kb("VmHWM:") - start
+    print(out.len())
+    if grown * 2048 > SIZE -> panic("refill: peak grew {grown} kB, more than half a string of {SIZE} bytes")
+    print("refill: the buffer was reused")
+}

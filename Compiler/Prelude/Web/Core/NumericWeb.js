@@ -81,9 +81,9 @@ function jet_numeric_web_int_text(value) {
   if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
   throw new TypeError("Int must be an exact integer");
 }
-// MIR uses this one typed boundary for every integer result. Native Web
+// IR uses this one typed boundary for every integer result. Native Web
 // adapters may compute with Number internally, but an exact Jet Int leaves
-// the boundary as BigInt; fixed-width values are normalized by their MIR
+// the boundary as BigInt; fixed-width values are normalized by their IR
 // signedness and width.
 function jet_numeric_web_int_value(value, signed = false, bits = 0) {
   let integer;

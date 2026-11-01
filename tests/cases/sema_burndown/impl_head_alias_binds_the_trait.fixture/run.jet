@@ -1,0 +1,46 @@
+// #6170 (D-IMPLDOT1): in an `impl` head, an alias binds to the segment after
+// it, whether it names a package (`labels`), an inline module (`inner`) or a
+// generic-module instance (`ranked_i`). Before, the parser read type
+// `Local.labels` and trait `Named`, and the impl failed E0902.
+use labels
+
+module inner {
+    trait Shout {
+        fn shout(self) -> String
+    }
+
+    fn announce<S: Shout>(value: S) -> String { value.shout() }
+}
+
+module ranked<O>(scale: Int) {
+    trait Ranked {
+        fn rank(self) -> Int
+    }
+
+    fn scaled<R: Ranked>(value: R) -> Int { value.rank() * scale }
+}
+
+module ranked_i :: ranked<Int>(10)
+
+struct Local {
+    n: Int
+}
+
+impl Local.labels.Named {
+    fn label(self) -> String { "local {self.n}" }
+}
+
+impl Local.inner.Shout {
+    fn shout(self) -> String { "LOCAL {self.n}" }
+}
+
+impl Local.ranked_i.Ranked {
+    fn rank(self) -> Int { self.n }
+}
+
+fn run() {
+    local :: Local{n: 2}
+    print(local.label())
+    print(inner.announce(local))
+    print(ranked_i.scaled(local))
+}

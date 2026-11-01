@@ -140,18 +140,28 @@ A violation stops the affected work until it is fixed at the root.
   (D-EXEC1). Code generators and hosts only marshal values and call the same
   runtime symbols; they never re-encode validation, defaults, policy, or error
   meaning. Never mark a feature as working on one level only, or defer it to a
-  later level. Until native in-memory O0 lands, `jet run` and `jet dev` use the
-  normal build path and execute the result (D-EXEC2=A); the in-process
-  evaluator serves compile-time code (and the Canvas dev host) and must keep
-  that same meaning; do not extend it. An owner-ratified exception must name
-  the tier it excludes.
+  later level. `jet run` and `jet dev` compile at O0 and run the linked image
+  from memory without writing an executable (D-EXEC2=A); compile-time code
+  also runs natively at O0, in a child of the compiler, with the same meaning.
+  No interpreter or second code generator serves any tier. An owner-ratified
+  exception must name the tier it excludes.
 
 ## Performance gate
 
-Jet must strictly beat every matched peer on every required cell and metric.
-Against Rust, a same-run Jet/Rust ratio of `1.05` or lower counts as parity:
-that band is measurement noise, not a target and not a win. Against every other
-peer, Jet/peer must be below `1.00`.
+Jet's performance target has two stages, and each required cell and metric
+must pass both. The first stage is the peer floor: Jet/peer must be below
+`1.00` for every matched peer. Rust is judged like every other peer, with no
+parity band. The second and final stage is the machine ceiling: hand-written,
+maximally optimized machine code for the same workload. Jet must match or beat
+it in both cycles and bytes (Jet/ceiling at most `1.00`). Beating the peers is
+the floor, not the goal.
+
+Every required cell needs a ceiling reference: an asm-parity cell
+(Tools/perf/asm-parity) that names its gauntlet cell and does the work with the
+best known technique for the workload (SIMD, algorithmic, or syscall-level),
+not a naive transliteration. A cell without a reference is uncovered and fails
+the gate, and a peer win never closes a cell whose ceiling is unmet. A better
+technique replaces the reference and raises the target.
 
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
@@ -294,7 +304,7 @@ in one pass:
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`; `JET` names the admitted
-native compiler (the stage-2 output of `Tools/agent/native-compiler.mjs`) for
+native compiler (the stage-2 output of `jet build Compiler`) for
 every tool and gate. Keep scratch and logs on disk and build output outside the
 repository. Follow the orchestration resource reference for bounded,
 checkout-owned targets and shared artifacts; respect `JET_TARGET_CAP_GB=120`.

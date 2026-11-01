@@ -1,0 +1,42 @@
+// A Display body interpolates an inherent method whose failure set the
+// solve proves empty (`count` calls `words`, neither can fail), next to a
+// generic Display that prints, a callback-taking method, and an attributed type.
+use core.files as files
+
+#FX(!Net, !FS)
+struct Parser {
+    text: String
+}
+
+impl Parser {
+    fn words(self) -> [String] { self.text.split(" ").to_list() }
+    fn count(self) -> Int { self.words().len() }
+
+    // `visit` is the caller's function: what it does is the caller's.
+    fn each(self, visit: fn(String)) {
+        loop word in self.words() -> visit(word)
+    }
+}
+
+impl Parser.Display {
+    fn display(self) -> String { "Parser of {self.count()} words" }
+}
+
+#FX(IO)
+struct Traced<T: Printable> {
+    inner: T
+}
+
+impl Traced.Display {
+    fn display(self) -> String {
+        print("trace: display")
+        "{self.inner}"
+    }
+}
+
+fn run() {
+    parser :: Parser{text: files.read("notes.md") ?? "a b c"}
+    print(parser.count())
+    parser.each((word: String) -> print(word))
+    print(Traced<Parser>{inner: parser})
+}

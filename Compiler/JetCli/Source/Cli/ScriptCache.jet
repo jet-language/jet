@@ -4,7 +4,7 @@
 // slot, named by the profile and the entry's path. The slot's record names
 // its kept program and what that program was built from:
 // - the toolchain: this compiler, its runtime pack and the Core sources, by
-//   file identity;
+//   file identity, and whether JET_CHECKED_ALLOC=1 checks the build;
 // - a hash of the schema snapshots its checks read, of every file of its
 //   authorized source snapshot and of the source tree's shape (its
 //   directories and source names; other files a compile never reads).
@@ -76,6 +76,8 @@ fn jet_cli_script_toolchain(identity: String, options: BuildOptions) -> JetCLISc
         "{executable} {jet_cli_script_file_identity(executable_stat)}",
         jet_cli_host_triple(cli_sys.arch(), cli_sys.name()),
         build_options_key(options),
+        // A checked build links the checked heap (jet_cli_checked_alloc).
+        "checked_alloc {jet_cli_checked_alloc()}",
         "{pack} {jet_cli_script_file_identity(pack_stat)}",
         toolchain,
     }
@@ -199,11 +201,11 @@ fn jet_cli_script_record_program(rows: [String]) -> String? Never! {
 }
 
 // The program kept in `keep`'s slot for exactly its toolchain and sources,
-// run with this invocation's authority; None when the slot holds no such
+// to run with this invocation's authority; None when the slot holds no such
 // program, so the file compiles. The kept program runs from memory as a
-// compiled one does, or from the file `binary` (jet_cli_launch). A program
-// a concurrent keep removed before it was read is a miss too.
-fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String, binary: String, color: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetDriverVerbOutput? {
+// compiled one does, or from the file `binary` (Host.jet jet_cli_run_step). A
+// program a concurrent keep removed before it was read is a miss too.
+fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String, binary: String, color: Bool, json: Bool, options: BuildOptions, program_args: [String], invocation: JetCLIInvocationAuthority?) -> JetCLIRunStep? {
     directory :: jet_cli_script_cache_dir() ?? return None
     record :: "{directory}/{keep.slot}.run"
     text :: cli_files.read(record) ?? return None
@@ -213,10 +215,10 @@ fn jet_cli_script_kept_run(keep: JetCLIScriptKeep, file: String, source: String,
     executable :: x64_executable_kept("{directory}/{program}") ?? return None
     authority := JetCLIAuthority{required: jet_cli_script_rights(rows[3]), granted: jet_cli_script_rights(rows[4]), denied: jet_cli_script_rights(rows[5]), authority: rows[6], invocation_denied: [String]{}}
     jet_cli_with_invocation(&authority, jet_cli_source_invocation(source, invocation))
-    refused :: jet_cli_authority_report(file, source, color, "run", authority)
-    if refused != None -> return refused
+    refused :: jet_cli_authority_report(file, source, color, json, "run", authority)
+    if ^refused == .Val(report) -> return Val(JetCLIRunStep.Output{output: report})
     jet_cli_script_used(record, text)
-    Val(jet_cli_launch(executable, file, binary, program_args, options, invocation, false, color))
+    Val(JetCLIRunStep.Launch{executable: ^executable, file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, verbose: false, color: color})
 }
 
 // Mark the slot record `record`, whose text is `text`, as just used: a copy

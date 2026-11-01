@@ -12,12 +12,15 @@ fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")
     x :: compute.from_list([4.0]) ?? panic("x")
-    (dw, dx) :: compute.gradient(loss, w.copy(), x.copy())
+    // S74 (syntax-decisions.md:982-983): tuple parentheses bind member names, never
+    // positions; `{ member: local }` renames. A VJPRun alone destructures
+    // positionally (D-COMPUTE-VJP1=A, syntax-decisions.md:6953-6954).
+    { w: dw, x: dx } :: compute.gradient(loss, w.copy(), x.copy())
     print("grad:{compute.to_list(dw)}")
     print("grad_x:{compute.to_list(dx)}")
 
     d_loss :: compute.gradient(loss)
-    (transform_w, transform_x) :: d_loss(w.copy(), x.copy())
+    { w: transform_w, x: transform_x } :: d_loss(w.copy(), x.copy())
     print("transform_w:{compute.to_list(transform_w)}")
     print("transform_x:{compute.to_list(transform_x)}")
 
@@ -31,7 +34,7 @@ fn run() {
     tw :: compute.ones([1]) ?? panic("tw")
     tx :: compute.ones([1]) ?? panic("tx")
     d_loss_jvp :: compute.jvp(loss)
-    (jvp_value, jvp_tangent) :: d_loss_jvp(w, x, tw, tx)
+    { value: jvp_value, tangent: jvp_tangent } :: d_loss_jvp(w, x, tw, tx)
     print("jvp_value:{compute.to_list(jvp_value)}")
     print("jvp:{compute.to_list(jvp_tangent)}")
 
@@ -47,7 +50,7 @@ fn run() {
     print("vjp_pair_value:{compute.to_list(vjp_value)}")
     print("vjp_pair_pull_w:{compute.to_list(vjp_pair.w)}")
 
-    (value, selected) :: compute.value_and_gradient(loss, w.copy(), x.copy(), wrt: [w])
+    { value: value, gradients: selected } :: compute.value_and_gradient(loss, w.copy(), x.copy(), wrt: [w])
     print("value:{compute.to_list(value)}")
     print("selected_w:{compute.to_list(selected.w)}")
 

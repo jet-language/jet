@@ -1,5 +1,5 @@
-// Whole-program multi-head normalization. Variant names are collected across
-// every input Program; function heads are grouped only within their Program.
+// Multi-head normalization: one module's ordered heads of one function name
+// fold into one pattern table before registration.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -10,7 +10,6 @@ use jet_foundation.[
     Param,
     ParamZone,
     Pattern,
-    Program,
     Span,
     Stmt,
     SwitchArm,
@@ -18,11 +17,6 @@ use jet_foundation.[
     VariantPayload,
     type_name,
 ]
-
-struct SemaHeadPatternDesugarResult {
-    programs: [Program]
-    complete: Bool
-}
 
 struct SemaHeadPatternVariant {
     name: String
@@ -56,7 +50,7 @@ fn sema_head_pattern_payload_types(payload: VariantPayload) -> [Type] Never! {
     types
 }
 
-fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic], complete: &Bool) -> Func {
+fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVariant], diagnostics: &[Diagnostic]) -> Func {
     folded := heads[0]
     enum_name := String?{None}
     invalid := false
@@ -142,7 +136,6 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
 
     if invalid || enum_name == None {
         folded.head_pattern = None
-        complete = false
         return folded
     }
     enum_name_value :: enum_name ?? ""
@@ -173,56 +166,48 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
     folded
 }
 
-fn sema_head_patterns_desugar_modules(programs: [Program], diagnostics: &[Diagnostic]) -> SemaHeadPatternDesugarResult {
+// Folds each ordered group of multi-head declarations in one module's items
+// into one function over the enum its heads name, at the first head's
+// position. Variants come from the module's enums. Items without a head
+// pattern are left in place, uncopied.
+fn sema_head_patterns_fold_items(items: &[Item], diagnostics: &[Diagnostic]) Never! {
+    has_heads := false
     variants := [SemaHeadPatternVariant]{}
-    loop program in programs {
-        loop item in program.items {
-            if item == {
-                .Enum(definition) -> loop variant in definition.variants -> &variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
-                else -> {}
+    loop item in items {
+        if item == {
+            .Enum(definition) -> loop variant in definition.variants -> &variants.push(SemaHeadPatternVariant{name: variant.name, enum_name: definition.name, payload: variant.payload})
+            .Func(function) -> {
+                if function.head_pattern != None -> has_heads = true
             }
+            else -> {}
         }
     }
-
-    rebuilt_programs := [Program]{}
-    complete := true
-    loop program_index in 0..<programs.len() {
-        program :: programs[program_index]
-        groups := [SemaHeadPatternGroup]{}
-        ordered := [SemaHeadPatternOrderedItem]{}
-        loop item in program.items {
-            if item == {
-                .Func(function) -> {
-                    if {
-                        function.head_pattern != None -> {
-                            group_index := 0
-                            loop group_index < groups.len() {
-                                if groups[group_index].name == function.name -> break
-                                group_index += 1
-                            }
-                            if group_index == groups.len() {
-                                &groups.push(SemaHeadPatternGroup{name: function.name, heads: [Func]{}})
-                                &ordered.push(SemaHeadPatternOrderedItem.Heads{group_index: group_index})
-                            }
-                            &groups[group_index].heads.push(function)
-                        }
-                        else -> {
-                            &ordered.push(SemaHeadPatternOrderedItem.Item{item: item})
-                        }
-                    }
-                }
-                else -> &ordered.push(SemaHeadPatternOrderedItem.Item{item: item})
-            }
+    if !has_heads -> return
+    groups := [SemaHeadPatternGroup]{}
+    ordered := [SemaHeadPatternOrderedItem]{}
+    loop item in items {
+        head := Func?{None}
+        if item == .Func(function) {
+            if function.head_pattern != None -> head = Val(function)
         }
-
-        items := [Item]{}
-        loop entry in ordered {
-            if entry == {
-                .Item(item) -> &items.push(item)
-                .Heads(group_index) -> &items.push(Item.Func{value: sema_head_pattern_fold_function(groups[group_index].heads, variants, &diagnostics, &complete)})
+        if head == .Val(function) {
+            group_index := 0
+            loop group_index < groups.len() && groups[group_index].name != function.name -> group_index += 1
+            if group_index == groups.len() {
+                &groups.push(SemaHeadPatternGroup{name: function.name, heads: [Func]{}})
+                &ordered.push(SemaHeadPatternOrderedItem.Heads{group_index: group_index})
             }
+            &groups[group_index].heads.push(function)
+            next
         }
-        &rebuilt_programs.push(sema_program_with_items(program, ^items))
+        &ordered.push(SemaHeadPatternOrderedItem.Item{item: item})
     }
-    SemaHeadPatternDesugarResult{programs: rebuilt_programs, complete: complete}
+    folded := [Item]{}
+    loop entry in ordered {
+        if entry == {
+            .Item(item) -> &folded.push(item)
+            .Heads(group_index) -> &folded.push(Item.Func{value: sema_head_pattern_fold_function(groups[group_index].heads, variants, &diagnostics)})
+        }
+    }
+    items = folded
 }

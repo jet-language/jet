@@ -24,9 +24,32 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
             ast_visit_expr(end, visitor)
             if range == .Val(value) -> ast_visit_expr(value, visitor)
         }
-        .Range(left, right, _, _, _) | .Binary(_, left, right, _, _) -> {
+        .Range(left, right, _, _, _) -> {
             ast_visit_expr(left, visitor)
             ast_visit_expr(right, visitor)
+        }
+        .Binary(_, left, right, _, _) -> {
+            // A left-leaning chain (`a + b + c …`) walks its left spine in
+            // this frame, so its length costs no stack: each inner level
+            // visited going down, the innermost left operand, then each
+            // level's right operand, innermost first.
+            rights := [Expr]{right}
+            operand := left
+            loop {
+                if operand == .Binary(_, inner_left, inner_right, _, _) {
+                    visitor(operand)
+                    &rights.push(inner_right)
+                    operand = inner_left
+                } else {
+                    break
+                }
+            }
+            ast_visit_expr(operand, visitor)
+            index := rights.len() - 1
+            loop index >= 0 {
+                ast_visit_expr(rights[index], visitor)
+                index -= 1
+            }
         }
         .Call(call, _) -> ast_visit_call_args(call.args, visitor)
         .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
@@ -70,6 +93,27 @@ fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
         .PtrFromAddr(_, _, _, address, _, _) -> ast_visit_expr(address, visitor)
         else -> {}
     }
+}
+// The operands under a Binary node whose operands are `left` and `right`,
+// down its left-leaning chain (`a + b + c …`), in the order a walk that takes
+// each node's left operand before its right one reaches them: the innermost
+// left operand, then each level's right operand, innermost first. A walk with
+// no work of its own at a Binary node walks these in one frame, so a chain's
+// length costs it no stack.
+fn expr_binary_operands(left: Expr, right: Expr) -> [Expr] Never! {
+    operands := [Expr]{right}
+    operand := left
+    loop {
+        if operand == .Binary(_, inner_left, inner_right, _, _) {
+            &operands.push(inner_right)
+            operand = inner_left
+        } else {
+            break
+        }
+    }
+    &operands.push(operand)
+    &operands.reverse()
+    operands
 }
 fn ast_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
     loop statement in body -> ast_visit_statement(statement, visitor, nested_expression)
@@ -135,13 +179,18 @@ fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, T
                 ast_visit_fallback(fallback, visitor)
             }
         }
+        // An assigned field or local is visited as the place expression it
+        // names (the ownership checker's LValue-to-Expr reading), so a walk
+        // sees `self.hits = 0` as the field `hits` of `self`.
         .Assign(target, _, _, value) -> {
             if target == {
                 .Index(base, index, _, _) -> {
                     ast_visit_expr(base, visitor)
                     ast_visit_expr(index, visitor)
                 }
-                .Field(base, _, _) -> ast_visit_expr(base, visitor)
+                // copy: `base`, `field` and `name` are payloads of read parameter `statement`; the visited place owns these
+                .Field(base, field, span) -> ast_visit_expr(Expr.Field{base: base.copy(), member: field.copy(), span: span, id: AST_NODE_GENERATED}, visitor)
+                .Local(name, name_span) -> visitor(Expr.Ident{name: name.copy(), span: name_span, id: AST_NODE_GENERATED})
                 else -> {}
             }
             ast_visit_expr(value, visitor)

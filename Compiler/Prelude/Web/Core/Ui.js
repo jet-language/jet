@@ -258,41 +258,6 @@ function jet_ui_reactive_render(body) {
   return null;
 }
 
-// D-UI-PREVIEW1=A: named previews/playgrounds retain the canonical node
-// callback and explicit viewport without introducing a second UI tree.
-function jet_ui_preview_with_viewport(name, viewport, callback) {
-  const previewName = jet_ui_web_text(name).trim();
-  if (!previewName) throw new Error("core.ui.preview requires a non-empty name");
-  if (typeof callback !== "function") {
-    throw new Error("core.ui.preview requires a callback");
-  }
-  return {
-    kind: "Preview",
-    name: previewName,
-    viewport: jet_ui_web_option_value(viewport) ?? jet_ui_web_enum("Desktop"),
-    callback,
-  };
-}
-
-function jet_ui_playground_with_viewport(name, viewport, callback) {
-  const preview = jet_ui_preview_with_viewport(name, viewport, callback);
-  return { ...preview, kind: "Playground" };
-}
-
-function jet_ui_previews(values) {
-  return { kind: "PreviewRegistry", previews: Array.from(values ?? []) };
-}
-
-function jet_ui_playgrounds(values) {
-  return { kind: "PreviewRegistry", previews: Array.from(values ?? []) };
-}
-
-function jet_ui_raw_viewport_transfer(device, width, height, scale) {
-  return { device: jet_ui_web_enum(["Phone", "Tablet", "Desktop"][Number(device)]),
-    width: Number(width), height: Number(height), scale: Number(scale) };
-}
-
-
 
 function jet_ui_preview_attach_compiler_source(
   preview,
@@ -1141,7 +1106,7 @@ async function jet_ui_web_harfbuzz_imports() {
 
 // rustc may retain unused HostServices externs in an unoptimized Web module.
 // Supply linkage-only imports without loading HarfBuzz; a call is an internal
-// compiler error because MIR reachability proved font shaping unreachable.
+// compiler error because IR reachability proved font shaping unreachable.
 function jet_ui_web_unreachable_harfbuzz_imports() {
   const unavailable = (name) => () => {
     throw new Error(`unreachable Web font-shaping import called: ${name}`);

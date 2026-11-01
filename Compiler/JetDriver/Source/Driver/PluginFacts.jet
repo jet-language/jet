@@ -1,0 +1,22 @@
+// The project's frozen plugin interfaces: every `plugin__<stem>.api` snapshot
+// in the entry root's API cache, read once per compile. Sema cannot read
+// files, so the snapshot text crosses here and sema builds the typed facts
+// (sema_plugin_interface_facts). An unreadable cache is no snapshots.
+use core.files as plugin_facts_files
+use jet_sema.[SemaPluginInterfaceFacts, SemaPluginSnapshot, sema_plugin_interface_facts]
+
+fn jet_driver_plugin_facts(request: JetDriverCompileRequest) -[FS]> SemaPluginInterfaceFacts {
+    root :: jet_driver_entry_root_path(request.authorized_sources)
+    snapshots := [SemaPluginSnapshot]{}
+    if root != "" {
+        cache :: plugin_facts_files.join(root, ".jet/cache/api")
+        names := plugin_facts_files.listdir(cache) ?? [String]{}
+        &names.sort()
+        loop name in names {
+            if !name.starts_with("plugin__") || !name.ends_with(".api") -> next
+            text :: plugin_facts_files.read(plugin_facts_files.join(cache, name)) ?? next
+            &snapshots.push(SemaPluginSnapshot{stem: name.slice(8, name.len() - 4), text: text})
+        }
+    }
+    sema_plugin_interface_facts(snapshots)
+}

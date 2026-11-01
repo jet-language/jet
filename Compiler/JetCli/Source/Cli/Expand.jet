@@ -2,7 +2,7 @@
 // program. No lens performs another analysis or infers intent from text.
 use jet_driver.[JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[Diagnostic, diagnostic_from_registry, Func, Item, Span, diagnostic_column_at, diagnostic_line_at, type_name]
-use jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_effective_type, failure_contract_source]
+use jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_shown_type, failure_contract_source]
 
 struct JetCLIExpandFact {
     source: String
@@ -336,7 +336,7 @@ fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModule])
         failure := "unavailable"
         failure_source := if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
         if callable.failure_contract == .Val(contract) {
-            effective :: failure_contract_effective_type(contract)
+            effective :: failure_contract_shown_type(contract)
             failure = type_name(effective)
             failure_source = failure_contract_source(contract)
             names := [String]{}

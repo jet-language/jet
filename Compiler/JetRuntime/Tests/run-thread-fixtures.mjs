@@ -28,7 +28,8 @@ const sources = [
   "Compiler/JetBackend/Source/OS/Linux.jet",
   "Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetRuntime/Source/TrapMessages.jet", "Compiler/JetRuntime/Source/TrapDefectMessages.jet",
   "Compiler/JetRuntime/Source/Trap.jet", "Compiler/JetRuntime/Source/Sync.jet",
-  "Compiler/JetRuntime/Source/Thread.jet", "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
+  "Compiler/JetRuntime/Source/Thread.jet", "Compiler/JetRuntime/Source/Context.jet",
+  "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
 ];
 function command(bin, args, options = {}) {
   const result = spawnSync(bin, args, { encoding: "utf8", maxBuffer: 1 << 27, ...options });

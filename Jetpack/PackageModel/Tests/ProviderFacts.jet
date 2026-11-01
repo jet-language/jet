@@ -22,14 +22,14 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
     &facts.set_native_document("package.json", "{{\"name\":\"left-pad\"}}\n")
     &facts.add_fact("package.version", ProviderFactValue.Text("2.0.17"), "package.json.version")
     facts.validate() ?? panic("lossless provider facts")
-    assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@npm")
+    assert_eq(facts.qualified_reference(), "left-pad@npm#version=2.0.17")
     round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("provider facts JSON")
     assert_eq(round_trip, facts)
     assert(round_trip.explain_lines().contains("native package.json: retained"))
 }
 
 #Test("mutable selector is an explicit loss") {
-    facts :: ProviderFacts.for_reference("npm", "vite#^5@npm")
+    facts :: ProviderFacts.for_reference("npm", "vite@npm#^5")
     assert(!facts.is_lossless())
     error :: pkg_test_validate_error(facts)
     assert(error.contains("lossy") || error.contains("exact"))
@@ -42,7 +42,7 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 }
 
 #Test("mutable revision ref is an explicit loss") {
-    facts :: ProviderFacts.for_reference("swiftpm", "swift-log#revision=feature/main@swiftpm")
+    facts :: ProviderFacts.for_reference("swiftpm", "swift-log@swiftpm#revision=feature/main")
     keyed := false
     loop loss in facts.losses {
         if loss.key == "provider.selector.revision" -> keyed = true
@@ -67,9 +67,9 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 #Test("resolved selector makes an unpinned source explicit") {
     facts := ProviderFacts.for_reference("npm", "left-pad@catalog")
     &facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
-    &facts.set_resolved_source("left-pad#version=2.0.17@npm")
+    &facts.set_resolved_source("left-pad@npm#version=2.0.17")
     facts.validate() ?? panic("resolved source selector is lossless")
-    assert_eq(facts.qualified_reference(), "left-pad#version=2.0.17@catalog")
+    assert_eq(facts.qualified_reference(), "left-pad@catalog#version=2.0.17")
     round_trip :: ProviderFacts.from_json(facts.to_json()) ?? panic("carrier round trip")
     assert_eq(round_trip, facts)
     mentioned := false
@@ -92,14 +92,14 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 }
 
 #Test("resolved selector does not hide unsupported requested facts") {
-    facts := ProviderFacts.for_reference("npm", "left-pad#channel=next@catalog")
+    facts := ProviderFacts.for_reference("npm", "left-pad@catalog#channel=next")
     &facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog")
     assert(pkg_test_has_loss(facts, "unsupported selector fact"))
     _ :: pkg_test_validate_error(facts)
 }
 
 #Test("selector carrier tampering is rejected") {
-    npm := ProviderFacts.for_reference("npm", "left-pad#version=2.0.17@npm")
+    npm := ProviderFacts.for_reference("npm", "left-pad@npm#version=2.0.17")
     npm.selector.raw = "#version=2.0.17&channel=next"
     _ :: pkg_test_validate_error(npm)
     core := ProviderFacts.for_reference("core", "profile@core")
@@ -115,7 +115,7 @@ fn pkg_test_validate_error(facts: ProviderFacts) -> String {
 }
 
 #Test("duplicate selector facts are explicit loss") {
-    facts :: ProviderFacts.for_reference("npm", "left-pad#version=2.0.17&version=2.0.17&features=ssl+ssl@npm")
+    facts :: ProviderFacts.for_reference("npm", "left-pad@npm#version=2.0.17&version=2.0.17&features=ssl+ssl")
     assert(pkg_test_has_loss(facts, "duplicate selector fact"))
     _ :: pkg_test_validate_error(facts)
 }

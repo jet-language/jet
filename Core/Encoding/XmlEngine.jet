@@ -18,7 +18,7 @@
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
-use core.math as math
+use core.prelude.[min, max]
 use __core_encoding_stream as stream
 
 struct DocumentStart { encoding: Dyn, bom: Dyn }
@@ -294,26 +294,22 @@ fn field_kind(value: Dyn?) -> String Never! {
 }
 // Rust: crates/jet-foundation/src/XmlPull.rs:335
 fn xml_schema_order(entries: View<(key: String, value: Dyn)>) -> [String]? Never! {
-    text_field :: (key: String) -> {
-        text_value(xml_entry(entries, key))
-    }
-    has :: (key: String) -> !(xml_entry(entries, key) == .None)
     order := [String]{}
-    if text_field("$xml") == .Val(kind) {
+    if text_value(xml_entry(entries, "$xml")) == .Val(kind) {
         order = if kind == {
             "document" -> ["$xml", "encoding", "bom", "children"]
-            "document_whitespace" -> if has("lexical") -> ["$xml", "value", "lexical"] else -> ["$xml", "value"]
-            "declaration" -> if has("lexical") -> ["$xml", "version", "encoding", "standalone", "lexical"] else -> ["$xml", "version", "encoding", "standalone"]
-            "doctype" -> if has("lexical") -> ["$xml", "name", "public_id", "system_id", "internal_subset", "lexical"] else -> ["$xml", "name", "public_id", "system_id", "internal_subset"]
-            "element" -> if has("open_lexical") -> ["$xml", "name", "namespaces", "attributes", "children", "empty_style", "open_lexical", "close_lexical"] else -> ["$xml", "name", "namespaces", "attributes", "children", "empty_style"]
-            "namespace" -> if has("lexical") -> ["$xml", "prefix", "namespace_uri", "quote", "lexical"] else -> ["$xml", "prefix", "namespace_uri", "quote"]
-            "attribute" -> if has("lexical") -> ["$xml", "name", "parts", "normalized_value", "quote", "lexical"] else -> ["$xml", "name", "parts", "normalized_value", "quote"]
-            "text" | "cdata" | "comment" -> if has("lexical") -> ["$xml", "value", "lexical"] else -> ["$xml", "value"]
-            "entity_ref" -> if has("lexical") -> ["$xml", "name", "resolved_value", "lexical"] else -> ["$xml", "name", "resolved_value"]
-            "processing_instruction" -> if has("lexical") -> ["$xml", "target", "value", "lexical"] else -> ["$xml", "target", "value"]
+            "document_whitespace" -> if entry_has(entries, "lexical") -> ["$xml", "value", "lexical"] else -> ["$xml", "value"]
+            "declaration" -> if entry_has(entries, "lexical") -> ["$xml", "version", "encoding", "standalone", "lexical"] else -> ["$xml", "version", "encoding", "standalone"]
+            "doctype" -> if entry_has(entries, "lexical") -> ["$xml", "name", "public_id", "system_id", "internal_subset", "lexical"] else -> ["$xml", "name", "public_id", "system_id", "internal_subset"]
+            "element" -> if entry_has(entries, "open_lexical") -> ["$xml", "name", "namespaces", "attributes", "children", "empty_style", "open_lexical", "close_lexical"] else -> ["$xml", "name", "namespaces", "attributes", "children", "empty_style"]
+            "namespace" -> if entry_has(entries, "lexical") -> ["$xml", "prefix", "namespace_uri", "quote", "lexical"] else -> ["$xml", "prefix", "namespace_uri", "quote"]
+            "attribute" -> if entry_has(entries, "lexical") -> ["$xml", "name", "parts", "normalized_value", "quote", "lexical"] else -> ["$xml", "name", "parts", "normalized_value", "quote"]
+            "text" | "cdata" | "comment" -> if entry_has(entries, "lexical") -> ["$xml", "value", "lexical"] else -> ["$xml", "value"]
+            "entity_ref" -> if entry_has(entries, "lexical") -> ["$xml", "name", "resolved_value", "lexical"] else -> ["$xml", "name", "resolved_value"]
+            "processing_instruction" -> if entry_has(entries, "lexical") -> ["$xml", "target", "value", "lexical"] else -> ["$xml", "target", "value"]
             else -> { return None }
         }
-    } else if text_field("$xml_event") == .Val(kind) {
+    } else if text_value(xml_entry(entries, "$xml_event")) == .Val(kind) {
         order = if kind == {
             "document_start" -> ["$xml_event", "encoding", "bom"]
             "document_whitespace" -> ["$xml_event", "value", "lexical"]
@@ -352,43 +348,45 @@ fn xml_byte_array(value: Dyn?) -> Bool Never! {
     }
     true
 }
+// Schema checks for one entry; free functions, not local closures, so the
+// engine's effect summary stays pure (a call through a closure binding is an
+// open function-value call).
+fn entry_has(entries: View<(key: String, value: Dyn)>, key: String) -> Bool Never! { !(xml_entry(entries, key) == .None) }
+fn entry_is(entries: View<(key: String, value: Dyn)>, key: String, kind: String) -> Bool Never! { field_kind(xml_entry(entries, key)) == kind }
+fn entry_is_or_null(entries: View<(key: String, value: Dyn)>, key: String, kind: String) -> Bool Never! {
+    found :: field_kind(xml_entry(entries, key))
+    found == kind || found == "null"
+}
+fn entry_bytes(entries: View<(key: String, value: Dyn)>, key: String) -> Bool Never! { xml_byte_array(xml_entry(entries, key)) }
+fn entry_lexical(entries: View<(key: String, value: Dyn)>, key: String) -> Bool Never! { !entry_has(entries, key) || entry_is(entries, key, "object") }
 // Rust: crates/jet-foundation/src/XmlPull.rs:451
 fn xml_schema_types_are_valid(entries: View<(key: String, value: Dyn)>) -> Bool Never! {
-    text :: (key: String) -> field_kind(xml_entry(entries, key)) == "text"
-    optional_text :: (key: String) -> text(key) || field_kind(xml_entry(entries, key)) == "null"
-    array :: (key: String) -> field_kind(xml_entry(entries, key)) == "array"
-    object :: (key: String) -> field_kind(xml_entry(entries, key)) == "object"
-    object_or_null :: (key: String) -> object(key) || field_kind(xml_entry(entries, key)) == "null"
-    bool_or_null :: (key: String) -> field_kind(xml_entry(entries, key)) == "bool" || field_kind(xml_entry(entries, key)) == "null"
-    has :: (key: String) -> !(xml_entry(entries, key) == .None)
-    bytes :: (key: String) -> xml_byte_array(xml_entry(entries, key))
-    kind_field :: (key: String) -> text_value(xml_entry(entries, key))
-    if kind_field("$xml") == .Val(kind) {
+    if text_value(xml_entry(entries, "$xml")) == .Val(kind) {
         return if kind == {
-            "document" -> optional_text("encoding") && bytes("bom") && array("children")
-            "document_whitespace" -> text("value") && (!has("lexical") || object("lexical"))
-            "declaration" -> text("version") && optional_text("encoding") && bool_or_null("standalone") && (!has("lexical") || object("lexical"))
-            "doctype" -> text("name") && optional_text("public_id") && optional_text("system_id") && optional_text("internal_subset") && (!has("lexical") || object("lexical"))
-            "element" -> object("name") && array("namespaces") && array("attributes") && array("children") && text("empty_style") && (!has("open_lexical") || (object("open_lexical") && object_or_null("close_lexical")))
-            "namespace" -> optional_text("prefix") && text("namespace_uri") && text("quote") && (!has("lexical") || object("lexical"))
-            "attribute" -> object("name") && array("parts") && optional_text("normalized_value") && text("quote") && (!has("lexical") || object("lexical"))
-            "text" | "cdata" | "comment" -> text("value") && (!has("lexical") || object("lexical"))
-            "entity_ref" -> text("name") && optional_text("resolved_value") && (!has("lexical") || object("lexical"))
-            "processing_instruction" -> text("target") && text("value") && (!has("lexical") || object("lexical"))
+            "document" -> entry_is_or_null(entries, "encoding", "text") && entry_bytes(entries, "bom") && entry_is(entries, "children", "array")
+            "document_whitespace" -> entry_is(entries, "value", "text") && entry_lexical(entries, "lexical")
+            "declaration" -> entry_is(entries, "version", "text") && entry_is_or_null(entries, "encoding", "text") && entry_is_or_null(entries, "standalone", "bool") && entry_lexical(entries, "lexical")
+            "doctype" -> entry_is(entries, "name", "text") && entry_is_or_null(entries, "public_id", "text") && entry_is_or_null(entries, "system_id", "text") && entry_is_or_null(entries, "internal_subset", "text") && entry_lexical(entries, "lexical")
+            "element" -> entry_is(entries, "name", "object") && entry_is(entries, "namespaces", "array") && entry_is(entries, "attributes", "array") && entry_is(entries, "children", "array") && entry_is(entries, "empty_style", "text") && (!entry_has(entries, "open_lexical") || (entry_is(entries, "open_lexical", "object") && entry_is_or_null(entries, "close_lexical", "object")))
+            "namespace" -> entry_is_or_null(entries, "prefix", "text") && entry_is(entries, "namespace_uri", "text") && entry_is(entries, "quote", "text") && entry_lexical(entries, "lexical")
+            "attribute" -> entry_is(entries, "name", "object") && entry_is(entries, "parts", "array") && entry_is_or_null(entries, "normalized_value", "text") && entry_is(entries, "quote", "text") && entry_lexical(entries, "lexical")
+            "text" | "cdata" | "comment" -> entry_is(entries, "value", "text") && entry_lexical(entries, "lexical")
+            "entity_ref" -> entry_is(entries, "name", "text") && entry_is_or_null(entries, "resolved_value", "text") && entry_lexical(entries, "lexical")
+            "processing_instruction" -> entry_is(entries, "target", "text") && entry_is(entries, "value", "text") && entry_lexical(entries, "lexical")
             else -> false
         }
     }
-    if kind_field("$xml_event") == .Val(kind) {
+    if text_value(xml_entry(entries, "$xml_event")) == .Val(kind) {
         return if kind == {
-            "document_start" -> optional_text("encoding") && bytes("bom")
-            "document_whitespace" -> text("value") && object("lexical")
-            "declaration" -> text("version") && optional_text("encoding") && bool_or_null("standalone") && object("lexical")
-            "doctype" -> text("name") && optional_text("public_id") && optional_text("system_id") && optional_text("internal_subset") && object("lexical")
-            "element_start" -> object("name") && array("namespaces") && array("attributes") && text("empty_style") && object("open_lexical")
-            "text" | "cdata" | "comment" -> text("value") && object("lexical")
-            "entity_ref" -> text("name") && optional_text("resolved_value") && object("lexical")
-            "processing_instruction" -> text("target") && text("value") && object("lexical")
-            "element_end" -> object("name") && object("close_lexical")
+            "document_start" -> entry_is_or_null(entries, "encoding", "text") && entry_bytes(entries, "bom")
+            "document_whitespace" -> entry_is(entries, "value", "text") && entry_is(entries, "lexical", "object")
+            "declaration" -> entry_is(entries, "version", "text") && entry_is_or_null(entries, "encoding", "text") && entry_is_or_null(entries, "standalone", "bool") && entry_is(entries, "lexical", "object")
+            "doctype" -> entry_is(entries, "name", "text") && entry_is_or_null(entries, "public_id", "text") && entry_is_or_null(entries, "system_id", "text") && entry_is_or_null(entries, "internal_subset", "text") && entry_is(entries, "lexical", "object")
+            "element_start" -> entry_is(entries, "name", "object") && entry_is(entries, "namespaces", "array") && entry_is(entries, "attributes", "array") && entry_is(entries, "empty_style", "text") && entry_is(entries, "open_lexical", "object")
+            "text" | "cdata" | "comment" -> entry_is(entries, "value", "text") && entry_is(entries, "lexical", "object")
+            "entity_ref" -> entry_is(entries, "name", "text") && entry_is_or_null(entries, "resolved_value", "text") && entry_is(entries, "lexical", "object")
+            "processing_instruction" -> entry_is(entries, "target", "text") && entry_is(entries, "value", "text") && entry_is(entries, "lexical", "object")
+            "element_end" -> entry_is(entries, "name", "object") && entry_is(entries, "close_lexical", "object")
             "document_end" -> true
             else -> false
         }
@@ -396,16 +394,16 @@ fn xml_schema_types_are_valid(entries: View<(key: String, value: Dyn)>) -> Bool 
     keys := [String]{}
     loop entry in entries -> &keys.push(entry.key.copy())
     if keys == {
-        ["raw", "prefix", "local", "namespace_uri"] -> text("raw") && optional_text("prefix") && text("local") && optional_text("namespace_uri")
+        ["raw", "prefix", "local", "namespace_uri"] -> entry_is(entries, "raw", "text") && entry_is_or_null(entries, "prefix", "text") && entry_is(entries, "local", "text") && entry_is_or_null(entries, "namespace_uri", "text")
         ["raw_text", "raw_bytes", "semantic"] -> true
-        ["name", "namespaces", "attributes", "empty_style"] -> object("name") && array("namespaces") && array("attributes") && text("empty_style")
-        ["encoding", "bom"] -> optional_text("encoding") && bytes("bom")
-        ["version", "encoding", "standalone"] -> text("version") && optional_text("encoding") && bool_or_null("standalone")
-        ["name", "public_id", "system_id", "internal_subset"] -> text("name") && optional_text("public_id") && optional_text("system_id") && optional_text("internal_subset")
-        ["name", "resolved_value"] -> text("name") && optional_text("resolved_value")
-        ["target", "value"] -> text("target") && text("value")
-        ["value"] -> text("value")
-        ["name"] -> object("name")
+        ["name", "namespaces", "attributes", "empty_style"] -> entry_is(entries, "name", "object") && entry_is(entries, "namespaces", "array") && entry_is(entries, "attributes", "array") && entry_is(entries, "empty_style", "text")
+        ["encoding", "bom"] -> entry_is_or_null(entries, "encoding", "text") && entry_bytes(entries, "bom")
+        ["version", "encoding", "standalone"] -> entry_is(entries, "version", "text") && entry_is_or_null(entries, "encoding", "text") && entry_is_or_null(entries, "standalone", "bool")
+        ["name", "public_id", "system_id", "internal_subset"] -> entry_is(entries, "name", "text") && entry_is_or_null(entries, "public_id", "text") && entry_is_or_null(entries, "system_id", "text") && entry_is_or_null(entries, "internal_subset", "text")
+        ["name", "resolved_value"] -> entry_is(entries, "name", "text") && entry_is_or_null(entries, "resolved_value", "text")
+        ["target", "value"] -> entry_is(entries, "target", "text") && entry_is(entries, "value", "text")
+        ["value"] -> entry_is(entries, "value", "text")
+        ["name"] -> entry_is(entries, "name", "object")
         else -> false
     }
 }
@@ -719,7 +717,7 @@ fn parse_document_with(source: String, options: ParseOptions) -> Dyn XMLFault! {
 // Rust: crates/jet-foundation/src/XmlPull.rs:1218
 fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> Dyn XMLFault! {
     options.limits.validate() ?? return Err(err)
-    scanner := StreamScanner.new(math.max(bytes.len(), 4), options) ?? return Err(err)
+    scanner := StreamScanner.new(max(bytes.len(), 4), options) ?? return Err(err)
     &scanner.push(bytes[0..<bytes.len()]) ?? return Err(err)
     &scanner.finish_input() ?? return Err(err)
     events := [Dyn]{}
@@ -1854,7 +1852,7 @@ impl XMLFault {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4742
     fn located(self: ^XMLFault, source: View<U8>, path: ^String) -> XMLFault Never! {
-        offset :: math.min(self.offset, source.len())
+        offset :: min(self.offset, source.len())
         line := 1
         column := 1
         cursor := 0
@@ -2215,7 +2213,7 @@ impl StreamScanner {
             .None -> { return Err(&self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML token produced no event"))) }
             .Err(fault) -> {
                 error := ^fault
-                local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], math.min(error.offset, scanner.source.len()))
+                local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], min(error.offset, scanner.source.len()))
                 error.offset = self.wire_consumed
                 loop index in 0..<local_scalars -> error.offset += token.scalar_bytes[index]
                 local_line :: error.line ?? 1

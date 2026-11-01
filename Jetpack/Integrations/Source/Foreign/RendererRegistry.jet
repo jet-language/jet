@@ -20,7 +20,7 @@ enum DecoderProtocol {
 fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String Never! {
     lines :: if protocol == {
         .StandardEnvelope -> [String]{
-            "fn decode_response(raw: String, code: Int) -> Dyn !{error} {{",
+            "fn decode_response(raw: String, code: Int) -> Dyn {error}! {{",
             "    if code == {{",
             "        1 -> {{ return Err({error}.NotRunning) }}",
             "        2 -> {{ return Err({error}.Timeout) }}",
@@ -36,7 +36,7 @@ fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> Strin
             "}}"
         }
         .LuaRawJSON -> [String]{
-            "fn decode_response(raw: String, code: Int) -> Dyn !{error} {{",
+            "fn decode_response(raw: String, code: Int) -> Dyn {error}! {{",
             "    decode_status(code)",
             "    value := json.parse(raw) ?? return Err({error}.Protocol)",
             "    return Ok(value)",
@@ -49,7 +49,7 @@ fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> Strin
 // The Lua status adapter shared by response and table-view calls.
 fn pkg_render_lua_decode_status(error: String) -> String Never! {
     lines :: [String]{
-        "fn decode_status(code: Int) -> Bool !{error} {{",
+        "fn decode_status(code: Int) -> Bool {error}! {{",
         "    if code == 1 -> return Err({error}.NotRunning)",
         "    if code == 2 -> return Err({error}.Timeout)",
         "    if code == 3 -> return Err({error}.Cancelled)",

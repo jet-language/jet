@@ -148,6 +148,9 @@
             # The https/TLS cases' loopback peer is `openssl s_server`
             # (`requires: tool:openssl`), so the testkit runs them here.
             pkgs.openssl
+            # Jetpack script-registry claims run `php` on hostile archives; the
+            # `jet` wrapper's runtime path already carries it.
+            pkgs.php
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             # D-BUILDENTRY1 / #95: core verification executes typed build actions.
@@ -155,6 +158,10 @@
           ];
 
           shellHook = ''
+            # nix develop exports TMPDIR after exec, so this shell's environ
+            # never names it: hold it open for the shell's lifetime (children
+            # inherit the descriptor) so clean-nix-tmp.sh sees it as live.
+            [ ! -d "''${TMPDIR:-}" ] || exec {jet_nix_tmp_fd}<"$TMPDIR"
             if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               export JET_ROOT="$repo_root"
             else
@@ -270,6 +277,10 @@
           ];
 
           shellHook = ''
+            # nix develop exports TMPDIR after exec, so this shell's environ
+            # never names it: hold it open for the shell's lifetime (children
+            # inherit the descriptor) so clean-nix-tmp.sh sees it as live.
+            [ ! -d "''${TMPDIR:-}" ] || exec {jet_nix_tmp_fd}<"$TMPDIR"
             if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               export JET_ROOT="$repo_root"
             else
@@ -295,7 +306,7 @@
             # grepping/capture (agents misread results otherwise)
             {
               echo "Jet dev shell"
-              echo "  compiler: JET=<admitted native jet>  (built by Tools/agent/native-compiler.mjs)"
+              echo "  compiler: JET=<admitted native jet>  (built by jet build Compiler)"
               echo "  run:      jet run Examples/features/basics/hello.jet"
               echo "  package:  jetpack help        (JETPACK=<native jetpack>)"
               echo "  search:   rg \"pattern\" Docs Compiler Core Jetpack tests"

@@ -192,6 +192,21 @@ digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.
 
+Runtime services start on use (D-EFF-CORE-INIT1 A). A lifecycle hook written
+`// runtime-init: N when <storage>,...` names the module storage its service
+sets up; `lifecycle.list` carries the names and the library build
+(`JetIR/BuildLibrary.jet`) rejects one the hook (or code it calls or installs)
+does not set up. Per guard the object writer emits an `.init_array.NNNNN` or
+`.fini_array.NNNNN` section flagged `SHF_INFO_LINK` whose `sh_info` is that
+storage's data section; the pack keeps the link. Jet's linker
+(`Image/StaticLink.jet` `link_collect`) keeps such a hook exactly when it keeps
+one of its guards, so a program that touches no service state runs and links
+none of its startup. A guarded hook may run once per kept guard and therefore
+starts idempotently. System linkers ignore the flag and keep every hook, as
+does the runtime image, whose exports are all live. Code a service runs only
+when used is installed by its hook as a code word (`rt_*_address()`), never
+called from always-live startup or exit paths.
+
 `RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
 its only home: its route, record and import rows are edited by hand, sorted,
 together with the runtime `#Export(c)` they name. After provider admission
@@ -295,107 +310,119 @@ when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
-### Single slot IR (middle end)
+### The IR and IR Lint (middle end)
 
-D-ARCH-IR1=A gives the middle end one IR per function:
+D-ARCH-IR1=A: the middle end has one typed IR, called IR, and one checker
+for it, IR Lint. There is no other intermediate representation.
 
 ```text
-checked program (checked bodies + sema facts) -> IR (slots, structured control) -> x86-64 selection
+checked program (checked bodies + sema facts) -> IR build -> IR Lint
+  -> O1/O2 passes (IR Lint after each with verify) -> IR Lint -> x86-64 selection
   -> encoder, object writer, DWARF, static linker, runtime pack
 ```
 
-**Frozen boundaries.** Changing either end of the middle needs the owner's
-explicit approval.
+**Frozen boundaries.** Changing either end needs the owner's explicit approval.
 
-- *Front-end boundary:* the IR builder consumes the checked program: the
-  checked function rows and the sema facts they carry. A data-oriented front
-  end (flat AST, facts in tables keyed by node id) is a later, separate step;
-  when it lands, it changes the builder's input reader and nothing below it.
-- *Emission boundary:* the IR path produces `X64CompiledFunction` and
-  `X64FunctionDebug` rows and an `X64ObjectModule` (data objects, debug files
-  and types, per-function source facts), all declared in
-  `Image/Emission.jet`, for the existing encoder (`X64/Encoder.jet`), object
-  writer (`Image/Object.jet`), DWARF writer (`Image/Dwarf.jet`) and static
-  linker (`Image/StaticLink.jet`). It calls the runtime symbols with the
-  System V ABI and links the runtime pack.
+- *Front end:* the IR builder reads the checked program: the checked function
+  rows and the sema facts they carry. The facts are sema's output, not an IR.
+  They carry every binder's type and every generic call's instantiated type
+  arguments. The builder reads those types; it never re-derives or substitutes
+  them, and it never falls back to an unchecked emitter.
+- *Emission:* x86-64 selection produces the `X64CompiledFunction`,
+  `X64FunctionDebug` and `X64ObjectModule` rows of `Image/Emission.jet` for
+  the encoder, object writer, DWARF writer and static linker. It calls the
+  runtime pack's symbols with the System V ABI.
 
-**Data model** ([`Compiler/JetIR/Source/IR.jet`](../../Compiler/JetIR/Source/IR.jet)).
-An `IRModule` holds interned type rows (the checked `Type`, its kind, size,
-alignment, ABI class and drop symbol), interned names, read-only data rows and
-the functions, keyed by their stable function key. An `IRFunction` is one flat
-arena in struct-of-arrays form: slot columns (type, kind, name, line) and
-instruction columns (`op`, `dst`, `a`, `b`, `c`, line), plus one shared
-operand pool for calls. Slots `0..<param_count` are the parameters. There is
-no per-instruction or per-slot heap allocation, and every reference is an
-integer id.
+**Data model** ([`IR.jet`](../../Compiler/JetIR/Source/IR.jet)). An
+`IRModule` holds interned type rows (the checked `Type`, its kind, size,
+alignment, ABI class, drop and clone routes), names, read-only data and the
+functions, keyed by function key. An `IRFunction` is one flat arena of slot
+columns (type row, kind, name, line) and instruction columns (`op`, `dst`,
+`a`, `b`, `c`, line) with one operand pool for calls; slots `0..<param_count`
+are the parameters, and every reference is an integer id.
 
-- **Not SSA.** A slot is a mutable typed variable. An instruction reads slots
-  and writes at most one. Loops need no block parameters or back-edge copies.
-- **Structured control.** `Block`, `Loop`, `If`/`Else`, `End`, `Br depth`,
-  `BrIf`, `Return` and `Unreachable`; there are no arbitrary jumps. Every
-  opener records the index of its `End`, so a walker skips a region in O(1).
-  The form maps one-to-one onto Wasm blocks and locals.
-- **Explicit ownership.** `Copy`, `Move`, `Drop` and `Close` are instructions.
-  The builder emits them from the checked ownership facts, and only for types
-  that have a drop.
-- **Semantic operations where Jet semantics live.** For example, `Add` on an
-  exact `Int` slot means inline arithmetic with a big-integer spill, and
-  `Concat` means String concatenation. The slot's type row selects the
-  meaning, and the machine layer chooses the instruction sequence. The
-  runtime routes are the runtime pack's symbols.
-- **Content hash.** A function's key is the SHA-256 of its text form, in which
-  every interned id is spelled out by content. That key is the unit for the
-  store, caching and per-function hot swap.
+- A slot is a mutable typed variable; an instruction reads slots and writes
+  at most one. The IR is not SSA.
+- Control is structured: `Block`, `Loop`, `If`/`Else`, `End`, `Br depth`,
+  `BrIf`, `Return`, `Unreachable`. Every opener records its `End`.
+- `Copy`, `Move`, `Drop` and `Close` make ownership explicit; the builder
+  emits them from the checked ownership facts.
+- An operation means what Jet means for its slot's type row (`Add` on an
+  exact `Int` spills to a big integer, `Concat` concatenates Strings); a
+  `CallRuntime` names a runtime route
+  ([`RuntimeRoutes.jet`](../../Compiler/JetIR/Source/RuntimeRoutes.jet)).
+- `ir_function_hash` is the SHA-256 of a function's text form, in which every
+  interned id is spelled out by content.
 
-**SSA only on demand.** A pass that needs SSA (value numbering, constant
-propagation across joins) builds an SSA view of one function, uses it and
-discards it. A view is never stored, never spans functions and never becomes
-the program's representation. O0 builds never construct one.
+An O2 pass may build an SSA form of one function, use it and discard it
+(`Ssa.jet`). It is never stored and never spans functions; O0 builds none.
 
-**Consumers.**
+**IR Lint** ([`Lint.jet`](../../Compiler/JetIR/Source/Lint.jet)) checks a
+module against the IR's contract. It shares no code with the builder or the
+passes. Per function it checks the arena, each instruction's operands against
+its opcode's row in `IR_LINT_OPS` (roles, slot kinds, typing), every `Call`
+against the callee's parameter and result rows, every `CallRuntime` against
+its route's carriers, the structured-control nesting, and `Return` against
+the result. Per module it checks each type row's kind and layout against its
+checked `Type`. `ir_lint_core_routes` checks each Core call registry row
+with a runtime route against that route's arity. The route lint,
+`ir_lint_route_gaps`, lists in one run every gap a runtime leaves: each Core
+call row and Prelude static (`Pool.new()`) whose symbol no route carries,
+and each route export and runtime handle helper missing from that runtime's
+`runtime.exports`
+(`jet run Compiler/JetIR/Tests/Lint/LintPlanted.jet -- --route-gaps <path>`).
+
+The contract the lint checks also admits a few word-level forms. A general
+word `Move`/`Copy` may change its slot's type row (the word is
+reinterpreted), and `Compare` may compare raw words. A valueless `Return` is
+the stop edge. A runtime route's Word carrier takes an `Int` or a word. A
+`ConstText` may yield the raw static-text address the runtime library's
+`rt_static_text` reads as a Word.
+
+It runs after the IR build (`ir.build`) on every native build, and again
+before x86-64 selection (`ir.opt`) when the optimizer ran; the functions
+split across the compiler threads. With `IROptOptions.verify` (tests, CI,
+`JET_OPT_VERIFY=1`) it also runs after each optimizer pass
+(`ir.opt.<pass>`) and verifies each SSA form (`ssa.form`). A finding is a
+compiler bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE
+census row naming the function, the pass and the rule. The build collects
+every row, traps each function that has one, and exits 101. The runtime
+library build (`Request.jet` `jet_cli_runtime_library`) runs the same two
+checks, and each finding is one of its issue rows.
 
 | Consumer | Reads |
 |---|---|
-| IR builder (`JetIR/Source/Build*.jet`) | the checked program |
-| O1/O2 passes (`JetIR/Source/Opt*.jet`; inlining splices slot arenas, loop work uses the structured loops, SSA views where needed) | IR |
+| IR builder (`JetIR/Source/Build*.jet`) | the checked program and its sema facts |
+| IR Lint (`JetIR/Source/Lint.jet`) | IR |
+| O1/O2 passes (`JetIR/Source/Opt*.jet`) | IR |
 | x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) | IR |
-| Encoder, object writer, DWARF, static linker | x64 rows; DWARF variables are slots |
-| Comptime (`JetEval/Source/IR`): in-memory O0 machine code from the same selector, one meaning for comptime and run time | IR |
-| Phase trace: `ir.build`, `ir.opt`, `ir.x64`, `ir.object` | IR |
+| Comptime (`JetEval/Source/IR`): O0 machine code from the same selector | IR |
+| Phase trace: `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`, `ir.object` | IR |
+| WebAssembly selection (`JetWeb/Source/Web/*.jet`); phase trace `web.module` | IR |
 
-There is no web emitter on the IR yet: `jet build --target=web` is not part of
-the Jet-hosted CLI (E2104). The IR's structured control maps one-to-one onto
-Wasm blocks and locals for when it is rebuilt.
+The web target selects WebAssembly from the same IR. Runtime packaging
+selects the runtime library once into the runtime partition
+(`jet_runtime.wasm`), with a receipt of its data layout, table slots and
+exports (`jet_runtime.wasm.tsv`). `jet build --target web` selects the program
+into the program partition `app.wasm`, placed after the runtime's data and
+table slots. The program calls the runtime through imports from module `rt`
+named by runtime symbol (a `task` links `jet_rt_native_task_spawn`), and C
+library functions through module `c`. Both partitions import one memory, one
+table and the stack, thread and stop globals from `env`, and make Linux system
+calls through `host.syscall`. `web.manifest.json` records both partitions;
+the generated `jet_dom_runtime.js` owns the memory, table and globals and
+answers the system calls. The web host runs one thread: starting a runtime
+thread fails, so a program that starts a `task` stops with E3001.
 
-### Checked program — the IR builder seam
+#### The read-only fact channel
 
-The [IR builder](../../Compiler/JetIR/Source/) accepts the checked bundle,
-carries sema-approved types, access conventions and effects from the checked
-program into
-the [IR](../../Compiler/JetIR/Source/IR.jet), and gives those facts canonical
-type, function, slot and artifact identities there. The resulting IR is
-validated and optimized before execution or emission. The builder infers no
-new language permissions and never falls back to an unchecked AST emitter.
-
-The checked program is a semantic contract, not a commitment to one permanent
-representation. A port may change the representation, but it may not move
-semantic choices into an executable lens or create a second meaning.
-
-#### Totality and the read-only fact channel
-
-The checked program is post-sema and total: every fact the IR builder needs is
-carried concretely on the checked row, never re-inferred through a fallback.
-Surface sugar expands during sema into core forms every lens already handles,
-and a coverage miss is an internal compiler error, never a fallback. The IR
-builder and the back ends read the facts sema selected; they do not re-run
-semantic decisions such as expression typing or overflow classification. A
-missing fact means "not proven" and never authorizes a lens to re-derive sema
-policy. An optimized pass may build a private SSA view (see *SSA only on
-demand*), but that view is not a semantic representation or a source of truth.
+The checked program is post-sema and total: each function is complete or has
+a diagnostic. The builder and the back end read the facts sema selected and
+re-run no semantic decision; a builder or back-end failure on a checked
+program is an ICE. A missing optimization fact means "not proven":
 
 | Fact | Missing fact |
 |---|---|
-| Type: expression, local, parameter and return types | Keep the conservative typed operation. |
 | Integer bounds: integer ranges, exact integer literals, inline-range numeric operations, fixed-list proofs | Keep the checked range or index operation. |
 | Exclusivity: sema access conventions, lowered to call-argument borrow flags and borrows | Keep shared or unknown memory dependencies and wrappers. |
 | Purity: sema function purity and effect-free bodies | Do not apply a reorder or vector hint. |
@@ -702,8 +729,11 @@ packages live under `Jetpack/`.
 | `JetParser` | tokens to AST, formatter | yes (E00xx) |
 | `JetSema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `JetIR` | the slot IR: builder from the checked program, optimizer, x86-64 selection | **never** |
+| `JetWasm` | the plugin engine's WebAssembly front end: core module and Component Model data model, binary decoders, WAT reader, core validator | **never** (errors are load faults carried to run time) |
+| `JetWeb` | the web target: WebAssembly selection of the lowered slot IR into the runtime partition (at runtime packaging) and the program partition (`jet build --target web`), their manifest and the generated JS host | **never** (a selection finding is an ICE) |
+| `JetPlugin` | the plugin link step: translates each loaded Component into JetIR functions, canonical-ABI thunks and a descriptor | **never** (a failed translation becomes the load fault) |
 | `JetBackend` | native code generation, object and image writing | **never** (a failure is an ICE, R5) |
-| `JetEval` | in-process evaluator for comptime and the REPL | no user-facing surface by itself |
+| `JetEval` | compile-time execution: compiles comptime code to x86-64 at O0 and runs it in a child of the compiler | no user-facing surface by itself |
 | `JetRuntime` | the native runtime linked into every program | no |
 | `JetDriver` | front-end orchestration and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
 | `JetBuildSession` | build sessions over the driver | no new diagnostics |
@@ -958,9 +988,9 @@ Core or String APIs or eliminate the copy made by String.bytes(). Declaring thes
 values and including their source files does not activate the host startup path
 or qualify a native supplier.
 
-Compilation keeps the `JetDriverCompileRequest` field `comptime_stop_points`
-false: compile-time code runs in the in-process evaluator, which refuses stop
-points, until native in-memory O0 lands.
+Compile-time code runs natively at O0 in a long-lived child of the compiler
+(JetEval `IR/Native.jet`): a runtime stop there returns to the compiler as a
+report carrying its text, and the child's host effects are refused.
 
 Build-plan queries move their invocation request into one query and return that
 same owner beside the query facts. Staged checks borrow it; only the small
@@ -1482,8 +1512,8 @@ target, generated sources, and schema.
 
 Generated wrappers keep ownership, errors, layout, callbacks, and task crossings
 explicit. Safe Jet cannot acquire an ungated unsafe operation through a bridge.
-Executable bridge proof is in `tests/cffi.rs`, the scoped C++ system proof, and
-the feature goldens run by `Tools/testkit/Golden.jet`.
+Executable bridge proof is in `tests/cases/cffi/`, the scoped C++ system proof,
+and the feature goldens run by `Tools/testkit/Golden.jet`.
 
 ### Jet as guest: embedding contract
 
@@ -1619,17 +1649,21 @@ discovered sources with at most eight workers and consumes them in stable
 order. The server records cancellation concurrently with
 request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
-in `tests/lsp.rs`; the server must not advertise speculative features.
+in `Compiler/JetLSP/Tests/Integration/` or `tests/cases/lsp/`; the server must
+not advertise speculative features.
 
 ### Compiler-speed evidence boundary (#666)
 
 Compiler-speed evidence stays on the production compiler path. The differential
-gate sends the same checked example to optimized AOT and the default `jet run`
-(normal build path, D-EXEC2=A) and to the forced evaluator, then compares exit
-status, stdout, and stderr; a refusal, newly broken AOT oracle, missing record,
-or divergent result remains visible as a failure. Named-job parity uses the
-same checked program-argument slice for `jet run`, `jet dev`, and interpreter
-execution; an unknown job remains an E1294 failure.
+gate (the golden suite, Tools/testkit/Golden.jet) runs the same checked example
+at three tiers: o0 is the default `jet run` (O0 image run from memory,
+D-EXEC2=A), o1 is the `jet build` executable, and o2 is the
+`jet build --release` executable. It compares each tier's exit status, stdout
+and stderr with one expected record. A refusal, a newly broken AOT oracle, a
+missing record or a divergent result stays visible as a failure. No evaluator
+tier exists: JetEval runs only native O0 compile-time code. Named-job parity
+gives `jet run` and `jet dev` the same checked program-argument slice, and an
+unknown job stays an E1294 failure.
 
 The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
@@ -1641,11 +1675,12 @@ edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
 hiding cold-cache work. The checked-corpus report is schema version 4 and emits
-six rows for each active corpus row: `jit-clean`, `jit-no-change`,
-`jit-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
-`aot-release-representative-edit`. The `jit-*` rows measure `jet run`, which
-today runs the transitional build-and-execute path (D-EXEC2); their names
-predate the Cranelift retirement. The current corpus has five active rows, so
+six rows for each active corpus row: `run-clean`, `run-no-change`,
+`run-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
+`aot-release-representative-edit`. The `run-*` rows (stage `run-o0`, backend
+`native-o0`) measure `jet run`, which compiles at O0 and runs the image from
+memory (D-EXEC2). The `aot-release-*` rows (backend `native-release`) measure
+`jet build --profile=release`. The current corpus has five active rows, so
 the matrix has 30 rows. Each row uses one warmup and twenty measured samples.
 Its top-level receipt records verified semantic, diagnostic, effect, and tier
 parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,
@@ -1672,34 +1707,62 @@ and the function-extract helper returns no action. Other non-scalar parameters
 and results stay unsupported until sema supplies a complete ownership contract
 for reads, writes, takes, and returned values.
 
-## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / D-DEP-WASM1)
+## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / #4717)
 
 An application sandbox is a prebuilt WASM Component Model guest loaded by the
 `core.plugin` host; the compiler has no sandbox build target. The native library boundary is
-different: a native library is trusted code and has no Wasmtime sandbox or
-implicit capability reduction. Both surfaces keep the same checked export
-shape, but only the Component path makes an isolation guarantee.
+different: a native library is trusted code and has no sandbox or implicit
+capability reduction. Both surfaces keep the same checked export shape, but
+only the Component path makes an isolation guarantee.
 
-The Component loader reads the module below the caller's canonical,
-resource-scoped `FS.Read` authority, then preflights every import as a typed
-`HostImportFact`. The declared `authority.needs` and the one authority lent to
-the load must cover each fact before the linker registers it or instantiation
-can occur. An unknown or denied import fails closed; no adapter can reach the
-filesystem, network, process, or another external effect first. An empty
-grant is explicit zero authority, never an ambient fallback. Host adapters
-re-check the typed decision at the call edge and apply the same resource scope
-to path/endpoint arguments.
+The plugin engine is Jet end to end; no Rust crate, Cargo bridge or Wasmtime
+is involved. Three stages own it:
 
-The host applies fuel, linear-memory, table, wire-size, and wall-call budgets.
-The failure envelope records which budget was actually consumed; a guest
-memory/table request is not relabeled as fuel exhaustion, and an oversized
-wire is rejected before an unbounded host encoding. A call trap is classified
-as user/guest failure, denied authority, budget exhaustion, or internal host
-defect from typed boundary state, not by parsing backend error text.
+- `Compiler/JetWasm` is the front end: the core module and Component Model
+  data model, the binary decoders, the WAT text reader and the core
+  validator. It never executes guest code.
+- `Compiler/JetPlugin` is the build-time link step. For every literal
+  `plugin.load(path, …)` it reads the artifact (a relative path under the
+  package root), flattens the Component
+  (core instances, aliases, `canon lift`/`canon lower`), validates each core
+  module and translates every core function into ordinary JetIR functions of
+  the program. Each translated function checks fuel, call depth and memory
+  bounds inline; exports and lowered imports become canonical-ABI thunks,
+  `call_indirect` goes through one dispatcher per signature class, and a
+  descriptor blob records the exports, imports, memories, tables, globals,
+  segments and function names. A component it cannot translate becomes a
+  descriptor whose load fails with the translation error.
+- `Compiler/JetRuntime/Source/PluginHost.jet` is the one host interface. It
+  owns the instance state (linear memory, tables, globals, fuel, depth,
+  frames), the canonical ABI lifting and lowering, host imports, budgets and
+  failure envelopes. Translated guest code reaches the host only through the
+  `jet_plugin_*` helpers; nothing else crosses the boundary.
+
+The guest runs in the host process (D-PLUGIN-ENGINE-PROC1 is open; option A, a
+seccomp'd child process, swaps in behind the same host interface). Isolation
+comes from the translation: guest code addresses only its own bounds-checked
+linear memory and tables, and reaches effects only through admitted imports.
+
+At run time the loader reads the artifact below the caller's canonical,
+resource-scoped `FS.Read` authority and refuses it unless the bytes equal the
+ones the program was built with, so a changed artifact asks for a rebuild
+instead of running stale code. It then preflights every import: the one
+authority lent to the load must cover each import's right family before
+anything runs. An unknown or denied import fails closed; no adapter can reach
+the filesystem, network, process, or another external effect first. An empty
+grant is explicit zero authority, never an ambient fallback. The host adapter
+re-checks the decision at the call edge and applies the same resource scope to
+path arguments; the implemented adapter is the scoped `FS.Read` text read.
+
+The host applies fuel, linear-memory, table and call-depth budgets. The
+failure envelope records which budget was actually consumed; a guest
+memory/table request is not relabeled as fuel exhaustion. A call trap is
+classified as user/guest failure, denied authority, budget exhaustion, or
+internal host defect from typed boundary state, not by parsing error text.
 D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
 export name, original display message, and up to 32 innermost-first Wasm frames.
-Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. A
-`PluginFrame` locates the function by name (empty without a name section), the
+Budget failures name Fuel, Memory or Table. A `PluginFrame` locates the
+function by name (the name section's, else the export's, else empty), the
 Wasm `component` it ran in, and the offset; debug-file/line loading is
 intentionally outside this transport. Failures before guest execution carry no
 frames. A failed load leaves a handle whose first call returns the load fault
@@ -1711,14 +1774,10 @@ execution routes: default `jet run` and release/AOT `--release`. Each route is
 required; unavailable release tooling is not a passing or skipped authority
 witness.
 
-Handles and Wasmtime stores are owner-thread state. Cross-thread use and
-unload of an active call are rejected by the existing handle boundary, and
-nested host/guest entry is explicitly rejected rather than borrowing the
-thread-local store map recursively. Bounded external adapters (network and
-process) use the same call deadline; cancellation stops the deadline worker
-before the store becomes idle. Component values are copied while the call
-owns guest memory and before `post_return`; no borrowed guest or host view
-escapes its call/owner.
+A handle is owner-thread state. Nested host/guest entry is rejected rather
+than re-entering an active instance. Component values are copied while the
+call owns guest memory and before `post_return`; no borrowed guest or host
+view escapes its call/owner.
 A failed guest returns a Jet error frame and keeps any failure scoped to its
 own instance; unrelated native work is not terminated.
 
@@ -1736,7 +1795,15 @@ only semantic authority (I2/I3).
 The boundary owner is
 [`CompilerExtension.jet`](../../Jetpack/Integrations/Source/CompilerExtension/CompilerExtension.jet),
 which owns the versioned snapshot, response validation, and lifecycle.
-Ordinary `jet` processes never link or initialize Wasmtime.
+Ordinary `jet` processes never load a compiler-extension guest.
+
+**Host status.** The sibling host verb reads and checks the snapshot, then
+fails closed: no guest code runs. The plugin engine (see the application
+plugin host boundary) translates a Component at build time from a literal
+artifact path, so it cannot load the runtime-chosen component that
+`JET_COMPILER_EXTENSION` names. The Rust/Wasmtime host that used to serve this
+verb is retired with the rest of the Rust plugin runtime. The protocol,
+limits and lifecycle below are the contract a host must meet.
 
 The WIT world is `compiler-extension-v1`
 (`package jet:compiler-extension@0.1.0`, export `analyze`), distinct from
@@ -1774,21 +1841,20 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 
 - **Defaults:** fuel `10_000_000`, memory `16 MiB`, table `10_000`, findings
   `256`, edits `64`, response `256 KiB`, wall budget `timeout_ms=2000`.
-  Loader applies fuel + `StoreLimits`; each `analyze` arms wasmtime epoch
-  interruption and ticks the engine after `timeout_ms` (fail-closed interrupt
-  trap). Snapshot declares the same caps.
+  A host applies fuel, memory and table limits and interrupts `analyze` after
+  `timeout_ms` (fail-closed interrupt trap). Snapshot declares the same caps.
 - **Trust:** v1 admits only `untrusted` components (zero host imports).
-- **Deterministic sandbox (D-DX5-HOOK1):** the host linker registers no
+- **Deterministic sandbox (D-DX5-HOOK1):** the host registers no
   imports, so guests get no ambient clock, random, filesystem, network, or
   process. Components that declare any host import (for example WASI random
-  or clocks) fail closed at load — Jet-owned `E:` wire, no session commit,
+  or clocks) fail closed at load — a Jet-owned message, no session commit,
   no rustc leak. Pure guests over a frozen snapshot are the only admitted
   shape; the host never supplies nondeterminism sources.
 - **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
   validates without commit; `rollback` discards staged output only (an
   accepted commit latch stays final — restage requires a new session);
-  `close(close_guest)` invokes the WASM host closer
-  (`jet_compiler_extension_close`) so guest Store/memory is dropped.
+  `close(close_guest)` invokes the host's guest closer so guest
+  memory is dropped.
   Uncommitted work never reaches sema or codegen.
 - **Process IPC:** when configured, `jet-driver` resolves `jetpack` only beside
   the current Jet executable (never PATH), invokes hidden versioned verb
@@ -1797,14 +1863,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
   kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
   missing sibling all map to Jet-owned E1402.
-- **E2E harness (C4 technical):** `Jetpack/CLI/Tests/CompilerExtensionHost.jet`
-  loads real `compiler-extension-v1` component fixtures under
-  `tests/fixtures/compiler_extension/` through the compiled compiler-extension
-  host. Proves one custom-lint finding
-  round-trip, fail-closed crash / malformed / incompatible / fuel-exhaust /
-  WASI-random-import guests, wall-clock epoch `timeout_ms` interrupt, and
-  byte-identical re-analyze of a pure guest (Jet-owned `E:` wires; no rustc
-  leak; no auto-commit).
+- **E2E harness:** `Jetpack/CLI/Tests/CompilerExtensionHost.jet` drives the
+  hidden host verb and pins its fail-closed answer: a snapshot that decodes
+  is refused with the host-unavailable message and a nonzero exit, and no
+  guest runs.
 - **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
   path (expert env registration — no new user syntax until a spelling ballot),
   `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
@@ -1825,7 +1887,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
   sema (E3101/E3102/E3103), and every gated region is counted, positioned and
-  reasoned in the unsafe ratchet (`Tools/agent/check-unsafe-ratchet.mjs`).
+  reasoned in the unsafe ratchet (`Tools/agent/UnsafeRatchet.jet`).
   Codegen stays dumb: it lowers an already-checked `#Unsafe` region straight to
   an unsafe region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must lower to
@@ -1965,7 +2027,6 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.data line renderers need options` | Kernel | `Core/Data/Plot.jet` owns line-renderer option validation. |
   | `core.data: argument must be `[DataGroup]`` | Kernel | `Core/Data/Plot.jet` owns `DataGroup` validation. |
   | `core.data: argument must be `[Float]`` | Kernel | `Core/Math/Stats.jet` owns numeric input validation. |
-  | `core.email` | Kernel | `Core/Email/Email.jet`; comptime marshals values. |
   | `core.encoding` | Kernel | Encoding dispatch and value validation use the shared encoding Prelude/Core kernels. |
   | `core.encoding.jsonl.to_string: expected a list` | Kernel | JSONL value validation stays with the encoding kernel. |
   | `core.encoding.base32` | Kernel | `Core/Encoding/Base32.jet` owns encode and edition-aware decode; comptime marshals values. |

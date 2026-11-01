@@ -217,7 +217,7 @@ fn ir_ssa_reads(s: &IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
     op :: f.op[at]
     a :: f.a[at]
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> s.use_a[at] = ir_ssa_read(&s, current, a)
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .IntBig | .Convert | .Load | .Offset | .If | .BrIf -> s.use_a[at] = ir_ssa_read(&s, current, a)
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
             s.use_a[at] = ir_ssa_read(&s, current, a)
             s.use_b[at] = ir_ssa_read(&s, current, f.b[at])

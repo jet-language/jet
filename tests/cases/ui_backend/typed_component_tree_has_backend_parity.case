@@ -1,0 +1,14 @@
+# tests/ui_backend.rs::typed_component_tree_has_backend_parity at tests/ui_backend.rs:196; hand-port
+# Fixture source bytes unchanged; package.jet stands in for the harness's TIR_TEST_PACKAGE. The
+# original compiled the program ahead of time (build_and_run), so the case builds and runs the
+# executable. Expected stdout is the original's asserted constant.
+fixture: typed_component_tree_has_backend_parity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0 # assert_eq!(code, 0, "typed tree failed: {stderr}")
+stdout: = "Save\nSave\ntext({x:0,y:0,w:8,h:1}, Title)\nfill({x:0,y:1,w:8,h:1}, #000000)\ntext({x:0,y:1,w:8,h:1}, Save)\nSave\nTitle\nSave\n"

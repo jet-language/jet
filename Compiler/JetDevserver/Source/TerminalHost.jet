@@ -3,7 +3,8 @@
 use std.collections.[VecDeque]
 use jet_devserver.Devtools.[JetDevtoolsEvent, JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelAvailabilityState, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelDescriptor, JetDevtoolsPanelFreshnessPolicy, JetDevtoolsPanelId, JetDevtoolsPanelUnavailableReason]
 use jet_devserver.Devtools.catalog.[descriptors]
-use jet_devserver.Session.[DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession, DevtoolsSelectionFact]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, ResidentDevSession, DevtoolsSelectionFact]
+use jet_foundation.Devtools.[JetDevtoolsLifecycleState]
 use core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability]
 
 // Rust: crates/jet-devserver/src/TerminalHost.rs:21
@@ -684,7 +685,7 @@ fn access_label(access: TerminalHostAccess) -> String {
     if access.read_only -> "read-only" else if access.release -> "release" else if access.local -> "local" else -> "remote"
 }
 // Rust: crates/jet-devserver/src/TerminalHost.rs:1711
-fn session_state_label(state: DevtoolsSessionState) -> String {
+fn session_state_label(state: JetDevtoolsLifecycleState) -> String {
     if state == {
         .Starting -> "starting"
         .Building -> "building"

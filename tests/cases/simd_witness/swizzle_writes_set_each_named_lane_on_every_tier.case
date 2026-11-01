@@ -1,0 +1,20 @@
+# #5997 C8: a swizzle write `v.zx = e` is the vector's own
+# `__swizzle_setN`, so a local, a field path, a compound `+=` and the F32x4
+# and F64x2 lane types set exactly the named lanes on each tier.
+fixture: swizzle_writes_set_each_named_lane_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = swizzle_writes_set_each_named_lane_on_every_tier.1.out
+stderr: = ""
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = swizzle_writes_set_each_named_lane_on_every_tier.1.out
+stderr: = ""
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = swizzle_writes_set_each_named_lane_on_every_tier.1.out
+stderr: = ""

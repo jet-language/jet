@@ -349,37 +349,14 @@ fn render_scheduler_messages() -> String Never! {
 }
 
 // Observe fragments append directly to the canonical E4 builder, without
-// allocating an intermediate String for each fixed JSON/diagnostic fragment.
+// allocating an intermediate String for each fixed diagnostic/path fragment.
 fn observe_literals(what: String, why: String, fix: String) -> [MessageLiteral] Never! {
     [MessageLiteral]{
         MessageLiteral{name: "task_label", text: "task@"},
         MessageLiteral{name: "task_fallback", text: "task #"},
         MessageLiteral{name: "site", text: " (spawn site "},
         MessageLiteral{name: "close_site", text: ")"},
-        MessageLiteral{name: "yes", text: "true"},
-        MessageLiteral{name: "no", text: "false"},
-        MessageLiteral{name: "null", text: "null"},
-        MessageLiteral{name: "queued", text: "queued"},
-        MessageLiteral{name: "running", text: "running"},
         MessageLiteral{name: "blocked", text: "blocked"},
-        MessageLiteral{name: "paused", text: "paused"},
-        MessageLiteral{name: "task_begin", text: "{{\"id\":"},
-        MessageLiteral{name: "parent", text: ",\"parent\":"},
-        MessageLiteral{name: "label", text: ",\"label\":\""},
-        MessageLiteral{name: "spawn", text: "\",\"spawn_site\":"},
-        MessageLiteral{name: "state", text: ",\"state\":\""},
-        MessageLiteral{name: "wait", text: "\",\"wait\":\""},
-        MessageLiteral{name: "deadline", text: "\",\"deadline_ms\":"},
-        MessageLiteral{name: "cancelled", text: ",\"cancelled\":"},
-        MessageLiteral{name: "channel_begin", text: "{{\"id\":"},
-        MessageLiteral{name: "depth", text: ",\"depth\":"},
-        MessageLiteral{name: "capacity", text: ",\"capacity\":"},
-        MessageLiteral{name: "send_waiters", text: ",\"send_waiters\":"},
-        MessageLiteral{name: "recv_waiters", text: ",\"recv_waiters\":"},
-        MessageLiteral{name: "closed", text: ",\"closed\":"},
-        MessageLiteral{name: "tasks", text: "\"tasks\":["},
-        MessageLiteral{name: "channels", text: "],\"channels\":["},
-        MessageLiteral{name: "end_arrays", text: "]}}"},
         MessageLiteral{name: "entry", text: "\n  "},
         MessageLiteral{name: "report_site", text: " (spawn site "},
         MessageLiteral{name: "report_state", text: ")\n    state: "},
@@ -389,60 +366,10 @@ fn observe_literals(what: String, why: String, fix: String) -> [MessageLiteral] 
         MessageLiteral{name: "omitted_tail", text: " more parked task(s) omitted by the report limit ..."},
         MessageLiteral{name: "report_head", text: "Stop [E3013]: {before_hole(what)}"},
         MessageLiteral{name: "report_tail", text: "{after_hole(what)}\n Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/E3013\n"},
-        MessageLiteral{name: "live_begin", text: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\""},
-        MessageLiteral{name: "live_source", text: "\",\"source_id\":\""},
-        MessageLiteral{name: "live_build", text: "\",\"build_id\":\""},
-        MessageLiteral{name: "live_revision", text: "\",\"revision\":\""},
-        MessageLiteral{name: "live_world", text: "\",\"world_id\":\""},
-        MessageLiteral{name: "live_decisions", text: "\",\"decisions\":"},
-        MessageLiteral{name: "live_values", text: ",\"values\":["},
-        MessageLiteral{name: "live_schema", text: "],\"schema_version\":1,\"pid\":"},
-        MessageLiteral{name: "live_start", text: ",\"start_id\":\""},
-        MessageLiteral{name: "live_captured", text: "\",\"captured_ms\":"},
-        MessageLiteral{name: "live_tasks", text: ",\"tasks\":["},
-        MessageLiteral{name: "live_events", text: "],\"event_observations\":["},
-        MessageLiteral{name: "live_effects", text: "],\"effects\":{{\"compute\":"},
-        MessageLiteral{name: "live_waiting", text: ",\"waiting\":"},
-        MessageLiteral{name: "live_channel", text: ",\"channel\":"},
-        MessageLiteral{name: "live_time", text: ",\"time\":"},
-        MessageLiteral{name: "live_io", text: ",\"io\":"},
-        MessageLiteral{name: "live_resources", text: "}},\"resources\":{{\"workers\":"},
-        MessageLiteral{name: "live_running", text: ",\"running\":"},
-        MessageLiteral{name: "live_queued", text: ",\"queued\":"},
-        MessageLiteral{name: "live_cancelled", text: ",\"cancelled\":"},
-        MessageLiteral{name: "live_arenas", text: ",\"arenas\":"},
-        MessageLiteral{name: "live_allocs", text: ",\"arena_allocations\":"},
-        MessageLiteral{name: "live_bytes", text: ",\"arena_bytes\":"},
-        MessageLiteral{name: "live_runtime", text: "}},\"runtime\":{{\"elapsed_ns\":"},
-        MessageLiteral{name: "live_cpu", text: ",\"cpu_ns\":"},
-        MessageLiteral{name: "live_exit", text: ",\"exit\":"},
-        MessageLiteral{name: "live_end", text: "}}}}"},
-        MessageLiteral{name: "value_begin", text: "{{\"value_id\":\""},
-        MessageLiteral{name: "value_type", text: "\",\"type_identity\":\""},
-        MessageLiteral{name: "value_disposition", text: "\",\"disposition\":\""},
-        MessageLiteral{name: "value_reason", text: "\",\"reason\":\""},
-        MessageLiteral{name: "value_rendered", text: "\",\"rendered_value\":"},
-        MessageLiteral{name: "event_begin", text: "{{\"sequence\":"},
-        MessageLiteral{name: "event_source", text: ",\"source\":\""},
-        MessageLiteral{name: "event_id", text: "\",\"event_id\":"},
-        MessageLiteral{name: "event_owner", text: ",\"owner_id\":"},
-        MessageLiteral{name: "event_subscription", text: ",\"subscription_id\":"},
-        MessageLiteral{name: "event_dispatch", text: ",\"dispatch_id\":"},
-        MessageLiteral{name: "event_lifecycle", text: ",\"lifecycle\":\""},
-        MessageLiteral{name: "event_queued", text: "\",\"queued\":"},
-        MessageLiteral{name: "event_blocked", text: ",\"blocked\":"},
-        MessageLiteral{name: "event_running", text: ",\"running\":"},
-        MessageLiteral{name: "event_capacity", text: ",\"capacity\":"},
-        MessageLiteral{name: "event_overflow", text: ",\"overflow\":\""},
-        MessageLiteral{name: "event_priority", text: "\",\"priority\":"},
-        MessageLiteral{name: "event_failure", text: ",\"failure\":\""},
-        MessageLiteral{name: "event_terminal", text: "\",\"terminal\":\""},
         MessageLiteral{name: "path_head", text: "jet-observe-"},
         MessageLiteral{name: "path_tail", text: ".json"},
         MessageLiteral{name: "stage_head", text: ".jet-observe-"},
         MessageLiteral{name: "stage_tail", text: ".tmp"},
-        MessageLiteral{name: "proc_stat", text: "/proc/self/stat"},
-        MessageLiteral{name: "proc_auxv", text: "/proc/self/auxv"},
         MessageLiteral{name: "root_label", text: "root"},
         MessageLiteral{name: "env_observe", text: "JET_OBSERVE"},
         MessageLiteral{name: "env_session", text: "JET_DEVTOOLS_RELAY_SESSION_ID"},
@@ -470,7 +397,6 @@ fn render_observe_messages(registry: String) -> String GeneratorError! {
 fn test_literals() -> [MessageLiteral] Never! {
     [MessageLiteral]{
         MessageLiteral{name: "invalid", text: "internal error: native test record is invalid\n"},
-        MessageLiteral{name: "property_gap", text: "native property tests require a Jet property engine\n"},
         MessageLiteral{name: "pass", text: "pass"},
         MessageLiteral{name: "fail", text: "FAIL"},
         MessageLiteral{name: "skip", text: "skip"},
@@ -724,6 +650,30 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         stage :: registry_field(registry, code, "stage") ?? return Err(err)
         if stage.contains("runtime") -> return Err(generator_fail("{code} is an active runtime row; its stop renders the row, not the host form"))
     }
+    // Core library stops that carry a registered code (core.rt.__coded_stop,
+    // Trap.jet jet_rt_coded_stop): the caller renders the row's `what`; the
+    // footer is the same row's Why/Fix. Codes are five-byte little-endian words.
+    coded_stops :: ["E2804", "E2805"]
+    registered := [String]{}
+    branches := ""
+    loop code in coded_stops {
+        if byte_len(code) != 5 || !code.starts_with("E") -> return Err(generator_fail("{code} is not a five-byte diagnostic code"))
+        why :: registry_field(registry, code, "why") ?? return Err(err)
+        fix :: registry_field(registry, code, "fix") ?? return Err(err)
+        source = "{source}\n// {code} Why: {why}\n// Fix: {fix}\n"
+        source = "{source}{emit("trap_footer_{code.lower()}", " Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}\n", "trap_write_word")}"
+        word := 0
+        scale := 1
+        loop byte in code.bytes() {
+            word += Int.from_u8(byte) * scale
+            scale *= 256
+        }
+        &registered.push("code == I64{{{word}}}")
+        if code != coded_stops[coded_stops.len() - 1] -> branches = "{branches}        (code == I64{{{word}}}) -> trap_footer_{code.lower()}()\n"
+    }
+    last_coded :: coded_stops[coded_stops.len() - 1].lower()
+    source = "{source}\nfn trap_coded_registered(code: I64) -> Bool {{\n    {registered.join(" || ")}\n}}\n"
+    source = "{source}\nfn trap_coded_footer(code: I64) {{\n    if {{\n{branches}        else -> trap_footer_{last_coded}()\n    }}\n}}\n"
     literals :: [MessageLiteral]{
         MessageLiteral{name: "header_panic", text: "Stop [E3001]: {before_hole(e3001_what)}"},
         MessageLiteral{name: "header_numeric", text: "Stop [E3010]: {before_hole(e3010_what)}"},
@@ -752,7 +702,9 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         MessageLiteral{name: "divide_zero", text: "divided by zero"},
         MessageLiteral{name: "native_index_range", text: "native Int argument exceeds host range"},
         MessageLiteral{name: "list_head", text: "the list has "},
-        MessageLiteral{name: "list_position", text: " items, so position "},
+        MessageLiteral{name: "list_item", text: " item"},
+        MessageLiteral{name: "list_plural", text: "s"},
+        MessageLiteral{name: "list_position", text: ", so position "},
         MessageLiteral{name: "list_end", text: " doesn't exist`\n  --> <core.prelude>:0\n"},
         MessageLiteral{name: "unreachable", text: "internal error: entered unreachable code: "},
         MessageLiteral{name: "locals", text: "locals: "},
@@ -772,6 +724,8 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         MessageLiteral{name: "native_tls", text: tls},
         MessageLiteral{name: "inactive_row_head", text: "Internal error: runtime diagnostic `"},
         MessageLiteral{name: "inactive_row_tail", text: "` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/"},
+        MessageLiteral{name: "coded_head", text: "Stop ["},
+        MessageLiteral{name: "coded_mid", text: "]: "},
     }
     loop literal in literals -> source = "{source}\n{emit("trap_msg_{literal.name}", literal.text, "trap_write_word")}"
     // Retype the canonical Debug interval table at generation time. Runtime
@@ -877,9 +831,10 @@ fn plan_error(check: Bool, defects_only: Bool, source_current: Bool, defects_cur
 }
 
 // Compiler/JetRuntime/lifecycle.list orders the constructor/destructor hooks
-// the runtime sources mark with a `// runtime-init: N` or `// runtime-fini: N`
-// line directly above an `#Export(c)` function. The export set itself is
-// exactly the sources' #Export(c) functions; these rows only order hooks.
+// the runtime sources mark with a `// runtime-init: N [when guard,...]` or
+// `// runtime-fini: N [when guard,...]` line directly above an `#Export(c)`
+// function. The export set itself is exactly the sources' #Export(c)
+// functions; these rows only order hooks and name their guards.
 
 LIFECYCLE_TARGET_PATH :: "Compiler/JetRuntime/lifecycle.list"
 RUNTIME_SOURCES_PATH :: "Compiler/JetRuntime/sources.list"
@@ -929,7 +884,7 @@ fn skip_spaces(bytes: [U8], at: Int) -> Int Never! {
 }
 
 // The name, the text up to the body's `{` and the offset after that `{` of the
-// `#Export(c) [pub] fn name` declaration starting at byte `start`, or None when
+// `#Export(c) fn name` declaration starting at byte `start`, or None when
 // the line is not one (a `}` before the body's `{` also means it is not a
 // declaration head).
 struct ExportHead {
@@ -943,10 +898,6 @@ fn export_head(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
     spaced := skip_spaces(bytes, at)
     if spaced == at -> return None
     at = spaced
-    if bytes_at(bytes, at, "pub") {
-        after_pub :: skip_spaces(bytes, at + 3)
-        if after_pub > at + 3 -> at = after_pub
-    }
     if !bytes_at(bytes, at, "fn") -> return None
     spaced = skip_spaces(bytes, at + 2)
     if spaced == at + 2 -> return None
@@ -965,11 +916,13 @@ fn export_head(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
     None
 }
 
-// The hook a `// runtime-init: N` / `// runtime-fini: N` line names; None for
-// any other line.
+// The hook a `// runtime-init: N [when guard,...]` / `// runtime-fini: N
+// [when guard,...]` line names; None for any other line. `guards` is the
+// comma-separated module storage list, or empty.
 struct LifecycleHook {
     kind: String
     priority: Int
+    guards: String
 }
 
 fn lifecycle_hook(line: String) -> LifecycleHook? Never! {
@@ -981,13 +934,27 @@ fn lifecycle_hook(line: String) -> LifecycleHook? Never! {
     } else {
         return None
     }
-    digits :: byte_tail(line, byte_len("// runtime-init: "))
+    fields :: byte_tail(line, byte_len("// runtime-init: ")).split(" ").to_list()
+    if fields.len() != 1 && (fields.len() != 3 || fields[1] != "when") -> return None
+    digits :: fields[0]
     if digits == "" -> return None
     loop byte in digits.bytes() {
         if !is_digit_byte(Int.from_u8(byte)) -> return None
     }
+    guards :: if fields.len() == 3 -> fields[2] else -> ""
+    if fields.len() == 3 {
+        loop guard in guards.split(",").to_list() {
+            if guard == "" -> return None
+            bytes :: guard.bytes()
+            loop at in 0..<bytes.len() {
+                code :: Int.from_u8(bytes[at])
+                word :: code == 95 || (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
+                if !word && (at == 0 || !is_digit_byte(code)) -> return None
+            }
+        }
+    }
     if Int.parse(digits) == {
-        .Ok(priority) -> return Val(LifecycleHook{kind: kind, priority: priority})
+        .Ok(priority) -> return Val(LifecycleHook{kind: kind, priority: priority, guards: guards})
         .Err(_) -> { return None }
     }
 }
@@ -1113,7 +1080,7 @@ fn runtime_exports(source: String, path: String) -> ParsedExports Never! {
                         if lifecycle_hook(byte_slice(source, previous_line, line_start - 1)) == {
                             .Val(hook) -> {
                                 if hook.priority > MAX_LIFECYCLE_PRIORITY -> &problems.push("{path}: lifecycle priority exceeds {MAX_LIFECYCLE_PRIORITY}")
-                                lifecycle = "{hook.kind} {hook.priority}"
+                                lifecycle = if hook.guards == "" -> "{hook.kind} {hook.priority}" else -> "{hook.kind} {hook.priority} {hook.guards}"
                             }
                             .None -> {}
                         }
@@ -1132,8 +1099,8 @@ fn runtime_exports(source: String, path: String) -> ParsedExports Never! {
     ParsedExports{exports: exports, problems: problems}
 }
 
-// lifecycle.list for the given runtime sources: one `symbol init|fini N` row
-// per hook, in symbol order.
+// lifecycle.list for the given runtime sources: one `symbol init|fini N
+// [guards]` row per hook, in symbol order.
 fn lifecycle_list(sources: [RuntimeSource]) -> String GeneratorError! {
     problems := [String]{}
     names := [String]{}
@@ -1154,10 +1121,11 @@ fn lifecycle_list(sources: [RuntimeSource]) -> String GeneratorError! {
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     &rows.sort()
     lines := [String]{
-        "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535>.",
+        "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535> [<guard storage>,...].",
         "# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).",
+        "# A guarded hook runs exactly when the program links one of its guard module storages.",
         "# Rows only order hooks; the export set is exactly the sources' #Export(c) functions.",
-        "# Generated by Tools/agent/RuntimeGenerators.jet from `// runtime-init|fini: N` comments.",
+        "# Generated by Tools/agent/RuntimeGenerators.jet from `// runtime-init|fini: N [when guard,...]` comments.",
     }
     loop row in rows -> &lines.push(row)
     Ok("{lines.join("\n")}\n")
@@ -1186,17 +1154,20 @@ fn render_lifecycle_list() -[FS]> String GeneratorError! {
 }
 
 #Test("lifecycle rows come from the hook line directly above an export") {
-    source :: "// runtime-init: 04\n#Export(c) fn b_start() {{\n}}\n// runtime-fini: 2\n#Export(c)\npub fn a_stop(handle: I64) -> Unit {{\n}}\n#Export(c) fn plain(x: I64) -> I64 {{ x }}\n// runtime-init: 1\n\n#Export(c) fn spaced() {{}}\n#Export(c) fn closed }} {{\n"
+    source :: "// runtime-init: 04\n#Export(c) fn b_start() {{\n}}\n// runtime-fini: 2 when a_root,a_key\n#Export(c)\nfn a_stop(handle: I64) -> Unit {{\n}}\n#Export(c) fn plain(x: I64) -> I64 {{ x }}\n// runtime-init: 1\n\n#Export(c) fn spaced() {{}}\n#Export(c) fn closed }} {{\n"
     parsed :: runtime_exports(source, "Fixture.jet")
     assert_eq(parsed.problems.len(), 0)
     assert_eq(parsed.exports.len(), 4)
     assert_eq(parsed.exports[0].lifecycle, "init 4")
     assert_eq(parsed.exports[1].name, "a_stop")
-    assert_eq(parsed.exports[1].lifecycle, "fini 2")
+    assert_eq(parsed.exports[1].lifecycle, "fini 2 a_root,a_key")
     assert_eq(parsed.exports[3].lifecycle, "")
+    assert(lifecycle_hook("// runtime-init: 3 when 9bad") == None)
+    assert(lifecycle_hook("// runtime-init: 3 when a,,b") == None)
+    assert(lifecycle_hook("// runtime-init: 3 a_root") == None)
     if lifecycle_list([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: source}}) == {
         .Ok(text) -> {
-            expected :: "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535>.\n# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).\n# Rows only order hooks; the export set is exactly the sources' #Export(c) functions.\n# Generated by Tools/agent/RuntimeGenerators.jet from `// runtime-init|fini: N` comments.\na_stop fini 2\nb_start init 4\n"
+            expected :: "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535> [<guard storage>,...].\n# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).\n# A guarded hook runs exactly when the program links one of its guard module storages.\n# Rows only order hooks; the export set is exactly the sources' #Export(c) functions.\n# Generated by Tools/agent/RuntimeGenerators.jet from `// runtime-init|fini: N [when guard,...]` comments.\na_stop fini 2 a_root,a_key\nb_start init 4\n"
             assert_eq(text, expected)
         }
         .Err(error) -> assert_eq(error.message, "")
@@ -1459,6 +1430,7 @@ fn read_needed_text() -[FS]> [GeneratedFile] GeneratorError! {
 STOP_EXPORTS_TARGET_PATH :: "Compiler/JetFoundation/Source/Registry/RuntimeStopExports.jet"
 RUNTIME_SOURCE_DIRECTORY :: "Compiler/JetRuntime/Source"
 PANIC_PUBLICATION_ROOT :: "scheduler_panic_publish_record"
+BUILD_LIBRARY_PATH :: "Compiler/JetIR/Source/BuildLibrary.jet"
 
 fn code_at(code: [U8], at: Int) -> Int Never! {
     if at >= 0 && at < code.len() -> Int.from_u8(code[at]) else -> 0 - 1
@@ -1654,9 +1626,10 @@ fn bound_names(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [S
 }
 
 // The direct named calls of `code[from..<to]`: identifiers followed on the same
-// line by `(`, except member calls (`.name(`).
+// line by `(`, except member calls (`.name(`). `open` is the offset after `(`.
 struct NamedCall {
     name: String
+    open: Int
 }
 
 fn named_calls(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Never! {
@@ -1676,9 +1649,97 @@ fn named_calls(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Neve
         before := start
         loop before > from && is_space_byte(Int.from_u8(code[before - 1])) -> before -= 1
         if before > from && Int.from_u8(code[before - 1]) == 46 -> next
-        &calls.push(NamedCall{name: byte_slice(text, start, at)})
+        &calls.push(NamedCall{name: byte_slice(text, start, at), open: cursor + 1})
     }
     calls
+}
+
+// The identifier starting at the first non-space byte from `at`, below `to`;
+// "" when none does.
+fn word_after(text: String, code: [U8], at: Int, to: Int) -> String Never! {
+    start :: skip_spaces(code, at)
+    if start >= to || !is_name_start_byte(Int.from_u8(code[start])) -> return ""
+    end := start
+    loop end < to && is_name_byte(Int.from_u8(code[end])) -> end += 1
+    byte_slice(text, start, end)
+}
+
+// A stop rail behind a hook: a code word named `<name>_rail_code` that
+// holds a checked function address (JetIR BuildLibrary.jet's FunctionAddress
+// rows). `<word> = rt_x_address()` installs it, and a function that calls
+// through the word (`coll_callN(word, ...)` or `os_callN`, directly or
+// through a local bound to it) calls every export installed there: those
+// calls are named edges too, so a rail behind a hook keeps its callers'
+// stop facts. Other code words stay callback effects, outside the graph.
+struct RailInstall {
+    word: String
+    address: String
+}
+
+fn rail_installs(text: String, code: [U8]) -> [RailInstall] Never! {
+    installs := [RailInstall]{}
+    at := 0
+    loop at < code.len() {
+        if !is_name_byte(Int.from_u8(code[at])) {
+            at += 1
+            next
+        }
+        start :: at
+        loop at < code.len() && is_name_byte(Int.from_u8(code[at])) -> at += 1
+        if !is_name_start_byte(Int.from_u8(code[start])) -> next
+        word :: byte_slice(text, start, at)
+        if !word.ends_with("_rail_code") -> next
+        equals :: skip_spaces(code, at)
+        if code_at(code, equals) != 61 || code_at(code, equals + 1) == 61 -> next
+        address_at :: skip_spaces(code, equals + 1)
+        address :: word_after(text, code, address_at, code.len())
+        if !address.starts_with("rt_") || !address.ends_with("_address") -> next
+        open :: skip_spaces(code, address_at + byte_len(address))
+        if code_at(code, open) != 40 || code_at(code, skip_spaces(code, open + 1)) != 41 -> next
+        &installs.push(RailInstall{word: word, address: address})
+    }
+    installs
+}
+
+// The `_rail_code` word the local `name` is bound to (`name :: word` or
+// `name := word`) in `code[from..<to]`, or "".
+fn rail_binding(text: String, code: [U8], from: Int, to: Int, name: String) -> String Never! {
+    at := from
+    loop at < to {
+        if !is_name_byte(Int.from_u8(code[at])) {
+            at += 1
+            next
+        }
+        start :: at
+        loop at < to && is_name_byte(Int.from_u8(code[at])) -> at += 1
+        if !is_name_start_byte(Int.from_u8(code[start])) || byte_slice(text, start, at) != name -> next
+        colon :: skip_spaces(code, at)
+        if colon + 1 >= to || code_at(code, colon) != 58 || (code_at(code, colon + 1) != 58 && code_at(code, colon + 1) != 61) -> next
+        bound :: word_after(text, code, colon + 2, to)
+        if bound.ends_with("_rail_code") -> return bound
+    }
+    ""
+}
+
+// JetIR BuildLibrary.jet's checked function addresses: `rt_x_address` -> the
+// export it resolves to.
+fn runtime_function_addresses(source: String) -> [String:String] Never! {
+    addresses := [String:String]{}
+    name_marker :: "{{name: \""
+    symbol_marker :: ".FunctionAddress{{symbol: \""
+    loop line in source.split("\n") {
+        trimmed :: line.trim()
+        if !trimmed.starts_with("{name_marker}rt_") -> next
+        rest :: byte_tail(trimmed, byte_len(name_marker))
+        name_end :: rest.find("\"")
+        symbol_at :: rest.find(symbol_marker)
+        if name_end < 0 || symbol_at < 0 -> next
+        symbol :: byte_tail(rest, symbol_at + byte_len(symbol_marker))
+        symbol_end :: symbol.find("\"")
+        if symbol_end < 0 -> next
+        addresses[byte_slice(rest, 0, name_end)] = byte_slice(symbol, 0, symbol_end)
+    }
+    addresses
 }
 
 // The index of the byte that closes the group opened just before `from`
@@ -1697,12 +1758,16 @@ fn group_end(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int Ne
 }
 
 // The sorted #Export(c) symbols whose named-call closure reaches the panic
-// publication root; every unreadable source is reported at once.
-fn runtime_stop_exports(sources: [RuntimeSource]) -> [String] GeneratorError! {
+// publication root; every unreadable source is reported at once. Calls
+// through a stop rail's hook (RailInstall) are named calls of every export
+// installed there; `addresses` resolves the installs.
+fn runtime_stop_exports(sources: [RuntimeSource], addresses: [String:String]) -> [String] GeneratorError! {
     problems := [String]{}
     exports := [String]{}
     order := [String]{}
     functions := [String: [String]]{}
+    installed := [String: [String]]{}
+    rail_calls := [String: [String]]{}
     loop source in sources {
         path :: source.path
         text :: if code_only(source.text) == {
@@ -1714,6 +1779,16 @@ fn runtime_stop_exports(sources: [RuntimeSource]) -> [String] GeneratorError! {
         }
         code :: text.bytes()
         loop problem in unsupported_calls(code, path) -> &problems.push(problem)
+        loop install in rail_installs(text, code) {
+            symbol :: addresses.get(install.address) ?? ""
+            if symbol == "" {
+                &problems.push("unknown runtime function address {install.address} installed in {install.word}")
+                next
+            }
+            symbols := installed.get(install.word) ?? [String]{}
+            if !symbols.contains(symbol) -> &symbols.push(symbol)
+            installed[install.word] = symbols
+        }
         parsed :: runtime_exports(text, path)
         loop problem in parsed.problems -> &problems.push(problem)
         loop export in parsed.exports {
@@ -1756,19 +1831,35 @@ fn runtime_stop_exports(sources: [RuntimeSource]) -> [String] GeneratorError! {
             bound := bound_names(text, code, head.end + 1, parameters_end - 1, false)
             loop name in bound_names(text, code, body_start, body_end - 1, true) -> &bound.push(name)
             calls := [String]{}
+            words := [String]{}
             loop call in named_calls(text, code, body_start, body_end - 1) {
                 if bound.contains(call.name) {
                     &problems.push("{path}: unsupported bound-value call {call.name} in {head.name}")
                     next
                 }
                 &calls.push(call.name)
+                if !call.name.starts_with("coll_call") && !call.name.starts_with("os_call") -> next
+                argument :: word_after(text, code, call.open, body_end - 1)
+                word :: if argument.ends_with("_rail_code") -> argument else -> rail_binding(text, code, body_start, body_end - 1, argument)
+                if word != "" && !words.contains(word) -> &words.push(word)
             }
+            if words.len() > 0 -> rail_calls[head.name] = words
             &order.push(head.name)
             functions[head.name] = calls
         }
     }
     if !functions.has_key(PANIC_PUBLICATION_ROOT) -> &problems.push("missing runtime panic publication root")
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    loop name in order {
+        words :: rail_calls.get(name) ?? [String]{}
+        if words.len() == 0 -> next
+        calls := functions.get(name) ?? [String]{}
+        loop word in words {
+            symbols :: installed.get(word) ?? [String]{}
+            loop symbol in symbols -> &calls.push(symbol)
+        }
+        functions[name] = calls
+    }
     callers := [String: [String]]{}
     loop name in order {
         seen := [String]{}
@@ -1803,7 +1894,7 @@ fn render_stop_registry(symbols: [String]) -> String Never! {
     lines := [String]{
         "// Generated by Tools/agent/RuntimeGenerators.jet; do not edit.",
         "// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.",
-        "// Direct named calls only; foreign/dynamic callback effects are separate.",
+        "// Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.",
         "// Both compiler halves consume these Panic stop facts, not returned Results.",
         "// The symbols land as literal data: no compile-time execution host is needed.",
         "RUNTIME_STOP_EXPORTS :: comptime {{ [String]{{",
@@ -1826,14 +1917,15 @@ fn read_stop_registry() -[FS]> String GeneratorError! {
         text :: files.read("{RUNTIME_SOURCE_DIRECTORY}/{name}") ?? return Err(generator_fail("cannot read {RUNTIME_SOURCE_DIRECTORY}/{name}: {err}"))
         &sources.push(RuntimeSource{path: name, text: text})
     }
-    symbols :: runtime_stop_exports(sources) ?? return Err(err)
+    library :: files.read(BUILD_LIBRARY_PATH) ?? return Err(generator_fail("cannot read {BUILD_LIBRARY_PATH}: {err}"))
+    symbols :: runtime_stop_exports(sources, runtime_function_addresses(library)) ?? return Err(err)
     Ok(render_stop_registry(symbols))
 }
 
 STOP_FIXTURE_ROOT :: "fn scheduler_panic_publish_record(record: I64) -> Bool {{ false }}\nfn rt_task_panic_publish(message: I64, length: I64, form: I64) -> Bool {{ scheduler_panic_publish_record(message) }}\n"
 
 fn stop_closure(source: String) -> [String] GeneratorError! {
-    runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}})
+    runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}}, [String:String]{})
 }
 
 fn closure_text(source: String) -> String Never! {
@@ -1878,7 +1970,7 @@ fn closure_text(source: String) -> String Never! {
         RuntimeSource{path: "Root.jet", text: "{STOP_FIXTURE_ROOT}fn helper() {{\n    value :: I64{{0}}\n    rt_task_panic_publish(value, value, value)\n}}"},
         RuntimeSource{path: "Caller.jet", text: "#Export(c) fn caller() {{ if true {{ helper() }} }}"},
     }
-    symbols :: runtime_stop_exports(sources) ?? panic("the closure failed: {err.message}")
+    symbols :: runtime_stop_exports(sources, [String:String]{}) ?? panic("the closure failed: {err.message}")
     assert_eq(symbols.join(","), "caller")
 }
 
@@ -1889,7 +1981,7 @@ fn closure_text(source: String) -> String Never! {
 
 #Test("generated registry is the exact literal symbol list") {
     symbols :: stop_closure("#Export(c) fn stopped() {{ rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}}) }}") ?? panic("the closure failed: {err.message}")
-    expected :: "// Generated by Tools/agent/RuntimeGenerators.jet; do not edit.\n// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.\n// Direct named calls only; foreign/dynamic callback effects are separate.\n// Both compiler halves consume these Panic stop facts, not returned Results.\n// The symbols land as literal data: no compile-time execution host is needed.\nRUNTIME_STOP_EXPORTS :: comptime {{ [String]{{\n    \"stopped\",\n}} }}\n\nfn runtime_export_can_stop(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_STOP_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n"
+    expected :: "// Generated by Tools/agent/RuntimeGenerators.jet; do not edit.\n// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.\n// Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.\n// Both compiler halves consume these Panic stop facts, not returned Results.\n// The symbols land as literal data: no compile-time execution host is needed.\nRUNTIME_STOP_EXPORTS :: comptime {{ [String]{{\n    \"stopped\",\n}} }}\n\nfn runtime_export_can_stop(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_STOP_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n"
     assert_eq(render_stop_registry(symbols), expected)
 }
 
@@ -1905,7 +1997,7 @@ fn closure_text(source: String) -> String Never! {
 }
 
 #Test("missing publication root or malformed source fails instead of emitting incomplete facts") {
-    if runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Missing.jet", text: "#Export(c) fn ordinary() {{}}"}}) == {
+    if runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Missing.jet", text: "#Export(c) fn ordinary() {{}}"}}, [String:String]{}) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error.message.contains("missing runtime panic publication root"))
     }
@@ -1923,6 +2015,19 @@ fn closure_text(source: String) -> String Never! {
     assert_eq(closure_text("#Export(c) fn foreign_member() {{ foreign.rt_task_panic_publish() }}"), "")
     assert_eq(closure_text("#Export(c) fn arms() {{ if {{\n true -> rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n (true) -> rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n }} }}"), "arms")
     assert_eq(closure_text("fn ordinary(left: I64, right: I64) -> Bool {{\n if left != right -> return (left ^ I64{{1}}) < (right ^ I64{{1}}){cr}\n (left ^ I64{{0}}) < (right ^ I64{{0}})\n }}"), "")
+}
+
+#Test("a stop-rail hook is a named edge to every export installed in it; other code words are not") {
+    source :: "\ntrap_root_rail_code := I64{{0}}\nprint_code := I64{{0}}\nfn coll_call3(code: I64, a: I64, b: I64, c: I64) -> I64 {{ I64{{0}} }}\nfn install() {{\n    trap_root_rail_code = rt_root_address()\n    print_code = rt_other_address()\n}}\n#Export(c) fn root_half(op: I64) -> I64 {{\n    rt_task_panic_publish(op, op, op)\n    I64{{1}}\n}}\n#Export(c) fn other_half(op: I64) -> I64 {{\n    rt_task_panic_publish(op, op, op)\n    I64{{1}}\n}}\n#Export(c) fn direct() {{ _ := coll_call3(trap_root_rail_code, I64{{0}}, I64{{0}}, I64{{0}}) }}\n#Export(c) fn bound() {{\n    rail :: trap_root_rail_code\n    _ := coll_call3(rail, I64{{0}}, I64{{0}}, I64{{0}})\n}}\n#Export(c) fn callback() {{ _ := coll_call3(print_code, I64{{0}}, I64{{0}}, I64{{0}}) }}\n"
+    addresses := [String:String]{}
+    addresses["rt_root_address"] = "root_half"
+    addresses["rt_other_address"] = "other_half"
+    sources :: [RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}}
+    symbols :: runtime_stop_exports(sources, addresses) ?? panic("the closure failed: {err.message}")
+    assert_eq(symbols.join(","), "bound,direct,other_half,root_half")
+    assert(closure_text(source).contains("unknown runtime function address rt_root_address installed in trap_root_rail_code"))
+    library :: "        {{name: \"rt_root_address\", shape: .FunctionAddress{{symbol: \"root_half\", arity: 1}}}},\n"
+    assert_eq(runtime_function_addresses(library).get("rt_root_address") ?? "", "root_half")
 }
 
 // The runtime pack's strerror text, from pinned musl 1.2.5 assets (never a

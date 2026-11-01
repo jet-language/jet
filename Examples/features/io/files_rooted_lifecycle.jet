@@ -6,7 +6,7 @@
 // line loop early closes its reader; I/O failures are typed `IOError`s.
 package {
     name: "files_rooted_lifecycle"
-    authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
+    authority: { allow: [Env, FS, IO, Mem.Alloc, Time.Wait] }
 }
 
 use core.files as files
@@ -57,8 +57,13 @@ fn temporaries() -> [String] {
 fn hold_lock(path: String) {
     held :: files.lock(path) ?? panic("first lock")
     print("lock held: {files.exists(held.path)}")
-    second :: files.try_lock(path) ?? panic("probe lock")
-    print("second lock while held: contended={second == None}")
+    // `??` would also take the absent branch, so the probe matches all three states.
+    contended :: if files.try_lock(path) == {
+        .None -> true
+        .Val(_) -> false
+        .Err(_) -> panic("probe lock")
+    }
+    print("second lock while held: contended={contended}")
 }
 
 fn run() {

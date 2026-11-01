@@ -21,9 +21,9 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: TCPStream) -> [U8] {
+fn request_head(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block :: stream.read(512) ?? panic("request read")
@@ -63,9 +63,9 @@ fn line_end(raw: [U8]) -> Int {
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    stream :: &listener.accept() ?? panic("accept")
+    stream := &listener.accept() ?? panic("accept")
     files.write_atomic("{work}/accepted", "yes".bytes()) ?? panic("accepted flag")
-    head :: request_head(stream)
+    head :: request_head(&stream)
     assert(prefix(head, "POST /chunked HTTP/1.1{PEER_CRLF}".bytes()))
     assert(contains_bytes(head, "transfer-encoding: chunked".bytes(), true))
     assert(!contains_bytes(head, "content-length:".bytes(), true))

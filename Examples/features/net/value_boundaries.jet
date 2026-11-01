@@ -1,0 +1,90 @@
+// Canonical URL, address and identifier values (#3286): each value keeps its
+// original form beside the normalized one, invalid input is a typed failure,
+// and no parse touches the network.
+use core.crypto.uuid as uuid
+use core.http as http
+use core.net.ip as ip
+use core.net.url as url
+
+fn url_line(text: String) -> String Never! {
+    if url.parse(text) == {
+        .Ok(value) -> "ok {value.to_string()}"
+        .Err(_) -> "invalid"
+    }
+}
+
+fn ipv4_line(text: String) -> String Never! {
+    if ip.parse_ipv4(text) == {
+        .Ok(value) -> "ok {ip.ipv4_to_string(value)}"
+        .Err(_) -> "invalid"
+    }
+}
+
+fn ipv6_line(text: String) -> String Never! {
+    if ip.parse_ipv6(text) == {
+        .Ok(value) -> "ok {ip.ipv6_compressed(value)}"
+        .Err(_) -> "invalid"
+    }
+}
+
+fn uuid_line(text: String) -> String Never! {
+    if uuid.parse(text) == {
+        .Ok(value) -> "ok {value}"
+        .Err(_) -> "invalid"
+    }
+}
+
+fn run() {
+    // Normalize versus original: the caller keeps the written text; parse()
+    // lowers the scheme and host and removes dot segments, but keeps an
+    // explicitly written default port.
+    written :: "HTTPS://Example.TEST:443/a/./b/../c?x=1"
+    parsed :: url.parse(written) ?? panic("url")
+    normalized :: parsed.normalize()
+    print("written: {written}")
+    print("parsed: {parsed.to_string()}")
+    print("normalized: {normalized.to_string()}")
+    print("port: {parsed.port() ?? -1} default: {parsed.default_port() ?? -1}")
+
+    // Repeated query keys keep their order and every occurrence.
+    repeated :: url.parse("https://example.test/search?tag=b&tag=a&tag=b") ?? panic("query")
+    loop pair in repeated.query_pairs() -> print("query {pair[0]}={pair[1]}")
+    added :: repeated.add_query("tag", "c")
+    print("added: {added.query()}")
+
+    // An escape already in the input is not escaped again.
+    escaped :: url.parse("https://example.test/a%20b?q=x%26y") ?? panic("escaped")
+    print("escaped: {escaped.to_string()}")
+    print("segments: {escaped.path_segments().join("|")}")
+    print("encode once: {url.percent_encode("a b")} decode: {url.percent_decode("a%20b") ?? "bad"}")
+
+    // IDNA: a Unicode host becomes its ASCII form; empty and over-long labels
+    // and spaces fail.
+    print("idna: {url_line("https://Bücher.example/")}")
+    long_label :: "a".repeat(64)
+    print("long label: {url_line("https://{long_label}.example/")}")
+    print("empty label: {url_line("https://a..example/")}")
+    print("space: {url_line("https://a b.example/")}")
+
+    // IP canonical and invalid forms.
+    print("ipv4: {ipv4_line("192.168.1.1")}")
+    print("ipv4 leading zero: {ipv4_line("192.168.001.1")}")
+    print("ipv4 out of range: {ipv4_line("256.1.1.1")}")
+    print("ipv6: {ipv6_line("2001:0DB8:0000:0000:0000:0000:0000:0001")}")
+    print("ipv6 two gaps: {ipv6_line("2001::db8::1")}")
+
+    // UUID canonical (lowercase) and invalid forms.
+    print("uuid: {uuid_line("6BA7B810-9DAD-11D1-80B4-00C04FD430C8")}")
+    print("uuid short: {uuid_line("6ba7b810-9dad-11d1-80b4")}")
+    print("uuid bad hex: {uuid_line("6ba7b810-9dad-11d1-80b4-00c04fd430zz")}")
+
+    // Header multiplicity: append keeps every field in order, get reads the
+    // first, set replaces them all, and names compare case-insensitively.
+    headers := http.headers()
+    headers = http.headers_append(headers, "Set-Cookie", "a=1")
+    headers = http.headers_append(headers, "set-cookie", "b=2")
+    print("all: {http.headers_all(headers, "SET-COOKIE").join(" | ")}")
+    print("first: {http.headers_get(headers, "set-cookie") ?? "none"}")
+    headers = http.headers_set(headers, "Set-Cookie", "c=3")
+    print("after set: {http.headers_all(headers, "set-cookie").join(" | ")}")
+}

@@ -195,12 +195,22 @@ struct Marker {
     ct: CtValue?
 }
 
+// Sema's checked proof for one counted loop (JetSema LoopFacts.jet), carried
+// on its ForRange statement to JetIR's range loop, which reads it and never
+// re-derives eligibility. `extent` is the exclusive bound sema proved for the
+// loop index when the range starts at or above 0 and the body neither rebinds
+// nor writes the index (None: unproven); `proven_indexes` the index nodes of
+// the body's list reads and writes that the extent keeps inside their fixed
+// list, which need no bounds check. Each Bool is a semantic verdict on the
+// whole body; a loop sema cannot read completely carries no facts at all.
 struct AutoVectorizationFacts {
     element_type: Type
     no_aliasing: Bool
     no_early_exit: Bool
     effect_free_body: Bool
     no_cross_iteration_deps: Bool
+    extent: Int?
+    proven_indexes: [Int]
 }
 
 fn ast_binding(name: String, name_span: Span, mutable: Bool, init: Expr, sigil_span: Span?) -> Binding Never! {

@@ -157,22 +157,42 @@ struct EffectivePolicy {
     provenance: [PolicyDeclaration]
 }
 
+// The source text of a file a policy chain names, so its declarations
+// render as `path:line:col`.
+struct PolicySourceText {
+    path: String
+    text: DiagnosticSourceText
+}
+
+// Where `declaration` was written: `path:line:col` when its source is among
+// `sources`, else the bare path (a package manifest's declarations carry no
+// span, and the invocation's `--gate` has no file).
+fn policy_declaration_site(declaration: PolicyDeclaration, sources: [PolicySourceText]) -> String Never! {
+    if declaration.span.end <= declaration.span.start -> return declaration.source
+    loop source in sources {
+        if source.path == declaration.source -> return "{declaration.source}:{diagnostic_source_line(source.text, declaration.span.start)}:{diagnostic_source_column(source.text, declaration.span.start)}"
+    }
+    declaration.source
+}
+
 // The resolution as `key = value` followed by every declaration of its chain,
 // the last one effective and the earlier ones shadowed.
-fn policy_explain(resolution: EffectivePolicy) -> String Never! {
+fn policy_explain(resolution: EffectivePolicy, sources: [PolicySourceText]) -> String Never! {
     out := "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}"
     loop (index, declaration) in resolution.provenance {
         status :: if index + 1 == resolution.provenance.len() -> "effective" else -> "shadowed"
-        out = "{out}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
+        out = "{out}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {policy_declaration_site(declaration, sources)}"
     }
     out
 }
 
+// A refused ladder. `outer_site` is the outer rung's declaration the inner
+// one collides with, so the report names its site.
 #Error
 enum PolicyError {
     ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
-    Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span)
-    Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span)
+    Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span, outer_site: PolicyDeclaration)
+    Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span, outer_site: PolicyDeclaration)
 }
 
 // Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
@@ -181,8 +201,8 @@ impl PolicyError.Debug {
     fn debug(self) -> String {
         if self == {
             .ProhibitedScope(key, scope, span) -> "ProhibitedScope {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, span: {policy_span_debug_text(span)} }}"
-            .Conflict(key, scope, first, second) -> "Conflict {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, first: {policy_span_debug_text(first)}, second: {policy_span_debug_text(second)} }}"
-            .Widening(key, outer, inner, span) -> "Widening {{ key: {policy_key_debug_text(key)}, outer: {policy_value_debug_text(outer)}, inner: {policy_value_debug_text(inner)}, span: {policy_span_debug_text(span)} }}"
+            .Conflict(key, scope, first, second, _) -> "Conflict {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, first: {policy_span_debug_text(first)}, second: {policy_span_debug_text(second)} }}"
+            .Widening(key, outer, inner, span, _) -> "Widening {{ key: {policy_key_debug_text(key)}, outer: {policy_value_debug_text(outer)}, inner: {policy_value_debug_text(inner)}, span: {policy_span_debug_text(span)} }}"
         }
     }
 }
@@ -262,14 +282,14 @@ fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effectiv
     loop declaration in ordered {
         if !registry.scopes.contains(declaration.scope) -> return Err(PolicyError.ProhibitedScope{key: key, scope: declaration.scope, span: declaration.span})
         loop previous in chain {
-            if previous.scope == declaration.scope && previous.target == declaration.target -> return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span})
+            if previous.scope == declaration.scope && previous.target == declaration.target -> return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span, outer_site: previous})
         }
         next := declaration.value
         if effective == .Val(outer) {
             widens :: policy_widens(key, outer, declaration.value)
-            if registry.combine == PolicyCombine.Tighten && widens -> return Err(PolicyError.Widening{key: key, outer: outer, inner: declaration.value, span: declaration.span})
+            if registry.combine == PolicyCombine.Tighten && widens -> return Err(PolicyError.Widening{key: key, outer: outer, inner: declaration.value, span: declaration.span, outer_site: chain[chain.len() - 1]})
             if registry.combine == PolicyCombine.Merge {
-                next = policy_merge(outer, declaration.value) ?? return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: chain[chain.len() - 1].span, second: declaration.span})
+                next = policy_merge(outer, declaration.value) ?? return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: chain[chain.len() - 1].span, second: declaration.span, outer_site: chain[chain.len() - 1]})
             }
         }
         effective = Val(next)

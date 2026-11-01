@@ -160,7 +160,7 @@ fn cli_build_package_generation_body(verification: &StoreVerification, cache: &W
         live := LiveRegion?{None}
         outcome :: cli_realize_ref_outcome(&verification, theme, roots, parsed.flags, table, spec, name_width, RowStyle.Ledger, &live, RealizeScope.UserProfile)
         if outcome == {
-            .Realized(entry, _, _, lease) -> &realized.push(RealizedProfilePackage{fact: package, entry: entry, lease: lease, nodes: [PackageOutputNode]{}})
+            .Realized(entry, _, _, lease) -> &realized.push(RealizedProfilePackage{fact: package, entry: entry, lease: ^lease, nodes: [PackageOutputNode]{}})
             .NeedsNix(need) -> {
                 cli_report_nix_bridge_required(theme, parsed.flags, [NixBridgeNeed]{need}, [String]{})
                 return Err(CLIError.Other("profile package needs the provider bridge before it can be generated"))
@@ -521,13 +521,9 @@ fn cli_read_package_generations(verification: &StoreVerification, state: String)
 }
 
 fn cli_positive_json_int(value: Dyn?) -> Int? Never! {
-    if value == {
-        .Val(tree) -> if tree == {
-            .Int(number) -> if number > 0 -> Val(number) else -> None
-            else -> None
-        }
-        .None -> None
-    }
+    tree :: value ?? return None
+    number :: foundation_json_integer(tree) ?? return None
+    if number > 0 -> Val(number) else -> None
 }
 
 // One complete generation, with every recorded fact revalidated: schema,

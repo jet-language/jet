@@ -19,7 +19,7 @@ Default outputs live under `~/.cache/jet-dev/scratch/sol/SolJetcBench/results/`;
 For coordinated slots, run `--phase rust --out DIR`, then `--phase jetc --out DIR`; `--phase report` prints saved data.
 Existing legs are never overwritten; use a fresh output directory to remeasure. Invocations serialize on a lock.
 Package investigation: runner accepts one `.jet` entry under one authorized root; JetLexer needs sibling Foundation.
-Foundation's `Source/Collections.jet` probe: Rust check timed out at 300s; emit failed E0956 (prep/MIR) and E0101 (no run).
+Foundation's `Source/Collections.jet` probe: Rust check timed out at 300s; emit failed E0956 (prep/IR) and E0101 (no run).
 Example probes diverged: time-foundation (33 errors/19 warnings) and Murmur3 (`test` item unsupported); generated programs give valid ratios.
 Observed loop/loop7 ratios versus Rust emit: hello **59.27x/54.55x**, N256 **164.75x/145.83x**, N512 **305.89x/291.95x**.
 Empty floors were 8.02s/6.08s; negative hello-minus-empty differences show noise, not a separately measured image-restore duration.

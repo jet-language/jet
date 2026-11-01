@@ -62,14 +62,15 @@ fn run() {
     print(accepted([191, 97, 107, 1, 255]))
 
     // Truncation at each structural layer, reserved heads, invalid text,
-    // closed Dyn byte identity, duplicate/non-text keys, tags/simple
-    // values, stray breaks, trailing roots, and signed-range overflow.
+    // byte strings as Dyn.Bytes, duplicate/non-text keys, date-time tag
+    // payloads, simple values, stray breaks, trailing roots, and signed-range
+    // overflow.
     print(rejected(empty, 0, "$", "CBOR value is missing"))
     print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
     print(rejected([26, 0], 2, "$", "CBOR length argument is truncated"))
     print(rejected([27, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
     print(rejected([59, 128, 0, 0, 0, 0, 0, 0, 0], 0, "$", "CBOR integer is outside Jet Int"))
-    print(rejected([65, 0], 0, "$", "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
+    print(accepted([65, 0]))
     print(rejected([98, 97], 2, "$", "CBOR byte/text string is truncated"))
     print(rejected([97, 255], 0, "$", "CBOR text is not UTF-8"))
     print(rejected([127, 98, 97], 3, "$", "CBOR byte/text string chunk is truncated"))
@@ -77,7 +78,7 @@ fn run() {
     print(rejected([161, 1, 2], 1, "$", "CBOR map key must be text"))
     print(rejected([162, 97, 97, 1, 97, 97, 2], 4, "$", "duplicate CBOR text map key"))
     print(rejected([161, 97, 97], 3, "$[\"a\"]", "CBOR value is missing"))
-    print(rejected([192, 1], 0, "$", "CBOR tags are unsupported"))
+    print(rejected([192, 1], 0, "$", "invalid CBOR date-time tag payload"))
     print(rejected([247], 0, "$", "unsupported CBOR simple value 23"))
     print(rejected([255], 0, "$", "CBOR break outside an indefinite container"))
     print(rejected([249, 0], 2, "$", "CBOR Float16 is truncated"))

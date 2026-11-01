@@ -537,7 +537,6 @@ impl TimeError {
     fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
 }
 struct LocalDate { date_y: Int, date_m: Int, date_d: Int }
-alias Date :: LocalDate
 struct LocalTime { hour_value: Int, minute_value: Int, second_value: Int, nanos: Int }
 struct DateTime { secs: Int, nanos: Int, leap_second: Bool }
 struct Period { years_value: Int, months_value: Int, days_value: Int }
@@ -836,6 +835,10 @@ fn civil_checked_epoch(value: Int, unit: String) -> Int RangeError! {
 }
 impl DateTime {
     fn date(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
+    fn year(self) -> Int Never! { self.date().date_y }
+    fn month(self) -> Int Never! { self.date().date_m }
+    fn day(self) -> Int Never! { self.date().date_d }
+    fn weekday(self) -> Int Never! { self.date().weekday() }
     fn time(self) -> LocalTime Never! {
         seconds :: civil_mod(self.secs, 86400)
         t := civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, self.nanos)
@@ -1074,8 +1077,14 @@ fn utc() -> Zone Never! {
     data :: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
     Zone{name_value: "UTC", data: data}
 }
+// The fixed-offset zone a `±HH:MM` offset names; a zero offset is UTC.
+fn civil_fixed_zone(offset: Int) -> Zone Never! {
+    if offset == 0 -> return utc()
+    Zone{name_value: civil_offset(offset), data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: offset, is_dst: false}}}}
+}
 fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
+    if name.starts_with("+") || name.starts_with("-") -> return Ok(civil_fixed_zone(civil_parse_offset(name)))
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") -> return Err(TimeError{reason: "invalid time zone name: {name}"})
     rel := name.copy()
     loop rel.starts_with("posix/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
@@ -1682,11 +1691,7 @@ fn civil_dyn_datetime(text: String) -> ZonedDateTime? Never! {
         return None
     }
     seconds :: civil_utc(new(year, month, day), civil_time(hour, minute, second, 0)) - offset
-    zone := utc()
-    if offset != 0 {
-        zone = Zone{name_value: civil_offset(offset), data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: offset, is_dst: false}}}}
-    }
-    Val(zoned(civil_timestamp(seconds, nanos, second == 60), zone))
+    Val(zoned(civil_timestamp(seconds, nanos, second == 60), civil_fixed_zone(offset)))
 }
 
 impl DateTime {
@@ -1786,7 +1791,7 @@ impl Instant {
 }
 
 #Test("Civil codecs retain their permissive wire policy separately from public parsers") {
-    date :: Dyn.Text("2024-2-29").decode<Date>() ?? panic("Date codec")
+    date :: Dyn.Text("2024-2-29").decode<LocalDate>() ?? panic("Date codec")
     assert_eq(date.to_string(), "2024-02-29")
     assert_eq(date.encode(), Dyn.Text("2024-02-29"))
     t :: Dyn.Text("1:2:3").decode<LocalTime>() ?? panic("LocalTime codec")
@@ -1828,7 +1833,7 @@ impl Instant {
 }
 
 #Test("Date alias receivers retain projections and ISO year boundaries") {
-    date :: Date{new(2021, 1, 1)}
+    date :: LocalDate{new(2021, 1, 1)}
     assert_eq(date.year(), 2021)
     assert_eq(date.month(), 1)
     assert_eq(date.day(), 1)
@@ -1846,7 +1851,7 @@ impl Instant {
 }
 
 #Test("Date alias arithmetic preserves leap clamps and signed periods") {
-    date :: Date{new(2024, 2, 29)}
+    date :: LocalDate{new(2024, 2, 29)}
     assert_eq(date.quarter_of_year(), 1)
     assert_eq(new(2024, 12, 1).quarter_of_year(), 4)
     assert_eq(date.days_in_month(), 29)
@@ -1863,7 +1868,7 @@ impl Instant {
 }
 
 #Test("Date alias truncation formatting and rounded differences preserve errors") {
-    date :: Date{new(2024, 2, 29)}
+    date :: LocalDate{new(2024, 2, 29)}
     assert_eq(date.truncate("year"), new(2024, 1, 1))
     assert_eq(date.truncate("month"), new(2024, 2, 1))
     assert_eq(date.truncate("unknown"), date)

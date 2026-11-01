@@ -14,7 +14,7 @@ step: jetpack services up --no-color
 when os-name linux: env: PATH={work}/bin:{env:PATH}
 when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
 exit: nonzero
-stderr: ~ "E1261"
+stderr: ~ "E1261" # original contains predicate
 await: file .jet/services/fixture/pid absent timeout 5s every 50ms
 file: .jet/services/fixture/supervisor.error is-file
 step: jetpack services health --no-color

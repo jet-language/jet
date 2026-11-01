@@ -10,7 +10,8 @@ use jet_foundation.[
     NameFacts,
     type_name,
     expr_span,
-    failure_contract_effective_type,
+    failure_contract_shown_return,
+    failure_contract_shown_type,
     failure_contract_source,
 ]
 
@@ -298,7 +299,7 @@ fn semantic_shape(name: String, kind: SymKind, owner: String?, names: NameFacts,
                 }
             }
             result_type :: if failure_contract == {
-                .Checked(failure) -> Val(failure_contract_effective_type(failure))
+                .Checked(failure) -> failure_contract_shown_return(failure)
                 .Unavailable(_) -> return_type
             }
             result :: if result_type == {
@@ -311,7 +312,7 @@ fn semantic_shape(name: String, kind: SymKind, owner: String?, names: NameFacts,
             }
             suffix :: if ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}" else if result != "" -> " -> {result}" else -> ""
             failure :: if failure_contract == {
-                .Checked(failure) -> "{type_name(failure_contract_effective_type(failure))} ({failure_contract_source(failure)})"
+                .Checked(failure) -> "{type_name(failure_contract_shown_type(failure))} ({failure_contract_source(failure)})"
                 .Unavailable(unavailable) -> "unavailable ({unavailable.reason})"
             }
             SemanticShape{kind: .Function, signature: "{prefix}({parts.join(", ")}){suffix}\nfailure: {failure}"}

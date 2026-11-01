@@ -7,13 +7,14 @@ export const nativeSuiteNames = ['golden', 'ui', 'cases', 'registries'];
 
 export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node = process.execPath, suites = nativeSuiteNames }) {
     if (!suites.length || new Set(suites).size !== suites.length || suites.some(suite => !nativeSuiteNames.includes(suite))) throw Error('invalid or empty native suite selection');
+    // Node gates run under `node`; Jet gates run under the compiler being verified.
     const definitions = [
-        ['unsafe-ratchet', 'check-unsafe-ratchet.mjs', []],
-        ['agent-doc-flags', 'check-agent-doc-flags.mjs', []],
-        ['decision-index', 'decision-index.mjs', ['--check']],
-        ['core-coverage', 'core-coverage-census.mjs', ['--check']],
-        ['core-module-check', 'core-module-check.mjs', ['--check']],
-    ].map(([scope, file, args]) => ({ scope, command: node, args: [join(root, 'Tools/agent', file), ...args], cwd: root, kind: 'gate', documents: {} }));
+        ['unsafe-ratchet', jet, 'UnsafeRatchet.jet', []],
+        ['agent-doc-flags', jet, 'AgentDocFlags.jet', []],
+        ['decision-index', jet, 'DecisionIndex.jet', ['--check']],
+        ['core-coverage', node, 'core-coverage-census.mjs', ['--check']],
+        ['core-module-check', node, 'core-module-check.mjs', ['--check']],
+    ].map(([scope, command, file, args]) => ({ scope, command, args: [join(root, 'Tools/agent', file), ...args], cwd: root, kind: 'gate', documents: {} }));
     for (const suite of suites) {
         if (suite !== 'registries') {
             // The fixture gate is `jet test Tools/testkit`; its `suite <name>` test reads JET (the

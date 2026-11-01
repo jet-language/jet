@@ -90,7 +90,7 @@ fn ir_dyn_text(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
 // the line start (DynRuntime.rs).
 fn ir_dyn_checked(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, symbol: String, operands: [Int], mask: [Bool], location: TPanicLoc, span: Span) -> Int Never! {
     string_row :: ir_string_row(&m)
-    result_ty :: Type.Result{ok: ir_subst(m, ty), err: Type.String}
+    result_ty :: Type.Result{ok: ty, err: Type.String}
     outcome :: ir_route(&m, p, &b, symbol, operands, mask, result_ty, span)
     if ir_failed(b) || outcome < 0 -> return -1
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -294,25 +294,83 @@ fn ir_dyn_remove(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: I
 // jet_rt_codec_decode_<scalar>, which borrows the tree.
 fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
-    concrete :: ir_subst(m, target)
+    concrete :: ir_fact(p, &b, target, span)
+    if ir_failed(b) -> return -1
     tree_arg :: ir_codec_arg(receiver)
     if ir_codec_impl(p, concrete, "Decode", "decode") == .Val(found) -> return ir_call(&m, p, &b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     if ir_codec_decode_helper(p, concrete) == .Val(helper) {
         helper_key :: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
         return ir_call(&m, p, &b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
+    if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_decode(&m, p, &b, ty, receiver, concrete, members, span)
     scalar :: ir_codec_scalar(concrete) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
     tree :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || tree < 0 -> return -1
-    result_ty :: ir_subst(m, ty)
-    ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, result_ty, span)
+    ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
+}
+
+// `tree.decode<A | B>()`: the first member, in written order, whose own
+// decode succeeds, boxed as that member's variant; the last member's errors
+// when none does.
+fn ir_dyn_union_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
+    err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(union_ty)} as {ir_type_name(ty)}") }
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if members.len() == 0 -> return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(union_ty)} without members")
+    ir_scope_open(&b)
+    tree :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || tree < 0 {
+        ir_scope_close(&m, &b)
+        return -1
+    }
+    tree_ty :: ir_ty(p, b, receiver)
+    tree_local :: checked_generated_local("decode_union_{tree}", span, tree_ty)
+    tree_owned :: b.fresh[tree] && ir_has_drop(m, b, tree)
+    &b.bindings.push(IRBinding{name: tree_local.name.copy(), slot: tree, owned: tree_owned})
+    b.fresh[tree] = false
+    out :: ir_temp(&m, &b, result_row)
+    loop (index, member) in members {
+        tree_node :: ir_node(&b, tree_ty, NodeKind.Local{local: tree_local}, span)
+        attempt_ty :: Type.Result{ok: member.copy(), err: err_ty.copy()}
+        attempt :: ir_dyn_decode(&m, p, &b, attempt_ty, tree_node, member, [Int]{}, span)
+        if ir_failed(b) || attempt < 0 {
+            ir_scope_close(&m, &b)
+            return -1
+        }
+        member_row :: ir_value_type(&m, p, member) ?? return ir_type_fail(&b, span, member)
+        attempt_fresh :: b.fresh[attempt]
+        decoded :: ir_result_is_ok(&m, &b, attempt)
+        ir_open_if(&b.f, decoded, b.line)
+        payload :: ir_adapt(&m, p, &b, attempt, member_row, span)
+        boxed :: ir_union_box(&m, p, &b, payload, member, union_ty, span)
+        made :: ir_result_box(&m, p, &b, ty, true, boxed)
+        if ir_failed(b) {
+            ir_scope_close(&m, &b)
+            return -1
+        }
+        ir_emit(&b.f, IROp.Copy, out, made, -1, -1, b.line)
+        b.fresh[made] = false
+        ir_else(&b.f, b.line)
+        b.fresh[attempt] = attempt_fresh
+        if index + 1 == members.len() {
+            failed :: ir_result_rebox(&m, p, &b, attempt, result_row, span)
+            ir_emit(&b.f, IROp.Copy, out, failed, -1, -1, b.line)
+            b.fresh[failed] = false
+        } else {
+            ir_release(&m, &b, attempt)
+        }
+        b.fresh[attempt] = false
+    }
+    loop _ in 0..<members.len() -> ir_end(&b.f, b.line)
+    ir_scope_close(&m, &b)
+    b.fresh[out] = true
+    out
 }
 
 // `FieldError.under(segment, inner)`: Core/Encoding/Encoding.jet
 // __decode_under frames every error of the inner Result under `segment` and
 // passes a success through.
 fn ir_decode_under(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
-    success :: if ir_untag(ir_subst(m, ty)) == {
+    success :: if ir_untag(ty) == {
         .Result(ok, _) -> ok.copy()
         else -> { return ir_fail_slot(&b, span, "FieldError.under as {ir_type_name(ty)}") }
     }
@@ -378,20 +436,31 @@ fn ir_codec_scalar(target: Type) -> String? Never! {
 // of its encoded values. The builtin and typed codec routes have no lowering
 // here.
 fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
-    concrete :: ir_subst(m, ir_ty(p, b, receiver))
+    concrete :: ir_ty(p, b, receiver)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
     if ir_codec_impl(p, concrete, "Encode", "encode") == .Val(found) {
         self_slot :: ir_expr(&m, p, &b, receiver)
         if ir_failed(b) || self_slot < 0 -> return -1
         return ir_call(&m, p, &b, found.key, found.args, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
     }
-    if ir_dyn_def(p, ir_subst(m, ty)) != None {
+    if ir_dyn_def(p, ty) != None {
         receiver_node :: ir_body_node(p, b, receiver)
         typed :: ir_node(&b, concrete, receiver_node.kind.copy(), receiver_node.span)
         if ir_untag(concrete) == .Map(map_key, _, _) {
             if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(&m, p, &b, ty, typed, span)
         }
-        if ir_untag(concrete) == .List(element) -> return ir_dyn_array_encode(&m, p, &b, ty, typed, element, span)
+        if ir_untag(concrete) == .List(element) {
+            // A byte List encodes as Dyn.Bytes, the inverse of __decode_bytes
+            // (encoding-decisions.md: Codable `[U8]` is never an integer array).
+            if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
+                bytes :: ir_expr(&m, p, &b, receiver)
+                if ir_failed(b) || bytes < 0 -> return -1
+                return ir_dyn_box(&m, p, &b, ty, "Bytes", bytes, span)
+            }
+            return ir_dyn_array_encode(&m, p, &b, ty, typed, element, span)
+        }
+        if ir_untag(concrete) == .Option(inner) -> return ir_dyn_option_encode(&m, p, &b, ty, typed, inner, span)
+        if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_encode(&m, p, &b, ty, typed, concrete, members, span)
     }
     variant :: if ir_untag(concrete) == {
         .Int | .IntN(_, _) -> "Int"
@@ -400,7 +469,7 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         .String | .Char -> "Text"
         else -> ""
     }
-    if variant == "" || ir_dyn_def(p, ir_subst(m, ty)) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
+    if variant == "" || ir_dyn_def(p, ty) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
     slot :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || slot < 0 -> return -1
     payload := slot
@@ -428,21 +497,21 @@ fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
         ir_scope_close(&m, &b)
         return -1
     }
-    source_local :: checked_generated_local("encode_source_{source}", span)
+    value_ty :: ir_ty(p, b, value)
+    source_local :: checked_generated_local("encode_source_{source}", span, value_ty)
     source_owned :: b.fresh[source] && ir_has_drop(m, b, source)
     &b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
     b.fresh[source] = false
     // The item List leaves the scope as the payload: its binding never owns it.
     output :: ir_list_empty(&m, &b, output_row)
     b.fresh[output] = false
-    output_local :: checked_generated_local("encode_output_{output}", span)
+    output_local :: checked_generated_local("encode_output_{output}", span, output_ty)
     &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
-    item_local :: checked_user_local("encode_item_{output}", span)
+    item_local :: checked_user_local("encode_item_{output}", span, element)
     item_expr :: ir_node(&b, element, NodeKind.Local{local: item_local}, span)
     encoded :: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
     output_expr :: ir_node(&b, output_ty, NodeKind.Local{local: output_local}, span)
     push :: ir_node(&b, Type.Named{name: "Unit"}, NodeKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [Int]{encoded}}, span)
-    value_ty :: ir_ty(p, b, value)
     source_expr :: ir_node(&b, value_ty, NodeKind.Local{local: source_local}, span)
     push_stmt :: ir_stmt_node(&b, StmtKind.ExprStmt{value: push, span: span})
     walk :: ir_stmt_node(&b, StmtKind.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [Int]{push_stmt}, span: span})
@@ -451,6 +520,103 @@ fn ir_dyn_array_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, valu
     if ir_failed(b) -> return -1
     b.fresh[output] = true
     ir_dyn_box(&m, p, &b, ty, "Array", output, span)
+}
+
+// An Option's `encode()`: its value's encode() when present, Null when not.
+fn ir_dyn_option_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, inner: Type, span: Span) -> Int Never! {
+    dyn_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+    ir_scope_open(&b)
+    source :: ir_dyn_encode_source(&m, p, &b, value, "encode_option", span)
+    if source < 0 {
+        ir_scope_close(&m, &b)
+        return -1
+    }
+    out :: ir_temp(&m, &b, dyn_row)
+    present :: ir_option_is_some(&m, &b, source)
+    ir_open_if(&b.f, present, b.line)
+    payload :: ir_option_payload(&m, &b, source, inner_row)
+    encoded :: ir_dyn_encode_slot(&m, p, &b, ty, payload, inner, "encode_some_{source}", span)
+    if ir_failed(b) || encoded < 0 {
+        ir_scope_close(&m, &b)
+        return -1
+    }
+    ir_emit(&b.f, IROp.Copy, out, encoded, -1, -1, b.line)
+    b.fresh[encoded] = false
+    ir_else(&b.f, b.line)
+    null :: ir_enum_value(&m, p, &b, ty, "Dyn", "Null", BodyEnumPayload.Unit, span)
+    if ir_failed(b) || null < 0 {
+        ir_scope_close(&m, &b)
+        return -1
+    }
+    ir_emit(&b.f, IROp.Copy, out, null, -1, -1, b.line)
+    b.fresh[null] = false
+    ir_end(&b.f, b.line)
+    ir_scope_close(&m, &b)
+    b.fresh[out] = true
+    out
+}
+
+// A union's `encode()`: the encode() of the member its variant holds.
+fn ir_dyn_union_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
+    row :: ir_type_def(p, ir_union_key(ir_untag(union_ty))) ?? return ir_fail_slot(&b, span, "union {ir_type_name(union_ty)} without a definition")
+    dyn_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if members.len() == 0 -> return ir_fail_slot(&b, span, "encode of {ir_type_name(union_ty)} without members")
+    ir_scope_open(&b)
+    source :: ir_dyn_encode_source(&m, p, &b, value, "encode_union", span)
+    if source < 0 {
+        ir_scope_close(&m, &b)
+        return -1
+    }
+    out :: ir_temp(&m, &b, dyn_row)
+    selector :: ir_load_word(&m, &b, source, 0)
+    loop (index, member) in members {
+        last :: index + 1 == members.len()
+        if !last {
+            expected :: ir_word_const(&m, &b, index)
+            held :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
+            ir_open_if(&b.f, held, b.line)
+        }
+        fields :: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(union_ty)}")
+        if fields.len() != 1 -> return ir_fail_slot(&b, span, "encode of union member {ir_type_name(member)} without a payload")
+        payload :: ir_load_at(&m, &b, source, fields[0].offset, fields[0].ty)
+        encoded :: ir_dyn_encode_slot(&m, p, &b, ty, payload, member, "encode_member_{source}_{index}", span)
+        if ir_failed(b) || encoded < 0 {
+            ir_scope_close(&m, &b)
+            return -1
+        }
+        ir_emit(&b.f, IROp.Copy, out, encoded, -1, -1, b.line)
+        b.fresh[encoded] = false
+        if !last -> ir_else(&b.f, b.line)
+    }
+    loop _ in 1..<members.len() -> ir_end(&b.f, b.line)
+    ir_scope_close(&m, &b)
+    b.fresh[out] = true
+    out
+}
+
+// The value `value` evaluated and bound for the current scope under a
+// generated local, which owns it when it is a fresh value with a drop; -1
+// when it fails.
+fn ir_dyn_encode_source(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, stem: String, span: Span) -> Int Never! {
+    source :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || source < 0 -> return -1
+    value_ty :: ir_ty(p, b, value)
+    local :: checked_generated_local("{stem}_{source}", span, value_ty)
+    owned :: b.fresh[source] && ir_has_drop(m, b, source)
+    &b.bindings.push(IRBinding{name: local.name.copy(), slot: source, owned: owned})
+    b.fresh[source] = false
+    source
+}
+
+// The `encode()` of the borrowed slot `slot` of type `slot_ty`, through a
+// generated local `name` bound to it.
+fn ir_dyn_encode_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, slot_ty: Type, name: String, span: Span) -> Int Never! {
+    local :: checked_generated_local(name, span, slot_ty)
+    &b.bindings.push(IRBinding{name: local.name.copy(), slot: slot})
+    item :: ir_node(&b, slot_ty, NodeKind.Local{local: local}, span)
+    encoded :: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
+    ir_expr(&m, p, &b, encoded)
 }
 
 // `concrete`'s own `codec` implementation method (`Decode|decode`,
@@ -475,11 +641,37 @@ fn ir_codec_impl(p: IRProgram, concrete: Type, codec: String, method: String) ->
         implementer :: owner ?? next
         if ir_owner_binders(p, p.functions[row]).len() == 0 {
             if ir_trait_identity(p, implementer) == identity -> return Val((key: p.functions[row].key.copy(), args: [Type]{}))
-            next
+            // A derived codec of a generic declaration (SerdeItems) declares
+            // the declaration's parameters on the method itself: its instance
+            // binds each to the concrete type's argument in that position.
+            if p.functions[row].generic_params.len() == 0 || ir_render_type_key(p.type_rows, p.types, implementer) != declaration -> next
+            method_args :: ir_codec_method_args(p, p.functions[row], concrete) ?? next
+            return Val((key: p.functions[row].key.copy(), args: method_args))
         }
         if ir_render_type_key(p.type_rows, p.types, implementer) != declaration -> next
         args :: ir_owner_args(p, p.functions[row], concrete) ?? next
         return Val((key: p.functions[row].key.copy(), args: args))
     }
     None
+}
+
+// The type arguments of the derived codec method `function` of generic
+// declaration instance `concrete` (`[Int]` for `decode<T>` at `Wrap<Int>`):
+// each method parameter is the declaration parameter of the same name.
+fn ir_codec_method_args(p: IRProgram, function: FnBody, concrete: Type) -> [Type]? Never! {
+    name :: ir_nominal_name(ir_untag(concrete)) ?? return None
+    row :: ir_type_def(p, name) ?? return None
+    declared :: p.types[row].generic_params
+    actual :: ir_type_args(concrete)
+    if declared.len() != actual.len() -> return None
+    args := [Type]{}
+    loop parameter in function.generic_params {
+        found := -1
+        loop (index, candidate) in declared {
+            if candidate.name == parameter.name -> found = index
+        }
+        if found < 0 -> return None
+        &args.push(actual[found].copy())
+    }
+    Val(args)
 }

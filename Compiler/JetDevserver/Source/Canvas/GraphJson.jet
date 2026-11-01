@@ -110,7 +110,7 @@ fn next_function_start(src: String, offset: Usize) -> Usize {
     cursor := offset.min(src.len())
     loop line in src[cursor..<src.len()].split_inclusive('\n') {
         trimmed := line.trim_start() // #4303
-        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") || trimmed.starts_with("pub(package) fn ") {
+        if trimmed.starts_with("fn ") {
             return cursor + line.len() - trimmed.len()
         }
         cursor += line.len()
@@ -402,7 +402,7 @@ fn function_metadata_json(src: String, f: &AST.Func, visibility: String) -> Stri
     ret :: f.effective_return_type().name()
     effects :: f.declared_effects.as_ref().map((effects) -> effects.iter().map(((name, _)) -> json_str(name)).collect().join(",")).unwrap_or_default()
     effect_via :: f.effect_via.as_ref().map(((param, _)) -> json_str(param)).unwrap_or("null")
-    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(src, f, visibility))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{if f.is_pure { "true" } else { "false" }},\"unsafe\":{if f.is_unsafe { "true" } else { "false" }},\"effects\":[{effects}],\"effect_via\":{effect_via},\"returns\":{json_str(ret)},\"params\":[{params}],\"meta\":{meta_attr_json(f.meta.as_ref()).unwrap_or("null")},\"source_span\":{span_json(func_source_span(f))},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
+    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(src, f))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{if f.is_pure { "true" } else { "false" }},\"unsafe\":{if f.is_unsafe { "true" } else { "false" }},\"effects\":[{effects}],\"effect_via\":{effect_via},\"returns\":{json_str(ret)},\"params\":[{params}],\"meta\":{meta_attr_json(f.meta.as_ref()).unwrap_or("null")},\"source_span\":{span_json(func_source_span(f))},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
 }
 
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:879
@@ -414,10 +414,10 @@ fn ledger_function_visibility(ledger: NameLedger, module_idx: Usize, name: Strin
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:895
-fn function_signature_text(src: String, f: &AST.Func, visibility: String) -> String {
+// Rust: crates/jet-devserver/src/Canvas/graph_json.rs:895. Declarations are
+// public by default, so the signature carries no visibility marker.
+fn function_signature_text(src: String, f: &AST.Func) -> String {
     out := "".to_string()
-    if visibility == "package" { out.push_str("pub(package) ") } else if visibility == "public" { out.push_str("pub ") }
     out.push_str("fn ")
     out.push_str(f.name)
     out.push('(')

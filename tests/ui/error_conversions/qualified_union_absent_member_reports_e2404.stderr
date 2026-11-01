@@ -1,0 +1,8 @@
+Error [E2404]: `parse` fails with `ParseErr`, which can't propagate into `NetError | TaskFailure` here
+  --> qualified_union_absent_member_reports_e2404.jet:13:14
+    |
+ 13 |     value :: parse()
+    |              ^^^^^
+ Why: `parse` is defined at `qualified_union_absent_member_reports_e2404.jet:8:4` with effective failure contract `explicit ParseErr!`; the caller's `explicit (net.NetError | TaskFailure)!` contract has no route from `ParseErr` to `NetError | TaskFailure`
+ Fix: Declare the caller with `ParseErr` as its failure domain, or add `impl ParseErr -> NetError | TaskFailure { … }`; otherwise handle `parse` locally with `??`
+More: jet-lang.dev/e/E2404

@@ -7,73 +7,46 @@ Error [E0112]: `checked_add` wants Int (a whole number) for argument 1, but this
  Fix: Use Int (a whole number) here
 More: jet-lang.dev/e/E0112
 
-Error [E0112]: `abs` needs Int, Float, or F32, not String (text)
+Error [E0112]: `abs` wants Int (a whole number) for argument 1, but this is String (text)
   --> tests/ui/core_math_value_type_mismatch.jet:5:14
     |
   5 |     math.abs("one")
     |              ^^^^^
- Why: Absolute value is only defined for numbers
- Fix: Pass an Int, Float, or F32
-More: jet-lang.dev/e/E0112
-
-Error [E0905]: `min` needs comparable values
-  --> tests/ui/core_math_value_type_mismatch.jet:6:14
-    |
-  6 |     math.min((n: Int) -> n, (n: Int) -> n)
-    |              ^^^^^^^^^^^^^
- Why: min/max compare their two arguments
- Fix: Use Int, Float, String, Char, Bool, or a comparable type
-More: jet-lang.dev/e/E0905
-
-Error [E0112]: `min` needs two values of the same type
-  --> tests/ui/core_math_value_type_mismatch.jet:7:17
-    |
-  7 |     math.min(1, "two")
-    |                 ^^^^^
- Why: min/max compare like with like
- Fix: Use Int (a whole number) here
-More: jet-lang.dev/e/E0112
-
-Error [E0112]: `clamp` needs all three values to have the same type
-  --> tests/ui/core_math_value_type_mismatch.jet:8:19
-    |
-  8 |     math.clamp(1, 0.0, 2)
-    |                   ^^^
- Why: The value and both bounds are compared together
+ Why: Every argument must match its parameter's type
  Fix: Use Int (a whole number) here
 More: jet-lang.dev/e/E0112
 
 Error [E0112]: `round` wants Float (an approximate binary number) for argument 1, but this is String (text)
-  --> tests/ui/core_math_value_type_mismatch.jet:9:16
+  --> tests/ui/core_math_value_type_mismatch.jet:6:16
     |
-  9 |     math.round("one")
+  6 |     math.round("one")
     |                ^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use Float (an approximate binary number) here
 More: jet-lang.dev/e/E0112
 
-Error [E0112]: `to_bits` needs Float or F32, not String (text)
-  --> tests/ui/core_math_value_type_mismatch.jet:10:18
+Error [E0112]: `to_bits` wants Float (an approximate binary number) for argument 1, but this is String (text)
+  --> tests/ui/core_math_value_type_mismatch.jet:7:18
     |
- 10 |     math.to_bits("one")
+  7 |     math.to_bits("one")
     |                  ^^^^^
- Why: Only floating-point values have this bit representation
- Fix: Pass a Float or F32 value
+ Why: Every argument must match its parameter's type
+ Fix: Use Float (an approximate binary number) here
 More: jet-lang.dev/e/E0112
 
 Error [E0112]: `from_bits` wants Int (a whole number) for argument 1, but this is String (text)
-  --> tests/ui/core_math_value_type_mismatch.jet:11:20
+  --> tests/ui/core_math_value_type_mismatch.jet:8:20
     |
- 11 |     math.from_bits("one")
+  8 |     math.from_bits("one")
     |                    ^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use Int (a whole number) here
 More: jet-lang.dev/e/E0112
 
 Error [E0112]: `decimal` wants String (text) for argument 1, but this is Int (a whole number)
-  --> tests/ui/core_math_value_type_mismatch.jet:12:18
+  --> tests/ui/core_math_value_type_mismatch.jet:9:18
     |
- 12 |     math.decimal(1)
+  9 |     math.decimal(1)
     |                  ^
  Why: Every argument must match its parameter's type
  Fix: Put the value in text with interpolation: "{x}"

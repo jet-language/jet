@@ -14,10 +14,8 @@
 // stays final), and close hands the guest handle to the host's closer.
 use jet_foundation.[HostImportFact, authority_parse_right]
 use core.encoding.json as json
-use core.encoding.hex as hex
-use core.math as math
 use jet_pkg_model.[
-    PKG_JSON_NOT_ARRAY, PKG_JSON_NOT_OBJECT, PKG_JSON_NOT_STRING, pkg_ascii_lower, pkg_bytes_text,
+    PKG_JSON_NOT_ARRAY, PKG_JSON_NOT_OBJECT, PKG_JSON_NOT_STRING,
     pkg_json_array, pkg_json_object, pkg_json_parse_protocol, pkg_json_text, pkg_json_texts,
 ]
 
@@ -42,8 +40,6 @@ EXTENSION_HOST_SUBCOMMAND :: "__compiler-extension-v1"
 EXTENSION_MAX_SNAPSHOT_BYTES :: 16777216
 // Outer process deadline; guest execution has its own 2 s deadline.
 EXTENSION_HOST_PROCESS_TIMEOUT_MS :: 5000
-// The failure text that replaces a leaked internal diagnostic.
-EXTENSION_INTERNAL_FAILURE :: "compiler-extension failed with an internal message"
 
 // The closed set of Jet plugin mechanisms, one semantic role each.
 enum PluginMechanism {
@@ -624,106 +620,6 @@ fn pkg_extension_negotiate_abilities(protocol: Int, requested: [ExtensionAbility
     Ok(granted)
 }
 
-// Parse the `jet_compiler_extension_load` wire: `O:<handle>` or
-// `E:<message>`.
-fn pkg_extension_parse_load_result(wire: String) -> Int ExtensionProtocolError! {
-    if wire.starts_with("O:") {
-        if Int.parse(wire.removeprefix("O:")) == {
-            .Ok(handle) -> {
-                if handle < 0 -> return Err(ExtensionProtocolError.new("malformed compiler-extension load handle: {wire}"))
-                return Ok(handle)
-            }
-            .Err(_) -> return Err(ExtensionProtocolError.new("malformed compiler-extension load handle: {wire}"))
-        }
-    }
-    if wire.starts_with("E:") -> return Err(ExtensionProtocolError.new(wire.removeprefix("E:")))
-    Err(ExtensionProtocolError.new("malformed compiler-extension load wire: {wire}"))
-}
-
-// Parse the `jet_compiler_extension_analyze` wire: `O:<len>:<hex>` or
-// `E:<message>`.
-fn pkg_extension_parse_analyze_result(wire: String) -> [U8] ExtensionProtocolError! {
-    if wire.starts_with("E:") -> return Err(ExtensionProtocolError.new(wire.removeprefix("E:")))
-    if !wire.starts_with("O:") -> return Err(ExtensionProtocolError.new("malformed compiler-extension analyze wire: {wire}"))
-    parts :: wire.removeprefix("O:").split_once(":") ?? return Err(ExtensionProtocolError.new("malformed compiler-extension analyze wire: {wire}"))
-    length :: Int.parse(parts.before) ?? return Err(ExtensionProtocolError.new("malformed compiler-extension analyze length: {parts.before}"))
-    if length < 0 -> return Err(ExtensionProtocolError.new("malformed compiler-extension analyze length: {parts.before}"))
-    digits :: parts.after.bytes()
-    if digits.len() != length * 2 -> return Err(ExtensionProtocolError.new("compiler-extension analyze hex length mismatch: expected {length * 2}, got {digits.len()}"))
-    bytes := [U8]{}
-    index := 0
-    loop index < digits.len() {
-        pair :: pkg_bytes_text(digits, index, index + 2)
-        decoded :: hex.decode(pair) ?? return Err(ExtensionProtocolError.new("malformed compiler-extension analyze hex: {pair}"))
-        &bytes.push(decoded[0])
-        index += 2
-    }
-    Ok(bytes)
-}
-
-// Whether a host or guest failure looks like a leaked host-language
-// (rustc) diagnostic.
-fn pkg_extension_message_exposes_rustc(message: String) -> Bool Never! {
-    lower :: pkg_ascii_lower(message)
-    lower.contains("rustc") || lower.contains("error[e") || lower.contains("--explain")
-}
-
-// A failure message with any leaked internal diagnostic replaced.
-fn pkg_extension_public_error(error: ExtensionProtocolError) -> ExtensionProtocolError Never! {
-    if pkg_extension_message_exposes_rustc(error.message) -> return ExtensionProtocolError.new(EXTENSION_INTERNAL_FAILURE)
-    error.copy()
-}
-
-// Load, analyze, validate and stage, accept, and close through one supplied
-// Component Model host. The Jetpack host supplies the real WASM functions;
-// keeping the orchestration here keeps one protocol and lifecycle.
-fn pkg_extension_analyze_with_host(wasm_path: String, snapshot: TypedSnapshot, load_guest: fn(String) -> String Never!, analyze_guest: fn(Int, [U8]) -> String Never!, close_guest: fn(Int) -> Bool Never!) -> AnalyzeResponse ExtensionProtocolError! {
-    handle :: if pkg_extension_parse_load_result(load_guest(wasm_path)) == {
-        .Ok(handle) -> handle
-        .Err(error) -> {
-            return Err(pkg_extension_public_error(error))
-        }
-    }
-    session := ExtensionSession.new()
-    if &session.on_loaded(handle) == {
-        .Ok(_) -> {}
-        .Err(error) -> {
-            _ :: close_guest(handle)
-            return Err(error)
-        }
-    }
-    snapshot_bytes :: if snapshot.encode_bytes() == {
-        .Ok(bytes) -> bytes
-        .Err(error) -> {
-            _ :: &session.close(close_guest)
-            return Err(error)
-        }
-    }
-    raw :: if pkg_extension_parse_analyze_result(analyze_guest(handle, snapshot_bytes)) == {
-        .Ok(bytes) -> bytes
-        .Err(error) -> {
-            _ :: &session.close(close_guest)
-            return Err(pkg_extension_public_error(error))
-        }
-    }
-    if &session.stage_response(snapshot, raw) == {
-        .Ok(_) -> {}
-        .Err(error) -> {
-            _ :: &session.close(close_guest)
-            return Err(error)
-        }
-    }
-    accepted :: if &session.accept_staged() == {
-        .Ok(response) -> response
-        .Err(error) -> {
-            _ :: &session.close(close_guest)
-            return Err(error)
-        }
-    }
-    _ :: &session.close(close_guest)
-    Ok(accepted)
-}
-
 // This host's mechanism identity.
 fn pkg_extension_mechanism() -> PluginMechanism Never! {
     PluginMechanism.CompilerExtension
@@ -783,22 +679,12 @@ fn pkg_extension_require_keys(object: [String: Dyn], required: [String], optiona
     }
 }
 
-// A non-negative integer no larger than `maximum`; a float with no fraction
-// counts.
+// A non-negative integer no larger than `maximum`, read through Core's typed
+// Int decode (an integral float counts).
 fn pkg_extension_json_bounded(value: Dyn, maximum: Int) -> Int? Never! {
-    if value == {
-        .Int(number) -> {
-            if number >= 0 && number <= maximum -> return Val(number)
-            return None
-        }
-        .Float(number) -> {
-            if math.fract(number) != 0.0 || number < 0.0 -> return None
-            whole :: Int.from_float(number) ?? return None
-            if whole <= maximum -> return Val(whole)
-            return None
-        }
-        else -> return None
-    }
+    number :: value.decode<Int>() ?? return None
+    if number >= 0 && number <= maximum -> return Val(number)
+    None
 }
 
 fn pkg_extension_json_u32(value: Dyn, name: String) -> Int ExtensionProtocolError! {

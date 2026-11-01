@@ -17,8 +17,8 @@ vault_test_backup_config := I64{0}
     }
     destructor :: jet_rt_alloc(I64{24}, I64{8})
     sync_store(destructor, I64{1})
-    sync_store(destructor + I64{8}, destructor_code)
-    sync_store(destructor + I64{16}, I64{0})
+    sync_store(wrapping(destructor + I64{8}), destructor_code)
+    sync_store(wrapping(destructor + I64{16}), I64{0})
     vault_test_destructor = destructor_code
     vault_test_backup_mutex = jet_rt_alloc(I64{8}, I64{8})
     sync_store(vault_test_backup_mutex, I64{0})
@@ -53,10 +53,10 @@ fn vault_test_borrow_stop() {
     trap_defect_exit(I64{101})
 }
 #Export(c) fn jet_rt_vault_test_hooks_destroy(_closure: I64, state: I64) -> I64 {
-    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    if (sync_load(wrapping(state + I64{24})) != I64{0}) -> vault_test_borrow_stop()
     authorizer :: sync_load(state)
-    trust :: sync_load(state + I64{8})
-    fault :: sync_load(state + I64{16})
+    trust :: sync_load(wrapping(state + I64{8}))
+    fault :: sync_load(wrapping(state + I64{16}))
     if (authorizer != I64{0}) -> scheduler_closure_drop(authorizer)
     if (trust != I64{0}) -> jet_rt_string_drop(trust)
     if (fault != I64{0}) -> jet_rt_string_drop(fault)
@@ -67,7 +67,7 @@ fn vault_test_borrow_stop() {
 // the closure's release entry owns its environment and header on final drop.
 #Export(c) fn jet_rt_vault_set_test_authorizer(closure: I64) {
     state :: vault_test_state_ensure()
-    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    if (sync_load(wrapping(state + I64{24})) != I64{0}) -> vault_test_borrow_stop()
     previous :: sync_load(state)
     sync_store(state, closure)
     if (previous != I64{0}) -> scheduler_closure_drop(previous)
@@ -75,7 +75,7 @@ fn vault_test_borrow_stop() {
 #Export(c) fn jet_rt_vault_clear_test_authorizer() {
     state :: vault_test_state()
     if (state == I64{0}) -> return
-    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    if (sync_load(wrapping(state + I64{24})) != I64{0}) -> vault_test_borrow_stop()
     previous :: sync_load(state)
     sync_store(state, I64{0})
     if (previous != I64{0}) -> scheduler_closure_drop(previous)
@@ -86,30 +86,30 @@ fn vault_test_borrow_stop() {
     if (state == I64{0}) -> return I64{-1}
     closure :: sync_load(state)
     if (closure == I64{0}) -> return I64{-1}
-    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
-    sync_store(state + I64{24}, I64{1})
-    answer :: coll_call2(sync_load(closure + I64{8}), closure, preview)
-    sync_store(state + I64{24}, I64{0})
+    if (sync_load(wrapping(state + I64{24})) != I64{0}) -> vault_test_borrow_stop()
+    sync_store(wrapping(state + I64{24}), I64{1})
+    answer :: coll_call2(sync_load(wrapping(closure + I64{8})), closure, preview)
+    sync_store(wrapping(state + I64{24}), I64{0})
     if ((answer.bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1}
 }
 fn vault_test_set_text(offset: I64, text: I64) {
     state :: vault_test_state_ensure()
-    previous :: sync_load(state + offset)
+    previous :: sync_load(wrapping(state + offset))
     // Clone before dropping: callers may borrow the existing hook value.
     next :: if (text == I64{0}) -> I64{0} else -> jet_rt_string_clone(text)
-    sync_store(state + offset, next)
+    sync_store(wrapping(state + offset), next)
     if (previous != I64{0}) -> jet_rt_string_drop(previous)
 }
 #Export(c) fn jet_rt_vault_set_test_trust_path(path: I64) { vault_test_set_text(I64{8}, path) }
 #Export(c) fn jet_rt_vault_test_trust_path() -> I64 {
     state :: vault_test_state()
-    if (state == I64{0}) -> I64{0} else -> sync_load(state + I64{8})
+    if (state == I64{0}) -> I64{0} else -> sync_load(wrapping(state + I64{8}))
 }
 #Export(c) fn jet_rt_vault_set_test_fault(fault: I64) { vault_test_set_text(I64{16}, fault) }
 #Export(c) fn jet_rt_vault_test_fault(name: I64) -> Bool {
     state :: vault_test_state()
     if (state == I64{0}) -> return false
-    fault :: sync_load(state + I64{16})
+    fault :: sync_load(wrapping(state + I64{16}))
     fault != I64{0} && jet_rt_string_eq(fault, name)
 }
 // Reusable native barrier48: refs0 mutex8 participants16 remaining24
@@ -119,8 +119,8 @@ fn vault_test_set_text(offset: I64, text: I64) {
     barrier :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(barrier, I64{48})
     sync_store(barrier, I64{1})
-    sync_store(barrier + I64{16}, participants)
-    sync_store(barrier + I64{24}, participants)
+    sync_store(wrapping(barrier + I64{16}), participants)
+    sync_store(wrapping(barrier + I64{24}), participants)
     barrier
 }
 fn vault_test_barrier_retain(barrier: I64) { _ := sync_add(barrier, I64{1}) }
@@ -128,26 +128,26 @@ fn vault_test_barrier_retain(barrier: I64) { _ := sync_add(barrier, I64{1}) }
     if (sync_add(barrier, I64{-1}) == I64{1}) -> jet_rt_free(barrier, I64{48}, I64{8})
 }
 #Export(c) fn jet_rt_vault_test_barrier_wait(barrier: I64) {
-    mutex :: barrier + I64{8}
+    mutex :: wrapping(barrier + I64{8})
     sync_mutex_lock(mutex)
     // std::sync::Barrier::new(0), like new(1), releases each waiter immediately.
     // Keep the mutex/generation publication edge even for the zero case.
-    if (sync_load(barrier + I64{16}) == I64{0}) {
-        sync_store(barrier + I64{32}, wrapping(sync_load(barrier + I64{32}) + I64{1}))
-        sync_cond_notify_all(barrier + I64{40})
+    if (sync_load(wrapping(barrier + I64{16})) == I64{0}) {
+        sync_store(wrapping(barrier + I64{32}), wrapping(sync_load(wrapping(barrier + I64{32})) + I64{1}))
+        sync_cond_notify_all(wrapping(barrier + I64{40}))
         sync_mutex_unlock(mutex)
         return
     }
-    generation :: sync_load(barrier + I64{32})
-    remaining :: sync_load(barrier + I64{24}) - I64{1}
-    sync_store(barrier + I64{24}, remaining)
+    generation :: sync_load(wrapping(barrier + I64{32}))
+    remaining :: sync_load(wrapping(barrier + I64{24})) - I64{1}
+    sync_store(wrapping(barrier + I64{24}), remaining)
     if (remaining == I64{0}) {
-        sync_store(barrier + I64{24}, sync_load(barrier + I64{16}))
-        sync_store(barrier + I64{32}, wrapping(generation + I64{1}))
-        sync_cond_notify_all(barrier + I64{40})
+        sync_store(wrapping(barrier + I64{24}), sync_load(wrapping(barrier + I64{16})))
+        sync_store(wrapping(barrier + I64{32}), wrapping(generation + I64{1}))
+        sync_cond_notify_all(wrapping(barrier + I64{40}))
     } else {
-        loop sync_load(barrier + I64{32}) == generation {
-            _ := sync_cond_wait(barrier + I64{40}, mutex, I64{-1})
+        loop sync_load(wrapping(barrier + I64{32})) == generation {
+            _ := sync_cond_wait(wrapping(barrier + I64{40}), mutex, I64{-1})
         }
     }
     sync_mutex_unlock(mutex)
@@ -157,9 +157,9 @@ fn vault_test_barrier_retain(barrier: I64) { _ := sync_add(barrier, I64{1}) }
 fn vault_test_backup_drop(config: I64) {
     if (config == I64{0}) -> return
     if (sync_add(config, I64{-1}) != I64{1}) -> return
-    jet_rt_string_drop(sync_load(config + I64{8}))
-    jet_rt_vault_test_barrier_drop(sync_load(config + I64{16}))
-    jet_rt_vault_test_barrier_drop(sync_load(config + I64{24}))
+    jet_rt_string_drop(sync_load(wrapping(config + I64{8})))
+    jet_rt_vault_test_barrier_drop(sync_load(wrapping(config + I64{16})))
+    jet_rt_vault_test_barrier_drop(sync_load(wrapping(config + I64{24})))
     jet_rt_free(config, I64{32}, I64{8})
 }
 #Export(c) fn jet_rt_vault_set_test_backup_barrier(root: I64, entered: I64, release: I64) {
@@ -169,11 +169,11 @@ fn vault_test_backup_drop(config: I64) {
         if (entered == I64{0} || release == I64{0}) -> panic("vault test backup barrier pair is incomplete")
         next = jet_rt_alloc(I64{32}, I64{8})
         sync_store(next, I64{1})
-        sync_store(next + I64{8}, jet_rt_string_clone(root))
+        sync_store(wrapping(next + I64{8}), jet_rt_string_clone(root))
         vault_test_barrier_retain(entered)
         vault_test_barrier_retain(release)
-        sync_store(next + I64{16}, entered)
-        sync_store(next + I64{24}, release)
+        sync_store(wrapping(next + I64{16}), entered)
+        sync_store(wrapping(next + I64{24}), release)
     } else if (entered != I64{0} || release != I64{0}) -> panic("vault test backup barrier root is absent")
     sync_mutex_lock(vault_test_backup_mutex)
     previous :: vault_test_backup_config.copy()
@@ -188,9 +188,9 @@ fn vault_test_backup_drop(config: I64) {
     if (config != I64{0}) -> _ := sync_add(config, I64{1})
     sync_mutex_unlock(vault_test_backup_mutex)
     if (config == I64{0}) -> return
-    if jet_rt_string_eq(sync_load(config + I64{8}), root) {
-        jet_rt_vault_test_barrier_wait(sync_load(config + I64{16}))
-        jet_rt_vault_test_barrier_wait(sync_load(config + I64{24}))
+    if jet_rt_string_eq(sync_load(wrapping(config + I64{8})), root) {
+        jet_rt_vault_test_barrier_wait(sync_load(wrapping(config + I64{16})))
+        jet_rt_vault_test_barrier_wait(sync_load(wrapping(config + I64{24})))
     }
     vault_test_backup_drop(config)
 }

@@ -12,8 +12,8 @@
 // a sibling file and cannot lower a generic instantiated inside one ("missing
 // checked function target"), while the self-hosted compiler loads sibling
 // files itself and rejects the `module` line (E0105 "defined twice"); it also
-// cannot call a trait method through a bounded type parameter ("MIR trait
-// receiver is not a trait object"), so trait calls go through trait values.
+// cannot call a trait method through a bounded type parameter ("trait
+// receiver is not a trait object" from the Rust IR), so trait calls go through trait values.
 //
 // The generator also evaluates every generated function itself, so the
 // expected output is derived from the same template parameters that wrote

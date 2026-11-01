@@ -3,12 +3,9 @@ use core.ui.[UINode]
 use core.ui.host.[UIAccessibility, UIAccessibilityProjection, UIHostError, UINodeID]
 
 // core.ui.host.accessibility — route canonical node metadata through the host.
-fn attach(node: UINode, metadata: UIAccessibility) UIHostError! -[IO]> {
+fn attach(node: UINode, metadata: UIAccessibility) -[IO]> UINode UIHostError! {
     #Unsafe("Core accessibility attaches metadata to the canonical node through the current retained provider") {
-        if core.ui.host.accessibility.__attach(node, metadata) == {
-            .Ok(_) -> return Ok(())
-            .Err(error) -> return Err(error)
-        }
+        core.ui.host.accessibility.__attach(node, metadata)
     }
 }
 

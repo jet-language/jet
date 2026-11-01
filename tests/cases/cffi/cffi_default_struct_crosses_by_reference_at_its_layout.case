@@ -1,0 +1,32 @@
+# A struct without `#Layout` crosses to C by reference (`&Mixed`) as the
+# address of its own bytes. c/mixed.c declares it from Mixed.$layout
+# (descending alignment, explicit tail padding), and main.jet compares the C
+# side's sizeof, _Alignof and offsetof with $layout before any call, so a
+# drift between the compiler's placement and the layout it reports fails
+# here on every tier. C reads and writes the fields in place: the pointer it
+# keeps from `remember` is the one `same` receives, and `run` copies no bytes.
+requires: tool:cc|gcc|clang
+fixture: cffi_default_struct_crosses_by_reference_at_its_layout.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --optimize=none main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = cffi_default_struct_crosses_by_reference_at_its_layout.out
+step: jet build --optimize=basic main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = cffi_default_struct_crosses_by_reference_at_its_layout.out
+step: jet build --optimize=full main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = cffi_default_struct_crosses_by_reference_at_its_layout.out
+step: jet inspect decisions --release main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # --release runs the O2 passes
+stdout: count "copy_bytes" = 0 # value crosses to C by its address, never copied

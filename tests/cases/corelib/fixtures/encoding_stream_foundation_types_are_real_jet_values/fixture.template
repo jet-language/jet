@@ -59,8 +59,8 @@ fn run() {
     output :: files.create("{work}/foundation.json") ?? panic("create")
     writer :: json.writer(^output, limits, false) ?? panic("writer")
     kept_writer := keep_json_writer(^writer)
-    kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
-    kept_writer.finish() ?? panic("finish")
+    &kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
+    &kept_writer.finish() ?? panic("finish")
 
     bad := encoding.EncodingLimits.safe()
     bad.buffer_bytes = 1

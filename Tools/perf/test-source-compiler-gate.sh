@@ -3,8 +3,8 @@
 # not run by the implementation worker: the owner runs it after Foundation's
 # real private adapter is integrated.  The fixture is complete across every
 # frozen cell, workflow, tier, implementation, metric, and sample; only the
-# Source values mutate, proving that parity and the general 1.05 noise band
-# are both losses in this lane.
+# Source values mutate, proving that Source/reference ratios of 1.00 and 1.05
+# are both losses.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -154,12 +154,12 @@ expect_status() {
 make_report 99
 expect_status 0 'strict Source win across all cells'
 
-# 1.00 is parity and MUST fail; this is not the general Rust 1.05 policy.
+# Only a strict win passes: 1.00 MUST fail.
 make_report 100
-expect_status 1 'parity ratio 1.00' 'required <1.00'
+expect_status 1 'ratio 1.00' 'required <1.00'
 
-# 1.05 is the general language noise band and MUST also fail this lane.
+# 1.05 MUST fail too; no peer has a tolerance band.
 make_report 105
-expect_status 1 'noise-band ratio 1.05' 'required <1.00'
+expect_status 1 'ratio 1.05' 'required <1.00'
 
 printf '%s\n' 'source compiler gate canary: CODE covers strict ratio and complete matrix'

@@ -13,13 +13,13 @@ PRECISE_BOTTOM :: I64{8}
 // JSONNumber.rs JSON_NUMBER_MAX_DIGITS / JSON_NUMBER_MAX_EXPONENT.
 DECIMAL_MAX_DIGITS :: I64{1000000}
 
-fn precise_top(value: I64) -> I64 { rt_text_word(value + PRECISE_TOP) }
-fn precise_bottom(value: I64) -> I64 { rt_text_word(value + PRECISE_BOTTOM) }
+fn precise_top(value: I64) -> I64 { rt_text_word(wrapping(value + PRECISE_TOP)) }
+fn precise_bottom(value: I64) -> I64 { rt_text_word(wrapping(value + PRECISE_BOTTOM)) }
 
 fn precise_pair(top: I64, bottom: I64) -> I64 {
     result :: jet_rt_alloc(PRECISE_HANDLE_BYTES, I64{8})
-    rt_text_store(result + PRECISE_TOP, top)
-    rt_text_store(result + PRECISE_BOTTOM, bottom)
+    rt_text_store(wrapping(result + PRECISE_TOP), top)
+    rt_text_store(wrapping(result + PRECISE_BOTTOM), bottom)
     result
 }
 
@@ -333,7 +333,7 @@ fn decimal_render(value: I64) -> I64 {
 fn decimal_digits_valid(data: I64, from: I64, to: I64) -> Bool {
     at := from
     loop at < to {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         if (byte < I64{48} || byte > I64{57}) -> return false
         at += I64{1}
     }
@@ -351,24 +351,24 @@ fn decimal_parse(text: I64) -> I64 {
     data :: rt_text_data(text)
     at := start
     negative := false
-    first :: rt_text_byte(data + at)
+    first :: rt_text_byte(wrapping(data + at))
     if (first == I64{45} || first == I64{43}) {
         negative = first == I64{45}
         at += I64{1}
     }
     stop := at
-    loop stop < end && rt_text_byte(data + stop) != (I64{101}) && rt_text_byte(data + stop) != (I64{69}) { stop += I64{1} }
+    loop stop < end && rt_text_byte(wrapping(data + stop)) != (I64{101}) && rt_text_byte(wrapping(data + stop)) != (I64{69}) { stop += I64{1} }
     exponent := I64{0}
     if (stop < end) {
         cursor := stop + I64{1}
         exponent_negative := false
-        if (cursor < end && (rt_text_byte(data + cursor) == I64{45} || rt_text_byte(data + cursor) == I64{43})) {
-            exponent_negative = rt_text_byte(data + cursor) == I64{45}
+        if (cursor < end && (rt_text_byte(wrapping(data + cursor)) == I64{45} || rt_text_byte(wrapping(data + cursor)) == I64{43})) {
+            exponent_negative = rt_text_byte(wrapping(data + cursor)) == I64{45}
             cursor += I64{1}
         }
         if (cursor >= end || !decimal_digits_valid(data, cursor, end)) -> return I64{0}
         loop cursor < end {
-            exponent = exponent * I64{10} + rt_text_byte(data + cursor) - I64{48}
+            exponent = exponent * I64{10} + rt_text_byte(wrapping(data + cursor)) - I64{48}
             // Past the limit the reference fails either way (range or i64 parse).
             if (exponent > DECIMAL_MAX_DIGITS) -> return I64{0}
             cursor += I64{1}
@@ -376,7 +376,7 @@ fn decimal_parse(text: I64) -> I64 {
         if exponent_negative -> exponent = -exponent
     }
     dot := at
-    loop dot < stop && rt_text_byte(data + dot) != (I64{46}) { dot += I64{1} }
+    loop dot < stop && rt_text_byte(wrapping(data + dot)) != (I64{46}) { dot += I64{1} }
     fraction_start :: if (dot < stop) -> dot + I64{1} else -> stop
     whole_len :: dot - at
     fraction_len :: stop - fraction_start
@@ -385,8 +385,8 @@ fn decimal_parse(text: I64) -> I64 {
     if (whole_len + fraction_len > DECIMAL_MAX_DIGITS) -> return I64{0}
     scale :: fraction_len - exponent
     if (scale < I64{0} && whole_len + fraction_len - scale > DECIMAL_MAX_DIGITS) -> return I64{0}
-    whole :: jet_rt_int_from_static(data + at, whole_len)
-    part :: jet_rt_int_from_static(data + fraction_start, fraction_len)
+    whole :: jet_rt_int_from_static(wrapping(data + at), whole_len)
+    part :: jet_rt_int_from_static(wrapping(data + fraction_start), fraction_len)
     shifted :: precise_scale_up(whole, fraction_len)
     coefficient :: jet_int_add(shifted, part)
     jet_rt_int_drop(whole)
@@ -552,9 +552,9 @@ fn decimal_integral(value: I64, mode: I64) -> I64 {
 #Export(c) fn jet_decimal_to_float(value: I64) -> Float {
     text :: decimal_render(value)
     slots :: jet_rt_alloc(I64{16}, I64{8})
-    parsed :: jet_float_parse(text, slots, slots + I64{8})
+    parsed :: jet_float_parse(text, slots, wrapping(slots + I64{8}))
     bits :: rt_text_word(slots)
-    if (parsed == I64{0}) -> jet_rt_string_drop(rt_text_word(slots + I64{8}))
+    if (parsed == I64{0}) -> jet_rt_string_drop(rt_text_word(wrapping(slots + I64{8})))
     jet_rt_free(slots, I64{16}, I64{8})
     jet_rt_string_drop(text)
     rt_f64_from_bits(bits)

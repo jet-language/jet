@@ -1,11 +1,12 @@
 package {
     name: "files_store_primitives"
-    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+    authority: { allow: [Env, FS, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 // Store-grade core.files primitives (#3593): exclusive create with a mode,
 // no-follow opens, file identity, held directories, refusing and swapping
-// renames, and extended attributes. Each failure prints its IOError kind.
+// renames, extended attributes, and advisory locks. Each failure prints its
+// IOError kind.
 
 use core.files as files
 
@@ -112,4 +113,21 @@ fn run() {
         }
         .Err(error) -> print("attribute written: {kind(error) == "Unsupported"}")
     }
+
+    // D-CORE-FILELOCK1: a held exclusive lock makes try_lock report None;
+    // closing the owner releases the lock and keeps the lock file.
+    lock_path :: files.join(root, "store.lock")
+    held :: files.lock(lock_path)
+    if files.try_lock(lock_path) == {
+        .None -> print("try_lock while held: None")
+        .Val(_) -> print("try_lock while held: acquired")
+        .Err(error) -> print("try_lock while held: {kind(error)}")
+    }
+    close(^held)
+    if files.try_lock(lock_path) == {
+        .None -> print("try_lock after close: None")
+        .Val(_) -> print("try_lock after close: acquired")
+        .Err(error) -> print("try_lock after close: {kind(error)}")
+    }
+    print("lock file kept: {files.exists(lock_path)}")
 }

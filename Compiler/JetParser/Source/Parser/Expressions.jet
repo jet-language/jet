@@ -71,7 +71,6 @@ use jet_lexer.[
     TOKEN_KW_IF,
     TOKEN_KW_IT,
     TOKEN_KW_LOOP,
-    TOKEN_KW_MOVE,
     TOKEN_KW_TAG,
     TOKEN_KW_USE,
     TOKEN_LBRACE,
@@ -102,6 +101,7 @@ use jet_lexer.[
     TOKEN_SLASH_PERCENT,
     TOKEN_STAR,
     TOKEN_STRING,
+    TOKEN_TILDE,
     TOKEN_TRUE,
     TOKEN_UNIT_NUMBER,
     StringPart,
@@ -224,7 +224,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
     }
 
     left := parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
-    left = parser_parse_postfix(&state, ^left, depth + 1, allow_struct_lit)
+    left = parser_parse_postfix(&state, ^left, depth + 1, allow_struct_lit, false)
     loop {
         operator := parser_current_kind(&state)
         precedence := parser_expression_precedence(operator)
@@ -244,6 +244,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             }
             &state.diagnostics.push(diagnostic)
             state.abort_mark = state.diagnostics.len()
+            state.abort_position = state.position
             break
         }
 
@@ -259,10 +260,21 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         }
 
         if operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(&state) {
+            // Rust `try_named_struct_pattern`: a `Point{…}` head that does
+            // not read as a pattern (`Envelope{ badge: dep.Badge{ … } }`) is
+            // the struct value it spells.
+            named :: parser_named_struct_pattern_ahead(&state)
+            saved_position :: state.position
+            saved_diagnostics :: state.diagnostics.len()
+            saved_blocks :: state.block_spans.len()
+            saved_else_arms :: state.else_arms.len()
             pattern :: parser_parse_pattern(&state, depth + 1, allow_struct_lit)
-            span := parser_cover(left.span, pattern.span)
-            left = ParsedExpr{expr: Expr.PatternTest{subject: ^left.expr, pattern: pattern.pattern, span: span, id: parser_node_id(&state)}, span: span}
-            next
+            if !named || !parser_error_since(state, saved_diagnostics) {
+                span := parser_cover(left.span, pattern.span)
+                left = ParsedExpr{expr: Expr.PatternTest{subject: ^left.expr, pattern: pattern.pattern, span: span, id: parser_node_id(&state)}, span: span}
+                next
+            }
+            parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
         }
 
         right := parser_parse_expression_restricted(&state, precedence + 1, depth + 1, allow_struct_lit, stop_before_comparison)
@@ -351,6 +363,21 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
         "Write `{grouped}` to keep today's meaning, or regroup the conditions the way you intended",
     )
     &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+}
+
+// E0941 (D-COPY-WORD1=A): the retired prefix copy sigil. The Safe fix
+// rewrites `~operand` to `operand.copy()`, parenthesized when the operand is
+// not a postfix chain; without operand text the fix stays prose.
+fn parser_report_retired_copy_sigil(state: &JetParserState, sigil: Span, full: Span) {
+    operand_text :: parser_source_slice(state, sigil.end, full.end).trim()
+    shown :: if operand_text == "" -> "x" else -> operand_text
+    replacement :: if parser_is_postfix_operand(shown) -> "{shown}.copy()" else -> "({shown}).copy()"
+    diagnostic :: diagnostic_from_registry("E0941", Val(sigil), "the `~` copy sigil is retired; a copy is the method `x.copy()`", "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` (D-COPY-WORD1), so a copy reads as a word and chains like any method", "write `{replacement}`")
+    if operand_text == "" {
+        &state.diagnostics.push(diagnostic)
+        return
+    }
+    &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: full, new_text: replacement}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
 fn parser_is_postfix_operand(text: String) -> Bool Never! {
@@ -491,7 +518,9 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     record_head := if head == {
         None -> true
         Val(ty) -> if ty == {
-            .Named(name) -> name != "Layout"
+            // A constraint `Layout{…}` body holds comparisons, never
+            // `field:` entries, so a user record named `Layout` stays a record.
+            .Named(name) -> name != "Layout" || (parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_COLON)
             .Apply(_, _) -> true
             else -> false
         }
@@ -652,6 +681,18 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         if kind == TOKEN_MINUS -> op = UnOp.Neg
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.Unary{op: op, operand: operand.expr, span: span, id: parser_node_id(&state)}, span: span}
+    }
+    // D-COPY-WORD1=A: the prefix `~x` sigil and the `copy x` word are
+    // retired; a copy is the built-in method `x.copy()`. Teach (E0941 with a
+    // Safe rewrite, E0991 in prose), then recover as the copy so parsing
+    // continues.
+    if kind == TOKEN_TILDE || kind == TOKEN_KW_COPY {
+        parser_bump(&state)
+        if kind == TOKEN_KW_COPY -> parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` (D-COPY-WORD1) — so all code reads the same", "write `name.copy()` in place of `copy name`")
+        operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
+        span := parser_cover(token.span, operand.span)
+        if kind == TOKEN_TILDE -> parser_report_retired_copy_sigil(&state, token.span, span)
+        return ParsedExpr{expr: Expr.Copy{value: operand.expr, span: span, id: parser_node_id(&state)}, span: span}
     }
     // `&` or `^` marks the maximal
     // place after it. Before a place-rooted method chain it marks the place
@@ -865,7 +906,11 @@ fn parser_parse_marker_value(state: &JetParserState, depth: Int, allow_struct_li
         applied = if kind_name.len() == 0 -> "Input" else -> kind_name
         parser_add_error_code(&state, "E0927", head_span, "`#Tainted` is retired", "taint kinds are ordinary declared fact tags", "write `#{applied} value`")
     }
-    inner :: parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
+    named :: parser_current_kind(&state) == TOKEN_IDENT
+    inner := parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
+    // Rust `expr_primary` reads a bare name's call or member call with the
+    // name, so `#Checked Die.from_int(1)` tags the call's value.
+    if named && inner.expr == .Ident(_, _, _) -> inner = parser_parse_postfix(&state, ^inner, depth + 1, allow_struct_lit, true)
     span :: parser_cover(head_span, inner.span)
     ParsedExpr{expr: Expr.Tainted{value: inner.expr, tag: Val(applied), span: span, id: parser_node_id(&state)}, span: span}
 }
@@ -989,6 +1034,7 @@ fn parser_take_nested_failure(state: &JetParserState, diagnostics: [Diagnostic])
     if parser_aborting(&state) -> return
     loop diagnostic in diagnostics -> &state.diagnostics.push(diagnostic)
     state.abort_mark = state.diagnostics.len()
+    state.abort_position = state.position
 }
 
 // The closed interpolation selector
@@ -1531,14 +1577,24 @@ fn parser_is_adjacent_call_result(expr: Expr) -> Bool Never! {
     }
 }
 
-fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
+fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int, allow_struct_lit: Bool, primary_tail: Bool) -> ParsedExpr {
     expression := ^initial
     // Rust `expr_primary`: a capitalized name's own `<…>` (`Pool<T>.new()`)
     // and call-site arguments (`decode<Order>(raw)`).
     owner_type_args := [Type]{}
     call_type_args := [Type]{}
+    // `primary_tail` reads only what Rust `expr_primary` read after a bare
+    // name: one call (`name(…)`), or one member with its call
+    // (`name.member(…)`), with their `<…>` lists and a literal head.
+    tail_member := false
+    tail_done := false
     loop {
         kind :: parser_current_kind(&state)
+        if primary_tail {
+            if tail_done -> break
+            if kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_QUESTION_DOT -> break
+            if tail_member && kind != TOKEN_LPAREN && kind != TOKEN_LT && kind != TOKEN_LBRACE -> break
+        }
         if kind == TOKEN_LT {
             // Rust `ptr_from_addr`: `alias.Ptr<T>.from_addr(addr)` reads its
             // `<…>` as the element type, not a comparison.
@@ -1553,7 +1609,9 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
                 .Field(_, member, _, _) -> if parser_turbofish_ahead(&state, TOKEN_LBRACE) -> member else -> ""
                 else -> ""
             }
-            if allow_struct_lit && owner_type_args.len() == 0 && parser_pascal_name(literal_name) {
+            // An adjacent `Owner<T>.` names a generic owner even where a
+            // struct literal can't start (`if List<Int>.try_new() == {`).
+            if owner_type_args.len() == 0 && parser_pascal_name(literal_name) && (allow_struct_lit || parser_turbofish_ahead(&state, TOKEN_DOT)) {
                 owner_type_args = parser_parse_call_type_args(&state, depth + 1)
                 next
             }
@@ -1635,6 +1693,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
             }
             owner_type_args = [Type]{}
             call_type_args = [Type]{}
+            tail_done = true
             next
         }
         // A bare `{ }` after a field chain is a struct literal only on an
@@ -1669,6 +1728,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
             literal :: if upper -> Expr.StructLit{type_name: "{alias}.{type_name}", type_args: owner_type_args, import_ns: None, as_trait: None, fields: parsed.fields, inferred: false, span: span, id: parser_node_id(&state)} else -> Expr.StructLit{type_name: type_name, type_args: owner_type_args, import_ns: Val(alias), as_trait: None, fields: parsed.fields, inferred: false, span: span, id: parser_node_id(&state)}
             expression = ParsedExpr{expr: literal, span: span}
             owner_type_args = [Type]{}
+            tail_done = true
             next
         }
         if kind == TOKEN_LBRACKET {
@@ -1712,6 +1772,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
         }
         if kind == TOKEN_DOT || kind == TOKEN_QUESTION_DOT {
             operator :: parser_bump(&state)
+            tail_member = true
             // A capitalized name's `<…>` belongs only to the member it names.
             owner_head :: parser_literal_head_path(expression.expr)
             if owner_head == "" || owner_head.contains(".") -> owner_type_args = [Type]{}
@@ -1748,8 +1809,13 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
                 expression = ParsedExpr{expr: Expr.Field{base: ^expression.expr, member: "0", span: span, id: parser_node_id(&state)}, span: span}
                 next
             }
-            member :: if parser_current_kind(&state) == TOKEN_KW_COPY || parser_current_kind(&state) == TOKEN_KW_MOVE -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
-            member_name :: if member.kind == TOKEN_KW_COPY || member.kind == TOKEN_KW_MOVE -> parser_text(state, member) else -> parser_value(state, member)
+            // After `.` or `?.` a member is a name even when the word is a
+            // keyword elsewhere (`x.copy()`, `reactive.effect(…)`): no keyword
+            // syntax starts at a member position.
+            next_token :: parser_current(&state)
+            keyword_member :: parser_is_keyword_token(state, next_token)
+            member :: if keyword_member -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
+            member_name :: if keyword_member -> parser_text(state, member) else -> parser_value(state, member)
             span := parser_cover(expression.span, member.span)
             // A field access is spanned at its member name, as in the
             // reference; `span` covers the base too.

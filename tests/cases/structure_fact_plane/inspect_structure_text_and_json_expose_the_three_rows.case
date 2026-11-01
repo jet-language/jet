@@ -10,7 +10,8 @@ stdout: ~ _name # Original text-report containment.
 stdout: ~ policy allow # Original text-report containment.
 stdout: ~ manifest rule edit # Original text-report containment.
 step: jet inspect structure --json structure_plane.jet
-stdout: ^= "{\"schema_version\":1," # Original JSON begins with schema_version1.
+# The Rust prefix `{"schema_version":1,` predates the status object every --json command emits (`jet.status/v1`), which the structure_plane.structure.json golden already follows.
+stdout: ^= "{\"schema\":\"jet.status/v1\"," # JSON begins with the status envelope.
 stdout: ~ Structure.Liveness # Original JSON text containment.
 stdout: ~ Structure.Lifecycle # Original JSON text containment.
 stdout: ~ Structure.ImportEdge # Original JSON text containment.

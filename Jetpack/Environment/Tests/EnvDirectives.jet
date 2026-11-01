@@ -169,7 +169,7 @@ fn env_file_test_sorted(values: [String]) -> [String] {
     // the source declarations.
     added :: EnvFile.add(dir, env_file_test_classify_in("fd@unstable", table)) ?? panic("add fd@unstable")
     assert(added.packages.contains("fd@unstable"))
-    assert_eq(added.named.len(), 2, "named sources must survive an edit")
+    assert(added.named.len() == 2, "named sources must survive an edit")
     // Removing it by its full ref works.
     removed :: EnvFile.remove(dir, env_file_test_classify_in("fd@unstable", table)) ?? panic("remove fd@unstable")
     assert(removed.removed)

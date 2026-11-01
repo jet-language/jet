@@ -11,11 +11,20 @@ use core.time as time
 struct KeyRef<T> {
     name: String
     version: Int
+    // The repository identity the vault issued this reference under: store
+    // uuid (16 bytes), record opaque id (16), record hash (32). The provider
+    // re-verifies all of it, so a same-named generation in a restored or
+    // re-imported repository never answers for this reference.
+    priv identity: [U8]
 
     // A reference renders only its public repository name and generation.
     // Its phantom key type never needs Display and never exposes key bytes.
     impl Display {
         fn display(self) -> String { "repo:{self.name}@v{self.version}" }
+    }
+    // Debug shows the public fields only; the identity stays private.
+    impl Debug {
+        fn debug(^self) -> String { "KeyRef {{ name: {self.name.debug()}, version: {self.version} }}" }
     }
 }
 
@@ -63,14 +72,13 @@ fn __close_secret_storage<T>(value: ^Shared<T?>) Never! {
     __take_expired<T>(owner)
 }
 
-// Acquire the guard here: removal consumes an owned local, never a borrowed
-// guard parameter. Reinitialize the slot before dropping its moved payload.
+// Acquire the guard here: removal edits an owned guard, never a borrowed
+// guard parameter. Assigning `None` through the guard drops the stored
+// payload in place; a `^` cannot take it out of the guard (E0120, #6450).
 // The approved general mono-time Close drop glue (#4792) owns cleanup.
 fn __take_expired<T>(storage: Shared<T?>) Never! {
     guard := storage.guard_edit()
-    removed :: ^guard.value
     guard.value = None
-    _ :: ^removed
 }
 
 // A read parameter's pattern payload is an existing non-owning read window.
@@ -216,7 +224,7 @@ struct KeyWrapError {
 // result is separate from typed vault key handles.
 fn get(name: String) -[Secret]> String? Never! { vault.get(name) }
 
-fn load<T>(key: &KeyRef<T>) -[Secret]> T VaultError! {
+fn load<T>(key: KeyRef<T>) -[Secret]> T VaultError! {
     #Unsafe("vault typed load provider boundary") {
         return vault.load<T>(key)
     }
@@ -229,7 +237,7 @@ fn current<T>(name: String) -[Secret]> KeyRef<T>? VaultError! {
     }
 }
 
-fn status<T>(key: &KeyRef<T>) -[Secret]> KeyStatus VaultError! {
+fn status<T>(key: KeyRef<T>) -[Secret]> KeyStatus VaultError! {
     #Unsafe("vault typed status provider boundary") {
         return vault.status<T>(key)
     }
@@ -287,28 +295,28 @@ fn prepare_rotate<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
     }
 }
 
-fn prepare_retire<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
+fn prepare_retire<T>(key: KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
     validate_reason(reason) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed retirement provider boundary") {
         return vault.prepare_retire<T>(key, reason)
     }
 }
 
-fn prepare_revoke<T>(key: &KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
+fn prepare_revoke<T>(key: KeyRef<T>, reason: String) -[Secret]> MutationPlan<T> VaultError! {
     validate_reason(reason) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed revocation provider boundary") {
         return vault.prepare_revoke<T>(key, reason)
     }
 }
 
-fn authorize_write<T>(plan: &MutationPlan<T>, reason: String) -[Secret]> VaultWrite<T> VaultError! {
+fn authorize_write<T>(plan: MutationPlan<T>, reason: String) -[Secret]> VaultWrite<T> VaultError! {
     validate_reason(reason) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault write authorization provider boundary") {
         return vault.authorize_write<T>(plan, reason)
     }
 }
 
-fn authorize_wrapped_import<T>(plan: &WrappedImportPlan<T>, reason: String) -[Secret]> VaultWrite<T> KeyWrapError! {
+fn authorize_wrapped_import<T>(plan: WrappedImportPlan<T>, reason: String) -[Secret]> VaultWrite<T> KeyWrapError! {
     validate_reason(reason) ?? return Err(KeyWrapError{reason: "invalid authorization reason"})
     #Unsafe("vault wrapped authorization provider boundary") {
         return vault.authorize_wrapped_import<T>(plan, reason)
@@ -363,13 +371,13 @@ fn commit_revoke<T>(write: ^VaultWrite<T>, plan: ^MutationPlan<T>) VaultError! -
     }
 }
 
-fn export_to_passphrase<T>(key: &KeyRef<T>, passphrase: &Secret) -[Secret]> WrappedVaultKey KeyWrapError! {
+fn export_to_passphrase<T>(key: KeyRef<T>, passphrase: Secret) -[Secret]> WrappedVaultKey KeyWrapError! {
     #Unsafe("vault passphrase export provider boundary") {
         return vault.export_to_passphrase<T>(key, passphrase)
     }
 }
 
-fn export_to_recipients<T>(key: &KeyRef<T>, recipients: [X25519PublicKey]) -[Secret]> WrappedVaultKey KeyWrapError! {
+fn export_to_recipients<T>(key: KeyRef<T>, recipients: [X25519PublicKey]) -[Secret]> WrappedVaultKey KeyWrapError! {
     if recipients.len() == 0 || recipients.len() > 16 -> return Err(KeyWrapError{reason: "recipient count must be 1..=16"})
     #Unsafe("vault recipient export provider boundary") {
         return vault.export_to_recipients<T>(key, recipients)

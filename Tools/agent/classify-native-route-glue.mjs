@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Inventory classification, not an emission seed or a native layout witness.
-// The MIR-backed lower_native_source_type predicate makes final ownership.
+// The IR-backed lower_native_source_type predicate makes final ownership.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,7 +45,7 @@ export function classifyNativeInventory(inventory, routes, source) {
   }
   const classified = [...rows.values()].map((row) => ({ ...row,
     status: row.declarations.length === 0 ? 'rust-only' : row.schema ? 'source-record-candidate' : 'source-opaque-candidate',
-    nativeLayout: 'unexercised: requires current MIR ownership predicate',
+    nativeLayout: 'unexercised: requires current IR ownership predicate',
     symbols: [...new Set(row.symbols)].sort(),
   })).sort((a, b) => b.symbols.length - a.symbols.length || a.runtime.localeCompare(b.runtime));
   return { types: classified, unclassified: unclassified.sort(), counts: {

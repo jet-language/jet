@@ -429,7 +429,7 @@ use std.[fs, sync, thread, env]
     dir :: temp_dir("project_rename")
     fs.write(dir.join("package.jet"), "name: \"project_rename\"\nversion: \"0.1.0\"\n").unwrap()
     entry :: dir.join("main.jet")
-    fs.write(entry, "pub fn helper() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    print(helper())\n}}\n").unwrap()
+    fs.write(entry, "fn helper() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    print(helper())\n}}\n").unwrap()
     other :: dir.join("other.jet")
     fs.write(other, "use \"./main\" as main\n\nfn use_helper() -> Int {{\n    return main.helper()\n}}\n").unwrap()
     unrelated :: dir.join("unrelated.jet")
@@ -442,7 +442,7 @@ use std.[fs, sync, thread, env]
     main_revision :: source_revision(main_before)
     request :: "{{\"schema_version\":1,\"op\":\"preview_rename\",\"source_id\":\"main.jet\",\"revision\":\"{main_revision}\",\"project_revision\":\"{project_revision}\",\"symbol\":\"helper\",\"to\":\"compute\"}}"
     preview :: query_json_for_entry(entry, request).expect("project rename preview")
-    loop field in ["\"op\":\"preview_rename\"", "\"project_revision\":\"sha256-", "\"source_id\":\"main.jet\"", "\"source_id\":\"other.jet\"", "\"source_id\":\"unrelated.jet\"", "\"files\"", "-pub fn helper()", "+pub fn compute()"] -> assert(preview.contains(field), "rename preview missing {field}: {preview}")
+    loop field in ["\"op\":\"preview_rename\"", "\"project_revision\":\"sha256-", "\"source_id\":\"main.jet\"", "\"source_id\":\"other.jet\"", "\"source_id\":\"unrelated.jet\"", "\"files\"", "-fn helper()", "+fn compute()"] -> assert(preview.contains(field), "rename preview missing {field}: {preview}")
     assert_eq(fs.read_to_string(entry).unwrap(), main_before)
     assert_eq(fs.read_to_string(other).unwrap(), other_before)
     assert_eq(fs.read_to_string(unrelated).unwrap(), unrelated_before)
@@ -540,8 +540,8 @@ use std.[fs, sync, thread, env]
     dir :: temp_dir("actions_exports")
     fs.create_dir_all(dir.join(".jet/bindings/js")).unwrap()
     descriptor :: binder_descriptor(ForeignLanguage.JS).expect("JavaScript binder descriptor").stamp()
-    fs.write(dir.join(".jet/bindings/js/plotly.jet"), "// jet-ffi-descriptor={descriptor}\npub fn println() -> Int {{\n    return 1\n}}\n").unwrap()
-    fs.write(dir.join("helper.jet"), "fn hidden(n: Int) -> Int {{\n    return n\n}}\n\npub fn square(n: Int) -> Int {{\n    return n * n\n}}\n\npub fn noisy(n: Int) -[IO]> Int {{\n    print(n)\n    return n\n}}\n").unwrap()
+    fs.write(dir.join(".jet/bindings/js/plotly.jet"), "// jet-ffi-descriptor={descriptor}\nfn println() -> Int {{\n    return 1\n}}\n").unwrap()
+    fs.write(dir.join("helper.jet"), "priv module internal {{\n    fn hidden(n: Int) -> Int {{\n        return n\n    }}\n}}\n\nfn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn noisy(n: Int) -[IO]> Int {{\n    print(n)\n    return n\n}}\n").unwrap()
     path :: dir.join("main.jet")
     src :: "use \"./helper\" as h\nuse js.plotly as plot\n\nfn run() {{\n    print(plot.println())\n    print(h.square(2))\n}}\n"
     fs.write(path, src).unwrap()
@@ -590,7 +590,7 @@ use std.[fs, sync, thread, env]
 // Rust: tests/canvas.rs:3254
 #Test("canvas_actions_preserve_nested_imported_module_callee") {
     dir :: temp_dir("actions_nested_import")
-    fs.write(dir.join("helper.jet"), "module tools {{\n    pub fn square(n: Int) -> Int {{\n        return n * n\n    }}\n}}\n").unwrap()
+    fs.write(dir.join("helper.jet"), "module tools {{\n    fn square(n: Int) -> Int {{\n        return n * n\n    }}\n}}\n").unwrap()
     path :: dir.join("main.jet")
     src :: "use \"./helper\" as h\n\nfn run(limit: Int) {{\n    print(limit)\n}}\n"
     fs.write(path, src).unwrap()

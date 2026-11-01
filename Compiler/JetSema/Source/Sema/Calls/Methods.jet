@@ -3,15 +3,23 @@
 // sema_call_check_method_candidate_owned; the local collector only exposes
 // declarations already present in SemaScopeTable.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     BUILTIN_METHOD_ROWS,
     BinOp,
     COLLECTION_OPERATIONS,
     AccessConvention,
+    Call,
     CallArg,
     Diagnostic,
     Expr,
     Func,
-    NodeKind,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
+    OrFallback,
+    Stmt,
+    StrPart,
     Span,
     SymbolID,
     SymbolKind,
@@ -21,7 +29,9 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     TextEdit,
+    ast_binding,
     ast_empty_call_arg_flags,
+    ast_empty_lambda_meta,
     builtin_method_receiver_accepts,
     core_source_receiver_method,
     core_source_receiver_method_routes,
@@ -53,7 +63,7 @@ fn sema_call_distinct_raw_finish(receiver_value: TExpr, args: [CallArg], span: S
     if args.len() > 0 {
         &diagnostics.push(sema_error("E0103", span, "`.raw()` takes no arguments", "`.raw()` simply unwraps the base value — no arguments needed", "write `.raw()` with no arguments"))
     }
-    value :: sema_tir_node(base, TExprKind.DistinctRaw{value: receiver_value}, span)
+    value :: sema_tree_node(base, TExprKind.DistinctRaw{value: receiver_value}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -101,13 +111,13 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
     scopes.transaction_wall_depth = saved_transaction_wall_depth
     callback :: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
     executable :: if callback.kind == {.Lambda(value) -> Val(value) else -> None} ?? {
-        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {type_name(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {sema_type_show(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     handle_name :: if receiver == {.Ident(name, _, _) -> name else -> ""}
     if handle_name == "" -> return SemaMethodSpecialCheck{handled: true, value: None}
     kind :: if method == "on_commit" -> TCoreClosureKind.OnCommit{handle_name: handle_name, executable: executable} else -> TCoreClosureKind.OnRollback{handle_name: handle_name, executable: executable}
-    value :: sema_tir_node(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
+    value :: sema_tree_node(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
     checked_value :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked_value}
 }
@@ -159,12 +169,37 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
             callback_value.kind = TExprKind.Lambda{value: moved_lambda}
         }
     }
-    tir_expr_retype(&callback_value, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty)))
+    tree_expr_retype(&callback_value, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty)))
     callback_name :: sema_shared_access_host_method_name(receiver_value.ty, method)
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, callback_name, span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value :: sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
+    value :: sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
+}
+
+// `authority.with(right)` / `authority.without(right)` on the Core Authority
+// handle: the narrowing family, each a new handle from the runtime route.
+fn sema_call_try_authority_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "with" && method != "without" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    receiver_type :: sema_expr_unwrap_tag(receiver_value.ty)
+    if receiver_type == .Named(name) {
+        if name != "Authority" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    } else {
+        return SemaMethodSpecialCheck{handled: false, value: None}
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 {
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_arity_diagnostic("Authority.{method}", 1, args.len(), false, span))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    right :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Authority.{method}", span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    handle :: TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    text :: TCallArg{value: right, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    reference :: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "JetAuthority", method), name: method, mangled: false, trait_owner: None, operator_identity: None}
+    value :: sema_tree_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{handle, text}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
 // Only the canonical primitive selects this route. Nominal types named Int
@@ -205,6 +240,14 @@ fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: S
     if method == "raw" {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         return sema_call_try_distinct_raw_value(receiver_value, args, span, expected, environment, program, &scopes, &diagnostics)
+    }
+    measurement :: sema_call_try_measurement_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if measurement.handled -> return measurement
+    authority :: sema_call_try_authority_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if authority.handled -> return authority
+    if program.registration_graph == .Val(graph) {
+        plugin :: sema_call_try_plugin_method(receiver, receiver_value, method, args, span, expected, graph.plugin_facts, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if plugin.handled -> return plugin
     }
     transaction :: sema_call_try_transaction_hook(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if transaction.handled -> return transaction
@@ -278,7 +321,7 @@ fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, a
     ordering :: method == "compare"
     op :: if ordering -> BinOp.Compare else -> BinOp.Eq
     result_ty :: if ordering -> Type.Named{name: "Ordering"} else -> Type.Bool
-    value :: sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: receiver_value, rhs: argument}, span)
+    value :: sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: receiver_value, rhs: argument}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -495,7 +538,7 @@ fn sema_call_collect_method_inference_facts(candidate: SemaCallMethodCandidate, 
     }
     loop parameter_type in facts.parameter_types -> &parameter_types.push(parameter_type)
     loop argument_type in facts.argument_types -> &argument_types.push(argument_type)
-    SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types}
+    SemaCallInferenceFacts{parameter_types: parameter_types, argument_types: argument_types, waiting: facts.waiting}
 }
 
 fn sema_call_method_candidate_types_compatible(candidate: SemaCallMethodCandidate, receiver_type: Type, argument_types: [Type?], binding: SemaCallBinding, params: [SemaCallParam], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -751,15 +794,15 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         pin_slot :: -typed.values.len() - 1
         owner :: sema_scope_function_owner_key(scopes)
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
-        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, receiver_value.ty)
         local.generated = true
         local.mutable = access == AccessConvention.Write
         local.deref = borrowed
         init := receiver_value
-        if borrowed -> init = sema_tir_node(init.ty, TExprKind.Borrow{place: init, access: access}, init.span)
+        if borrowed -> init = sema_tree_node(init.ty, TExprKind.Borrow{place: init, access: access}, init.span)
         &pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
-        value :: sema_tir_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
-        pinned_receiver = if access == AccessConvention.Move -> sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
+        value :: sema_tree_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
+        pinned_receiver = if access == AccessConvention.Move -> sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
     }
     loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, program, scopes, span) -> &pins.push(pin)
     lowered = sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return None
@@ -787,7 +830,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts
     }
-    call_value := sema_tir_node(result_type, TExprKind.MethodCall{receiver: call_receiver, method: resolved_candidate.method, type_args: resolved_candidate.type_args, args: lowered}, span)
+    call_value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: call_receiver, method: resolved_candidate.method, type_args: resolved_candidate.type_args, args: lowered}, span)
     if host_method && lowered.len() > 0 {
         callback := lowered[0].value
         if host_stored {
@@ -797,16 +840,16 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
                 callback.kind = TExprKind.Lambda{value: moved_lambda}
             }
         }
-        tir_expr_retype(&callback, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty)))
+        tree_expr_retype(&callback, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty)))
         callback_name :: sema_shared_access_host_method_name(receiver_value.ty, resolved_candidate.method.name)
-        call_value = sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
+        call_value = sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
             &wrapped.push(TStmt.ExprStmt{value: call_value, span: span})
-            sema_tir_node(result_type, TExprKind.InlineBlock{body: wrapped}, span)
+            sema_tree_node(result_type, TExprKind.InlineBlock{body: wrapped}, span)
         }
         else -> call_value
     }
@@ -847,18 +890,130 @@ fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: St
     Val(checked.value)
 }
 
-// Opaque App graph registrations preserve the named handler
-// and its typed input binding rather than pretending App is a plain record.
-fn sema_app_method_arity(method: String, actual: Int) -> Int Never! {
+// App handler registrations. Each handler reaches the App graph as one
+// `fn(__AppCall) -> __AppReply` adapter written over the named handler: the
+// adapter decodes the handler's typed inputs from the call (route path and
+// search inputs, the loader's data, a server function's body, a mount's
+// path), answers an input that is missing or does not decode as a
+// rejection, and wraps the result as a page or JSON reply. The registration
+// then checks as the App source method that stores the adapter.
+fn sema_app_handler_arity(method: String, actual: Int) -> Int Never! {
     if method == {
         "route" | "page" | "layout" | "action" | "form" | "data" -> 2
         "loader" -> if actual == 3 -> 3 else -> 2
         "mount" -> if actual == 3 || actual == 4 -> actual else -> 2
-        "pending" | "not_found" | "error" | "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter" | "serve_on" -> 1
-        "serve" -> if actual == 1 -> 1 else -> 0
-        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev" | "hydration_release" | "facts_json" -> 0
+        "pending" | "not_found" | "error" -> 1
         else -> -1
     }
+}
+
+fn sema_app_ident(name: String, span: Span) -> Expr Never! {
+    Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+}
+
+fn sema_app_text(text: String, span: Span) -> Expr Never! {
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: AST_NODE_GENERATED}
+}
+
+fn sema_app_arg(expr: Expr, convention: AccessConvention, span: Span) -> CallArg Never! {
+    CallArg{convention: convention, expr: expr, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+
+fn sema_app_call_method(call: String, method: String, type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {
+    Expr.MethodCall{receiver: sema_app_ident(call, span), method: method, method_span: span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: AST_NODE_GENERATED}
+}
+
+fn sema_app_returns_unit(ty: Type?) -> Bool Never! {
+    if ty == {
+        .Val(declared) -> if declared == {
+            .Named(name) -> name == "Unit"
+            .Result(ok, _) -> ok == (Type.Named{name: "Unit"})
+            else -> false
+        }
+        .None -> true
+    }
+}
+
+// The success type a handler declares (`T` of `T E!`).
+fn sema_app_success_type(ty: Type) -> Type Never! {
+    if ty == .Result(ok, _) -> return ok
+    ty.copy()
+}
+
+// `input ?? return Ok(call.__rejected("name"))`: an input that is missing or
+// does not decode answers the request without entering the handler.
+fn sema_app_or_rejected(input: Expr, call: String, name: String, span: Span) -> Expr Never! {
+    rejected :: sema_app_call_method(call, "__rejected", [Type]{}, [CallArg]{sema_app_arg(sema_app_text(name, span), AccessConvention.Read, span)}, span)
+    Expr.OrFallback{value: input, fallback: OrFallback.Return{value: Val(Expr.Ok{value: rejected, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}
+}
+
+// The adapter over the named handler `name`. `None` after an E2810 when the
+// handler's inputs cannot come from an App call.
+fn sema_app_handler_adapter(method: String, name: String, function: SemaRegistrationFunction, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Expr? {
+    call :: "__jet_app_call"
+    params :: function.declaration.params
+    boundary :: method == "pending" || method == "not_found" || method == "error"
+    server :: method == "action" || method == "form" || method == "data"
+    if (boundary && params.len() != 0) || ((server || method == "mount") && params.len() > 1) || (method == "mount" && params.len() == 0) {
+        inputs :: if {
+            boundary -> "no inputs"
+            method == "mount" -> "one input, the request path"
+            else -> "at most one input, the decoded request body"
+        }
+        &diagnostics.push(sema_error("E2810", span, "App `{method}` handler `{name}` takes {params.len()} input(s)", "an App `{method}` handler takes {inputs}", "change `{name}` to take {inputs}"))
+        return None
+    }
+    body := [Stmt]{}
+    handler_args := [CallArg]{}
+    loop (index, parameter) in params {
+        if method == "mount" {
+            &handler_args.push(sema_app_arg(sema_app_call_method(call, "__path", [Type]{}, [CallArg]{}, span), AccessConvention.Read, span))
+            next
+        }
+        ty :: sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_name)
+        optional :: if ty == {
+            .Option(inner) -> Val(inner)
+            else -> None
+        }
+        decoder :: if {
+            server -> "__body"
+            parameter.name == "data" && method != "loader" -> "__data"
+            else -> "__input"
+        }
+        decoder_args :: if decoder == "__input" -> [CallArg]{sema_app_arg(sema_app_text(parameter.name, span), AccessConvention.Read, span)} else -> [CallArg]{}
+        input :: sema_app_call_method(call, decoder, [Type]{optional ?? ty}, decoder_args, span)
+        local :: "__jet_app_input_{index}"
+        // An optional input stays optional: an absent one is `None`, not a
+        // rejection.
+        value :: if optional == None -> sema_app_or_rejected(input, call, parameter.name, span) else -> input
+        &body.push(Stmt.Val{binding: ast_binding(local, span, false, value, None)})
+        &handler_args.push(sema_app_arg(sema_app_ident(local, span), AccessConvention.Read, span))
+    }
+    handler_call :: Expr.Call{call: Call{name: name, name_span: span, type_args: [Type]{}, args: handler_args}, id: AST_NODE_GENERATED}
+    reply := sema_app_call_method(call, "__done", [Type]{}, [CallArg]{}, span)
+    if method == "mount" || sema_app_returns_unit(function.declaration.return_type) {
+        &body.push(Stmt.Expr{expr: handler_call})
+    } else {
+        wrap :: if method == "loader" || server -> "__json" else -> "__page"
+        reply = sema_app_call_method(call, wrap, [Type]{}, [CallArg]{sema_app_arg(handler_call, AccessConvention.Read, span)}, span)
+    }
+    &body.push(Stmt.Expr{expr: reply})
+    call_param :: LambdaParam{name: call, name_span: span, ty: None, ty_span: None}
+    Val(Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{call_param}, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED})
+}
+
+// The named function an App registration argument passes, after an E2810
+// when it is not one.
+fn sema_app_named_handler(method: String, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> (name: String, function: SemaRegistrationFunction)? {
+    name :: sema_http_mux_callee(argument.expr) ?? {
+        &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
+        return None
+    }
+    function :: sema_http_route_find_function(environment, program, scopes, name) ?? {
+        &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler, and `{name}` is not a declared function", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
+        return None
+    }
+    Val((name: name, function: function))
 }
 
 fn sema_app_route_wire_type(ty: Type) -> String Never! {
@@ -873,7 +1028,7 @@ fn sema_app_route_wire_type(ty: Type) -> String Never! {
 }
 
 fn sema_app_route_binding(method: String, handler: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> String {
-    shape :: sema_http_route_shape(handler, environment, program, scopes, host_hooks) ?? return ""
+    shape :: sema_http_route_shape(handler, environment, program, scopes, host_hooks, None) ?? return ""
     parts := [String]{}
     loop parameter in shape.params {
         if parameter.name == "data" && method != "loader" {
@@ -908,57 +1063,60 @@ fn sema_app_route_binding(method: String, handler: Expr, environment: SemaScopeE
 }
 
 fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver_value.ty != (Type.Named{name: "App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    arity :: sema_app_method_arity(method, args.len())
+    receiver_type :: sema_call_resolved_type(receiver_value.ty, environment, program)
+    if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    arity :: sema_app_handler_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
+    graph :: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if (method == "route" || method == "page" || method == "layout") && args.len() > 0 -> _ := sema_http_route_check_literal(args[0], environment, program, scopes, &diagnostics)
     if args.len() != arity {
         &diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    values := [TExpr]{}
-    binding := ""
-    has_binding :: method == "route" || method == "page" || method == "layout" || method == "loader" || method == "form"
-    loop (index, argument) in args {
-        handler :: if {
-            method == "pending" || method == "not_found" || method == "error" -> index == 0
-            method == "route" || method == "page" || method == "layout" || method == "loader" || method == "action" || method == "form" || method == "data" || method == "mount" -> index == 1
-            else -> false
+    boundary :: method == "pending" || method == "not_found" || method == "error"
+    handler_index :: if boundary -> 0 else -> 1
+    handler :: sema_app_named_handler(method, args[handler_index], environment, program, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    adapter_expr :: sema_app_handler_adapter(method, handler.name, handler.function, graph, args[handler_index].span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    adapter :: sema_app_arg(adapter_expr, AccessConvention.Move, args[handler_index].span)
+    identity :: sema_app_arg(sema_app_text(handler.name, span), AccessConvention.Read, span)
+    kind :: sema_app_arg(sema_app_text(method, span), AccessConvention.Read, span)
+    registration := [CallArg]{}
+    target := ""
+    if method == {
+        "route" | "page" | "layout" -> {
+            target = "__route"
+            binding :: sema_app_route_binding(method, args[1].expr, environment, program, scopes, context.host_hooks)
+            registration = [CallArg]{args[0].copy(), adapter, identity, sema_app_arg(sema_app_text(binding, span), AccessConvention.Read, span)}
         }
-        if handler && method != "mount" {
-            if argument.expr == {
-                .Ident(_, _, _) -> {}
-                else -> {
-                    &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
-                    return SemaMethodSpecialCheck{handled: true, value: None}
-                }
+        "pending" | "not_found" | "error" -> {
+            target = "__boundary"
+            registration = [CallArg]{kind, adapter, identity}
+        }
+        "action" | "form" | "data" -> {
+            target = "__action"
+            registration = [CallArg]{kind, args[0].copy(), adapter}
+        }
+        "loader" -> {
+            // The first argument names the route handler the loader feeds;
+            // the loader attaches to the route registered just before it.
+            _ :: sema_app_named_handler(method, args[0], environment, program, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            target = "__loader"
+            data_type :: if handler.function.declaration.return_type == {
+                .Val(declared) -> type_name(sema_app_success_type(sema_type_resolve_declared(graph, declared, handler.function.symbol.module_name)))
+                .None -> "Unit"
             }
+            preload :: if args.len() == 3 -> args[2].copy() else -> sema_app_arg(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, AccessConvention.Read, span)
+            registration = [CallArg]{adapter, identity, sema_app_arg(sema_app_text(data_type, span), AccessConvention.Read, span), preload}
         }
-        wanted :: if handler -> None else -> if (method == "serve" || method == "serve_on") -> Val(Type.Int) else -> Val(Type.String)
-        checked :: sema_check_expression_with_lambda_escapes(argument.expr, wanted, environment, program, &scopes, &state, &tail_store, &context, Val(handler), &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        value := checked
-        if handler {
-            params :: if checked.ty == {.Fn(parameters, _, _, _, _, _) -> parameters else -> {
-                &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }}
-            if method != "mount" {
-                callable_row :: sema_arena_adopt(&context, checked)
-                value = sema_node(&context, checked.ty, NodeKind.HostBorrowCallback{callable: callable_row, params: params}, checked.span)
-            }
-            value = sema_tir_node(value.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: value}}, value.span)
-            if has_binding -> binding = sema_app_route_binding(method, argument.expr, environment, program, scopes, context.host_hooks)
+        else -> {
+            target = "__mount"
+            effect_text :: if args.len() >= 3 -> args[2].copy() else -> sema_app_arg(sema_app_text("", span), AccessConvention.Read, span)
+            policy :: if args.len() == 4 -> args[3].copy() else -> sema_app_arg(sema_app_text("", span), AccessConvention.Read, span)
+            registration = [CallArg]{args[0].copy(), adapter, effect_text, policy}
         }
-        &values.push(value)
     }
-    if has_binding -> &values.push(sema_call_http_core_string(binding, span))
-    result :: if method == "facts_json" -> Type.String else -> if method == "serve" || method == "serve_on" -> Type.Named{name: "Unit"} else -> receiver_value.ty
-    value :: sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AppMethod{method: method, args_len: args.len()}, args: values}, span)
-    if method == "serve" || method == "serve_on" {
-        if !sema_network_handle_effect_fact(environment, program, &scopes, &context, "App.{method}", span, result, Val("Net"), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    value :: sema_expr_check_declared_method(receiver, receiver_value, target, target, span, [Type]{}, [Type]{}, registration, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
 }
 
 // Rust `FOREIGN_METHOD_ALIASES` (Sema/Diagnostics.rs:1176): another
@@ -1105,7 +1263,6 @@ fn sema_call_builtin_method_arities(receiver: Type, method: String) -> [Int] Nev
             "Duration" -> sema_time_duration_result(method, arity) != None || (method == "round" && arity >= 1)
             "Decimal" | "Fraction" -> sema_value_method_precise_result(owner, method, arity) != None
             "DeterministicWorld" -> sema_time_world_contract(method, arity) != None
-            "HistoryRNG" -> sema_time_history_rng_contract(method, arity) != None
             "RNG" -> sema_time_rng_fixed_signature(method, arity) != None || ((method == "pick" || method == "shuffle") && arity == 1) || ((method == "weighted_pick" || method == "sample") && arity == 2)
             "Clock" -> (method == "now" && arity == 0) || ((method == "tick" || method == "advance" || method == "wait") && arity == 1)
             "Task" -> ((method == "join" || method == "detach" || method == "resume" || method == "cancel" || method == "trace") && arity == 0) || (method == "pause" && arity < 2)
@@ -1124,7 +1281,6 @@ fn sema_call_builtin_method_pool(receiver: Type) -> [String] Never! {
         "Decimal" -> pool = [String]{"add", "sub", "mul", "div", "round", "floor", "ceil", "equal", "compare", "to_string", "to_float"}
         "Fraction" -> pool = [String]{"add", "sub", "mul", "div", "numerator", "denominator", "to_string", "to_float", "is_zero", "equal"}
         "DeterministicWorld" -> pool = [String]{"now", "advance", "wait_idle", "history"}
-        "HistoryRNG" -> pool = [String]{"next_u64", "below"}
         "RNG" -> pool = [String]{"int", "float", "float_range", "bool", "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample", "shuffle"}
         "Clock" -> pool = [String]{"now", "tick", "advance", "wait"}
         "Task" -> pool = [String]{"join", "detach", "pause", "resume", "cancel", "trace"}

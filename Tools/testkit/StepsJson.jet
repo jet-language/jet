@@ -1,6 +1,7 @@
 use core.encoding.json as json
 
-// Keys, indices, universal selection, filters, and explicit object projection.
+// Keys, indices (a negative index counts from the end), universal selection,
+// filters, and explicit object projection.
 // Filter values and quoted strings are validated by the standard JSON codec.
 fn kit_steps_json_path(path: String) -> [String]? {
     if !path.starts_with("$") -> return None
@@ -318,11 +319,16 @@ fn kit_steps_json_leaf(value: Dyn, op: String, expected: Dyn, expected_type: Str
     None
 }
 
+// Ops whose right-hand side may be an integer `N*{cap:x}` / `{cap:x}+N` form.
+fn kit_steps_json_numeric_op(op: String) -> Bool {
+    kit_expect_named(["=", "!=", ">", ">=", "<", "<="], op)
+}
+
 fn kit_steps_json_test(text: String, mode: String, path: String, op: String, literal: String) -> String? {
     if op == "canonical" -> return kit_steps_json_canonical(text)
     if kit_expect_named(["==", "!=", "#=="], op) && literal.starts_with("$") -> return kit_steps_json_same_document(text, mode, path, op, literal)
     selected :: kit_steps_json_values(text, mode, path) ?? {
-        if op == "!=" -> return kit_steps_json_leaf(Dyn.Null, op, json.parse(literal) ?? return Val("invalid expected JSON"), "", 0)
+        if op == "!=" -> return kit_steps_json_leaf(Dyn.Null, op, json.parse(kit_steps_arithmetic(literal) ?? literal) ?? return Val("invalid expected JSON"), "", 0)
         return Val("JSON parse or path failed: {path}")
     }
     if selected.len() == 0 {
@@ -334,7 +340,8 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
     expected_type := ""
     count := 0
     if kit_expect_named(["=", "!=", "has", "!has", "in", "keys", ">", ">=", "<", "<="], op) {
-        expected = json.parse(literal) ?? return Val("expected JSON literal: {err}")
+        evaluated :: if kit_steps_json_numeric_op(op) -> kit_steps_arithmetic(literal) ?? literal else -> literal
+        expected = json.parse(evaluated) ?? return Val("expected JSON literal: {err}")
         if op == "=" && path.contains("[*]") && kit_steps_json_type(expected) == "array" -> return if kit_steps_json_equal(Dyn.Array(selected), expected) -> None else -> Val("JSON ordered projection differs")
     } else if op == ":" {
         expected_type = literal
@@ -418,7 +425,19 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal, json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
     }
     if kit_expect_named(["=", "!=", "has", "!has", "in", ">", ">=", "<", "<="], op) {
-        _ :: json.parse(kit_steps_json_preview(literal)) ?? return None
+        preview :: kit_steps_json_preview(literal)
+        if !kit_steps_json_numeric_op(op) || kit_steps_arithmetic(preview) == None {
+            parsed :: json.parse(preview) ?? return None
+            // `has` looks for a key, an element, or the pinned fields of a
+            // nonempty object; an array or an empty object pins nothing.
+            if op == "has" {
+                if parsed == {
+                    .Array(_) -> return None
+                    .Object(fields) -> { if fields.len() == 0 -> return None }
+                    else -> {}
+                }
+            }
+        }
     } else if op == "keys" {
         if !literal.starts_with("= ") -> return None
         literal = kit_steps_byte_slice(literal, 2, literal.count_bytes()).trim().copy()

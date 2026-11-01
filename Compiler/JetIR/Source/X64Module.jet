@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 
-use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
+use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
 use jet_backend.[
     X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
     X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
@@ -148,6 +148,8 @@ IR_X64_MIN_INSTRUCTIONS_PER_THREAD :: 20000
 // function gets an error row and fresh threads select the rest.
 fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64Result Never! {
     m := ^program
+    ir_drop_early(&m)
+    ir_tail_calls(&m)
     tables := ir_x64_tables(m)
     count :: m.functions.len()
     weights := [Int]{}
@@ -325,7 +327,9 @@ fn ir_x64_take_inputs(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // The relocatable object of `compiled` (moved in, every row moved on): its
 // functions behind a global `main` that runs the module's entry function
 // (no parameters, no result) through the runtime's jet_rt_main, as the old
-// native route's object. `debug_info` false (the build option) leaves the
+// native route's object, or itself when the program owns its main
+// (IRModule.owned_main), attaching its thread first when
+// IRModule.owned_attach. `debug_info` false (the build option) leaves the
 // DWARF sections empty.
 fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
@@ -333,12 +337,15 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     entry :: owned.program.entry
     if entry < 0 || entry >= owned.program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry} is not in the module"}}
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
+    owned_main :: owned.program.owned_main
+    owned_attach :: owned.program.owned_attach
     program :: ir_x64_object_module(&owned)
-    main :: x64_object_main(X64FunctionID{value: entry})
+    main :: x64_object_main(X64FunctionID{value: entry}, owned_main, owned_attach)
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
+    ir_x64_reached_only(&functions, &debug)
     threads :: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
@@ -348,11 +355,68 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     task.group ir_x64_object_release {
         rest :: task ir_x64_release_rest(released)
         dropped :: task ir_x64_release_runs(released, -1)
-        &objects.push(x64_object_functions_threads(^program, ^functions, ^debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info))
+        &objects.push(x64_object_functions_threads(^program, ^functions, ^debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info, false))
         _ :: rest.join() ?? panic(compiler_threads_failure_text(err))
         _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     &objects.pop() ?? panic("the object writer lost its object")
+}
+
+// Keeps the rows of `functions` (with their `debug` rows) whose function the
+// first row, `main`, reaches through function relocations. The optimizer
+// keeps every body it inlined (ir_optimize_module), so a function whose
+// calls were all inlined has none left; a program object is one `.text`,
+// which the static link keeps whole, so its dead functions go here.
+fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) Never! {
+    if functions.len() != debug.len() -> panic("the object writer has {functions.len()} functions and {debug.len()} debug rows")
+    max_id := -1
+    loop function in functions {
+        if function.id.value > max_id -> max_id = function.id.value
+    }
+    // Per function id + 1 its rows, and whether it is reached.
+    id_rows := [[Int]]{}
+    reached := [Bool]{}
+    loop _ in 0..<(max_id + 2) {
+        &id_rows.push([Int]{})
+        &reached.push(false)
+    }
+    loop (index, function) in functions {
+        if function.id.value >= -1 -> &id_rows[function.id.value + 1].push(index)
+    }
+    work := [Int]{functions[0].id.value}
+    reached[functions[0].id.value + 1] = true
+    loop work.len() > 0 {
+        id :: &work.pop() ?? { break }
+        loop row in id_rows[id + 1] {
+            loop reloc in functions[row].relocs {
+                if reloc.target == {
+                    .Function(target) -> {
+                        at :: target.value + 1
+                        if at >= 0 && at < reached.len() && !reached[at] {
+                            reached[at] = true
+                            &work.push(target.value)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    kept := [X64CompiledFunction]{}
+    kept_debug := [X64FunctionDebug]{}
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        facts := &debug.pop() ?? panic("the object writer lost a debug row")
+        at :: function.id.value + 1
+        if at >= 0 && reached[at] {
+            &kept.push(^function)
+            &kept_debug.push(^facts)
+        }
+    }
+    &kept.reverse()
+    &kept_debug.reverse()
+    compiler_transfer_rows<X64CompiledFunction>(&functions, &kept)
+    compiler_transfer_rows<X64FunctionDebug>(&debug, &kept_debug)
 }
 
 // What ir_x64_object releases: the compile's IR functions in runs, each
@@ -484,15 +548,16 @@ fn ir_x64_hot_order(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 // The relocatable object of a library module (moved in, every row moved
 // on): its functions with no `main`, each of `exports` (ir_build_library)
 // a global symbol of its IR function and, with a priority, a constructor or
-// destructor hook. `debug_info` as ir_x64_object.
+// destructor hook. `debug_info` as ir_x64_object. Every function and data
+// object is in a section of its own, so a link keeps only what it reaches.
 fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
     program := ir_x64_object_module(&owned)
     debug := compiler_take_rows<X64FunctionDebug>(&owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(&owned.functions)
-    globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
-    x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info)
+    globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()}
+    x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info, true)
 }
 
 // The object writer's module of `owned`: its data, debug files and types

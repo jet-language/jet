@@ -6,6 +6,7 @@ use jet_driver.[
     JET_DRIVER_EXIT_OK, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
     JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileRequest,
     JetDriverCoreSource, jet_driver_compiler_queries_check_disk,
+    jet_driver_core_text,
     jet_driver_compiler_queries_clear_measurement, jet_driver_compiler_queries_documents,
     jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document,
     jet_driver_compiler_queries_stats,
@@ -20,6 +21,9 @@ use jet_cli.[
 ]
 use jet_sema.[SchemaSnapshot]
 use jet_foundation.[Diagnostic, Span, TextEdit]
+use core.sys as cli_sys
+use core.files as cli_files
+use core.process as cli_process
 
 fn try_service_request(core_sources: [JetDriverCoreSource]) -> JetDriverCompileRequest {
     source :: "use core.devtools as tools\nfn serve() -> Int {{ 7 }}"
@@ -34,7 +38,7 @@ fn try_service_request(core_sources: [JetDriverCoreSource]) -> JetDriverCompileR
         entry_root_identity: "try-service-root",
         entry_path: "/try-service-fixture/main.jet",
     }
-    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Doc)
+    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Program)
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
@@ -66,8 +70,8 @@ fn try_service_ownership(request: ^JetDriverCompileRequest, expected_source_rows
 #Test("try") {
     try_service_ownership(^try_service_request([JetDriverCoreSource]{}), 1)
     try_service_ownership(^try_service_request([JetDriverCoreSource]{
-        {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, source: ""},
-        {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, source: ""},
+        {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
+        {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
     }), 3)
     path :: "/project/main.jet"
     changes :: [JetCLISourceChange]{JetCLISourceChange{path: path, before: "fn run() {{ 1 }}\n".bytes(), after: "fn run() {{ 2 }}\n".bytes()}}
@@ -118,7 +122,8 @@ fn try_service_ownership(request: ^JetDriverCompileRequest, expected_source_rows
     plan_file :: "{root}/edit.json"
     original :: "fn unchanged() -> Int {{ 7 }}\nfn changed() -> Int {{ 1 }}\nfn run() {{\n    unchanged()\n    changed()\n}}\n"
     cli_files.write(entry, original) ?? panic("try original")
-    at :: original.find("{{ 1 }}") ?? panic("fixture edit")
+    at :: original.find("{{ 1 }}")
+    if at < 0 -> panic("fixture edit")
     cli_files.write(plan_file, "{{\"version\":1,\"name\":\"Body\",\"entry\":\"run.jet\",\"edits\":[{{\"path\":\"run.jet\",\"start\":{at + 2},\"end\":{at + 3},\"new_text\":\"2\"}}]}}") ?? panic("try plan")
     parsed :: jet_cli_try_read_plan(plan_file) ?? panic("try plan parsing")
     text_session := jet_driver_compiler_queries_new()

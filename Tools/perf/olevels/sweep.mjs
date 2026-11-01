@@ -3,7 +3,7 @@
 // variants) compiled by one native Jet compiler at each requested optimization level, every binary run
 // N times, output checked against expected.out and across levels (AGENTS.md I9), runtime compared with
 // a same-run Rust/C build and with the newest gauntlet receipt of every matched peer (AGENTS.md
-// Performance gate: Rust parity band 1.05, every other peer < 1.00).
+// Performance gate: Jet/peer < 1.00 for every peer, Rust included).
 //
 //   node sweep.mjs --compiler r29g=/path/to/jet-wrapper --level O0=build --level O2=build,--release \
 //     --unavailable 'O1=r29g CLI has no O1 route' --runs 5 --out DIR [--entries sieve,nbody]
@@ -39,7 +39,6 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir, cpus } from 'node:os';
 
 const GNU_TIME = existsSync('/run/current-system/sw/bin/time') ? '/run/current-system/sw/bin/time' : '/usr/bin/time';
-const RUST_BAND = 1.05;
 
 function usage(message) {
   if (message) process.stderr.write(`sweep: ${message}\n`);
@@ -410,7 +409,7 @@ async function main() {
       if (!r.expected_equal) flags.push({ program: name, level, kind: 'I9-output-differs-from-expected', detail: `stdout ${[...new Set(r.samples.map(s => s.stdout_sha256.slice(0, 12)))].join(',')} vs expected ${record.expected_sha256.slice(0, 12)}` });
       if (r.compile.includes_one_run && !r.compile.run_expected_equal) flags.push({ program: name, level, kind: 'I9-output-differs-from-expected', detail: 'the run inside `jet run`' });
       const rust = record.peers_same_run.rust?.summary;
-      if (rust) { r.rust_same_run_ratio = r.summary.median_wall / rust.median_wall; r.rust_verdict = r.rust_same_run_ratio < 1 ? 'win' : r.rust_same_run_ratio <= RUST_BAND ? 'parity' : 'loss'; }
+      if (rust) { r.rust_same_run_ratio = r.summary.median_wall / rust.median_wall; r.rust_verdict = r.rust_same_run_ratio < 1 ? 'win' : 'loss'; }
       r.receipt_ratios = Object.fromEntries(Object.values(record.peer_receipts).map(p => [p.language, r.summary.median_wall / p.runtime_wall_seconds]));
     }
     record.outputs_equal_across_levels = digests.size <= 1 && levelRecs.length > 0 && levelRecs.every(([, r]) => r.run_status === 'ok');
@@ -437,7 +436,7 @@ function writeTables(results, o) {
     `${results.unavailable.length ? ` Unavailable: ${results.unavailable.map(u => `${u.name} (${u.reason})`).join('; ')}.` : ''}`,
     '`compile wall s` is the whole measured command (scope, wrapper and toolchain environment startup included); `compiler traced s` is the timestamp of the compiler\'s last trace event (the compiler process alone; for `jet run`, the compile before the program starts).',
     `Runs: ${results.runs} measured after ${results.warmup} warmup; one compile at a time, each in a scope with MemoryMax=${results.scope_mem} and no swap${results.pinned_cpus ? `; compiles, runs and peers pinned to CPUs ${results.pinned_cpus}` : ''}. Machine: ${results.machine.cpus} CPUs, load ${results.machine.load_start} → ${results.machine.load_end}. Started ${results.started}, ${results.complete ? `finished ${results.finished}` : `PARTIAL as of ${results.finished}`}.`,
-    `Rust ratio verdict: < 1 win, ≤ ${RUST_BAND} parity, > ${RUST_BAND} loss (same-run \`rustc -O\`). Receipt ratios use the newest gauntlet receipt (older run, other load): context, not gate evidence.${results.toolchain_note ? ` Toolchain: ${results.toolchain_note}.` : ''}`,
+    `Rust ratio verdict: < 1 win, ≥ 1 loss (same-run \`rustc -O\`), the same rule as every other peer. Receipt ratios use the newest gauntlet receipt (older run, other load): context, not gate evidence.${results.toolchain_note ? ` Toolchain: ${results.toolchain_note}.` : ''}`,
     results.cli_adapter === 'off' ? 'CLI adapter: off.' : `CLI adapter (${results.cli_adapter}): the native compiler rejects the typed \`#CLI struct Args\` + \`fn run(args: Args)\` entry (E1321), so such entries were measured as \`fn run()\` that ${results.cli_adapter === 'argv' ? 'reads the same positional arguments from `process.argv()`' : 'builds `Args` from the entry\'s spec arguments written as literals (no `core.process` import; the arguments become compile-time constants, unlike the peers)'}; the program body is unchanged (results.json keeps both source digests).`, '',
     `| ${header.join(' | ')} |`, `|${header.map(() => '---').join('|')}|`];
   const tsv = [header.join('\t')];

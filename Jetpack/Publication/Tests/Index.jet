@@ -3,6 +3,29 @@
 // JP-PUB-REG-VERIFY, JP-PUB-REG-REFERRERS; authority operations owe Core #3593.
 // Rust InvalidData refusals report InvalidInput until Core has InvalidData (CORE-GAPS 11).
 // The pure name/wire proof is NOT proof of the native publication acceptance.
+use jet_foundation.[diagnostic_render, foundation_json_quote]
+use jet_pkg_model.[
+    LockFile, LockSource, LockedPackage, PublicationRegistryTier, pkg_lock_write,
+    publication_parse_tier,
+]
+use jetpack_foundation.[foundation_tree_hash]
+use jetpack_publication.[
+    PUBLICATION_RESERVED_SUFFIXES, PublicationIndexEntry, PublicationNamePolicyDecision,
+    PublicationNamePolicyFinding, PublicationNamePolicyThresholds, publication_assess_name,
+    publication_assess_name_with_thresholds, publication_blocked_reasons, publication_community_open,
+    publication_community_with_name, publication_confusable_skeleton, publication_core_reviewed,
+    publication_edit_distance, publication_edit_distance_at_most, publication_find_entry,
+    publication_gate_summary, publication_index_entry_path, publication_index_parse_line,
+    publication_index_to_jsonl, publication_is_takeover, publication_mark_yanked,
+    publication_name_diagnostic, publication_name_is_blocked, publication_non_yanked_entries,
+    publication_package_names, publication_parse_gate_status, publication_pinned_public_key,
+    publication_publish_artifact, publication_read_entries, publication_require_core_review,
+    publication_require_takeover_review, publication_validate_index_component,
+    publication_validate_takeover, publication_verify_oci_referrers, publication_write_index_entry,
+]
+use core.files as files
+use core.sys as sys
+
 fn publication_index_test_entry(name: String, version: String, yanked: Bool) -> PublicationIndexEntry Never! {
     PublicationIndexEntry{name: name, version: version, content_hash: "sha256-tree", fingerprint: "sha256-fp", yanked: yanked, tier: .Core, gate_status: publication_core_reviewed(), public_key: "", signature: ""}
 }
@@ -162,7 +185,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
 
 #Test("publication name warning_diagnostic_matches_ui_snapshot") {
     diagnostic :: publication_name_diagnostic(publication_assess_name("cagro", [String]{"cargo"}), "cagro") ?? panic("warning diagnostic")
-    expected :: "Warning [L2608] (registry_name_lookalike): registry package name `cagro` is suspicious: it is edit distance 2 from existing package `cargo`\n Why: A name in the warning band is close enough to an existing registry name to confuse package selection, but this publish remains non-blocking while the owner policy allows it.\n Fix: choose a distinct package name instead of `cargo` before publishing; the closer block band and reserved suffix rules reject stronger matches.\nMore: jet-lang.dev/e/L2608\n"
+    expected :: "Warning [L2608] (registry_name_lookalike): Registry package name `cagro` is suspicious: it is edit distance 2 from existing package `cargo`\n Why: A name in the warning band is close enough to an existing registry name to confuse package selection, but this publish remains non-blocking while the owner policy allows it.\n Fix: Choose a distinct package name instead of `cargo` before publishing; the closer block band and reserved suffix rules reject stronger matches.\nMore: jet-lang.dev/e/L2608\n"
     assert_eq(diagnostic_render(diagnostic, "", "", false), expected)
     assert_eq(publication_name_diagnostic(PublicationNamePolicyDecision.Allow, "cargo"), None)
 }
@@ -193,8 +216,8 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
 #Test("publication index find_entry_matches_exact_version") {
     repo :: publication_index_test_root("find")
     publication_write_index_entry(repo, publication_index_test_entry("textkit", "1.0.0", false)) ?? panic("write")
-    assert((publication_find_entry(repo, "textkit", "1.0.0") ?? panic("find")) != None)
-    assert_eq(publication_find_entry(repo, "textkit", "9.9.9") ?? panic("find absent"), None)
+    assert((publication_find_entry(repo, "textkit", "1.0.0") ? found -> found ! error -> panic("find")) == .Val(_))
+    assert((publication_find_entry(repo, "textkit", "9.9.9") ? found -> found ! error -> panic("find absent")) == None)
     files.remove_all(repo) ?? panic("cleanup")
 }
 #Test("publication index mark_yanked_flips_in_place_never_deletes") {
@@ -223,7 +246,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     repo :: publication_index_test_root("malformed")
     path :: publication_index_entry_path(repo, "textkit") ?? panic("path")
     files.create_dir_all(files.dirname(path)) ?? panic("directory")
-    files.write(path, "{malformed}\n") ?? panic("fixture")
+    files.write(path, "{{malformed}}\n") ?? panic("fixture")
     if publication_read_entries(repo, "textkit") == {
         .Err(error) -> assert(error == .InvalidInput(_))
         .Ok(_) -> panic("malformed read accepted")
@@ -405,6 +428,6 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
         .Err(error) -> assert("{error}".contains("SBOM evidence was not staged"))
         .Ok(_) -> panic("index exposed without SBOM")
     }
-    assert_eq(publication_find_entry(repo, "ref-kit", "1.0.0") ?? panic("find"), None)
+    assert((publication_find_entry(repo, "ref-kit", "1.0.0") ? found -> found ! error -> panic("find")) == None)
     files.remove_all(root) ?? panic("cleanup")
 }

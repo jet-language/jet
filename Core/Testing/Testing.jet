@@ -13,10 +13,12 @@ use core.files as files
 use core.sys as sys
 use core.math.random as random
 use core.time.[Clock]
-use core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot, __histories_with_provenance]
+use core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot]
+use core.crypto as crypto
+use core.encoding.json as json
 
 // A second spelling, never a second owner.
-alias RNG :: random.RNG
+pub use core.math.random.[RNG]
 
 // core.testing — deterministic tests and comparison records.
 //
@@ -374,6 +376,159 @@ fn fake_city(state: &U64, locale: Int) -> String Never! {
 /// The Prelude `Test` carrying the current harness iteration and result.
 fn test_suite() -> Test Never! { __suite_snapshot() }
 
+// D-TEST-STRATEGY1=A (Docs/spec/syntax-decisions.md:3900-3912): the public
+// history records project the Foundation history data. Identities are logical
+// numbers, never host pointers.
+struct HandleID {
+    value: Int
+}
+
+struct TaskID {
+    value: Int
+}
+
+struct EventID {
+    value: Int
+}
+
+// #6410: the deterministic history generator: SplitMix64 over one 64-bit
+// state word. Every copy shares that word, so a draw a strategy makes
+// advances the campaign's sequence. `next_u64` gives the next draw in
+// 0..<2^64; `below(bound)` gives the next draw modulo `bound`, and 0 without
+// drawing when `bound` is not positive.
+struct HistoryRNG {
+    __state: Shared<__HistoryRngState>
+}
+
+struct __HistoryRngState {
+    word: U64
+}
+
+impl HistoryRNG {
+    fn next_u64(self) -> Int Never! { __history_rng_next(self) }
+    fn below(self, bound: Int) -> Int Never! { __history_rng_below(self, bound) }
+}
+
+// A generator seeded by the low 64 bits of a non-negative seed.
+fn __history_rng_new(seed: Int) -> HistoryRNG Never! {
+    HistoryRNG{__state: shared __HistoryRngState{word: U64.from_int(seed % 18446744073709551616) ?? U64{0}}}
+}
+
+fn __history_rng_draw(rng: HistoryRNG) -> U64 Never! {
+    guard := rng.__state.guard_edit()
+    guard.value.word = guard.value.word.wrapping_add(U64{11400714819323198485})
+    value := guard.value.word
+    value = (value.bit_xor(value >> U64{30})).wrapping_mul(U64{13787848793156543929})
+    value = (value.bit_xor(value >> U64{27})).wrapping_mul(U64{10723151780598845931})
+    value.bit_xor(value >> U64{31})
+}
+
+fn __history_rng_next(rng: HistoryRNG) -> Int Never! { Int.from_u64(__history_rng_draw(rng)) }
+
+fn __history_rng_below(rng: HistoryRNG, bound: Int) -> Int Never! {
+    if bound <= 0 -> return 0
+    limit :: U64.from_int(bound) ?? return __history_rng_next(rng)
+    Int.from_u64(__history_rng_draw(rng) % limit)
+}
+
+// Expected draws: an independent SplitMix64 model (BigInt, Node) from seed 41.
+#Test("HistoryRNG draws SplitMix64 from its seed and every copy shares the stream") {
+    rng :: __history_rng_new(41)
+    shared_copy :: rng.copy()
+    assert_eq(__history_rng_next(rng), 1265094156158224713)
+    assert_eq(__history_rng_next(shared_copy), 11038316942610582860)
+    assert_eq(__history_rng_below(rng, 0), 0)
+    assert_eq(__history_rng_next(rng), 1990246801145950849)
+    assert_eq(__history_rng_below(shared_copy, 17), 6)
+}
+
+/// A value carried by one history operation. A secret enters only as
+/// `Redacted`; `Text` is text declared safe for a replay artifact.
+enum HistoryValue {
+    Integer(Int)
+    Boolean(Bool)
+    Text(String)
+    Handle(HandleID)
+    Redacted(String)
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3907-3909): the four retained
+// precondition kinds.
+enum HistoryPrecondition {
+    HandleLive(HandleID)
+    HandleState(handle: HandleID, state: String)
+    TaskCompleted(TaskID)
+    EventAvailable(EventID)
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3905-3906).
+struct HistoryOperation {
+    index: Int
+    name: String
+    arguments: [HistoryValue]
+    creates: [HandleID]
+    consumes: [HandleID]
+    preconditions: [HistoryPrecondition]
+    depends_on: [Int]
+    task: TaskID?
+    event: EventID?
+}
+
+/// One scheduler choice attached to an operation.
+struct HistoryScheduleChoice {
+    operation: Int
+    task: TaskID?
+    event: EventID?
+    choice: String
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3904).
+struct HistoryCase {
+    case_id: String
+    seed: Int
+    operations: [HistoryOperation]
+    schedule: [HistoryScheduleChoice]
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3902-3903).
+struct TypedHistoryCase<Command> {
+    case: HistoryCase
+    commands: [Command]
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3910-3912). The `cases` argument
+// of `histories` stays the case bound.
+struct HistoryBounds {
+    max_steps: Int
+    max_resources: Int
+    max_shrink_attempts: Int
+    max_discarded_cases: Int
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3912).
+struct HistoryDistribution {
+    operation: String
+    weight: Int
+}
+
+// D-TEST-STRATEGY1=A (syntax-decisions.md:3875-3898): one immutable value with
+// all five fields. `generate` receives the HistoryRNG, `case_index` and
+// `max_steps`; `rebuild` and `valid` see the canonical case.
+struct HistoryStrategy<Command> {
+    generate: fn(HistoryRNG, Int, Int) -> TypedHistoryCase<Command>?
+    rebuild: fn(HistoryCase) -> TypedHistoryCase<Command>?
+    valid: fn(TypedHistoryCase<Command>) -> Bool
+    bounds: HistoryBounds
+    distributions: [HistoryDistribution]
+}
+
+// #6410: one campaign. A single HistoryRNG seeded by `seed` feeds every
+// `generate`; a case that fails to generate, validate, stay inside the
+// bounds, rebuild or pass `valid` is discarded, and more discards than
+// `max_discarded_cases` stop the campaign. A mismatch shrinks to a reduced
+// replayable case and returns an Err whose cause carries the history
+// artifact. The compiler supplies the `__` arguments: the command type, the
+// artifact provenance and, without `strategy`, the derived enum strategy.
 fn histories<T>(
     seed: Int,
     cases: Int,
@@ -381,13 +536,734 @@ fn histories<T>(
     model: ^fn([T]) -> Dyn,
     actual: ^fn([T]) -> Dyn,
     observe: ^fn(Dyn) -> Dyn,
+    __command_type: String{""},
+    __source: String{""},
+    __tool: String{""},
+    __target: String{""},
+    __unsupported: String{""},
+    __variants: [String],
+    __make: [fn(Int, [Int], [Bool], [String]) -> T Never!],
 ) -> TestComparison Err! {
-    // Fresh command/observation copies precede callbacks. Host validation
-    // messages enter the default typed Err rail, never a String failure domain.
-    model_copy :: (commands: [T]) -> { model(commands.copy()) }
-    actual_copy :: (commands: [T]) -> { actual(commands.copy()) }
-    observe_copy :: (value: Dyn) -> { observe(value.copy()) }
-    __histories_with_provenance<T>(seed, cases, strategy, model_copy, actual_copy, observe_copy) ?? return Err(err)
+    if seed < 0 -> return Err(testing_history_err("history seed is invalid"))
+    if cases < 0 -> return Err(testing_history_err("history case bound is invalid"))
+    if __source == "" || __tool == "" || __target == "" {
+        return Ok(testing_history_terminal(seed, "", "", "", "unavailable", "history provenance is unavailable"))
+    }
+    if strategy == .Val(explicit) {
+        return testing_history_campaign<T>(seed, cases, explicit, model, actual, observe, __command_type, __source, __tool, __target)
+    }
+    if __unsupported != "" || __make.len() != 1 || __variants.len() == 0 {
+        reason :: if __unsupported != "" -> __unsupported else -> "core.testing.histories command type `{__command_type}` has no checked enum schema"
+        return Ok(testing_history_terminal(seed, __source, __tool, __target, "unsupported", reason))
+    }
+    derived :: testing_history_derived<T>(__command_type.copy(), __variants, __make[0])
+    testing_history_campaign<T>(seed, cases, derived, model, actual, observe, __command_type, __source, __tool, __target)
+}
+
+fn testing_history_err(message: String) -> Err Never! { Err{message: message, code: None, cause: None} }
+
+fn testing_history_terminal(seed: Int, source: String, tool: String, target: String, status: String, reason: String) -> TestComparison Never! {
+    TestComparison{
+        status: status,
+        relation: "typed_equality",
+        source: source,
+        tool: tool,
+        target: target,
+        seed: Val(seed),
+        case_ids: [String]{},
+        inputs: [Dyn]{},
+        reference: [Dyn]{},
+        candidate: [Dyn]{},
+        first_difference: -1,
+        reason: reason,
+        universal_proof: false,
+    }
+}
+
+// The observation of one case: the raw JSON of the four observed values
+// and the status of their typed-equality comparison.
+struct TestingHistorySample {
+    case_id: String
+    input_id: String
+    seed: Int
+    reference: String
+    candidate: String
+    reference_replay: String
+    candidate_replay: String
+}
+
+struct TestingHistoryObservation {
+    status: String
+    reason: String
+    sample: TestingHistorySample?
+    input: Dyn
+    reference: Dyn
+    candidate: Dyn
+}
+
+fn testing_history_config_error(cases: Int, bounds: HistoryBounds, distributions: [HistoryDistribution], command_type: String) -> String Never! {
+    if cases < 1 || cases > 100000 -> return "cases must be between 1 and the history limit"
+    if bounds.max_steps < 1 || bounds.max_steps > 4096 -> return "max_steps must be between 1 and the history limit"
+    if bounds.max_resources < 1 || bounds.max_resources > 4096 -> return "max_resources must be between 1 and the history limit"
+    if bounds.max_shrink_attempts < 1 || bounds.max_shrink_attempts > 1000000 -> return "max_shrink_attempts must be between 1 and the history limit"
+    if bounds.max_discarded_cases < 0 -> return "max_discarded_cases must not be negative"
+    if bounds.max_discarded_cases > 100000 -> return "max_discarded_cases exceeds the history limit"
+    if command_type == "" || command_type.len() > 4096 -> return "command type must be non-empty and bounded"
+    if distributions.len() > 256 -> return "distribution count exceeds the history limit"
+    loop index in 0..<distributions.len() {
+        operation :: distributions[index].operation
+        if operation == "" || operation.len() > 4096 || distributions[index].weight <= 0 -> return "distribution {index} has an invalid operation or weight"
+    }
+    ""
+}
+
+fn testing_history_campaign<T>(
+    seed: Int,
+    cases: Int,
+    strategy: HistoryStrategy<T>,
+    model: fn([T]) -> Dyn,
+    actual: fn([T]) -> Dyn,
+    observe: fn(Dyn) -> Dyn,
+    command_type: String,
+    source: String,
+    tool: String,
+    target: String,
+) -> TestComparison Err! {
+    bounds :: strategy.bounds
+    config :: testing_history_config_error(cases, bounds, strategy.distributions, command_type)
+    if config != "" -> return Err(testing_history_err("invalid history config: {config}"))
+    generate :: strategy.generate
+    rng :: __history_rng_new(seed)
+    discarded := 0
+    explored := 0
+    samples := [TestingHistorySample]{}
+    inputs := [Dyn]{}
+    reference_values := [Dyn]{}
+    candidate_values := [Dyn]{}
+    loop case_index in 0..<cases {
+        admitted := false
+        case := HistoryCase{case_id: "", seed: 0, operations: [HistoryOperation]{}, schedule: [HistoryScheduleChoice]{}}
+        generated :: generate(rng, case_index, bounds.max_steps)
+        if generated == .Val(typed) {
+            case = typed.case.copy()
+            admitted = testing_history_admits<T>(case, bounds, strategy)
+        }
+        if !admitted {
+            discarded += 1
+            if discarded > bounds.max_discarded_cases -> return Err(testing_history_err("invalid history config: discarded cases exceeded the configured bound"))
+            next
+        }
+        explored += 1
+        observation :: testing_history_observe<T>(case, strategy, model, actual, observe)
+        if observation.status == "contaminated" -> return Err(testing_history_err("invalid history oracle: {observation.reason}"))
+        if observation.status == "mismatch" {
+            shrunk :: testing_history_shrink<T>(case, observation, bounds, strategy, model, actual, observe)
+            return Err(testing_history_failure(shrunk, discarded, cases, bounds, strategy.distributions, command_type, source, tool, target))
+        }
+        if observation.status != "matched" {
+            discarded += 1
+            if discarded > bounds.max_discarded_cases -> return Err(testing_history_err("invalid history config: discarded cases exceeded the configured bound"))
+            next
+        }
+        if observation.sample == .Val(sample) -> &samples.push(sample.copy())
+        &inputs.push(observation.input.copy())
+        &reference_values.push(observation.reference.copy())
+        &candidate_values.push(observation.candidate.copy())
+    }
+    status := "matched"
+    reason := "{samples.len()} observed case(s) matched under typed_equality"
+    if samples.len() == 0 {
+        status = "empty"
+        reason = if discarded > 0 -> "all comparison cases were discarded" else -> "comparison corpus is empty"
+    } else if discarded > 0 {
+        status = "invalid_oracle"
+        reason = "comparison discarded cases and cannot claim equality"
+    }
+    if explored == 0 {
+        status = "unavailable"
+        reason = "no history case produced an observation"
+    }
+    case_ids := [String]{}
+    loop sample in samples -> &case_ids.push(sample.case_id.copy())
+    Ok(TestComparison{
+        status: status,
+        relation: "typed_equality",
+        source: source,
+        tool: tool,
+        target: target,
+        seed: Val(seed),
+        case_ids: case_ids,
+        inputs: inputs,
+        reference: reference_values,
+        candidate: candidate_values,
+        first_difference: -1,
+        reason: reason,
+        universal_proof: false,
+    })
+}
+
+// A case the campaign may observe: structurally valid, inside the bounds,
+// rebuildable, and accepted by the strategy's `valid`.
+fn testing_history_admits<T>(case: HistoryCase, bounds: HistoryBounds, strategy: HistoryStrategy<T>) -> Bool {
+    if testing_history_case_error(case) != "" -> return false
+    if !testing_history_within_bounds(case, bounds) -> return false
+    rebuild :: strategy.rebuild
+    valid :: strategy.valid
+    typed :: rebuild(case.copy()) ?? return false
+    valid(typed)
+}
+
+fn testing_history_within_bounds(case: HistoryCase, bounds: HistoryBounds) -> Bool Never! {
+    if case.operations.len() > bounds.max_steps -> return false
+    created := [Int:Bool]{}
+    loop operation in case.operations {
+        loop handle in operation.creates -> created[handle.value] = true
+    }
+    created.len() <= bounds.max_resources
+}
+
+// Observe one case: the model and the candidate each run, are observed, and
+// run again so that an observation changing on replay is contamination.
+fn testing_history_observe<T>(case: HistoryCase, strategy: HistoryStrategy<T>, model: fn([T]) -> Dyn, actual: fn([T]) -> Dyn, observe: fn(Dyn) -> Dyn) -> TestingHistoryObservation {
+    rebuild :: strategy.rebuild
+    input :: json.parse(testing_history_case_json(case)) ?? Dyn.Null
+    typed :: rebuild(case.copy()) ?? return TestingHistoryObservation{status: "unavailable", reason: "history strategy could not rebuild a typed operation", sample: None, input: input, reference: Dyn.Null, candidate: Dyn.Null}
+    reference_value :: model(typed.commands.copy())
+    candidate_value :: actual(typed.commands.copy())
+    reference_observed :: observe(reference_value.copy())
+    candidate_observed :: observe(candidate_value.copy())
+    reference_replay :: observe(model(typed.commands.copy()))
+    candidate_replay :: observe(actual(typed.commands.copy()))
+    sample :: TestingHistorySample{
+        case_id: case.case_id.copy(),
+        input_id: crypto.sha256(testing_history_case_json(case)).hex(),
+        seed: case.seed,
+        reference: json.dumps(reference_observed) ?? "null",
+        candidate: json.dumps(candidate_observed) ?? "null",
+        reference_replay: json.dumps(reference_replay) ?? "null",
+        candidate_replay: json.dumps(candidate_replay) ?? "null",
+    }
+    status := "matched"
+    reason := "1 observed case(s) matched under typed_equality"
+    if sample.reference != sample.reference_replay {
+        status = "contaminated"
+        reason = "reference observation changed on replay for case `{case.case_id}`"
+    } else if sample.candidate != sample.candidate_replay {
+        status = "contaminated"
+        reason = "candidate observation changed on replay for case `{case.case_id}`"
+    } else if !reference_observed.equal_unordered(candidate_observed) {
+        status = "mismatch"
+        reason = "first differing observation is case `{case.case_id}`"
+    }
+    TestingHistoryObservation{status: status, reason: reason, sample: Val(sample), input: input, reference: reference_value, candidate: candidate_value}
+}
+
+struct TestingHistoryShrunk {
+    case: HistoryCase
+    observation: TestingHistoryObservation
+}
+
+// Shrink a failing case: first drop one operation (with everything that
+// depends on it), then shrink one argument; a candidate is kept while it
+// still mismatches. `max_shrink_attempts` bounds the candidates tried.
+fn testing_history_shrink<T>(
+    original: HistoryCase,
+    first: TestingHistoryObservation,
+    bounds: HistoryBounds,
+    strategy: HistoryStrategy<T>,
+    model: fn([T]) -> Dyn,
+    actual: fn([T]) -> Dyn,
+    observe: fn(Dyn) -> Dyn,
+) -> TestingHistoryShrunk {
+    current := original.copy()
+    current_observation := first.copy()
+    attempts := 0
+    loop {
+        changed := false
+        loop index in 0..<current.operations.len() {
+            if attempts >= bounds.max_shrink_attempts -> break
+            candidate :: testing_history_without(current, index) ?? next
+            attempts += 1
+            if !testing_history_admits<T>(candidate, bounds, strategy) -> next
+            observation :: testing_history_observe<T>(candidate, strategy, model, actual, observe)
+            if observation.status == "mismatch" {
+                current = candidate.copy()
+                current_observation = observation.copy()
+                changed = true
+                break
+            }
+        }
+        if changed -> next
+        exhausted := false
+        loop operation_index in 0..<current.operations.len() {
+            if changed || exhausted -> break
+            loop argument_index in 0..<current.operations[operation_index].arguments.len() {
+                if changed || exhausted -> break
+                loop value in testing_history_value_shrinks(current.operations[operation_index].arguments[argument_index]) {
+                    if attempts >= bounds.max_shrink_attempts {
+                        exhausted = true
+                        break
+                    }
+                    candidate :: testing_history_with_argument(current, operation_index, argument_index, value)
+                    attempts += 1
+                    if !testing_history_admits<T>(candidate, bounds, strategy) -> next
+                    observation :: testing_history_observe<T>(candidate, strategy, model, actual, observe)
+                    if observation.status == "mismatch" {
+                        current = candidate.copy()
+                        current_observation = observation.copy()
+                        changed = true
+                        break
+                    }
+                }
+            }
+        }
+        if !changed -> break
+    }
+    TestingHistoryShrunk{case: current, observation: current_observation}
+}
+
+fn testing_history_value_shrinks(value: HistoryValue) -> [HistoryValue] Never! {
+    values := [HistoryValue]{}
+    if value == {
+        .Integer(number) -> {
+            &values.push(HistoryValue.Integer(0))
+            half :: if number < 0 -> 0 - ((0 - number) /% 2) else -> number /% 2
+            if number != 0 && half != 0 -> &values.push(HistoryValue.Integer(half))
+        }
+        .Boolean(flag) -> {
+            if flag -> &values.push(HistoryValue.Boolean(false))
+        }
+        .Text(text) -> {
+            if text != "" {
+                &values.push(HistoryValue.Text(""))
+                characters :: text.chars()
+                half := ""
+                loop index in 0..<(characters.len() /% 2) -> half = "{half}{characters[index]}"
+                &values.push(HistoryValue.Text(half))
+            }
+        }
+        else -> {}
+    }
+    values
+}
+
+fn testing_history_with_argument(case: HistoryCase, operation_index: Int, argument_index: Int, value: HistoryValue) -> HistoryCase Never! {
+    operations := [HistoryOperation]{}
+    loop index in 0..<case.operations.len() {
+        operation := case.operations[index].copy()
+        if index == operation_index {
+            arguments := [HistoryValue]{}
+            loop position in 0..<operation.arguments.len() {
+                &arguments.push(if position == argument_index -> value.copy() else -> operation.arguments[position].copy())
+            }
+            operation.arguments = arguments
+        }
+        &operations.push(operation)
+    }
+    HistoryCase{case_id: case.case_id.copy(), seed: case.seed, operations: operations, schedule: case.schedule.copy()}
+}
+
+// Remove operation `index` and, transitively, every operation that depends on
+// a removed one or touches a handle a removed one created; the survivors are
+// renumbered and their dependencies and schedule entries remapped.
+fn testing_history_without(case: HistoryCase, index: Int) -> HistoryCase? Never! {
+    count :: case.operations.len()
+    if count <= 1 || index < 0 || index >= count -> return None
+    removed := [Int:Bool]{}
+    removed[index] = true
+    changed := true
+    loop changed {
+        changed = false
+        handles := [Int:Bool]{}
+        loop position in 0..<count {
+            if removed.get(position) == None -> next
+            loop handle in case.operations[position].creates -> handles[handle.value] = true
+        }
+        loop position in 0..<count {
+            if removed.get(position) != None -> next
+            if testing_history_cascades(case.operations[position], removed, handles) {
+                removed[position] = true
+                changed = true
+            }
+        }
+    }
+    if removed.len() >= count -> return None
+    remap := [Int:Int]{}
+    kept := 0
+    loop position in 0..<count {
+        if removed.get(position) != None -> next
+        remap[case.operations[position].index] = kept
+        kept += 1
+    }
+    operations := [HistoryOperation]{}
+    loop position in 0..<count {
+        if removed.get(position) != None -> next
+        operation := case.operations[position].copy()
+        depends := [Int]{}
+        loop dependency in operation.depends_on {
+            found :: remap.get(dependency)
+            if found == .Val(mapped) -> &depends.push(mapped)
+        }
+        operation.index = remap.get(operation.index) ?? 0
+        operation.depends_on = depends
+        &operations.push(operation)
+    }
+    schedule := [HistoryScheduleChoice]{}
+    loop choice in case.schedule {
+        mapped :: remap.get(choice.operation) ?? next
+        entry := choice.copy()
+        entry.operation = mapped
+        &schedule.push(entry)
+    }
+    Val(HistoryCase{case_id: case.case_id.copy(), seed: case.seed, operations: operations, schedule: schedule})
+}
+
+fn testing_history_cascades(operation: HistoryOperation, removed: [Int:Bool], handles: [Int:Bool]) -> Bool Never! {
+    loop dependency in operation.depends_on {
+        if removed.get(dependency) != None -> return true
+    }
+    loop handle in operation.creates {
+        if handles.get(handle.value) != None -> return true
+    }
+    loop handle in operation.consumes {
+        if handles.get(handle.value) != None -> return true
+    }
+    loop argument in operation.arguments {
+        if argument == .Handle(handle) && handles.get(handle.value) != None -> return true
+    }
+    loop precondition in operation.preconditions {
+        handle :: testing_history_precondition_handle(precondition) ?? next
+        if handles.get(handle) != None -> return true
+    }
+    false
+}
+
+fn testing_history_precondition_handle(precondition: HistoryPrecondition) -> Int? Never! {
+    if precondition == {
+        .HandleLive(handle) -> Val(handle.value)
+        .HandleState(handle, _) -> Val(handle.value)
+        else -> None
+    }
+}
+
+// The structural rules of a replayable case: dense operation indexes,
+// bounded metadata, argument handles live, dependencies on distinct earlier
+// operations, satisfied preconditions, handles created once and consumed
+// while live, and schedule choices that match their operation. Returns "" for
+// a valid case.
+fn testing_history_case_error(case: HistoryCase) -> String Never! {
+    if case.case_id == "" || case.case_id.len() > 4096 -> return "case identity must be non-empty and bounded"
+    if case.operations.len() == 0 -> return "case must contain at least one operation"
+    if case.operations.len() > 4096 -> return "operation count exceeds the history bound"
+    live := [Int:Bool]{}
+    known := [Int:Bool]{}
+    completed := [Int:Bool]{}
+    events := [Int:Bool]{}
+    loop position in 0..<case.operations.len() {
+        operation :: case.operations[position]
+        if operation.index != position -> return "operation {position} has index {operation.index}, expected {position}"
+        if operation.name == "" || operation.name.len() > 4096 -> return "operation {position} has an invalid name"
+        if operation.arguments.len() > 64 || operation.creates.len() > 4096 || operation.consumes.len() > 4096 || operation.preconditions.len() > 64 || operation.depends_on.len() > 64 {
+            return "operation {position} exceeds its metadata bound"
+        }
+        loop argument in operation.arguments {
+            failure :: testing_history_argument_error(position, argument, live)
+            if failure != "" -> return failure
+        }
+        dependencies := [Int:Bool]{}
+        loop dependency in operation.depends_on {
+            if dependency < 0 || dependency >= position || dependencies.get(dependency) != None -> return "operation {position} has a duplicate or forward dependency"
+            dependencies[dependency] = true
+        }
+        loop precondition in operation.preconditions {
+            failure :: testing_history_precondition_error(position, precondition, live, completed, events)
+            if failure != "" -> return failure
+        }
+        creates := [Int:Bool]{}
+        loop handle in operation.creates {
+            if creates.get(handle.value) != None -> return "operation {position} creates a handle more than once"
+            creates[handle.value] = true
+        }
+        consumes := [Int:Bool]{}
+        loop handle in operation.consumes {
+            if consumes.get(handle.value) != None -> return "operation {position} consumes a handle more than once"
+            if creates.get(handle.value) != None -> return "operation {position} creates and consumes one handle"
+            consumes[handle.value] = true
+        }
+        loop handle in operation.consumes {
+            if live.get(handle.value) == None -> return "operation {position} consumes non-live handle {handle.value}"
+            &live.remove(handle.value).drop("a consumed handle leaves the live set")
+        }
+        loop handle in operation.creates {
+            if known.get(handle.value) != None -> return "operation {position} recreates handle {handle.value}"
+            known[handle.value] = true
+            live[handle.value] = true
+        }
+        if operation.task == .Val(task_id) -> completed[task_id.value] = true
+        if operation.event == .Val(event) -> events[event.value] = true
+    }
+    if known.len() > 4096 -> return "resource count exceeds the history bound"
+    loop choice in case.schedule {
+        if choice.operation < 0 || choice.operation >= case.operations.len() -> return "schedule references missing operation {choice.operation}"
+        operation :: case.operations[choice.operation]
+        if choice.task == .Val(task_id) && operation.task != Val(task_id) -> return "schedule task does not match operation {choice.operation}"
+        if choice.event == .Val(event) && operation.event != Val(event) -> return "schedule event does not match operation {choice.operation}"
+        if choice.choice == "" || choice.choice.len() > 4096 -> return "schedule choice must be non-empty and bounded"
+    }
+    ""
+}
+
+fn testing_history_argument_error(position: Int, argument: HistoryValue, live: [Int:Bool]) -> String Never! {
+    if argument == {
+        .Text(text) -> {
+            if text.len() > 4096 -> return "operation {position} has an oversized argument"
+        }
+        .Redacted(label) -> {
+            if label == "" || label.len() > 4096 -> return "operation {position} has an invalid redacted argument"
+        }
+        .Handle(handle) -> {
+            if live.get(handle.value) == None -> return "operation {position} requires non-live argument handle {handle.value}"
+        }
+        else -> {}
+    }
+    ""
+}
+
+fn testing_history_precondition_error(position: Int, precondition: HistoryPrecondition, live: [Int:Bool], completed: [Int:Bool], events: [Int:Bool]) -> String Never! {
+    if precondition == {
+        .HandleLive(handle) -> if live.get(handle.value) == None -> return "operation {position} requires non-live handle {handle.value}"
+        .HandleState(handle, state) -> {
+            if state == "" || state.len() > 4096 -> return "operation {position} has an invalid handle state"
+            if live.get(handle.value) == None -> return "operation {position} requires non-live handle {handle.value}"
+        }
+        .TaskCompleted(task_id) -> if completed.get(task_id.value) == None -> return "operation {position} requires incomplete task {task_id.value}"
+        .EventAvailable(event) -> if events.get(event.value) == None -> return "operation {position} requires unavailable event {event.value}"
+    }
+    ""
+}
+
+fn testing_history_quote(text: String) -> String Never! { json.dumps(Dyn.Text(text.copy())) ?? "\"\"" }
+
+fn testing_history_value_json(value: HistoryValue) -> String Never! {
+    if value == {
+        .Integer(number) -> "{number}"
+        .Boolean(flag) -> if flag -> "true" else -> "false"
+        .Text(text) -> testing_history_quote(text)
+        .Handle(handle) -> "{handle.value}"
+        .Redacted(label) -> "{{\"redacted\":{testing_history_quote(label)}}}"
+    }
+}
+
+fn testing_history_precondition_json(precondition: HistoryPrecondition) -> String Never! {
+    if precondition == {
+        .HandleLive(handle) -> "{{\"kind\":\"handle_live\",\"handle\":{handle.value}}}"
+        .HandleState(handle, state) -> "{{\"handle\":{handle.value},\"kind\":\"handle_state\",\"state\":{testing_history_quote(state)}}}"
+        .TaskCompleted(task_id) -> "{{\"kind\":\"task_completed\",\"task\":{task_id.value}}}"
+        .EventAvailable(event) -> "{{\"event\":{event.value},\"kind\":\"event_available\"}}"
+    }
+}
+
+fn testing_history_operation_json(operation: HistoryOperation) -> String Never! {
+    arguments := [String]{}
+    loop value in operation.arguments -> &arguments.push(testing_history_value_json(value))
+    creates := [String]{}
+    loop handle in operation.creates -> &creates.push("{handle.value}")
+    consumes := [String]{}
+    loop handle in operation.consumes -> &consumes.push("{handle.value}")
+    preconditions := [String]{}
+    loop precondition in operation.preconditions -> &preconditions.push(testing_history_precondition_json(precondition))
+    dependencies := [String]{}
+    loop dependency in operation.depends_on -> &dependencies.push("{dependency}")
+    event_json :: if operation.event == .Val(event_id) -> "{event_id.value}" else -> "null"
+    task_json :: if operation.task == .Val(task_id) -> "{task_id.value}" else -> "null"
+    "{{\"arguments\":[{arguments.join(",")}],\"consumes\":[{consumes.join(",")}],\"creates\":[{creates.join(",")}],\"dependsOn\":[{dependencies.join(",")}],\"event\":{event_json},\"index\":{operation.index},\"name\":{testing_history_quote(operation.name)},\"preconditions\":[{preconditions.join(",")}],\"task\":{task_json}}}"
+}
+
+fn testing_history_schedule_json(choice: HistoryScheduleChoice) -> String Never! {
+    event_json :: if choice.event == .Val(event_id) -> "{event_id.value}" else -> "null"
+    task_json :: if choice.task == .Val(task_id) -> "{task_id.value}" else -> "null"
+    "{{\"choice\":{testing_history_quote(choice.choice)},\"event\":{event_json},\"operation\":{choice.operation},\"task\":{task_json}}}"
+}
+
+fn testing_history_operations_json(case: HistoryCase) -> String Never! {
+    rows := [String]{}
+    loop operation in case.operations -> &rows.push(testing_history_operation_json(operation))
+    rows.join(",")
+}
+
+fn testing_history_schedules_json(case: HistoryCase) -> String Never! {
+    rows := [String]{}
+    loop choice in case.schedule -> &rows.push(testing_history_schedule_json(choice))
+    rows.join(",")
+}
+
+// The canonical case JSON: the callback input and, hashed, the input identity.
+fn testing_history_case_json(case: HistoryCase) -> String Never! {
+    "{{\"caseId\":{testing_history_quote(case.case_id)},\"operations\":[{testing_history_operations_json(case)}],\"schedule\":[{testing_history_schedules_json(case)}],\"seed\":{case.seed}}}"
+}
+
+fn testing_history_identity_json(sample: TestingHistorySample, source: String, tool: String, target: String) -> String Never! {
+    "{{\"caseId\":{testing_history_quote(sample.case_id)},\"inputId\":{testing_history_quote(sample.input_id)},\"seed\":{sample.seed},\"source\":{testing_history_quote(source)},\"target\":{testing_history_quote(target)},\"tool\":{testing_history_quote(tool)}}}"
+}
+
+fn testing_history_observation_json(raw: String) -> String Never! {
+    "{{\"cleanup\":[],\"mutation\":null,\"orderedEffects\":[],\"raw\":{testing_history_quote(raw)},\"typedFailure\":null}}"
+}
+
+fn testing_history_sample_json(sample: TestingHistorySample, source: String, tool: String, target: String) -> String Never! {
+    "{{\"candidate\":{testing_history_observation_json(sample.candidate)},\"candidateReplay\":{testing_history_observation_json(sample.candidate_replay)},\"identity\":{testing_history_identity_json(sample, source, tool, target)},\"reference\":{testing_history_observation_json(sample.reference)},\"referenceReplay\":{testing_history_observation_json(sample.reference_replay)}}}"
+}
+
+// Operations after the first that carry neither a dependency nor a
+// precondition: legal, but reported so a case count cannot hide them.
+fn testing_history_vacuous(case: HistoryCase) -> Int Never! {
+    count := 0
+    loop position in 1..<case.operations.len() {
+        if case.operations[position].preconditions.len() == 0 && case.operations[position].depends_on.len() == 0 -> count += 1
+    }
+    count
+}
+
+// The failure of a campaign: a one-line summary naming the reduced case and
+// its operations, caused by an Err that carries the replayable artifact JSON.
+// The artifact id is the SHA-256 of the artifact payload.
+fn testing_history_failure(shrunk: TestingHistoryShrunk, discarded: Int, cases: Int, bounds: HistoryBounds, distributions: [HistoryDistribution], command_type: String, source: String, tool: String, target: String) -> Err Never! {
+    case :: shrunk.case
+    sample :: shrunk.observation.sample ?? return testing_history_err("history mismatch in case `{case.case_id}`")
+    samples :: testing_history_sample_json(sample, source, tool, target)
+    comparison :: "{{\"contamination\":null,\"discardedCases\":0,\"firstDifference\":0,\"reason\":{testing_history_quote(shrunk.observation.reason)},\"relation\":\"typed_equality\",\"samples\":[{samples}],\"status\":\"mismatch\",\"universalProof\":false}}"
+    rows := [String]{}
+    loop distribution in distributions -> &rows.push("{{\"operation\":{testing_history_quote(distribution.operation)},\"weight\":{distribution.weight}}}")
+    identity :: testing_history_identity_json(sample, source, tool, target)
+    oracle :: "{{\"dependencies\":[],\"root\":\"testing.histories.model\"}}"
+    body :: "\"bounds\":{{\"maxDiscardedCases\":{bounds.max_discarded_cases},\"maxResources\":{bounds.max_resources},\"maxSteps\":{bounds.max_steps},\"maxShrinkAttempts\":{bounds.max_shrink_attempts}}},\"case\":{testing_history_quote(case.case_id)},\"cases\":{cases},\"commandType\":{testing_history_quote(command_type)},\"comparison\":{comparison},\"discardedCases\":{discarded},\"distributions\":[{rows.join(",")}],\"identity\":{identity},\"operations\":[{testing_history_operations_json(case)}],\"oracle\":{oracle},\"schedule\":[{testing_history_schedules_json(case)}],\"schema\":\"jet.testing.history\",\"seed\":{case.seed},\"vacuousPreconditions\":{testing_history_vacuous(case)},\"version\":1}}"
+    artifact_id :: crypto.sha256("{{{body}").hex()
+    names := [String]{}
+    loop operation in case.operations -> &names.push(operation.name.copy())
+    artifact :: Err{message: "history-artifact {{\"artifactId\":{testing_history_quote(artifact_id)},{body}", code: None, cause: None}
+    Err{message: "history mismatch in case `{case.case_id}`: {names.join(" -> ")}", code: None, cause: Val(artifact)}
+}
+
+// The `artifactId` of a campaign failure: the 64 hex digits that open its
+// cause, `history-artifact {"artifactId":"<id>",...`.
+fn testing_history_artifact_id(failure: Err) -> String Never! {
+    if failure.cause == .Val(cause) -> return cause.message.slice(32, 96)
+    ""
+}
+
+#Test("a history artifact id changes with its source provenance") {
+    case :: HistoryCase{case_id: "C-0", seed: 3, operations: [HistoryOperation]{}, schedule: [HistoryScheduleChoice]{}}
+    sample :: TestingHistorySample{case_id: "C-0", input_id: "C-0", seed: 3, reference: "1", candidate: "2", reference_replay: "1", candidate_replay: "2"}
+    observation :: TestingHistoryObservation{status: "mismatch", reason: "first differing observation is case `C-0`", sample: Val(sample), input: Dyn.Int(0), reference: Dyn.Int(1), candidate: Dyn.Int(2)}
+    bounds :: HistoryBounds{max_steps: 8, max_resources: 8, max_shrink_attempts: 8, max_discarded_cases: 0}
+    shrunk :: TestingHistoryShrunk{case: case, observation: observation}
+    first :: testing_history_failure(shrunk, 0, 1, bounds, [HistoryDistribution]{}, "C", "source-a", "tool", "target")
+    again :: testing_history_failure(shrunk, 0, 1, bounds, [HistoryDistribution]{}, "C", "source-a", "tool", "target")
+    edited :: testing_history_failure(shrunk, 0, 1, bounds, [HistoryDistribution]{}, "C", "source-b", "tool", "target")
+    assert_eq(first.message, edited.message)
+    assert_eq(testing_history_artifact_id(first).len(), 64)
+    assert_eq(testing_history_artifact_id(first), testing_history_artifact_id(again))
+    assert_eq(testing_history_artifact_id(first) == testing_history_artifact_id(edited), false)
+}
+
+// A strategy derived from a command enum whose variant payloads are Int,
+// Bool or String values. Each `variants` row is the variant's operation name
+// followed by one `:i`, `:b` or `:s` per payload field; `make` builds the
+// command from the row position and the payload values grouped by kind.
+// Every variant has weight 1.
+fn testing_history_derived<T>(^command_type: String, variants: [String], ^make: fn(Int, [Int], [Bool], [String]) -> T Never!) -> HistoryStrategy<T> {
+    names := [String]{}
+    kinds := [[String]]{}
+    distributions := [HistoryDistribution]{}
+    loop row in variants {
+        parts :: row.split(":").to_list()
+        fields := [String]{}
+        loop position in 1..<parts.len() -> &fields.push(parts[position].copy())
+        &names.push(parts[0].copy())
+        &kinds.push(fields)
+        &distributions.push(HistoryDistribution{operation: parts[0].copy(), weight: 1})
+    }
+    HistoryStrategy<T>{
+        generate: (rng: HistoryRNG, case_index: Int, max_steps: Int) -> { testing_history_derived_generate<T>(rng, case_index, max_steps, command_type, names, kinds, make) },
+        rebuild: (case: HistoryCase) -> { testing_history_derived_rebuild<T>(case, names, kinds, make) },
+        valid: (typed: TypedHistoryCase<T>) -> { testing_history_case_error(typed.case) == "" },
+        bounds: HistoryBounds{max_steps: 64, max_resources: 64, max_shrink_attempts: 10000, max_discarded_cases: 100},
+        distributions: distributions,
+    }
+}
+
+// One derived case: the case seed is the next campaign draw, and a local
+// generator seeded by it picks 1 + below(min(max_steps, 8)) operations, each
+// a uniformly chosen variant whose payload draws Int as -8 + below(17), Bool
+// as below(2) != 0 and String as "history-{below(17)}". Every operation after
+// the first depends on its predecessor.
+fn testing_history_derived_generate<T>(rng: HistoryRNG, case_index: Int, max_steps: Int, command_type: String, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -> T Never!) -> TypedHistoryCase<T>? {
+    if max_steps <= 0 || names.len() == 0 -> return None
+    case_seed :: __history_rng_next(rng)
+    local :: __history_rng_new(case_seed)
+    step_count :: 1 + __history_rng_below(local, if max_steps < 8 -> max_steps else -> 8)
+    operations := [HistoryOperation]{}
+    loop index in 0..<step_count {
+        choice :: __history_rng_below(local, names.len())
+        arguments := [HistoryValue]{}
+        loop kind in kinds[choice] {
+            if kind == "i" {
+                &arguments.push(HistoryValue.Integer(__history_rng_below(local, 17) - 8))
+            } else if kind == "b" {
+                &arguments.push(HistoryValue.Boolean(__history_rng_below(local, 2) != 0))
+            } else {
+                &arguments.push(HistoryValue.Text("history-{__history_rng_below(local, 17)}"))
+            }
+        }
+        preconditions := [HistoryPrecondition]{}
+        depends_on := [Int]{}
+        if index > 0 {
+            &depends_on.push(index - 1)
+            &preconditions.push(HistoryPrecondition.TaskCompleted(TaskID{value: (index - 1) % 2}))
+            &preconditions.push(HistoryPrecondition.EventAvailable(EventID{value: index}))
+        }
+        &operations.push(HistoryOperation{
+            index: index,
+            name: names[choice].copy(),
+            arguments: arguments,
+            creates: [HandleID]{},
+            consumes: [HandleID]{},
+            preconditions: preconditions,
+            depends_on: depends_on,
+            task: Val(TaskID{value: index % 2}),
+            event: Val(EventID{value: index + 1}),
+        })
+    }
+    case :: HistoryCase{case_id: "{command_type}-{case_index}", seed: case_seed, operations: operations, schedule: [HistoryScheduleChoice]{}}
+    testing_history_derived_rebuild<T>(case, names, kinds, make)
+}
+
+fn testing_history_derived_rebuild<T>(case: HistoryCase, names: [String], kinds: [[String]], make: fn(Int, [Int], [Bool], [String]) -> T Never!) -> TypedHistoryCase<T>? {
+    commands := [T]{}
+    loop operation in case.operations {
+        choice := -1
+        loop position in 0..<names.len() {
+            if names[position] == operation.name {
+                choice = position
+                break
+            }
+        }
+        if choice < 0 || operation.creates.len() != 0 || operation.consumes.len() != 0 || operation.arguments.len() != kinds[choice].len() -> return None
+        ints := [Int]{}
+        bools := [Bool]{}
+        texts := [String]{}
+        loop position in 0..<operation.arguments.len() {
+            kind :: kinds[choice][position]
+            if operation.arguments[position] == {
+                .Integer(number) -> if kind == "i" -> &ints.push(number) else -> return None
+                .Boolean(flag) -> if kind == "b" -> &bools.push(flag) else -> return None
+                .Text(text) -> if kind == "s" -> &texts.push(text.copy()) else -> return None
+                else -> return None
+            }
+        }
+        &commands.push(make(choice, ints, bools, texts))
+    }
+    Val(TypedHistoryCase<T>{case: case.copy(), commands: commands})
 }
 
 // I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.

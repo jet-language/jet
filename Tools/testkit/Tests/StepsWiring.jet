@@ -30,17 +30,31 @@ use core.files as files
     files.remove_all(root) ?? panic("remove null wiring scratch")
 }
 
-#Test("all canonical PTY event and per-fd spellings parse and refuse without running the child") {
+#Test("terminal steps and sessions run on a sized terminal with timed input and partial wiring refuses") {
     root :: cases_test_root("wiring-pty")
-    loop modifier in ["pty: true", "pty: true size 24x80", "pty: true size 0x0", "pty: true size 0x80", "pty: stdin,stdout,stderr", "pty-send: \"x\\n\" after 1ms", "pty-close: after 1ms", "pty-resize: 30x100 at 1ms"] {
-        refused :: cases_test_advanced(root, "pty", "step: false\n{modifier}\n")
+    sized :: "requires: os:unix\nstep: jet -c 'stty size'\npty: true size 24x80\nstdout: = \"24 80\\r\\n\"\n"
+    assert_eq(cases_test_advanced(root, "sized", sized).verdict.status, "PASS")
+    typed :: "requires: os:unix\nstep: jet -c 'read line; printf \"got:%s\\\\n\" \"$line\"'\npty: true\npty-send: \"hi\\n\" after 50ms\nexit: 0\nstdout: ~ \"got:hi\" # the transcript also echoes the typed line\n"
+    assert_eq(cases_test_advanced(root, "typed", typed).verdict.status, "PASS")
+    closed :: "requires: os:unix\nstep: cat\npty: true\npty-send: \"abc\\n\" after 10ms\npty-close: after 50ms\nexit: 0\nstdout: ~ \"abc\" # echo and copy of the typed line\n"
+    assert_eq(cases_test_advanced(root, "closed", closed).verdict.status, "PASS")
+    resized :: "requires: os:unix\nstep: jet -c 'sleep 0.5; stty size'\npty: true size 24x80\npty-resize: 30x100 at 50ms\nstdout: = \"30 100\\r\\n\"\n"
+    assert_eq(cases_test_advanced(root, "resized", resized).verdict.status, "PASS")
+    session :: "requires: os:unix\nsession peer raw: cat\npty: true\npty-send: \"ping\\n\" after 0ms\nrecv peer until ~ \"ping\" timeout 5s # the terminal echoes typed input\npty-send: \"two\\n\" after 10ms\nclose peer\nexit: 0\nstdout: ~ \"two\" # echo and copy of the second line\n"
+    assert_eq(cases_test_advanced(root, "session", session).verdict.status, "PASS")
+    wrong :: "requires: os:unix\nstep: jet -c 'stty size'\npty: true size 24x80\nstdout: = \"25 80\\r\\n\"\n"
+    assert_eq(cases_test_advanced(root, "wrong-size", wrong).verdict.status, "FAIL")
+    partial :: cases_test_advanced(root, "partial", "step: false\npty: stdin,stdout,stderr\n")
+    assert_eq(partial.verdict.status, "REFUSED")
+    assert_eq(partial.verdict.detail, "pty-stdio")
+    loop orphan in ["step: false\npty-send: \"x\\n\" after 1ms\n", "step: false\npty-close: after 1ms\n", "step: false\npty-resize: 30x100 at 1ms\n", "session peer raw: cat\npty-send: \"x\" after 1ms\nclose peer\n", "step: false\npty: true\npty: true\n"] {
+        refused :: cases_test_advanced(root, "orphan", orphan)
         assert_eq(refused.verdict.status, "REFUSED")
-        assert_eq(refused.verdict.detail, "pty")
     }
     loop modifier in ["pty: false", "pty: output", "pty: true size -1x80", "pty: true size nox0", "pty: true size 0x", "pty-resize: 24x80 after 1ms", "stderr-to-stdout: false", "stdout: file ../escape"] {
         refused :: cases_test_advanced(root, "noncanonical", "step: false\n{modifier}\n")
         assert_eq(refused.verdict.status, "REFUSED")
-        assert(refused.verdict.detail != "pty")
+        assert(refused.verdict.detail != "pty-stdio")
     }
     files.remove_all(root) ?? panic("remove PTY scratch")
 }

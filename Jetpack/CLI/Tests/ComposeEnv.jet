@@ -30,7 +30,7 @@
     root :: files.tmpdir("jetpack-dotenv-allowlist-") ?? panic("claim scratch dir")
     files.write(files.join(root, ".env"), "ALLOWED=from-dotenv\nUNLISTED=must-not-load\n") ?? panic("write .env")
     values :: cli_read_dotenv_snapshot(root, ".env", [String]{"ALLOWED"}) ?? panic("read dotenv")
-    assert_eq(values, [String: String]{"ALLOWED": "from-dotenv"})
+    assert(values == [String: String]{"ALLOWED": "from-dotenv"})
     files.remove_all(root).drop("scratch cleanup")
 }
 

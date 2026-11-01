@@ -1,0 +1,69 @@
+// `jet init [<script.jet>]` (Source/main.rs `run_init`, U11/D-JPK-SCRIPTDEP1=A):
+// write a fresh `package.jet` pinned to the running toolchain's channel (the
+// Trust pin writer never clobbers a manifest), then fold the script's inline
+// `use pkg#version` refs into its `deps` block with the comment-preserving
+// editor `jet add` uses. Status lines go to stderr unless `--quiet`/`--json`;
+// a pin diagnostic is always stderr. The migration-era role-file transition
+// (`--restore-role-files`, `--check` beside pkg/env/workspace/config.jet, and a
+// bare `jet init` beside them without a manifest) is Jetpack's Environment
+// transition, which no CLI package reaches: those forms are refused.
+use core.files as cli_files
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[DIAGNOSTIC_ERROR, diagnostic_render]
+use jet_lexer.[lex]
+use jet_parser.[parse_source]
+use jet_pkg_model.[DepSpec, pkg_add_dependency, pkg_inline_deps_collect, pkg_mask_inline_package_source]
+use jetpack_trust.[trust_pin_write_init]
+
+JET_CLI_INIT_ROLE_FILES :: [String]{"pkg.jet", "env.jet", "workspace.jet", "config.jet"}
+
+fn jet_cli_init(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    cwd :: cli_files.cwd() ?? "."
+    has_role_file := false
+    loop name in JET_CLI_INIT_ROLE_FILES {
+        if cli_files.is_file(cli_files.join(cwd, name)) -> has_role_file = true
+    }
+    if jet_argv.contains("--restore-role-files") -> return jet_cli_not_ported("init --restore-role-files", color)
+    if jet_argv.contains("--check") {
+        if has_role_file -> return jet_cli_not_ported("init --check", color)
+        return jet_cli_done("", jet_cli_init_status("No migration-era role files found.\nNo files changed.\n", quiet, json), JET_DRIVER_EXIT_OK)
+    }
+    script :: args.get(1)
+    if script == None && has_role_file && !cli_files.is_file(cli_files.join(cwd, JET_CLI_PACKAGE_FILE)) -> return jet_cli_not_ported("init", color)
+    base :: cli_files.basename(cwd)
+    name :: if base == "" || base == "/" -> "app" else -> base
+    message :: trust_pin_write_init(cwd, name, JET_CLI_VERSION) ?? {
+        diagnostic :: if err == .Pin(report) -> report else -> panic("the init pin writer returned a non-pin error")
+        return jet_cli_done("", diagnostic_render(diagnostic, "", "", color), JET_DRIVER_EXIT_USER_ERROR)
+    }
+    lifted :: if script == .Val(path) -> jet_cli_init_lift(cwd, path) else -> ""
+    jet_cli_done("", jet_cli_init_status("{lifted}{message}\n", quiet, json), JET_DRIVER_EXIT_OK)
+}
+
+fn jet_cli_init_status(text: String, quiet: Bool, json: Bool) -> String Never! {
+    if quiet || json -> return ""
+    text.copy()
+}
+
+// `lift_inline_deps_into_manifest`: a script that cannot be read, masked,
+// lexed or parsed, or that has no inline refs, lifts nothing and says nothing.
+fn jet_cli_init_lift(cwd: String, script: String) -[FS, Env]> String Never! {
+    file := script
+    if !cli_files.is_file(file) && cli_files.is_file("{script}.jet") -> file = "{script}.jet"
+    source :: cli_files.read(file) ?? return ""
+    masked :: pkg_mask_inline_package_source(source) ?? return ""
+    bytes :: masked.source.bytes()
+    if lex(bytes).diagnostics.len() > 0 -> return ""
+    parsed :: parse_source(bytes)
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return ""
+    }
+    deps :: pkg_inline_deps_collect(parsed.program)
+    if deps.len() == 0 -> return ""
+    manifest :: cli_files.join(cwd, JET_CLI_PACKAGE_FILE)
+    raw := cli_files.read(manifest) ?? return ""
+    loop dep in deps -> raw = pkg_add_dependency(raw, dep.name, DepSpec.Registry(dep.selector))
+    cli_files.write(manifest, raw) ?? return ""
+    noun :: if deps.len() == 1 -> "dependency" else -> "dependencies"
+    "lifted {deps.len()} inline {noun} into {JET_CLI_PACKAGE_FILE}\n"
+}

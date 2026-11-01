@@ -14,39 +14,32 @@
     host_stdio_option_cause(host_stdio_text_failure(text, false, true, false), some)
 }
 
-// One byte from stdin: 1, 0 at end of input, or -errno. std's stdin maps
-// EBADF to end of input (handle_ebadf).
-fn term_read_byte(byte: I64, retry: Bool) -> I64 {
-    loop {
-        got := I64{0}
-        #Unsafe("byte lends one writable byte for a raw Linux read of stdin") {
-            got = os_syscall_i64(I64{0}, I64{0}, byte, I64{1}, I64{0}, I64{0}, I64{0})
-        }
-        if (got == I64{-4} && retry) -> next
-        if (got == I64{-9}) -> return I64{0}
-        return got
-    }
-}
-
 // Term.rs:300 / StdinReader.rs:54 stdin().read_line: appends the bytes
 // through the first LF (kept) or end of input to `value`; 0, or the errno
-// that stopped the read.
+// that stopped the read. The line is copied out of the stdin buffer a run at
+// a time; a refill retries EINTR, and EBADF is end of input (std's stdin
+// handle_ebadf).
 fn term_read_line(value: I64) -> I64 {
-    byte :: jet_rt_alloc(I64{8}, I64{8})
     failure := I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
-        got :: term_read_byte(byte, true)
-        if (got == I64{0}) -> break
-        if (got < I64{0}) {
-            failure = -got
-            break
+        buffered :: term_input_buffered()
+        if (buffered == I64{0}) {
+            got :: term_input_fill(true, true)
+            if (got == I64{0}) -> break
+            if (got < I64{0}) {
+                failure = -got
+                break
+            }
+            next
         }
-        rt_text_append(value, byte, I64{1})
-        if (rt_text_byte(byte) == I64{10}) -> break
+        start :: term_input_next()
+        run :: rt_line_run(start, buffered)
+        rt_text_append(value, start, run)
+        term_input_consume(run)
+        if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) -> break
     }
     sync_mutex_unlock(terminal_input_root)
-    jet_rt_free(byte, I64{8}, I64{8})
     failure
 }
 
@@ -80,9 +73,10 @@ fn term_read_line(value: I64) -> I64 {
     }
 }
 
-// StdinReader.rs:54 core.term.__stdin_line: Ok(None) at end of input,
-// Ok(Some(line)) with its LF kept, or jet_std::io_error_at(Read, "stdin"):
-// errno through its IOError arm, invalid UTF-8 (InvalidData) as Other.
+// core.term.__stdin_line: Ok(None) at end of input, Ok(Some(line)) with every
+// trailing LF and CR removed (the line's bytes, no copy: the length shrinks in
+// place), or jet_std::io_error_at(Read, "stdin"): errno through its IOError
+// arm, invalid UTF-8 (InvalidData) as Other.
 #Export(c) fn jet_stdin_line_raw(some: I64, line: I64, error: I64) -> I64 {
     value :: jet_rt_string_builder_new()
     code :: term_read_line(value)
@@ -101,38 +95,49 @@ fn term_read_line(value: I64) -> I64 {
         rt_text_store(some, I64{0})
         return I64{1}
     }
+    end := rt_text_len(value)
+    data :: rt_text_data(value)
+    loop {
+        if (end == I64{0}) { break }
+        last :: rt_text_byte(wrapping(data + end - I64{1}))
+        if (last != I64{10} && last != I64{13}) { break }
+        end = wrapping(end - I64{1})
+    }
+    rt_text_store(wrapping(value + I64{8}), end)
     rt_text_store(some, I64{1})
     rt_text_store(line, value)
     I64{1}
 }
 
-// IoLineStream.rs:86: one-byte reads until the trailing window equals the
-// delimiter (removed) or end of input; an empty delimiter stops after one
-// byte. Read errors propagate as read() reports them (no EINTR retry);
-// invalid UTF-8 is InvalidData carrying FromUtf8Error's Display.
+// IoLineStream.rs:86: bytes until the trailing window equals the delimiter
+// (removed) or end of input; an empty delimiter stops after one byte. Read
+// errors propagate as read() reports them (no EINTR retry); invalid UTF-8 is
+// InvalidData carrying FromUtf8Error's Display. Bytes past the delimiter stay
+// in the stdin buffer for the next read.
 #Export(c) fn jet_terminal8_read_until(delimiter: I64, output: I64, error_tag: I64, error: I64) {
     needle :: rt_text_data(delimiter)
     width :: rt_text_len(delimiter)
     value :: jet_rt_string_builder_new()
-    byte :: jet_rt_alloc(I64{8}, I64{8})
     failure := I64{0}
     sync_mutex_lock(terminal_input_root)
     loop {
-        got :: term_read_byte(byte, false)
-        if (got == I64{0}) -> break
-        if (got < I64{0}) {
-            failure = host_errno_cause(-got)
-            break
+        if (term_input_buffered() == I64{0}) {
+            got :: term_input_fill(false, true)
+            if (got == I64{0}) -> break
+            if (got < I64{0}) {
+                failure = host_errno_cause(-got)
+                break
+            }
         }
-        rt_text_append(value, byte, I64{1})
+        rt_text_append(value, term_input_next(), I64{1})
+        term_input_consume(I64{1})
         length :: rt_text_len(value)
-        if (length >= width && rt_text_equal_bytes(rt_text_data(value) + length - width, needle, width)) {
-            rt_text_store(value + I64{8}, length - width)
+        if (length >= width && rt_text_equal_bytes(wrapping(wrapping(rt_text_data(value) + length) - width), needle, width)) {
+            rt_text_store(wrapping(value + I64{8}), length - width)
             break
         }
     }
     sync_mutex_unlock(terminal_input_root)
-    jet_rt_free(byte, I64{8}, I64{8})
     if (failure == I64{0}) -> failure = text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
     #Unsafe("the caller lends the tuple's Text word and Option<Text> tag/payload words") {
         if (failure != I64{0}) {
@@ -148,9 +153,10 @@ fn term_read_line(value: I64) -> I64 {
 }
 
 // Terminal8Raw.rs:31 / IoLineStream.rs:132: one stdin read of up to `n`
-// bytes, as (bytes, None), or ([], Some(io::Error Display)). Read errors
-// propagate as read() reports them (no EINTR retry); std's stdin maps EBADF
-// to end of input. Core rejects a negative `n` before the call.
+// bytes (the buffered ones first, without a read), as (bytes, None), or ([],
+// Some(io::Error Display)). Read errors propagate as read() reports them (no
+// EINTR retry); std's stdin maps EBADF to end of input. Core rejects a
+// negative `n` before the call.
 #Export(c) fn jet_terminal8_take(n: I64, data: I64, length: I64, error_tag: I64, error: I64) {
     capacity :: if (n > I64{0}) -> n else -> I64{0}
     got := I64{0}
@@ -158,9 +164,7 @@ fn term_read_line(value: I64) -> I64 {
     if (capacity != I64{0}) {
         buffer = jet_rt_alloc(capacity, I64{8})
         sync_mutex_lock(terminal_input_root)
-        #Unsafe("buffer lends `capacity` writable bytes for a raw Linux read of stdin") {
-            got = os_syscall_i64(I64{0}, I64{0}, buffer, capacity, I64{0}, I64{0}, I64{0})
-        }
+        got = term_input_take(buffer, capacity)
         sync_mutex_unlock(terminal_input_root)
         if (got == I64{-9}) -> got = I64{0}
     }
@@ -181,15 +185,13 @@ fn term_read_line(value: I64) -> I64 {
     rt_text_store(error_tag, I64{0})
 }
 
-// Terminal8Raw.rs:45 / Term.rs:306: one stdin read of up to six bytes (a
-// failed read is no bytes) and the key decoder's platform, 1 for Unix.
+// Terminal8Raw.rs:45 / Term.rs:306: one stdin read of up to six bytes (the
+// buffered ones first; a failed read is no bytes) and the key decoder's
+// platform, 1 for Unix.
 #Export(c) fn jet_terminal8_key_bytes(data: I64, length: I64, platform: I64) {
     buffer :: jet_rt_alloc(I64{8}, I64{8})
-    got := I64{0}
     sync_mutex_lock(terminal_input_root)
-    #Unsafe("buffer lends six writable bytes for a raw Linux read of stdin") {
-        got = os_syscall_i64(I64{0}, I64{0}, buffer, I64{6}, I64{0}, I64{0}, I64{0})
-    }
+    got := term_input_take(buffer, I64{6})
     sync_mutex_unlock(terminal_input_root)
     if (got < I64{0}) -> got = I64{0}
     compiler_fs_bytes_take(buffer, I64{8}, got, data, length)
@@ -231,7 +233,7 @@ fn term_read_line(value: I64) -> I64 {
 #Export(c) fn jet_term_machine_output() -> Bool {
     value :: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
     if (value == I64{0}) -> return false
-    rt_text_byte(value) == I64{49} && rt_text_byte(value + I64{1}) == I64{0}
+    rt_text_byte(value) == I64{49} && rt_text_byte(wrapping(value + I64{1})) == I64{0}
 }
 
 // Term.rs:713-760 (Linux termios): the per-thread stack of saved stdin modes.
@@ -252,19 +254,19 @@ fn term_mode_saved_key() -> I64 {
 #Export(c) fn jet_term_mode_enter(raw: Bool) -> Bool {
     node :: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(node, I64{72})
-    mode :: node + I64{8}
+    mode :: wrapping(node + I64{8})
     if (net_i32(term_tcgetattr(I64{0}, mode)) != I64{0}) {
         jet_rt_free(node, I64{72}, I64{8})
         return false
     }
     next :: jet_rt_alloc(I64{64}, I64{8})
     rt_text_bytes_copy(next, mode, I64{64})
-    flags :: net_load_uint(next + I64{12}, I64{4})
+    flags :: net_load_uint(wrapping(next + I64{12}), I64{4})
     cleared :: if raw -> flags.bit_and(I64{4294967285}) else -> flags.bit_and(I64{4294967287})
-    net_store_uint(next + I64{12}, I64{4}, cleared)
+    net_store_uint(wrapping(next + I64{12}), I64{4}, cleared)
     if raw {
-        net_store_uint(next + I64{17} + I64{6}, I64{1}, I64{1})
-        net_store_uint(next + I64{17} + I64{5}, I64{1}, I64{0})
+        net_store_uint(wrapping(wrapping(next + I64{17}) + I64{6}), I64{1}, I64{1})
+        net_store_uint(wrapping(wrapping(next + I64{17}) + I64{5}), I64{1}, I64{0})
     }
     status :: net_i32(term_tcsetattr(I64{0}, I64{0}, next))
     jet_rt_free(next, I64{64}, I64{8})

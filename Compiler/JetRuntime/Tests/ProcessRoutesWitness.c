@@ -12,8 +12,8 @@
 typedef struct { unsigned char *data; int64_t len,capacity; } Text;
 typedef struct { int64_t len,capacity; void *data; } List;
 typedef struct { void *owner; int64_t child,as_cwd; } Directory;
-typedef struct { List *cmd; Text *cwd; int64_t clear; List *set,*remove; int64_t *in,out,err,*timeout,*output,*cpu,*memory,*files,detached; void *terminal; Text *wire; List *directories; } Spec;
-_Static_assert(sizeof(Spec)==136 && sizeof(Directory)==24,"native carriers");
+typedef struct { List *cmd; Text *cwd; int64_t clear; List *set,*remove; int64_t *in,out,err,*timeout,*output,*cpu,*memory,*files,detached; void *terminal; Text *wire; List *directories; int64_t parent_death; } Spec;
+_Static_assert(sizeof(Spec)==144 && sizeof(Directory)==24,"native carriers");
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_host_arguments(int64_t,char **,char **);
 extern Text *jet_rt_string_from_static(const void *,int64_t);

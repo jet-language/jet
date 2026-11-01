@@ -21,7 +21,7 @@ fn lsp_code_action_response(server: LSPServer, params: Dyn?, id: Dyn) -> String?
         lsp_retain_document_diagnostics(&diagnostics, doc.path, doc.text)
         fixes :: lsp_collect_fixes_from_diagnostics(diagnostics.copy(), doc.text)
         db := lsp_build_symbol_db(result)
-        sources :: lsp_merge_workspace_defs_with_sources(server, doc, &db)
+        lsp_merge_workspace_defs(server, doc, &db)
         token_owner :: server.lex(doc)
         token_permit :: token_owner.guard_read()
         tokens :: token_permit.value
@@ -36,7 +36,7 @@ fn lsp_code_action_response(server: LSPServer, params: Dyn?, id: Dyn) -> String?
                 .Err(_) -> &excluded.push(open.path.copy())
             }
         }
-        refactors :: lsp_compute_refactor_actions(db, tokens, diagnostics, doc.text, doc.path, root, sources, excluded, requested)
+        refactors :: lsp_compute_refactor_actions(db, tokens, diagnostics, doc.text, doc.path, root, excluded, requested)
         actions := [String]{}
         loop fix in fixes -> &actions.push(lsp_code_action_json(uri, doc.version, doc.text, fix))
         loop action in refactors -> &actions.push(lsp_refactor_action_json(uri, doc.version, doc.text, action))

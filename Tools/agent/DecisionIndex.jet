@@ -11,6 +11,7 @@
 use core.encoding.json as json
 use core.files as files
 use core.process as process
+use core.regex as regex
 use core.term as term
 
 SPEC_PATH :: "Docs/spec/syntax-decisions.md"
@@ -19,6 +20,10 @@ OPEN :: "<!-- BEGIN GENERATED RATIFIED INDEX -->"
 CLOSE :: "<!-- END GENERATED RATIFIED INDEX -->"
 CELL_LIMIT :: 96
 CELL_KEEP :: 93
+
+// ECMAScript `\s`: Unicode White_Space without U+0085, plus U+FEFF. The index
+// keeps the wording Tower's outcome text had under the JavaScript tool.
+SPACE_RUN :: Regex{"[\t\n\v\f\r \xA0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+"}
 
 #Error
 struct IndexError {
@@ -33,12 +38,6 @@ struct RatifiedDecision {
 
 fn index_fail(message: String) -> IndexError Never! { IndexError{message: message} }
 
-fn byte_slice(text: String, start: Int, end: Int) -> String Never! {
-    String.from_bytes_lossy(text.bytes()[start..<end])
-}
-
-fn byte_len(text: String) -> Int Never! { text.bytes().len() }
-
 // The text of field `key` of a JSON object's fields; "" when absent or not text.
 fn field_text(fields: [(key: String, value: Dyn)], key: String) -> String Never! {
     loop field in fields {
@@ -51,88 +50,30 @@ fn field_text(fields: [(key: String, value: Dyn)], key: String) -> String Never!
     ""
 }
 
-// The byte length of the UTF-8 sequence led by `lead`.
-fn sequence_len(lead: Int) -> Int Never! {
-    if {
-        lead < 128 -> 1
-        lead >= 240 -> 4
-        lead >= 224 -> 3
-        lead >= 192 -> 2
-        else -> 1
-    }
-}
-
-// Whether the sequence at `at` is one of JavaScript's `\s` characters.
-fn is_js_space(bytes: [U8], at: Int, length: Int) -> Bool Never! {
-    first :: Int.from_u8(bytes[at])
-    if length == 1 -> return first == 32 || (first >= 9 && first <= 13)
-    second :: Int.from_u8(bytes[at + 1])
-    if length == 2 -> return first == 194 && second == 160
-    if length != 3 -> return false
-    third :: Int.from_u8(bytes[at + 2])
-    if {
-        first == 225 && second == 154 && third == 128 -> true
-        first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> true
-        first == 226 && second == 129 && third == 159 -> true
-        first == 227 && second == 128 && third == 128 -> true
-        first == 239 && second == 187 && third == 191 -> true
-        else -> false
-    }
-}
+// UTF-16 code units of one scalar, the unit JavaScript string lengths count.
+fn utf16_units(scalar: String) -> Int Never! { if scalar.count_bytes() == 4 -> 2 else -> 1 }
 
 // One table cell: whitespace runs collapsed to one space and trimmed, `|`
 // escaped, and anything past 96 UTF-16 units cut to 93 units and an ellipsis.
+// A cut through a surrogate pair keeps U+FFFD, as the UTF-8 write of a lone
+// surrogate did.
 fn cell(text: String) -> String Never! {
-    bytes :: text.bytes()
-    out := [U8]{}
-    units := [Int]{}
-    pending_space := false
-    at := 0
-    loop at < bytes.len() {
-        length := sequence_len(Int.from_u8(bytes[at]))
-        if at + length > bytes.len() -> length = bytes.len() - at
-        if is_js_space(bytes, at, length) {
-            pending_space = true
-            at += length
-            next
-        }
-        if pending_space && out.len() > 0 {
-            &out.push(U8{32})
-            &units.push(1)
-        }
-        pending_space = false
-        if length == 1 && Int.from_u8(bytes[at]) == 124 {
-            &out.push(U8{92})
-            &units.push(1)
-        }
-        loop index in at..<at + length -> &out.push(bytes[index])
-        &units.push(if length == 4 -> 2 else -> 1)
-        at += length
-    }
+    flat :: SPACE_RUN.replace(text, " ").remove_prefix(" ").remove_suffix(" ").replace("|", "\\|")
     total := 0
-    loop unit in units -> total += unit
-    flat :: String.from_bytes_lossy(out)
+    loop scalar in flat.chars() -> total += utf16_units("{scalar}")
     if total <= CELL_LIMIT -> return flat
-    kept := [U8]{}
+    kept := [String]{}
     used := 0
-    byte_at := 0
-    unit_index := 0
-    loop used < CELL_KEEP {
-        count :: units[unit_index]
-        length := sequence_len(Int.from_u8(out[byte_at]))
-        if count == 2 && used + 2 > CELL_KEEP {
-            &kept.push(U8{239})
-            &kept.push(U8{191})
-            &kept.push(U8{189})
-            used += 1
-            next
+    loop scalar in flat.chars() {
+        units :: utf16_units("{scalar}")
+        if used + units > CELL_KEEP {
+            if used < CELL_KEEP -> &kept.push("�")
+            break
         }
-        loop index in byte_at..<byte_at + length -> &kept.push(out[index])
-        used += count
-        byte_at += length
-        unit_index += 1
+        &kept.push("{scalar}")
+        used += units
     }
-    "{String.from_bytes_lossy(kept)}…"
+    "{kept.join("")}…"
 }
 
 fn ratified_decisions(raw: String) -> [RatifiedDecision] IndexError! {
@@ -194,10 +135,10 @@ fn index_body(rows: [RatifiedDecision]) -> String Never! {
 
 // `spec` with its generated block replaced by `body`.
 fn replace_index(spec: String, body: String) -> String IndexError! {
-    start :: spec.find(OPEN)
-    end :: spec.find(CLOSE)
-    if start < 0 || end < 0 || end < start -> return Err(index_fail("{SPEC_PATH} has no generated ratified-index markers"))
-    Ok("{byte_slice(spec, 0, start)}{body}{byte_slice(spec, end + byte_len(CLOSE), byte_len(spec))}")
+    if spec.find(OPEN) < 0 || spec.find(CLOSE) < spec.find(OPEN) -> return Err(index_fail("{SPEC_PATH} has no generated ratified-index markers"))
+    before :: spec.partition(OPEN)
+    after :: before.tail.partition(CLOSE)
+    Ok("{before.head}{body}{after.tail}")
 }
 
 fn decision_index_main(args: [String]) -[Exec, Env, FS, Time.Wait]> String IndexError! {
@@ -236,9 +177,21 @@ fn repeated(text: String, count: Int) -> String Never! {
     x93 :: repeated("x", 93)
     assert_eq(cell(repeated("x", 97)), "{x93}…")
     assert_eq(cell(repeated("x", 96)), repeated("x", 96))
-    accent :: String.from_bytes_lossy([U8]{U8{195}, U8{169}})
-    e93 :: repeated(accent, 93)
-    assert_eq(cell(repeated(accent, 100)), "{e93}…")
+    e93 :: repeated("é", 93)
+    assert_eq(cell(repeated("é", 100)), "{e93}…")
+    // 92 units, then a pair that the 93-unit cut splits.
+    assert_eq(cell("{repeated("x", 92)}{repeated("😀", 3)}"), "{repeated("x", 92)}�…")
+    assert_eq(cell("{repeated("x", 91)}{repeated("😀", 3)}"), "{repeated("x", 91)}😀…")
+}
+
+#Test("the generated block replaces exactly the marked span") {
+    spec :: "head\n{OPEN}\nold\n{CLOSE}\ntail\n"
+    replaced :: replace_index(spec, "{OPEN}\nnew\n{CLOSE}") ?? panic("markers: {err.message}")
+    assert_eq(replaced, "head\n{OPEN}\nnew\n{CLOSE}\ntail\n")
+    if replace_index("{CLOSE}\n{OPEN}\n", "") == {
+        .Ok(text) -> panic("reversed markers were accepted: {text}")
+        .Err(error) -> assert_eq(error.message, "{SPEC_PATH} has no generated ratified-index markers")
+    }
 }
 
 #Test("ratified rows are filtered, sorted by id and read from either list shape") {

@@ -1,0 +1,128 @@
+// Branch relaxation for one selected function (X64Select.jet). Selection
+// emits every branch inside the function in its rel32 form (jmp E9 cd, jcc
+// 0F 80+cc cd) and patches it once its target is known (ir_x64_patch, which
+// lists the branch). Afterwards this pass gives each listed branch whose
+// target is within reach the rel8 form (jmp EB cb, jcc 70+cc cb) and moves
+// the code after it up.
+//
+// The pass starts from every branch long and shortens, to a fixed point,
+// each branch whose displacement fits in a signed byte with the branches
+// shortened so far: shortening only brings code closer together, so a
+// branch that fits stays fitting, and a branch left long only ever needed
+// it. Offsets the code was laid out at map to the relaxed code by
+// ir_x64_relaxed_at; the caller moves its relocations, line rows, debug
+// positions and frame-description offsets with it. Code that is not a
+// listed branch (calls and tail jumps, whose rel32 a relocation fills) is
+// copied unchanged.
+
+use jet_backend.[x64_patch_rel32]
+
+// The relaxed layout: each listed branch (by its rel32 field, in code
+// order) with the instruction's first offset and its length in the old
+// layout, whether it is short now, and how many bytes the code up to and
+// including each branch shrank by.
+struct IRX64Relax {
+    sites: [Int]
+    starts: [Int]
+    lengths: [Int]
+    short: [Bool]
+    shrunk: [Int]
+}
+
+// Relaxes the branches whose rel32 fields `sites` lists (in any order,
+// repeats allowed) in `code`, in place, and returns the layout map.
+fn ir_x64_relax(code: &[U8], sites: [Int]) -> IRX64Relax Never! {
+    ordered := sites.copy()
+    &ordered.sort()
+    r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, shrunk: [Int]{}}
+    targets := [Int]{}
+    loop site in ordered {
+        if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
+        jump :: Int.from_u8(code[site - 1]) == 0xe9
+        &r.sites.push(site)
+        &r.starts.push(if jump -> site - 1 else -> site - 2)
+        &r.lengths.push(if jump -> 5 else -> 6)
+        &r.short.push(false)
+        &r.shrunk.push(0)
+        &targets.push(site + 4 + ir_x64_rel32_at(code, site))
+    }
+    // Each pass decides on the shortenings of the passes before it: a
+    // branch that fits then fits after them too, as more short branches
+    // only bring its target closer.
+    changed := true
+    loop changed {
+        changed = false
+        shorten := [Int]{}
+        loop index in 0..<r.sites.len() {
+            if r.short[index] -> next
+            end :: r.starts[index] + r.lengths[index]
+            saving :: r.lengths[index] - 2
+            // Where this branch would end, and its target would be, were it
+            // short too.
+            from :: ir_x64_relaxed_at(r, end) - saving
+            to :: ir_x64_relaxed_at(r, targets[index]) - (if targets[index] >= end -> saving else -> 0)
+            reach :: to - from
+            if reach >= -128 && reach <= 127 -> &shorten.push(index)
+        }
+        loop index in shorten -> r.short[index] = true
+        if shorten.len() > 0 {
+            total := 0
+            loop index in 0..<r.sites.len() {
+                if r.short[index] -> total += r.lengths[index] - 2
+                r.shrunk[index] = total
+            }
+            changed = true
+        }
+    }
+    out := [U8]{}
+    copied := 0
+    loop index in 0..<r.sites.len() {
+        start :: r.starts[index]
+        loop at in copied..<start -> &out.push(code[at])
+        end :: r.starts[index] + r.lengths[index]
+        target :: ir_x64_relaxed_at(r, targets[index])
+        jump :: r.lengths[index] == 5
+        if r.short[index] {
+            &out.push(if jump -> U8{0xeb} else -> U8{0x70 + (Int.from_u8(code[start + 1]) - 0x80)})
+            reach :: target - (out.len() + 1)
+            &out.push(U8{reach.bit_and(255)})
+        } else {
+            if jump {
+                &out.push(U8{0xe9})
+            } else {
+                &out.push(U8{0x0f})
+                &out.push(code[start + 1])
+            }
+            field :: out.len()
+            loop _ in 0..<4 -> &out.push(U8{0})
+            x64_patch_rel32(&out, field, target)
+        }
+        copied = end
+    }
+    loop at in copied..<code.len() -> &out.push(code[at])
+    code = ^out
+    r
+}
+
+// The signed rel32 field at `at`.
+fn ir_x64_rel32_at(code: [U8], at: Int) -> Int Never! {
+    word :: Int.from_u8(code[at]).bit_or((Int.from_u8(code[at + 1]) << 8)).bit_or((Int.from_u8(code[at + 2]) << 16)).bit_or((Int.from_u8(code[at + 3]) << 24))
+    if word >= 2147483648 -> word - 4294967296 else -> word
+}
+
+// Where offset `at` of the old layout, an instruction boundary, is in the
+// relaxed code: every short branch that ends at or before it moved it up.
+fn ir_x64_relaxed_at(r: IRX64Relax, at: Int) -> Int Never! {
+    // The last branch ending at or before `at`.
+    low := 0
+    high := r.sites.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if r.starts[middle] + r.lengths[middle] <= at {
+            low = middle + 1
+        } else {
+            high = middle
+        }
+    }
+    if low == 0 -> at else -> at - r.shrunk[low - 1]
+}

@@ -83,7 +83,7 @@ fn engine_import_report_conflict(report: ProviderFactReport, word: String) -> Bo
         assert(matched)
         assert(engine_import_todo(plan, "package.json", "unresolved"))
     }
-    optional :: plan.provider_facts.get("fsevents#version=2.3.3@npm") ?? panic("exact optional npm facts")
+    optional :: plan.provider_facts.get("fsevents@npm#version=2.3.3") ?? panic("exact optional npm facts")
     optional.validate() ?? panic("lossless optional npm facts")
     assert_eq(optional.provenance.get("package.dependency_kind"), Val("package.json.optionalDependencies"))
     assert(optional.explain_lines().contains("native package.json: retained"))
@@ -115,18 +115,18 @@ fn engine_import_report_conflict(report: ProviderFactReport, word: String) -> Bo
 #Test("provider_conformance_real_path_preserves_registry_npm_and_cargo_facts") {
     npm_document :: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5.4.0\"}},\"scripts\":{{\"build\":\"vite build\"}},\"repository\":{{\"type\":\"git\",\"url\":\"https://example.invalid/web.git\"}}}}"
     npm :: cli_import_npm(npm_document)
-    npm_facts :: npm.provider_facts.get("vite#version=5.4.0@npm") ?? panic("exact npm dependency")
+    npm_facts :: npm.provider_facts.get("vite@npm#version=5.4.0") ?? panic("exact npm dependency")
     npm_facts.validate() ?? panic("lossless npm facts")
-    assert(npm.emit_pkg_jet().contains("vite: vite#version=5.4.0@npm"))
+    assert(npm.emit_pkg_jet().contains("vite: vite@npm#version=5.4.0"))
     assert_eq(npm_facts.native_document, npm_document)
     assert(npm_facts.explain_lines().contains("native package.json: retained"))
     assert_eq(ProviderFacts.from_json(npm_facts.to_json()) ?? panic("npm export"), npm_facts)
     cargo_manifest :: "[package]\nname = \"app\"\nversion = \"0.1.0\"\nlicense = \"MIT\"\nrepository = \"https://example.invalid/app.git\"\n[dependencies]\nserde = \"1\"\n[dev-dependencies]\ninsta = \"1\"\n"
     cargo_lock :: "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n"
     cargo :: cli_import_cargo(cargo_manifest, cargo_lock)
-    cargo_facts :: cargo.provider_facts.get("serde#version=1.0.200@cargo") ?? panic("exact Cargo dependency")
+    cargo_facts :: cargo.provider_facts.get("serde@cargo#version=1.0.200") ?? panic("exact Cargo dependency")
     cargo_facts.validate() ?? panic("lossless Cargo facts")
-    assert(cargo.emit_pkg_jet().contains("serde: serde#version=1.0.200@cargo"))
+    assert(cargo.emit_pkg_jet().contains("serde: serde@cargo#version=1.0.200"))
     assert(cargo_facts.native_document.contains("Cargo.lock:"))
     assert(cargo_facts.facts.has_key("provider.cargo.lock.serde.checksum"))
     kind_found := false
@@ -163,7 +163,7 @@ fn engine_import_report_conflict(report: ProviderFactReport, word: String) -> Bo
     registry :: provider_normalize_document(ProviderFamily.JetRegistry, "{{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-a\"}}\n{{\"name\":\"web\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-b\"}}")
     assert(!registry.is_lossless())
     assert(engine_import_report_conflict(registry, "conflicting native facts"))
-    if registry.lock_record("app", "web#version=1.0.0@jet-registry", "any") == {
+    if registry.lock_record("app", "web@jet-registry#version=1.0.0", "any") == {
         .Ok(_) -> panic("conflicting registry facts entered lock")
         .Err(error) -> assert(error.message.contains("conflict"))
     }

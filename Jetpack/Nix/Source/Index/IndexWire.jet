@@ -3,6 +3,7 @@
 // parser re-encodes what it read and rejects bytes that are not already
 // canonical, because the canonical bytes are what the producer signed.
 use core.encoding.json as json
+use jet_foundation.[foundation_json_integer]
 use jet_pkg_model.[
     pkg_json_array, pkg_json_bool, pkg_json_object, pkg_json_render, pkg_json_text, pkg_json_texts,
     pkg_text_has_control,
@@ -775,15 +776,13 @@ fn nix_index_string_field(map: [String: Dyn], name: String) -> String NixIndexEr
 
 // A JSON integer in the unsigned 64-bit range.
 fn nix_index_u64_value(value: Dyn, label: String) -> Int NixIndexError! {
-    if value == {
-        .Int(number) -> {
-            if number < 0 -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
-            if number > NIX_INDEX_U64_MAX -> return Err(NixIndexError.Invalid("{label} is out of range"))
-            return Ok(number)
-        }
-        .Float(_) -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
-        else -> return Err(NixIndexError.Invalid("{label} must be an integer"))
+    number :: foundation_json_integer(value) ?? {
+        if value.decode<Float>() == .Ok(_) -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
+        return Err(NixIndexError.Invalid("{label} must be an integer"))
     }
+    if number < 0 -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
+    if number > NIX_INDEX_U64_MAX -> return Err(NixIndexError.Invalid("{label} is out of range"))
+    Ok(number)
 }
 
 fn nix_index_u64_field(map: [String: Dyn], name: String) -> Int NixIndexError! {

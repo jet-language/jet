@@ -1,4 +1,4 @@
-// Canonical task-group/task-surface checking and TIR producers.
+// Canonical task-group/task-surface checking and checked-tree producers.
 //
 // The state lives on SemaCheckContext so statement and expression walks share
 // lexical groups, pending joins, and task-lambda boundaries.
@@ -39,6 +39,7 @@ use jet_foundation.[
     symbol_id,
     checked_symbol_local,
     checked_user_local,
+    core_call,
     type_identity_equal,
     type_name,
 ]
@@ -58,6 +59,9 @@ struct SemaTaskGroupBorrow {
     name: String
     place: SemaOwnershipPlace
     access: AccessConvention
+    // Lent through a captured window (`left :: &xs[0]`), which the parent
+    // may no longer change or (for a write) read until the group joins.
+    window: Bool{false}
 }
 
 struct SemaTaskGroupFrame {
@@ -74,7 +78,6 @@ struct SemaTaskGroupState {
     in_spawn: Bool
     spawn_group_floor: Int
     scoped_loan_read_reported: Bool
-    current_binding: String?
     time_effects: [TEffectSpan]
     // (Rust `current_binding_name` / `task_spawn_binding_name`):
     // the binding whose initializer is being checked, and the binding a task
@@ -97,7 +100,6 @@ fn sema_taskgroup_state_init() -> SemaTaskGroupState Never! {
         in_spawn: false,
         spawn_group_floor: 0,
         scoped_loan_read_reported: false,
-        current_binding: None,
         time_effects: [TEffectSpan]{},
     }
 }
@@ -113,6 +115,7 @@ fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupSta
                 name: borrow.name,
                 place: sema_ownership_place_snapshot(borrow.place),
                 access: borrow.access,
+                window: borrow.window,
             })
         }
         &stack.push(SemaTaskGroupFrame{
@@ -131,7 +134,6 @@ fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupSta
         in_spawn: source.in_spawn,
         spawn_group_floor: source.spawn_group_floor,
         scoped_loan_read_reported: source.scoped_loan_read_reported,
-        current_binding: source.current_binding,
         time_effects: effects,
         binding_name: source.binding_name,
         spawn_binding: source.spawn_binding,
@@ -201,12 +203,6 @@ fn sema_taskgroup_active_lexical_name(state: SemaTaskGroupState) -> String? {
     None
 }
 
-fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: String?) -> String? {
-    previous := context.taskgroups.current_binding
-    context.taskgroups.current_binding = name
-    previous
-}
-
 // (Rust `report_unsendable` in a task spawn context): an E1102 at a
 // task capture or result records the task binding, so `.detach()` reports the
 // right refusal: a view borrow is E1106, any other sendability failure E1103.
@@ -225,6 +221,20 @@ fn sema_taskgroup_push_parameter(context: &SemaCheckContext, name: String) Never
     &context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Parameter, Span{start: 0, end: 0}))
 }
 
+// Hands the parent's ownership checks the places running children hold. A
+// child's own body sees none: there the loan is what makes the access legal.
+fn sema_taskgroup_publish_loans(context: SemaCheckContext, state: &SemaOwnershipState) Never! {
+    loans := [SemaOwnershipGroupLoan]{}
+    if !context.taskgroups.in_spawn {
+        loop frame in context.taskgroups.stack {
+            loop held in frame.borrows {
+                if held.window -> &loans.push(SemaOwnershipGroupLoan{name: held.name, group: frame.name, place: sema_ownership_place_snapshot(held.place), access: held.access})
+            }
+        }
+    }
+    state.group_loans = loans
+}
+
 fn sema_taskgroup_note_time_effect(context: &SemaCheckContext, span: Span) Never! {
     loop fact in context.taskgroups.time_effects {
         if fact.name == "Time" && fact.span.start == span.start && fact.span.end == span.end -> return
@@ -238,11 +248,11 @@ fn sema_taskgroup_merge_time_effects(context: &SemaCheckContext, effects: [TEffe
     }
 }
 
-fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, span: Span) Never! {
+fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, binding: String?, span: Span) Never! {
     index :: sema_taskgroup_stack_index(context.taskgroups, group_name) ?? return
     if context.taskgroups.in_spawn && index < context.taskgroups.spawn_group_floor -> return
     &context.taskgroups.stack[index].pending.push(SemaTaskGroupPendingSpawn{
-        binding: context.taskgroups.current_binding,
+        binding: binding,
         span: span,
     })
 }
@@ -398,10 +408,17 @@ fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, b
     nested := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
     sema_taskgroup_mark_spawns_owned(&context, SemaTaskGroupOrigin.Lexical, scopes, &state, &diagnostics)
     if context.taskgroups.stack.len() > 0 -> _ := &context.taskgroups.stack.pop()
+    sema_taskgroup_publish_loans(context, &state)
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     if !nested.complete || !valid -> return None
-    group_local := checked_symbol_local(name, name_span, id)
+    group_local := checked_symbol_local(name, name_span, id, Type.Named{name: "Group"})
     TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
+}
+
+// The check is inside a `task.group` body the current body owns, not in a
+// spawned child's body outside its own groups.
+fn sema_taskgroup_in_group_body(context: SemaCheckContext) -> Bool Never! {
+    context.taskgroups.stack.len() > context.taskgroups.spawn_group_floor
 }
 
 fn sema_taskgroup_contains_name(names: [String], name: String) -> Bool Never! {
@@ -424,10 +441,10 @@ fn sema_taskgroup_task_element(ty: Type) -> Type? {
 }
 
 fn sema_taskgroup_check_discarded_arguments(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    saved_binding := context.taskgroups.current_binding
-    context.taskgroups.current_binding = None
+    saved_binding := context.taskgroups.binding_name
+    context.taskgroups.binding_name = None
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    context.taskgroups.current_binding = saved_binding
+    context.taskgroups.binding_name = saved_binding
 }
 
 fn sema_taskgroup_check_arity(args: [CallArg], expected: Int, label: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -479,7 +496,7 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span, co
         }
         else -> return None
     }
-    body := sema_tir_node(result_ty, TExprKind.IndirectCall{callee: value, type_args: [Type]{}, args: [TCallArg]{}, signature: signature}, span)
+    body := sema_tree_node(result_ty, TExprKind.IndirectCall{callee: value, type_args: [Type]{}, args: [TCallArg]{}, signature: signature}, span)
     Val(TLambda{
         executable: TLambdaBody.Expr{value: body},
         source_span: span,
@@ -531,7 +548,10 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         frozen := sema_taskgroup_contains_name(lambda.capture_facts.frozen, capture.source)
         materialized := sema_taskgroup_contains_name(lambda.capture_facts.materialized, capture.source)
         borrowed := Bool?{None}
-        if !taken && !frozen && !materialized {
+        // A read window the body materializes still names the place it lends
+        // from, so a `task.group` child borrows that place like Rust's
+        // `admit_scoped_borrow`, which runs before any view materialization.
+        if !taken && !frozen {
             borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, span, scopes, &state, &context, &diagnostics)
         }
         // A scoped `task.group` borrow is admitted, but a detached task could
@@ -542,8 +562,38 @@ fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment
         if problem == .Val(value) {
             sema_taskgroup_note_detach_problem(&context, value.kind == SemaSendProblemKind.ViewBorrow)
             &diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
+            next
+        }
+        // A capture the body writes is refused: the task runs beside its
+        // owner. `^` or a frozen snapshot removes the outer alias, a shared
+        // handle orders its own crossing, and the owner of a window the task
+        // also captures is judged through that window.
+        if taken || frozen || materialized || sema_taskgroup_shared_capture(capture.ty) || sema_taskgroup_window_owner(lambda, capture.source, state) -> next
+        if sema_taskgroup_contains_name(lambda.capture_facts.mutable, capture.source) {
+            &diagnostics.push(sema_ownership_crossing_concurrent_write_diagnostic(capture.source, "task capture", span))
         }
     }
+}
+
+fn sema_taskgroup_window_owner(lambda: TLambda, owner: String, state: SemaOwnershipState) -> Bool Never! {
+    loop view in state.views {
+        if !view.active || view.invalidated || view.source.root != owner || view.carrier == owner -> next
+        loop capture in lambda.captures {
+            if capture.source == view.carrier -> return true
+        }
+    }
+    false
+}
+
+// A capture that aliases one lock-ordered cell: `Shared<T>`, a `Condition`
+// wait set, a reactive handle, or a Cell guard.
+fn sema_taskgroup_shared_capture(ty: Type) -> Bool Never! {
+    shared :: if ty == {
+        .Shared(_) -> true
+        .Named(name) -> name == "Condition"
+        else -> false
+    }
+    shared || sema_function_reactive_handle_type(ty) || sema_cell_guard_contained(ty)
 }
 
 fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
@@ -553,6 +603,7 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
     name := capture.source
     expression := Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
     place := SemaOwnershipPlace?{None}
+    window := false
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol :: capture.local.symbol_id ?? return None
     loop binding_index in 0..<scopes.bindings.len() {
@@ -564,6 +615,7 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
         if view.active && !view.invalidated && sema_ownership_view_fact_matches_expr(view, expression, scopes) {
             place = Val(sema_ownership_place_snapshot(view.source))
             access = view.access
+            window = true
             break
         }
     }
@@ -577,10 +629,12 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
         }
     }
     if place == None -> return None
-    sema_taskgroup_admit_scoped_borrow(&context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, span, scopes, &diagnostics)
+    admitted :: sema_taskgroup_admit_scoped_borrow(&context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, window, span, scopes, &diagnostics)
+    sema_taskgroup_publish_loans(context, &state)
+    admitted
 }
 
-fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
+fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, window: Bool, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
     if context.taskgroups.stack.len() == 0 -> return None
     active_index := context.taskgroups.stack.len() - 1
     active := context.taskgroups.stack[active_index]
@@ -601,45 +655,28 @@ fn sema_taskgroup_admit_scoped_borrow(context: &SemaCheckContext, name: String, 
         &diagnostics.push(sema_error("E1101", span, what, "children of a task group run concurrently, so overlapping places cannot include a write borrow", "give the task owned data, freeze it, use `shared`, or borrow provably separate fields"))
         return Val(false)
     }
-    &context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access})
+    &context.taskgroups.stack[active_index].borrows.push(SemaTaskGroupBorrow{name: name, place: sema_ownership_place_snapshot(place), access: access, window: window})
     Val(true)
 }
 
-fn sema_taskgroup_report_scoped_loan_conflict(context: SemaCheckContext, changed: SemaOwnershipPlace, action: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    if context.taskgroups.in_spawn -> return false
-    lent := String?{None}
-    group_name := ""
-    loop frame in context.taskgroups.stack {
-        loop held in frame.borrows {
-            if sema_ownership_places_overlap(held.place, changed) {
-                lent = Val(held.name)
-                group_name = frame.name
-                break
-            }
-        }
-        if lent != None -> break
-    }
-    if lent == .Val(name) {
-        target := sema_ownership_place_name(changed)
-        &diagnostics.push(sema_error("E1101", span, "`{target}` cannot {action} while `{name}` is lent to a task in `{group_name}`", "the task group joins children only at the end of its block, so the place remains borrowed while the child runs", "do this after `{group_name}` joins, or use owned, frozen, or shared data"))
-        return true
-    }
-    false
-}
-
+// A child holding a write loan runs beside the parent, so a parent read of
+// that place races the child's writes. Sequentially a read beside a live
+// write view is fine, which is why this rule belongs to task groups and not
+// to the general view model.
 fn sema_taskgroup_check_scoped_loan_read(context: &SemaCheckContext, expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    if context.taskgroups.in_spawn || context.taskgroups.scoped_loan_read_reported -> return
+    if context.taskgroups.scoped_loan_read_reported -> return
+    // Almost no expression runs while a child holds a loan.
+    if state.group_loans.len() == 0 -> return
     is_place_read := if expression == {.Index(_, _, _, _, _) | .Field(_, _, _, _) -> true else -> false}
     if !is_place_read -> return
-    place :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
-    if place.len() == 0 -> return
-    loop frame in context.taskgroups.stack {
-        loop held in frame.borrows {
-            if held.access == AccessConvention.Write && sema_ownership_places_overlap(held.place, place[0]) {
-                context.taskgroups.scoped_loan_read_reported = true
-                _ := sema_taskgroup_report_scoped_loan_conflict(context, place[0], "be read", expr_span(expression), &diagnostics)
-                return
-            }
+    places :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
+    if places.len() == 0 -> return
+    loop held in state.group_loans {
+        if held.access == AccessConvention.Write && sema_ownership_places_overlap(held.place, places[0]) {
+            context.taskgroups.scoped_loan_read_reported = true
+            read_name :: sema_ownership_place_name(places[0])
+            &diagnostics.push(sema_error("E1101", expr_span(expression), "`{read_name}` cannot be read while `{held.name}` is lent to a task in `{held.group}`", "`{held.name}` is an exclusive write borrow held by a running child, so reading `{read_name}` here would race that task's writes", "read `{read_name}` after the `{held.group}` block ends, give it with `^`, freeze it with `freeze`, or share it with `shared`"))
+            return
         }
     }
 }
@@ -664,13 +701,13 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
     if !sema_taskgroup_check_arity(args, 1, method, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     empty := if args[0].expr == {.ListLit(values, _, _) -> values.len() == 0 else -> false}
     if empty {
-        &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task-group combinator cannot wait for an empty set", "give it one or more task branches"))
+        &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task combinator must have a child to join or select", "write `{method}` {{ work() }} with one or more branches"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    saved_binding := context.taskgroups.current_binding
-    context.taskgroups.current_binding = None
+    saved_binding := context.taskgroups.binding_name
+    context.taskgroups.binding_name = None
     branches := sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    context.taskgroups.current_binding = saved_binding
+    context.taskgroups.binding_name = saved_binding
     values :: branches ?? return SemaMethodSpecialCheck{handled: true, value: None}
     result_ty := Type?{None}
     if values.ty == {
@@ -714,7 +751,7 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
             }
         }
     }
-    checked := sema_expr_expected_owned(sema_tir_expr(result_type, operation, span), expected, environment, program, &diagnostics)
+    checked := sema_expr_expected_owned(sema_tree_expr(result_type, operation, span), expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
 
@@ -722,21 +759,20 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     if !sema_taskgroup_check_arity(args, 1, "task", span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     saved_in_spawn := context.taskgroups.in_spawn
     saved_floor := context.taskgroups.spawn_group_floor
-    saved_binding := context.taskgroups.current_binding
     saved_binding_name := context.taskgroups.binding_name
     saved_spawn_binding := context.taskgroups.spawn_binding
     saved_spawn_body := context.taskgroups.spawn_body
     context.taskgroups.in_spawn = true
+    sema_taskgroup_publish_loans(context, &state)
     context.taskgroups.spawn_group_floor = context.taskgroups.stack.len()
-    context.taskgroups.current_binding = None
     context.taskgroups.spawn_binding = saved_binding_name
     context.taskgroups.binding_name = None
     context.taskgroups.spawn_body = if args[0].expr == {.Lambda(_, _) -> true else -> false}
     checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     context.taskgroups.spawn_body = saved_spawn_body
     context.taskgroups.in_spawn = saved_in_spawn
+    sema_taskgroup_publish_loans(context, &state)
     context.taskgroups.spawn_group_floor = saved_floor
-    context.taskgroups.current_binding = saved_binding
     context.taskgroups.binding_name = saved_binding_name
     context.taskgroups.spawn_binding = saved_spawn_binding
     body :: checked_body ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -769,11 +805,11 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     }
     task_type := Type.Apply{name: "Task", args: [Type]{task_result_ty}}
     kind := TCoreClosureKind.Spawn{group: group, site: span.start, label: None, executable: lambda}
-    value := sema_tir_node(task_type, TExprKind.CoreClosureCall{kind: kind}, span)
+    value := sema_tree_node(task_type, TExprKind.CoreClosureCall{kind: kind}, span)
     if group != None {
         index :: sema_taskgroup_active_index(context.taskgroups) ?? 0
         group_name := context.taskgroups.stack[index].name
-        sema_taskgroup_register_spawn(&context, group_name, span)
+        sema_taskgroup_register_spawn(&context, group_name, saved_binding_name, span)
     }
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
@@ -790,7 +826,14 @@ fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [Ca
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(&context, span)
-        value := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
+        // D-TYPE2-TIME1=A: the Duration installs the task deadline through
+        // the registered `core.time.__task_timeout` row (Rust
+        // jet_task_timeout_duration_ns); the next wait point past it stops.
+        record :: core_call("core.time", "__task_timeout") ?? {
+            &diagnostics.push(sema_error("E0906", span, "the canonical `core.time.__task_timeout` route for `task.timeout` is unavailable", "a task timeout installs its deadline through the registered Core row", "restore the registered `core.time.__task_timeout` route"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        value := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.CoreCall{record: record, args: [TExpr]{duration}, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, fallibility: TFailureCarrier.Infallible}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {
@@ -860,11 +903,11 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
             &diagnostics.push(sema_error("E1103", span, "can't detach task `{name}` — it captured a value that can't cross a thread boundary", "a detached task runs unsupervised; it must only hold values it owns cleanly", "fix the E1102 error at the spawn site first, then `.detach()` is safe"))
         }
     }
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, method, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     join := method == "join"
     result_type := if join -> sema_taskgroup_failure_result(payload) else -> Type.Named{name: "Unit"}
     operation := if join -> THandleOp.TaskJoin else -> THandleOp.TaskDetach
-    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     effect_name := if join -> "Time.Wait" else -> ""
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "Task.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -892,7 +935,7 @@ fn sema_taskgroup_check_task_control(receiver: Expr, receiver_value: TExpr, meth
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type :: Type.Named{name: "Unit"}
-    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "Task.{method}", span, result_type, "", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -945,7 +988,7 @@ fn sema_call_check_channel(call: Call, expected: Type?, environment: SemaScopeEn
     member_bytes :: if call.args.len() == 0 -> [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{99}, U8{104}, U8{97}, U8{110}, U8{110}, U8{101}, U8{108}, U8{46}, U8{110}, U8{101}, U8{119}} else -> [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{99}, U8{104}, U8{97}, U8{110}, U8{110}, U8{101}, U8{108}, U8{46}, U8{98}, U8{111}, U8{117}, U8{110}, U8{100}, U8{101}, U8{100}}
     member :: String.from_bytes(member_bytes) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     record :: sema_call_core_record("core.tasks", member, values.len(), call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, values, call.name_span, [Type]{element}, [Bool]{}, result_type, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)
+    value :: sema_call_core_tree(record, values, call.name_span, [Type]{element}, [Bool]{}, result_type, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
@@ -1037,7 +1080,7 @@ fn sema_readiness_check_head(cond: Expr, table: &SemaReadinessTable, environment
             id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, binding)
             symbol :: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_name: environment.module_identity, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
             if checked == .Val(receiver) {
-                &table.arms.push(Val(SemaReadinessArm.Receive{local: checked_symbol_local(binding, cond_span, id), receiver: receiver, ordinal: table.receivers}))
+                &table.arms.push(Val(SemaReadinessArm.Receive{local: checked_symbol_local(binding, cond_span, id, payload), receiver: receiver, ordinal: table.receivers}))
             } else {
                 &table.arms.push(None)
             }
@@ -1066,15 +1109,15 @@ fn sema_readiness_check_head(cond: Expr, table: &SemaReadinessTable, environment
 }
 
 fn sema_readiness_result_field(result: TLocal, result_ty: Type, index: Int, ty: Type, span: Span) -> TExpr Never! {
-    base :: sema_tir_node(result_ty, TExprKind.Local{local: result}, span)
-    sema_tir_node(ty, TExprKind.HostCall{call: THostCall.TupleIndex{base: base, index: index}}, span)
+    base :: sema_tree_node(result_ty, TExprKind.Local{local: result}, span)
+    sema_tree_node(ty, TExprKind.HostCall{call: THostCall.TupleIndex{base: base, index: index}}, span)
 }
 
 // Rust `lower_readiness_switch`: one scheduler wait over every arm in source
 // order, which yields `(arm, value: T?)`, then one dense integer dispatch on
 // the selected arm. A receive arm unwraps its payload only once it is
 // selected; a timer arm never reads it. An `else` makes the wait nonblocking.
-fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResult], else_result: ^[TStmt]?, span: Span, context: &SemaCheckContext) -> TStmt? {
+fn sema_readiness_tree(table: ^SemaReadinessTable, branches: ^[SemaStatementResult], else_result: ^[TStmt]?, span: Span, context: &SemaCheckContext) -> TStmt? {
     owned_table := ^table
     owned_branches := ^branches
     if owned_branches.len() != owned_table.arms.len() -> return None
@@ -1085,7 +1128,7 @@ fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResul
         {name: "arm", ty: Type.Int},
         {name: "value", ty: payload_ty},
     }}
-    result_local :: checked_user_local("__select_result", span)
+    result_local :: checked_user_local("__select_result", span, result_ty)
     // The wait reads the builder chain from the outer node inward, so the
     // chain is built from the last arm back to keep source order.
     builder := sema_node(&context, builder_ty, NodeKind.SelectStart, span)
@@ -1099,17 +1142,17 @@ fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResul
         if arm == {
             .Receive(local, receiver, ordinal) -> {
                 selected = ordinal
-                payload :: sema_tir_node(element, TExprKind.HostCall{call: THostCall.OptionProbe{inner: sema_readiness_result_field(result_local, result_ty, 1, payload_ty, span), kind: TOptionProbe.Unwrap}}, span)
+                payload :: sema_tree_node(element, TExprKind.HostCall{call: THostCall.OptionProbe{inner: sema_readiness_result_field(result_local, result_ty, 1, payload_ty, span), kind: TOptionProbe.Unwrap}}, span)
                 &body.push(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: element, wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local.span})
-                builder = sema_tir_node(builder_ty, TExprKind.SelectRecv{builder: ^builder, channel: receiver}, span)
+                builder = sema_tree_node(builder_ty, TExprKind.SelectRecv{builder: ^builder, channel: receiver}, span)
             }
             .After(duration, ordinal) -> {
                 selected = owned_table.receivers + ordinal
-                builder = sema_tir_node(builder_ty, TExprKind.SelectAfter{builder: ^builder, duration: duration, value: None}, span)
+                builder = sema_tree_node(builder_ty, TExprKind.SelectAfter{builder: ^builder, duration: duration, value: None}, span)
             }
         }
         loop statement in ^branch.value -> &body.push(^statement)
-        condition :: sema_tir_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tir_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
+        condition :: sema_tree_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tree_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
         &reversed.push(TMixedArm{condition: condition, body: body})
     }
     dispatch := [TMixedArm]{}

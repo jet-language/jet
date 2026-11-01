@@ -25,11 +25,11 @@ fn sema_process_named(name: String) -> Type Never! {
 
 // The Core types this module types itself that Core declares nowhere and
 // exports from no module: the spawned child, its plan, streams and line
-// reader, the stream mode, the terminal policy and session, and the parsed
-// arguments. Copy and sendability judgments know them as Core types.
+// reader, the stream mode, and the terminal policy and session. Copy and
+// sendability judgments know them as Core types.
 fn sema_process_handle_type(name: String) -> Bool Never! {
     if name == {
-        "ProcessChild" | "ProcessPlan" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines" | "ProcessStreamMode" | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession" | "ParsedArgs" -> true
+        "ProcessChild" | "ProcessPlan" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines" | "ProcessStreamMode" | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession" -> true
         else -> false
     }
 }
@@ -49,7 +49,7 @@ fn sema_process_infer_args(args: [CallArg], environment: SemaScopeEnvironment, p
 }
 
 fn sema_process_wrong_arity(method: String, expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_call_arity_diagnostic(method, expected, actual, false, span))
+    &diagnostics.push(sema_call_core_arity_diagnostic(method, expected, actual, span))
 }
 
 fn sema_process_check_args(args: [CallArg], required: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
@@ -116,18 +116,22 @@ fn sema_process_args_spec_wrong_arity(method: String, actual: Int, span: Span) -
         "positional" -> Val(sema_error("E1303", span, "`positional` expects 2 arguments (name, help), got {actual}", "`ArgsSpec.positional(name, help)` registers a required positional argument", "pass exactly two strings: the positional name and a help description"))
         "subcommand" -> Val(sema_error("E1303", span, "`subcommand` expects 3 arguments (name, help, spec), got {actual}", "`ArgsSpec.subcommand(name, help, spec)` gives a subcommand its own nested ArgsSpec", "pass the subcommand name, help text, and an ArgsSpec built with `args.spec()`"))
         "version" | "completion" -> Val(sema_error("E1303", span, "`{method}` expects 1 argument, got {actual}", "`version(text)` configures `--version`; `completion(shell)` renders shell completion text", "pass exactly one string"))
-        "parse" -> Val(sema_error("E1304", span, "`parse` expects 1 argument (argv), got {actual}", "`ArgsSpec.parse(argv)` parses a `[String]` against the spec", "pass exactly one argument: an argv list, e.g. `process.argv()`"))
+        "parse" -> Val(sema_error("E1304", span, "`parse` expects 1 argument (argv), got {actual}", "`ArgsSpec.parse(argv)` parses a `[String]` (from `process.argv()`) against the spec", "pass exactly one argument: the argv list, e.g. `process.argv()`"))
         "description" -> Val(sema_call_arity_diagnostic(method, 1, actual, false, span))
         else -> None
     }
 }
 
-fn sema_process_args_spec_result(method: String) -> Type? {
+// `spec` is the receiver's checked `ArgsSpec` type and `parsed` the
+// Core/Args/Args.jet `ParsedArgs` nominal; Core source implements every
+// method (`__args_*`, `__parsed_*`). `parse` fails with `Err` (the refusal
+// text is its message): a String is not a failure domain (E2417).
+fn sema_process_args_spec_result(method: String, spec: Type, parsed: Type) -> Type? {
     if method == {
-        "flag" | "flag_short" | "option" | "option_short" | "option_default" | "option_env" | "option_int" | "option_float" | "option_choice" | "repeat" | "required_option" | "positional" | "description" | "subcommand" | "version" -> Val(sema_process_named("ArgsSpec"))
+        "flag" | "flag_short" | "option" | "option_short" | "option_default" | "option_env" | "option_int" | "option_float" | "option_choice" | "repeat" | "required_option" | "positional" | "description" | "subcommand" | "version" -> Val(spec)
         "completion" | "help" -> Val(Type.String)
-        "parse" -> Val(sema_process_result(sema_process_named("ParsedArgs"), Type.String))
-        "parse_or_exit" -> Val(sema_process_named("ParsedArgs"))
+        "parse" -> Val(sema_process_result(parsed, Type.Named{name: "Err"}))
+        "parse_or_exit" -> Val(parsed)
         else -> None
     }
 }
@@ -162,14 +166,14 @@ fn sema_process_parsed_args_wrong_arity(method: String, actual: Int, span: Span)
     }
 }
 
-fn sema_process_args_spec_arg_types(method: String) -> [Type] Never! {
+fn sema_process_args_spec_arg_types(method: String, spec: Type) -> [Type] Never! {
     if method == {
         "flag" | "positional" -> [Type]{Type.String, Type.String}
         "flag_short" -> [Type]{Type.String, Type.String, Type.String}
         "option" | "option_int" | "option_float" | "repeat" | "required_option" -> [Type]{Type.String, Type.String, Type.String}
         "option_short" | "option_default" | "option_env" | "option_choice" -> [Type]{Type.String, Type.String, Type.String, Type.String}
         "description" | "version" | "completion" -> [Type]{Type.String}
-        "subcommand" -> [Type]{Type.String, Type.String, sema_process_named("ArgsSpec")}
+        "subcommand" -> [Type]{Type.String, Type.String, spec}
         "parse" | "parse_or_exit" -> [Type]{Type.List{element: Type.String}}
         else -> [Type]{}
     }
@@ -235,7 +239,7 @@ fn sema_process_record_intrinsic(result: Type, effect_name: String, api: String,
 
 fn sema_process_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_process_record_intrinsic(result, effect_name, api, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     // A call checker's finish: under the dispatcher's success view a
     // `ProcessReceipt IOError!` result meets a `ProcessReceipt` expectation by
     // its success side, and the call root then propagates the failure.
@@ -245,7 +249,8 @@ fn sema_process_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], res
 
 fn sema_process_args_spec_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     operation :: sema_process_args_spec_op(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    result :: sema_process_args_spec_result(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    parsed :: Type.Named{name: sema_core_module_nominal(program, "core.args", "ParsedArgs")}
+    result :: sema_process_args_spec_result(method, receiver_value.ty, parsed) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     required_arity :: sema_process_args_spec_arity(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
@@ -256,13 +261,15 @@ fn sema_process_args_spec_method(receiver: Expr, receiver_value: TExpr, method: 
         sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    required := sema_process_args_spec_arg_types(method)
+    required := sema_process_args_spec_arg_types(method, receiver_value.ty)
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     receiver_access :: if method == "help" || method == "completion" || method == "parse" || method == "parse_or_exit" -> AccessConvention.Read else -> AccessConvention.Move
     moving_args :: if method == "subcommand" -> [Bool]{false, false, true} else -> [Bool]{}
     sema_call_note_route_implicit_takes(sema_process_method_params(args, required, moving_args), args, values, environment, program, scopes, &state, context)
     if !sema_process_check_method_ownership(receiver, "ArgsSpec.{method}", args, required, moving_args, receiver_access, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_process_finish(receiver_value, operation, values, result, "Env", "ArgsSpec.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    // Rust D-ARGS1 recorded no effect for spec methods: `parse` reads an
+    // option_env variable inside the parse, without application authority.
+    sema_process_finish(receiver_value, operation, values, result, "", "ArgsSpec.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_process_parsed_args_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -285,7 +292,7 @@ fn sema_process_parsed_args_method(receiver: Expr, receiver_value: TExpr, method
         "positional" -> THandleOp.ParsedArgsPositional
         else -> THandleOp.ParsedArgsSubcommand
     }
-    sema_process_finish(receiver_value, operation, values, result, "Env", "ParsedArgs.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    sema_process_finish(receiver_value, operation, values, result, "", "ParsedArgs.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_process_spec_known_method(method: String) -> Bool Never! {
@@ -386,6 +393,20 @@ fn sema_process_spec_method(receiver: Expr, receiver_value: TExpr, method: Strin
     if known_mutating && receiver == .Ident(_, _, _) {
         if !sema_ownership_mark_unmarked_move(&state, receiver, scopes, "`ProcessSpec.{method}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    // D-PROCESS-SESSION2=D: the report is the ordinary Core source body
+    // `core.process.__spec_abilities`, typed as the checked TerminalFact set,
+    // so every tier runs the same Jet code.
+    if method == "abilities" {
+        if !sema_process_record_intrinsic(result, "", "ProcessSpec.abilities", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        route :: sema_call_core_resolve_route(environment, program, "core.process", "__spec_abilities", [Type]{}, 1, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        target :: if route == {
+            .Source(source) -> source
+            .Core(_) | .SharedSite(_) -> panic("ProcessSpec.abilities must resolve its canonical Jet source body")
+        }
+        callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value)}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
+    }
     effect_name :: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     sema_process_finish(receiver_value, THandleOp.ProcessSpecMethod{method: method, args_len: args.len()}, values, result, effect_name, "ProcessSpec.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
@@ -433,8 +454,13 @@ fn sema_process_terminal_method(receiver: Expr, receiver_value: TExpr, method: S
 }
 
 fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // `write(bytes)` is one partial write that reports the count taken;
+    // `write_all(bytes)` and `write_text(text)` write every byte.
     result :: if method == {
-        "write" | "write_all" -> {
+        "write" -> {
+            if args.len() == 1 -> Val(sema_process_io_result(Type.Int)) else -> None
+        }
+        "write_all" | "write_text" -> {
             if args.len() == 1 -> Val(sema_process_io_result(Type.Named{name: "Unit"})) else -> None
         }
         "close" -> {
@@ -442,7 +468,7 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
         }
         else -> None
     }
-    if method != "write" && method != "write_all" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method != "write" && method != "write_all" && method != "write_text" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
     required_arity :: if method == "close" -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
@@ -450,8 +476,8 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     required :: if method == {
-        "write" -> [Type]{Type.String}
-        "write_all" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
+        "write_text" -> [Type]{Type.String}
+        "write" | "write_all" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
         else -> [Type]{}
     }
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -459,14 +485,15 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
     operation :: if method == {
         "write" -> THandleOp.ProcessStdinWrite
         "write_all" -> THandleOp.ProcessStdinWriteAll
+        "write_text" -> THandleOp.ProcessStdinWriteText
         else -> THandleOp.ProcessStdinClose
     }
     sema_process_finish(receiver_value, operation, values, result ?? Type.Named{name: "Unit"}, "Exec", "ProcessStdin.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method != "lines" && method != "read" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    required_arity :: if method == "read" -> 1 else -> 0
+    if method != "lines" && method != "read" && method != "chunks" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    required_arity :: if method == "lines" -> 0 else if method == "chunks" && args.len() == 0 -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
         sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -474,13 +501,30 @@ fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: Str
     }
     stream_name := sema_process_handle_receiver_name(receiver_value.ty)
     api := "{stream_name}.{method}"
-    required :: if method == "read" -> [Type]{Type.Int} else -> [Type]{}
+    required :: if required_arity == 1 -> [Type]{Type.Int} else -> [Type]{}
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     // `read(max)`: Read::read on the pipe, up to `max` bytes, empty at EOF.
     if method == "read" {
         operation :: if stream_name == "ProcessStderrStream" -> THandleOp.ProcessStderrRead else -> THandleOp.ProcessStdoutRead
         return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
+    }
+    // `chunks(size)`: the Core source body `core.process.__stdout_chunks` /
+    // `__stderr_chunks` builds the loop source, whose Iterable reads the pipe
+    // `size` bytes at a time, so every tier runs the same Jet code.
+    if method == "chunks" {
+        result :: Type.Named{name: sema_core_module_nominal(program, "core.process", "ProcessChunks")}
+        if !sema_process_record_intrinsic(result, "Exec", api, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        member :: if stream_name == "ProcessStderrStream" -> "__stderr_chunks" else -> "__stdout_chunks"
+        route :: sema_call_core_resolve_route(environment, program, "core.process", member, [Type]{}, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        target :: if route == {
+            .Source(source) -> source
+            .Core(_) | .SharedSite(_) -> panic("{api} must resolve its canonical Jet source body")
+        }
+        callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        size :: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)
+        value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(size)}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
     }
     sema_process_finish(receiver_value, THandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
@@ -501,14 +545,35 @@ fn sema_process_child_field(base: TExpr, member: String, span: Span, expected: T
     field_symbol := Symbol{id: field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: Val(owner.key), span: span, ty: Val(field_ty), visibility: 2}
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
     reference := TFieldRef{owner: Val(owner), field: field_id, name: member, ty: field_ty, boxed: false}
-    value := sema_tir_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
+    value := sema_tree_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
 fn sema_call_try_process_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // A child's `terminal` is optional: its session methods need the handle
+    // unwrapped first.
+    if method == "resize" && receiver_value.ty == .Option(inner) && sema_process_handle_receiver_name(inner) == "TerminalSession" {
+        &diagnostics.push(sema_error("E0311", span, "`.resize()` needs `TerminalSession`, not `TerminalSession?`", "a child has a terminal session only when a terminal-backed launch succeeds", "unwrap the optional handle first, then call `session.resize(size)`"))
+        sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    // A string key one or two edits from a stable terminal fact is a typo of
+    // that fact; any other string key stays an open preview fact.
+    if method == "has" && args.len() == 1 && receiver_value.ty == .Tagged(marker, _) && marker == (TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}) {
+        if args[0].expr == .Str(parts, key_span, _) && parts.len() == 1 && parts[0] == .Lit(key) {
+            if sema_suggest_field(key, SEMA_TERMINAL_FACTS) == .Val(fact) {
+                &diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but close spellings of stable facts are probably typos", "write `TerminalFact.{fact}`"))
+                sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
     receiver_name :: sema_process_handle_receiver_name(receiver_value.ty)
-    if receiver_name == "ArgsSpec" -> return sema_process_args_spec_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if receiver_name == "ParsedArgs" -> return sema_process_parsed_args_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // Core/Args/Args.jet declares both; a user type of the same leaf name is
+    // not them.
+    receiver_leaf :: sema_call_reflection_leaf_name(receiver_name)
+    if receiver_leaf == "ArgsSpec" && receiver_name == sema_core_module_nominal(program, "core.args", "ArgsSpec") -> return sema_process_args_spec_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if receiver_leaf == "ParsedArgs" && receiver_name == sema_core_module_nominal(program, "core.args", "ParsedArgs") -> return sema_process_parsed_args_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "ProcessSpec" -> return sema_process_spec_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "ProcessChild" -> return sema_process_child_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if receiver_name == "TerminalSession" -> return sema_process_terminal_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

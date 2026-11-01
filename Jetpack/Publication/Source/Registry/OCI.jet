@@ -5,6 +5,11 @@
 // shared publication_ensure_real_directory; no substitute artifact provider.
 // Staging belongs solely to Foundation's protected publisher: no second
 // unique_suffix; Cache.publication_registry_unique_suffix is the canonical one.
+use jet_foundation.[foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json]
+use jet_pkg_model.[pkg_json_array, pkg_json_object, pkg_json_text, pkg_sha256_hex, publication_tier_label]
+use jetpack_foundation.[FoundationDirectoryAuthority, FoundationPublicationPolicy, foundation_open_directory_authority, foundation_open_file_authority, foundation_write_file_nofollow_at_root]
+use core.files as files
+
 PUBLICATION_OCI_SBOM_TYPE :: "application/vnd.jet.sbom.v1"
 PUBLICATION_OCI_SIGNATURE_TYPE :: "application/vnd.jet.signature.v1"
 PUBLICATION_OCI_PROVENANCE_TYPE :: "application/vnd.jet.provenance.v1"
@@ -319,11 +324,8 @@ fn publication_parse_oci_index(bytes: [U8], subject: String) -> [PublicationOCID
     object :: pkg_json_object(value) ?? return Err(publication_invalid_oci("OCI referrer index is not an object"))
     publication_require_oci_keys(object, [String]{"schemaVersion", "subject", "manifests"}, "index")
     schema_value :: object.get("schemaVersion") ?? return Err(publication_invalid_oci("OCI referrer index has an unsupported schema version"))
-    supported_schema :: if schema_value == {
-        .Int(schema) -> schema == 2
-        else -> false
-    }
-    if !supported_schema -> return Err(publication_invalid_oci("OCI referrer index has an unsupported schema version"))
+    schema :: foundation_json_integer(schema_value) ?? return Err(publication_invalid_oci("OCI referrer index has an unsupported schema version"))
+    if schema != 2 -> return Err(publication_invalid_oci("OCI referrer index has an unsupported schema version"))
     subject_value :: object.get("subject") ?? return Err(publication_invalid_oci("OCI referrer index has no subject"))
     subject_object :: pkg_json_object(subject_value) ?? return Err(publication_invalid_oci("OCI referrer subject is not an object"))
     publication_require_oci_keys(subject_object, [String]{"digest"}, "subject")
@@ -348,13 +350,8 @@ fn publication_parse_oci_index(bytes: [U8], subject: String) -> [PublicationOCID
         digest :: pkg_json_text(digest_value) ?? return Err(publication_invalid_oci("OCI referrer digest is not a string"))
         publication_validate_oci_digest(digest)
         size_value :: manifest.get("size") ?? return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
-        size :: if size_value == {
-            .Int(recorded_size) -> {
-                if recorded_size < 0 -> return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
-                recorded_size
-            }
-            else -> { return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer")) }
-        }
+        size :: foundation_json_integer(size_value) ?? return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
+        if size < 0 -> return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
         &descriptors.push(PublicationOCIDescriptor{artifact_type: artifact_type, digest: digest, size: size})
     }
     Ok(descriptors)

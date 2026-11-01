@@ -9,6 +9,10 @@ use jet_cli.[
     jet_cli_read_rooted_source, jet_cli_replace_source_budget, jet_cli_source_read_limit,
     jet_cli_walk_held_sources, jet_cli_walk_sources,
 ]
+use core.sys as cli_sys
+use core.files as cli_files
+use core.process as cli_process
+use core.time as snapshot_time
 
 fn snapshot_fixture_files(root: String) -> [JetDriverAuthorizedSourceFile] {
     files := [JetDriverAuthorizedSourceFile]{}
@@ -50,8 +54,9 @@ fn snapshot_fixture_files(root: String) -> [JetDriverAuthorizedSourceFile] {
     assert(directories.len() == 3)
     unicode_name := false
     empty_directory := false
+    empty_path :: "{root}/empty"
     loop directory in directories {
-        if directory.path == "{root}/empty" -> empty_directory = directory.entries.len() == 0
+        if directory.path == empty_path -> empty_directory = directory.entries.len() == 0
         if directory.path == root {
             loop entry in directory.entries {
                 if entry.name == "�.jet" -> unicode_name = entry.name_is_unicode
@@ -68,18 +73,18 @@ fn snapshot_fixture_files(root: String) -> [JetDriverAuthorizedSourceFile] {
     // copy: `read.stat` stays with `read`, which is read again at line 140, and the binding
     // `precise` owns its own.
     precise := read.stat.copy()
-    precise.modified = core.time.datetime(2026, 1, 1, 0, 0, 0).add_nanoseconds(123456789)
+    precise.modified = snapshot_time.datetime(2026, 1, 1, 0, 0, 0).add_nanoseconds(123456789)
     ns :: precise.modified.to_unix_ns() ?? panic("fixture timestamp")
     assert(ns % 1000000 != 0)
     assert(jet_cli_identity_key("file", precise).contains("modified_ns={ns};"))
     root_info :: held.stat() ?? panic("root identity")
     assert(jet_cli_identity_key("directory", root_info) == "authority-file-v1;kind=directory;length=0;modified_ns=none;device={root_info.id.device};inode={root_info.id.inode}")
     if jet_cli_read_held_source(held, "main.jet", 1) == {
-        .Err(detail) -> assert(detail == "file exceeds its read bound")
+        .Err(detail) -> assert(detail.message == "file exceeds its read bound")
         .Ok(_) -> panic("oversized held read was accepted")
     }
     if jet_cli_read_held_source(held, "main.jet", -1) == {
-        .Err(detail) -> assert(detail == "file read bound exceeds the tree hashing bound")
+        .Err(detail) -> assert(detail.message == "file read bound exceeds the tree hashing bound")
         .Ok(_) -> panic("negative held read bound was accepted")
     }
 

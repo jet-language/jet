@@ -5,10 +5,10 @@ env: S5_PORT={free-port:web}
 mkdir: .git
 mkdir: app
 env: S5_PROJECT_ROOT={work}
-cwd: app
 session app raw: jet dev app.jet --target=web --port={free-port:web}
+cwd: app
 stderr: null
-recv app line until ^= "App preview: " timeout 60s
+recv app line until ^= "App preview: " timeout 60s # original waits for the dev server readiness line
 capture: served = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
 json: cap:served doc $ = {free-port:web}
 step: jet test claims

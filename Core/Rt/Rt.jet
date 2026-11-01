@@ -10,6 +10,7 @@ package {
     }
 }
 use core as core
+use core.time as time
 
 // Positional field order is the existing provider receipt schema.
 struct RealtimeReceipt {
@@ -70,7 +71,7 @@ fn callback(rate_hz: Int, frames_per_buffer: Int, callback: fn([Float]) -[]>) ->
 // Atomic observations and cancellation joining belong to the provider stream,
 // not a source DTO: copying this handle retains the same worker.
 impl RealtimeStream {
-    fn next_deadline(self) -> Instant Never! {
+    fn next_deadline(self) -> time.Instant Never! {
         core.rt.__next_deadline(self)
     }
 

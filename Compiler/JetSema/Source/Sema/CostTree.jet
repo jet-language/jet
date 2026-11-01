@@ -3,6 +3,7 @@ use jet_foundation.[
     OrFallback,
     TIntegerBounds,
     TUnaryOp,
+    Type,
     integer_bounds_exact,
     checked_cost_bounded,
     checked_cost_combine_bounds,
@@ -13,7 +14,7 @@ use jet_foundation.[
 
 // The exact value an integer literal node spells. A literal beyond i64 is a
 // BigInt constant.
-fn tir_expr_literal_integer(expression: TExpr) -> Int? Never! {
+fn tree_expr_literal_integer(expression: TExpr) -> Int? Never! {
     if expression.kind == {
         .IntLit(value, _) -> return Val(value)
         .CtLit(value) -> {
@@ -27,26 +28,26 @@ fn tir_expr_literal_integer(expression: TExpr) -> Int? Never! {
 // The bounds a node states by itself: an integer literal, a negated literal
 // (a fixed-width operand crosses the checked Int-to-fixed conversion), or a
 // local, which carries its binding's bounds. No other node states bounds.
-fn tir_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
+fn tree_expr_known_bounds(expression: TExpr) -> TIntegerBounds? Never! {
     if expression.kind == {
         .Local(local) -> return local.integer_bounds
         .Unary(op, operand) -> {
             if op != TUnaryOp.Neg -> return None
-            literal := tir_expr_literal_integer(operand)
+            literal := tree_expr_literal_integer(operand)
             if operand.kind == .NumericMethod(receiver, operation) {
-                if operation == .CheckedIntToFixed(_, _) -> literal = tir_expr_literal_integer(receiver)
+                if operation == .CheckedIntToFixed(_, _) -> literal = tree_expr_literal_integer(receiver)
             }
             number :: literal ?? return None
             return Val(integer_bounds_exact(-number))
         }
         else -> {}
     }
-    value :: tir_expr_literal_integer(expression) ?? return None
+    value :: tree_expr_literal_integer(expression) ?? return None
     Val(integer_bounds_exact(value))
 }
 
 fn checked_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
-    known :: tir_expr_known_bounds(expression)
+    known :: tree_expr_known_bounds(expression)
     if known != None -> return known
     bounds := TIntegerBounds?{None}
     if expression.kind == {
@@ -84,4 +85,48 @@ fn checked_cost_integer_bounds(expression: TExpr) -> TIntegerBounds? Never! {
         else -> {}
     }
     if bounds != None -> bounds else -> checked_cost_type_bounds(expression.ty)
+}
+
+TREE_FOLD_INT_MIN :: -9223372036854775808
+TREE_FOLD_INT_MAX :: 9223372036854775807
+// Each factor of a folded product stays within 2^31, so the product fits.
+TREE_FOLD_FACTOR_LIMIT :: 2147483648
+
+// The value an immutable block-local `name :: value` folds to while building
+// (#6125): Int `+`, `-`, `*` and negation over literals and immutable locals
+// whose bounds name one value. A result that would leave Int, and every other
+// node, has no fold and computes at run time as written.
+fn tree_expr_fold_int(expression: TExpr) -> Int? Never! {
+    if expression.ty != Type.Int -> return None
+    if expression.kind == {
+        .Unary(op, operand) -> {
+            if op != TUnaryOp.Neg -> return None
+            number :: tree_expr_fold_int(operand) ?? return None
+            if number == TREE_FOLD_INT_MIN -> return None
+            return Val(-number)
+        }
+        .Binary(op, _, _, lhs, rhs) -> {
+            left :: tree_expr_fold_int(lhs) ?? return None
+            right :: tree_expr_fold_int(rhs) ?? return None
+            if op == {
+                .Add -> {
+                    if (right > 0 && left > TREE_FOLD_INT_MAX - right) || (right < 0 && left < TREE_FOLD_INT_MIN - right) -> return None
+                    return Val(left + right)
+                }
+                .Sub -> {
+                    if (right < 0 && left > TREE_FOLD_INT_MAX + right) || (right > 0 && left < TREE_FOLD_INT_MIN + right) -> return None
+                    return Val(left - right)
+                }
+                .Mul -> {
+                    if left > TREE_FOLD_FACTOR_LIMIT || left < -TREE_FOLD_FACTOR_LIMIT || right > TREE_FOLD_FACTOR_LIMIT || right < -TREE_FOLD_FACTOR_LIMIT -> return None
+                    return Val(left * right)
+                }
+                else -> return None
+            }
+        }
+        else -> {}
+    }
+    bounds :: tree_expr_known_bounds(expression) ?? return None
+    if bounds.lo != bounds.hi || bounds.lo < TREE_FOLD_INT_MIN || bounds.lo > TREE_FOLD_INT_MAX -> return None
+    Val(bounds.lo)
 }

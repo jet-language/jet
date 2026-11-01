@@ -358,6 +358,181 @@ fn trap_build_invalid_layout_head(builder: I64) {
     rt_text_push_word(builder, I64{10}, I64{1})
 }
 
+// E2804 Why: A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately.
+// Fix: Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).
+fn trap_footer_e2804() {
+    trap_write_word(I64{2324174318216959776}, I64{8})
+    trap_write_word(I64{8386093285582599524}, I64{8})
+    trap_write_word(I64{2334400029591216229}, I64{8})
+    trap_write_word(I64{7594230551648362861}, I64{8})
+    trap_write_word(I64{6998708597297344627}, I64{8})
+    trap_write_word(I64{8319678436673675885}, I64{8})
+    trap_write_word(I64{7308901430990004768}, I64{8})
+    trap_write_word(I64{8243113871575967776}, I64{8})
+    trap_write_word(I64{7935452960416298784}, I64{8})
+    trap_write_word(I64{2334379873359197797}, I64{8})
+    trap_write_word(I64{3342908322434082162}, I64{8})
+    trap_write_word(I64{7310594991672611360}, I64{8})
+    trap_write_word(I64{8295758474120553842}, I64{8})
+    trap_write_word(I64{2337497044692918644}, I64{8})
+    trap_write_word(I64{7070762914270965619}, I64{8})
+    trap_write_word(I64{7018422918071740277}, I64{8})
+    trap_write_word(I64{7308618068575610211}, I64{8})
+    trap_write_word(I64{3348826980926712164}, I64{8})
+    trap_write_word(I64{5917794199201521674}, I64{8})
+    trap_write_word(I64{7957614686737755493}, I64{8})
+    trap_write_word(I64{7307218077914964069}, I64{8})
+    trap_write_word(I64{7017568558837490720}, I64{8})
+    trap_write_word(I64{8316291872320415092}, I64{8})
+    trap_write_word(I64{8317708060514677364}, I64{8})
+    trap_write_word(I64{7737585620925489196}, I64{8})
+    trap_write_word(I64{7021147438986829925}, I64{8})
+    trap_write_word(I64{7214893521250382964}, I64{8})
+    trap_write_word(I64{2338603432378921833}, I64{8})
+    trap_write_word(I64{7233097860205405480}, I64{8})
+    trap_write_word(I64{8386112018953871460}, I64{8})
+    trap_write_word(I64{7594869363788768105}, I64{8})
+    trap_write_word(I64{7308901430368411768}, I64{8})
+    trap_write_word(I64{4207895249207045673}, I64{8})
+    trap_write_word(I64{7953757359395138080}, I64{8})
+    trap_write_word(I64{3415188077984099943}, I64{8})
+    trap_write_word(I64{11219263566405}, I64{6})
+}
+
+fn trap_build_footer_e2804(builder: I64) {
+    rt_text_push_word(builder, I64{2324174318216959776}, I64{8})
+    rt_text_push_word(builder, I64{8386093285582599524}, I64{8})
+    rt_text_push_word(builder, I64{2334400029591216229}, I64{8})
+    rt_text_push_word(builder, I64{7594230551648362861}, I64{8})
+    rt_text_push_word(builder, I64{6998708597297344627}, I64{8})
+    rt_text_push_word(builder, I64{8319678436673675885}, I64{8})
+    rt_text_push_word(builder, I64{7308901430990004768}, I64{8})
+    rt_text_push_word(builder, I64{8243113871575967776}, I64{8})
+    rt_text_push_word(builder, I64{7935452960416298784}, I64{8})
+    rt_text_push_word(builder, I64{2334379873359197797}, I64{8})
+    rt_text_push_word(builder, I64{3342908322434082162}, I64{8})
+    rt_text_push_word(builder, I64{7310594991672611360}, I64{8})
+    rt_text_push_word(builder, I64{8295758474120553842}, I64{8})
+    rt_text_push_word(builder, I64{2337497044692918644}, I64{8})
+    rt_text_push_word(builder, I64{7070762914270965619}, I64{8})
+    rt_text_push_word(builder, I64{7018422918071740277}, I64{8})
+    rt_text_push_word(builder, I64{7308618068575610211}, I64{8})
+    rt_text_push_word(builder, I64{3348826980926712164}, I64{8})
+    rt_text_push_word(builder, I64{5917794199201521674}, I64{8})
+    rt_text_push_word(builder, I64{7957614686737755493}, I64{8})
+    rt_text_push_word(builder, I64{7307218077914964069}, I64{8})
+    rt_text_push_word(builder, I64{7017568558837490720}, I64{8})
+    rt_text_push_word(builder, I64{8316291872320415092}, I64{8})
+    rt_text_push_word(builder, I64{8317708060514677364}, I64{8})
+    rt_text_push_word(builder, I64{7737585620925489196}, I64{8})
+    rt_text_push_word(builder, I64{7021147438986829925}, I64{8})
+    rt_text_push_word(builder, I64{7214893521250382964}, I64{8})
+    rt_text_push_word(builder, I64{2338603432378921833}, I64{8})
+    rt_text_push_word(builder, I64{7233097860205405480}, I64{8})
+    rt_text_push_word(builder, I64{8386112018953871460}, I64{8})
+    rt_text_push_word(builder, I64{7594869363788768105}, I64{8})
+    rt_text_push_word(builder, I64{7308901430368411768}, I64{8})
+    rt_text_push_word(builder, I64{4207895249207045673}, I64{8})
+    rt_text_push_word(builder, I64{7953757359395138080}, I64{8})
+    rt_text_push_word(builder, I64{3415188077984099943}, I64{8})
+    rt_text_push_word(builder, I64{11219263566405}, I64{6})
+}
+
+// E2805 Why: Route patterns and typed inputs define one checked endpoint contract. Paths bind by handler name, and their types must support Decode.
+// Fix: Use `:name` or final `*name` with a matching decodable handler parameter; fix the path or handler signature before registration.
+fn trap_footer_e2805() {
+    trap_write_word(I64{8021509321817347872}, I64{8})
+    trap_write_word(I64{8391439139905827957}, I64{8})
+    trap_write_word(I64{7236828443234431589}, I64{8})
+    trap_write_word(I64{7575164960078656544}, I64{8})
+    trap_write_word(I64{7306000175748968558}, I64{8})
+    trap_write_word(I64{7308901430200265062}, I64{8})
+    trap_write_word(I64{7234306451087844128}, I64{8})
+    trap_write_word(I64{7956012745238668576}, I64{8})
+    trap_write_word(I64{7021802786688016500}, I64{8})
+    trap_write_word(I64{7526747874008134755}, I64{8})
+    trap_write_word(I64{7070761840348897395}, I64{8})
+    trap_write_word(I64{7308326720558866553}, I64{8})
+    trap_write_word(I64{2318339428649410674}, I64{8})
+    trap_write_word(I64{7594591194599157345}, I64{8})
+    trap_write_word(I64{2338324165283815538}, I64{8})
+    trap_write_word(I64{8103509687752947053}, I64{8})
+    trap_write_word(I64{7162205688585940848}, I64{8})
+    trap_write_word(I64{7585785850452337775}, I64{8})
+    trap_write_word(I64{6926647772919642744}, I64{8})
+    trap_write_word(I64{8007506126207807034}, I64{8})
+    trap_write_word(I64{2336349433541042290}, I64{8})
+    trap_write_word(I64{2332976127438367328}, I64{8})
+    trap_write_word(I64{7863391741208193399}, I64{8})
+    trap_write_word(I64{2334956330816861281}, I64{8})
+    trap_write_word(I64{7809911787807270244}, I64{8})
+    trap_write_word(I64{7308326720558866533}, I64{8})
+    trap_write_word(I64{7308604914181087346}, I64{8})
+    trap_write_word(I64{8676578445728310644}, I64{8})
+    trap_write_word(I64{8386107265583182880}, I64{8})
+    trap_write_word(I64{7953752905481134184}, I64{8})
+    trap_write_word(I64{7451613641656593508}, I64{8})
+    trap_write_word(I64{7070762957242917230}, I64{8})
+    trap_write_word(I64{7309940765259425381}, I64{8})
+    trap_write_word(I64{7598805615488756071}, I64{8})
+    trap_write_word(I64{7310027521849716335}, I64{8})
+    trap_write_word(I64{7020035897104670778}, I64{8})
+    trap_write_word(I64{7291176499580659566}, I64{8})
+    trap_write_word(I64{2873230984627503}, I64{7})
+}
+
+fn trap_build_footer_e2805(builder: I64) {
+    rt_text_push_word(builder, I64{8021509321817347872}, I64{8})
+    rt_text_push_word(builder, I64{8391439139905827957}, I64{8})
+    rt_text_push_word(builder, I64{7236828443234431589}, I64{8})
+    rt_text_push_word(builder, I64{7575164960078656544}, I64{8})
+    rt_text_push_word(builder, I64{7306000175748968558}, I64{8})
+    rt_text_push_word(builder, I64{7308901430200265062}, I64{8})
+    rt_text_push_word(builder, I64{7234306451087844128}, I64{8})
+    rt_text_push_word(builder, I64{7956012745238668576}, I64{8})
+    rt_text_push_word(builder, I64{7021802786688016500}, I64{8})
+    rt_text_push_word(builder, I64{7526747874008134755}, I64{8})
+    rt_text_push_word(builder, I64{7070761840348897395}, I64{8})
+    rt_text_push_word(builder, I64{7308326720558866553}, I64{8})
+    rt_text_push_word(builder, I64{2318339428649410674}, I64{8})
+    rt_text_push_word(builder, I64{7594591194599157345}, I64{8})
+    rt_text_push_word(builder, I64{2338324165283815538}, I64{8})
+    rt_text_push_word(builder, I64{8103509687752947053}, I64{8})
+    rt_text_push_word(builder, I64{7162205688585940848}, I64{8})
+    rt_text_push_word(builder, I64{7585785850452337775}, I64{8})
+    rt_text_push_word(builder, I64{6926647772919642744}, I64{8})
+    rt_text_push_word(builder, I64{8007506126207807034}, I64{8})
+    rt_text_push_word(builder, I64{2336349433541042290}, I64{8})
+    rt_text_push_word(builder, I64{2332976127438367328}, I64{8})
+    rt_text_push_word(builder, I64{7863391741208193399}, I64{8})
+    rt_text_push_word(builder, I64{2334956330816861281}, I64{8})
+    rt_text_push_word(builder, I64{7809911787807270244}, I64{8})
+    rt_text_push_word(builder, I64{7308326720558866533}, I64{8})
+    rt_text_push_word(builder, I64{7308604914181087346}, I64{8})
+    rt_text_push_word(builder, I64{8676578445728310644}, I64{8})
+    rt_text_push_word(builder, I64{8386107265583182880}, I64{8})
+    rt_text_push_word(builder, I64{7953752905481134184}, I64{8})
+    rt_text_push_word(builder, I64{7451613641656593508}, I64{8})
+    rt_text_push_word(builder, I64{7070762957242917230}, I64{8})
+    rt_text_push_word(builder, I64{7309940765259425381}, I64{8})
+    rt_text_push_word(builder, I64{7598805615488756071}, I64{8})
+    rt_text_push_word(builder, I64{7310027521849716335}, I64{8})
+    rt_text_push_word(builder, I64{7020035897104670778}, I64{8})
+    rt_text_push_word(builder, I64{7291176499580659566}, I64{8})
+    rt_text_push_word(builder, I64{2873230984627503}, I64{7})
+}
+
+fn trap_coded_registered(code: I64) -> Bool {
+    code == I64{224147288645} || code == I64{228442255941}
+}
+
+fn trap_coded_footer(code: I64) {
+    if {
+        (code == I64{224147288645}) -> trap_footer_e2804()
+        else -> trap_footer_e2805()
+    }
+}
+
 fn trap_msg_header_panic() {
     trap_write_word(I64{3694459264210793555}, I64{8})
     trap_write_word(I64{8097507565055848496}, I64{8})
@@ -682,16 +857,30 @@ fn trap_build_msg_list_head(builder: I64) {
     rt_text_push_word(builder, I64{139374716960}, I64{5})
 }
 
+fn trap_msg_list_item() {
+    trap_write_word(I64{469853563168}, I64{5})
+}
+
+fn trap_build_msg_list_item(builder: I64) {
+    rt_text_push_word(builder, I64{469853563168}, I64{5})
+}
+
+fn trap_msg_list_plural() {
+    trap_write_word(I64{115}, I64{1})
+}
+
+fn trap_build_msg_list_plural(builder: I64) {
+    rt_text_push_word(builder, I64{115}, I64{1})
+}
+
 fn trap_msg_list_position() {
-    trap_write_word(I64{2318354821879720224}, I64{8})
-    trap_write_word(I64{8388362703413997427}, I64{8})
-    trap_write_word(I64{544108393}, I64{4})
+    trap_write_word(I64{8317990321387675692}, I64{8})
+    trap_write_word(I64{35658687673449}, I64{6})
 }
 
 fn trap_build_msg_list_position(builder: I64) {
-    rt_text_push_word(builder, I64{2318354821879720224}, I64{8})
-    rt_text_push_word(builder, I64{8388362703413997427}, I64{8})
-    rt_text_push_word(builder, I64{544108393}, I64{4})
+    rt_text_push_word(builder, I64{8317990321387675692}, I64{8})
+    rt_text_push_word(builder, I64{35658687673449}, I64{6})
 }
 
 fn trap_msg_list_end() {
@@ -988,6 +1177,22 @@ fn trap_build_msg_inactive_row_tail(builder: I64) {
     rt_text_push_word(builder, I64{8387226567698641519}, I64{8})
     rt_text_push_word(builder, I64{7306015517270174765}, I64{8})
     rt_text_push_word(builder, I64{795160438}, I64{4})
+}
+
+fn trap_msg_coded_head() {
+    trap_write_word(I64{100194883433555}, I64{6})
+}
+
+fn trap_build_msg_coded_head(builder: I64) {
+    rt_text_push_word(builder, I64{100194883433555}, I64{6})
+}
+
+fn trap_msg_coded_mid() {
+    trap_write_word(I64{2112093}, I64{3})
+}
+
+fn trap_build_msg_coded_mid(builder: I64) {
+    rt_text_push_word(builder, I64{2112093}, I64{3})
 }
 
 // Canonical Text/RustDebug.jet intervals, retyped to machine words.

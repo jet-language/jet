@@ -194,9 +194,10 @@ fn s3cas_copy_nofollow(source: String, destination: String) {
         files.chmod(destination, metadata.mode) ?? panic("file permissions")
     }
 }
+// The roots outlive this helper, so they are a `tmpdir`: a `temp_dir` would
+// remove them when its `TempDir` drops at return (#6119).
 fn s3cas_roots(name: String) -> HangarRoots {
-    scratch :: files.temp_dir(name) ?? panic("scratch")
-    HangarRoots{root: scratch.path, dev_mode: false}
+    HangarRoots{root: files.tmpdir(name) ?? panic("scratch"), dev_mode: false}
 }
 fn s3cas_closure(output: String) -> NixClosureRecord {
     NixClosureRecord{channel: "nixpkgs-unstable", revision: s3cas_repeat("a", 40), system: pkg_host_platform(), index_authority: s3cas_repeat("b", 64), derivation: s3cas_repeat("c", 64), output: output, nar_hash: "sha256:{s3cas_repeat("d", 64)}", size: 1, compression: "none", references: [String]{}, upstream_proof: "sha256-{s3cas_repeat("e", 64)}", cache_key: s3cas_repeat("f", 64), project_cas_bundle: "sha256-{s3cas_repeat("0", 64)}"}
@@ -211,7 +212,7 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     if sys.family() != "unix" -> return
     verification := StoreVerification.new()
     roots :: s3cas_roots("nix-cas-source-root")
-    source :: (files.temp_dir("nix-cas-source") ?? panic("source")).path
+    source :: files.tmpdir("nix-cas-source") ?? panic("source")
     absolute_target :: "/nix/store/jet-closure-target"
     relative_target :: s3cas_repeat("x", absolute_target.len())
     files.write(files.join(source, relative_target), "link target payload\n") ?? panic("payload")
@@ -224,7 +225,7 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     revision :: s3cas_repeat("a", 40)
     cache_key :: s3cas_repeat("f", 64)
     bundle :: s3cas_encode(entry.envelope.output_hash, output, platform, revision, cache_key)
-    absolute_source :: (files.temp_dir("nix-cas-absolute-digest") ?? panic("absolute source")).path
+    absolute_source :: files.tmpdir("nix-cas-absolute-digest") ?? panic("absolute source")
     tree :: files.join(absolute_source, "tree")
     s3cas_copy_nofollow(source, tree)
     files.remove(files.join(tree, "link")) ?? panic("remove relative link")
@@ -238,7 +239,7 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     changed :: s3cas_replace_all(bundle, entry.envelope.output_hash.bytes(), new_output.bytes())
     assert(changed.count >= 2, "root and output digest must be rewritten")
     absolute_bundle :: s3cas_replace_link(changed.bytes, relative_target.bytes(), absolute_target.bytes())
-    project :: (files.temp_dir("nix-cas-project") ?? panic("project")).path
+    project :: files.tmpdir("nix-cas-project") ?? panic("project")
     bundle_dir :: files.join(project, ".jet/nix-cas")
     files.create_dir_all(bundle_dir) ?? panic("bundle dir")
     bundle_digest :: s3cas_digest(absolute_bundle)
@@ -263,8 +264,8 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     warm_entry := warm.metadata()
     warm_entry.realized_at = 0
     warm_entry.last_used_at = 0
-    assert_eq(warm_entry, expected, "warm replay changed lock identity")
-    copied_project :: (files.temp_dir("nix-cas-copied-project") ?? panic("copied project")).path
+    assert(warm_entry == expected, "warm replay changed lock identity")
+    copied_project :: files.tmpdir("nix-cas-copied-project") ?? panic("copied project")
     copied_bundle :: files.join(copied_project, ".jet/nix-cas")
     files.create_dir_all(copied_bundle) ?? panic("copied bundle dir")
     files.copy(files.join(project, ".jet/lock"), files.join(copied_project, ".jet/lock")) ?? panic("copy lock")
@@ -279,7 +280,7 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     expected_identity.out = ""
     expected_identity.bin = ""
     expected_identity.rlib = ""
-    assert_eq(copied_identity, expected_identity, "copied repository changed locked replay identity")
+    assert(copied_identity == expected_identity, "copied repository changed locked replay identity")
     exported :: store_export_nix_cas_bundle(&verification, destination, nix_entry.reference) ?? panic("Nix export")
     assert(s3cas_find(exported.bytes, absolute_target.bytes(), 0) >= 0, "Nix CAS export must retain the absolute target as link data")
     if store_export_unsigned_archive(&verification, destination, nix_entry.reference, false) == {

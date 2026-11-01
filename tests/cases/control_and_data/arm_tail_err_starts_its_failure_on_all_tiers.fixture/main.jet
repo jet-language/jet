@@ -1,0 +1,21 @@
+// The `Err(...)` an arm's last line hands back is where its failure starts,
+// as `return Err(...)` is, even after an earlier failure was handled.
+fn lookup(name: String) -> Int? {
+    if name == "port" -> return Val(8080)
+    None
+}
+
+fn setting(name: String) -> Int {
+    if lookup(name) == {
+        .Val(value) -> Ok(value)
+        .None -> Err("no setting `{name}`")
+    }
+}
+
+fn run() {
+    if setting("host") == {
+        .Ok(value) -> print("host:{value}")
+        .Err(error) -> print("handled:{error}")
+    }
+    print(setting("color"))
+}

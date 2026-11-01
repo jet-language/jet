@@ -23,16 +23,16 @@ fn run() {
     warm :: observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("warm"))
     first_task :: task {
         files.write_atomic("{work}/first.ready", "ready".bytes()) ?? panic("first barrier")
-        loop !files.exists("{work}/barrier.go") { time.sleep(1) }
-        return observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("first"))
+        loop !files.exists("{work}/barrier.go") { time.sleep(1ms) }
+        observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("first"))
     }
     second_task :: task {
         files.write_atomic("{work}/second.ready", "ready".bytes()) ?? panic("second barrier")
-        loop !files.exists("{work}/barrier.go") { time.sleep(1) }
-        return observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("second"))
+        loop !files.exists("{work}/barrier.go") { time.sleep(1ms) }
+        observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("second"))
     }
     // Original THREE-party barrier: both task arrivals and main release, AFTER warm drain.
-    loop !files.exists("{work}/first.ready") || !files.exists("{work}/second.ready") { time.sleep(1) }
+    loop !files.exists("{work}/first.ready") || !files.exists("{work}/second.ready") { time.sleep(1ms) }
     files.write_atomic("{work}/barrier.go", "go".bytes()) ?? panic("release barrier")
     first :: first_task.join() ?? panic("first task")
     second :: second_task.join() ?? panic("second task")

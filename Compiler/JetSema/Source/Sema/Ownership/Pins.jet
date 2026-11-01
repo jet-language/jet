@@ -20,19 +20,26 @@ fn sema_pin_write_window(argument: CallArg) -> Bool Never! {
     false
 }
 
-// Rust `core_call` arm ("core.mem", "pin"). False when the call is rejected.
-fn sema_pin_check_call(module_name: String, member: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
-    if module_name != "core.mem" || member != "pin" || args.len() != 1 -> return true
+// Rust `core_call` arm ("core.mem", "pin") for the one argument of
+// `mem.pin` (sema_call_memory_pin). False when the call is rejected.
+fn sema_pin_check_call(args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
     if sema_pin_write_window(args[0]) -> return true
     &diagnostics.push(sema_error("E0218", expr_span(args[0].expr), "`pin` needs a write window made with the write-access marker `&` into the place being pinned", "a pin promises one storage location will not move, so it has to name that location with the write-access marker `&` instead of a copied value", "write `mem.pin(&place)` with the write-access marker `&`"))
     false
 }
 
 fn sema_pin_type(ty: Type) -> Bool Never! {
-    if ty == {
-        .Apply(name, _) -> name == "Pin"
-        else -> false
+    sema_pin_target(ty) != None
+}
+
+// The pinned type `T` of a `Pin<T>`, spelled bare (`mem.pin`'s result) or as
+// the Core nominal `<corelib>/core.mem::Pin` (a written annotation); None for
+// any other type.
+fn sema_pin_target(ty: Type) -> Type? Never! {
+    if sema_expr_unwrap_tag(ty) == .Apply(name, args) {
+        if (name == "Pin" || name == "<corelib>/core.mem::Pin") && args.len() == 1 -> return Val(args[0].copy())
     }
+    None
 }
 
 // Rust `ViewKind::Pin`: a view fact is a pin when its carrier holds a `Pin<T>`.

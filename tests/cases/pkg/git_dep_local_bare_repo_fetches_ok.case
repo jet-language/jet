@@ -7,41 +7,32 @@ requires: tool:git
 mkdir: store
 env: JET_PACKAGE_STORE_DIR={work}/store
 step: git init --bare {work}/mylib.git
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git clone {work}/mylib.git {work}/mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 copy: mylib_src/mylib.jet mylib_clone/mylib.jet
 copy: mylib_src/package.jet mylib_clone/package.jet
 step: git config user.email "test@jet.test"
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git config user.name "Jet Test"
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git add .
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git commit -m init
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git push origin HEAD:main
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git tag v0.1.0
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git push origin v0.1.0
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 mkdir: home
 write: package.jet package.template
 step: jet fetch
@@ -55,8 +46,8 @@ write: .jet/build/deps/mylib/mylib.jet compromised.template
 step: jet fetch --locked
 env: HOME={work}/home
 exit: nonzero
-stderr.after_first("Error ["): ^= "E1204]"
+stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 step: jet build --locked run.jet
 exit: nonzero
-stderr.after_first("Error ["): ^= "E1204]"
+stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 # Initial typed LockFile pin returned by Fetch is checked through the actual written lock; no constructed lock/cache.

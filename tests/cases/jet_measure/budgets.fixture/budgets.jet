@@ -1,0 +1,27 @@
+fn run() {}
+
+module perf.claims {
+    budgets: [
+        Budget{name: "too_tight", scope: .Test("tight"), metric: .BenchTime(.P50), provider: .BenchMeasurement("tight"), comparison: .AbsoluteFrom("local/claims"), limit: .AtMost(1ns), enforcement: .Fail},
+        Budget{name: "roomy", scope: .Test("roomy"), metric: .BenchTime(.P99), provider: .BenchMeasurement("roomy"), comparison: .AbsoluteFrom("local/claims"), limit: .AtMost(10s), enforcement: .Fail},
+        Budget{name: "advisory", scope: .Test("advisory"), metric: .BenchTime(.P50), provider: .BenchMeasurement("advisory"), comparison: .AbsoluteFrom("local/claims"), limit: .AtMost(1ns), enforcement: .Warn},
+    ]
+}
+
+fn work(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n -> total += i * i
+    total
+}
+
+#Test("tight") { .measure {
+    assert(keep(work(2000)) >= 0)
+} }
+
+#Test("roomy") { .measure {
+    assert(keep(work(10)) >= 0)
+} }
+
+#Test("advisory") { .measure {
+    assert(keep(work(2000)) >= 0)
+} }

@@ -36,7 +36,7 @@ fn net_unix_connect_job_drop(job: I64) {
     }
     net_put(job, I64{24}, state)
     net_put(job, I64{32}, status)
-    sync_store(job + I64{8}, I64{1})
+    sync_store(wrapping(job + I64{8}), I64{1})
     sync_park_wake(net_word(job, I64{40}))
     net_unix_connect_job_drop(job)
     I64{0}
@@ -61,7 +61,7 @@ fn net_unix_connect_run(path: I64, output: I64, error: I64) -> I64 {
         loop {
             // The seed receives a completed result before entering a wait:
             // neither a zero deadline nor cancellation replaces ready success.
-            if (sync_load(job + I64{8}) != I64{0}) {
+            if (sync_load(wrapping(job + I64{8})) != I64{0}) {
                 status :: net_word(job, I64{32})
                 if (status == I64{0}) {
                     net_put(output, I64{0}, jet_socket_stream_from_fd_raw(net_word(job, I64{24})))

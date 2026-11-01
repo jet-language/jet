@@ -77,7 +77,7 @@ struct Notes {
         producer :: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"]).stdout(.Stream).spawn() ?? panic("spawn producer")
         consumer :: process.cmd(["cat"]).stdin(.Stream).stdout(.Capture).spawn() ?? panic("spawn consumer")
         loop line in producer.stdout.lines() {
-            if line.contains(pattern) -> consumer.stdin.write("{line}\n") ?? panic("write consumer")
+            if line.contains(pattern) -> consumer.stdin.write_text("{line}\n") ?? panic("write consumer")
         }
         producer_status :: producer.wait() ?? panic("wait producer")
         consumer_status :: consumer.wait() ?? panic("wait consumer")

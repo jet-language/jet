@@ -21,9 +21,9 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: TCPStream) -> [U8] {
+fn request_head(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block :: stream.read(512) ?? panic("request read")
@@ -41,8 +41,8 @@ fn publish(listener: TCPListener, path: String) {
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    first :: &listener.accept() ?? panic("first accept")
-    head :: request_head(first)
+    first := &listener.accept() ?? panic("first accept")
+    head :: request_head(&first)
     assert(prefix(head, "POST /from HTTP/1.1{PEER_CRLF}".bytes()))
     assert(contains_bytes(head, "content-length: 98304".bytes(), true))
     got := 0
@@ -55,8 +55,8 @@ fn run() {
     }
     first.write_all("HTTP/1.1 307 Temporary Redirect{PEER_CRLF}Location: /to{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
     first.close() ?? panic("close first")
-    second :: &listener.accept() ?? panic("replay accept")
-    replay :: request_head(second)
+    second := &listener.accept() ?? panic("replay accept")
+    replay :: request_head(&second)
     assert(prefix(replay, "POST /to HTTP/1.1{PEER_CRLF}".bytes()))
     assert(contains_bytes(replay, "content-length: 98304".bytes(), true))
     got = 0

@@ -1,0 +1,36 @@
+// A remainder taken right after the quotient of the same operands may reuse
+// that quotient. Both must still satisfy a == q * b + r with r between 0
+// and the divisor, for every sign and at the ends of the one-word range,
+// past them, and for the quotient that leaves the word range
+// (-4611686018427387904 /% -1).
+fn parts(a: Int, b: Int) -> [Int] {
+    q :: a /% b
+    r :: a % b
+    [Int]{q, r}
+}
+
+fn exact(a: Int, b: Int, got: [Int]) -> Bool {
+    q :: got[0]
+    r :: got[1]
+    within :: if b > 0 -> r >= 0 && r < b else -> r <= 0 && r > b
+    q * b + r == a && within
+}
+
+fn run() {
+    values :: [Int]{0, 7, -7, 12, -12, 1000003, -1000003, 4611686018427387903, -4611686018427387904, 4611686018427387904, -4611686018427387905, 9223372036854775807, -9223372036854775808}
+    divisors :: [Int]{1, -1, 3, -3, 13, 1000003, -1000003, 4611686018427387903, -4611686018427387904, 9223372036854775808}
+    checked := 0
+    wrong := 0
+    loop a in values {
+        loop b in divisors {
+            checked += 1
+            if !exact(a, b, parts(a, b)) -> wrong += 1
+        }
+    }
+    print(checked)
+    print(wrong)
+    print(parts(-7, 3))
+    print(parts(7, -3))
+    print(parts(4611686018427387903, -4611686018427387904))
+    print(parts(-4611686018427387904, -1))
+}

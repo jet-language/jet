@@ -129,11 +129,8 @@ fn store_build_record_text(value: Dyn) -> String? Never! {
 
 // A JSON number as a Float (Rust `Int as f64` or `Float`), or None.
 fn store_build_record_number(value: Dyn) -> Float? Never! {
-    if value == {
-        .Int(whole) -> Val(Float.from_int(whole))
-        .Float(fraction) -> Val(fraction)
-        else -> None
-    }
+    number :: value.decode<Float>() ?? return None
+    Val(number)
 }
 
 // Rust project_state::last_run wire; malformed or missing workspace state is

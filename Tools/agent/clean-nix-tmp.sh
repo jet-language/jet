@@ -6,17 +6,44 @@
 # so it must stay fast. Liveness scanning uses three batch passes (find over
 # /proc symlinks, one environ sweep) — never one fork per fd; a machine with
 # ~250k open fds made the old per-fd `readlink` loop take minutes per shell.
+#
+# Liveness: a dir is live while any process has it as cwd or root, holds a
+# descriptor into it, or names it in its initial environment. `nix develop`
+# exports TMPDIR from its rcfile after exec, so a shell's own environ never
+# names it; the flake shellHook therefore holds a descriptor on its TMPDIR for
+# the shell's lifetime, which pass 1 sees and every child inherits.
+# The kernel denies /proc links and environ of processes outside the caller's
+# user namespace, so from inside one (an `unshare -r` wrapper) every live shell
+# would look dead; there this removes nothing.
+#
+# JET_NIX_TMP_ROOT (default /tmp) moves the scanned nix-shell.* parent for
+# clean-nix-tmp.test.mjs.
 set -u
 
+root="${JET_NIX_TMP_ROOT:-/tmp}"
+case "$root" in
+  /*[!A-Za-z0-9/._-]* | [!/]* | '')
+    echo "clean-nix-tmp: JET_NIX_TMP_ROOT must be an absolute path of [A-Za-z0-9/._-]" >&2
+    exit 0
+    ;;
+esac
 stale_minutes="${JET_NIX_TMP_STALE_MINUTES:-0}"
 case "$stale_minutes" in
   '' | *[!0-9]*) stale_minutes=0 ;;
 esac
 uid="$(id -u)"
 
+# Only the initial user namespace maps the whole uid range; anywhere else the
+# scan below cannot see the parent namespace's shells.
+initial_user_namespace() {
+  local inside outside count
+  read -r inside outside count < /proc/self/uid_map || return 1
+  [ "$inside $outside $count" = "0 0 4294967295" ]
+}
+
 # Collect candidate dirs first; with none there is nothing to scan.
 candidates=()
-for candidate in /tmp/nix-shell.*; do
+for candidate in "$root"/nix-shell.*; do
   [ -d "$candidate" ] || continue
   [ ! -L "$candidate" ] || continue
   [ "$(stat -c %u "$candidate" 2>/dev/null)" = "$uid" ] || continue
@@ -27,15 +54,15 @@ for candidate in /tmp/nix-shell.*; do
   candidates+=("$candidate")
 done
 
-if [ "${#candidates[@]}" -gt 0 ] && [ -d /proc/self ]; then
+if [ "${#candidates[@]}" -gt 0 ] && [ -d /proc/self ] && initial_user_namespace; then
   declare -A live=()
 
   mark_target() {
     case "$1" in
-      /tmp/nix-shell.*)
-        rest="${1#/tmp/nix-shell.}"
+      "$root"/nix-shell.*)
+        rest="${1#"$root"/nix-shell.}"
         name="${rest%%/*}"
-        live["/tmp/nix-shell.${name%%:*}"]=1
+        live["$root/nix-shell.${name%%:*}"]=1
         ;;
     esac
   }
@@ -47,7 +74,7 @@ if [ "${#candidates[@]}" -gt 0 ] && [ -d /proc/self ]; then
     mark_target "$target"
   done < <(
     find /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd \
-      -maxdepth 1 -lname '/tmp/nix-shell.*' -printf '%l\n' 2>/dev/null
+      -maxdepth 1 -lname "$root/nix-shell.*" -printf '%l\n' 2>/dev/null
   )
 
   # Pass 2: every readable process environment, in one sweep. Some sandboxes
@@ -59,7 +86,7 @@ if [ "${#candidates[@]}" -gt 0 ] && [ -d /proc/self ]; then
   done < <(
     cat /proc/[0-9]*/environ 2>/dev/null \
       | tr '\0' '\n' \
-      | grep -o '/tmp/nix-shell\.[^/:[:space:]]*' \
+      | grep -o "${root//./\\.}/nix-shell\.[^/:[:space:]]*" \
       | sort -u
   )
 

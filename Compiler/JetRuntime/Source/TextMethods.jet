@@ -23,16 +23,16 @@ fn text_push_repeat_byte(target: I64, byte: I64, count: I64) {
     if (buffer == I64{0}) -> return
     at := I64{0}
     loop at < count {
-        rt_text_put(buffer + used + at, byte)
+        rt_text_put(wrapping(wrapping(buffer + used) + at), byte)
         at += I64{1}
     }
-    rt_text_store(target + I64{8}, used + count)
+    rt_text_store(wrapping(target + I64{8}), used + count)
 }
 
 // Start of the scalar that ends at byte offset end (> floor).
 fn text_scalar_start(data: I64, floor: I64, end: I64) -> I64 {
     at := end - I64{1}
-    loop at > floor && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+    loop at > floor && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
     at
 }
 
@@ -44,14 +44,14 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     end := rt_text_len(value)
     if leading {
         loop start < end {
-            if !unicode_is_white_space(rt_text_decode(data + start)) -> break
-            start += rt_text_width(data + start)
+            if !unicode_is_white_space(rt_text_decode(wrapping(data + start))) -> break
+            start += rt_text_width(wrapping(data + start))
         }
     }
     if trailing {
         loop end > start {
             at :: text_scalar_start(data, start, end)
-            if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+            if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
             end = at
         }
     }
@@ -93,7 +93,7 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     length :: rt_text_len(value)
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(data + at) >= I64{128}) -> return false
+        if (rt_text_byte(wrapping(data + at)) >= I64{128}) -> return false
         at += I64{1}
     }
     true
@@ -193,8 +193,8 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     column := I64{0}
     at := I64{0}
     loop at < length {
-        byte :: rt_text_byte(data + at)
-        step :: rt_text_width(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
+        step :: rt_text_width(wrapping(data + at))
         if {
             (byte == I64{9}) -> {
                 if (width > I64{0}) {
@@ -228,14 +228,14 @@ fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
     if (length == I64{0}) -> return empty
     at := I64{0}
     loop at < length {
-        cp :: rt_text_decode(data + at)
+        cp :: rt_text_decode(wrapping(data + at))
         holds :: if {
             (kind == I64{0}) -> text_char_alnum(cp)
             (kind == I64{1}) -> cp >= I64{48} && cp <= I64{57}
             else -> !unicode_is_control(cp)
         }
         if !holds -> return false
-        at += rt_text_width(data + at)
+        at += rt_text_width(wrapping(data + at))
     }
     true
 }
@@ -254,9 +254,9 @@ fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
     if !(first == I64{95} || compiler_text_alphabetic(first)) -> return false
     at := rt_text_width(data)
     loop at < length {
-        cp :: rt_text_decode(data + at)
+        cp :: rt_text_decode(wrapping(data + at))
         if !(cp == I64{95} || text_char_alnum(cp)) -> return false
-        at += rt_text_width(data + at)
+        at += rt_text_width(wrapping(data + at))
     }
     true
 }
@@ -269,7 +269,7 @@ fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
     expect_upper := true
     at := I64{0}
     loop at < length {
-        cp :: rt_text_decode(data + at)
+        cp :: rt_text_decode(wrapping(data + at))
         if {
             unicode_is_uppercase(cp) -> {
                 has_cased = true
@@ -282,7 +282,7 @@ fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
             compiler_text_alphabetic(cp) -> return false
             else -> expect_upper = true
         }
-        at += rt_text_width(data + at)
+        at += rt_text_width(wrapping(data + at))
     }
     has_cased
 }
@@ -296,13 +296,13 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     saw := false
     at := I64{0}
     loop at < length {
-        cp :: rt_text_decode(data + at)
+        cp :: rt_text_decode(wrapping(data + at))
         if unicode_is_cased(cp) {
             changed :: if lower -> unicode_upper_mapping(cp) != cp else -> unicode_lower_mapping(cp) != cp
             if !changed -> return false
             saw = true
         }
-        at += rt_text_width(data + at)
+        at += rt_text_width(wrapping(data + at))
     }
     saw
 }
@@ -330,8 +330,8 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     result :: rt_text_builder_with_capacity(length)
     at := I64{0}
     loop at < length {
-        unicode_append_mapping(result, unicode_fold_mapping(rt_text_decode(data + at)))
-        at += rt_text_width(data + at)
+        unicode_append_mapping(result, unicode_fold_mapping(rt_text_decode(wrapping(data + at))))
+        at += rt_text_width(wrapping(data + at))
     }
     result
 }
@@ -344,8 +344,8 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     result :: rt_text_builder_with_capacity(length)
     at := I64{0}
     loop at < length {
-        step :: rt_text_width(data + at)
-        cp :: rt_text_decode(data + at)
+        step :: rt_text_width(wrapping(data + at))
+        cp :: rt_text_decode(wrapping(data + at))
         upper :: if unicode_is_cased(cp) -> unicode_upper_mapping(cp) else -> cp
         if {
             upper != cp -> unicode_append_mapping(result, upper)
@@ -366,8 +366,8 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     word_start := true
     at := I64{0}
     loop at < length {
-        step :: rt_text_width(data + at)
-        cp :: rt_text_decode(data + at)
+        step :: rt_text_width(wrapping(data + at))
+        cp :: rt_text_decode(wrapping(data + at))
         if (compiler_text_alphabetic(cp) || compiler_text_numeric(cp)) {
             unicode_append_mapping(result, if word_start -> unicode_title_mapping(cp) else -> unicode_lower_mapping(cp))
             word_start = false

@@ -2,6 +2,7 @@
 // parents, so these tests do not alter the user's default source store.
 use jet_pkg_model.[
     pkg_source_snapshot_into, pkg_source_store_component, pkg_source_store_link_into_project,
+    pkg_source_store_path, pkg_source_store_verify,
 ]
 use jetpack_foundation.[
     foundation_open_directory_authority, foundation_read_file_nofollow_at_root,
@@ -75,11 +76,11 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
         files.symlink(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("symlink fixture")
         source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
         assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
-        assert_eq((files.read_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
+        assert_eq((files.list_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove(files.join(source_path, ".ignored")) ?? panic("remove symlink")
         files.hard_link(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("hardlink fixture")
         assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
-        assert_eq((files.read_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
+        assert_eq((files.list_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove_all(root) ?? panic("fixture cleanup")
     }
 }
@@ -101,5 +102,34 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
     files.write(files.join(mismatch_path, "main.jet"), "different") ?? panic("mismatch bytes")
     assert(pkg_source_store_link_into_project(source_path, mismatch_path) == .Err(_))
     assert_eq(files.read_bytes(files.join(mismatch_path, "main.jet")) ?? panic("mismatch retained"), "different".bytes())
+    files.remove_all(root) ?? panic("fixture cleanup")
+}
+
+// tests/pkg.rs:2811: a store entry is named <name>-<version>-<fingerprint without sha256->.
+#Test("store_path_format_name_version_fp") {
+    assert_eq(files.basename(pkg_source_store_path("mylib", "1.0.0", "sha256-deadbeef")), "mylib-1.0.0-deadbeef")
+}
+
+// tests/pkg.rs:2821
+#Test("store_path_strips_sha256_prefix") {
+    assert_eq(pkg_source_store_path("mylib", "1.0.0", "sha256-deadbeef"), pkg_source_store_path("mylib", "1.0.0", "deadbeef"))
+}
+
+// tests/pkg.rs:3074: a store entry edited after install fails verification
+// with E1204. The entry is written under a held scratch root instead of
+// installing into the user's default store.
+#Test("content_hash_mismatch_after_tamper") {
+    root :: pkg_source_store_test_root("tamper")
+    entry :: files.join(root, "mylib-0.1.0-bbbb")
+    files.create_dir_all(entry) ?? panic("entry directory")
+    files.write(files.join(entry, "lib.jet"), "fn x() {{}}\n") ?? panic("entry source")
+    files.write(files.join(entry, "package.jet"), "name: \"mylib\"\nversion: \"0.1.0\"\n") ?? panic("entry manifest")
+    original :: (foundation_open_directory_authority(entry) ?? panic("hold entry")).tree_hash() ?? panic("entry hash")
+    pkg_source_store_verify("mylib", entry, original) ?? panic("a fresh entry verifies: {err.diagnostic.what}")
+    files.write(files.join(entry, "lib.jet"), "fn evil() {{}}\n") ?? panic("tamper")
+    if pkg_source_store_verify("mylib", entry, original) == {
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1204")
+        .Ok(_) -> panic("a tampered entry must fail verification")
+    }
     files.remove_all(root) ?? panic("fixture cleanup")
 }

@@ -143,31 +143,14 @@ fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [
     }
 }
 
-// U12: bring up every enabled dev `services:` entry and block until each is
-// healthy (or E1261 on timeout) before `jet dev` runs the project's
-// `fn dev()`/`fn run()`. The composed env puts catalog binaries on PATH the
-// same way as the project's own command.
-fn cli_wait_for_services_ready(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, services: [DevServicePlan]) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
-    selected := [Int]{}
-    loop index in 0..<services.len() {
-        if services[index].enable -> &selected.push(index)
-    }
-    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, true)
-    if services_up_ordered_with(ServiceHost.Platform, project_dir, &env, services, selected, cli_service_health_timeout(), before_start) == .Err(error) {
-        cli_report_service_start_error(theme, "couldn't start dev services", error.message)
-        return Err(CLIError.Reported(EXIT_USAGE))
-    }
-}
-
 // The per-service start hook: refuse an unknown field (E1262), then run the
 // declared `before_start` jobs.
-fn cli_service_before_start(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, svc: DevServicePlan, announce: Bool) ServicesError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+fn cli_service_before_start(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, svc: DevServicePlan) ServicesError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
     if services_unknown_field(svc) == .Val(field) {
         theme.error_coded("E1262", "service `{svc.name}` has a field Jet doesn't recognize: `{field}`", SERVICES_UNKNOWN_FIELD_WHY, SERVICES_UNKNOWN_FIELD_FIX)
         return Err(ServicesError{message: "service `{svc.name}` has an unsupported field"})
     }
     if !cli_run_before_start_jobs(&verification, &cache, theme, parsed, roots, project_dir, entry, svc) -> return Err(ServicesError{message: "before_start task for service `{svc.name}` failed"})
-    if announce -> theme.detail("waiting for service `{svc.name}` to become healthy…")
 }
 
 fn cli_report_service_start_error(theme: Theme, title: String, error: String) Never! -[IO, Time.Wait]> {
@@ -419,7 +402,7 @@ fn cli_services_up(verification: &StoreVerification, cache: &WorkspaceDeclaratio
     env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
     entry :: cli_find_project_entry(project_dir)
-    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, false)
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc)
     started :: services_up_ordered_with(ServiceHost.Platform, project_dir, &env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         cli_report_service_start_error(theme, "couldn't start services", err.message)
         return EXIT_USAGE
@@ -434,7 +417,7 @@ fn cli_services_restart(verification: &StoreVerification, cache: &WorkspaceDecla
     env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry :: cli_find_project_entry(project_dir)
-    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, false)
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc)
     restarted :: services_restart_ordered_with(ServiceHost.Platform, project_dir, &env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         theme.error("couldn't restart services", err.message, "check the service logs, readiness declarations, and restart policy.")
         return EXIT_USAGE
@@ -525,7 +508,7 @@ fn cli_services_watch(verification: &StoreVerification, cache: &WorkspaceDeclara
     env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry :: cli_find_project_entry(project_dir)
-    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, false)
+    before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc)
     changed :: services_watch_once_ordered_with(ServiceHost.Platform, project_dir, &env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         theme.error("couldn't watch services", err.message, "declare project-relative files in `watch` and inspect the service lifecycle error.")
         return EXIT_USAGE

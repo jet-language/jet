@@ -7,60 +7,48 @@ requires: tool:git
 mkdir: store
 env: JET_PACKAGE_STORE_DIR={work}/store
 step: git init -b main {work}/mylib_init
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 copy: mylib_src/mylib.jet mylib_init/mylib.jet
 copy: mylib_src/package.jet mylib_init/package.jet
 step: git config user.email "test@jet.test"
 cwd: mylib_init
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git config user.name "Jet Test"
 cwd: mylib_init
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git add .
 cwd: mylib_init
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git commit -m init
 cwd: mylib_init
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git clone --bare {work}/mylib_init {work}/mylib.git
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git clone {work}/mylib.git {work}/mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git config user.email "test@jet.test"
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git config user.name "Jet Test"
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 write: package.jet package.template
 step: jet fetch
 exit: 0
 capture: initial_rev = text file.after_first("rev = \"").split("\"", 0) .jet/lock
-cap:initial_rev: nonempty
+cap:initial_rev: nonempty # original predicate: !is_empty()
 write: mylib_clone/extra.jet extra.template
 step: git add .
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git commit -m "second commit"
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git push origin HEAD:main
 cwd: mylib_clone
-exit: any
-# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: jet update
 exit: 0
 capture: new_rev = text file.after_first("rev = \"").split("\"", 0) .jet/lock
-cap:new_rev: nonempty
-cap:new_rev: != "{cap:initial_rev}"
+cap:new_rev: nonempty # original predicate: !is_empty()
+cap:new_rev: != "{cap:initial_rev}" # original assert_ne!(initial_rev, new_rev)

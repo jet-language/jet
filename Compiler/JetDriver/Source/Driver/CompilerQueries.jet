@@ -97,7 +97,7 @@
 // - Exact try human/JSON output, receipt identity and keep/no-keep transaction
 //   behavior use real item-counter deltas. Source approval requires the full
 //   typed input/replay/caller packet; parser success is not semantic proof.
-use jet_sema.[sema_output_resolve]
+use jet_sema.[sema_output_legacy_run_contract, sema_output_resolve]
 use jet_foundation.[
     Diagnostic,
     SourceFile,
@@ -257,6 +257,19 @@ fn jet_driver_compiler_check_source_bytes(load: JetDriverLoadResult, path: Strin
     found
 }
 
+// The loaded text of the entry module's source unit; None unless exactly one
+// loaded module is the entry and its unit has exactly one loaded text.
+fn jet_driver_compiler_check_entry_source(load: JetDriverLoadResult) -> String? {
+    found := String?{None}
+    loop loaded_module in load.modules {
+        if loaded_module.module_identity != load.entry_module_identity -> next
+        if found != None -> return None
+        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() -> return None
+        found = Val(jet_driver_compiler_check_source_bytes(load, load.source_units[loaded_module.source_unit_index].path) ?? return None)
+    }
+    found
+}
+
 // Path -> position of its first loaded source text, built once per compile so
 // each module reads its text without rescanning the file list.
 fn jet_driver_source_file_positions(files: [SourceFile]) -> [String:Int] Never! {
@@ -356,7 +369,10 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
             // Retained products use the canonical registration/Doc ownership
             // bijection, including ABI catalog units without physical source.
             // Only the actual entry is replaced by the prepared parser's program.
-            entry_source :: jet_driver_compiler_check_source_bytes(load, input.request.authorized_sources.entry_path) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            // The entry is the loaded entry module's own source unit, the row
+            // the module-source bijection reads (its loaded path is the
+            // unit's, which need not spell the authorized entry path).
+            entry_source :: jet_driver_compiler_check_entry_source(load) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
             if entry_source != input.parsed.source || (input.parsed.compiler_source.len() > 0 && input.parsed.compiler_source.len() != entry_source.len()) {
                 return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
             }
@@ -391,11 +407,15 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
         input.request.compiler_threads,
     )
     if input.retain_projection -> registration.retain_programs = true
+    registration.plugin_facts = jet_driver_plugin_facts(input.request)
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
+    if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
     output_intent :: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent
-    output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address)
+    output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
+    // The legacy `fn run` contract fails the check without stopping it.
+    loop diagnostic in sema_output_legacy_run_contract(registration, output_intent) -> &load.diagnostics.push(diagnostic)
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     // Declaration checking loans the single graph to its stage, then returns it.
     stage := sema_collect_comptime_declarations(^registration, jet_driver_compiler_check_package_policies(load), input.request.compiler_threads, input.request.trace_sink)
@@ -415,7 +435,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
             packet := jet_driver_compiler_check_diagnostic_packet(input, ^registration, ^provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
-        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_incomplete_graph_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_count} modules checked)", stage.modules)))
+        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_totality_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_count} modules checked)", "sema.check", stage.modules)))
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
     initial_values := [SemaComptimeItemValue]{ }

@@ -98,6 +98,16 @@ struct SemaScopeBinding {
     // does not own. It owns nothing to give away: an exact `^` on it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
     place_alias: Bool{false}
+    // A `::` name bound to a new `Shared` cell keeps its initializer, so a
+    // write into another cell can see the stored value is built in place
+    // (SharedCycles.jet).
+    fresh_cell: Expr?{None}
+    // L0517: a `::` name bound to `path.normalize().to_string()` holds the
+    // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
+    normalized_path_text: Bool{false}
+    // The `::` of a `name :: value` binding: assigning the name replaces it
+    // with `:=` as the E0111 machine edit.
+    binding_sigil: Span?{None}
 }
 
 struct SemaOriginFact {
@@ -126,6 +136,9 @@ struct SemaCallSiteFact {
     // Rust `sig.foreign_effect_root`: the callee is an extern body (an
     // `#FFI(<lang>)` function or a foreign row) whose effect is this one root.
     foreign_effect_root: String?{None}
+    // The callee is the `#Unsafe` inline foreign function of this name: the
+    // call needs an audited region (E3103).
+    unsafe_foreign_name: String?{None}
     // A resolved Core lifecycle marker, retained with the checked call site.
     lifecycle: CoreMarkerApplication?{None}
     shared_lifetime: SharedLifetime?{None}
@@ -167,10 +180,17 @@ enum SemaLoopValueKind {
     Result
 }
 
+// `moved_before` and `scope_depth` are the ownership state where the loop
+// opened its mark (`entry`, sema_ownership_mark): a move the body makes of a
+// binding declared at or above `scope_depth`, still standing where the body
+// reaches its back edge, repeats on the next iteration
+// (sema_ownership_check_loop_move_backedge).
 struct SemaLoopValueFrame {
     label: String?
     kind: SemaLoopValueKind
     ty: Type?
+    moved_before: [SemaOwnershipMovedPlace]
+    scope_depth: Int
 }
 
 struct SemaPendingLoopValue {
@@ -203,7 +223,7 @@ fn sema_loop_value_set_pending_type(context: &SemaCheckContext, kind: SemaLoopVa
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
 }
 
-fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) Never! {
+fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?, entry: SemaOwnershipFork) Never! {
     pending := context.pending_loop_value
     context.pending_loop_value = None
     kind := SemaLoopValueKind.Effect
@@ -214,7 +234,7 @@ fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) Never!
         if value.label != None -> resolved_label = value.label
         result_type = value.ty
     }
-    &context.loop_value_frames.push(SemaLoopValueFrame{kind: kind, label: resolved_label, ty: result_type})
+    &context.loop_value_frames.push(SemaLoopValueFrame{kind: kind, label: resolved_label, ty: result_type, moved_before: entry.moved.copy(), scope_depth: entry.scope_depth})
     &context.loop_break_flows.push(SemaLoopBreakFlows{paths: [SemaOwnershipState]{}})
 }
 
@@ -588,6 +608,11 @@ struct SemaCheckContext {
     // reference's callback `ret`.
     callback_return_open: Bool{false}
     callback_return_row: Type?{None}
+    // An expected callback whose return row is a plain value (`fn(T, T) ->
+    // Ordering`): it has no failure route, so a call of an unannotated
+    // function in it is a failure obligation the bundle solve settles, as in
+    // a named `T Never!` function, rather than the callback's carrier.
+    callback_return_closed: Bool{false}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
     // The enclosing named callable, for the return verdicts.
@@ -655,6 +680,10 @@ struct SemaCheckContext {
     filed_expr_ids: [Int]{[Int]{}}
     filed_expr_id_set: [Int:Bool]{[Int:Bool]{}}
     next_expr_id: Int{TEXPR_FIRST_LOCAL_ID}
+    // True while this check reads a copy of another declaration's source (a
+    // callee's `#Pre` clause at one of its call sites): that source's ids are
+    // filed by every copy, so each copy's nodes take fresh function-local ids.
+    fresh_expr_ids: Bool{false}
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
@@ -1084,6 +1113,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         failure_inference: source.failure_inference,
         inferred_failure_carrier: source.inferred_failure_carrier,
         callback_return_open: source.callback_return_open,
+        callback_return_closed: source.callback_return_closed,
         callback_return_row: source.callback_return_row,
         failure_contract_source: source.failure_contract_source,
         function_name: source.function_name,
@@ -1109,6 +1139,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         // them there after the check (sema_arena_take_back).
         arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
         next_expr_id: source.next_expr_id,
+        fresh_expr_ids: source.fresh_expr_ids,
     }
     sema_comptime_body_sources_index(&snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1225,6 +1256,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             failure_inference: context.failure_inference,
             inferred_failure_carrier: context.inferred_failure_carrier,
             callback_return_open: context.callback_return_open,
+            callback_return_closed: context.callback_return_closed,
             callback_return_row: context.callback_return_row,
             failure_contract_source: context.failure_contract_source,
             function_name: context.function_name,
@@ -1320,6 +1352,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.failure_inference = saved.failure_inference
     context.inferred_failure_carrier = saved.inferred_failure_carrier
     context.callback_return_open = saved.callback_return_open
+    context.callback_return_closed = saved.callback_return_closed
     context.callback_return_row = saved.callback_return_row
     context.failure_contract_source = saved.failure_contract_source
     context.function_name = saved.function_name
@@ -1352,7 +1385,7 @@ fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
 fn sema_check_record_expr_id(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
     if value.id != AST_NODE_GENERATED -> return
     id := expr_node_id(expr)
-    if id == AST_NODE_GENERATED || context.filed_expr_id_set.get(id) != None {
+    if id == AST_NODE_GENERATED || context.fresh_expr_ids || context.filed_expr_id_set.get(id) != None {
         id = context.next_expr_id
         context.next_expr_id -= 1
     } else {
@@ -2071,6 +2104,23 @@ fn sema_scope_declare_local(table: &SemaScopeTable, symbol: Symbol, mutable: Boo
 fn sema_scope_mark_place_alias(table: &SemaScopeTable, name: String) Never! {
     index :: sema_scope_resolve_index(table, name) ?? return
     table.bindings[index].place_alias = true
+}
+
+// Keeps `init` on the `::` binding `name` just declared (see
+// SemaScopeBinding.fresh_cell).
+fn sema_scope_mark_fresh_cell(table: &SemaScopeTable, name: String, init: Expr) Never! {
+    index :: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(&table, index)
+    // copy: `init` is the binding statement's initializer, which the statement keeps.
+    table.bindings[index].fresh_cell = Val(init.copy())
+}
+
+// Keeps the `::` span of the binding `name` just declared (see
+// SemaScopeBinding.binding_sigil).
+fn sema_scope_mark_binding_sigil(table: &SemaScopeTable, name: String, sigil: Span) Never! {
+    index :: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(&table, index)
+    table.bindings[index].binding_sigil = Val(sigil)
 }
 
 // A proven payload refines a stable Optional name for the rest

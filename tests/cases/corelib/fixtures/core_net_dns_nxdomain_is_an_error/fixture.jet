@@ -41,7 +41,7 @@ fn fixture_header(query: [U8], flags: Int, answers: Int, authorities: Int, addit
 }
 fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     peer :: net.socket_addr(packet.host, packet.port) ?? panic("peer")
-    net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")
+    (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
 #Test("core_net_dns_nxdomain_is_an_error") {

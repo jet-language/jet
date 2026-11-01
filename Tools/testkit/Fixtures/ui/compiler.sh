@@ -48,9 +48,11 @@ build)
         printf 'Error [E1250]: unlocked toolchain\n' >&2
         exit 1
     fi
-    printf '#!/bin/sh\nexit 0\n' > fixture-artifact
-    chmod +x fixture-artifact
-    printf 'built: fixture-artifact\n'
+    # A real build writes the entry's artifact under `.jet/build`, named for its stem.
+    artifact="$(dirname "$file")/.jet/build/$(basename "$file" .jet)"
+    mkdir -p "$(dirname "$artifact")"
+    printf '#!/bin/sh\nexit 0\n' > "$artifact"
+    chmod +x "$artifact"
     ;;
 run)
     if [ ! -f "$file" ]; then echo 'fixed was not staged' >&2; exit 9; fi

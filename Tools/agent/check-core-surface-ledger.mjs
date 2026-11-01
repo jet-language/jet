@@ -26,21 +26,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RUNTIME_LEDGER_PATH = ".jet/reports/core-surface-ledger.json";
 const LEDGER_PATH = join(ROOT, RUNTIME_LEDGER_PATH);
 const PYTHON_SURFACE_PATH = join(ROOT, "Docs/spec/reference/python-surface.json");
-// The canonical board lives in the main checkout. A worktree carries its own
-// committed copy, which goes stale the moment a card is minted, and reading it
-// reported every new owner as missing. Resolve the main checkout through git
-// and fall back to this tree only when that fails. Read-only either way.
-const TOWER_PATH = (function () {
-  try {
-    const commonDir = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd: ROOT, encoding: "utf8" }).trim();
-    const candidate = join(dirname(commonDir), "Tools/tower/.tower/tower.json");
-    if (existsSync(candidate)) return candidate;
-  } catch (error) {
-    // Not a git checkout, or git is unavailable; use the in-tree copy.
-  }
-  return join(ROOT, "Tools/tower/.tower/tower.json");
-})();
+// Decisions and card owners come only from the board of the tree under check,
+// never from another checkout's live board, so the same tree checks the same
+// way in a git worktree and in a plain export. Read-only.
+const TOWER_PATH = join(ROOT, "Tools/tower/.tower/tower.json");
 const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 // The Core rows with no Core.jet declaration: typed fixed-signature members,
 // built-in receiver methods, and the lowering-owned extension calls.
@@ -50,7 +39,9 @@ const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_ENUM_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet";
-const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
+// The Core source-ownership views' Jet generator, run by $JET through jet-env.
+const CORE_ROWS_GENERATOR_PATH = "Tools/agent/CoreSourceRows.jet";
+const JET_ENV_PATH = "Tools/agent/jet-env";
 // The owner-controlled syntax registry: every Syntax string constant a Core.jet
 // dispatcher row or the core.mem tier map names.
 const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
@@ -193,7 +184,6 @@ const PYTHON_SOURCE_CONTAINER = {
   "mod:threading": "core.sync",
   "mod:queue": "core.sync",
   "mod:argparse": "core.args",
-  "mod:email": "core.email",
   "mod:inspect": "core.reflect",
   "mod:mimetypes": "core.net.mime",
   "mod:xml.etree.ElementTree": "core.encoding.xml",
@@ -213,6 +203,7 @@ const PYTHON_SOURCE_CONTAINER = {
 // countable; dropping it silently would hide a whole workflow.
 const PYTHON_UNASSIGNED = {
   "type:bool": "bool mirrors int, which is recorded under core.math",
+  "mod:email": "Jet ships no email support",
 };
 
 const PYTHON_ABSENT = {
@@ -1194,7 +1185,7 @@ const CORE_CALL_COVERAGE = {
 function corePureRouteValue(expression, context) {
   const match = expression.trim().match(/^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$/);
   const variants = new Set([
-    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Date",
+    "None", "Mime", "EncodingXml", "Time", "Math", "Date",
     "DateTime", "SketchHll", "SketchTDigest", "SketchCms", "SketchReservoir", "Ui",
     "Raylib", "Io", "Net", "Crypto",
   ]);
@@ -1356,7 +1347,9 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.files" && coreCallOneOf(member, ["__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family", "__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"])) return null;
   if (moduleName === "core.log" && member === "__metric_publish") return null;
   if (moduleName === "core.devtools" && member === "__publish_payload") return null;
-  if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"])) return null;
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop"])) return null;
+  // The live-binding registry is in-process state (Core/Web/Web.jet), not a browser API.
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__live_load", "__live_replace", "live_stats"])) return null;
   if (moduleName === "core.web.store" && member === "__facts_snapshot") return null;
   if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
     "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;
@@ -1409,10 +1402,17 @@ function coreCallEffectFor(moduleName, member) {
   if ((coreCallOneOf(moduleName, [
     "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",
   ]) && coreCallOneOf(member, ["reader", "writer"])) || (moduleName === "core.encoding.csv" && member === "query")) return "FS";
+  // The host's f32 SIMD dispatch is a fixed CPU fact read without a system
+  // call; comptime refuses it (BuildRoutes.jet ir_comptime_ambient_refusal).
+  if (moduleName === "core.compute" && member === "__simd_lanes") return null;
   if (moduleName === "core.compute" && member !== "device_cpu") return "GPU";
   if (moduleName === "core.data" && member === "__host_path_is_file") return "FS";
   if (moduleName === "core.files") return "FS";
   if (moduleName === "core.service" && member === "state_store") return "FS";
+  // D-SERVICE-EFFECTS1=A: the service runtime's file leaves name FS and its
+  // lock and workflow sleeps name Time; callers infer both upward.
+  if (moduleName === "core.service" && coreCallServiceFileLeaf(member) !== null) return "FS";
+  if (moduleName === "core.service" && coreCallOneOf(member, ["__host_sleep_ns", "__host_sleep_wait_ns"])) return "Time";
   if (moduleName === "core.net" || moduleName === "core.net.tls" || moduleName === "core.http.client" || moduleName === "core.http.server" || moduleName === "core.http.middleware" || (moduleName === "core.http" && coreCallOneOf(member, ["serve", "get"]))) return "Net";
   if (moduleName === "core.game.raylib") return "GPU";
   if (moduleName === "core.time") return "Time";
@@ -1449,10 +1449,24 @@ function coreCallEffectFor(moduleName, member) {
   return null;
 }
 
+// D-SERVICE-EFFECTS1=A: a service file leaf names the one leaf it needs, as
+// core.files does: lstat, stat and reads take FS.Read; appends, lock files,
+// atomic replace steps, removes, fsyncs and modes take FS.Write.
+function coreCallServiceFileLeaf(member) {
+  if (coreCallOneOf(member, ["__host_path_kind", "__host_stat", "__host_read_bytes"])) return "FS.Read";
+  if (coreCallOneOf(member, [
+    "__host_append_bytes", "__host_create_dirs", "__host_reserve", "__host_finish", "__host_rename",
+    "__host_sync_parent", "__host_close", "__host_remove", "__host_fsync", "__host_set_mode",
+  ])) return "FS.Write";
+  return null;
+}
+
 function coreCallEffectLeafFor(moduleName, member) {
   if ((moduleName === "core.net" && member === "gethostname") || (moduleName === "core.sys" && member === "hostname")) return "FS.Read";
   if (moduleName === "core.process" && member === "__with_directory_raw") return "FS.Read";
   if (moduleName === "core.service" && member === "state_store") return "FS.Read";
+  if (moduleName === "core.service" && coreCallServiceFileLeaf(member) !== null) return coreCallServiceFileLeaf(member);
+  if (moduleName === "core.service" && coreCallOneOf(member, ["__host_sleep_ns", "__host_sleep_wait_ns"])) return "Time.Wait";
   if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS.Read";
   if (moduleName === "core.time" && coreCallOneOf(member, ["sleep", "sleep_until", "__sleep_ns"])) return "Time.Wait";
   if (moduleName === "core.tasks" && coreCallOneOf(member, ["yield_now", "__yield_now"])) return "Time.Wait";
@@ -1901,7 +1915,7 @@ function ownedWrapperRuntimeUnit(source, module, member) {
   if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length &&
-      !/^(?:priv\s+)?(?:fn|struct|enum|alias|impl|module|trait)\b|^#/.test(lines[end])) {
+      !/^(?:priv\s+)?(?:fn|struct|enum|impl|module|trait)\b|^[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?\s*::|^#/.test(lines[end])) {
     end += 1;
   }
   const body = lines.slice(start, end).join("\n");
@@ -2261,9 +2275,11 @@ function parseCoreSource(source, root = ROOT) {
           sourceModule.module + "." + member + "` target `" + target + "` at line " + sourceModule.sourceLine);
       }
     }
+    // A type alias is `Name :: Type` or `Name<T> :: Type<T>`; a column-0
+    // constant matches too, which only widens this existence check.
     const sourceTypes = new Set(Array.from(
-      readSource(sourceModule.path).matchAll(/^(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
-    ).map(function (match) { return match[1]; }));
+      readSource(sourceModule.path).matchAll(/^(?:(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\s*::)/gm),
+    ).map(function (match) { return match[1] ?? match[2]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {
         throw new Error("Core source module does not declare owned type `" +
@@ -2508,54 +2524,6 @@ function coreSourceFacts() {
   return parseCoreSource(read(CORE_SOURCE_PATH));
 }
 
-// Compiler-private runtime units come straight from the directory: every
-// `Core/<area>/runtime/**/<unit>.jet` except a `// PORT-PENDING` packet, whose
-// body is still the Rust it replaces. A nested directory is one more path
-// segment (`Core/Text/Runtime/Assets/x.jet` is `core.text.runtime.assets.x`).
-// One list, no hand-kept table.
-// The snake_case module segment of a PascalCase Core path segment.
-function snakeSegment(segment) {
-  return segment.replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-}
-
-function coreRuntimeParts() {
-  const parts = [];
-  const aliases = new Set();
-  const coreRoot = join(ROOT, "Core");
-  const walk = function (directory, segments) {
-    for (const entry of readdirSync(directory).sort()) {
-      const full = join(directory, entry);
-      if (statSync(full).isDirectory()) {
-        walk(full, segments.concat([entry]));
-        continue;
-      }
-      if (!entry.endsWith(".jet") || !statSync(full).isFile()) continue;
-      const path = "Core/" + segments.join("/") + "/" + entry;
-      if (/^\/\/ PORT-PENDING\b/m.test(read(path))) continue;
-      // Core source directories and files are PascalCase; the module path is
-      // their snake_case names (`Core/Text/Runtime/Assets/UnicodeCcc.jet` is
-      // `core.text.runtime.assets.unicode_ccc`).
-      const unitSegments = segments.concat([entry.slice(0, -".jet".length)]).map(snakeSegment);
-      for (const segment of unitSegments) {
-        if (!/^[a-z][a-z0-9_]*$/.test(segment)) {
-          throw new Error("runtime unit path segment `" + segment + "` is not a lowercase identifier: " + path);
-        }
-      }
-      const alias = "__core_" + unitSegments.join("_");
-      if (aliases.has(alias)) {
-        throw new Error("runtime unit alias `" + alias + "` is claimed twice; rename " + path);
-      }
-      aliases.add(alias);
-      parts.push({ module: "core." + unitSegments.join("."), alias: alias, path: path });
-    }
-  };
-  for (const area of readdirSync(coreRoot).sort()) {
-    const directory = join(coreRoot, area, "Runtime");
-    if (existsSync(directory) && statSync(directory).isDirectory()) walk(directory, [area, "Runtime"]);
-  }
-  return parts;
-}
-
 // The extension rows of CoreCallExtensions.jet's CORE_CALL_EXTENSIONS list:
 // one CoreCallRecord literal per line, already in the CoreCallRows.jet spelling.
 const CORE_CALL_EXTENSIONS_HEAD = "CORE_CALL_EXTENSIONS :: [CoreCallRecord]{";
@@ -2584,6 +2552,23 @@ function coreCallExtensionRows(source) {
   return rows;
 }
 
+// core_call_key (CoreCalls.jet) of one CoreCallRecord literal row.
+function coreCallRowKey(row) {
+  const match = row.match(/module_name: (.+?), member: (.+?), receiver_types: \[String\]\{(.*?)\}, signature:/);
+  if (!match) throw new Error("CoreCallRecord row has no module_name/member/receiver_types prefix: " + row.slice(0, 120));
+  const receivers = [...match[3].matchAll(/"[^"]*"|String\.from_bytes\(\[U8\]\{[^\]]*?\}\)/g)].map((item) => coreCallRowText(item[0]));
+  const member = coreCallRowText(match[2]);
+  return receivers.length ? "receiver(" + receivers.join("|") + ")." + member : coreCallRowText(match[1]) + "." + member;
+}
+
+// The text of a row's string literal: `"text"` or `String.from_bytes([U8]{U8{n}, …})`.
+function coreCallRowText(expression) {
+  const quoted = expression.match(/^"([^"]*)"$/);
+  if (quoted) return quoted[1];
+  if (!expression.startsWith("String.from_bytes(")) throw new Error("CoreCallRecord row string is neither quoted nor from_bytes: " + expression.slice(0, 120));
+  return Buffer.from([...expression.matchAll(/U8\{(\d+)\}/g)].map((item) => Number(item[1]))).toString("utf8");
+}
+
 function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
   const ambientKeys = new Set(
     declarations.ambientRoutes.map(function (route) {
@@ -2608,7 +2593,18 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
       "    " + translateCoreCallExpression(expression, "Core.jet line " + row.sourceLine) + ",",
     );
   }
-  for (const row of coreCallExtensionRows(extensionSource)) lines.push("    " + row + ",");
+  // core_call_key: lookups take the first row per key and IR canonicalization
+  // refuses a duplicate, so an extension row may not repeat a dispatcher key.
+  const keys = new Map();
+  for (const line of lines) {
+    if (line.startsWith("    CoreCallRecord{")) keys.set(coreCallRowKey(line), "Core.jet");
+  }
+  for (const row of coreCallExtensionRows(extensionSource)) {
+    const key = coreCallRowKey(row);
+    if (keys.has(key)) throw new Error(CORE_CALL_EXTENSIONS_PATH + " row `" + key + "` repeats a " + keys.get(key) + " row; drop the extension row");
+    keys.set(key, CORE_CALL_EXTENSIONS_PATH);
+    lines.push("    " + row + ",");
+  }
   lines.push(
     "} }",
     "",
@@ -2756,7 +2752,7 @@ function validateCoreCallRegistry(source, declarations) {
 
 function validateGeneratedViews(source, declarations) {
   // The Jet-hosted CLI's Core row table is generated from the same declarations.
-  execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH, "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
     throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
@@ -2770,7 +2766,7 @@ function validateGeneratedViews(source, declarations) {
 function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
-  execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH)], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH], { cwd: ROOT, stdio: "inherit" });
   writeCoreCallRegistry(source, declarations);
   writeCoreEnumRows(source, declarations);
   writeCoreEnumPayloadRows();
@@ -5555,7 +5551,6 @@ export {
   buildLedger,
   parseCoreSource,
   coreSourceFacts,
-  coreRuntimeParts,
   ownedWrapperRuntimeUnit,
   publicDispatcherRows,
   validatePublicDispatcher,

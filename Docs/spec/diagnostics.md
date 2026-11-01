@@ -1,10 +1,12 @@
 # Diagnostics
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 This page is the contract for user-facing diagnostics and their projections. It
 covers registry ownership, terminal/LSP/machine rendering, the no-OS E3301
 contract, and the checks for changing a diagnostic. The canonical source is
 `Compiler/Prelude/Diagnostics.jet`; executable checks include
-`tests/cross.rs`, `tests/ui/`, and `tests/diagnostics_coverage.rs`.
+`tests/cross.rs`, `tests/ui/`, and `tests/cases/diagnostics_coverage/`.
 
 ## One registry, many projections
 
@@ -114,7 +116,8 @@ pointer is a stack overflow: `Stop [E3012]` names the Jet function and its
 source line and exits 70. Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
 `Fault [SIGNAME]: invalid memory access at address 0x…` (or the signal's own
 reason) and a backtrace of the Jet frames (`name at file:line`, from the
-image's DWARF). It then re-raises the signal with its default action, so the
+image's location table, `.debug_jetline`, which the compiler writes beside
+the DWARF from the same rows). It then re-raises the signal with its default action, so the
 status is the signal's (128 + number in a shell). Addresses other than the
 faulting one are not printed, because they differ between the two tiers.
 
@@ -176,9 +179,8 @@ remains explicit.
 `jet explain <CODE>` resolves the same registry rows offline through
 [`Explain.jet`](../../Compiler/JetCli/Source/Cli/Explain.jet). The website is another
 projection of that data: [`Docs/site/generate.jet`](../site/generate.jet) writes
-the error index and [`tests/diagnostic_pages.rs`](../../tests/diagnostic_pages.rs)
-renders each code page from registry rows and snapshots. Neither CLI help nor a
-website page is an alternate diagnostic catalog.
+the error index and renders each code page from registry rows and snapshots.
+Neither CLI help nor a website page is an alternate diagnostic catalog.
 
 `jet explain <token>` answers a sigil or operator from the syntax dictionary
 ([`SyntaxDictionaryData.jet`](../../Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet)) in

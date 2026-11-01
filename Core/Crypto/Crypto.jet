@@ -84,7 +84,7 @@ fn jetc_hash_update(hash: &JetcHash, data: [U8]) Never! {
         }
         if hash.pending.bytes.len() == 64 {
             sha256_block(&hash.state, hash.pending.bytes, 0)
-            core.crypto.__zeroize(&hash.pending.bytes)
+            core.crypto.wipe(&hash.pending.bytes)
             hash.pending.bytes = [U8]{}
         }
     }
@@ -103,7 +103,7 @@ fn jetc_hash_finish(hash: &JetcHash) -> [U8] Never! {
     loop hash.pending.bytes.len() %% 64 != 56 -> &hash.pending.bytes.push(U8{0})
     loop b in be64(hash.length * 8) -> &hash.pending.bytes.push(b)
     loop offset in 0..<hash.pending.bytes.len(), 64 -> sha256_block(&hash.state, hash.pending.bytes, offset)
-    core.crypto.__zeroize(&hash.pending.bytes)
+    core.crypto.wipe(&hash.pending.bytes)
     hash.pending.bytes = [U8]{}
     words_to_bytes(hash.state, 4)
 }
@@ -138,6 +138,8 @@ struct Digest256 {
     fn hex(self) -> String Never! { hex_encode(self.bytes) }
 }
 
+impl Digest256.Display { fn display(self) -> String { self.hex() } }
+
 struct Digest512 {
     bytes: [U8]
 
@@ -145,6 +147,8 @@ struct Digest512 {
 
     fn hex(self) -> String Never! { hex_encode(self.bytes) }
 }
+
+impl Digest512.Display { fn display(self) -> String { self.hex() } }
 
 struct Hasher {
     data: [U8]
@@ -191,7 +195,7 @@ impl Secret.Decode {
 impl Secret.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -217,7 +221,7 @@ struct SigningKey {
 impl SigningKey.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -254,7 +258,7 @@ struct X25519SecretKey {
 impl X25519SecretKey.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -285,7 +289,7 @@ struct SharedSecret {
 impl SharedSecret.Close {
     fn close(^self) {
         bytes := ^self.bytes
-        core.crypto.__zeroize(&bytes)
+        core.crypto.wipe(&bytes)
     }
 }
 
@@ -341,8 +345,14 @@ struct KeyWrapError {
     reason: String
 }
 
-/// SHA-256. Pure Jet, RFC 6234. Allocates a 32-byte digest.
-fn sha256(bytes: [U8]) -> Digest256 Never! { {bytes: sha256_raw(bytes)} }
+/// SHA-256. Pure Jet, RFC 6234. Allocates a 32-byte digest. Text hashes its
+/// UTF-8 bytes, so `sha256("hello")` equals `sha256("hello".bytes())`.
+fn sha256(input: [U8] | String) -> Digest256 Never! {
+    if input == {
+        .M__U8_(bytes) -> Digest256{bytes: sha256_raw(bytes)}
+        .String(text) -> Digest256{bytes: sha256_raw(text.bytes())}
+    }
+}
 
 /// SHA-224. SHA-256 with the SHA-224 IV, truncated to 28 bytes.
 fn sha224(bytes: [U8]) -> String Never! { hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)) }
@@ -976,7 +986,7 @@ fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCrypt
     // Exact equality also verifies every original recipient stanza, ephemeral
     // key and header tag, without retaining writer ephemeral private material.
     if !constant_time_equal_bytes(prefix.bytes, writer.prefix) -> return Err(.OpenFailed)
-    reader := jetc.Reader{header_hash: writer.header_hash, key: Secret{bytes: writer.key.bytes.copy()},
+    reader := jetc.ChunkReader{header_hash: writer.header_hash, key: Secret{bytes: writer.key.bytes.copy()},
         nonce_prefix: writer.nonce_prefix, remaining: metadata.len - writer.prefix.len(), index: 1, final: false}
     loop reader.remaining > 0 {
         jetc_cancel_checkpoint()

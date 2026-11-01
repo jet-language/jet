@@ -72,16 +72,13 @@ fn jet_cli_perf_capture_observations(capture: &JetCLIPerfCapture, observations: 
             break
         }
     }
-    jet_cli_perf_window(&capture.profile, latest.live.runtime)
-    if latest.live.runtime == .Val(window) {
-        &capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
-        if window.cpu_ns == .Val(cpu) {
-            &capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
-            if root != None -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
-            else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "root task causality was not observable", status: "unavailable", symbol: symbol, target: target, task_id: None})
-        } else {
-            &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
-        }
+    window :: latest.live.runtime
+    jet_cli_perf_window(&capture.profile, window)
+    &capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
+    if window.cpu_ns == .Val(cpu) {
+        &capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
+        if root != None -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
+        else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "root task causality was not observable", status: "unavailable", symbol: symbol, target: target, task_id: None})
     } else {
         &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
     }
@@ -91,7 +88,7 @@ fn jet_cli_perf_capture_source(path: String, text: String, observations: [JetCLI
     if observations.len() > 4096 -> return Err(jet_cli_read_error("source sampling exceeds its observation bound"))
     source :: jet_cli_perf_source(path, text)
     cpu_samples := U64{0}
-    loop observed in observations { if observed.live.runtime == .Val(window) && window.cpu_ns != None -> cpu_samples += U64{1} }
+    loop observed in observations { if observed.live.runtime.cpu_ns != None -> cpu_samples += U64{1} }
     profile :: jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
     capture := jet_cli_perf_capture_new(profile, [SourceIdentity]{source.identity})
     jet_cli_perf_window(&capture.profile, observations[observations.len() - 1].live.runtime)

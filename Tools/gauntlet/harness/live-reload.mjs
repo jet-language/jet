@@ -782,7 +782,6 @@ function liveReloadAggregateVerdict(phases) {
   const verdicts = Object.values(phases).map((phase) => phase.verdict);
   if (verdicts.some((verdict) => verdict === "loss")) return "loss";
   if (verdicts.length > 0 && verdicts.every((verdict) => verdict === "win")) return "win";
-  if (verdicts.length > 0 && verdicts.every((verdict) => verdict === "parity")) return "parity";
   return "unmeasured";
 }
 

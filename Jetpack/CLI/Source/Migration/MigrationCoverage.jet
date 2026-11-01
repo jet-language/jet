@@ -16,12 +16,14 @@ struct CoveragePackage {
         CoveragePackage{name: name, version: version, reference: reference}
     }
 
+    // Fields in Rust order; a pair-list object keeps it (D-DATATREE-ORDER1).
     fn to_json_tree(self) -> Dyn Never! {
-        object := [String: Dyn]{}
-        object["name"] = Dyn.Text(self.name.copy())
-        object["version"] = Dyn.Text(self.version.copy())
-        object["reference"] = Dyn.Text(self.reference.copy())
-        Dyn.Object(object)
+        fields :: [(key: String, value: Dyn)]{
+            (key: "name", value: Dyn.Text(self.name.copy())),
+            (key: "version", value: Dyn.Text(self.version.copy())),
+            (key: "reference", value: Dyn.Text(self.reference.copy()))
+        }
+        Dyn.Object(fields)
     }
 
     // Name and reference must not be blank.
@@ -116,21 +118,25 @@ struct CoverageReport {
     }
 
     // Stable machine-readable report for CI and migration dashboards:
-    // compact JSON, fields in schema order.
+    // compact JSON, fields in schema order. The objects are pair lists,
+    // which keep their order; a `[String: Dyn]` map would sort its keys
+    // (D-DATATREE-ORDER1).
     fn to_json(self) -> String Never! {
-        progress := [String: Dyn]{}
-        progress["total"] = Dyn.Int(self.nativeization.total)
-        progress["nativeized"] = Dyn.Int(self.nativeization.nativeized)
-        progress["remaining"] = Dyn.Int(self.nativeization.remaining)
-        progress["percent"] = Dyn.Int(self.nativeization.percent)
-        object := [String: Dyn]{}
-        object["schema"] = Dyn.Text(CLI_COVERAGE_SCHEMA)
-        object["native_recipes"] = cli_coverage_packages_json(self.native_recipes)
-        object["centrally_imported_recipes"] = cli_coverage_packages_json(self.centrally_imported_recipes)
-        object["local_imports"] = cli_coverage_packages_json(self.local_imports)
-        object["not_yet_imported"] = cli_coverage_packages_json(self.not_yet_imported)
-        object["nativeization"] = Dyn.Object(progress)
-        pkg_json_render(Dyn.Object(object))
+        progress_fields :: [(key: String, value: Dyn)]{
+            (key: "total", value: Dyn.Int(self.nativeization.total)),
+            (key: "nativeized", value: Dyn.Int(self.nativeization.nativeized)),
+            (key: "remaining", value: Dyn.Int(self.nativeization.remaining)),
+            (key: "percent", value: Dyn.Int(self.nativeization.percent))
+        }
+        fields :: [(key: String, value: Dyn)]{
+            (key: "schema", value: Dyn.Text(CLI_COVERAGE_SCHEMA)),
+            (key: "native_recipes", value: cli_coverage_packages_json(self.native_recipes)),
+            (key: "centrally_imported_recipes", value: cli_coverage_packages_json(self.centrally_imported_recipes)),
+            (key: "local_imports", value: cli_coverage_packages_json(self.local_imports)),
+            (key: "not_yet_imported", value: cli_coverage_packages_json(self.not_yet_imported)),
+            (key: "nativeization", value: Dyn.Object(progress_fields))
+        }
+        pkg_json_render(Dyn.Object(fields))
     }
 }
 

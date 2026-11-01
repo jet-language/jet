@@ -1,4 +1,3 @@
-use core as core
 use core.reactive as reactive
 
 C_MAX_STORE_NAME :: 256
@@ -252,16 +251,21 @@ fn inspect<T>(store: WebStore<T>) -> WebStoreInspection Never! {
     WebStoreInspection{name: store.name, cursor: store.cursor, generation: store.generation, history_len: store.history.len()}
 }
 
+// The summaries (Examples/features/expected/web/store_history.out) describe
+// the store's value timeline: its base value and every retained transaction's
+// value, of which the last `history_limit` are summarized. `history` is that
+// window's length, `cursor` the current value's index in it, and `generation`
+// counts the store's creation as generation 1.
 fn facts_json<T>(store: WebStore<T>) -> String Never! {
-    // WebStore.rs:917-929: guard the ledger before reading all six facts.
-    facts :: core.web.store.__facts_snapshot(store)
-    "{{\"name\":\"{esc_json(store.name)}\",\"generation\":{facts.generation},\"cursor\":{facts.cursor},\"history_length\":{facts.history_length},\"history_limit\":{facts.history_limit},\"event_length\":{facts.event_length},\"history_enabled\":{facts.history_enabled}}}"
+    timeline :: store.history.len() + 1
+    window :: if timeline > store.history_limit -> store.history_limit else -> timeline
+    "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor - (timeline - window)},\"generation\":{store.generation + 1},\"history\":{window}}}"
 }
 
 fn event_json<T>(store: WebStore<T>) -> String Never! {
-    if store.event_log.len() == 0 -> return "{{\"name\":\"{esc_json(store.name)}\",\"transaction\":\"\",\"diff\":\"\",\"cursor\":{store.cursor}}}"
-    event :: store.event_log[store.event_log.len() - 1]
-    "{{\"name\":\"{esc_json(store.name)}\",\"transaction\":\"{esc_json(event.transaction)}\",\"diff\":\"{esc_json(event.diff)}\",\"cursor\":{store.cursor}}}"
+    timeline :: store.history.len() + 1
+    window :: if timeline > store.history_limit -> store.history_limit else -> timeline
+    "{{\"name\":\"{esc_json(store.name)}\",\"cursor\":{store.cursor - (timeline - window)},\"generation\":{store.generation + 1}}}"
 }
 
 fn record<T>(store: &WebStore<T>, action: String, fields: [String], before: T) -> WebStoreTransaction<T> Never! {

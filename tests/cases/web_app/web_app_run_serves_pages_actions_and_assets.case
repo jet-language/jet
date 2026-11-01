@@ -17,10 +17,10 @@ file: page.http ^= "HTTP/1.1 200" # Original starts_with.
 file: page.http ~ "<title>Home</title>" # Original contains predicate.
 file: page.http ~ "hello from csr" # Original contains predicate.
 file: page.http !~ "jet-dev-server-functions" # Original negative predicate.
-file.after_first("\r\n\r\n"): page.http = "{cap:expectedPage}"
+file.after_first("\r\n\r\n"): page.http = "{cap:expectedPage}" # original request helper compares the body after the header block
 step: jet explain --web-graph --json {root}/Examples/features/web/web_app.jet
 exit: 0
-stdout.replace("{root}/Examples/features/web/web_app.jet", "Examples/features/web/web_app.jet"): = "{cap:expectedFacts}"
+stdout.replace("{root}/Examples/features/web/web_app.jet", "Examples/features/web/web_app.jet"): = "{cap:expectedFacts}" # original replaces the absolute fixture path
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
 env: S6_WEB_METHOD=POST
@@ -30,7 +30,7 @@ exit: 0
 file: action.http ^= "HTTP/1.1 200" # Original starts_with.
 file: action.http ~ "content-type: application/json" # Original contains predicate.
 file: action.http ~ "content-security-policy: default-src 'self'" # Original contains predicate.
-file.after_first("\r\n\r\n"): action.http = "\"saved\""
+file.after_first("\r\n\r\n"): action.http = "\"saved\"" # original request helper compares the body after the header block
 file: action.http !~ "server function input is missing" # Original negative predicate.
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}

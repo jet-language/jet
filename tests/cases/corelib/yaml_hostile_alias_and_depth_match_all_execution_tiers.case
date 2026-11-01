@@ -1,6 +1,8 @@
 # Port of tests/corelib_parts/derives.rs::yaml_hostile_alias_and_depth_match_all_execution_tiers; original source unchanged.
 # ORACLE-LITERAL: tests/corelib_parts/derives.rs:1231.
 # PENDING-SAME-HEAD: E2 historical all-tier original assertion failed; oracle retained.
+# Expected line 2 is `depth:accepted`: `yaml.parse` reads flow YAML under EncodingLimits.safe(), whose max_depth
+# is 256 (encoding-decisions.md:105-108), so 65-deep nesting is within the limit; the Rust-era oracle rejected it.
 fixture: fixtures/yaml_hostile_alias_and_depth_match_all_execution_tiers
 step: jet build fixture.jet
 step baseline: built

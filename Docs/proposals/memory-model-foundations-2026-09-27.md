@@ -120,6 +120,11 @@ D-SHARED-CYCLE1=C allowed either "construction that would cycle needs an
 explicit expert form" or "cycles free when external roots drop". The
 implementation rejects whole types instead of cycle construction.
 
+Status: E0221 now sits at the write that can close a cycle. The type above
+compiles, construction from new cells is accepted, and storing a cell that may
+already reach the written one is rejected (spec "Shared state, local cells, and
+pools").
+
 ### F4 — GC scope copies, contradicting D-OPTGC1=A
 
 ```jet

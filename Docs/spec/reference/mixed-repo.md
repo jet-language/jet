@@ -4,7 +4,7 @@ A mixed repository keeps Jet sources and a foreign host in one package while the
 Jet program calls a checked C, C++, JVM, JavaScript, or Python boundary. This
 guide is for maintainers wiring that repository and for reviewers reading the
 provenance of generated bridges. The executable workflow is in
-[`tests/polyglot_systems.rs`](../../../tests/polyglot_systems.rs); native
+[`tests/cases/polyglot_systems/`](../../../tests/cases/polyglot_systems/); native
 Library output is checked by
 [`tests/library_outputs.rs`](../../../tests/library_outputs.rs).
 

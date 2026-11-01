@@ -50,7 +50,7 @@ use core.sys as sys
     root :: cases_test_root("host-environment")
     directory :: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "environment.out"), "base:next\nalpha\nbeta\n")
-    source :: "env: VALUE=base\nstep: printf '%s\\n' {{env:VALUE}} {{env-words:WORDS|alpha beta}}\nenv: VALUE={{env:VALUE}}:next\nstdout: = environment.out\n"
+    source :: "env: VALUE=base\nstep: printf '%s\\\\n' {{env:VALUE}} {{env-words:WORDS|alpha beta}}\nenv: VALUE={{env:VALUE}}:next\nstdout: = environment.out\n"
     assert_eq(cases_test_advanced(root, "effective", source).verdict.status, "PASS")
     kit_exec_write(files.join(directory, "wrong.out"), "wrong")
     wrong :: "step: printf '%s' {{env:ABSENT_TESTKIT|fallback}}\nstdout: = wrong.out\n"
@@ -73,7 +73,7 @@ use core.sys as sys
 
 #Test("when boolean expressions preserve precedence short-circuit and reject unknown atoms") {
     root :: cases_test_root("host-boolean")
-    source :: "step named: printf ok\nwhen exit == 0 && (stdout ~ \"ok\" || stdout ~ \"wrong\"): stdout: ~ ok # original predicate\nwhen ! (exit != 0 || named.stdout !~ \"ok\"): mkdir: selected\nfile: selected is-dir\nwhen stdout ~any \"ok\" \"other\": stdout: ~ ok # original predicate\nwhen exit == 0 || probe false: stdout: ~ ok # original predicate\n"
+    source :: "step named: printf ok\nwhen exit == 0 && (stdout ~ \"ok\" || stdout ~ \"wrong\"): stdout: ~ ok # original predicate\nwhen stdout ~any \"ok\" \"other\": stdout: ~ ok # original predicate\nwhen exit == 0 || probe false: stdout: ~ ok # original predicate\nwhen ! (exit != 0 || named.stdout !~ \"ok\"): mkdir: selected\nfile: selected is-dir\n"
     assert_eq(cases_test_advanced(root, "precedence", source).verdict.status, "PASS")
     failed :: "step: printf ok\nwhen exit == 0 && stdout ~ \"ok\": stdout: ~ wrong # original predicate\n"
     assert_eq(cases_test_advanced(root, "selected-failure", failed).verdict.status, "FAIL")
@@ -93,6 +93,42 @@ use core.sys as sys
     cases_test_source(root, "ports-wrong", "step: printf \"%s\" {{free-port:app}}\nstdout: = \"wrong\"\n")
     assert_eq(kit_cases_run(cases_test_entry("ports-wrong"), context)[0].verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove free-port scratch")
+}
+
+#Test("free-port tokens in a write template are reserved in the case's one probe run") {
+    root :: cases_test_root("host-template-ports")
+    kit_exec_write(files.join(root, "tests/cases/group/port.template"), "{{free-port:templated}}")
+    cases_test_source(root, "template", "write: port.txt port.template\nstep: cat port.txt\nstdout: is-u32 # a port\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.jet = sys.get("TESTKIT_JET") ?? panic("TESTKIT_JET must name the pinned real compiler for the free-port self-test")
+    context.env.root = files.cwd() ?? panic("free-port probe source root")
+    context.env.timeout = 600s
+    assert_eq(kit_cases_run(cases_test_entry("template"), context)[0].verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove template free-port scratch")
+}
+
+#Test("host-port cases hold the port's host-wide lock until they end and refuse malformed ports") {
+    plan :: kit_steps_parse_case("host-port: 8080\nstep: printf ok\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.host_port, 8080)
+    loop source in ["host-port: 0\nstep: true\n", "host-port: 65536\nstep: true\n", "host-port: http\nstep: true\n", "host-port: 8080\nhost-port: 8081\nstep: true\n", "step: true\nhost-port: 8080\n"] {
+        assert(kit_steps_parse_case(source).error.contains("host-port needs one header port"))
+    }
+    root :: cases_test_root("host-port-lock")
+    port :: 65531
+    cases_test_source(root, "bound", "host-port: {port}\nstep: printf ok\nstdout: = \"ok\"\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("bound"), context)[0].verdict.status, "PASS")
+    // Its steps run while the lock is held.
+    cases_test_source(root, "held", "host-port: {port}\nrequires: tool:flock\nstep: flock -n {kit_steps_host_port_path(port)} true\nexit: 1\n")
+    assert_eq(kit_cases_run(cases_test_entry("held"), context)[0].verdict.status, "PASS")
+    // The finished case released the lock, and a case waits only one step timeout for a held port.
+    held :: files.lock(kit_steps_host_port_path(port), timeout: Val(1s)) ?? panic("the finished case still holds its host port lock: {err}")
+    waited :: kit_cases_run(cases_test_entry("bound"), context)[0].verdict
+    assert_eq(waited.status, "ERROR")
+    assert(waited.detail.contains("host port {port} lock"))
+    close(^held)
+    files.remove_all(root) ?? panic("remove host port scratch")
 }
 
 #Test("host-triple and capture condition atoms execute setup from real case text") {
@@ -259,7 +295,7 @@ use core.sys as sys
     assert_eq(kit_steps_parse_case(source).error, "")
     assert_eq(cases_test_advanced(root, "platform", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "wrong", source.replace("cap:chosen: = \"ready\"", "cap:chosen: = \"wrong\"")).verdict.status, "FAIL")
-    loops :: "step producer: printf 'a\\nb\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name not-a-host: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
+    loops :: "step producer: printf 'a\\\\nb\\\\n'\nfor line stdout as row\nwhen os-name {kit_steps_host_name()}: capture: chosen = text stdout.line(0)\nwhen os-name not-a-host: capture: chosen = text stderr\ncap:chosen: = \"a\"\nend for\nfor line stdout as row\ncapture: chosen = text stdout.line(0)\ncap:chosen: = \"a\"\nend for\n"
     assert_eq(kit_steps_parse_case(loops).error, "")
     assert_eq(cases_test_advanced(root, "scopes", loops).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove platform capture scratch")

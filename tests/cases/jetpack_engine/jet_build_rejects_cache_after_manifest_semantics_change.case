@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:8817-8849 jet_build_rejects_cache_after_manifest_semantics_change
 # PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: jet_build_rejects_cache_after_manifest_semantics_change.fixture
 env: NO_COLOR=1
 env: JETPACK_ROOT={work}/root
@@ -8,12 +9,12 @@ mkdir: project
 when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
 write: project/env.jet env.template
 write: jet-pkgs/package.jet manifest1.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0
 write: jet-pkgs/package.jet manifest2.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: nonzero

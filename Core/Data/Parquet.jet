@@ -1,0 +1,1127 @@
+// Flat-schema Parquet reader behind `data.loader` (#6395): a payload's rows as
+// one Dyn array of objects keyed by column name.
+//
+// Read: the Thrift compact footer; a flat schema of REQUIRED and OPTIONAL
+// leaves; v1 data pages and dictionary pages; PLAIN, PLAIN_DICTIONARY and
+// RLE_DICTIONARY values; RLE definition levels; UNCOMPRESSED and SNAPPY
+// column chunks. Physical BOOLEAN, INT32, INT64, FLOAT and DOUBLE map to Bool,
+// Int and Float; INT96 to a UTC DateTime; BYTE_ARRAY and FIXED_LEN_BYTE_ARRAY
+// to Bytes, or Text when annotated UTF8, STRING or ENUM. Anything else is
+// refused as Unsupported, naming what the file uses; a malformed file is a
+// Decode failure.
+use core.math as math
+use core.time as time
+use __core_encoding_cbor_parse as cbor_parse
+use __core_encoding_stream as stream
+
+#Equatable
+enum ParquetFailureKind {
+    Decode
+    Unsupported
+    Limit
+}
+
+#[Error, Equatable]
+struct ParquetFailure {
+    kind: ParquetFailureKind
+    reason: String
+    impl Display {
+        fn display(self) -> String { self.display_text() }
+    }
+    impl Debug {
+        fn debug(^self) -> String { self.display_text() }
+    }
+}
+impl ParquetFailure {
+    fn display_text(self) -> String Never! {
+        kind :: if self.kind == {
+            .Decode -> "Decode"
+            .Unsupported -> "Unsupported"
+            .Limit -> "Limit"
+        }
+        "{kind}: {self.reason}"
+    }
+}
+
+// The Thrift kinds (compact protocol type nibbles) the footer uses.
+THRIFT_BYTE :: 3
+THRIFT_I32 :: 5
+THRIFT_I64 :: 6
+THRIFT_BINARY :: 8
+THRIFT_LIST :: 9
+THRIFT_STRUCT :: 12
+// Thrift nesting deeper than this is refused rather than recursed into.
+THRIFT_MAX_DEPTH :: 64
+
+// Parquet physical types.
+PARQUET_BOOLEAN :: 0
+PARQUET_INT32 :: 1
+PARQUET_INT64 :: 2
+PARQUET_INT96 :: 3
+PARQUET_FLOAT :: 4
+PARQUET_DOUBLE :: 5
+PARQUET_BYTE_ARRAY :: 6
+PARQUET_FIXED_LEN_BYTE_ARRAY :: 7
+
+// Julian day number of 1970-01-01.
+JULIAN_UNIX_EPOCH :: 2440588
+
+fn decode_failure(reason: String) -> ParquetFailure Never! {
+    ParquetFailure{kind: .Decode, reason: reason}
+}
+
+fn unsupported(reason: String) -> ParquetFailure Never! {
+    ParquetFailure{kind: .Unsupported, reason: reason}
+}
+
+fn encoding_name(encoding: Int) -> String Never! {
+    names :: [String]{"PLAIN", "GROUP_VAR_INT", "PLAIN_DICTIONARY", "RLE", "BIT_PACKED", "DELTA_BINARY_PACKED", "DELTA_LENGTH_BYTE_ARRAY", "DELTA_BYTE_ARRAY", "RLE_DICTIONARY", "BYTE_STREAM_SPLIT"}
+    if encoding >= 0 && encoding < names.len() -> return names[encoding].copy()
+    "encoding {encoding}"
+}
+
+fn codec_name(codec: Int) -> String Never! {
+    names :: [String]{"UNCOMPRESSED", "SNAPPY", "GZIP", "LZO", "BROTLI", "LZ4", "ZSTD", "LZ4_RAW"}
+    if codec >= 0 && codec < names.len() -> return names[codec].copy()
+    "codec {codec}"
+}
+
+fn converted_name(converted: Int) -> String Never! {
+    names :: [String]{"UTF8", "MAP", "MAP_KEY_VALUE", "LIST", "ENUM", "DECIMAL", "DATE", "TIME_MILLIS", "TIME_MICROS", "TIMESTAMP_MILLIS", "TIMESTAMP_MICROS", "UINT_8", "UINT_16", "UINT_32", "UINT_64", "INT_8", "INT_16", "INT_32", "INT_64", "JSON", "BSON", "INTERVAL"}
+    if converted >= 0 && converted < names.len() -> return names[converted].copy()
+    "converted type {converted}"
+}
+
+// Logical type union members by field id; id 9 is unassigned.
+fn logical_name(logical: Int) -> String Never! {
+    names :: [String]{"", "STRING", "MAP", "LIST", "ENUM", "DECIMAL", "DATE", "TIME", "TIMESTAMP", "", "INTEGER", "UNKNOWN", "JSON", "BSON", "UUID", "FLOAT16", "VARIANT", "GEOMETRY", "GEOGRAPHY"}
+    if logical >= 0 && logical < names.len() && names[logical] != "" -> return names[logical].copy()
+    "logical type {logical}"
+}
+
+// A bounded read position over `input[pos..<end]`.
+struct Cursor {
+    pos: Int
+    end: Int
+}
+
+impl Cursor {
+    fn byte(&self, input: [U8]) -> Int ParquetFailure! {
+        if self.pos >= self.end -> return Err(decode_failure("Parquet metadata ends early at byte {self.pos}"))
+        value :: Int.from_u8(input[self.pos])
+        self.pos += 1
+        Ok(value)
+    }
+
+    // An unsigned LEB128 varint of at most 64 bits.
+    fn varint(&self, input: [U8]) -> Int ParquetFailure! {
+        value := 0
+        shift := 0
+        loop shift < 64 {
+            b :: &self.byte(input) ?? return Err(err)
+            if shift == 63 && b.bit_and(127) > 1 -> return Err(decode_failure("varint at byte {self.pos - 1} exceeds 64 bits"))
+            value = value.bit_or((b.bit_and(127) << shift))
+            if b < 128 -> return Ok(value)
+            shift += 7
+        }
+        Err(decode_failure("varint at byte {self.pos} is longer than 10 bytes"))
+    }
+
+    fn zigzag(&self, input: [U8]) -> Int ParquetFailure! {
+        raw :: &self.varint(input) ?? return Err(err)
+        half :: (raw >> 1).bit_and(9223372036854775807)
+        if raw.bit_and(1) == 0 -> return Ok(half)
+        Ok(-half - 1)
+    }
+
+    fn little(&self, input: [U8], width: Int) -> Int ParquetFailure! {
+        if width > self.end - self.pos -> return Err(decode_failure("value at byte {self.pos} needs {width} bytes past the end of its page"))
+        value := 0
+        loop index in 0..<width -> value = value.bit_or((Int.from_u8(input[self.pos + index]) << (8 * index)))
+        self.pos += width
+        Ok(value)
+    }
+
+    // Eight little-endian bytes as a two's-complement 64-bit value.
+    fn signed64(&self, input: [U8]) -> Int ParquetFailure! {
+        raw :: &self.little(input, 8) ?? return Err(err)
+        if raw <= 9223372036854775807 -> return Ok(raw)
+        Ok((raw - 9223372036854775807 - 1) + (-9223372036854775807 - 1))
+    }
+
+    fn bytes(&self, input: [U8], length: Int) -> [U8] ParquetFailure! {
+        if length < 0 || length > self.end - self.pos -> return Err(decode_failure("{length} bytes at byte {self.pos} run past the end of their region"))
+        out := [U8]{}
+        loop index in 0..<length -> &out.push(input[self.pos + index])
+        self.pos += length
+        Ok(out)
+    }
+
+    // The next Thrift field header as (id, kind); kind 0 ends the struct.
+    fn field(&self, input: [U8], last: Int) -> (id: Int, kind: Int) ParquetFailure! {
+        head :: &self.byte(input) ?? return Err(err)
+        kind :: head.bit_and(15)
+        if kind == 0 -> return Ok((id: 0, kind: 0))
+        delta :: head >> 4
+        if delta != 0 -> return Ok((id: last + delta, kind: kind))
+        id :: &self.zigzag(input) ?? return Err(err)
+        Ok((id: id, kind: kind))
+    }
+
+    fn int(&self, input: [U8], kind: Int) -> Int ParquetFailure! {
+        if kind == THRIFT_BYTE {
+            value :: &self.byte(input) ?? return Err(err)
+            return Ok(if value >= 128 -> value - 256 else -> value)
+        }
+        if kind < 4 || kind > THRIFT_I64 -> return Err(decode_failure("Thrift field of type {kind} where an integer belongs"))
+        &self.zigzag(input)
+    }
+
+    fn binary(&self, input: [U8], kind: Int) -> [U8] ParquetFailure! {
+        if kind != THRIFT_BINARY -> return Err(decode_failure("Thrift field of type {kind} where a binary belongs"))
+        length :: &self.varint(input) ?? return Err(err)
+        &self.bytes(input, length)
+    }
+
+    fn text(&self, input: [U8], kind: Int) -> String ParquetFailure! {
+        bytes :: &self.binary(input, kind) ?? return Err(err)
+        text :: String.from_bytes(bytes) ?? return Err(decode_failure("Thrift string is not UTF-8"))
+        Ok(text)
+    }
+
+    // A list header as (size, element kind); every element takes at least
+    // one byte, so a size past the region is refused before any loop.
+    fn list(&self, input: [U8], kind: Int) -> (size: Int, kind: Int) ParquetFailure! {
+        if kind != THRIFT_LIST && kind != 10 -> return Err(decode_failure("Thrift field of type {kind} where a list belongs"))
+        head :: &self.byte(input) ?? return Err(err)
+        size := head >> 4
+        if size == 15 {
+            size = &self.varint(input) ?? return Err(err)
+        }
+        if size < 0 || size > self.end - self.pos -> return Err(decode_failure("Thrift list of {size} elements runs past its region"))
+        Ok((size: size, kind: head.bit_and(15)))
+    }
+
+    // Skips one value of `kind`; a Bool element of a list or map is one byte.
+    fn skip(&self, input: [U8], kind: Int, depth: Int, element: Bool) ParquetFailure! {
+        if depth > THRIFT_MAX_DEPTH -> return Err(decode_failure("Thrift metadata nests deeper than {THRIFT_MAX_DEPTH}"))
+        if kind == 1 || kind == 2 {
+            if element {
+                _flag :: &self.byte(input) ?? return Err(err)
+            }
+            return
+        }
+        if kind == THRIFT_BYTE {
+            _value :: &self.byte(input) ?? return Err(err)
+            return
+        }
+        if kind == 4 || kind == THRIFT_I32 || kind == THRIFT_I64 {
+            _value :: &self.varint(input) ?? return Err(err)
+            return
+        }
+        if kind == 7 {
+            _value :: &self.little(input, 8) ?? return Err(err)
+            return
+        }
+        if kind == THRIFT_BINARY {
+            _value :: &self.binary(input, kind) ?? return Err(err)
+            return
+        }
+        if kind == THRIFT_LIST || kind == 10 {
+            header :: &self.list(input, kind) ?? return Err(err)
+            loop _ in 0..<header.size {
+                &self.skip(input, header.kind, depth + 1, true) ?? return Err(err)
+            }
+            return
+        }
+        if kind == 11 {
+            size :: &self.varint(input) ?? return Err(err)
+            if size == 0 -> return
+            if size < 0 || size > self.end - self.pos -> return Err(decode_failure("Thrift map of {size} entries runs past its region"))
+            kinds :: &self.byte(input) ?? return Err(err)
+            loop _ in 0..<size {
+                &self.skip(input, kinds >> 4, depth + 1, true) ?? return Err(err)
+                &self.skip(input, kinds.bit_and(15), depth + 1, true) ?? return Err(err)
+            }
+            return
+        }
+        if kind == THRIFT_STRUCT {
+            last := 0
+            loop {
+                field :: &self.field(input, last) ?? return Err(err)
+                if field.kind == 0 -> return
+                &self.skip(input, field.kind, depth + 1, false) ?? return Err(err)
+                last = field.id
+            }
+        }
+        Err(decode_failure("Thrift field has unknown type {kind}"))
+    }
+}
+
+fn expect_struct(kind: Int, what: String) ParquetFailure! {
+    if kind != THRIFT_STRUCT -> return Err(decode_failure("{what} is a Thrift field of type {kind}, not a struct"))
+}
+
+struct SchemaElement {
+    physical: Int
+    type_length: Int
+    repetition: Int
+    name: String
+    children: Int
+    converted: Int
+    logical: Int
+    logical_width: Int
+    logical_signed: Bool
+}
+
+struct ColumnMeta {
+    physical: Int
+    path: [String]
+    codec: Int
+    values: Int
+    compressed_size: Int
+    data_offset: Int
+    dictionary_offset: Int
+    external: Bool
+}
+
+struct RowGroup {
+    columns: [ColumnMeta]
+    rows: Int
+}
+
+struct FileMeta {
+    schema: [SchemaElement]
+    rows: Int
+    groups: [RowGroup]
+}
+
+struct PageHeader {
+    kind: Int
+    uncompressed: Int
+    compressed: Int
+    values: Int
+    encoding: Int
+    level_encoding: Int
+    has_data: Bool
+    has_dictionary: Bool
+}
+
+// One flat column: its name, physical type and how values surface.
+struct Leaf {
+    name: String
+    physical: Int
+    width: Int
+    optional: Bool
+    text: Bool
+    unsigned: Bool
+}
+
+fn parse_logical(cursor: &Cursor, input: [U8], element: &SchemaElement) ParquetFailure! {
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> return
+        last = field.id
+        element.logical = field.id
+        if field.id == 10 && field.kind == THRIFT_STRUCT {
+            inner_last := 0
+            loop {
+                inner :: &cursor.field(input, inner_last) ?? return Err(err)
+                if inner.kind == 0 -> break
+                inner_last = inner.id
+                if inner.id == 1 {
+                    element.logical_width = &cursor.int(input, inner.kind) ?? return Err(err)
+                } else if inner.id == 2 && (inner.kind == 1 || inner.kind == 2) {
+                    element.logical_signed = inner.kind == 1
+                } else {
+                    &cursor.skip(input, inner.kind, 3, false) ?? return Err(err)
+                }
+            }
+        } else {
+            &cursor.skip(input, field.kind, 2, false) ?? return Err(err)
+        }
+    }
+}
+
+fn parse_schema_element(cursor: &Cursor, input: [U8]) -> SchemaElement ParquetFailure! {
+    element := SchemaElement{physical: -1, type_length: 0, repetition: -1, name: "", children: 0, converted: -1, logical: -1, logical_width: 0, logical_signed: true}
+    has_name := false
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> break
+        last = field.id
+        if field.id == 1 {
+            element.physical = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 2 {
+            element.type_length = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 3 {
+            element.repetition = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 4 {
+            element.name = &cursor.text(input, field.kind) ?? return Err(err)
+            has_name = true
+        } else if field.id == 5 {
+            element.children = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 6 {
+            element.converted = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 10 {
+            expect_struct(field.kind, "SchemaElement.logicalType") ?? return Err(err)
+            parse_logical(&cursor, input, &element) ?? return Err(err)
+        } else {
+            &cursor.skip(input, field.kind, 1, false) ?? return Err(err)
+        }
+    }
+    if !has_name -> return Err(decode_failure("schema element has no name"))
+    Ok(element)
+}
+
+fn parse_column_meta(cursor: &Cursor, input: [U8], column: &ColumnMeta) ParquetFailure! {
+    seen := [Bool]{false, false, false, false, false, false}
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> break
+        last = field.id
+        if field.id == 1 {
+            column.physical = &cursor.int(input, field.kind) ?? return Err(err)
+            seen[0] = true
+        } else if field.id == 3 {
+            header :: &cursor.list(input, field.kind) ?? return Err(err)
+            loop _ in 0..<header.size {
+                part :: &cursor.text(input, header.kind) ?? return Err(err)
+                &column.path.push(part)
+            }
+            seen[1] = true
+        } else if field.id == 4 {
+            column.codec = &cursor.int(input, field.kind) ?? return Err(err)
+            seen[2] = true
+        } else if field.id == 5 {
+            column.values = &cursor.int(input, field.kind) ?? return Err(err)
+            seen[3] = true
+        } else if field.id == 7 {
+            column.compressed_size = &cursor.int(input, field.kind) ?? return Err(err)
+            seen[4] = true
+        } else if field.id == 9 {
+            column.data_offset = &cursor.int(input, field.kind) ?? return Err(err)
+            seen[5] = true
+        } else if field.id == 11 {
+            column.dictionary_offset = &cursor.int(input, field.kind) ?? return Err(err)
+        } else {
+            &cursor.skip(input, field.kind, 2, false) ?? return Err(err)
+        }
+    }
+    loop flag in seen {
+        if !flag -> return Err(decode_failure("column metadata lacks a required field"))
+    }
+}
+
+fn parse_column_chunk(cursor: &Cursor, input: [U8]) -> ColumnMeta ParquetFailure! {
+    column := ColumnMeta{physical: -1, path: [String]{}, codec: 0, values: 0, compressed_size: 0, data_offset: 0, dictionary_offset: -1, external: false}
+    has_meta := false
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> break
+        last = field.id
+        if field.id == 1 {
+            column.external = true
+            &cursor.skip(input, field.kind, 1, false) ?? return Err(err)
+        } else if field.id == 3 {
+            expect_struct(field.kind, "ColumnChunk.meta_data") ?? return Err(err)
+            parse_column_meta(&cursor, input, &column) ?? return Err(err)
+            has_meta = true
+        } else {
+            &cursor.skip(input, field.kind, 1, false) ?? return Err(err)
+        }
+    }
+    if column.external -> return Err(unsupported("column chunks stored in another file"))
+    if !has_meta -> return Err(decode_failure("column chunk has no metadata"))
+    Ok(column)
+}
+
+fn parse_row_group(cursor: &Cursor, input: [U8]) -> RowGroup ParquetFailure! {
+    group := RowGroup{columns: [ColumnMeta]{}, rows: -1}
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> break
+        last = field.id
+        if field.id == 1 {
+            header :: &cursor.list(input, field.kind) ?? return Err(err)
+            if header.kind != THRIFT_STRUCT -> return Err(decode_failure("row group columns are not structs"))
+            loop _ in 0..<header.size {
+                column :: parse_column_chunk(&cursor, input) ?? return Err(err)
+                &group.columns.push(column)
+            }
+        } else if field.id == 3 {
+            group.rows = &cursor.int(input, field.kind) ?? return Err(err)
+        } else {
+            &cursor.skip(input, field.kind, 1, false) ?? return Err(err)
+        }
+    }
+    if group.rows < 0 -> return Err(decode_failure("row group has no row count"))
+    Ok(group)
+}
+
+fn parse_file_meta(cursor: &Cursor, input: [U8]) -> FileMeta ParquetFailure! {
+    meta := FileMeta{schema: [SchemaElement]{}, rows: -1, groups: [RowGroup]{}}
+    has_groups := false
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> break
+        last = field.id
+        if field.id == 2 {
+            header :: &cursor.list(input, field.kind) ?? return Err(err)
+            if header.kind != THRIFT_STRUCT -> return Err(decode_failure("schema elements are not structs"))
+            loop _ in 0..<header.size {
+                element :: parse_schema_element(&cursor, input) ?? return Err(err)
+                &meta.schema.push(element)
+            }
+        } else if field.id == 3 {
+            meta.rows = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 4 {
+            header :: &cursor.list(input, field.kind) ?? return Err(err)
+            if header.kind != THRIFT_STRUCT -> return Err(decode_failure("row groups are not structs"))
+            loop _ in 0..<header.size {
+                group :: parse_row_group(&cursor, input) ?? return Err(err)
+                &meta.groups.push(group)
+            }
+            has_groups = true
+        } else {
+            &cursor.skip(input, field.kind, 1, false) ?? return Err(err)
+        }
+    }
+    if meta.schema.len() == 0 -> return Err(decode_failure("file metadata has no schema"))
+    if meta.rows < 0 -> return Err(decode_failure("file metadata has no row count"))
+    if !has_groups -> return Err(decode_failure("file metadata has no row groups"))
+    Ok(meta)
+}
+
+fn parse_page_header(cursor: &Cursor, input: [U8]) -> PageHeader ParquetFailure! {
+    header := PageHeader{kind: -1, uncompressed: -1, compressed: -1, values: 0, encoding: 0, level_encoding: 3, has_data: false, has_dictionary: false}
+    last := 0
+    loop {
+        field :: &cursor.field(input, last) ?? return Err(err)
+        if field.kind == 0 -> break
+        last = field.id
+        if field.id == 1 {
+            header.kind = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 2 {
+            header.uncompressed = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 3 {
+            header.compressed = &cursor.int(input, field.kind) ?? return Err(err)
+        } else if field.id == 5 || field.id == 7 {
+            expect_struct(field.kind, "page header body") ?? return Err(err)
+            inner_last := 0
+            loop {
+                inner :: &cursor.field(input, inner_last) ?? return Err(err)
+                if inner.kind == 0 -> break
+                inner_last = inner.id
+                if inner.id == 1 {
+                    header.values = &cursor.int(input, inner.kind) ?? return Err(err)
+                } else if inner.id == 2 {
+                    header.encoding = &cursor.int(input, inner.kind) ?? return Err(err)
+                } else if inner.id == 3 && field.id == 5 {
+                    header.level_encoding = &cursor.int(input, inner.kind) ?? return Err(err)
+                } else {
+                    &cursor.skip(input, inner.kind, 2, false) ?? return Err(err)
+                }
+            }
+            if field.id == 5 {
+                header.has_data = true
+            } else {
+                header.has_dictionary = true
+            }
+        } else {
+            &cursor.skip(input, field.kind, 1, false) ?? return Err(err)
+        }
+    }
+    if header.kind < 0 || header.uncompressed < 0 || header.compressed < 0 -> return Err(decode_failure("page header lacks its type or sizes"))
+    Ok(header)
+}
+
+// The flat columns of `schema`, refusing nesting, repetition and the
+// annotations whose physical value would be misread as a plain number.
+fn flat_leaves(schema: [SchemaElement]) -> [Leaf] ParquetFailure! {
+    root :: schema[0]
+    if root.children != schema.len() - 1 -> return Err(unsupported("nested schema (root holds {root.children} children of {schema.len() - 1} elements)"))
+    leaves := [Leaf]{}
+    loop index in 1..<schema.len() {
+        element :: schema[index]
+        name :: element.name.copy()
+        if element.children > 0 -> return Err(unsupported("nested schema (group `{name}`)"))
+        if element.repetition == 2 -> return Err(unsupported("repeated column `{name}`"))
+        if element.repetition != 0 && element.repetition != 1 -> return Err(decode_failure("column `{name}` has repetition {element.repetition}"))
+        if element.physical < PARQUET_BOOLEAN || element.physical > PARQUET_FIXED_LEN_BYTE_ARRAY -> return Err(decode_failure("column `{name}` has physical type {element.physical}"))
+        if element.physical == PARQUET_FIXED_LEN_BYTE_ARRAY && element.type_length <= 0 -> return Err(decode_failure("column `{name}` has fixed length {element.type_length}"))
+        text := false
+        unsigned := false
+        // Converted types: UTF8 0, ENUM 4, UINT_8..UINT_32 11-13, INT_8..INT_64 15-18.
+        converted :: element.converted
+        if converted == 0 || converted == 4 {
+            text = true
+        } else if converted >= 11 && converted <= 13 {
+            unsigned = converted == 13
+        } else if converted != -1 && (converted < 15 || converted > 18) {
+            return Err(unsupported("{converted_name(converted)} column `{name}`"))
+        }
+        // Logical types: STRING 1, ENUM 4, INTEGER 10.
+        logical :: element.logical
+        if logical == 1 || logical == 4 {
+            text = true
+        } else if logical == 10 {
+            if !element.logical_signed && element.logical_width == 64 -> return Err(unsupported("unsigned 64-bit integer column `{name}`"))
+            if !element.logical_signed && element.logical_width == 32 -> unsigned = true
+        } else if logical != -1 {
+            return Err(unsupported("{logical_name(logical)} column `{name}`"))
+        }
+        if text && element.physical != PARQUET_BYTE_ARRAY && element.physical != PARQUET_FIXED_LEN_BYTE_ARRAY -> return Err(decode_failure("text column `{name}` is not stored as bytes"))
+        &leaves.push(Leaf{name: name, physical: element.physical, width: element.type_length, optional: element.repetition == 1, text: text, unsigned: unsigned})
+    }
+    Ok(leaves)
+}
+
+// An INT96 instant as Spark writes and reads it: microseconds since the
+// epoch in wrapping 64-bit arithmetic, plus the sub-microsecond rest. Every
+// in-range value is exact; Spark's out-of-range years round-trip as Spark
+// reads them.
+fn int96_instant(julian: Int, nanos: Int) -> Dyn Never! {
+    // Truncating division, as the producer computes it.
+    whole :: if nanos >= 0 -> nanos /% 1000 else -> 0 - ((0 - nanos) /% 1000)
+    micros := (julian - JULIAN_UNIX_EPOCH) * 86400000000 + whole
+    loop micros > 9223372036854775807 {
+        micros = micros - 9223372036854775807 - 9223372036854775807 - 2
+    }
+    loop micros < -9223372036854775807 - 1 {
+        micros = micros + 9223372036854775807 + 9223372036854775807 + 2
+    }
+    seconds :: micros /% 1000000
+    rest :: (micros - seconds * 1000000) * 1000 + nanos - whole * 1000
+    Dyn.DateTime(time.zoned(time.add_duration(time.from_unix_seconds(seconds), time.duration_ns(rest)), time.utc()))
+}
+
+// `count` PLAIN values of `leaf` from `page[cursor.pos..<cursor.end]`.
+fn plain_values(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] ParquetFailure! {
+    values := [Dyn]{}
+    if leaf.physical == PARQUET_BOOLEAN {
+        bytes :: (count + 7) >> 3
+        if bytes > cursor.end - cursor.pos -> return Err(decode_failure("column `{leaf.name}` holds fewer than {count} booleans"))
+        loop index in 0..<count {
+            bit :: (Int.from_u8(page[cursor.pos + (index >> 3)]) >> index.bit_and(7)).bit_and(1)
+            &values.push(Dyn.Bool(bit == 1))
+        }
+        cursor.pos += bytes
+        return Ok(values)
+    }
+    if count > cursor.end - cursor.pos -> return Err(decode_failure("column `{leaf.name}` holds fewer than {count} values"))
+    loop _ in 0..<count {
+        if leaf.physical == PARQUET_INT32 {
+            raw :: &cursor.little(page, 4) ?? return Err(err)
+            value :: if leaf.unsigned || raw < 2147483648 -> raw else -> raw - 4294967296
+            &values.push(Dyn.Int(value))
+        } else if leaf.physical == PARQUET_INT64 {
+            value :: &cursor.signed64(page) ?? return Err(err)
+            &values.push(Dyn.Int(value))
+        } else if leaf.physical == PARQUET_INT96 {
+            nanos :: &cursor.signed64(page) ?? return Err(err)
+            raw_day :: &cursor.little(page, 4) ?? return Err(err)
+            julian :: if raw_day < 2147483648 -> raw_day else -> raw_day - 4294967296
+            &values.push(int96_instant(julian, nanos))
+        } else if leaf.physical == PARQUET_FLOAT {
+            bits :: &cursor.little(page, 4) ?? return Err(err)
+            &values.push(Dyn.Float(cbor_parse.widen_float(bits, 8, 23)))
+        } else if leaf.physical == PARQUET_DOUBLE {
+            bits :: &cursor.signed64(page) ?? return Err(err)
+            &values.push(Dyn.Float(math.from_bits(bits)))
+        } else {
+            length := leaf.width
+            if leaf.physical == PARQUET_BYTE_ARRAY {
+                length = &cursor.little(page, 4) ?? return Err(err)
+            }
+            bytes :: &cursor.bytes(page, length) ?? return Err(err)
+            if leaf.text {
+                text :: String.from_bytes(bytes) ?? return Err(decode_failure("column `{leaf.name}` holds a value that is not UTF-8"))
+                &values.push(Dyn.Text(text))
+            } else {
+                &values.push(Dyn.Bytes(bytes))
+            }
+        }
+    }
+    Ok(values)
+}
+
+// `count` values of `width` bits from the RLE/bit-packed hybrid run list
+// in `data[cursor.pos..<cursor.end]`.
+fn hybrid(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] ParquetFailure! {
+    out := [Int]{}
+    value_bytes :: (width + 7) >> 3
+    loop out.len() < count {
+        header :: &cursor.varint(data) ?? return Err(err)
+        run :: (header >> 1).bit_and(9223372036854775807)
+        if header.bit_and(1) == 0 {
+            value :: &cursor.little(data, value_bytes) ?? return Err(err)
+            repeat :: if run < count - out.len() -> run else -> count - out.len()
+            loop _ in 0..<repeat -> &out.push(value)
+        } else {
+            // Only the values the page still needs must be present: writers
+            // may end the last group early, and width 0 stores no bytes.
+            remaining :: cursor.end - cursor.pos
+            wanted := count - out.len()
+            if run < (wanted + 7) >> 3 -> wanted = run * 8
+            if (wanted * width + 7) >> 3 > remaining -> return Err(decode_failure("bit-packed run of {run} groups runs past its page"))
+            bit := 0
+            loop _ in 0..<wanted {
+                value := 0
+                loop offset in 0..<width {
+                    at :: bit + offset
+                    set :: (Int.from_u8(data[cursor.pos + (at >> 3)]) >> at.bit_and(7)).bit_and(1)
+                    value = value.bit_or((set << offset))
+                }
+                &out.push(value)
+                bit += width
+            }
+            step := remaining
+            if run < remaining -> step = run * width
+            if step > remaining -> step = remaining
+            cursor.pos += step
+        }
+    }
+    Ok(out)
+}
+
+// Raw Snappy (no framing) decompression to exactly `expected` bytes.
+fn snappy(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFailure! {
+    cursor := Cursor{pos: start, end: end}
+    length :: &cursor.varint(input) ?? return Err(err)
+    if length != expected -> return Err(decode_failure("Snappy block holds {length} bytes; its page header declares {expected}"))
+    out := [U8]{}
+    loop cursor.pos < cursor.end {
+        lead :: &cursor.byte(input) ?? return Err(err)
+        kind :: lead.bit_and(3)
+        if kind == 0 {
+            size := (lead >> 2) + 1
+            if size > 60 {
+                extended :: &cursor.little(input, size - 60) ?? return Err(err)
+                size = extended + 1
+            }
+            if size > expected - out.len() -> return Err(decode_failure("Snappy literal overruns the declared {expected} bytes"))
+            literal :: &cursor.bytes(input, size) ?? return Err(err)
+            loop byte in literal -> &out.push(byte)
+            next
+        }
+        size := 0
+        offset := 0
+        if kind == 1 {
+            size = (lead >> 2).bit_and(7) + 4
+            low :: &cursor.byte(input) ?? return Err(err)
+            offset = ((lead >> 5) << 8).bit_or(low)
+        } else if kind == 2 {
+            size = (lead >> 2) + 1
+            offset = &cursor.little(input, 2) ?? return Err(err)
+        } else {
+            size = (lead >> 2) + 1
+            offset = &cursor.little(input, 4) ?? return Err(err)
+        }
+        if offset == 0 || offset > out.len() -> return Err(decode_failure("Snappy copy offset {offset} reaches before its output"))
+        if size > expected - out.len() -> return Err(decode_failure("Snappy copy overruns the declared {expected} bytes"))
+        from :: out.len() - offset
+        loop index in 0..<size {
+            byte :: out[from + index]
+            &out.push(byte)
+        }
+    }
+    if out.len() != expected -> return Err(decode_failure("Snappy block yields {out.len()} bytes; its page header declares {expected}"))
+    Ok(out)
+}
+
+// One data page's values appended to `values`; nulls are Dyn.Null.
+fn data_page(page: [U8], header: PageHeader, leaf: Leaf, dictionary: &[Dyn], has_dictionary: Bool, values: &[Dyn]) ParquetFailure! {
+    count :: header.values
+    cursor := Cursor{pos: 0, end: page.len()}
+    present := [Bool]{}
+    stored := count
+    if leaf.optional {
+        if header.level_encoding != 3 -> return Err(unsupported("{encoding_name(header.level_encoding)} definition levels"))
+        length :: &cursor.little(page, 4) ?? return Err(err)
+        if length < 0 || length > cursor.end - cursor.pos -> return Err(decode_failure("definition levels of column `{leaf.name}` run past their page"))
+        levels := Cursor{pos: cursor.pos, end: cursor.pos + length}
+        decoded :: hybrid(page, &levels, 1, count) ?? return Err(err)
+        cursor.pos += length
+        stored = 0
+        loop level in decoded {
+            if level > 1 -> return Err(decode_failure("column `{leaf.name}` has definition level {level}"))
+            &present.push(level == 1)
+            if level == 1 -> stored += 1
+        }
+    }
+    stored_values := [Dyn]{}
+    if header.encoding == 0 {
+        stored_values = plain_values(page, &cursor, leaf, stored) ?? return Err(err)
+    } else if header.encoding == 2 || header.encoding == 8 {
+        if !has_dictionary -> return Err(decode_failure("dictionary-encoded page of column `{leaf.name}` has no dictionary page"))
+        if stored > 0 {
+            width :: &cursor.byte(page) ?? return Err(err)
+            if width > 32 -> return Err(decode_failure("dictionary index width {width} exceeds 32 bits"))
+            indices :: hybrid(page, &cursor, width, stored) ?? return Err(err)
+            loop index in indices {
+                if index >= dictionary.len() -> return Err(decode_failure("dictionary index {index} of column `{leaf.name}` exceeds its {dictionary.len()} entries"))
+                &stored_values.push(dictionary[index].copy())
+            }
+        }
+    } else {
+        return Err(unsupported("{encoding_name(header.encoding)} encoding"))
+    }
+    next_value := 0
+    loop index in 0..<count {
+        if leaf.optional && !present[index] {
+            &values.push(Dyn.Null)
+        } else {
+            &values.push(stored_values[next_value].copy())
+            next_value += 1
+        }
+    }
+}
+
+// The page payload, decompressed by `codec`.
+fn page_payload(input: [U8], start: Int, header: PageHeader, codec: Int) -> [U8] ParquetFailure! {
+    if codec == 1 -> return snappy(input, start, start + header.compressed, header.uncompressed)
+    if header.compressed != header.uncompressed -> return Err(decode_failure("uncompressed page declares {header.compressed} stored and {header.uncompressed} page bytes"))
+    cursor := Cursor{pos: start, end: start + header.compressed}
+    &cursor.bytes(input, header.compressed)
+}
+
+// Every value of one column chunk, `rows` of them.
+fn column_values(input: [U8], data_end: Int, column: ColumnMeta, leaf: Leaf, rows: Int, max_page_bytes: Int) -> [Dyn] ParquetFailure! {
+    if column.codec != 0 && column.codec != 1 -> return Err(unsupported("{codec_name(column.codec)} compression"))
+    if column.values != rows -> return Err(decode_failure("column `{leaf.name}` holds {column.values} values for {rows} rows"))
+    start := column.data_offset
+    if column.dictionary_offset >= 4 && column.dictionary_offset < start -> start = column.dictionary_offset
+    if start < 4 || column.compressed_size < 0 || column.compressed_size > data_end - start -> return Err(decode_failure("column `{leaf.name}` lies outside the file"))
+    end :: start + column.compressed_size
+    dictionary := [Dyn]{}
+    has_dictionary := false
+    values := [Dyn]{}
+    pos := start
+    loop values.len() < rows {
+        if pos >= end -> return Err(decode_failure("column `{leaf.name}` ends after {values.len()} of {rows} values"))
+        cursor := Cursor{pos: pos, end: end}
+        header :: parse_page_header(&cursor, input) ?? return Err(err)
+        if header.compressed > end - cursor.pos -> return Err(decode_failure("page of column `{leaf.name}` runs past its chunk"))
+        if header.uncompressed > max_page_bytes -> return Err(ParquetFailure{kind: .Limit, reason: "page of {header.uncompressed} bytes exceeds max_item_bytes {max_page_bytes}"})
+        body :: cursor.pos
+        pos = body + header.compressed
+        if header.kind == 1 -> next
+        if header.kind == 3 -> return Err(unsupported("DATA_PAGE_V2 pages"))
+        if header.kind != 0 && header.kind != 2 -> return Err(decode_failure("page type {header.kind}"))
+        page :: page_payload(input, body, header, column.codec) ?? return Err(err)
+        if header.kind == 2 {
+            if !header.has_dictionary -> return Err(decode_failure("dictionary page of column `{leaf.name}` has no dictionary header"))
+            if has_dictionary || values.len() > 0 -> return Err(decode_failure("column `{leaf.name}` has a dictionary page after its first"))
+            if header.values < 0 -> return Err(decode_failure("dictionary page of column `{leaf.name}` declares {header.values} values"))
+            if header.encoding != 0 && header.encoding != 2 -> return Err(unsupported("{encoding_name(header.encoding)} dictionary pages"))
+            entries := Cursor{pos: 0, end: page.len()}
+            dictionary = plain_values(page, &entries, leaf, header.values) ?? return Err(err)
+            has_dictionary = true
+            next
+        }
+        if !header.has_data -> return Err(decode_failure("data page of column `{leaf.name}` has no data header"))
+        if header.values < 0 || header.values > rows - values.len() -> return Err(decode_failure("data page of column `{leaf.name}` declares {header.values} values; {rows - values.len()} remain"))
+        data_page(page, header, leaf, &dictionary, has_dictionary, &values) ?? return Err(err)
+    }
+    Ok(values)
+}
+
+// The payload's rows, at most `max_rows`; no page may inflate past
+// `max_page_bytes`.
+fn read_rows(input: [U8], max_rows: Int, max_page_bytes: Int) -> Dyn ParquetFailure! {
+    size :: input.len()
+    if size < 12 -> return Err(decode_failure("payload of {size} bytes is shorter than a Parquet file"))
+    magic :: [U8]{80, 65, 82, 49}
+    loop index in 0..<4 {
+        if input[index] != magic[index] || input[size - 4 + index] != magic[index] -> return Err(decode_failure("payload does not begin and end with PAR1"))
+    }
+    footer := Cursor{pos: size - 8, end: size - 4}
+    length :: &footer.little(input, 4) ?? return Err(err)
+    if length > size - 12 -> return Err(decode_failure("footer of {length} bytes exceeds the file"))
+    data_end :: size - 8 - length
+    cursor := Cursor{pos: data_end, end: size - 8}
+    meta :: parse_file_meta(&cursor, input) ?? return Err(err)
+    leaves :: flat_leaves(meta.schema) ?? return Err(err)
+    if meta.rows > max_rows -> return Err(ParquetFailure{kind: .Limit, reason: "max_output_rows {max_rows} exceeded"})
+    rows := [Dyn]{}
+    loop group in meta.groups {
+        if group.columns.len() != leaves.len() -> return Err(decode_failure("row group has {group.columns.len()} columns; the schema has {leaves.len()}"))
+        if group.rows > meta.rows - rows.len() -> return Err(decode_failure("row groups hold more rows than the file's {meta.rows}"))
+        columns := [[Dyn]]{}
+        loop (index, column) in group.columns {
+            leaf :: leaves[index]
+            if column.path.len() != 1 || column.path[0] != leaf.name || column.physical != leaf.physical -> return Err(decode_failure("column chunk {index} does not match schema column `{leaf.name}`"))
+            values :: column_values(input, data_end, column, leaf, group.rows, max_page_bytes) ?? return Err(err)
+            &columns.push(values)
+        }
+        loop row in 0..<group.rows {
+            entries := [(key: String, value: Dyn)]{}
+            loop (index, leaf) in leaves -> &entries.push((key: leaf.name.copy(), value: columns[index][row].copy()))
+            &rows.push(stream.object_from_entries(^entries))
+        }
+    }
+    if rows.len() != meta.rows -> return Err(decode_failure("row groups hold {rows.len()} rows; the file declares {meta.rows}"))
+    Ok(Dyn.Array(rows))
+}
+
+fn test_varint(out: &[U8], value: Int) {
+    rest := value
+    loop rest >= 128 {
+        &out.push(U8{rest.bit_and(127) + 128})
+        rest = rest >> 7
+    }
+    &out.push(U8{rest})
+}
+
+// A Thrift field header in long form: the type nibble, then the zigzag id.
+fn test_field(out: &[U8], id: Int, kind: Int) {
+    &out.push(U8{kind})
+    test_varint(&out, id * 2)
+}
+
+fn test_int(out: &[U8], id: Int, kind: Int, value: Int) {
+    test_field(&out, id, kind)
+    test_varint(&out, if value >= 0 -> value * 2 else -> -value * 2 - 1)
+}
+
+fn test_text(out: &[U8], id: Int, text: String) {
+    test_field(&out, id, THRIFT_BINARY)
+    bytes :: text.bytes()
+    test_varint(&out, bytes.len())
+    loop byte in bytes -> &out.push(byte)
+}
+
+// One page: its header (stored size = `body.len()`, page size `size`) and body.
+fn test_page(kind: Int, values: Int, encoding: Int, levels: Int, body: [U8], size: Int) -> [U8] Never! {
+    out := [U8]{}
+    test_int(&out, 1, THRIFT_I32, kind)
+    test_int(&out, 2, THRIFT_I32, size)
+    test_int(&out, 3, THRIFT_I32, body.len())
+    header :: if kind == 2 -> 7 else if kind == 3 -> 8 else -> 5
+    test_field(&out, header, THRIFT_STRUCT)
+    test_int(&out, 1, THRIFT_I32, values)
+    if kind == 3 {
+        test_int(&out, 2, THRIFT_I32, 0)
+        test_int(&out, 3, THRIFT_I32, values)
+        test_int(&out, 4, THRIFT_I32, encoding)
+        test_int(&out, 5, THRIFT_I32, 0)
+        test_int(&out, 6, THRIFT_I32, 0)
+    } else {
+        test_int(&out, 2, THRIFT_I32, encoding)
+        if kind == 0 {
+            test_int(&out, 3, THRIFT_I32, levels)
+            test_int(&out, 4, THRIFT_I32, 3)
+        }
+    }
+    &out.push(U8{0})
+    &out.push(U8{0})
+    loop byte in body -> &out.push(byte)
+    out
+}
+
+// A one-column file: column `v`, one row group, one chunk at byte 4.
+struct TestColumn {
+    physical: Int
+    repetition: Int
+    converted: Int
+    logical: Int
+    children: Int
+    codec: Int
+    external: Bool
+    pages: [U8]
+    rows: Int
+}
+
+fn test_column(physical: Int, pages: [U8], rows: Int) -> TestColumn Never! {
+    TestColumn{physical: physical, repetition: 0, converted: -1, logical: -1, children: 0, codec: 0, external: false, pages: pages, rows: rows}
+}
+
+fn test_file(column: TestColumn) -> [U8] Never! {
+    out := [U8]{80, 65, 82, 49}
+    loop byte in column.pages -> &out.push(byte)
+    meta := [U8]{}
+    test_int(&meta, 1, THRIFT_I32, 1)
+    test_field(&meta, 2, THRIFT_LIST)
+    &meta.push(U8{32 + THRIFT_STRUCT})
+    test_text(&meta, 4, "schema")
+    test_int(&meta, 5, THRIFT_I32, 1)
+    &meta.push(U8{0})
+    test_int(&meta, 1, THRIFT_I32, column.physical)
+    if column.physical == PARQUET_FIXED_LEN_BYTE_ARRAY -> test_int(&meta, 2, THRIFT_I32, 4)
+    test_int(&meta, 3, THRIFT_I32, column.repetition)
+    test_text(&meta, 4, "v")
+    if column.children > 0 -> test_int(&meta, 5, THRIFT_I32, column.children)
+    if column.converted >= 0 -> test_int(&meta, 6, THRIFT_I32, column.converted)
+    if column.logical >= 0 {
+        test_field(&meta, 10, THRIFT_STRUCT)
+        test_field(&meta, column.logical, THRIFT_STRUCT)
+        &meta.push(U8{0})
+        &meta.push(U8{0})
+    }
+    &meta.push(U8{0})
+    test_int(&meta, 3, THRIFT_I64, column.rows)
+    test_field(&meta, 4, THRIFT_LIST)
+    &meta.push(U8{16 + THRIFT_STRUCT})
+    test_field(&meta, 1, THRIFT_LIST)
+    &meta.push(U8{16 + THRIFT_STRUCT})
+    if column.external -> test_text(&meta, 1, "other.parquet")
+    test_int(&meta, 2, THRIFT_I64, 4)
+    test_field(&meta, 3, THRIFT_STRUCT)
+    test_int(&meta, 1, THRIFT_I32, column.physical)
+    test_field(&meta, 2, THRIFT_LIST)
+    &meta.push(U8{16 + THRIFT_I32})
+    test_varint(&meta, 0)
+    test_field(&meta, 3, THRIFT_LIST)
+    &meta.push(U8{16 + THRIFT_BINARY})
+    test_varint(&meta, 1)
+    &meta.push(U8{118})
+    test_int(&meta, 4, THRIFT_I32, column.codec)
+    test_int(&meta, 5, THRIFT_I64, column.rows)
+    test_int(&meta, 6, THRIFT_I64, column.pages.len())
+    test_int(&meta, 7, THRIFT_I64, column.pages.len())
+    test_int(&meta, 9, THRIFT_I64, 4)
+    &meta.push(U8{0})
+    &meta.push(U8{0})
+    test_int(&meta, 2, THRIFT_I64, column.pages.len())
+    test_int(&meta, 3, THRIFT_I64, column.rows)
+    &meta.push(U8{0})
+    &meta.push(U8{0})
+    loop byte in meta -> &out.push(byte)
+    loop index in 0..<4 -> &out.push(U8{(meta.len() >> (8 * index)).bit_and(255)})
+    magic :: [U8]{80, 65, 82, 49}
+    loop byte in magic -> &out.push(byte)
+    out
+}
+
+fn test_rows(values: [Dyn]) -> Dyn Never! {
+    rows := [Dyn]{}
+    loop value in values {
+        entries := [(key: String, value: Dyn)]{(key: "v", value: value.copy())}
+        &rows.push(stream.object_from_entries(^entries))
+    }
+    Dyn.Array(rows)
+}
+
+fn test_same(actual: Dyn, expected: Dyn) {
+    assert(actual.equal_unordered(expected))
+}
+
+fn test_outcome(file: [U8]) -> String Never! {
+    if read_rows(file, 1000, 1048576) == {
+        .Ok(_) -> return "accepted"
+        .Err(failure) -> return failure.display_text()
+    }
+}
+
+// INT32 7 and -1, PLAIN.
+fn test_int32_page() -> [U8] Never! {
+    test_page(0, 2, 0, 3, [U8]{7, 0, 0, 0, 255, 255, 255, 255}, 8)
+}
+
+#Test("Parquet PLAIN columns read as typed Dyn rows") {
+    test_same(read_rows(test_file(test_column(PARQUET_INT32, test_int32_page(), 2)), 10, 1048576) ?? panic("int32"), test_rows([Dyn]{Dyn.Int(7), Dyn.Int(-1)}))
+    booleans :: test_page(0, 3, 0, 3, [U8]{5}, 1)
+    test_same(read_rows(test_file(test_column(PARQUET_BOOLEAN, booleans, 3)), 10, 1048576) ?? panic("boolean"), test_rows([Dyn]{Dyn.Bool(true), Dyn.Bool(false), Dyn.Bool(true)}))
+    longs :: test_page(0, 1, 0, 3, [U8]{254, 255, 255, 255, 255, 255, 255, 255}, 8)
+    test_same(read_rows(test_file(test_column(PARQUET_INT64, longs, 1)), 10, 1048576) ?? panic("int64"), test_rows([Dyn]{Dyn.Int(-2)}))
+    floats :: test_page(0, 1, 0, 3, [U8]{0, 0, 192, 63}, 4)
+    test_same(read_rows(test_file(test_column(PARQUET_FLOAT, floats, 1)), 10, 1048576) ?? panic("float"), test_rows([Dyn]{Dyn.Float(1.5)}))
+    doubles :: test_page(0, 1, 0, 3, [U8]{0, 0, 0, 0, 0, 0, 248, 63}, 8)
+    test_same(read_rows(test_file(test_column(PARQUET_DOUBLE, doubles, 1)), 10, 1048576) ?? panic("double"), test_rows([Dyn]{Dyn.Float(1.5)}))
+    // Julian day 2440589 is 1970-01-02; the times of day are 0 and -1 ns. The
+    // third value is Spark's wrapped year 290000-12-30T23:00:00Z.
+    stamps :: test_page(0, 3, 0, 3, [U8]{0, 0, 0, 0, 0, 0, 0, 0, 141, 61, 37, 0, 255, 255, 255, 255, 255, 255, 255, 255, 141, 61, 37, 0, 0, 96, 185, 199, 110, 226, 255, 255, 168, 171, 176, 249}, 36)
+    day :: time.from_unix_seconds(86400)
+    test_same(read_rows(test_file(test_column(PARQUET_INT96, stamps, 3)), 10, 1048576) ?? panic("int96"), test_rows([Dyn]{Dyn.DateTime(time.zoned(day, time.utc())), Dyn.DateTime(time.zoned(time.add_duration(day, time.duration_ns(-1)), time.utc())), Dyn.DateTime(time.zoned(time.from_unix_seconds(9089380393200), time.utc()))}))
+    text := test_column(PARQUET_BYTE_ARRAY, test_page(0, 1, 0, 3, [U8]{2, 0, 0, 0, 104, 105}, 6), 1)
+    text.converted = 0
+    test_same(read_rows(test_file(text), 10, 1048576) ?? panic("utf8"), test_rows([Dyn]{Dyn.Text("hi")}))
+    raw :: test_page(0, 1, 0, 3, [U8]{2, 0, 0, 0, 104, 105}, 6)
+    test_same(read_rows(test_file(test_column(PARQUET_BYTE_ARRAY, raw, 1)), 10, 1048576) ?? panic("bytes"), test_rows([Dyn]{Dyn.Bytes([U8]{104, 105})}))
+}
+
+#Test("Parquet optional dictionary columns read nulls from RLE definition levels") {
+    dictionary :: test_page(2, 1, 0, 3, [U8]{5, 0, 0, 0}, 4)
+    // Levels 1, 0, 1 as one bit-packed group; indices 0, 0 as one RLE run.
+    data :: test_page(0, 3, 8, 3, [U8]{2, 0, 0, 0, 3, 5, 1, 4, 0}, 9)
+    pages := dictionary.copy()
+    loop byte in data -> &pages.push(byte)
+    column := test_column(PARQUET_INT32, pages, 3)
+    column.repetition = 1
+    test_same(read_rows(test_file(column), 10, 1048576) ?? panic("dictionary"), test_rows([Dyn]{Dyn.Int(5), Dyn.Null, Dyn.Int(5)}))
+}
+
+#Test("Parquet SNAPPY pages decompress literals and copies") {
+    // 8 bytes: a 4-byte literal (7) and a 4-byte copy at offset 4.
+    column := test_column(PARQUET_INT32, test_page(0, 2, 0, 3, [U8]{8, 12, 7, 0, 0, 0, 1, 4}, 8), 2)
+    column.codec = 1
+    test_same(read_rows(test_file(column), 10, 1048576) ?? panic("snappy"), test_rows([Dyn]{Dyn.Int(7), Dyn.Int(7)}))
+    broken := test_column(PARQUET_INT32, test_page(0, 2, 0, 3, [U8]{8, 12, 7, 0, 0, 0, 1, 9}, 8), 2)
+    broken.codec = 1
+    assert_eq(test_outcome(test_file(broken)), "Decode: Snappy copy offset 9 reaches before its output")
+}
+
+#Test("Parquet refuses each unread codec, encoding, page and schema shape as Unsupported") {
+    gzip := test_column(PARQUET_INT32, test_int32_page(), 2)
+    gzip.codec = 2
+    assert_eq(test_outcome(test_file(gzip)), "Unsupported: GZIP compression")
+    zstd := test_column(PARQUET_INT32, test_int32_page(), 2)
+    zstd.codec = 6
+    assert_eq(test_outcome(test_file(zstd)), "Unsupported: ZSTD compression")
+    delta :: test_page(0, 2, 5, 3, [U8]{7, 0, 0, 0, 255, 255, 255, 255}, 8)
+    assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, delta, 2))), "Unsupported: DELTA_BINARY_PACKED encoding")
+    split :: test_page(0, 2, 9, 3, [U8]{7, 0, 0, 0, 255, 255, 255, 255}, 8)
+    assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, split, 2))), "Unsupported: BYTE_STREAM_SPLIT encoding")
+    v2 :: test_page(3, 2, 0, 3, [U8]{7, 0, 0, 0, 255, 255, 255, 255}, 8)
+    assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, v2, 2))), "Unsupported: DATA_PAGE_V2 pages")
+    packed := test_column(PARQUET_INT32, test_page(0, 1, 0, 4, [U8]{1, 7, 0, 0, 0}, 5), 1)
+    packed.repetition = 1
+    assert_eq(test_outcome(test_file(packed)), "Unsupported: BIT_PACKED definition levels")
+    rle_dictionary :: test_page(2, 1, 3, 3, [U8]{5, 0, 0, 0}, 4)
+    assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, rle_dictionary, 1))), "Unsupported: RLE dictionary pages")
+    repeated := test_column(PARQUET_INT32, test_int32_page(), 2)
+    repeated.repetition = 2
+    assert_eq(test_outcome(test_file(repeated)), "Unsupported: repeated column `v`")
+    group := test_column(PARQUET_INT32, test_int32_page(), 2)
+    group.children = 1
+    assert_eq(test_outcome(test_file(group)), "Unsupported: nested schema (group `v`)")
+    decimal := test_column(PARQUET_INT32, test_int32_page(), 2)
+    decimal.converted = 5
+    assert_eq(test_outcome(test_file(decimal)), "Unsupported: DECIMAL column `v`")
+    unsigned_long := test_column(PARQUET_INT64, test_page(0, 1, 0, 3, [U8]{1, 0, 0, 0, 0, 0, 0, 0}, 8), 1)
+    unsigned_long.converted = 14
+    assert_eq(test_outcome(test_file(unsigned_long)), "Unsupported: UINT_64 column `v`")
+    date := test_column(PARQUET_INT32, test_int32_page(), 2)
+    date.logical = 6
+    assert_eq(test_outcome(test_file(date)), "Unsupported: DATE column `v`")
+    external := test_column(PARQUET_INT32, test_int32_page(), 2)
+    external.external = true
+    assert_eq(test_outcome(test_file(external)), "Unsupported: column chunks stored in another file")
+}
+
+#Test("Parquet rejects malformed files as Decode and oversized ones as Limit") {
+    file :: test_file(test_column(PARQUET_INT32, test_int32_page(), 2))
+    assert_eq(test_outcome([U8]{80, 65, 82, 49, 0, 0, 0, 0, 80, 65, 82, 50}), "Decode: payload does not begin and end with PAR1")
+    negative :: test_page(2, -26, 0, 3, [U8]{5, 0, 0, 0}, 4)
+    assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, negative, 1))), "Decode: dictionary page of column `v` declares -26 values")
+    dictionary :: test_page(2, 1, 0, 3, [U8]{5, 0, 0, 0}, 4)
+    data :: test_page(0, 1, 8, 3, [U8]{1, 2, 1}, 3)
+    pages := dictionary.copy()
+    loop byte in data -> &pages.push(byte)
+    assert_eq(test_outcome(test_file(test_column(PARQUET_INT32, pages, 1))), "Decode: dictionary index 1 of column `v` exceeds its 1 entries")
+    if read_rows(file, 1, 1048576) == {
+        .Ok(_) -> panic("two rows under max_output_rows 1")
+        .Err(failure) -> assert_eq("{failure.kind}: {failure.reason}", "Limit: max_output_rows 1 exceeded")
+    }
+    if read_rows(file, 10, 4) == {
+        .Ok(_) -> panic("an 8-byte page under max_item_bytes 4")
+        .Err(failure) -> assert_eq("{failure.kind}: {failure.reason}", "Limit: page of 8 bytes exceeds max_item_bytes 4")
+    }
+}

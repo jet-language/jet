@@ -48,10 +48,61 @@ fn unicode_lower_append(builder: I64, data: I64, start: I64, length: I64) {
     }
 }
 
+// The A-Z bytes among eight ASCII bytes, each as its 0x80 bit: a byte b
+// below 0x80 sets it in b + 0x3F once b >= 0x41 ('A') and in b + 0x25 once
+// b >= 0x5B (past 'Z'); neither sum carries into the next byte.
+fn unicode_ascii_upper_bits(word: I64) -> I64 {
+    wrapping(word + I64{4557430888798830399}).bit_and(wrapping(word + I64{2676586395008836901}).bit_not()).bit_and(I64{-9187201950435737472})
+}
+
+fn unicode_ascii_upper(byte: I64) -> Bool {
+    byte >= I64{65} && byte <= I64{90}
+}
+
+// The lowercase of an ASCII text: A-Z gain 32, every other byte stays (the
+// Unicode mapping of an ASCII scalar is exactly that). A text without A-Z is
+// its own lowercase and is shared, not copied. -1 when a byte is not ASCII.
+fn unicode_ascii_lower(value: I64, data: I64, length: I64) -> I64 {
+    words :: wrapping(length - length.bit_and(I64{7}))
+    upper := false
+    at := I64{0}
+    loop at < words {
+        word :: rt_text_word(wrapping(data + at))
+        if (word.bit_and(I64{-9187201950435737472}) != I64{0}) -> return I64{-1}
+        if (unicode_ascii_upper_bits(word) != I64{0}) -> upper = true
+        at = wrapping(at + I64{8})
+    }
+    loop at < length {
+        byte :: rt_text_byte(wrapping(data + at))
+        if (byte >= I64{128}) -> return I64{-1}
+        if unicode_ascii_upper(byte) -> upper = true
+        at = wrapping(at + I64{1})
+    }
+    if !upper -> return jet_rt_string_clone(value)
+    lowered :: rt_text_with_length(length, length)
+    if (lowered == I64{0}) -> return I64{0}
+    target :: rt_text_data(lowered)
+    at = I64{0}
+    loop at < words {
+        word :: rt_text_word(wrapping(data + at))
+        rt_text_store(wrapping(target + at), word.bit_or((unicode_ascii_upper_bits(word) >> I64{2}).bit_and(I64{2314885530818453536})))
+        at = wrapping(at + I64{8})
+    }
+    loop at < length {
+        byte :: rt_text_byte(wrapping(data + at))
+        rt_text_put(wrapping(target + at), if unicode_ascii_upper(byte) -> byte + I64{32} else -> byte)
+        at = wrapping(at + I64{1})
+    }
+    lowered
+}
+
 #Export(c) fn jet_unicode_lower(value: I64) -> I64 {
     length :: rt_text_len(value)
+    data :: rt_text_data(value)
+    ascii :: unicode_ascii_lower(value, data, length)
+    if (ascii != I64{-1}) -> return ascii
     builder :: rt_text_builder_with_capacity(length)
-    unicode_lower_append(builder, rt_text_data(value), I64{0}, length)
+    unicode_lower_append(builder, data, I64{0}, length)
     jet_rt_string_builder_finish(builder)
 }
 

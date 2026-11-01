@@ -186,7 +186,7 @@ fn parser_parse_module_contribution(state: &JetParserState) -> Contribution {
     namespace_name :: parser_value(state, namespace_token)
     namespace := parser_module_namespace(namespace_name)
     if namespace == None {
-        parser_module_error(&state, "E0960", namespace_token.span, "`{namespace_name}` is not a module namespace", "namespace contributions use env, system, image, fleet, vmtest, or profile", "start the contribution with a supported namespace")
+        parser_module_error(&state, "E0960", namespace_token.span, "`{namespace_name}` is not a module namespace", "a module contributes to the reserved namespaces `env` (a dev environment), `system` (a whole machine), `image` (a disk image), `fleet` (a host fleet), `vmtest` (a VM test), and `profile` (a package generation)", "begin the contribution with `env`, `system`, `image`, `fleet`, `vmtest`, or `profile`")
         namespace = Val(Namespace.Env)
     }
     namespace_value :: namespace ?? Namespace.Env
@@ -605,10 +605,12 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
     perf_budgets_span := namespace_head.span
     perf_compile_workloads := [CompileWorkloadDecl]{}
     perf_compile_workloads_span := Span?{None}
+    perf_budgets_seen := false
     perf_list_span := namespace_head.span
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        before := state.position
         if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parsed_sources :: parser_module_sources(&state)
             loop source in parsed_sources -> &sources.push(source)
@@ -647,31 +649,33 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
             else -> {
                 field :: parser_expect_name(&state, "for a performance field")
                 parser_expect(&state, TOKEN_COLON, "after a performance field")
-                if parser_value(state, field) == {
-                    "budgets" -> {
-                        parsed :: parser_module_perf_budgets(&state)
-                        perf_budgets = parsed.budgets
-                        perf_budgets_span = parsed.span
-                        perf_list_span = parsed.span
-                    }
-                    "compile_workloads" -> {
-                        parsed :: parser_module_perf_workloads(&state)
-                        perf_compile_workloads = parsed.workloads
-                        perf_compile_workloads_span = Val(field.span)
-                    }
-                    else -> {
-                        parser_module_error(&state, "E2903", field.span, "unknown performance role field", "performance roles contain budgets and compile_workloads", "write `budgets: [...]` or `compile_workloads: {{ ... }}`")
-                        parser_parse_expression(&state, 1, 0)
-                    }
+                field_name :: parser_value(state, field)
+                if field_name == "budgets" && !perf_budgets_seen {
+                    parsed :: parser_module_perf_budgets(&state)
+                    perf_budgets = parsed.budgets
+                    perf_budgets_span = parsed.span
+                    perf_list_span = parsed.span
+                    perf_budgets_seen = true
+                } else if field_name == "compile_workloads" && perf_compile_workloads_span == None {
+                    parsed :: parser_module_perf_workloads(&state)
+                    perf_compile_workloads = parsed.workloads
+                    perf_compile_workloads_span = Val(field.span)
+                } else {
+                    parser_add_fatal_code(&state, "E2903", field.span, "performance budget role `{role.name}` is not valid", "a performance role contains one `budgets` list and at most one `compile_workloads` map", "write `budgets: [Budget{{ ... }}]` and, for edit probes, `compile_workloads: {{ ... }}`")
+                    parser_parse_expression(&state, 1, 0)
                 }
             }
         }
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+        if state.position == before {
+            parser_add_error_here(&state, "the role-module body parser could not advance", "one malformed role-module field must not trap the enclosing parser", "complete the role-module field or remove it")
+            parser_bump(&state)
+        }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a role-module body")
     body_span :: parser_cover(namespace_head.span, close.span)
-    if namespace_value == Namespace.Perf && perf_budgets.len() == 0 {
-        parser_module_error(&state, "E2903", namespace_head.span, "a performance role needs a budgets list", "performance policy is typed budget metadata", "write `budgets: [Budget{{ ... }}]`")
+    if namespace_value == Namespace.Perf && !perf_budgets_seen {
+        parser_add_fatal_code(&state, "E2903", role.span, "performance budget role `{role.name}` is not valid", "a performance role requires one `budgets` list", "add `budgets: [Budget{{ ... }}]`")
         perf_budgets_span = body_span
         perf_list_span = body_span
     }

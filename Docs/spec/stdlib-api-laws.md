@@ -598,8 +598,8 @@ Removed native routes → source replacements (reviewed pre-removal line anchors
   `Traits.rs:2702` → source nominal Fake and ordinary record traits.
 - `Collections.rs:558,2103,2908,3890,3952` and
   `method_calls.rs:6290` → source Fake methods and ordinary parameter/borrow rules.
-- Rust `TIR/mod.rs:14242`, `routes.rs:2078`, `subset/handles.rs:248,561`,
-  `tir_to_mir_expr.rs:4506`; Jet `TIR.jet:948`, `HandleMethods.jet:1043,1355`
+- Rust IR `mod.rs:14242`, `routes.rs:2078`, `subset/handles.rs:248,561`,
+  `tir_to_mir_expr.rs:4506`; the retired Jet IR module (line 948), `HandleMethods.jet:1043,1355`
   → source locale/name/email/host/address bodies, no closed Fake handle operations.
 - Comptime `Builtins.rs:1438`, `dispatch/eval_method.rs:2355`,
   `Methods/core_calls.rs:378`, `plain_calls.rs:1243` → ordinary source dispatch.

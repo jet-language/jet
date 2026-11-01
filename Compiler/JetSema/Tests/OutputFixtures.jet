@@ -37,7 +37,7 @@ fn output_fixture_case(label: String, source: String, effects_source: String, in
         &failures.push("{label}: registration failed: {graph.diagnostics:Debug}")
         return
     }
-    diagnostics :: sema_output_resolve(&graph, intent, address)
+    diagnostics :: sema_output_resolve(&graph, intent, address, false)
     codes := [String]{}
     loop diagnostic in diagnostics -> &codes.push(diagnostic.code.copy())
     if codes != expected_codes -> &failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
@@ -55,7 +55,7 @@ fn output_fixture_case(label: String, source: String, effects_source: String, in
 fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
     source :: "APP :: Output.Executable{{name: \"app\", entry: launch}}\nfn leaf() {{ print(\"checked effect\") }}\nfn launch() {{ leaf() }}\n"
     graph := output_fixture_graph("solved effect publication", source, effects_source, &failures) ?? return
-    output_diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None)
+    output_diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None, false)
     if sema_has_error_since(output_diagnostics, 0) {
         &failures.push("solved effect publication: Output resolution failed {output_diagnostics:Debug}")
         return
@@ -176,7 +176,7 @@ fn output_fixture_visibility(label: String, main_source: String, bank_source: St
         &failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
         return
     }
-    diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None)
+    diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None, false)
     if expected_link {
         if diagnostics.len() != 0 -> &failures.push("{label}: public link rejected {diagnostics:Debug}")
         found := false
@@ -203,6 +203,16 @@ fn output_fixture_visibility(label: String, main_source: String, bank_source: St
             if constant.declaration.resolved_output == .Val(_) -> &failures.push("{label}: rejected private link still published a checked fact")
         }
     }
+}
+
+// A run with no address, no `fn run` and no Output selects nothing (E0101),
+// unless the package manifest binds an `outputs.*.entry` function.
+fn output_fixture_manifest_entry(label: String, manifest_entry: Bool, expected_codes: [String], effects_source: String, failures: &[String]) {
+    graph := output_fixture_graph(label, "fn cli_run() {{}}\n", effects_source, &failures) ?? return
+    diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None, manifest_entry)
+    codes := [String]{}
+    loop diagnostic in diagnostics -> &codes.push(diagnostic.code.copy())
+    if codes != expected_codes -> &failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
 }
 
 fn output_fixture_visibility_cases(effects_source: String, failures: &[String]) {
@@ -264,6 +274,8 @@ fn output_fixture_run(effects_source: String) Never! {
     }
     if name_mangle("launch") != "__jet_launch" || name_mangle("$launch") != "__jet_ct_launch" || name_mangle("__jet_launch") != "__jet_launch" -> &failures.push("canonical machine-name bytes")
     output_fixture_solved_effects(effects_source, &failures)
+    output_fixture_manifest_entry("run with no entry", false, [String]{"E0101"}, effects_source, &failures)
+    output_fixture_manifest_entry("manifest entry binding", true, [String]{}, effects_source, &failures)
     output_fixture_visibility_cases(effects_source, &failures)
     if failures.len() > 0 -> panic("OutputFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
 }

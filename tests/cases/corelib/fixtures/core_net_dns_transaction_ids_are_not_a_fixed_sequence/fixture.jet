@@ -73,7 +73,7 @@ fn fixture_response(query: [U8]) -> [U8] {
 }
 fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     peer :: net.socket_addr(packet.host, packet.port) ?? panic("peer")
-    net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")
+    (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
 #Test("core_net_dns_transaction_ids_are_not_a_fixed_sequence") {

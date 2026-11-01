@@ -15,21 +15,21 @@ fn parallel_limit(limit: I64, cap: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_native_para_worker(worker: I64) -> I64 {
-    chunk := sync_load(worker + I64{24})
-    chunks :: sync_load(worker + I64{8})
-    stride :: sync_load(worker + I64{16})
+    chunk := sync_load(wrapping(worker + I64{24}))
+    chunks :: sync_load(wrapping(worker + I64{8}))
+    stride :: sync_load(wrapping(worker + I64{16}))
     length :: sync_load(worker)
-    save :: sync_load(worker + I64{72})
+    save :: sync_load(wrapping(worker + I64{72}))
     loop chunk < chunks {
         start :: chunk * I64{64}
         remaining :: length - start
         end :: start + (if remaining < (I64{64}) -> remaining else -> I64{64})
         control :: scheduler_control_new()
-        sync_store(control + I64{104}, SCHEDULER_SCOPE_TASK)
+        sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_TASK)
         scheduler_control_enter(control, save)
         body :: scheduler_body_enter()
         #Unsafe("checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots") {
-            os_call3_unit_i64(sync_load(worker + I64{40}), sync_load(worker + I64{32}), start, end)
+            os_call3_unit_i64(sync_load(wrapping(worker + I64{40})), sync_load(wrapping(worker + I64{32})), start, end)
         }
         scheduler_body_leave(body)
         record :: scheduler_control_take_stop(control)
@@ -37,9 +37,9 @@ fn parallel_limit(limit: I64, cap: I64) -> I64 {
         scheduler_control_drop(control)
         if (record != I64{0}) {
             // This worker's cyclic chunk indices only increase.
-            if (sync_load(worker + I64{48}) == I64{0}) {
-                sync_store(worker + I64{48}, record)
-                sync_store(worker + I64{56}, start)
+            if (sync_load(wrapping(worker + I64{48})) == I64{0}) {
+                sync_store(wrapping(worker + I64{48}), record)
+                sync_store(wrapping(worker + I64{56}), start)
             } else { scheduler_stop_drop(record) }
         }
         if stride >= chunks - chunk -> break
@@ -67,7 +67,7 @@ fn parallel_raise(record: I64) {
     // The process edge has no parent control. Replay the captured diagnostic,
     // not a replacement panic; the owned stop is released before process exit.
     message :: scheduler_stop_take_message(record)
-    form :: sync_load(record + I64{48})
+    form :: sync_load(wrapping(record + I64{48}))
     scheduler_stop_drop(record)
     if (form == I64{0}) {
         trap_header(I64{0})
@@ -103,19 +103,19 @@ fn parallel_raise(record: I64) {
     loop at < count {
         worker :: workers + at * I64{112}
         sync_store(worker, length)
-        sync_store(worker + I64{8}, chunks)
-        sync_store(worker + I64{16}, count)
-        sync_store(worker + I64{24}, at)
-        sync_store(worker + I64{32}, env)
-        sync_store(worker + I64{40}, invoke)
-        sync_store(worker + I64{72}, worker + I64{80})
+        sync_store(wrapping(worker + I64{8}), chunks)
+        sync_store(wrapping(worker + I64{16}), count)
+        sync_store(wrapping(worker + I64{24}), at)
+        sync_store(wrapping(worker + I64{32}), env)
+        sync_store(wrapping(worker + I64{40}), invoke)
+        sync_store(wrapping(worker + I64{72}), worker + I64{80})
         if (count == I64{1}) { _ := jet_rt_native_para_worker(worker) } else {
             handle :: thread_spawn(rt_parallel_worker_address(), worker)
             if (handle < I64{0}) {
                 spawn_failed = true
                 break
             }
-            sync_store(worker + I64{64}, handle)
+            sync_store(wrapping(worker + I64{64}), handle)
             started += I64{1}
         }
         at += I64{1}
@@ -123,7 +123,7 @@ fn parallel_raise(record: I64) {
     // Rust joins in reverse creation order; no borrowed input escapes here.
     loop started > (I64{0}) {
         started -= I64{1}
-        handle :: sync_load(workers + started * I64{112} + I64{64})
+        handle :: sync_load(wrapping(wrapping(workers + started * I64{112}) + I64{64}))
         if (thread_join(handle, I64{0}) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     }
     first := I64{0}
@@ -131,8 +131,8 @@ fn parallel_raise(record: I64) {
     at = I64{0}
     loop at < count {
         worker :: workers + at * I64{112}
-        record :: sync_load(worker + I64{48})
-        start :: sync_load(worker + I64{56})
+        record :: sync_load(wrapping(worker + I64{48}))
+        start :: sync_load(wrapping(worker + I64{56}))
         if (record != I64{0}) {
             if start < index {
                 scheduler_stop_drop(first)

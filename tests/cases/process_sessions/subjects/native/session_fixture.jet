@@ -1,0 +1,142 @@
+// Subject program port of tests/fixtures/process_sessions/session_fixture.rs:8-55,80-96.
+// Observable output, allocation/open-handle pressure, and descendant lifetime are
+// unchanged. The assertions belong to the .case files, not this child program.
+// The terminal subject is PENDING-SEAM(term-is-terminal): width/height alone do
+// not establish that both stdin and stdout are TTYs.
+use core.process as process
+use core.files as files
+use core.time as time
+use core.sys as sys
+
+fn output(size: String) {
+    if size == "small" -> print("ok")
+    else -> print("0123456789abcdef0123456789abcdef")
+}
+
+fn cpu() {
+    loop {}
+}
+
+fn memory() {
+    blocks := [[U8]]{}
+    loop {
+        block := "x".repeat(256 * 1024).bytes()
+        block[0] = U8{1}
+        &blocks.push(block)
+        time.sleep(1ms)
+    }
+}
+
+fn descriptors() {
+    handles := [FileReader]{}
+    path :: if sys.family() == "windows" -> "NUL" else -> "/dev/null"
+    loop {
+        if files.open(path) == {
+            .Ok(handle) -> &handles.push(handle)
+            .Err(_) -> time.sleep(1ms)
+        }
+    }
+}
+
+fn tree(pid_file: String) {
+    executable :: sys.executable()
+    child :: process.cmd([executable, "descendant", pid_file]).spawn() ?? panic("spawn descendant")
+    loop { time.sleep(1s) }
+}
+
+// The original spawned this child with std::process::Command, which keeps it in
+// the tree's process group; core.process gives every child a group of its own,
+// so the descendant rejoins its parent's group before it reports its pid.
+fn descendant(pid_file: String) {
+    #Unsafe("the fixture's descendant rejoins the process group of the tree that spawned it") {
+        group :: sys.getpgid(sys.getppid()) ?? panic("read the tree's process group")
+        sys.setpgid(0, group) ?? panic("join the tree's process group")
+    }
+    files.write(pid_file, "{process.current_pid()}") ?? panic("write descendant pid")
+    loop { time.sleep(1s) }
+}
+
+// SIGKILL (9) is bit 8 of a /proc signal mask: the low bit of the third hex
+// digit from the right of the 16-digit mask.
+fn kill_pending(status: String) -> Bool {
+    loop line in status.lines() {
+        if line.starts_with("SigPnd:") || line.starts_with("ShdPnd:") {
+            mask :: line.bytes().slice(7, line.bytes().len())
+            digits :: String.from_bytes(mask) ?? ""
+            hex :: digits.trim().bytes()
+            if hex.len() >= 3 {
+                digit :: String.from_bytes(hex.slice(hex.len() - 3, hex.len() - 2)) ?? ""
+                if digit != "" && "13579bdfBDF".contains(digit) -> return true
+            }
+        }
+    }
+    false
+}
+
+// How a killed descendant is reaped, or "" while it is still running. Off
+// Linux there is no /proc: kill -0 failing, as in the original, is the proof.
+// On Linux its /proc entry is gone, it is a zombie, it has begun exit
+// (PF_EXITING, 0x4 in stat field 9), or a SIGKILL is pending. The descendant
+// only ever sleeps, so each of these means the tree kill reached it. A killed
+// task can sit in uninterruptible sleep (state D) inside the kernel, for
+// example blocked in block-I/O throttling, for seconds under load before it
+// disappears; the pending kill or the exit flag already proves it can never
+// run again.
+fn reaped_how(pid: String) -> String {
+    if !sys.is_linux() {
+        target :: Int.parse(pid) ?? panic("descendant pid {pid} is not an integer")
+        gone := false
+        #Unsafe("kill -0 only asks whether the killed descendant still exists") {
+            if sys.kill(target, 0) == {
+                .Ok(_) -> {}
+                .Err(_) -> gone = true
+            }
+        }
+        return if gone -> "gone" else -> ""
+    }
+    stat :: files.read("/proc/{pid}/stat") ?? return "gone"
+    rest :: stat.cut_last(")")?.after ?? return "gone"
+    fields :: rest.trim().split(" ").to_list()
+    state :: fields.get(0) ?? ""
+    if state == "Z" || state == "X" || state == "x" -> return "zombie"
+    flags :: Int.parse(fields.get(6) ?? "") ?? 0
+    if flags.bit_and(4) != 0 -> return "exiting in state {state}"
+    status :: files.read("/proc/{pid}/status") ?? return "gone"
+    if kill_pending(status) -> return "kill pending in state {state}"
+    ""
+}
+
+// Each pid file names a descendant the pipeline timeout must have killed. It
+// is judged within a two-second window and then removed, so the next step's
+// tree writes a fresh file instead of truncating this one.
+fn reaped(pid_files: [String]) {
+    loop pid_file in pid_files {
+        pid :: (files.read(pid_file) ?? panic("read descendant pid file {pid_file}")).trim()
+        how := reaped_how(pid)
+        loop _ in 0..<200 {
+            if how != "" -> break
+            time.sleep(10ms)
+            how = reaped_how(pid)
+        }
+        if how == "" {
+            stat :: files.read("/proc/{pid}/stat") ?? ""
+            wchan :: files.read("/proc/{pid}/wchan") ?? ""
+            eprint("pipeline descendant {pid} survived timeout ({pid_file}): stat {stat.trim()} wchan {wchan}")
+            process.exit(1)
+        }
+        files.remove(pid_file) ?? panic("remove descendant pid file {pid_file}")
+    }
+}
+
+fn run() {
+    args :: process.argv()
+    mode :: args.get(1) ?? ""
+    if mode == "output" -> output(args.get(2) ?? "large")
+    else if mode == "cpu" -> cpu()
+    else if mode == "memory" -> memory()
+    else if mode == "files" -> descriptors()
+    else if mode == "tree" -> tree(args.get(2) ?? panic("tree needs a pid file"))
+    else if mode == "descendant" -> descendant(args.get(2) ?? panic("descendant needs a pid file"))
+    else if mode == "reaped" -> reaped(args.slice(2, args.len()))
+    else -> process.exit(2)
+}

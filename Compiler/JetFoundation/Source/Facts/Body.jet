@@ -253,6 +253,10 @@ enum NodeKind {
     Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
+    // `T.name` for a trait constant over a type parameter: the build reads
+    // the constant of the implementation of `trait_name` (its short name)
+    // that the concrete `owner` has.
+    TraitConst(owner: Type, trait_name: String, name: String)
     GlobalShared(initializer: DeclID, lifetime: SharedLifetime)
     Call(callee: DeclID, type_args: [Type], args: [BodyCallArg])
     IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type)
@@ -267,7 +271,6 @@ enum NodeKind {
     Drop(value: Int)
     Close(value: Int)
     Move(value: Int)
-    AmbientInput(prompt: Int?)
     RequireStop(kind: BodyRequireKind, location: TPanicLoc, always_stops: Bool)
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: Int, rhs: Int)
     CompareChain(operands: [Int], operators: [TBinaryOp], hooks: [Bool])
@@ -304,8 +307,6 @@ enum NodeKind {
     ListSpread(parts: [BodyListSpreadPart])
     MapLit(entries: [BodyMapEntry])
     PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String)
-    MathLaneIndex(lane_type: String, base: Int, index: Int, line: Int)
-    MathSwizzleRead(type_name: String, receiver: Int, lanes: [Int])
     // #4318: `fact` is the sema decision behind the copy.
     Clone(value: Int, fact: CopyFact)
     ExplicitCopy(value: Int)
@@ -314,7 +315,6 @@ enum NodeKind {
     DecodeUnder(segment: Int, inner: Int)
     BuiltinMethod(receiver: Int, operation: TBuiltinOp, args: [Int])
     IfExpr(cond: BodyIfCond, then_body: [Int], then_value: Int, else_body: [Int], else_value: Int)
-    ResultHandler(subject: Int, ok_pattern: BodyPattern, ok_body: [Int], ok_value: Int, err_pattern: BodyPattern, err_body: [Int], err_value: Int, terminal: Int)
     RawOf(value: Int)
     InvariantViolation(construct: String, span: Span)
     DistinctRaw(value: Int)
@@ -328,7 +328,6 @@ enum NodeKind {
     PatternMatches(subject: Int, pattern: BodyPattern)
     OptionLift2(function: Int, left: Int, right: Int)
     ClosureMethod(receiver: Int, operation: TClosureOp, args: [Int])
-    HostBorrowCallback(callable: Int, params: [Type])
     NumericMethod(receiver: Int, operation: TNumericOp)
     NumericBinaryMethod(receiver: Int, operation: TNumericOp, argument: Int)
     OverflowOpt(prefix: String, operation: String, line: Int, lhs: Int, rhs: Int)
@@ -343,6 +342,10 @@ enum NodeKind {
     SelectWait(builder: Int, nonblocking: Bool)
     FnValue(kind: BodyFnValueKind)
     Never(reason: String)
+    // D-TYPESWITCH1: whether generic type `subject` (a type parameter) is
+    // exactly `target` in the instance being built. Only an `if` condition
+    // holds one, and the IR folds that `if` to the arm its instance keeps.
+    TypeTest(subject: Type, target: Type)
 }
 
 struct BodyStructFieldValue {
@@ -391,6 +394,9 @@ enum BodyHostCall {
     // checked literal path or glob, relative to the source file being
     // compiled. The compiler reads and records it; it never runs at runtime.
     ComptimeInput(builtin: String, path: String)
+    // `name.cache()` on a memoized function: its result store's `MemoStats`
+    // record, with the written bound ("128", "none").
+    MemoStats(function: DeclID, bound: String)
 }
 
 enum BodyCoreClosureKind {
@@ -466,8 +472,6 @@ enum BodyHandleOp {
     RealtimeReceipt
     RealtimeCancel
     RealtimeIsCancelled
-    HistoryRNGNextU64
-    HistoryRNGBelow
     GameSceneNew
     GameReplayRecord
     GameBackendHeadless
@@ -570,6 +574,7 @@ enum BodyHandleOp {
     ProcessChildMethod(method: String)
     TerminalSessionResize
     ProcessStdinWrite
+    ProcessStdinWriteText
     ProcessStdinClose
     ProcessStdinWriteAll
     ProcessStdoutRead
@@ -595,7 +600,7 @@ enum BodyHandleOp {
     ChannelClose
     SenderSend
     HTTPRouterRegister(verb: HTTPRouteMethod, handler: Int, file: String, line: Int, handler_param_names: [String], contract_json: String)
-    MathMethod(type_name: String, method: String, reduce_op: String?)
+    MathMethod(type_name: String, method: String)
     ReactiveGet
     ReactiveSet
     ReactiveEffectMethod
@@ -603,7 +608,6 @@ enum BodyHandleOp {
     LayoutMethod(method: String)
     LoadableMethod(method: String)
     CivilTimeMethod(kind: String, method: String)
-    EmailMethod(method: String)
     HTTPClientMethod(kind: String, method: String)
     HTTPServerMethod(kind: String, method: String)
     DynField
@@ -644,15 +648,8 @@ enum BodyHandleOp {
     PathNormalize
     PathIsWithin
     PathToString
-    PathWriteAtomic
     PathWalk
     UIBackendMethod(method: String)
-    AppMethod(method: String, args_len: Int)
-    ServiceRuntimeSend
-    ServiceRuntimeRetry
-    ServiceRuntimeDeadLetter
-    ServiceRuntimeRetain
-    ServiceRuntimeCommit
     PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -1259,11 +1256,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
         .Move(f0) -> {
             visit(f0)
         }
-        .AmbientInput(f0) -> {
-            if f0 == .Val(inner) {
-                visit(inner)
-            }
-        }
         .RequireStop(f0, _, _) -> {
             body_each_require_kind_child(tree, f0, visit)
         }
@@ -1409,13 +1401,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
             visit(f0)
             visit(f1)
         }
-        .MathLaneIndex(_, f1, f2, _) -> {
-            visit(f1)
-            visit(f2)
-        }
-        .MathSwizzleRead(_, f1, _) -> {
-            visit(f1)
-        }
         .Clone(f0, _) -> {
             visit(f0)
         }
@@ -1450,20 +1435,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
                 body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             visit(f4)
-        }
-        .ResultHandler(f0, f1, f2, f3, f4, f5, f6, f7) -> {
-            visit(f0)
-            body_each_pattern_child(tree, f1, visit)
-            loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
-            }
-            visit(f3)
-            body_each_pattern_child(tree, f4, visit)
-            loop item in f5 {
-                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
-            }
-            visit(f6)
-            visit(f7)
         }
         .RawOf(f0) -> {
             visit(f0)
@@ -1505,9 +1476,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
             loop item in f2 {
                 visit(item)
             }
-        }
-        .HostBorrowCallback(f0, _) -> {
-            visit(f0)
         }
         .NumericMethod(f0, _) -> {
             visit(f0)

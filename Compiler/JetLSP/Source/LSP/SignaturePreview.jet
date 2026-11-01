@@ -145,14 +145,9 @@ fn lsp_compute_signature_change_preview(db: SymbolDB, sources: [String:String], 
         key :: LSPSignatureCallSpan{path: reference.module_path.copy(), start: reference.span.start, end: reference.span.end}
         if !known_call_spans.has_key(key) -> &preview.unknown.push("unresolved_or_higher_order_reference:{reference.module_path}:{reference.span.start}-{reference.span.end}")
     }
-    before := declaration_source.slice(0, definition.def_span.start.min(declaration_source.bytes().len())) // #4303
-    last_line := String?{None}
-    loop line in before.lines() -> last_line = Val(line.copy())
-    if last_line == .Val(line) {
-        loop word in line.split_whitespace() {
-            if word == "pub" { &preview.unknown.push("external_callers_outside_checked_workspace"); break }
-        }
-    }
+    // #6341: Sema's checked visibility, never the declaration's spelling: a
+    // Public declaration may have callers outside the checked workspace.
+    if db.declaration_visibility(definition.module_path, definition.def_span) == .Val(.Public) -> &preview.unknown.push("external_callers_outside_checked_workspace")
     &preview.unknown.sort()
     &preview.unknown.dedup()
     Ok(preview)

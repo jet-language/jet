@@ -1,0 +1,30 @@
+# `s = ""` empties a String place that always holds its value in place, and
+# `s += text` grows it in place, through a write parameter as well as on an
+# owned local. So a refill through `&String` reuses the buffer and the peak
+# resident set does not grow, while a value another owner holds or a static
+# text keeps its bytes. Checked on O0, O1, O2, the default run and a built
+# binary.
+fixture: strings_refill_in_place.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+limit: time=120
+exit: 0
+stdout: = strings_refill_in_place.out
+step: jet run --optimize=basic main.jet
+limit: time=120
+exit: 0
+stdout: = strings_refill_in_place.out
+step: jet run --optimize=full main.jet
+limit: time=120
+exit: 0
+stdout: = strings_refill_in_place.out
+step: jet run main.jet
+limit: time=120
+exit: 0
+stdout: = strings_refill_in_place.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+limit: time=120
+exit: 0
+stdout: = strings_refill_in_place.out

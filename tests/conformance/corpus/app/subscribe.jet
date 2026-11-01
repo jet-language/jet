@@ -1,7 +1,26 @@
 // core-conformance: app.subscribe
 use app as application
+use core.reactive.loadable.[Loadable]
+
+#Error
+enum ReadError {
+    Offline
+}
+
+fn reading(sensor: String) -> Int ReadError! {
+    if sensor == "" -> return Err(ReadError.Offline)
+    sensor.len()
+}
+
+fn shown(state: Loadable<Int, ReadError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(_) -> "failed"
+        else -> "pending"
+    }
+}
 
 fn run() {
-    query :: application.subscribe("metrics")
-    assert(application.live_show(query).contains("footprint=ext:metrics"))
+    binding :: application.subscribe(reading, "cpu")
+    print(shown(application.state(binding)))
 }

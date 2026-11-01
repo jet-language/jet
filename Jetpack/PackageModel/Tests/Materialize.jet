@@ -7,19 +7,19 @@ use jet_pkg_model.[
 #Test("native bundle staging normalizes relative paths and refuses escapes") {
     plan :: pkg_bundle_wire_test_plan()
     good :: BundleFile.new("a/./b", BundleFileKind.Executable, 493, "payload".bytes())
-    assert_eq(pkg_bundle_native_relative(&plan, &good, false) ?? panic("relative"), "a/b")
+    assert_eq(pkg_bundle_native_relative(plan, good, false) ?? panic("relative"), "a/b")
     loop path in ([String]{"../a", "a/../b", "/a", "C:\\a", "", "."}) {
         file :: BundleFile.new(path, BundleFileKind.Executable, 493, [U8]{})
-        assert(pkg_bundle_native_relative(&plan, &file, false) == .Err(_))
+        assert(pkg_bundle_native_relative(plan, file, false) == .Err(_))
     }
     mac :: BundleFile.new("demo.app/Contents/MacOS/demo", BundleFileKind.Executable, 493, [U8]{})
-    assert_eq(pkg_bundle_native_relative(&plan, &mac, true) ?? panic("mac root"), "Contents/MacOS/demo")
+    assert_eq(pkg_bundle_native_relative(plan, mac, true) ?? panic("mac root"), "Contents/MacOS/demo")
     outside :: BundleFile.new("other.app/Contents/demo", BundleFileKind.Executable, 493, [U8]{})
-    assert(pkg_bundle_native_relative(&plan, &outside, true) == .Err(_))
+    assert(pkg_bundle_native_relative(plan, outside, true) == .Err(_))
 }
 #Test("native bundle signing requires successful verify and canonical tool identity") {
     absent :: BundleSigningRun{requested: false, verified: false, programs: [String]{}, identities: [String]{}}
-    assert(pkg_bundle_native_signing(absent) == .None)
+    assert((pkg_bundle_native_signing(absent) ? found -> found ! error -> panic("unrequested signing failed: {error.message()}")) == None)
     pending :: BundleSigningRun{requested: true, verified: false, programs: [String]{"sign"}, identities: [String]{"id"}}
     assert(pkg_bundle_native_signing(pending) == .Err(_))
     one :: BundleSigningRun{requested: true, verified: true, programs: [String]{"verify"}, identities: [String]{"id"}}

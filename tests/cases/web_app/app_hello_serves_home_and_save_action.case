@@ -10,16 +10,16 @@ env: S6_WEB_METHOD=GET
 env: S6_WEB_PATH=/
 env: S6_WEB_RESPONSE={work}/page.http
 exit: 0
-file: page.http ^= "HTTP/1.1 200"
-file: page.http ~ "<title>Hello</title>"
-file: page.http ~ "world"
+file: page.http ^= "HTTP/1.1 200" # checks the status line; response headers are not part of this proof
+file: page.http ~ "<title>Hello</title>" # checks page content by phrase; response headers are not part of this proof
+file: page.http ~ "world" # checks page content by phrase; response headers are not part of this proof
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
 env: S6_WEB_METHOD=POST
 env: S6_WEB_PATH=/actions/save
 env: S6_WEB_RESPONSE={work}/action.http
 exit: 0
-file: action.http ^= "HTTP/1.1 200"
+file: action.http ^= "HTTP/1.1 200" # checks the status line; response headers are not part of this proof
 signal server: KILL
 wait: server
-exit: any
+exit: any # the case kills the server; its status is not part of this proof

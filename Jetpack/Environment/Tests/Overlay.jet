@@ -260,10 +260,12 @@ fn env_overlay_test_write(path: String, text: String) -[FS]> {
     files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
     stage.entries["tree/two.txt"].name = "."
     saved :: files.join(moved, "one.saved")
+    held_moved :: moved.copy()
+    held_saved :: saved.copy()
     if env_overlay_commit_staged(authority, &stage, (path: String) -[FS]> {
         assert_eq(path, files.join(source, "tree/one.txt"))
-        files.rename(files.join(moved, "one.txt"), saved) ?? panic("hold committed bytes")
-        files.create_dir(files.join(moved, "one.txt")) ?? panic("block rollback publication")
+        files.rename(files.join(held_moved, "one.txt"), held_saved) ?? panic("hold committed bytes")
+        files.create_dir(files.join(held_moved, "one.txt")) ?? panic("block rollback publication")
     }) == {
         .Ok(_) -> panic("the second commit must fail")
         .Err(error) -> {
@@ -287,8 +289,7 @@ fn env_overlay_test_write(path: String, text: String) -[FS]> {
     root :: env_overlay_test_root("transaction")
     env_overlay_test_write(files.join(root, "src/one.txt"), "one\n")
     env_overlay_test_write(files.join(root, "src/two.txt"), "two\n")
-    result :: env_overlay_test_apply(root, "--- a/src/one.txt\n+++ b/src/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/two.txt\n+++ b/src/two.txt\n@@ -1 +1 @@\n-wrong\n+TWO\n")
-    assert(result == .Err(_))
+    assert(env_overlay_test_apply(root, "--- a/src/one.txt\n+++ b/src/one.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/src/two.txt\n+++ b/src/two.txt\n@@ -1 +1 @@\n-wrong\n+TWO\n") == .Err(_))
     assert_eq(env_overlay_test_read(files.join(root, "src/one.txt")), "one\n")
     assert_eq(env_overlay_test_read(files.join(root, "src/two.txt")), "two\n")
     files.remove_all(root).drop("test cleanup")

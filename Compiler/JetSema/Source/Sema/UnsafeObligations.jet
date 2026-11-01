@@ -280,8 +280,11 @@ fn sema_unsafe_visit_gate(target: Span, span: Span, is_function: Bool, reason: S
     if value == PolicyValue.Forbid {
         sema_unsafe_diagnostic(&result, source, "E3105", Val(span), "organization or package policy forbids unsafe code", "a lexical `#Unsafe` gate cannot widen the effective safety floor", "remove the low-level operation or change the outer policy through its owner")
     } else if reason == .None && !source_has_reason && value != PolicyValue.Relaxed {
-        subject :: if is_function -> "function" else -> "block"
-        sema_unsafe_diagnostic(&result, source, "E3112", Val(span), "this `#Unsafe` {subject} has no reason", "every gated region records why it can't break memory safety", "add the reason: `#Unsafe(\"why this is safe\")`")
+        if is_function {
+            sema_unsafe_diagnostic(&result, source, "E3112", Val(span), "an `#Unsafe` function needs a reason", "every unsafe function records why callers can rely on its unchecked contract", "write `#Unsafe(\"why this is safe\") fn …`")
+        } else {
+            sema_unsafe_diagnostic(&result, source, "E3112", Val(span), "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
+        }
     }
     provenance := [String]{}
     if effective == .Val(policy) {
@@ -315,6 +318,15 @@ fn sema_unsafe_assertion(statement: Stmt) -> (names: [String], span: Span)? Neve
         if argument.expr == .Ident(name, _, _) -> &names.push(name)
     }
     Val((names: names, span: call.name_span))
+}
+
+// Whether `statement` is an obligation assertion (`assert valid_ptr,
+// aligned`). The obligation pass checks it; it has no runtime form.
+fn sema_unsafe_is_assertion(statement: Stmt) -> Bool Never! {
+    if statement == .Expr(expression) {
+        if expression == .Call(call, _) -> return call.name == "__jet_unsafe_assert"
+    }
+    false
 }
 
 fn sema_unsafe_scan_sequence(body: [Stmt], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {

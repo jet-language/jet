@@ -613,7 +613,7 @@ function jet_web_try(valueOrThunk, file, line, fnName, note = null, convert = nu
 }
 
 function jet_list_bounds_message(len, index) {
-  return `the list has ${len} items, so position ${index} doesn't exist`;
+  return `the list has ${len} ${Number(len) === 1 ? "item" : "items"}, so position ${index} doesn't exist`;
 }
 
 function jet_missing_map_key_message(key) {

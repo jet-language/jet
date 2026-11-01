@@ -16,7 +16,7 @@ fn numeric_widen_stop(file: I64, line: I64) {
     trap_write_word(I64{8316287474279129191}, I64{8})
     trap_write_word(I64{7237481}, I64{3})
     trap_msg_message_end()
-    trap_context(sync_load(file), sync_load(file + I64{8}), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_context(sync_load(file), sync_load(wrapping(file + I64{8})), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{1})
 }
 
@@ -116,7 +116,7 @@ fn numeric_bit_set(word: I64, at: I64) -> Bool { ((word >> at).bit_and(I64{1})) 
     node :: int_copy(value, I64{0})
     ones := I64{0}
     length := I64{0}
-    loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+    loop !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0}) {
         ones += int_div_small(node, I64{2})
         length += I64{1}
     }

@@ -597,6 +597,20 @@ fn type_table_intern(table: &TypeTable, ty: Type) -> Int Never! {
     index
 }
 
+// The index of `ty` in `table.types`; None when the table never interned it.
+fn type_table_find(table: TypeTable, ty: Type) -> Int? Never! {
+    if table.slots.len() == 0 -> return None
+    hash :: type_shape_hash(ty)
+    mask :: table.slots.len() - 1
+    slot := hash.bit_and(mask)
+    loop table.slots[slot] != 0 {
+        index :: table.slots[slot] - 1
+        if table.hashes[index] == hash && table.types[index] == ty -> return Val(index)
+        slot = (slot + 1).bit_and(mask)
+    }
+    None
+}
+
 // Rebuilds the slots at `capacity` (a power of two) from the stored hashes.
 fn type_table_grow(table: &TypeTable, capacity: Int) Never! {
     slots := [Int]{}

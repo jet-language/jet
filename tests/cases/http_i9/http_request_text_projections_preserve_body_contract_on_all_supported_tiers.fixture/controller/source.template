@@ -21,9 +21,9 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: TCPStream) -> [U8] {
+fn request_head(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block :: stream.read(512) ?? panic("request read")
@@ -97,8 +97,8 @@ fn run() {
         // Original clock starts after runner spawn; AOT build is not moved outside the budget.
         started :: time.instant()
         loop index in 0..<5 {
-            client :: retry_connect(address, started)
-            net.set_read_timeout(client, 10000) ?? panic("read timeout")
+            client := retry_connect(address, started)
+            net.set_read_timeout(&client, 10000) ?? panic("read timeout")
             body := "hello".bytes()
             if index == 4 -> body = [U8]{0, 255, 1}
             path :: paths[index]
@@ -126,7 +126,10 @@ fn run() {
             separator := -1
             raw :: text.bytes()
             loop offset in 0..<(raw.len() - 3) {
-                if raw[offset] == (U8{13}) && raw[offset + 1] == (U8{10}) && raw[offset + 2] == (U8{13}) && raw[offset + 3] == (U8{10}) { separator = offset; break }
+                if raw[offset] == (U8{13}) && raw[offset + 1] == (U8{10}) && raw[offset + 2] == (U8{13}) && raw[offset + 3] == (U8{10}) {
+                    separator = offset
+                    break
+                }
             }
             assert(separator >= 0)
             assert_eq(text.slice(separator + 4..<text.len()), expected[index])

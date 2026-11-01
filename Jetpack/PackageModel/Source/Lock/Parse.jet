@@ -20,6 +20,10 @@ enum LockParseSection {
     WorkspaceOverlay
     WorkspaceOverlayPackage
     WorkspaceBuildGrant
+    // A Trust SemanticLock block. Those sections live in the same unified
+    // `.jet/lock`, their sole primary copy; this reader keeps them verbatim
+    // in `LockFile.semantic_text` for the writer, and the Trust codec reads them.
+    Semantic
 
     // The section a header line opens, or None for an unknown header.
     fn from_header(line: String) -> LockParseSection? Never! {
@@ -36,6 +40,7 @@ enum LockParseSection {
             "[[workspace_build_grant]]" -> Val(LockParseSection.WorkspaceBuildGrant)
             "[root]" -> Val(LockParseSection.Root)
             "[build.stamp]" -> Val(LockParseSection.BuildStamp)
+            "[[semantic_record]]" | "[[semantic_record.rationale]]" | "[[lock_input]]" | "[[source_map]]" -> Val(LockParseSection.Semantic)
             else -> None
         }
     }
@@ -43,7 +48,7 @@ enum LockParseSection {
     // Sections whose own `version` key is not the lockfile version.
     fn owns_version_key(self) -> Bool Never! {
         if self == {
-            .Package | .Toolchain | .Browser | .WorkspaceOverlayPackage | .Root -> true
+            .Package | .Toolchain | .Browser | .WorkspaceOverlayPackage | .Root | .Semantic -> true
             else -> false
         }
     }
@@ -51,7 +56,7 @@ enum LockParseSection {
     // Sections that shadow the top-level workspace keys.
     fn shadows_workspace_keys(self) -> Bool Never! {
         if self == {
-            .Package | .Root -> true
+            .Package | .Root | .Semantic -> true
             else -> false
         }
     }
@@ -69,6 +74,7 @@ fn pkg_lock_parse(raw: String) -> LockFile LockError! {
         // without a bound.
         if line_text.bytes().len() > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(index + 1)))
         &parser.accept(line_text.trim(), index + 1)
+        if parser.in_semantic -> &parser.semantic_lines.push(line_text)
     }
     &parser.finish()
 }
@@ -139,6 +145,10 @@ struct LockParser {
     overlay: PartialWorkspaceOverlay
     overlay_package: PartialWorkspaceOverlayPackage
     build_grant: PartialWorkspaceBuildGrant
+    // Whether the current line belongs to the SemanticLock tail, and that
+    // tail's raw lines (blank lines and comments included).
+    in_semantic: Bool
+    semantic_lines: [String]
 
     fn new() -> LockParser Never! {
         LockParser{
@@ -169,7 +179,9 @@ struct LockParser {
             build_contribution: PartialBuildContribution{},
             overlay: PartialWorkspaceOverlay{},
             overlay_package: PartialWorkspaceOverlayPackage{},
-            build_grant: PartialWorkspaceBuildGrant{}
+            build_grant: PartialWorkspaceBuildGrant{},
+            in_semantic: false,
+            semantic_lines: [String]{}
         }
     }
 
@@ -180,11 +192,19 @@ struct LockParser {
             // Any section header closes the section being built.
             &self.close_section()
             self.section = LockParseSection.from_header(line) ?? return Err(LockError.Invalid("unknown lock section `{line}`"))
+            self.in_semantic = self.section == LockParseSection.Semantic
             return
         }
         pair :: line.split_once("=") ?? return Err(LockError.Invalid("malformed lock line {number}: expected `key = value`"))
         key :: pair.before.trim()
         value :: pair.after.trim()
+        // The SemanticLock version line precedes its first block, so it lands in
+        // whichever machine section ends the file (Trust `SEMANTIC_LOCK_VERSION_KEY`).
+        // It opens the verbatim semantic tail.
+        if key == "semantic-lock-version" {
+            self.in_semantic = true
+            return
+        }
 
         if key == "version" && !self.section.owns_version_key() {
             self.version = Val(pkg_lock_parse_unsigned(pkg_lock_trim_quotes(value), 4294967295) ?? return Err(LockError.Invalid("invalid lock version: {value}")))
@@ -209,7 +229,7 @@ struct LockParser {
             }
         }
         if self.section == {
-            .Preamble | .BuildStamp -> {}
+            .Preamble | .BuildStamp | .Semantic -> {}
             .Root -> &self.assign_root(key, value)
             .ComptimeInput -> &self.comptime_input.assign(key, value)
             .BuildContribution -> &self.build_contribution.assign(key, value)
@@ -300,7 +320,7 @@ struct LockParser {
                 &self.build_grants.push(self.build_grant.finish())
                 self.build_grant = PartialWorkspaceBuildGrant{}
             }
-            .Preamble | .Root | .BuildStamp -> {}
+            .Preamble | .Root | .BuildStamp | .Semantic -> {}
         }
         self.section = LockParseSection.Preamble
     }
@@ -323,11 +343,20 @@ struct LockParser {
             browsers: self.browsers,
             source_channels: self.source_channels,
             build_stamp: self.build_stamp,
-            build_contributions: self.build_contributions
+            build_contributions: self.build_contributions,
+            semantic_text: pkg_lock_semantic_text(self.semantic_lines)
         }
         pkg_lock_canonicalize(&lock)
         Ok(lock)
     }
+}
+
+// The raw SemanticLock lines as one newline-terminated block, or "" when the
+// lock has none. A tail that already ends the file keeps its exact bytes.
+fn pkg_lock_semantic_text(lines: [String]) -> String Never! {
+    if lines.len() == 0 -> return ""
+    text :: lines.join("\n")
+    if text.ends_with("\n") -> text else -> "{text}\n"
 }
 
 struct PartialComptimeInput {

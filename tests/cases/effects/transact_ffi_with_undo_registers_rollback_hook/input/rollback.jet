@@ -1,0 +1,13 @@
+// run.jet's binding, with a block that fails after the foreign call, so the
+// registered inverse must run on rollback with the captured arguments
+// (D-BOUND-UNDO1=A, Docs/spec/syntax-decisions.md:3291-3297).
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = "std::cmp::max"
+}
+fn undo_mutate(left: Int, right: Int) { print("undo {left + right}") }
+fn run() {
+    #Transact(tx) {
+        mutate(1, 2)
+        panic("roll back")
+    }
+}

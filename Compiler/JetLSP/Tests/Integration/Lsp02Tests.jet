@@ -66,7 +66,7 @@ use std.process.[Command, Stdio]
     _ :: fs.remove_dir_all(root)
     fs.create_dir_all(root.join("src")).unwrap()
     fs.write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
-    source :: "module perf.package {{\n    budgets: [Budget{{ name: \"api\", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }}]\n}}\npub fn api() {{}}\nfn run() {{}}\n"
+    source :: "module perf.package {{\n    budgets: [Budget{{ name: \"api\", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }}]\n}}\nfn api() {{}}\nfn run() {{}}\n"
     // Budget discovery uses canonical run.jet, never main.jet.
     path :: root.join("src/run.jet")
     fs.write(path, source).unwrap()
@@ -517,8 +517,8 @@ use std.process.[Command, Stdio]
     _guard :: lock_lsp_process()
     root :: Scratch.new("lsp-sibling-import")
     fs.write(root.join("package.jet"), "name: \"sibling\"\nversion: \"0.1.0\"\n").unwrap()
-    helper_int :: "pub fn value() -> Int {{ return 1 }}\n"
-    helper_text :: "pub fn value() -> String {{ return \"one\" }}\n"
+    helper_int :: "fn value() -> Int {{ return 1 }}\n"
+    helper_text :: "fn value() -> String {{ return \"one\" }}\n"
     main :: "use \"helper\"\nfn run() {{ print(helper.value() + 1) }}\n"
     other :: "fn run() {{ print(2) }}\n"
     fs.write(root.join("helper.jet"), helper_int).unwrap()

@@ -1,4 +1,5 @@
 # Port of tests/jetpack_offline.rs:135-195; runtime PENDING-SAME-HEAD.
+# Retargeted off the retired `jetpack run` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 refused: hangar-verified-realization
 requires: os:unix
 mkdir: project
@@ -7,7 +8,7 @@ mkdir: fixtures
 mkdir: staging/bin
 env: JETPACK_ROOT={work}/package-root
 # Before execution, helper seals the output with lua-path ../outside\n, then writes the original workspace/package/hello/env sources.
-step: jetpack run -p hello --offline --trust --fixtures {work}/fixtures -- sh -c 'printf executed > "$1"' jet-test {work}/project/command-ran
+step: jetpack env -p hello --offline --trust --fixtures {work}/fixtures -- sh -c 'printf executed > "$1"' jet-test {work}/project/command-ran
 cwd: project
 exit: 1
 file: project/command-ran absent

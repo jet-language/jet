@@ -2,7 +2,7 @@
 // JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
 use jet_env_model.[
     AdapterRecipe, DevServiceExtra, EnvironmentRead, HostOverrideValue, IntegrationKind,
-    ModuleEntryKey, PromptPathMode, PromptStripMode, envmodel_evaluate_env,
+    ModuleEntryKey, PromptPathMode, PromptStripMode, RestartPolicy, ShutdownPolicy, envmodel_evaluate_env,
     envmodel_evaluate_env_with_environment, envmodel_evaluate_env_with_preset,
     envmodel_evaluate_package_profile, envmodel_evaluate_source, envmodel_merge_all,
     envmodel_merge_error_to_diagnostic, envmodel_merged_entry,
@@ -95,7 +95,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     assert_eq(facts.reference, "widget@catalog")
     assert_eq(facts.provider, "cran")
     assert_eq(facts.resolved_source, "cran:widget#version=1.2.3")
-    assert_eq(facts.qualified_reference(), "widget#version=1.2.3@catalog")
+    assert_eq(facts.qualified_reference(), "widget@catalog#version=1.2.3")
     assert(facts.is_lossless())
     assert(facts.facts.has_key("provider.resolved_selector"))
 }
@@ -345,7 +345,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     rendered :: envmodel_test_render("env.jet", src, error)
     assert(rendered.contains("Error [E0970]:"))
     assert(rendered.contains("3 |     imports: find(\"./nope\")"))
-    envmodel_test_check_snapshot("E0970", rendered)
+    envmodel_test_check_snapshot("E0970", envmodel_test_redact_dir(rendered, dir, "find-missing"))
     files.remove_all(dir) ?? return
 }
 
@@ -360,7 +360,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     src :: "\nmodule env.dev {{\n    imports: [\n        env.platform.android(api: 35, build_tools: \"35.0.0\", ndk: \"27.1\"),\n        env.platform.apple(targets: [.IOS]),\n        env.security.certificates([dev_certificate]),\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password]),\n        env.network.hosts([\"api.local\": \"127.0.0.1\"]),\n        env.agent.codex(mcp: [repo_server]),\n        env.editor.vscode()\n    ]\n}}\n"
     plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
     assert_eq(plan.integrations.len(), 8)
-    assert(plan.package_refs.contains("android-sdk@nixpkgs"))
+    assert(plan.package_refs.contains("android-sdk@jetpack"))
     android :: envmodel_test_integration(plan, IntegrationKind.Android)
     assert_eq(android.options.get("api"), Val("35"))
     assert_eq(android.options.get("build_tools"), Val("35.0.0"))
@@ -372,7 +372,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     apple :: envmodel_test_integration(plan, IntegrationKind.Apple)
     assert_eq(apple.options.get("targets"), Val("IOS"))
     assert_eq(apple.options.get("license"), Val("policy-required"))
-    assert(apple.packages.contains("apple-sdk@nixpkgs"))
+    assert(apple.packages.contains("apple-sdk@jetpack"))
     assert(apple.validate_target("darwin.aarch64") == .Ok(_))
     assert(apple.validate_target("linux.x64") == .Err(_))
     certs :: envmodel_test_integration(plan, IntegrationKind.Certificates)
@@ -408,7 +408,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     assert(agent.grants.contains("mcp.read"))
     editor :: envmodel_test_integration(plan, IntegrationKind.Editor)
     assert_eq(editor.preset, "vscode")
-    assert_eq(editor.packages, [String]{"vscode@nixpkgs"})
+    assert_eq(editor.packages, [String]{"vscode@jetpack"})
     assert_eq(editor.providers, [String]{"nixpkgs"})
 }
 
@@ -499,6 +499,25 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E0975")
 }
 
+// The spec's `restart: .OnFailure{ max: 3, backoff_ms: 250 }` form
+// (jetpack-epoch5.md): a leading-dot enum value, nested values included,
+// reads through the module-value evaluator into the typed policies.
+#Test("dev service restart and shutdown read leading-dot enum values") {
+    src :: "\nmodule env.dev {{\n    services: {{\n        api: {{ run: [\"api\"], restart: .OnFailure{{ max: 1, backoff_ms: 1 }}, shutdown: .Term{{ grace_ms: 500 }} }},\n        worker: {{ run: [\"worker\"], restart: .Always{{ max: 2, backoff: .Exponential }}, shutdown: .Kill }},\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.dev_services.len(), 2)
+    api :: plan.dev_services[0]
+    assert_eq(api.name, "api")
+    assert_eq(api.restart, Val(RestartPolicy.OnFailure{max: 1, backoff_ms: 1, exponential: false}))
+    assert_eq(api.shutdown, Val(ShutdownPolicy.Term{grace_ms: 500}))
+    assert_eq(api.extra.len(), 0)
+    worker :: plan.dev_services[1]
+    assert_eq(worker.name, "worker")
+    assert_eq(worker.restart, Val(RestartPolicy.Always{max: 2, backoff_ms: 250, exponential: true}))
+    assert_eq(worker.shutdown, Val(ShutdownPolicy.Kill))
+    assert_eq(worker.extra.len(), 0)
+}
+
 #Test("dev services are captured independently of other tiers") {
     // Rewritten from the Rust dev-vs-jetos independence claim: only the dev
     // services list exists in the Jet plan.
@@ -546,7 +565,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     rendered :: envmodel_test_render("env.jet", src, error)
     assert(rendered.contains("Error [E0971]:"))
     assert(rendered.contains("liftability law"))
-    envmodel_test_check_snapshot("E0971", rendered)
+    envmodel_test_check_snapshot("E0971", envmodel_test_redact_dir(rendered, dir, "find-liftability"))
     files.remove_all(dir) ?? return
 }
 
@@ -554,11 +573,11 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     root :: envmodel_test_repo_root()
     source :: files.read(files.join(root, "env.jet")) ?? panic("read the repository env.jet")
     dev :: envmodel_evaluate_env_with_environment(source, root, Val("dev")) ?? panic("the dev environment evaluates")
-    assert_eq(dev.package_refs.len(), 28)
-    assert(dev.package_refs.contains("rustfmt@default"))
+    assert_eq(dev.package_refs.len(), 25)
+    assert(dev.package_refs.contains("rustc@default"))
     assert(dev.package_refs.contains("rPackages.jsonlite@default"))
     full :: envmodel_evaluate_env_with_environment(source, root, Val("full")) ?? panic("the full environment evaluates")
-    assert_eq(full.package_refs.len(), 51)
+    assert_eq(full.package_refs.len(), 48)
     names :: [String]{"rustup", "gnat", "fpc", "dart", "powershell", "gfortran", "gnucobol", "go", "jdk", "dotnet-sdk_8", "tcl", "lua5_4", "octave", "qemu", "wasmtime", "emscripten", "lldb", "raylib", "chromium", "firefox", "geckodriver", "gtk4", "bubblewrap"}
     loop name in names {
         // The full environment must carry every one of these packages.
@@ -569,10 +588,11 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 // Rust oracle: ModuleEval/System.rs:673-727 resolves the override field
 // environment before services/options; ordinary System capture is unchanged.
 #Test("fleet host fields shadow globals without changing the system") {
-    src :: "base :: comptime {{ 100 }}\nmodule system.web {{ target: linux.x64, options: [tuning.retries: 9] }}\nmodule fleet.prod {{ hosts: {{ web1: system.web.{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
+    src :: "base :: comptime {{ 100 }}\nmodule system.web {{ target: linux.x64, options: [tuning.retries: 9] }}\nmodule fleet.prod {{ hosts: {{ web1: system.web{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
     plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("fleet override evaluates")
     assert_eq(plan.systems[0].options[0].value, "9")
-    host :: plan.fleets[0].hosts[0]
+    fleets :: envmodel_test_host_groups(src, false)
+    host :: fleets[0].hosts[0]
     override_plan :: host.overrides ?? panic("the first host has typed overrides")
     options :: if override_plan.fields[0].value == {
         .Options(values) -> values
@@ -580,12 +600,12 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     }
     assert_eq(options[0].value, "5")
     assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 4}})
-    assert_eq(plan.fleets[0].hosts[1].overrides, None)
-    assert_eq(plan.fleets[0].hosts[1].override_source, None)
+    assert(fleets[0].hosts[1].overrides == None)
+    assert(fleets[0].hosts[1].override_source == None)
 }
 
 #Test("fleet host service override rejects non boolean enable") {
-    src :: "module system.web {{ target: linux.x64 }}\nmodule fleet.prod {{ hosts: {{ web1: system.web.{{ services: {{ ssh: {{ enable: 1 }} }} }} }} }}\n"
+    src :: "module system.web {{ target: linux.x64 }}\nmodule fleet.prod {{ hosts: {{ web1: system.web{{ services: {{ ssh: {{ enable: 1 }} }} }} }} }}\n"
     error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
     // Rust ModuleEval/System.rs:698 calls evaluate_service (:104-135).
     assert_eq(error.code, "E0975")
@@ -593,9 +613,8 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 }
 
 #Test("vmtest host overrides share fleet typed evaluation") {
-    src :: "module system.web {{ target: linux.x64 }}\nmodule vmtest.boot {{ hosts: {{ machine: system.web.{{ region: base + 2, base: 40 }} }} }}\n"
-    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("VM host override evaluates")
-    override_plan :: plan.vmtests[0].hosts[0].overrides ?? panic("VM host has typed overrides")
+    src :: "module system.web {{ target: linux.x64 }}\nmodule vmtest.boot {{ hosts: {{ machine: system.web{{ region: base + 2, base: 40 }} }} }}\n"
+    override_plan :: envmodel_test_host_groups(src, true)[0].hosts[0].overrides ?? panic("VM host has typed overrides")
     assert_eq(override_plan.fields[0].value, HostOverrideValue.Value{value: CtValue.Int{value: 42}})
     assert_eq(override_plan.provenance[0].field, "region")
     assert_eq(override_plan.provenance[0].dependencies, [String]{"base"})

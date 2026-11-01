@@ -34,7 +34,8 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "deadline", "await: file absent timeout 20ms\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "resize", "resize: sparse 100000000000\n").verdict.status, "REFUSED")
-    loop invalid in ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "poke: a at 0 hex \"f\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
+    // Malformed poke hex is a run-time ERROR (StepsGapForms), not refused grammar.
+    loop invalid in ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove readiness scratch")
@@ -122,6 +123,8 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "missing-lstat", "file: missing is-symlink\n").verdict.status, "FAIL")
     wrong :: "write: unicode = \"é\"\ncapture: broken = replace-range file unicode 1 2 \"x\"\n"
     assert_eq(cases_test_advanced(root, "boundary", wrong).verdict.status, "FAIL")
+    captured :: "write: original = \"ABCDE\"\nwrite: start.txt = \"1\"\nwrite: end.txt = \"3\"\nwrite: insert.txt = \"xy\"\ncapture: start_at = text file start.txt\ncapture: end_at = text file end.txt\ncapture: insert = text file insert.txt\ncapture: replaced = replace-range file original {{cap:start_at}} {{cap:end_at}} {{cap:insert}}\ncap:replaced: = \"AxyDE\"\n"
+    assert_eq(cases_test_advanced(root, "captured-span", captured).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove metadata capture scratch")
 }
 
@@ -137,9 +140,17 @@ use core.files as files
     files.remove_all(root) ?? panic("remove tree capture scratch")
 }
 
+#Test("a missing fixture directory is an ERROR verdict naming it") {
+    root :: cases_test_root("filesystem-missing-fixture")
+    outcome :: cases_test_advanced(root, "absent", "fixture: absent\nstep: printf ready\n")
+    assert_eq(outcome.verdict.status, "ERROR")
+    assert_eq(outcome.verdict.detail, "fixture directory is missing: absent")
+    files.remove_all(root) ?? panic("remove missing fixture scratch")
+}
+
 #Test("first-spawnable accepts nonzero exit and prefixed capture observes marker precedence") {
     root :: cases_test_root("filesystem-first-spawnable")
-    source :: "capture: selected = first-spawnable /jet-testkit-does-not-exist | sh -c 'exit 13'\nwhen captured selected: step: printf '%s' {{cap:selected}}\nstdout: = \"sh\"\nstep: printf 'SECOND=value2\\nFIRST=value1\\n'\ncapture: value = prefixed stdout \"FIRST=\" | \"SECOND=\"\ncap:value: = \"value1\"\ncapture: missing = first-spawnable /jet-testkit-does-not-exist\nwhen !captured missing: step: printf absent\nstdout: = \"absent\"\n"
+    source :: "capture: selected = first-spawnable /jet-testkit-does-not-exist | sh -c 'exit 13'\nwhen captured selected: step: printf '%s' {{cap:selected}}\nstdout: = \"sh\"\nstep: printf 'SECOND=value2\\\\nFIRST=value1\\\\n'\ncapture: value = prefixed stdout \"FIRST=\" | \"SECOND=\"\ncap:value: = \"value1\"\ncapture: missing = first-spawnable /jet-testkit-does-not-exist\nwhen !captured missing: step: printf absent\nstdout: = \"absent\"\n"
     assert_eq(cases_test_advanced(root, "select", source).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove first-spawnable scratch")
 }
@@ -183,4 +194,35 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "independent", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "must-check", "fixture: tree\nwhen os not-a-host: mkdir: absent\nfile: value = \"wrong\"\n").verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove assertion guard scratch")
+}
+
+// Port of tests/agent_workloads.rs:2545-2630 (scratch_output_shape_rejects_arbitrary_build_residue).
+// The Jet corpus runner checks a Jet adapter's scratch with the assertion block
+// in tests/cases/agent_workloads/{equivalent_adapters_complete_declared_tasks,
+// structured_data_database_http_production_paths_handle_success_and_hostile_inputs}.case;
+// `shape` is that block for the scratch `s` and the artifact `process_batch`.
+// Both declared shapes pass; each residue added to a passing shape fails it.
+// Every shape runs in its own scratch: the work directory outlives a case.
+fn cases_test_scratch_shape(name: String, residue: String) -> KitVerdict {
+    root :: cases_test_root("scratch-shape-{name}")
+    shape :: "file: s/.jet is-dir\nfile: s/.jet not-symlink\nfile: s/.jet/build is-dir\nfile: s/.jet/build not-symlink\nfile: s/.jet/build/process_batch is-file\nentries: s name != \".jet\" = 0\nentries: s/.jet name != \"build\" = 0\nentries: s/.jet/build name != \"process_batch\" name != \"process_batch.rs\" = 0\nfor file s/.jet/build as artifact\nfile: {{artifact.path}} is-file\nfile: {{artifact.path}} not-symlink\nend for\n"
+    verdict :: cases_test_advanced(root, name, "mkdir: s/.jet/build\nwrite: s/.jet/build/process_batch = \"declared artifact\"\n{residue}{shape}").verdict
+    files.remove_all(root) ?? panic("remove scratch shape scratch")
+    verdict
+}
+
+#Test("scratch output shape rejects arbitrary build residue") {
+    assert_eq(cases_test_scratch_shape("cache-hit", "").status, "PASS")
+    assert_eq(cases_test_scratch_shape("cache-miss", "write: s/.jet/build/process_batch.rs = \"declared generated Rust\"\n").status, "PASS")
+    residues :: [[String]]{
+        ["build-leak", "write: s/.jet/build/leak = \"undeclared residue\"\n"],
+        ["root-leak", "write: s/leak = \"undeclared residue\"\n"],
+        ["nested-leak", "mkdir: s/.jet/build/nested\nwrite: s/.jet/build/nested/leak = \"undeclared residue\"\n"],
+        ["wrong-type", "mkdir: s/.jet/build/process_batch.rs\n"],
+        ["symlink", "symlink: missing-target s/.jet/build/process_batch.rs\n"],
+    }
+    loop residue in residues {
+        verdict :: cases_test_scratch_shape(residue[0], residue[1])
+        assert(verdict.status == "FAIL", "{residue[0]}: {verdict.status} {verdict.detail}")
+    }
 }

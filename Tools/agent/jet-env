@@ -73,19 +73,34 @@ else
   flake_shell="default"
 fi
 
-# The shell depends on flake.nix/flake.lock, not ordinary source edits. A
-# dirty checkout otherwise creates another whole-repository store snapshot
-# for every command. Native profiles retain the shell's toolchain across GC.
-# sha256sum includes the absolute input paths, keeping checkouts independent.
-cache_key="$(sha256sum "$repo/flake.nix" "$repo/flake.lock" | sha256sum)"
+# The shell depends only on flake.nix and flake.lock: the dev shells never read
+# `self`, and the shell hook derives JET_ROOT from its working directory at run
+# time. So the cached profile is keyed on those two files' content and built
+# from a snapshot holding just them. A flake change then costs one small store
+# copy machine-wide, where evaluating "${repo}#…" copied the whole checkout per
+# tree. Native profiles retain the shell's toolchain across GC.
+cache_key="$({ sha256sum < "$repo/flake.nix"; sha256sum < "$repo/flake.lock"; } | sha256sum)"
+cache_key="${cache_key%% *}"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/jet/dev-shells"
-cached_shell="$cache_dir/${cache_key%% *}-$flake_shell"
-if [ -e "$cached_shell" ]; then
-  shell_args=("$cached_shell")
-else
+cached_shell="$cache_dir/${cache_key}-$flake_shell"
+if [ ! -e "$cached_shell" ]; then
   mkdir -p "$cache_dir"
-  shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
+  snapshot="$cache_dir/src-$cache_key"
+  # One builder per key; the lock is released before the requested command runs.
+  (
+    flock 9
+    if [ ! -e "$cached_shell" ]; then
+      if [ ! -d "$snapshot" ]; then
+        staging="$(mktemp -d "$cache_dir/.src-$cache_key.XXXXXX")"
+        cp -- "$repo/flake.nix" "$repo/flake.lock" "$staging/"
+        mv -T -- "$staging" "$snapshot"
+      fi
+      cd -- "$repo"
+      nix develop --profile "$cached_shell" "path:$snapshot#$flake_shell" -c true
+    fi
+  ) 9> "$snapshot.lock"
 fi
+shell_args=("$cached_shell")
 # The shell hook derives JET_ROOT from its working directory (git toplevel,
 # else $PWD) and runs "$JET_ROOT/Tools/agent/clean-nix-tmp.sh", so enter the
 # shell from this checkout and return to the caller's directory for the command.

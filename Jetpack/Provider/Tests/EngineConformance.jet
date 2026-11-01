@@ -64,7 +64,7 @@
         assert_eq(shared.native_document, native)
         assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
         assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
-        lock :: report.lock_record("engine-test", "jq#version=1.7.1@homebrew", "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        lock :: report.lock_record("engine-test", "jq@homebrew#version=1.7.1", "x86_64-linux") ?? panic("provider lock uses shared carrier")
         assert_eq(provider_test_locked_facts(lock), shared)
         assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
     }
@@ -88,7 +88,7 @@
         assert_eq(shared.native_document, native)
         assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
         assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
-        lock :: report.lock_record("engine-test", "tool#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef@binary", "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        lock :: report.lock_record("engine-test", "tool@binary#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "x86_64-linux") ?? panic("provider lock uses shared carrier")
         assert_eq(provider_test_locked_facts(lock), shared)
         assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
     }

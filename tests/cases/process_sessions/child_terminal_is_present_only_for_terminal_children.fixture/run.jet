@@ -1,0 +1,35 @@
+use core.process as process
+
+// A piped child has no terminal session.
+fn plain() {
+    child := process.cmd([String]{"true"}).spawn() ?? panic("spawn failed")
+    if child.terminal == {
+        .Val(_) -> print("plain: some")
+        .None -> print("plain: none")
+    }
+    _ :: child.wait() ?? panic("wait failed")
+}
+
+// Each read of a terminal child's `terminal` is its own session over the
+// same terminal; a resize reaches the child, and a session outlives the
+// child but fails once the child is waited and its terminal closed.
+fn kept() -> TerminalSession {
+    spec :: process.cmd([String]{"sh", "-c", "sleep 0.2; stty size"}).terminal(TerminalPolicy{size: TerminalSize{cols: 80, rows: 24}, mode: .Cooked})
+    child := spec.spawn() ?? panic("spawn failed")
+    session :: child.terminal ?? panic("no terminal session")
+    again :: child.terminal ?? panic("no second terminal session")
+    again.resize(TerminalSize{cols: 33, rows: 11}) ?? panic("resize failed")
+    receipt :: child.wait() ?? panic("wait failed")
+    print("terminal: {receipt.output.replace("\r", "").trim()}")
+    session
+}
+
+fn run() {
+    plain()
+    session :: kept()
+    session.resize(TerminalSize{cols: 10, rows: 5}) ?? {
+        print("after wait: resize fails")
+        return
+    }
+    print("after wait: resized")
+}

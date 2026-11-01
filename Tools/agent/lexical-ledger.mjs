@@ -7,12 +7,14 @@
 //
 // Usage: node Tools/agent/lexical-ledger.mjs [--check|--write]
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const SYNTAX = "Compiler/JetFoundation/Data/Syntax/Spellings.jet";
+// Spelling constants such as KW_COMPTIME may live in any file of the Syntax module.
+const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
 const SPEC = "Docs/spec/syntax-decisions.md";
 const OPEN = "<!-- BEGIN GENERATED LEXICAL LEDGER -->";
 const CLOSE = "<!-- END GENERATED LEXICAL LEDGER -->";
@@ -38,11 +40,11 @@ function readStringConstants(source) {
 
   return (name) => {
     const count = declarationCounts.get(name) ?? 0;
-    if (count === 0) fail(`unresolved LexicalEntry spelling constant ${name} in ${SYNTAX}`);
-    if (count !== 1) fail(`ambiguous LexicalEntry spelling constant ${name} in ${SYNTAX} (${count} declarations)`);
+    if (count === 0) fail(`unresolved LexicalEntry spelling constant ${name} in ${SYNTAX_DIR}`);
+    if (count !== 1) fail(`ambiguous LexicalEntry spelling constant ${name} in ${SYNTAX_DIR} (${count} declarations)`);
     const values = literals.get(name) ?? [];
     if (values.length !== 1) {
-      fail(`LexicalEntry spelling constant ${name} in ${SYNTAX} must have a quoted string literal initializer`);
+      fail(`LexicalEntry spelling constant ${name} in ${SYNTAX_DIR} must have a quoted string literal initializer`);
     }
     return jetString(values[0], `${name} spelling`);
   };
@@ -81,7 +83,12 @@ export function readLedger(root = ROOT) {
   const table = source.match(TABLE_RE)?.[0];
   if (!table) fail(`missing ${SYNTAX}::LEXICAL_LEDGER table`);
 
-  const resolveConstant = readStringConstants(source);
+  const moduleSource = readdirSync(resolve(root, SYNTAX_DIR))
+    .filter((name) => name.endsWith(".jet"))
+    .sort()
+    .map((name) => readSource(`${SYNTAX_DIR}/${name}`, root))
+    .join("\n");
+  const resolveConstant = readStringConstants(moduleSource);
   const rows = [];
   const spellings = new Set();
   ROW_RE.lastIndex = 0;

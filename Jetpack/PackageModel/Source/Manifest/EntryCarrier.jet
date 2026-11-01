@@ -152,12 +152,13 @@ fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, start
             .Ok(found) -> found
             .Err(error) -> { return Err(pkg_entry_authority_error(error)) }
         }
-        resolver :: if authority == {
+        walked :: authority != None
+        resolver :: if ^authority == {
             .Val(opened) -> opened
             .None -> AuthorityResolver.open(dir) ?? return Err(pkg_entry_authority_error(err))
         }
         workspace := false
-        if authority != None {
+        if walked {
             workspace = pkg_entry_has_workspace(resolver, &cache)
         }
         has_manifest :: if resolver.checked_manifest(".") == {
@@ -169,7 +170,7 @@ fn pkg_find_inline_package_root_checked(cache: &WorkspaceDeclarationCache, start
         }
         inline :: pkg_checked_inline_package_entry(resolver)
         has_inline :: if inline == .Val(_) -> true else -> false
-        if authority == None && (has_manifest || has_inline) {
+        if !walked && (has_manifest || has_inline) {
             _ :: pkg_entry_has_workspace(resolver, &cache)
         }
         if has_inline -> return Ok(Val(dir))

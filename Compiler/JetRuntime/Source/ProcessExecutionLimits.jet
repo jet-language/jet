@@ -32,11 +32,11 @@ fn process_execution_memory_used(pid: I64, scratch: I64) -> I64 {
         at := rt_text_find(text, prefix, I64{0}, false)
         if (at >= I64{0}) {
             at += rt_text_len(prefix)
-            loop at < rt_text_len(text) && (rt_text_byte(rt_text_data(text) + at) == I64{32} || rt_text_byte(rt_text_data(text) + at) == I64{9}) -> at += I64{1}
+            loop at < rt_text_len(text) && (rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{32} || rt_text_byte(wrapping(rt_text_data(text) + at)) == I64{9}) -> at += I64{1}
             value := I64{0}
             digits := I64{0}
             loop at < rt_text_len(text) {
-                byte :: rt_text_byte(rt_text_data(text) + at)
+                byte :: rt_text_byte(wrapping(rt_text_data(text) + at))
                 if (byte < I64{48} || byte > I64{57}) -> break
                 if (value > (I64{9223372036854775807} - (byte - I64{48})) /% I64{10}) {
                     value = I64{9223372036854775807}
@@ -70,15 +70,15 @@ fn process_execution_files_used(pid: I64, scratch: I64) -> I64 {
         if (count == I64{0}) -> break
         at := I64{0}
         loop at < count {
-            row :: scratch + at
-            length :: rt_text_byte(row + I64{16}).bit_or(rt_text_byte(row + I64{17}) << I64{8})
+            row :: wrapping(scratch + at)
+            length :: rt_text_byte(wrapping(row + I64{16})).bit_or(rt_text_byte(wrapping(row + I64{17})) << I64{8})
             if (length < I64{20} || length > count - at) {
                 used = I64{-1}
                 break
             }
-            a :: rt_text_byte(row + I64{19})
-            b :: rt_text_byte(row + I64{20})
-            if !(a == I64{46} && (b == I64{0} || (b == I64{46} && rt_text_byte(row + I64{21}) == I64{0}))) -> used += I64{1}
+            a :: rt_text_byte(wrapping(row + I64{19}))
+            b :: rt_text_byte(wrapping(row + I64{20}))
+            if !(a == I64{46} && (b == I64{0} || (b == I64{46} && rt_text_byte(wrapping(row + I64{21})) == I64{0}))) -> used += I64{1}
             at += length
         }
         if (used < I64{0}) -> break

@@ -74,7 +74,7 @@ fn fixture_response(query: [U8]) -> [U8] {
 fn fixture_pointer(query: [U8], delta: Int) -> [U8] {
     pointer :: fixture_question_end(query) + delta
     out := fixture_header(query, 0x8180, 1, 0, 0)
-    &out.push(U8{0xc0 | ((pointer /% 256) & 0x3f)})
+    &out.push(U8{(pointer /% 256).bit_and(0x3f).bit_or(0xc0)})
     &out.push(U8{pointer %% 256})
     fixture_u16(&out, 1)
     fixture_u16(&out, 1)
@@ -85,7 +85,7 @@ fn fixture_pointer(query: [U8], delta: Int) -> [U8] {
 }
 fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     peer :: net.socket_addr(packet.host, packet.port) ?? panic("peer")
-    net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")
+    (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
 #Test("core_net_dns_rejects_non_response_and_cyclic_compression") {
@@ -94,7 +94,7 @@ fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     server :: task {
         packet :: net.udp_recv_from(socket, 512) ?? panic("receive query")
         response := fixture_response(packet.data)
-        response[2] = U8{Int.from_u8(response[2]) & 0x7f}
+        response[2] = U8{Int.from_u8(response[2]).bit_and(0x7f)}
         fixture_send(socket, packet, response)
     }
     fixture_build(address)

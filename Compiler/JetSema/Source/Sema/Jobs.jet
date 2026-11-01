@@ -236,3 +236,31 @@ fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
     }
     diagnostics
 }
+
+/// E0926: a job's `#Every(…)` must resolve to one fixed cadence. A function
+/// parameter of a type other than `Duration` is the marker's argument-type
+/// error (E0930), so it is not also reported as a dynamic schedule.
+fn sema_check_job_schedules(items: [Item], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [Diagnostic] {
+    diagnostics := [Diagnostic]{}
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                marker :: function.every ?? next
+                if marker.arg == .Expression(expression) {
+                    if expression == .Ident(name, _, _) && sema_job_mistyped_parameter(function.params, name) -> next
+                }
+                resolution :: sema_job_resolve_every_arg(marker.arg, environment, program)
+                if resolution.error == .Val(reason) -> &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(marker.arg)))
+            }
+            else -> {}
+        }
+    }
+    diagnostics
+}
+
+fn sema_job_mistyped_parameter(params: [Param], name: String) -> Bool Never! {
+    loop param in params {
+        if param.name == name -> return param.ty != Type.Named{name: "Duration"}
+    }
+    false
+}

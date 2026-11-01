@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:8714-8815 jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable
 # PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable.fixture
 env: NO_COLOR=1
 env: JETPACK_ROOT={work}/root
@@ -11,7 +12,7 @@ write: project/env.jet env.template
 step: jetpack hangar cache bind public {work}/mirror --yes --write --no-color
 cwd: project
 exit: 0
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0
@@ -26,7 +27,7 @@ when os unix: chmod: {cap:out} 755
 when os unix: chmod: {cap:out}/bin 755
 when os unix: chmod: {cap:out}/bin/hello 755
 write: {cap:out}/bin/hello tampered.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 env: JETPACK_FAKE_SANDBOX=unavailable
@@ -45,7 +46,7 @@ when os unix: chmod: {cap:repaired_out}/bin/hello 755
 write: {cap:repaired_out}/bin/hello tampered-again.template
 remove: mirror
 write: mirror unavailable.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0

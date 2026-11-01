@@ -278,7 +278,7 @@ awk -F '\t' -v OFS='\t' \
    FILENAME == ARGV[2] { if (FNR > 1 && $3 == "best-applicable") lang[$2] = $4; next }
    FILENAME == ARGV[3] { if (FNR > 1) { metric[++metric_count] = $2; unit[$2] = $3 } next }
    FILENAME == ARGV[4] { if (FNR > 1) task[++task_count] = $2; next }
-   END { print header; for (i = 1; i <= task_count; i++) for (l = 0; l < 2; l++) { language = l == 0 ? "jet" : lang[task[i]]; value = language == "jet" || language == "rust" ? 1 : 2; for (m = 1; m <= metric_count; m++) print 1,task[i],language,metric[m],value,unit[metric[m]],tool[language],"validator-self-check-measurement;comparison-peer=" lang[task[i]] ";comparison-operator=" (lang[task[i]] == "rust" ? ">" : ">=") ";tolerance-ratio=" (lang[task[i]] == "rust" ? "1.05" : "1.00"),"measured","-","linux","native","aot" } }' \
+   END { print header; for (i = 1; i <= task_count; i++) for (l = 0; l < 2; l++) { language = l == 0 ? "jet" : lang[task[i]]; value = language == "jet" ? 1 : 2; for (m = 1; m <= metric_count; m++) print 1,task[i],language,metric[m],value,unit[metric[m]],tool[language],"validator-self-check-measurement;comparison-peer=" lang[task[i]] ";comparison-operator=>=;tolerance-ratio=1.00","measured","-","linux","native","aot" } }' \
   "$CORPUS/toolchain_contract.tsv" "$CORPUS/peer_ledger.tsv" "$CORPUS/metric_contract.tsv" "$CORPUS/manifest.tsv" >"$report/measurements.tsv"
 
 awk -F '\t' -v OFS='\t' \
@@ -290,23 +290,22 @@ awk -F '\t' -v OFS='\t' \
      print "version", "task_id", "language", "metric", "sample", "value", "unit", "method", "platform", "target", "tier"
      for (i = 1; i <= task_count; i++) for (l = 0; l < 2; l++) for (m = 1; m <= metric_count; m++) {
        language = l == 0 ? "jet" : lang[task[i]]
-       value = language == "jet" || language == "rust" ? 1 : 2
-       for (s = 1; s <= count[metric[m]]; s++) print 1, task[i], language, metric[m], s, value, unit[metric[m]], "validator-self-check-measurement;comparison-peer=" lang[task[i]] ";comparison-operator=" (lang[task[i]] == "rust" ? ">" : ">=") ";tolerance-ratio=" (lang[task[i]] == "rust" ? "1.05" : "1.00"), "linux", "native", "aot"
+       value = language == "jet" ? 1 : 2
+       for (s = 1; s <= count[metric[m]]; s++) print 1, task[i], language, metric[m], s, value, unit[metric[m]], "validator-self-check-measurement;comparison-peer=" lang[task[i]] ";comparison-operator=>=;tolerance-ratio=1.00", "linux", "native", "aot"
      }
    }' \
   "$CORPUS/peer_ledger.tsv" "$CORPUS/metric_contract.tsv" "$CORPUS/measurement_policy.tsv" "$CORPUS/manifest.tsv" >"$report/samples.tsv"
 awk -F '\t' -v OFS='\t' \
   'FILENAME == ARGV[1] { if (FNR > 1 && $3 == "best-applicable") lang[$2] = $4; next }
-   FILENAME == ARGV[2] { if (FNR > 1) { metric[++metric_count] = $2; count[$2] = $3; tolerance[$2] = $9; rust_tolerance[$2] = $10 } next }
+   FILENAME == ARGV[2] { if (FNR > 1) { metric[++metric_count] = $2; count[$2] = $3; tolerance[$2] = $9 } next }
    FILENAME == ARGV[3] { if (FNR > 1) task[++task_count] = $2; next }
    END {
      print "version", "task_id", "language", "metric", "samples", "median", "min", "max", "relative_stdev", "outliers", "threshold", "tolerance_ratio", "status", "loss_owner", "evidence", "platform", "target", "tier"
      for (i = 1; i <= task_count; i++) for (l = 0; l < 2; l++) for (m = 1; m <= metric_count; m++) {
        language = l == 0 ? "jet" : lang[task[i]]
-       value = language == "jet" || language == "rust" ? 1 : 2
-       applied = lang[task[i]] == "rust" ? rust_tolerance[metric[m]] : tolerance[metric[m]]
-       operator = lang[task[i]] == "rust" ? ">" : ">="
-       print 1, task[i], language, metric[m], count[metric[m]], value, value, value, 0, 0, 0, applied, "measured", "-", "samples=" count[metric[m]] ";median=" value ";relative-stdev=0;outliers=0;producer=validator-self-check;comparison-peer=" lang[task[i]] ";comparison-operator=" operator ";tolerance-ratio=" applied, "linux", "native", "aot"
+       value = language == "jet" ? 1 : 2
+       applied = tolerance[metric[m]]
+       print 1, task[i], language, metric[m], count[metric[m]], value, value, value, 0, 0, 0, applied, "measured", "-", "samples=" count[metric[m]] ";median=" value ";relative-stdev=0;outliers=0;producer=validator-self-check;comparison-peer=" lang[task[i]] ";comparison-operator=>=;tolerance-ratio=" applied, "linux", "native", "aot"
      }
    }' \
   "$CORPUS/peer_ledger.tsv" "$CORPUS/measurement_policy.tsv" "$CORPUS/manifest.tsv" >"$report/statistics.tsv"
@@ -459,7 +458,7 @@ for (const peer of peers) {
     command, evidence,
   ].join("\t"));
   for (const metric of metrics) {
-    const peerValue = applies ? (peer.language === "rust" ? "1" : "2") : "-";
+    const peerValue = applies ? "2" : "-";
     measurements.push([
       "1", key, peer.task_id, peer.selection, peer.language, metric.metric, applies ? "5" : "0",
       peerValue, peerValue, peerValue, applies ? "0" : "-", metric.unit,
@@ -665,4 +664,22 @@ candidate_peer_key="$(awk -F '\t' 'NR > 1 && $3 == "candidate" && $4 == "cxx" { 
 awk -F '\t' -v OFS='\t' -v key="$candidate_peer_key" 'NR == 1 { print; next } $2 == key && $6 == "runtime" { $8 = 1; $9 = 1; $10 = 1 } { print }' "$tmp/candidate-peer-loss/peer_measurements.tsv" >"$tmp/candidate-peer-loss/new" && mv "$tmp/candidate-peer-loss/new" "$tmp/candidate-peer-loss/peer_measurements.tsv"
 refresh_review_digest "$tmp/candidate-peer-loss"
 expect_reject candidate-peer-loss 'peer comparison loss' "$tmp/candidate-peer-loss"
+
+# Rust is judged like every other peer: Jet/Rust 1.00 and 1.05 are losses.
+rust_selected_task="$(awk -F '\t' 'NR > 1 && $3 == "best-applicable" && $4 == "rust" { print $2; exit }' "$CORPUS/peer_ledger.tsv")"
+[[ -n "$rust_selected_task" ]] || { echo "missing selected rust fixture" >&2; exit 1; }
+rust_candidate_key="$(awk -F '\t' 'NR > 1 && $3 == "candidate" && $4 == "rust" { print $2 "|" $3 "|" $4 "|" $5; exit }' "$CORPUS/peer_ledger.tsv")"
+[[ -n "$rust_candidate_key" ]] || { echo "missing rust candidate fixture" >&2; exit 1; }
+for rust_case in "1.00 1" "1.05 0.952381"; do
+  rust_ratio="${rust_case% *}"
+  rust_value="${rust_case#* }"
+  cp -R "$report" "$tmp/rust-selected-$rust_ratio"
+  awk -F '\t' -v OFS='\t' -v task="$rust_selected_task" -v value="$rust_value" 'NR > 1 && $2 == task && $3 == "rust" && $4 == "runtime" { $5 = value } { print }' "$tmp/rust-selected-$rust_ratio/measurements.tsv" >"$tmp/rust-selected-$rust_ratio/new" && mv "$tmp/rust-selected-$rust_ratio/new" "$tmp/rust-selected-$rust_ratio/measurements.tsv"
+  refresh_review_digest "$tmp/rust-selected-$rust_ratio"
+  expect_reject "rust-selected-$rust_ratio" 'Jet metric loss is not recorded' "$tmp/rust-selected-$rust_ratio"
+  cp -R "$report" "$tmp/rust-candidate-$rust_ratio"
+  awk -F '\t' -v OFS='\t' -v key="$rust_candidate_key" -v value="$rust_value" 'NR == 1 { print; next } $2 == key && $6 == "runtime" { $8 = value; $9 = value; $10 = value } { print }' "$tmp/rust-candidate-$rust_ratio/peer_measurements.tsv" >"$tmp/rust-candidate-$rust_ratio/new" && mv "$tmp/rust-candidate-$rust_ratio/new" "$tmp/rust-candidate-$rust_ratio/peer_measurements.tsv"
+  refresh_review_digest "$tmp/rust-candidate-$rust_ratio"
+  expect_reject "rust-candidate-$rust_ratio" 'peer comparison loss' "$tmp/rust-candidate-$rust_ratio"
+done
 echo 'test result: compiled workload gate self-check: pass'

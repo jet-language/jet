@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { parseRuntimeExports, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { parseRuntimeExports, runtimeLifecycleList, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 function definition(params, suffix = "") {
   return { params, suffix, path: "Source/Test.jet", lifecycle: "" };
@@ -94,6 +94,10 @@ const lifecycle = parseRuntimeExports("// runtime-init: 3\n#Export(c) fn jet_ini
 assert.equal(lifecycle.get("jet_init").lifecycle, "init 3");
 assert.equal(lifecycle.get("jet_fini").lifecycle, "fini 1");
 assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn jet_init() { }\n", "Source/Test.jet"), /exceeds 65535/);
+const guarded = parseRuntimeExports("// runtime-init: 3 when jet_root\n#Export(c) fn jet_start() { }\n// runtime-fini: 1 when jet_a,jet_b\n#Export(c) fn jet_stop() { }\n", "Source/Test.jet");
+assert.equal(guarded.get("jet_start").lifecycle, "init 3 jet_root");
+assert.equal(guarded.get("jet_stop").lifecycle, "fini 1 jet_a,jet_b");
+assert.match(runtimeLifecycleList(guarded), /^jet_start init 3 jet_root$/m);
 // Record Lists cross every route as handle buffers (the IR's route calls),
 // whatever the provider's ownership. The census
 // below freezes the routes whose carriers hold a List of a schema record, so
@@ -113,11 +117,11 @@ assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn j
     for (const [, name] of carriers.matchAll(/List\{elem: IRRouteCarrier\.Handle\{name: "([^"]+)"\}\}/g)) if (schemas.has(name)) recordLists.add(symbol);
   }
   // Seed (Rust) adapters always exchanged handle buffers; the Jet-owned rows
-  // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw, message_parts)
+  // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw)
   // build or read the same shape.
   const reviewed = [
     "jet_binary_pattern_match", "jet_dyn_at", "jet_dyn_bool", "jet_dyn_field", "jet_dyn_float", "jet_dyn_int", "jet_dyn_text",
-    "jet_email::envelope", "jet_email::envelope_parts", "jet_email::message_parts", "jet_log_record_emit_raw",
+    "jet_log_record_emit_raw",
     "jet_net_dns_srv", "jet_net_dns_srv_at_lookup", "jet_net_dns_srv_lookup",
     "jet_ring_log_debug_fields", "jet_ring_log_error_fields", "jet_ring_log_info_fields", "jet_ring_log_warn_fields",
     "jet_rt_codec_decode_bool", "jet_rt_codec_decode_char", "jet_rt_codec_decode_float", "jet_rt_codec_decode_i16", "jet_rt_codec_decode_i32",

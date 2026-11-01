@@ -82,12 +82,32 @@ fn sema_effect_leaf_check_name(leaves: [SemaEffectLeaf], name: String, span: Spa
     loop candidate in members {
         if candidate == member -> return
     }
+    &diagnostics.push(sema_effect_leaf_unknown_diagnostic(name, root, member, members, span))
+}
+
+// A dotted package-budget right under a root Prelude/Effects.jet closes that
+// names none of its leaves; a package budget names leaves exactly (E0750).
+fn sema_effect_builtin_leaf_diagnostic(name: String, span: Span) -> Diagnostic? {
+    if !sema_effect_builtin_leaf_unknown(name) -> return None
+    bare :: sema_effect_leaf_name(name)
+    member :: sema_effect_leaf_member(bare) ?? return None
+    root :: sema_effect_root(bare)
+    members := [String]{}
+    loop leaf in EFFECT_VOCABULARY_LEAVES {
+        if sema_effect_root(leaf) == root {
+            if sema_effect_leaf_member(leaf) == .Val(leaf_member) -> &members.push(leaf_member)
+        }
+    }
+    Val(sema_effect_leaf_unknown_diagnostic(name, root, member, members, span))
+}
+
+fn sema_effect_leaf_unknown_diagnostic(name: String, root: String, member: String, members: [String], span: Span) -> Diagnostic {
     suggestion := String?{None}
     if sema_taint_closest(member, members) == .Val(closest) -> suggestion = Val("{root}.{closest}")
     fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "declare it with `effect {name}`, or use a declared leaf"
     diagnostic := sema_error("E0750", span, "`{name}` isn't a declared effect", "the `{root}` root has declared leaves, so every leaf under it must resolve to one declared name", fix)
     if suggestion == .Val(candidate) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
-    &diagnostics.push(diagnostic_with_rights(^diagnostic, "vocabulary", [String]{name}, [String]{}, None))
+    diagnostic_with_rights(^diagnostic, "vocabulary", [String]{name}, [String]{}, None)
 }
 
 fn sema_effect_leaf_check_row(leaves: [SemaEffectLeaf], row: [EffectRowEntry], diagnostics: &[Diagnostic]) {

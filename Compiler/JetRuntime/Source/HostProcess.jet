@@ -155,6 +155,59 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
     host_sample_out(host_call(I64{141}, I64{0}, native_who.bit_and(I64{4294967295}), native_priority), available, value, errno)
 }
 
+// prlimit64(0, resource, NULL, &old): this program's (soft, hard) limit.
+// RLIM_INFINITY (all ones) reads as -1; core.sys maps a negative to None.
+#Export(c) fn jet_sys_rlimit_raw(resource: I64, available: I64, soft: I64, hard: I64, errno: I64) {
+    native :: host_i32(resource)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    buffer :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(buffer, I64{16})
+    #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel writes; the caller lends the tuple's Bool byte and three Int words") {
+        result :: os_syscall_i64(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
+        os_store_u8(available, I64{1})
+        os_store_i64(soft, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(buffer)))
+        os_store_i64(hard, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(wrapping(buffer + I64{8}))))
+        os_store_i64(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
+    }
+    jet_rt_free(buffer, I64{16}, I64{8})
+}
+
+// prlimit64(0, resource, &new, NULL): -1 passes RLIM_INFINITY. Children
+// inherit the new limit; raising a hard limit needs privilege (EPERM).
+#Export(c) fn jet_sys_set_rlimit_raw(resource: I64, soft: I64, hard: I64, available: I64, value: I64, errno: I64) {
+    native :: host_i32(resource)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    low :: host_native_int(soft)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    high :: host_native_int(hard)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    buffer :: jet_rt_alloc(I64{16}, I64{8})
+    #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain") {
+        os_store_i64(buffer, low)
+        os_store_i64(wrapping(buffer + I64{8}), high)
+        host_sample_out(os_syscall_i64(I64{302}, I64{0}, native, buffer, I64{0}, I64{0}, I64{0}), available, value, errno)
+    }
+    jet_rt_free(buffer, I64{16}, I64{8})
+}
+
+// getrusage(who, &usage): user and system time in microseconds, and the
+// peak resident set, which Linux counts in KiB, in bytes.
+#Export(c) fn jet_sys_rusage_raw(who: I64, available: I64, user: I64, system: I64, peak: I64, errno: I64) {
+    native :: host_i32(who)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    buffer :: jet_rt_alloc(I64{144}, I64{8})
+    thread_zero(buffer, I64{144})
+    result :: host_call(I64{98}, native, buffer, I64{0})
+    #Unsafe("buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words") {
+        os_store_u8(available, I64{1})
+        os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer) * I64{1000000} + os_load_i64(wrapping(buffer + I64{8}))))
+        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{16})) * I64{1000000} + os_load_i64(wrapping(buffer + I64{24}))))
+        os_store_i64(peak, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{32})) * I64{1024}))
+        os_store_i64(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
+    }
+    jet_rt_free(buffer, I64{144}, I64{8})
+}
+
 #Export(c) fn jet_sys_umask_raw(mask: I64, some: I64) -> I64 {
     native :: host_native_int(mask)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

@@ -1,9 +1,13 @@
 // Source/Publish/Registry.rs:29-398. Hardened registry transport; the
 // registry identity and its one credential redaction live in jet_pkg_model
 // (Registry/RegistryIdentity.jet).
-// The all-answer strict public-destination policy is Foundation Net's concern
-// (#3595), not Core's broader is_global predicate (#4413). Full Fetch is #4262.
+// Every resolved answer must pass Core's strict public-destination predicates
+// (ip.is_public_destination / ip.ipv6_is_public_destination). Full Fetch is #4262.
+use jet_pkg_model.[PublicationRegistryConfig, pkg_bytes_space_width, pkg_bytes_text, pkg_hex_bytes, publication_registry_url_has_credentials]
+use jetpack_foundation.[foundation_hardened_git_command, foundation_hardened_ssh_command]
 use core.http.client as publication_dns
+use core.net.ip as ip
+use core.sys as sys
 
 #Error
 struct PublicationRegistryAuthorityError {
@@ -92,12 +96,12 @@ enum PublicationRegistryTransport {
         }
     }
     fn command(self) -[Env, Exec]> ProcessSpec Never! {
-        spec := provider_hardened_git_command()
+        spec := foundation_hardened_git_command()
         if self == .Network(scheme, host, port, explicit_port, address) {
             if scheme == "http" || scheme == "https" {
                 loop value in publication_registry_http_config(host, port, publication_registry_ip(address)) -> spec = spec.arg("-c").arg(value)
             } else if scheme == "ssh" {
-                spec = spec.env("GIT_SSH_COMMAND", "{provider_hardened_ssh_command()} -oHostName={publication_address_text(address)}")
+                spec = spec.env("GIT_SSH_COMMAND", "{foundation_hardened_ssh_command()} -oHostName={publication_address_text(address)}")
             }
         }
         spec
@@ -153,10 +157,10 @@ fn publication_addresses_public(addresses: [[U8]]) -> Bool Never! {
     if addresses.len() == 0 -> return false
     loop address in addresses {
         if address.len() == 4 {
-            if !foundation_public_destination_ipv4(Int.from_u8(address[0]), Int.from_u8(address[1]), Int.from_u8(address[2]), Int.from_u8(address[3])) -> return false
+            if !ip.is_public_destination(IPv4{a: Int.from_u8(address[0]), b: Int.from_u8(address[1]), c: Int.from_u8(address[2]), d: Int.from_u8(address[3])}) -> return false
         } else if address.len() == 16 {
             words :: loop index in 0..<8 -> Int.from_u8(address[index * 2]) * 256 + Int.from_u8(address[index * 2 + 1])
-            if !foundation_public_destination_ipv6(words) -> return false
+            if !ip.ipv6_is_public_destination(IPv6{words: words}) -> return false
         } else {
             return false
         }

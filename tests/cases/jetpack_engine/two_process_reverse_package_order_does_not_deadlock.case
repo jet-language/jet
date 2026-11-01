@@ -1,5 +1,6 @@
 # HAND-PORT tests/jetpack_engine.rs:8995-9074 two_process_reverse_package_order_does_not_deadlock
 # PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+# Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: two_process_reverse_package_order_does_not_deadlock.fixture
 env: NO_COLOR=1
 env: JETPACK_ROOT={work}/root
@@ -12,7 +13,7 @@ mkdir: ab
 write: ab/env.jet ab.template
 mkdir: ba
 write: ba/env.jet ba.template
-step: jetpack build --no-color
+step: jetpack env --prep --no-color --trust
 cwd: ab
 exit: 0
 spawn ab: jetpack env --no-color --trust -- /bin/sh -c true

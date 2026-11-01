@@ -476,10 +476,10 @@ use jet_builtins as builtin
 struct Unsigned<prep bits: Int> { raw: builtin.Bits<bits> }
 struct Signed<prep bits: Int> { raw: builtin.Bits<bits> }
 
-alias U8 :: Unsigned<8>
-alias U16 :: Unsigned<16>
-alias I32 :: Signed<32>
-alias I128 :: Signed<128>
+U8 :: Unsigned<8>
+U16 :: Unsigned<16>
+I32 :: Signed<32>
+I128 :: Signed<128>
 ```
 
 Operators are written once per family. The `#Arithmetic` policy
@@ -498,10 +498,10 @@ Decimal family:
 
 ```jet
 struct IEEE<prep exponent: Int, prep fraction: Int> { raw: builtin.Float<exponent, fraction> }
-alias F16 :: IEEE<5, 10>
-alias BF16 :: IEEE<8, 7>
-alias F32 :: IEEE<8, 23>
-alias F64 :: IEEE<11, 52>
+F16 :: IEEE<5, 10>
+BF16 :: IEEE<8, 7>
+F32 :: IEEE<8, 23>
+F64 :: IEEE<11, 52>
 ```
 
 What stays primitive: only `builtin.Bits<n>`, `builtin.Float<e, f>`,

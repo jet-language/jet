@@ -187,7 +187,9 @@ fn store_broker_admit_and_promote(verification: &StoreVerification, shared: Hang
     if store_broker_provenance_binding_for_entry(bound) != binding {
         return Err(store_broker_invalid("shared-store provenance binding does not match archive"))
     }
-    _promote_lock :: env_runtime_lock(shared.root, "shared-store-promote")
+    // The import holds the shared root's hangar lock, and every scope of one
+    // root shares that root's single kernel lock, so promotions are already
+    // serialized; an outer claim on the same root would wait on itself.
     store_import_archive(&verification, shared, attested, Val(key), false)
 }
 

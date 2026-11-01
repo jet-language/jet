@@ -55,10 +55,12 @@ fn native_pack_test_refused(bytes: [U8]) -> Bool {
     subject :: native_pack_test_subject(object)
     bytes :: subject.to_bytes() ?? panic("encode subject")
     assert_eq(NativeRuntimePackSubject.from_bytes(bytes) ?? panic("decode subject"), subject)
-    fields := if subject.to_tree() == {
+    pairs :: if subject.to_tree() == {
         .Object(values) -> values
         else -> { panic("subject object") }
     }
+    fields := [String: Dyn]{}
+    loop pair in pairs -> fields[pair.key] = pair.value
     fields["providers"] = native_pack_roles_tree([NativeRuntimeRoleObject]{subject.providers[0], subject.providers[0]})
     if NativeRuntimePackSubject.from_tree(Dyn.Object(fields)) == {
         .Ok(_) -> panic("duplicate provider accepted")
@@ -137,7 +139,7 @@ fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evide
     store :: store_artifact_test_store(root, 1024 * 1024)
     fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
     prepared :: native_runtime_pack_prepare(store, fixture.subject, fixture.evidence) ?? panic("prepare")
-    if store.lookup_artifact(NativeCandidateComposition.action_key(fixture.compiler)) == {
+    if (store.lookup_artifact(NativeCandidateComposition.action_key(fixture.compiler)) ?? panic("lookup candidate")) == {
         .Missing -> {}
         else -> panic("preparation published a candidate")
     }

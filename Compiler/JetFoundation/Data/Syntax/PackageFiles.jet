@@ -11,10 +11,9 @@ UNIFIED_LOCK_FILE :: ".jet/lock"
 /// for new resolution.
 HANGAR_DIR :: "/etc/jet/hangar"
 
-/// Amended by (ratified 2026-08-10): `run.jet`
-/// remains the ordinary zero-ceremony fallback source for `jet run`, but it
-/// is not a reserved command-role filename. The optional command home is
-/// `@run.jet`.
+/// `run.jet` is the conventional stock entry for `jet run` and the `jet run`
+/// command home: a root `run.jet` without `fn run` is an inert home that the
+/// stock entry runs.
 DEFAULT_ENTRY_FILE :: "run.jet"
 
 /// One optional leading contextual Package carrier
@@ -22,16 +21,17 @@ DEFAULT_ENTRY_FILE :: "run.jet"
 /// contextual so `pub(package)` keeps its existing visibility meaning.
 INLINE_PACKAGE_DECL :: "package"
 
-/// (ratified 2026-08-10, card #1866): optional package-root
-/// command homes. The marked namespace is closed to these four command names;
-/// there is no command directory and no package/module role-file spelling.
-COMMAND_FILE_RUN :: "@run.jet"
+/// The optional package-root command homes, named for their commands with no
+/// mark. The home names are closed to these four commands; there is no
+/// command directory and no package/module role-file spelling. The same
+/// names below the package root are ordinary source.
+COMMAND_FILE_RUN :: "run.jet"
 
-COMMAND_FILE_BUILD :: "@build.jet"
+COMMAND_FILE_BUILD :: "build.jet"
 
-COMMAND_FILE_DEV :: "@dev.jet"
+COMMAND_FILE_DEV :: "dev.jet"
 
-COMMAND_FILE_TEST :: "@test.jet"
+COMMAND_FILE_TEST :: "test.jet"
 
 COMMAND_ROLE_FILES :: [String]{
     COMMAND_FILE_RUN,
@@ -508,7 +508,6 @@ JET_KEYWORD_LIST :: [String]{
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57)
     KW_STRUCT,
     KW_ENUM,
-    KW_ALIAS,
     KW_IMPL,
     KW_POLICY,
     KW_WRAP,

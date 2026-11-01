@@ -3,7 +3,9 @@
 // Invoke in the project: `jet greet` / `jet seed_data`; for this file,
 // `jet run <this-file> -- greet` / `jet run <this-file> -- seed_data`.
 // Cross-job dependency = a plain call (`seed_data` calls `greet` below).
-// I5 golden runs both job paths (see Examples/features/expected/devloop/job_runner.case).
+// A release binary runs only `.Ship` jobs, so the golden runs `greet` on every
+// tier (Examples/features/expected/devloop/job_runner.case); the `.Dev` path
+// is covered by tests/cases/comptime_cli_parity/job_runner_help_and_named_jobs_match_default_run_aot_and_goldens.case.
 #[Job(.Ship), Doc("Say hello from a shipped project job")]
 fn greet() { print("hello from job") }
 

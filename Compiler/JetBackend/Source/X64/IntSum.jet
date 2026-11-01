@@ -1,0 +1,130 @@
+// The sum of a run of exact Ints (`[Int]` elements) as an asm leaf's body
+// (JetIR OptReduce.jet): x64_int_sum_code's bytes run in place, with
+//
+//   rdi  the address of element 0 of the List's data
+//   rsi  the run's first index, as a raw word
+//   rdx  the index it ends before, as a raw word
+//   rcx  the total so far, as a raw word
+//
+// and the result in rax. The result is either the total plus elements
+// first..<end, as an inline Int, or X64_INT_SUM_DECLINED (2^62, which is
+// never an inline Int). The leaf declines unless:
+// - 0 <= first < end and end is an inline Int;
+// - the total, every element and every partial sum the leaf forms is an
+//   inline Int.
+// Int addition is exact and associative, so a result that is not the
+// sentinel is the total the elements give in any order. The caller then
+// runs its own loop over the same elements. On a decline the leaf has
+// written no memory and changed nothing the caller sees.
+//
+// SSE2 (every x86-64 has it). Two xmm registers hold four lane sums, each
+// biased by 2^62: a lane is inline exactly when its biased word's sign bit
+// is clear. Adding an inline element to an inline lane cannot wrap 64 bits,
+// so the sign bits ORed into xmm2 after every step catch the first lane
+// that leaves the inline range. Each element gets the same test (element +
+// 2^62, sign bit). The last up to three elements go one at a time, and the
+// four lanes fold into the total with an inline test after each add.
+// Only caller-saved registers are written (rax, rcx, rsi, rdi, r8-r11 and
+// xmm0-xmm7), rsp is untouched, and the code falls through its last byte.
+
+X64_INT_SUM_DECLINED :: 4611686018427387904
+
+// The inline-Int bias: x + 2^62 has a clear sign bit exactly when x is an
+// inline Int.
+X64_INT_SUM_BIAS :: 4611686018427387904
+
+fn x64_int_sum_code() -> [U8] Never! {
+    code := [U8]{}
+    declines := [Int]{}
+    x64_mov_ri(&code, X64_RAX, X64_INT_SUM_DECLINED)
+    // 0 <= first < end, end and the total inline.
+    x64_test_rr(&code, X64_RSI, X64_RSI)
+    &declines.push(x64_jcc_rel32(&code, X64Cond.S))
+    x64_alu_rr(&code, X64Alu.Cmp, X64_RSI, X64_RDX)
+    &declines.push(x64_jcc_rel32(&code, X64Cond.GE))
+    x64_int_sum_test(&code, X64_RDX, &declines)
+    x64_int_sum_test(&code, X64_RCX, &declines)
+    // r9 the count, rdi the first element, r10 the bias.
+    x64_mov_rr(&code, X64_R9, X64_RDX)
+    x64_alu_rr(&code, X64Alu.Sub, X64_R9, X64_RSI)
+    x64_shift_ri(&code, X64Shift.Shl, X64_RSI, 3)
+    x64_alu_rr(&code, X64Alu.Add, X64_RDI, X64_RSI)
+    x64_mov_ri(&code, X64_R10, X64_INT_SUM_BIAS)
+    // xmm3 the bias in both lanes, xmm0 and xmm1 four biased zero lanes,
+    // xmm2 the sign bits seen.
+    x64_movq_to_xmm(&code, false, 3, X64_R10)
+    x64_sse(&code, 0x66, false, 0x6c, 3, 3)
+    x64_sse(&code, 0x66, false, 0x6f, 0, 3)
+    x64_sse(&code, 0x66, false, 0x6f, 1, 3)
+    x64_sse(&code, 0x66, false, 0xef, 2, 2)
+    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 4)
+    to_tail :: x64_jcc_rel32(&code, X64Cond.L)
+    body :: code.len()
+    x64_vector_load(&code, 4, X64_RDI, 0)
+    x64_vector_load(&code, 5, X64_RDI, 16)
+    // paddq lane, element; por seen, lane.
+    x64_sse(&code, 0x66, false, 0xd4, 0, 4)
+    x64_sse(&code, 0x66, false, 0xd4, 1, 5)
+    x64_sse(&code, 0x66, false, 0xeb, 2, 0)
+    x64_sse(&code, 0x66, false, 0xeb, 2, 1)
+    // paddq element, bias; por seen, element.
+    x64_sse(&code, 0x66, false, 0xd4, 4, 3)
+    x64_sse(&code, 0x66, false, 0xd4, 5, 3)
+    x64_sse(&code, 0x66, false, 0xeb, 2, 4)
+    x64_sse(&code, 0x66, false, 0xeb, 2, 5)
+    x64_alu_ri(&code, X64Alu.Add, X64_RDI, 32)
+    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 4)
+    again :: x64_jcc_rel32(&code, X64Cond.GE)
+    x64_patch_rel32(&code, again, body)
+    tail :: code.len()
+    x64_patch_rel32(&code, to_tail, tail)
+    x64_alu_ri(&code, X64Alu.Add, X64_R9, 4)
+    // movmskpd r8d, xmm2: any sign bit seen declines.
+    x64_sse(&code, 0x66, false, 0x50, X64_R8, 2)
+    x64_test_rr(&code, X64_R8, X64_R8)
+    &declines.push(x64_jcc_rel32(&code, X64Cond.NE))
+    // The four lanes, unbiased, into the total.
+    x64_int_sum_fold(&code, 0, &declines)
+    x64_sse(&code, 0x66, false, 0x70, 0, 0)
+    x64_byte(&code, 0xee)
+    x64_int_sum_fold(&code, 0, &declines)
+    x64_int_sum_fold(&code, 1, &declines)
+    x64_sse(&code, 0x66, false, 0x70, 1, 1)
+    x64_byte(&code, 0xee)
+    x64_int_sum_fold(&code, 1, &declines)
+    // The last elements, one at a time.
+    x64_test_rr(&code, X64_R9, X64_R9)
+    to_done :: x64_jcc_rel32(&code, X64Cond.E)
+    single :: code.len()
+    x64_load(&code, X64_R8, X64_RDI, 0)
+    x64_int_sum_test(&code, X64_R8, &declines)
+    x64_alu_rr(&code, X64Alu.Add, X64_RCX, X64_R8)
+    x64_int_sum_test(&code, X64_RCX, &declines)
+    x64_alu_ri(&code, X64Alu.Add, X64_RDI, 8)
+    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 1)
+    more :: x64_jcc_rel32(&code, X64Cond.NE)
+    x64_patch_rel32(&code, more, single)
+    done :: code.len()
+    x64_patch_rel32(&code, to_done, done)
+    x64_mov_rr(&code, X64_RAX, X64_RCX)
+    end :: code.len()
+    loop site in declines -> x64_patch_rel32(&code, site, end)
+    code
+}
+
+// `jo` to a decline when `reg` is not an inline Int (bits 63 and 62
+// differ), through r11.
+fn x64_int_sum_test(code: &[U8], reg: Int, declines: &[Int]) Never! {
+    x64_mov_rr(&code, X64_R11, reg)
+    x64_alu_rr(&code, X64Alu.Add, X64_R11, X64_R11)
+    &declines.push(x64_jcc_rel32(&code, X64Cond.O))
+}
+
+// The low lane of `xmm`, unbiased (r10 holds the bias), into the total in
+// rcx. Both are inline, so the add cannot wrap; the sum is then tested.
+fn x64_int_sum_fold(code: &[U8], xmm: Int, declines: &[Int]) Never! {
+    x64_movq_from_xmm(&code, false, X64_R8, xmm)
+    x64_alu_rr(&code, X64Alu.Sub, X64_R8, X64_R10)
+    x64_alu_rr(&code, X64Alu.Add, X64_RCX, X64_R8)
+    x64_int_sum_test(&code, X64_RCX, &declines)
+}

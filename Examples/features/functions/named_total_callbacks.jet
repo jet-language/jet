@@ -1,0 +1,18 @@
+// A named closure checked as total (`T Never!`) is an ordinary callback:
+// eager and lazy adapters see its values, never its empty failure rail.
+fn run() {
+    step :: (n: Int) -> n + 1
+    big :: (n: Int) -> n > 1
+    show :: (n: Int) -> print("each {n}")
+    print([1, 2, 3].map(step))
+    print([1, 2, 3].filter(big))
+    print([1, 2, 3].any(big))
+    print([1, 2, 3].all(big))
+    print([1, 2, 3].find(big) ?? 0)
+    pair :: [1, 2]
+    pair.each(show)
+    print([1, 2, 3].lazy().map(step).to_list())
+    total := 0
+    loop n in [1, 2, 3].lazy().map(step).filter(big) -> total += n
+    print(total)
+}

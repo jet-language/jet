@@ -21,9 +21,9 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: TCPStream) -> [U8] {
+fn request_head(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block :: stream.read(512) ?? panic("request read")
@@ -49,7 +49,7 @@ fn run() {
             .Ok(_) -> panic("environment proxy should not receive traffic")
             .Err(error) -> {
                 if error == {
-                    .Timeout -> { if time.instant() >= end -> break }
+                    .Timeout(_) -> { if time.instant() >= end -> break }
                     else -> panic("proxy accept failed")
                 }
             }

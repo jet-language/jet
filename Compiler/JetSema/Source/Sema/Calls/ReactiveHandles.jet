@@ -12,6 +12,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     Type,
+    expr_span,
     type_name,
 ]
 
@@ -25,7 +26,7 @@ fn sema_reactive_loadable_type(value: Type, error: Type) -> Type Never! {
 
 fn sema_reactive_element_type(ty: Type, name: String, fallback: Type) -> Type Never! {
     if ty == {
-        .Apply(owner, args) -> if owner == name && args.len() == 1 -> args[0] else -> fallback
+        .Apply(_, args) -> if sema_reactive_type_name(ty) == name && args.len() == 1 -> args[0] else -> fallback
         else -> fallback
     }
 }
@@ -85,7 +86,7 @@ fn sema_reactive_call_fact(environment: SemaScopeEnvironment, program: SemaProgr
 }
 
 fn sema_reactive_core_call_value(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    value :: sema_call_core_tir(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tree(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     Val(value)
 }
@@ -105,13 +106,13 @@ fn sema_reactive_callback_type(return_type: Type?) -> Type Never! {
 fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected_return: Type?, expected_element: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
     source_arity :: sema_reactive_source_lambda_arity(argument.expr) ?? {
         checked :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        actual :: if checked == .Val(value) -> type_name(value.ty) else -> "an invalid value"
-        &diagnostics.push(sema_error("E2910", argument.span, "`reactive.{kind}` needs a lambda, not {actual}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
+        actual :: if checked == .Val(value) -> sema_type_show(value.ty) else -> "an invalid value"
+        &diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {actual}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
         return None
     }
     if source_arity != 0 {
         _ := sema_expression_lambda_host_callback_stored(argument.expr, None, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E2911", argument.span, "`reactive.{kind}` needs a zero-parameter lambda, got {source_arity} parameter{if source_arity == 1 -> "" else -> "s"}", "the body takes no arguments — it reads the signals it depends on via `.get()`", "write `reactive.{kind}(() -> {{ … }})` with no parameters"))
+        &diagnostics.push(sema_error("E2911", expr_span(argument.expr), "`reactive.{kind}` needs a zero-parameter lambda, got {source_arity} parameter{if source_arity == 1 -> "" else -> "s"}", "the body takes no arguments — it reads the signals it depends on via `.get()`", "write `reactive.{kind}(() -> {{ … }})` with no parameters"))
         return None
     }
     expected_callback_return := expected_return
@@ -121,7 +122,7 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
     if checked.kind == {
         .Lambda(lambda) -> Val(lambda)
         else -> {
-            &diagnostics.push(sema_error("E2910", argument.span, "`reactive.{kind}` needs a lambda, not {type_name(checked.ty)}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
+            &diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {sema_type_show(checked.ty)}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
             return None
         }
     }
@@ -129,7 +130,7 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
 
 fn sema_reactive_direct_closure(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, type_args: [Type], diagnostics: &[Diagnostic]) -> TExpr? {
     closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
-    value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
+    value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return None
     if !sema_reactive_call_fact(environment, program, &scopes, &context, "core.reactive.{kind}", span, result_type, type_args, "", &diagnostics) -> return None
     Val(checked)
@@ -166,7 +167,7 @@ fn sema_reactive_derived_value(member: String, type_args: [Type], span: Span, ex
     lambda :: sema_reactive_check_retained_lambda(member, args[0], None, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type :: lambda.ret ?? Type.Named{name: "Unit"}
     if result_type == sema_reactive_unit_type() {
-        &diagnostics.push(sema_error("E2912", args[0].span, "reactive.{member} must return a value", "derived values recompute a data snapshot", "return a non-Unit value from the callback"))
+        &diagnostics.push(sema_error("E2912", expr_span(args[0].expr), "`reactive.{member}` must compute and return a value", "a derived value is recomputed from its signals; its lambda has to return the value", "return a value from the body, or use `reactive.effect(() -> {{ … }})` for a side effect"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_reactive_value_ok(result_type, member, args[0].span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -220,8 +221,14 @@ fn sema_call_try_reactive_core_call(module_name: String, member: String, args: [
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 
+// The handle owner a receiver names: the bare runtime handle, or the leaf of
+// its `core.reactive` declaration (`<corelib>/core.reactive::Signal`, the
+// type a written `Signal<Int>` resolves to).
 fn sema_reactive_type_name(ty: Type) -> String Never! {
-    sema_expr_type_base_name(ty) ?? type_name(ty)
+    owner :: sema_expr_type_base_name(ty) ?? type_name(ty)
+    prefix :: "<corelib>/core.reactive::"
+    if owner.starts_with(prefix) -> return owner.slice(prefix.len(), owner.len())
+    owner
 }
 
 fn sema_reactive_handle_member(owner: String, method: String) -> Bool Never! {
@@ -249,7 +256,10 @@ fn sema_reactive_checked_handle_args(owner: String, method: String, args: [CallA
         _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return None
     }
-    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true) ?? return None
+    // A bare name passed to `set` is an ordinary
+    // owning argument. A copy value passes; any other moves at its last use,
+    // and the ownership check below rejects it (E0209) when it is used again.
+    typed :: sema_call_typecheck_bound_arguments("{owner}.{method}", params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false) ?? return None
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &checked_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     Val(typed.values)
@@ -271,7 +281,7 @@ fn sema_call_try_reactive_handle_method(receiver: Expr, receiver_value: TExpr, m
         method == "set" -> THandleOp.ReactiveSet
         else -> THandleOp.ReactiveGet
     }
-    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: checked_args}, span)
+    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: checked_args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

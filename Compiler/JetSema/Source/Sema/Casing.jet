@@ -3,7 +3,6 @@
 // are snake_case. The category chosen at each declaration site fixes the case;
 // foreign declarations are exempt zones. Mirrors
 // crates/jet-sema/src/Sema/Casing.rs, whose UI snapshots are the spec.
-use core.text as unicode
 use jet_foundation.[
     BinMatchPart,
     BindName,
@@ -27,17 +26,15 @@ use jet_foundation.[
     TextEdit,
     TraitImplBlock,
     TraitMethodSig,
+    Type,
     TypeParam,
     TypedLitBody,
     SemaNameCase,
-    sema_casing_ascii_code,
+    sema_casing_acronym_name,
     sema_casing_canonical,
     sema_casing_has_case,
-    sema_casing_is_upper,
-    sema_casing_is_lower,
-    sema_casing_join,
-    sema_casing_split_words,
     diagnostic_with_edit,
+    expr_binary_operands,
 ]
 
 fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: &[Diagnostic]) {
@@ -60,74 +57,23 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
     ))
 }
 
-// This rule applied acronym lexicon: every initials-formed word in current
-// Jet names, in canonical caps. Mirrors `ACRONYMS` in
-// crates/jet-foundation/src/Syntax/acronyms.rs.
-SEMA_CASING_ACRONYMS :: comptime { [String]{
-    "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
-    "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DKIM", "DMA", "DNS",
-    "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
-    "ID", "IME", "IO", "IP", "IR", "JIT", "JS", "JSON", "JSONL", "JVM", "KDF", "KMS", "LRU",
-    "LSP", "LTO", "LWW", "MCP", "MIME", "MIR", "MMIO", "OCI", "OS", "PEM", "PID", "PM", "PNG",
-    "RGA", "RGB", "RNG", "RPC", "RSA", "SDK", "SHA", "SMTP", "SPSC", "SQL", "SRI", "SRV", "SSG",
-    "SSH", "SSR", "SVD", "SVG", "TCP", "TIR", "TLS", "TOML", "TTY", "TUF", "TUI", "UART", "UDP",
-    "UI", "URI", "URL", "UTF", "UUID", "VJP", "VM", "XML", "YAML",
-} }
-
-fn sema_casing_is_digit(scalar: String) -> Bool {
-    code :: sema_casing_ascii_code(scalar)
-    code >= 48 && code <= 57
-}
-
-// One PascalCase word: a lexicon acronym (plus trailing digits) in caps, a
-// fixed compound spelling, or the word unchanged. Coined contractions stay.
-fn sema_casing_acronym_word(word: String) -> String {
-    if word == "Wasm" || word == "Bindgen" -> return word.copy()
-    lower :: unicode.lower(word)
-    if lower == "macos" -> return "MacOS"
-    if lower == "ipv4" -> return "IPv4"
-    if lower == "ipv6" -> return "IPv6"
-    scalars :: unicode.scalars(word)
-    letters := scalars.len()
-    loop letters > 0 && sema_casing_is_digit(scalars[letters - 1]) -> letters -= 1
-    if letters == 0 -> return word.copy()
-    head :: unicode.upper(sema_casing_join(scalars, 0, letters))
-    loop acronym in SEMA_CASING_ACRONYMS {
-        if acronym == head -> return "{head}{sema_casing_join(scalars, letters, scalars.len())}"
-    }
-    word.copy()
-}
-
-// Respell every word of a PascalCase name (`MirTypeId` -> `MIRTypeID`).
-// ALL_CAPS and snake_case names are value-like and stay unchanged.
-fn sema_casing_acronym_name(name: String) -> String {
-    scalars :: unicode.scalars(name)
-    if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
-    has_lower := false
-    loop scalar in scalars {
-        if sema_casing_is_lower(scalar) -> has_lower = true
-    }
-    if !has_lower -> return name.copy()
-    segments := [String]{}
-    loop segment in name.split("_") {
-        out := ""
-        loop word in sema_casing_split_words(segment) -> out = "{out}{sema_casing_acronym_word(word)}"
-        &segments.push(out)
-    }
-    segments.join("_")
-}
-
 // E0358: a type-like declaration keeps every lexicon acronym
 // in caps. The edit replaces the whole written name when the span covers it.
 fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
-    if span.start == span.end -> return
+    if sema_casing_acronym_diagnostic(name, span) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+}
+
+// The E0358 for a type-like name that writes a lexicon acronym word-cased,
+// in a declaration or in a type position (`Id<Node>`, `HttpRequest`).
+fn sema_casing_acronym_diagnostic(name: String, span: Span) -> Diagnostic? {
+    if span.start == span.end -> return None
     parts := [String]{}
     loop segment in name.split(".") {
-        if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return
+        if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return None
         &parts.push(sema_casing_acronym_name(segment))
     }
     canonical :: parts.join(".")
-    if canonical == name -> return
+    if canonical == name -> return None
     diagnostic :: sema_error(
         "E0358",
         span,
@@ -135,11 +81,8 @@ fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
         "Jet keeps acronyms fully capitalized inside PascalCase names",
         "write `{canonical}` instead of `{name}`",
     )
-    if span.end - span.start != name.bytes().len() {
-        &diagnostics.push(diagnostic)
-        return
-    }
-    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: canonical}))
+    if span.end - span.start != name.bytes().len() -> return Val(diagnostic)
+    Val(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: canonical}))
 }
 
 fn sema_casing_pascal(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {
@@ -164,10 +107,17 @@ fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics
     }
 }
 
-// A `<comptime N: Int>` number parameter is rejected with E0390 by
-// registration, so it has no type-parameter casing to check.
+// Every generic declaration site (functions and methods, structs, enums,
+// aliases) reaches its parameters through this one walk. A `<comptime N: Int>`
+// number parameter parses into `TypeParam.prep`, but number-parameter
+// substitution, instance identity and layout belong to card #3505, so it is
+// rejected here, once per written parameter, and registration never treats
+// `N` as a type.
 fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) {
-    if parameter.prep != None -> return
+    if parameter.prep != None {
+        &diagnostics.push(sema_error("E0390", parameter.name_span, "`{parameter.name}` is a compile-time number parameter, which this compiler does not support yet.", "`<comptime N: Int>` is the ratified declaration grammar, but number-parameter substitution, instance identity and layout are not implemented.", "use a type parameter, or pass the number as an ordinary argument or field until number parameters ship."))
+        return
+    }
     sema_casing_pascal(parameter.name, parameter.name_span, "type parameter", &diagnostics)
 }
 
@@ -243,6 +193,7 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
         .Trait(definition) -> {
             sema_casing_pascal(definition.name, definition.name_span, "trait", &diagnostics)
             loop associated in definition.assoc_types -> sema_casing_pascal(associated.name, associated.span, "associated type", &diagnostics)
+            loop constant in definition.constants -> sema_casing_snake(constant.name, constant.name_span, "trait constant", &diagnostics)
             loop method in definition.methods -> sema_casing_trait_method(method, &diagnostics)
         }
         .Tag(definition) -> sema_casing_pascal(definition.name, definition.name_span, "tag", &diagnostics)
@@ -250,9 +201,14 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
             loop method in definition.methods -> sema_casing_function(method, "method", &diagnostics)
         }
         .Const(definition) -> {
+            // `defaults: { run: … }` is the Output defaults record
+            // (syntax-decisions.md:7425), not a user binding: its fixed
+            // lowercase name has no casing to check.
+            output_defaults :: definition.ty == (Val(Type.Named{name: "__OutputDefaults"}))
             // Owner ruling (2026-09-30): an immutable module binding is
             // ALL_CAPS; a mutable one is never ALL_CAPS.
             if {
+                output_defaults -> {}
                 definition.mutable -> sema_casing_snake(definition.name, definition.name_span, "module variable", &diagnostics)
                 else -> sema_casing_screaming(definition.name, definition.name_span, "constant", &diagnostics)
             }
@@ -587,10 +543,7 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
             sema_casing_expr(subject, &diagnostics)
             sema_casing_pattern(tested, &diagnostics)
         }
-        .Binary(_, left, right, _, _) -> {
-            sema_casing_expr(left, &diagnostics)
-            sema_casing_expr(right, &diagnostics)
-        }
+        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_casing_expr(operand, &diagnostics)
         .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
             loop value in operands -> sema_casing_expr(value, &diagnostics)
         }

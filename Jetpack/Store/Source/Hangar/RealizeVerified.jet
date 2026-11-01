@@ -69,7 +69,7 @@ struct VerifiedRealization {
     fn original_reference(self) -> String Never! { self.lease.original_reference() }
 
     fn into_parts(^self) -> (entry: StoreEntry, source_state: SourceState, lease: CacheLease) Never! {
-        (entry: self.entry, source_state: self.source_state_value, lease: self.lease)
+        (entry: self.entry, source_state: self.source_state_value, lease: ^self.lease)
     }
 }
 
@@ -327,7 +327,7 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
             .Package(spec, _) -> {
                 replayed :: store_replay_locked_nix_package(&verification, roots, ctx, spec)
                 if replayed == {
-                    .Val(hit) -> return Ok(hit)
+                    .Val(hit) -> return Ok(^hit)
                     .None -> {}
                 }
             }
@@ -346,7 +346,7 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
             .Val(verified) -> {
                 store_validate_adapter_request_hook(request, verified.entry, wanted)
                 store_authorize_and_project_realization(ctx, verified.entry)
-                return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease})
+                return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease})
             }
             .None -> {
                 proof :: store_verify_cache_entry(&verification, roots, found, reference, wanted)
@@ -361,7 +361,7 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
                             .Val(verified) -> {
                                 store_validate_adapter_request_hook(request, verified.entry, wanted)
                                 store_authorize_and_project_realization(ctx, verified.entry)
-                                return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Substituted, lease: verified.lease})
+                                return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Substituted, lease: ^verified.lease})
                             }
                             .None -> {}
                         }
@@ -403,7 +403,7 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
                     .Val(verified) -> {
                         store_validate_adapter_request_hook(request, verified.entry, wanted)
                         store_authorize_and_project_realization(ctx, verified.entry)
-                        return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease})
+                        return Ok(VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease})
                     }
                     .None -> {}
                 }
@@ -763,7 +763,7 @@ fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRo
         dependency_roots :: if uses_nix -> ctx.nix_roots ?? roots else -> roots
         realized :: store_realize_verified(&verification, dependency_roots, ctx, RealizeRequest.Package{spec: spec, table: table})
         parts :: ^realized.into_parts()
-        lease := parts.lease
+        lease := ^parts.lease
         receipt :: lease.profile_install_receipt() ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` has no verified executable output: {err}")))
         loop member in receipt.executable_members {
             path :: if lease.executable_for_command(member) == {

@@ -396,9 +396,11 @@ fn foundation_write_file_nofollow_at_root(root: String, relative: String, conten
         }
         if foundation_stage_and_rename(directories, directories[leaf].handle, writer, candidate, final_name, contents, expected_destination, before_rename, policy) == {
             .Ok(staged) -> {
-                loop directory in directories {
-                    directory.handle.fsync() ?? return Err(FoundationPublicationError{phase: .SyncParent, error: err})
-                }
+                // A rename is durable once the directory holding the renamed
+                // entry is fsynced; every directory this call created was made
+                // durable by its parent's fsync at creation. Unchanged ancestors
+                // need no barrier.
+                directories[leaf].handle.fsync() ?? return Err(FoundationPublicationError{phase: .SyncParent, error: err})
                 foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: err})
                 published :: if foundation_inspect_destination(directories[leaf].handle, final_name) == {
                     .Val(identity) -> identity
@@ -831,6 +833,11 @@ fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]> Fo
     }
     leaf :: directories.len() - 1
     final_name :: components[components.len() - 1]
+    // Core's open refuses a directory itself, so describe the entry first:
+    // a directory or special file gets the same refusal as the descriptor
+    // check below, and a link fails its no-follow open.
+    entry :: directories[leaf].handle.entry_stat(final_name)
+    if !entry.is_symlink && !entry.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))
     handle :: directories[leaf].handle.open(final_name)
     opened :: handle.stat()
     if !opened.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))

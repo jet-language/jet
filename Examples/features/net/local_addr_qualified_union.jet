@@ -1,0 +1,20 @@
+// A failure propagates into an error union by the member's nominal type: the
+// `NetError` that `local_addr()` raises reaches the member the caller wrote as
+// `net.NetError` (#6303).
+package {
+    name: "local_addr_qualified_union"
+    authority: { allow: [IO, Mem.Alloc, Net] }
+}
+
+use core.http as http
+use core.net as net
+
+fn loopback_bound() -> Bool (http.HTTPError | net.NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: listener.local_addr()
+    return Ok("{addr}".starts_with("127.0.0.1:"))
+}
+
+fn run() {
+    print(loopback_bound() ?? false)
+}

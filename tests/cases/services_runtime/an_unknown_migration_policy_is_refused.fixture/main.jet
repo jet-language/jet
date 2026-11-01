@@ -9,7 +9,7 @@ fn run() {
     tree := services.tree("cluster")
     store :: services.state_store(store_path) ?? panic("state store")
     &tree.set_state_event_log(^store, "cluster-events", 1, ^policy) ?? panic("state")
-    endpoint :: &tree.worker("api", ^rollback_worker, capacity: 1) ?? panic("worker")
+    endpoint :: &tree.worker("api", rollback_worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     &tree.append_event("before-upgrade") ?? panic("append")
     &tree.directory_register("api", endpoint.copy()) ?? panic("register")
@@ -18,8 +18,7 @@ fn run() {
     receipt :: tree.upgrade_receipt() ?? panic("receipt")
     print("receipt:{receipt}")
     &tree.append_event("after-upgrade") ?? panic("append after")
-    rolled :: tree.rollback_generation()
-    if rolled == {
+    if &tree.rollback_generation() == {
         .Ok(generation) -> {
             events :: tree.replay_events()
             print("rolled:{generation}:{events}")

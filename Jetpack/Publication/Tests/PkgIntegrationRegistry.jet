@@ -1,5 +1,16 @@
 // Reviewed tests/pkg.rs:7964-8030 and9082-9145, exact original predicates.
 // PENDING-SEAM(package-tests); no case is blessed or weakened on casing.
+use jet_foundation.[diagnostic_render]
+use jet_pkg_model.[PublicationRegistryConfig, publication_redact_registry_url]
+use jetpack_publication.[
+    PublicationIndexEntry, publication_core_reviewed, publication_ensure_index_clone,
+    publication_keygen, publication_read_entries, publication_sign, publication_verify_index_entry,
+    publication_e1235, publication_write_index_entry,
+]
+use core.files as files
+use core.process as process
+use core.sys as sys
+
 fn publication_pkg_integration_registry_root(label: String) -[FS, Env]> String Never! {
     root :: files.join(sys.temp_dir(), "jet-pkg-integration-{label}-{sys.pid()}")
     files.remove_all(root).drop("fixture may be absent")
@@ -68,9 +79,8 @@ fn publication_pkg_integration_entry(name: String, version: String, hash: String
     files.create_dir_all(files.dirname(review)) ?? panic("review dir")
     files.write(review, "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n") ?? panic("review")
     if publication_write_index_entry(repo, wrong) == {
-        // The original's lowercase needle stays exact. Existing RegistryVerify
-        // changes it to sentence casing; that is not parity evidence for this row.
-        .Err(error) -> assert("{error}".contains("signature verification failed"))
+        // Diagnostic rows are sentence-cased, so the `what` starts with a capital.
+        .Err(error) -> assert("{error}".contains("Signature verification failed"))
         .Ok(_) -> panic("old signer must refuse takeover")
     }
     publication_write_index_entry(repo, v2) ?? panic("reviewed takeover")

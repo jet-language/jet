@@ -11,13 +11,13 @@ fn rt_test_suite_state_drop_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// runtime-init: 3
+// runtime-init: 3 when test_suite_key
 #Export(c) fn jet_rt_test_suite_init() {
     if (test_suite_key != I64{0}) -> return
     closure :: jet_rt_alloc(I64{24}, I64{8})
     trap_store(closure, I64{1})
-    trap_store(closure + I64{8}, rt_test_suite_state_drop_address())
-    trap_store(closure + I64{16}, I64{0})
+    trap_store(wrapping(closure + I64{8}), rt_test_suite_state_drop_address())
+    trap_store(wrapping(closure + I64{16}), I64{0})
     test_suite_key = jet_rt_tls_key_new(closure)
 }
 
@@ -43,8 +43,8 @@ fn test_suite_state_ensure() -> I64 {
     trap_store(runner, trap_word(runner) + I64{1})
     state :: test_suite_state_ensure()
     trap_store(state, I64{0})
-    trap_store(state + I64{8}, I64{0})
-    trap_store(state + I64{16}, runner)
+    trap_store(wrapping(state + I64{8}), I64{0})
+    trap_store(wrapping(state + I64{16}), runner)
 }
 
 #Export(c) fn jet_test_suite_new() -> I64 {
@@ -54,8 +54,8 @@ fn test_suite_state_ensure() -> I64 {
         thread_zero(suite, I64{24})
     } else {
         trap_store(suite, jet_int_owned_from_i64(trap_word(state)))
-        trap_store(suite + I64{8}, jet_int_owned_from_i64(trap_word(state + I64{8})))
-        trap_store(suite + I64{16}, trap_word(state + I64{16}))
+        trap_store(wrapping(suite + I64{8}), jet_int_owned_from_i64(trap_word(wrapping(state + I64{8}))))
+        trap_store(wrapping(suite + I64{16}), trap_word(wrapping(state + I64{16})))
     }
     suite
 }
@@ -63,33 +63,33 @@ fn test_suite_state_ensure() -> I64 {
 #Export(c) fn jet_rt_handle_clone_jet_test_suite(suite: I64) -> I64 {
     cloned :: jet_rt_alloc(I64{24}, I64{8})
     trap_store(cloned, jet_rt_int_clone(trap_word(suite)))
-    trap_store(cloned + I64{8}, jet_rt_int_clone(trap_word(suite + I64{8})))
-    trap_store(cloned + I64{16}, trap_word(suite + I64{16}))
+    trap_store(wrapping(cloned + I64{8}), jet_rt_int_clone(trap_word(wrapping(suite + I64{8}))))
+    trap_store(wrapping(cloned + I64{16}), trap_word(wrapping(suite + I64{16})))
     cloned
 }
 
 #Export(c) fn jet_rt_handle_drop_jet_test_suite(suite: I64) {
     jet_rt_int_drop(trap_word(suite))
-    jet_rt_int_drop(trap_word(suite + I64{8}))
+    jet_rt_int_drop(trap_word(wrapping(suite + I64{8})))
     jet_rt_free(suite, I64{24}, I64{8})
 }
 
 #Export(c) fn jet_test_suite_run(suite: I64) -> I64 {
-    runner :: trap_word(suite + I64{16})
-    if (runner == I64{0}) { return jet_rt_int_clone(trap_word(suite + I64{8})) }
+    runner :: trap_word(wrapping(suite + I64{16}))
+    if (runner == I64{0}) { return jet_rt_int_clone(trap_word(wrapping(suite + I64{8}))) }
     state :: test_suite_state_ensure()
     // The two inline result words go directly to TLS, never to the receiver.
     // Tuple result stores happen on return, after the runner's user code, so
     // no extra heap workspace or Rust/C pair-return convention is needed.
     #Unsafe("the pinned named-fn box code takes its box and writable inline 16B result storage") {
-        _ := os_call_address_two_i64(trap_word(runner + I64{8}), runner, state)
+        _ := os_call_address_two_i64(trap_word(wrapping(runner + I64{8})), runner, state)
     }
-    jet_int_owned_from_i64(trap_word(state + I64{8}))
+    jet_int_owned_from_i64(trap_word(wrapping(state + I64{8})))
 }
 
 #Export(c) fn jet_test_suite_status() -> I64 {
     state :: test_suite_state()
-    if (state == I64{0}) -> I64{0} else -> trap_word(state + I64{8})
+    if (state == I64{0}) -> I64{0} else -> trap_word(wrapping(state + I64{8}))
 }
 
 #Export(c) fn jet_rt_test_suite_state_drop(_closure: I64, state: I64) -> I64 {
@@ -107,7 +107,7 @@ fn test_suite_state_ensure() -> I64 {
     rt_text_push_number(text, jet_int_owned_to_i64(trap_word(suite)))
     rt_text_push_word(text, I64{0x746c75736572202c}, I64{8})
     rt_text_push_word(text, I64{0x203a}, I64{2})
-    rt_text_push_number(text, jet_int_owned_to_i64(trap_word(suite + I64{8})))
+    rt_text_push_number(text, jet_int_owned_to_i64(trap_word(wrapping(suite + I64{8}))))
     rt_text_push_word(text, I64{0x7d20}, I64{2})
     text
 }

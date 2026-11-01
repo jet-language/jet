@@ -10,7 +10,7 @@ fn run() {
     retention :: Duration.seconds(86400) ?? panic("retention")
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("cancel-restart")
-    endpoint :: &tree.worker("worker", ^worker, capacity: 1) ?? panic("worker")
+    endpoint :: &tree.worker("worker", worker, capacity: 1) ?? panic("worker")
     &tree.start() ?? panic("start")
     if phase == "send" {
         accepted :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("send")
@@ -19,7 +19,8 @@ fn run() {
         print("send:{state.show()}")
     } else {
         recovered :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("recover")
-        state :: recovered.status() ?? panic("recover status")
+        // copy: status consumes its handle and the events read below still needs it.
+        state :: (recovered.copy()).status() ?? panic("recover status")
         history :: recovered.events() ?? panic("recover events")
         print("recover:{state.show()}:{history.len()}")
         &tree.handoff_generation() ?? panic("handoff")

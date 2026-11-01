@@ -6,6 +6,8 @@ use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
 use __core_encoding_stream as stream
 use core.math as math
 use core.mem as mem
+use core.time as time
+use core.time.[ZonedDateTime]
 // Exact representability, rather than a rounded conversion, selects the RFC
 // preferred float width. Inexact values retain all their original f64 bits.
 fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
@@ -119,7 +121,7 @@ impl Parser {
         if additional == 31 {
             self.indefinite(start, path) ?? return Err(err)
             if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
-            if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
+            what :: if major == 2 -> "CBOR byte string" else -> "CBOR text string"
             bytes := [U8]{}
             loop {
                 if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR string ended before its break"))
@@ -134,26 +136,58 @@ impl Parser {
                 if (head >> 5) != major || (head.bit_and(31)) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
                 length :: &self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
                 if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
-                encoding.__utf8_validate(input[self.cursor..<(self.cursor + length.value)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
-                &self.reserve<U8>(&bytes, length.value, 1, chunk, path, "CBOR text string") ?? return Err(err)
+                if major == 3 -> encoding.__utf8_validate(input[self.cursor..<(self.cursor + length.value)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
+                &self.reserve<U8>(&bytes, length.value, 1, chunk, path, what) ?? return Err(err)
                 piece :: input[self.cursor..<(self.cursor + length.value)]
                 loop byte in piece -> &bytes.push(byte)
                 self.cursor += length.value
             }
+            if major == 2 -> return Ok(Dyn.Bytes(bytes))
             text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
             return Ok(Dyn.Text(text))
         }
         length :: &self.argument(input, additional, start, path) ?? return Err(err)
         if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
-        if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
+        what :: if major == 2 -> "CBOR byte string" else -> "CBOR text string"
         bytes := [U8]{}
-        &self.reserve<U8>(&bytes, length.value, 1, start, path, "CBOR text string") ?? return Err(err)
+        &self.reserve<U8>(&bytes, length.value, 1, start, path, what) ?? return Err(err)
         loop _ in 0..<length.value {
             &bytes.push(input[self.cursor])
             self.cursor += 1
         }
+        if major == 2 -> return Ok(Dyn.Bytes(bytes))
         text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
         Ok(Dyn.Text(text))
+    }
+
+    // Tag 0 (RFC 3339 text) and tag 1 (epoch seconds, Int or Float) are
+    // DateTime; every other tag is Unsupported.
+    fn datetime(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
+        number :: &self.argument(input, additional, start, path) ?? return Err(err)
+        if number.outside_int || number.value > 1 -> return Err(failure(.Unsupported, start, path, "only CBOR date-time tags 0 and 1 are supported"))
+        if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "CBOR date-time tag exceeds max_depth"))
+        inner :: &self.value(input, depth + 1, path) ?? return Err(err)
+        if number.value == 0 {
+            if inner == .Text(_) {
+                stamp :: inner.decode<ZonedDateTime>() ?? return Err(failure(.Unsupported, start, path, "invalid CBOR date-time tag payload"))
+                return Ok(Dyn.DateTime(stamp))
+            }
+        } else {
+            if inner == {
+                .Int(seconds) -> return Ok(Dyn.DateTime(time.zoned(time.from_unix_seconds(seconds), time.utc())))
+                .Float(seconds) -> {
+                    if math.is_finite(seconds) && seconds > -9000000000.0 && seconds < 9000000000.0 {
+                        whole :: math.floor(seconds)
+                        nanos :: math.round((seconds - whole) * 1000000000.0)
+                        epoch :: Int.from_float(whole) ?? return Err(failure(.Unsupported, start, path, "epoch is outside DateTime"))
+                        return Ok(Dyn.DateTime(time.zoned(time.from_unix_nanoseconds(epoch * 1000000000 + nanos), time.utc())))
+                    }
+                    return Err(failure(.Unsupported, start, path, "epoch is outside DateTime"))
+                }
+                else -> {}
+            }
+        }
+        Err(failure(.Unsupported, start, path, "invalid CBOR date-time tag payload"))
     }
 
     fn array(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
@@ -290,7 +324,7 @@ impl Parser {
         if major == 2 || major == 3 -> return &self.string(input, additional, start, depth, path, major)
         if major == 4 -> return &self.array(input, additional, start, depth, path)
         if major == 5 -> return &self.object(input, additional, start, depth, path)
-        if major == 6 -> return Err(failure(.Unsupported, start, path, "CBOR tags are unsupported"))
+        if major == 6 -> return &self.datetime(input, additional, start, depth, path)
         if additional == 20 -> return Ok(Dyn.Bool(false))
         if additional == 21 -> return Ok(Dyn.Bool(true))
         if additional == 22 -> return Ok(Dyn.Null)

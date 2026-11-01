@@ -10,6 +10,7 @@ case "$1" in
     emit) printf 'fn main() {}\n' ;;
     check) exit 0 ;;
     build)
+        if [ "${JET_TESTKIT_REJECT:-}" = 1 ]; then printf 'Error [E0001]: rejected\n' >&2; exit 1; fi
         directory=$(dirname "$2")
         name=$(basename "$2" .jet)
         artifact="$directory/.jet/build/$name"

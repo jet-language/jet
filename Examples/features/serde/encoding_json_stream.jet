@@ -32,9 +32,9 @@ fn run() (EncodingError | IOError)! {
     reader := json.reader(^input) ?? return
     read_count := 0
     loop {
-        item :: &reader.next() ?? return Err(err)
-        value :: item ?? break
-        if value == {
+        // A failed read propagates; `??` handles the end of the stream.
+        event :: &reader.next() ?? break
+        if event == {
             .ObjectStart -> { print("event:ObjectStart") }
             .Key(key) && key == "b" -> { print("event:Key:b") }
             .Int(value) && value == 2 -> { print("event:Int:2") }

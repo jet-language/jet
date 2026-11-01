@@ -309,7 +309,10 @@ fn jet_cli_rust_foreign_bwrap(bwrap: String, source: String, output: String, reg
     Ok(args)
 }
 fn jet_cli_rust_foreign_sandbox() -[FS, Env, Exec, Time.Wait]> String JetDriverRustForeignError! {
-    if cli_sys.family() != "linux" -> return Err(jet_cli_rust_foreign_sandbox_error("the native user-Rust helper requires the Linux bubblewrap backend"))
+    // D-JPK-SANDBOX2=D (Docs/spec/syntax-decisions.md:6620): the strong
+    // sandbox is the Linux bubblewrap backend. `sys.name()` is the OS
+    // ("linux"); `sys.family()` is the family ("unix"), which never matches.
+    if cli_sys.name() != "linux" -> return Err(jet_cli_rust_foreign_sandbox_error("the native user-Rust helper requires the Linux bubblewrap backend"))
     if cli_sys.get("JETPACK_FAKE_SANDBOX") != None -> return Err(jet_cli_rust_foreign_sandbox_error("test sandbox override prevents the native Linux backend probe"))
     bwrap :: cli_process.which("bwrap") ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap (`bwrap`) is not available on PATH"))
     shell :: cli_process.which("sh") ?? return Err(jet_cli_rust_foreign_sandbox_error("bubblewrap is present but no immutable shell probe is available"))
@@ -512,7 +515,10 @@ fn jet_cli_rust_foreign_build(plan: JetDriverRustForeignPlan, cache: String, sou
     }
     cargo_home :: cli_sys.get("CARGO_HOME") ?? "{jet_cli_rust_foreign_home()}/.cargo"
     registry := ""
-    if cli_files.is_dir("{cargo_home}/registry") -> registry = cli_files.canonicalize("{cargo_home}/registry") ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve Cargo registry: {err}"))
+    // A std-only helper has no [dependencies], so Cargo never reads a registry:
+    // copying the host registry (hundreds of MB) into the private home would
+    // only stall `jet check` (#6463).
+    if plan.dependencies.len() > 0 && cli_files.is_dir("{cargo_home}/registry") -> registry = cli_files.canonicalize("{cargo_home}/registry") ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve Cargo registry: {err}"))
     private_cargo_home :: private_output.create_directory("cargo-home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private Cargo home: {err}"))
     private_registry :: private_cargo_home.create_directory("registry", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private Cargo registry: {err}"))
     private_home :: private_output.create_directory("home", Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create private build home: {err}"))

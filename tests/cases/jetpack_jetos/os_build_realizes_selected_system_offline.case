@@ -26,11 +26,11 @@ file: package-root/systems/generations/fixture-source-built/generation-root.json
 file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"source_proof_sha256\":\"" # original root proof substring
 file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"files_proof_sha256\":\"" # original root proof substring
 file: package-root/systems/generations/fixture-source-built/generation-root.json ~ "\"output_digests\":[\"sha256-" # original root proof substring
-file: package-root/systems/generations/fixture-source-built/generation-files.proof nonempty
-file: package-root/systems/generations.log count-lines ~ "\tfixture-source-built\t" = 1
+file: package-root/systems/generations/fixture-source-built/generation-files.proof nonempty # original proof file is present
+file: package-root/systems/generations.log count-lines ~ "\tfixture-source-built\t" = 1 # original contains predicate
 capture: witness file package-root/systems/generations/fixture-source-built/generation-root.json doc $.witness
-file.trim_end.split("\t", 4): package-root/systems/generations.log = "{cap:witness}"
-file.trim_end: package-root/systems/generations.log count "\t" = 4
+file.trim_end.split("\t", 4): package-root/systems/generations.log = "{cap:witness}" # original ledger.trim_end().split('\t')[4]
+file.trim_end: package-root/systems/generations.log count "\t" = 4 # original count predicate
 step expected: jet run lifecycle-expected.jet {work}/package-root/systems/generations/fixture-source-built/generation-root.json external-consumer:jetos-generation:6469c44e94fc44d3d95215983c22ae71b36e76b67d2b68600091c9e12cbdbf84
 exit: 0
 step: jet run lifecycle.jet {work}/package-root

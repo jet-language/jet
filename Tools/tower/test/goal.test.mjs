@@ -59,9 +59,9 @@ test('goal writes reject a missing title, unknown status, empty log, missing aut
 
 test('cards link goals by id; unknown goals are rejected and links can be cleared', () => {
   const st = fresh();
-  st.mutate((s) => db.addGoal(s, { title: 'Remove TIR/MIR/LIR', by: 'owner' }));
+  st.mutate((s) => db.addGoal(s, { title: 'One typed IR', by: 'owner' }));
   st.mutate((s) => db.addGoal(s, { title: 'Typed IR with a Core lint', by: 'owner' }));
-  const { result: card } = st.mutate((s, cfg) => db.addCard(s, { title: 'Delete MIR', goals: 'g1, G2,1', by: 'planner' }, cfg));
+  const { result: card } = st.mutate((s, cfg) => db.addCard(s, { title: 'Delete the staged IR', goals: 'g1, G2,1', by: 'planner' }, cfg));
   assert.deepEqual(card.goals, ['G1', 'G2'], 'refs normalize and dedupe');
   assert.throws(() => st.mutate((s, cfg) => db.addCard(s, { title: 'Bad', goals: ['G9'], by: 'planner' }, cfg)), code('E_NOT_FOUND'));
   assert.throws(() => st.mutate((s, cfg) => db.updateCard(s, '#1', { goals: ['G1', 'G9'], by: 'planner' }, cfg)), code('E_NOT_FOUND'));

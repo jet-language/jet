@@ -434,6 +434,10 @@ fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: Strin
                 return Ok(WorkspaceMembersValue{paths: paths, inputs: [ComptimeInput]{}})
             }
         }
+        // `members: []` names no member. Typed Jet needs the element type of an
+        // empty list, which only this field knows (member paths are strings),
+        // so it never reaches the compiler, where `[]` alone is E0501.
+        .ListLit(items, _, _) && items.len() == 0 -> return Ok(WorkspaceMembersValue{paths: [WorkspaceMemberPath]{}, inputs: [ComptimeInput]{}})
         else -> {}
     }
 

@@ -161,14 +161,73 @@ struct BrowserTestConfig {
     fn report_path(self) -> String Never! { self.report_path }
 }
 
-struct BrowserTestCase {
-    name: String
-    ok: Bool
-    detail: String
+// BrowserTest.rs:17-22, 310-377: the report data model a browser run records.
+// Lines, columns, sequences and byte counts are the Rust u32/usize facts.
+struct BrowserTestSource {
+    path: String
+    line: Int
+    column: Int
 }
 
-struct BrowserReport {
-    title: String
+struct BrowserTestAction {
+    sequence: Int
+    kind: String
+    fact: String
+}
+
+struct BrowserTestSnapshot {
+    kind: String
+    hash: String
+    bytes: Int
+    path: String
+    source: BrowserTestSource
+}
+
+struct BrowserTestEventFact {
+    kind: String
+    request_id_hash: String
+    request_method: String
+    url_hash: String
+    status_code: Int
+    is_blocked: Bool
+}
+
+struct BrowserTestArtifact {
+    name: String
+    path: String
+    mime: String
+    bytes: Int
+    hash: String
+    source: BrowserTestSource
+}
+
+struct BrowserTestAttempt {
+    test: String
+    engine: String
+    attempt: Int
+    passed: Bool
+    expected_failure: Bool
+    duration_ms: Int
+    source: BrowserTestSource
+    actions: [BrowserTestAction]
+    snapshots: [BrowserTestSnapshot]
+    events: [BrowserTestEventFact]
+    artifacts: [BrowserTestArtifact]
+    trace: [String]
+    error: String
+}
+
+struct BrowserTestCase {
+    name: String
+    selected: Bool
+    attempts: [BrowserTestAttempt]
+}
+
+struct BrowserTestReport {
+    source_root: String
+    reporter: String
+    ui: Bool
+    watch: Bool
     cases: [BrowserTestCase]
 }
 
@@ -201,12 +260,11 @@ fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
     Ok(BrowserTimeout{milliseconds: ms})
 }
 
-fn locked(engine: String) -[FS, IO, Env]> BrowserLocked BrowserError! {
+// The project's pin, read through FS alone (architecture.md:1287-1288): the
+// `.jet/lock` of the working directory, the project root a program runs from.
+fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
-    env :: core.sys.__startup_env()
-    root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
-    lock_path :: core.web.browser.__path_join(root, ".jet/lock")
-    raw :: core.web.browser.__read_text(lock_path) ?? return Err(BrowserError{kind: "missing lock"})
+    raw :: core.web.browser.__read_text(".jet/lock") ?? return Err(BrowserError{kind: "missing lock"})
     entry :: parse_locked(raw, engine)
     if !core.web.browser.__is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
     size :: core.web.browser.__file_size(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
@@ -284,9 +342,49 @@ fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser
 
 
 
-fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
-    BrowserLocator{selector: selector, page_id: page.id}
+fn selected(config: BrowserTestConfig, name: String) -> Bool Never! {
+    // BrowserTest.rs:262-271: an empty filter selects everything; otherwise any
+    // comma- or ASCII-whitespace-separated glob pattern may match the name.
+    if config.filter.trim().len() == 0 -> return true
+    value :: name.bytes()
+    pattern := [U8]{}
+    loop b in config.filter.bytes() {
+        n :: Int.from_u8(b)
+        if n == 44 || n == 32 || n == 9 || n == 10 || n == 12 || n == 13 {
+            if pattern.len() > 0 && glob_match(pattern, value) -> return true
+            pattern = [U8]{}
+        } else {
+            &pattern.push(b)
+        }
+    }
+    pattern.len() > 0 && glob_match(pattern, value)
 }
+
+fn glob_match(pattern: [U8], value: [U8]) -> Bool Never! {
+    // BrowserTest.rs:273-300: `*` matches any run and `?` any one byte.
+    p := 0
+    v := 0
+    star := -1
+    star_value := 0
+    loop v < value.len() {
+        if p < pattern.len() && (pattern[p] == value[v] || pattern[p] == (U8{63})) {
+            p += 1
+            v += 1
+        } else if p < pattern.len() && pattern[p] == (U8{42}) {
+            star = p
+            p += 1
+            star_value = v
+        } else {
+            if star < 0 -> return false
+            p = star + 1
+            star_value += 1
+            v = star_value
+        }
+    }
+    loop p < pattern.len() && pattern[p] == (U8{42}) -> p += 1
+    p == pattern.len()
+}
+
 fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
     // Source positions clamp to u32 exactly; the retained fixture owns actions,
     // subscriptions and cleanup when context/page creation fails.
@@ -317,51 +415,33 @@ fn generate_source(name: String, body: String, base_url: String) -> String Brows
     Ok(out)
 }
 
-fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
-
-fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
-    cases := [BrowserTestCase]{}
-    loop c in report.cases -> &cases.push(c)
-    &cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
-    BrowserReport{title: report.title, cases: cases}
+fn report_new(config: BrowserTestConfig) -> BrowserTestReport Never! {
+    // BrowserTest.rs:379-387.
+    BrowserTestReport{source_root: config.source_root, reporter: config.reporter, ui: config.ui, watch: config.watch, cases: [BrowserTestCase]{}}
 }
 
-fn report_html(report: BrowserReport) -> String Never! {
-    out := "<!doctype html><html><head><title>{esc(report.title)}</title></head><body><h1>{esc(report.title)}</h1><ol>"
-    loop c in report.cases {
-        cls := "pass"
-        if !c.ok -> cls = "fail"
-        out = "{out}<li class=\"{cls}\">{esc(c.name)}</li>"
-    }
-    out = "{out}</ol></body></html>"
+fn report_add_case(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport Never! {
+    // BrowserTest.rs:831-838: append, then order the cases by name.
+    out := report
+    &out.cases.push(case)
+    &out.cases.sort_by((left: BrowserTestCase, right: BrowserTestCase) -> left.name <=> right.name)
     out
 }
 
-fn report_json(report: BrowserReport) -> String Never! {
-    out := "{{\"title\":\"{esc_json(report.title)}\",\"passed\":{passed(report)},\"failed\":{failed(report)},\"cases\":["
-    loop i in 0..<report.cases.len() {
-        c :: report.cases[i]
-        if i > 0 -> out = "{out},"
-        ok := "true"
-        if !c.ok -> ok = "false"
-        out = "{out}{{\"name\":\"{esc_json(c.name)}\",\"ok\":{ok}}}"
-    }
-    "{out}]}}"
-}
+fn report_html(report: BrowserTestReport) -> String Never! { core.web.browser.__report_html(report) }
 
-fn report_text(report: BrowserReport) -> String Never! {
-    out := "{report.title}\n"
-    loop c in report.cases {
-        mark := "ok"
-        if !c.ok -> mark = "FAIL"
-        out = "{out}[{mark}] {c.name}\n"
-    }
-    out = "{out}{passed(report)} passed, {failed(report)} failed\n"
-    out
-}
+fn report_json(report: BrowserTestReport) -> String Never! { core.web.browser.__report_json(report) }
 
-fn report_exit_code(report: BrowserReport) -> Int Never! {
-    if failed(report) > 0 -> return 1
+fn report_text(report: BrowserTestReport) -> String Never! { core.web.browser.__report_text(report) }
+
+fn report_exit_code(report: BrowserTestReport) -> Int Never! {
+    // BrowserTest.rs:840-851: a selected case fails unless its last attempt passed.
+    loop case in report.cases {
+        if case.selected {
+            if case.attempts.len() == 0 -> return 1
+            if !case.attempts[case.attempts.len() - 1].passed -> return 1
+        }
+    }
     0
 }
 
@@ -403,64 +483,6 @@ fn server_logs(server: BrowserTestServer) -> String Never! { server.logs() }
 
 
 
-fn passed(report: BrowserReport) -> Int Never! {
-    n := 0
-    loop c in report.cases {
-        if c.ok -> n = n + 1
-    }
-    n
-}
-
-fn failed(report: BrowserReport) -> Int Never! { report.cases.len() - passed(report) }
-
-fn esc(text: String) -> String {
-    raw :: text.bytes()
-    out := [U8]{}
-    loop b in raw {
-        n :: b
-        if n == 38 {
-            push_str(&out, "&amp;")
-        } else {
-            if n == 60 {
-                push_str(&out, "&lt;")
-            } else {
-                if n == 62 {
-                    push_str(&out, "&gt;")
-                } else {
-                    if n == 34 {
-                        push_str(&out, "&quot;")
-                    } else {
-                        if n == 39 -> push_str(&out, "&#39;") else -> &out.push(b)
-                    }
-                }
-            }
-        }
-    }
-    String.from_bytes(out) ?? ""
-}
-
-fn esc_json(text: String) -> String {
-    raw :: text.bytes()
-    out := [U8]{}
-    loop b in raw {
-        n :: b
-        if n == 34 || n == 92 {
-            &out.push(U8{92})
-            &out.push(b)
-        } else {
-            if n == 10 {
-                push_str(&out, "\\n")
-            } else {
-                if n == 13 {
-                    push_str(&out, "\\r")
-                } else {
-                    if n == 9 -> push_str(&out, "\\t") else -> &out.push(b)
-                }
-            }
-        }
-    }
-    String.from_bytes(out) ?? ""
-}
 
 fn push_str(out: &[U8], s: String) Never! {
     loop b in s.bytes() -> &out.push(b)

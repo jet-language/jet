@@ -91,12 +91,16 @@ fn run() {
 
     replay :: game.Replay.record(replay_path)
     transcript :: game.run(scene, replay: replay, frames: 600)
-    print(transcript)
+    // Paths print relative to the fixture root, so the output is the same
+    // from a repository checkout and from the package directory.
+    shown_root :: "{root}/"
+    print(transcript.replace(shown_root, ""))
 
     state :: games.SaveState{x: accumulator.current_tick, paused: false}
     paused_state :: games.pause_toggle(state)
     encoded :: games.save_encode(paused_state)
-    save_path :: "/tmp/jet-games-battery-save.txt"
+    save_dir :: fs.temp_dir("games-battery-save") ?? panic("save temp dir")
+    save_path :: "{save_dir.path}/save.txt"
     fs.write(save_path, encoded) ?? panic("save write")
     restored_raw :: fs.read(save_path) ?? panic("save read")
     restored :: games.save_decode(restored_raw)
@@ -109,14 +113,18 @@ fn run() {
     48000,
     256,
     samples -> {
-        total := 0.0
+        total := Float{0.0}
         loop sample in samples -> total += sample
     },
     )
-    stream.next_deadline()
+    stream.next_deadline().drop("the stream is armed; this run does not schedule against its first deadline")
+    &stream.cancel()
     receipt :: stream.receipt()
-    stream.cancel()
-    print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} callbacks:{receipt.completed_callbacks} missed:{receipt.missed}")
+    // Callback and miss counts are host timing observations; the golden
+    // prints the requested shape and the joined worker only.
+    print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} cancelled:{stream.is_cancelled()} joined:{receipt.end_identity > 0}")
     print("music_stream=unavailable")
-    print("scene_image={image:Debug} scene_sound={sound:Debug}")
+    image_text :: "{image:Debug}".replace(shown_root, "")
+    sound_text :: "{sound:Debug}".replace(shown_root, "")
+    print("scene_image={image_text} scene_sound={sound_text}")
 }

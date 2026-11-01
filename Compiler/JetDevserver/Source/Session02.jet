@@ -6,6 +6,7 @@ use jet_foundation.HotSwap.[StateRetentionFact, StateRetentionDecision]
 use jet_foundation.Game.[JetGameChangeFact]
 use jet_devserver.CapturePolicy.[RecordIndexCaptureSink]
 use jet_foundation.[foundation_json_escape]
+use jet_foundation.Devtools.[JetDevtoolsLifecycleState]
 use core.encoding.[Dyn]
 
 impl ResidentDevSession {
@@ -251,7 +252,6 @@ fn trim_capture_facts(facts: [CaptureSessionFact]) -> Unit {
 }
 // Rust: crates/jet-devserver/src/Session.rs:2307
 impl ResidentDevSession.RecordIndexCaptureSink {
-    alias Error :: String
     // Rust: crates/jet-devserver/src/Session.rs:2310
     fn record_capture_start(self: &Self, fact: &CaptureStartFact) Err! { ResidentDevSession.record_capture_start(self, fact) }
     // Rust: crates/jet-devserver/src/Session.rs:2314
@@ -275,7 +275,7 @@ fn persist_outcome_fact(outcome: PersistOutcome) -> LiveValueFact {
 // Rust: crates/jet-devserver/src/Session.rs:2355
 fn optional_fact(value: String) -> String? { if !value.is_empty() -> .Val(value) else -> .None }
 // Rust: crates/jet-devserver/src/Session.rs:2359
-fn devtools_session_state(value: String) -> DevtoolsSessionState {
+fn devtools_session_state(value: String) -> JetDevtoolsLifecycleState {
     if value == {
         "starting" -> .Starting
         "building" -> .Building

@@ -1,9 +1,29 @@
 // core-conformance: app.invalidate
 use app as application
+use core.reactive.loadable.[Loadable]
+
+#Error
+enum LoadError {
+    Negative
+}
+
+fn load(id: Int) -[DB.Read]> Int LoadError! {
+    if id < 0 -> return Err(LoadError.Negative)
+    id * 10
+}
+
+fn shown(state: Loadable<Int, LoadError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(_) -> "failed"
+        else -> "pending"
+    }
+}
 
 fn run() {
-    query :: application.live("users", "alice")
-    print(application.live_get(query))
-    hit :: application.invalidate("users")
-    assert(hit > 0)
+    binding :: application.live(load, 4)
+    print(shown(application.state(binding)))
+    application.invalidate(load, 4)
+    print(shown(application.state(binding)))
+    print(application.live_stats())
 }

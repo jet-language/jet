@@ -24,7 +24,7 @@ for(const name of readdirSync(fixtures).filter(name=>name.endsWith('.fixture')).
  mkdirSync(cwd,{recursive:true});
  copyFileSync(join(fixtures,name),join(cwd,'main.jet'));
  const expected=run(cwd,[],{});
- const stressed=run(cwd,['--release'],{JET_OPT_SSA_STRESS:'1',JET_OPT_SSA_VERIFY:'1'});
+ const stressed=run(cwd,['--release'],{JET_OPT_SSA_STRESS:'1',JET_OPT_VERIFY:'1'});
  const head=text=>text.split('\n')[0];
  if(stressed.status===expected.status&&stressed.stdout===expected.stdout&&head(stressed.stderr)===head(expected.stderr)){
   console.log(`ok ${name}`);

@@ -1,0 +1,24 @@
+# RealtimeStream.next_deadline() returns core.time's Instant. A program that
+# imports only core.rt still builds and runs it on every tier, because core.rt
+# imports core.time (#6297 C4; before, IR left Instant unlowered: ICE).
+fixture: fixtures/rt_next_deadline_without_time_import
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = rt_next_deadline_without_time_import.out
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = rt_next_deadline_without_time_import.out
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = rt_next_deadline_without_time_import.out
+stderr: empty
+step: jet build --optimize=full main.jet
+exit: 0
+step aot2: built
+exit: 0
+stdout: = rt_next_deadline_without_time_import.out

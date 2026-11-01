@@ -1,0 +1,143 @@
+// D-ENUM-BACKING1 / D-ENUM-INGRESS1: `#Layout(U8) enum Mode { Read = 1, Write }`
+// is a numbered enum. Each case's number is its written value, or one more
+// than the case before it (the first case counts from 0). Before
+// registration the enum gains two ordinary methods, so every tier runs the
+// same source:
+//   `mode.to_int() -> Int`             the case's number
+//   `Mode.from_int(value: Int) -> Mode Err!`      the case with that number,
+//                                     or an error naming the number
+// A case payload (E1120), a number outside the backing type (E1121) and a
+// number two cases share (E1122) are refused; a case number is an integer
+// literal (E0035), so the checks see every number.
+use jet_foundation.[
+    Diagnostic,
+    EnumDef,
+    Expr,
+    Func,
+    Item,
+    Marker,
+    UnOp,
+    expr_span,
+    jet_layout_integer_backing_max,
+    jet_layout_integer_backing_min,
+    jet_target_layout_enum_backing,
+]
+use jet_parser.[
+    parse_source,
+]
+
+fn sema_enum_numbers_expand(items: &[Item], diagnostics: &[Diagnostic]) {
+    loop index in 0..<items.len() {
+        if items[index] == .Enum(definition) {
+            backing :: jet_target_layout_enum_backing(definition) ?? next
+            numbers :: sema_enum_numbers_checked(definition, backing, &diagnostics) ?? next
+            methods :: sema_enum_numbers_methods(definition, numbers, &diagnostics) ?? next
+            updated := definition
+            loop method in methods -> &updated.methods.push(method)
+            items[index] = Item.Enum{value: updated}
+        }
+    }
+}
+
+// Every case's number in declaration order, or None after a diagnostic.
+fn sema_enum_numbers_checked(definition: EnumDef, backing: String, diagnostics: &[Diagnostic]) -> [Int]? {
+    marker :: sema_enum_numbers_layout_marker(definition)
+    loop variant in definition.variants {
+        if !(variant.payload == .Unit) {
+            &diagnostics.push(sema_error("E1120", marker.span, "`#Layout({backing})` backs only a payload-free enum, and case `{variant.name}` of `{definition.name}` carries a payload", "a backing type gives each case one number; a case with fields is more than a number", "remove the payload from `{variant.name}`, or remove `#Layout({backing})` and convert with your own methods"))
+            return None
+        }
+    }
+    least :: jet_layout_integer_backing_min(backing)
+    greatest :: jet_layout_integer_backing_max(backing)
+    numbers := [Int]{}
+    valid := true
+    next_number := 0
+    loop variant in definition.variants {
+        number := next_number
+        if variant.discriminant_expr == .Val(expression) {
+            if sema_enum_numbers_literal(expression) == .Val(written) {
+                number = written
+                if number < least || number > greatest {
+                    &diagnostics.push(sema_error("E1121", expr_span(expression), "case `{variant.name}` is {number}, which `{backing}` can't hold", "`#Layout({backing})` stores every case number of `{definition.name}` as a `{backing}` ({least} to {greatest})", "use a number from {least} to {greatest}, or a wider backing type"))
+                    valid = false
+                }
+            } else {
+                &diagnostics.push(sema_error("E0035", expr_span(expression), "case `{variant.name}` of `{definition.name}` needs a literal number", "`#Layout({backing})` case numbers are checked against `{backing}` and against each other where the enum is declared", "write the number as an integer literal, such as `{variant.name} = {next_number}`"))
+                valid = false
+            }
+        } else if number > greatest {
+            &diagnostics.push(sema_error("E1121", variant.name_span, "case `{variant.name}` counts up to {number}, which `{backing}` can't hold", "a case without a number is one more than the case before it, and `#Layout({backing})` stores numbers from {least} to {greatest}", "give `{variant.name}` a number from {least} to {greatest}, or use a wider backing type"))
+            valid = false
+        }
+        loop earlier in 0..<numbers.len() {
+            if numbers[earlier] == number {
+                &diagnostics.push(sema_error("E1122", variant.name_span, "cases `{definition.variants[earlier].name}` and `{variant.name}` of `{definition.name}` are both {number}", "`{definition.name}.from_int({number})` has to name one case", "give `{variant.name}` a number no other case uses"))
+                valid = false
+                break
+            }
+        }
+        &numbers.push(number)
+        // The greatest Int has no successor; a following unnumbered case is
+        // refused by the range check above.
+        next_number = if number == 9223372036854775807 -> number else -> number + 1
+    }
+    if !valid -> return None
+    Val(numbers)
+}
+
+fn sema_enum_numbers_layout_marker(definition: EnumDef) -> Marker Never! {
+    loop candidate in definition.type_markers {
+        if candidate.name == "Layout" -> return candidate
+    }
+    panic("a backed enum has a `#Layout` marker")
+}
+
+fn sema_enum_numbers_literal(expression: Expr) -> Int? {
+    if expression == {
+        .Int(number, _, _, _, _) -> Val(number)
+        .Unary(op, operand, _, _) -> {
+            if op != UnOp.Neg -> return None
+            if operand == {
+                .Int(number, _, _, _, _) -> Val(0 - number)
+                else -> None
+            }
+        }
+        else -> None
+    }
+}
+
+// The generated `to_int` and `from_int`, omitting a method the enum declares
+// itself.
+fn sema_enum_numbers_methods(definition: EnumDef, numbers: [Int], diagnostics: &[Diagnostic]) -> [Func]? {
+    has_to_int :: loop method in definition.methods {
+        if method.name == "to_int" -> break true
+    } ?? false
+    has_from_int :: loop method in definition.methods {
+        if method.name == "from_int" -> break true
+    } ?? false
+    if has_to_int && has_from_int -> return Val([Func]{})
+    name :: definition.name
+    out := [String]{}
+    &out.push("impl {name} {{\n")
+    if !has_to_int {
+        &out.push("    fn to_int(self) -> Int {{\n        if self == {{\n")
+        loop index in 0..<numbers.len() -> &out.push("            .{definition.variants[index].name} -> {numbers[index]}\n")
+        &out.push("        }}\n    }}\n")
+    }
+    if !has_from_int {
+        &out.push("    fn from_int(value: Int) -> {name} Err! {{\n        if value == {{\n")
+        loop index in 0..<numbers.len() -> &out.push("            {numbers[index]} -> Ok({name}.{definition.variants[index].name})\n")
+        &out.push("            else -> Err(\"{{value}} is not a case number of `{name}`\")\n        }}\n    }}\n")
+    }
+    &out.push("}}\n")
+    parsed :: parse_source(out.join("").bytes())
+    if parsed.diagnostics.len() > 0 || parsed.program.items.len() != 1 {
+        &diagnostics.push(sema_error("E0153", definition.name_span, "enum `{name}` failed to expand its `to_int` and `from_int` methods", "the compiler generates them from the `#Layout` case numbers, and a fragment did not parse", "check the enum declaration for typos; if this persists, file a bug"))
+        return None
+    }
+    if parsed.program.items[0] == {
+        .Impl(block) -> Val(block.methods)
+        else -> None
+    }
+}

@@ -55,7 +55,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
     trap_store(data, jet_int_owned_from_i64(count))
     at := I64{0}
     loop at < native {
-        trap_store(data + (at + I64{1}) * I64{8}, jet_int_owned_from_i64(net_load_uint(gids + at * I64{4}, I64{4})))
+        trap_store(wrapping(data + (at + I64{1}) * I64{8}), jet_int_owned_from_i64(net_load_uint(wrapping(gids + at * I64{4}), I64{4})))
         at += I64{1}
     }
     jet_rt_free(gids, native * I64{4} + I64{8}, I64{8})
@@ -103,8 +103,8 @@ fn sys_some(some: I64, value: I64) -> I64 {
         os_store_u8(available, I64{1})
         os_store_i64(count, jet_int_owned_from_i64(result))
         os_store_i64(first, os_load_i64(averages))
-        os_store_i64(second, os_load_i64(averages + I64{8}))
-        os_store_i64(third, os_load_i64(averages + I64{16}))
+        os_store_i64(second, os_load_i64(wrapping(averages + I64{8})))
+        os_store_i64(third, os_load_i64(wrapping(averages + I64{16})))
     }
     jet_rt_free(averages, I64{24}, I64{8})
 }
@@ -117,7 +117,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     times :: jet_rt_alloc(I64{16}, I64{8})
     trap_store(times, access)
-    trap_store(times + I64{8}, modified)
+    trap_store(wrapping(times + I64{8}), modified)
     name :: fd_c_path(path)
     sys_errno_clear()
     result :: net_i32(sys_utime(name, times))
@@ -136,9 +136,9 @@ fn sys_some(some: I64, value: I64) -> I64 {
     #Unsafe("buffer owns an initialized struct tms; the caller lends the tuple's Bool byte and six Int words") {
         os_store_u8(available, I64{1})
         os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer)))
-        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(buffer + I64{8})))
-        os_store_i64(child_user, jet_int_owned_from_i64(os_load_i64(buffer + I64{16})))
-        os_store_i64(child_system, jet_int_owned_from_i64(os_load_i64(buffer + I64{24})))
+        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{8}))))
+        os_store_i64(child_user, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{16}))))
+        os_store_i64(child_system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{24}))))
         os_store_i64(elapsed, jet_int_owned_from_i64(now))
         os_store_i64(ticks, jet_int_owned_from_i64(rate))
     }
@@ -151,7 +151,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
     length :: rt_text_len(path)
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) {
+        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) {
             rt_text_store(error, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
             return I64{0}
         }
@@ -167,6 +167,32 @@ fn sys_some(some: I64, value: I64) -> I64 {
     I64{1}
 }
 
+// core.sys.decode's Dotenv.file read: std::fs::read_to_string, taking no
+// injected FS checkpoint. The error is (not_found, io::Error's Display); a
+// NUL byte is std's CString refusal.
+#Export(c) fn jet_sys_dotenv_read_raw(path: I64, ok: I64, not_found: I64, cause: I64) -> I64 {
+    rt_text_store(not_found, I64{0})
+    if testing_has_nul(path) {
+        rt_text_store(cause, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+        return I64{0}
+    }
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    status :: env_read_file(path, out)
+    value :: rt_text_word(out)
+    jet_rt_free(out, I64{8}, I64{8})
+    if (status == I64{1}) {
+        rt_text_store(ok, value)
+        return I64{1}
+    }
+    if (status == I64{0}) {
+        rt_text_store(not_found, I64{1})
+        rt_text_store(cause, host_errno_cause(I64{2}))
+        return I64{0}
+    }
+    rt_text_store(cause, value)
+    I64{0}
+}
+
 // OsExtra.rs:19 std::env::var_os(name).into_encoded_bytes(): the process
 // environment (the logical overlay never writes it). musl getenv finds no
 // name holding '=' (or empty); std refuses an interior NUL as absent.
@@ -176,7 +202,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
     if (length == I64{0}) -> return I64{0}
     at := I64{0}
     loop at < length {
-        byte :: rt_text_byte(rt_text_data(name) + at)
+        byte :: rt_text_byte(wrapping(rt_text_data(name) + at))
         if (byte == I64{0} || byte == I64{61}) -> return I64{0}
         at += I64{1}
     }

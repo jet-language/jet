@@ -1,9 +1,10 @@
 # Original tests/services_runtime.rs:169-181; verbatim input and asserted predicates.
-# PENDING-SAME-HEAD; expected files are original asserted constants, not blessed captures.
+# PENDING-SAME-HEAD; expected files are the original asserted constants with two hand-derived corrections below, not blessed captures.
 fixture: service_authority_receipts_match_interpreter.fixture
-# volatile: source line106 prints audit; these two originals intentionally retain their audit-less exact stdout.
+# Fixture migrated: the source prints `audit:...` first, so the expected stream starts with `audit:true:1` as the same source's AOT assertion does (tests/services_runtime.rs:148-150).
+# Fixture migrated: `retain:delivered`, not the original `retain:accepted`: retain answers the same receipt the preceding duplicate send read as Delivered, and the retention record only extends retained_until (Rust ServiceAuthority.rs 2876-2897 and 3139-3179; Core/Service/Service.jet runtime_retain).
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet run main.jet
 exit: 0
-stdout: = expected.out
+stdout: = service_authority_receipts_match_interpreter.fixture/expected.out

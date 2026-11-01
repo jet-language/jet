@@ -1,0 +1,38 @@
+route-list:/orders?limit=3
+route-detail:/orders/1
+query-decode:3
+route-report:route=/orders/:id params=id=1 status=Preloading cache=/orders/1?limit=3
+form-valid:true
+form-invalid:item: required
+<form action="/orders" method="POST"><label>item<input name="item" type="text" value="" required></label><span class="error">required</span><label>quantity<input name="quantity" type="number" value="0" required></label><button type="submit">Submit</button></form>
+query:before=orders.list:fresh:1 invalidated=2 after=orders.list:fetching:3 data=orders.list=count=1
+island:{"order_count":1,"signed_in":"alice"}
+register:true
+login-ok:200
+login-failure:401
+protected-ok:200
+protected-failure:401
+home:200
+redirect:303:/orders
+list-before:200:<h1>Orders</h1><p>request-path=/orders?limit=3</p><p>orders=1</p><p>cache=0</p>
+create:201
+list-after:200:<h1>Orders</h1><p>request-path=/orders</p><p>orders=2</p><p>cache=1</p>
+protected-failure-http:401
+detail:200
+login:200:cookie=true
+protected:200
+asset:200:<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Orders</title>
+  </head>
+  <body>
+    <main data-island="orders" data-props='{"order_count":1,"signed_in":"alice"}'>
+      <h1>Orders</h1>
+      <div id="orders-island">Loading orders island…</div>
+    </main>
+  </body>
+</html>
+

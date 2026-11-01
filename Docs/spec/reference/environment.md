@@ -31,7 +31,8 @@ one exists instead of adding another spelling for the same job.
 | `JET_FUZZ_SEED` | unsigned integer | Makes fuzz generation reproducible. |
 | `JET_FUZZ_TIME_MS` | non-negative integer | Sets the fuzz time budget in milliseconds. |
 | `JET_KEYS_DIR` | path | Overrides the signing-key directory used by publishing and secrets tooling. |
-| `JET_PROP_SEED` | unsigned integer | Replays a property-test run with the printed seed. |
+| `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. |
+| `JET_RAYLIB_CAPTURE` | path | Writes each frame that `core.game.raylib.end_drawing` presents to the path as a PAM (P7, RGB_ALPHA) image of the canvas. |
 | `JET_RAYLIB_DISPLAY` | `1` | Enables the real raylib display bridge; without it the bridge stays headless. |
 | `JET_REGISTRY_CACHE_DIR` | path | Overrides the local registry-index cache. |
 | `JET_REGISTRY_NAME` | registry name | Selects the named registry used by Jetpack doctor checks. |
@@ -54,7 +55,7 @@ one exists instead of adding another spelling for the same job.
 | --- | --- | --- |
 | `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`). When set, `Tools/agent/verify-full.sh` runs `Tools/agent/compiler-diff.mjs` (canary, then all corpora) against the reference compiler. |
 | `JET_CANVAS_PREREQUISITES` | `strict` | Makes Canvas scenario verification fail instead of skip when a prerequisite is absent. |
-| `JET_CHECKED_ALLOC` | `1` | **Internal** debugging aid for generated programs, read once at process start: every runtime heap block carries a canary, a tail guard and its allocating call chain, freed payloads are poisoned and quarantined, and a double free, foreign free, wrong-layout free, write past the end or write after free aborts with a report naming the call sites (`Compiler/JetRuntime/Source/Alloc.jet`, checked mode). Off, it costs one branch per allocation and free. |
+| `JET_CHECKED_ALLOC` | `1` | **Internal** debugging aid for generated programs. It is read when jet builds a program, which links the checked heap only then, and once at process start: every runtime heap block carries a canary, a tail guard and its allocating call chain, freed payloads are poisoned and quarantined, and a double free, foreign free, wrong-layout free, write past the end or write after free aborts with a report naming the call sites (`Compiler/JetRuntime/Source/Alloc.jet`, checked mode). A program built without it but started with it set stops before user code with exit status 70 and a message to build it again with the variable set; it never runs unchecked. Off, it costs one branch per allocation and free. |
 | `JET_PERF_MAP` | `1` | **Internal** profiling aid for `jet run` and `jet dev`: before a program runs from memory, jet writes `/tmp/perf-<pid>.map` from its image's symbol table, so `perf report` shows its function names (`Compiler/JetBackend/Source/Image/Loader.jet`, `x64_image_perf_map`). Unset, nothing is written. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |

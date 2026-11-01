@@ -65,6 +65,12 @@ fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> Str
         line :: raw.trim().copy()
         if line.starts_with(prefix) -> return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
     }
+    kit_known_ledger(root, entry.path)
+}
+
+// The central ledger row owning one corpus entry: a row ID names the entry path
+// itself, a file entry without `.jet`, or a project entry's directory.
+fn kit_known_ledger(root: String, path: String) -> String {
     ledger :: kit_exec_optional(files.join(root, "Tools/testkit/known-failing.tsv")) ?? ""
     loop raw in ledger.split("\n") {
         line :: raw.trim().copy()
@@ -72,7 +78,7 @@ fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> Str
         fields :: line.split("\t").to_list()
         if fields.len() != 3 -> next
         id :: fields[0]
-        if entry.path == id || entry.path == ("{id}.jet") || entry.path == ("{id}/run.jet") -> return "{fields[1]} {fields[2]}"
+        if path == id || path == ("{id}.jet") || path == ("{id}/run.jet") -> return "{fields[1]} {fields[2]}"
     }
     ""
 }

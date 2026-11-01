@@ -160,6 +160,14 @@ CORE_SOURCE_HTTP_MESSAGE_OWNERS :: [CoreSourceOwnedType]{
     {path: "Core/Http/Http.jet", name: "HTTPRequest"},
     {path: "Core/Http/Http.jet", name: "HTTPResponse"},
 }
+// D-VALIDATE1=A: the use-site rule builder whose `check(…, at: field, …)`
+// Sema checks against the validated type's fields.
+CORE_SOURCE_VALIDATE_OWNER :: [CoreSourceOwnedType]{
+    {path: "Core/Encoding/Validate.jet", name: "Validate"},
+}
+fn core_source_is_validate(identity: String) -> Bool Never! {
+    core_source_owns_type_in(CORE_SOURCE_VALIDATE_OWNER, identity)
+}
 
 // Whether `method` at `nargs` may target a reserved source method, so the
 // caller resolves the receiver's checked identity first.
@@ -177,9 +185,13 @@ fn core_source_receiver_method(identity: String, method: String, nargs: Int) -> 
 
 // Exact Rust CoreModuleExports table: an established bare spelling's
 // declaring source owner, never a general public-alias re-export mechanism.
+// `declared` is set when the prelude renames the declaration (`Date` is
+// `pub use core.time.[LocalDate as Date]`); otherwise the bare spelling is the
+// declared name.
 struct CoreBareSourceModule {
     name: String
     module_name: String
+    declared: String{""}
 }
 CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "URL", module_name: "core.net.url"},
@@ -204,13 +216,32 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "HTTPCorsPolicy", module_name: "core.http.server"},
     {name: "HTTPCorsOrigins", module_name: "core.http.server"},
     {name: "Perf", module_name: "core.perf"},
-    {name: "RNG", module_name: "core.testing"},
+    {name: "RNG", module_name: "core.math.random"},
     {name: "Vec2", module_name: "core.math"},
     {name: "Vec3", module_name: "core.math"},
     {name: "Vec4", module_name: "core.math"},
     {name: "Mat3", module_name: "core.math"},
     {name: "Mat4", module_name: "core.math"},
     {name: "F64x4", module_name: "core.math"},
+    {name: "F32x4", module_name: "core.math"},
+    {name: "F64x2", module_name: "core.math"},
+    {name: "F32x8", module_name: "core.math"},
+    {name: "I8x16", module_name: "core.math"},
+    {name: "U8x16", module_name: "core.math"},
+    {name: "I16x8", module_name: "core.math"},
+    {name: "U16x8", module_name: "core.math"},
+    {name: "I32x4", module_name: "core.math"},
+    {name: "U32x4", module_name: "core.math"},
+    {name: "I64x2", module_name: "core.math"},
+    {name: "U64x2", module_name: "core.math"},
+    {name: "I8x32", module_name: "core.math"},
+    {name: "U8x32", module_name: "core.math"},
+    {name: "I16x16", module_name: "core.math"},
+    {name: "U16x16", module_name: "core.math"},
+    {name: "I32x8", module_name: "core.math"},
+    {name: "U32x8", module_name: "core.math"},
+    {name: "I64x4", module_name: "core.math"},
+    {name: "U64x4", module_name: "core.math"},
     {name: "ScreenPoint", module_name: "core.math"},
     {name: "ScreenDelta", module_name: "core.math"},
     {name: "WorldPoint", module_name: "core.math"},
@@ -232,15 +263,31 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "Complex", module_name: "core.math"},
     {name: "eprint", module_name: "core.term"},
     {name: "debug", module_name: "core.term"},
+    {name: "input", module_name: "core.term"},
     {name: "read_file", module_name: "core.files"},
     {name: "write_file", module_name: "core.files"},
     {name: "file_exists", module_name: "core.files"},
-    {name: "Date", module_name: "core.time"},
+    {name: "Date", module_name: "core.time", declared: "LocalDate"},
+    {name: "Clock", module_name: "core.time"},
+    {name: "measurement", module_name: "core.units"},
     {name: "keep", module_name: "core.prelude"},
+    {name: "min", module_name: "core.prelude"},
+    {name: "max", module_name: "core.prelude"},
+    {name: "clamp", module_name: "core.prelude"},
+    {name: "Validate", module_name: "core.encoding.validate"},
 }
 fn core_bare_source_module(name: String) -> String? Never! {
     loop row in CORE_BARE_SOURCE_MODULES {
         if row.name == name -> return Val(row.module_name)
+    }
+    None
+}
+
+// The Core type a prelude rename spells bare (`Date` -> `LocalDate`), when
+// `name` is one.
+fn core_bare_source_declared(name: String) -> String? Never! {
+    loop row in CORE_BARE_SOURCE_MODULES {
+        if row.name == name && row.declared != "" -> return Val(row.declared)
     }
     None
 }
@@ -325,11 +372,13 @@ fn core_module_enum_variants(module_name: String, name: String) -> [String]? {
 }
 
 // One field of a builtin Core record; rows are authored in CoreRecordRows.jet
-// and the first match wins.
+// and the first match wins. A `core_only` field is private storage: only Core
+// source reads or writes it, and user code sees no such field.
 struct CoreRecordFieldRow {
     owner: String
     field: String
     ty: Type
+    core_only: Bool{false}
 }
 
 // The declared field list of a Core record users can build with a struct
@@ -381,6 +430,15 @@ fn core_record_leaf(owner: String) -> String Never! {
 
 fn core_record_field(owner: String, field: String) -> Type? {
     core_record_field_in(CORE_RECORD_FIELD_ROWS, core_record_leaf(owner), field)
+}
+
+// Whether `owner.field` is private storage only Core source may touch.
+fn core_record_field_is_core_only(owner: String, field: String) -> Bool Never! {
+    leaf :: core_record_leaf(owner)
+    loop row in CORE_RECORD_FIELD_ROWS {
+        if row.owner == leaf && row.field == field -> return row.core_only
+    }
+    false
 }
 
 // The table is a read parameter, so the scan reads its rows in place.

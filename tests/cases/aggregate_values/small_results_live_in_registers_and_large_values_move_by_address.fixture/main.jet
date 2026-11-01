@@ -1,0 +1,53 @@
+struct Big {
+    a: Int
+    b: Int
+    c: Int
+    d: Int
+    e: Int
+    name: String
+}
+
+struct Box4 {
+    w: Int
+    x: Int
+    y: Int
+    z: Int
+}
+
+fn divmod(n: Int, d: Int) -> (q: Int, r: Int) {
+    (q: n /% d, r: n % d)
+}
+
+fn quad(a: Int) -> (w: Int, x: Int, y: Int, z: Int) {
+    (w: a + 1, x: a + 2, y: a + 3, z: a + 4)
+}
+
+fn look(value: Big) -> Int { value.b + value.d }
+
+fn consume(value: ^Big) -> Int { value.a + value.e + value.name.len() }
+
+// Recursive, so never inlined: its result is built where the caller wants it.
+fn grow(n: Int) -> Box4 {
+    if n == 0 -> return Box4{w: 1, x: 2, y: 3, z: 4}
+    inner :: grow(n - 1)
+    Box4{w: inner.w + 1, x: inner.x + 2, y: inner.y + 3, z: inner.z + 4}
+}
+
+fn run() {
+    total := 0
+    i := 1
+    loop i < 100 {
+        d :: divmod(1000003, i)
+        total += d.q + d.r
+        f :: quad(i)
+        total += f.w + f.x + f.y + f.z
+        i += 1
+    }
+    big :: Big{a: 1, b: 2, c: 3, d: 4, e: 5, name: "jet"}
+    seen :: look(big)
+    used :: consume(^big)
+    g :: grow(3)
+    print(total)
+    print(seen + used)
+    print("{g.w} {g.x} {g.y} {g.z}")
+}

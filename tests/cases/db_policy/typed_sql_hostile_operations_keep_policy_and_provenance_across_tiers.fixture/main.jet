@@ -1,6 +1,29 @@
 
 use app as application
 use core.db as db
+use core.web.[Live]
+
+#Error
+enum TaskError {
+    Read
+}
+
+fn task_bodies(scope: db.DBScope) -[DB.Read]> String TaskError! {
+    rows :: scope.query(SQL{"SELECT body FROM tasks"}) ?? return Err(TaskError.Read)
+    bodies := [String]{}
+    loop row in rows {
+        body :: db.row_text(row, "body") ?? return Err(TaskError.Read)
+        &bodies.push(body)
+    }
+    bodies.join(",")
+}
+
+fn live_text(binding: Live<String, TaskError>) -> String {
+    if application.state(binding) == {
+        .Loaded(value) -> value
+        else -> ""
+    }
+}
 
 fn run() {
     conn := db.open_memory()
@@ -33,19 +56,19 @@ fn run() {
     } ! _error -> {
         print("driver:rejected")
     }
-    scoped.query(SQL{"SELECT body FROM other"}) ? _rows -> {
+    scoped.query(SQL{"SELECT body FROM other JOIN tasks"}) ? _rows -> {
         print("authority:accepted")
     } ! _error -> {
         print("authority:rejected")
     }
 
-    live :: scoped.live(SQL{"SELECT body FROM tasks"}) ?? panic("live")
-    live_before :: application.live_get(live)
+    live :: application.live(task_bodies, scoped.copy())
+    live_before :: live_text(live)
     print("live-before:{live_before.contains(payload)}")
     updated :: "updated"
     _updated :: scoped.execute(SQL{"UPDATE tasks SET body = {updated}"}) ?? panic("update")
-    _invalidated :: application.invalidate("tasks")
-    live_after :: application.live_get(live)
+    application.invalidate(task_bodies)
+    live_after :: live_text(live)
     print("live-after:{live_after.contains(updated)}")
 
     tx_body :: "rolled back"

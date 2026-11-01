@@ -7,8 +7,8 @@ fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
     length :: pairs * I64{2}
     data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{24}, I64{8})
     rt_text_store(output, length)
-    rt_text_store(output + I64{8}, length)
-    rt_text_store(output + I64{16}, data)
+    rt_text_store(wrapping(output + I64{8}), length)
+    rt_text_store(wrapping(output + I64{16}), data)
     data
 }
 
@@ -16,17 +16,17 @@ fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, false)
     pairs := I64{0}
-    entry := rt_text_word(logical_env_root + I64{56})
+    entry := rt_text_word(wrapping(logical_env_root + I64{56}))
     loop entry != (I64{0}) {
         pairs += I64{1}
         entry = rt_text_word(entry)
     }
     data :: compiler_env_columns_storage(pairs, output)
-    entry = rt_text_word(logical_env_root + I64{56})
+    entry = rt_text_word(wrapping(logical_env_root + I64{56}))
     at := I64{0}
     loop entry != (I64{0}) {
-        host_startup_list(rt_text_word(entry + I64{8}), rt_text_word(entry + I64{16}), data + at * I64{48})
-        host_startup_list(rt_text_word(entry + I64{24}), rt_text_word(entry + I64{32}), data + at * I64{48} + I64{24})
+        host_startup_list(rt_text_word(wrapping(entry + I64{8})), rt_text_word(wrapping(entry + I64{16})), wrapping(data + at * I64{48}))
+        host_startup_list(rt_text_word(wrapping(entry + I64{24})), rt_text_word(wrapping(entry + I64{32})), wrapping(wrapping(data + at * I64{48}) + I64{24}))
         entry = rt_text_word(entry)
         at += I64{1}
     }
@@ -38,11 +38,11 @@ fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
     data :: compiler_env_columns_storage(host_env_length, output)
     at := I64{0}
     loop at < host_env_length {
-        row :: host_env_rows + at * I64{24}
+        row :: wrapping(host_env_rows + at * I64{24})
         key :: rt_text_word(row)
-        value :: key + rt_text_word(row + I64{16})
-        host_startup_list(key, rt_text_word(row + I64{8}), data + at * I64{48})
-        host_startup_list(value, host_startup_byte_length(value), data + at * I64{48} + I64{24})
+        value :: wrapping(key + rt_text_word(wrapping(row + I64{16})))
+        host_startup_list(key, rt_text_word(wrapping(row + I64{8})), wrapping(data + at * I64{48}))
+        host_startup_list(value, host_startup_byte_length(value), wrapping(wrapping(data + at * I64{48}) + I64{24}))
         at += I64{1}
     }
 }
@@ -55,12 +55,12 @@ fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
 #Export(c) fn jet_rt_env_key_compare(left: I64, right: I64) -> I64 {
     left_length :: rt_text_word(left)
     right_length :: rt_text_word(right)
-    left_data :: rt_text_word(left + I64{16})
-    right_data :: rt_text_word(right + I64{16})
+    left_data :: rt_text_word(wrapping(left + I64{16}))
+    right_data :: rt_text_word(wrapping(right + I64{16}))
     at := I64{0}
     loop at < left_length && at < right_length {
-        a :: rt_text_byte(left_data + at)
-        b :: rt_text_byte(right_data + at)
+        a :: rt_text_byte(wrapping(left_data + at))
+        b :: rt_text_byte(wrapping(right_data + at))
         if (a < b) -> return I64{-1}
         if (a > b) -> return I64{1}
         at += I64{1}

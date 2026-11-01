@@ -3,6 +3,6 @@ Error [E2404]: `halve` fails with `Err`, which can't propagate into `Never` here
     |
   8 |     loop index in 0..<count -> total += halve(index)
     |                                         ^^^^^
- Why: `halve` is defined at `comptime_inferred_failure_escapes:1:4` with effective failure contract `implicit default !Err`; the caller's `explicit !Never (proven unreachable)` contract has no route from `Err` to `Never`
+ Why: `halve` is defined at `comptime_inferred_failure_escapes.jet:1:4` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`
  Fix: Declare the caller with `Err` as its failure domain, or add `impl Err -> Never { … }`; otherwise handle `halve` locally with `??`
 More: jet-lang.dev/e/E2404

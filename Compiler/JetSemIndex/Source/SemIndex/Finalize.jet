@@ -13,9 +13,10 @@ use jet_foundation.[
     EffectRowEntry,
     Item,
     NameFacts,
+    NameVisibility,
     NamedSpan,
     Span,
-    failure_contract_effective_type,
+    failure_contract_shown_return,
     sha256_hex,
 ]
 use jet_sema.[
@@ -73,12 +74,75 @@ fn semindex_build_symbol_db(registration: SemaRegistrationGraph, checked: SemaGr
         semindex_apply_inferred_effect_rows(&db, module_index, module_ref.program.items, source.alias, source.display, checked.effect_facts)
     }
     semindex_add_import_alias_definitions(&db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
+    semindex_add_declaration_visibility(&db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
+    semindex_add_propagation_hints(&db, checked, module_sources, loaded_module_rows)
     semindex_add_state_graph_hovers(&db, registration, checked.effect_facts, module_sources, loaded_module_rows)
     semindex_add_breadcrumb_hints(&db)
     &db.finalize_index(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
     &db.refresh_effect_hovers()
     db.symbols = semindex_build_semantic_symbol_index(db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
     db
+}
+
+// One module's scoped declaration name (`outer.inner.run`) in the name ledger.
+struct SemIndexScopedDeclaration {
+    module_index: Int
+    name: String
+}
+
+fn semindex_visibility_rank(visibility: NameVisibility) -> Int Never! {
+    if visibility == {
+        .Private -> 0
+        .Package -> 1
+        .Public -> 2
+    }
+}
+
+// #6341: LSP export checks read Sema's checked visibility, never source text.
+// A declaration is only as visible as its least visible enclosing declaration
+// in the same module, so a member of a `priv module` is never Public.
+fn semindex_add_declaration_visibility(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    sources := [Int:Int]{}
+    loop source_index in loaded_module_rows -> sources[semindex_loaded_registration_index(registration, module_sources[source_index])] = source_index
+    own := [SemIndexScopedDeclaration:NameVisibility]{}
+    loop declaration in names.declarations -> own[SemIndexScopedDeclaration{module_index: declaration.module_index, name: declaration.name.copy()}] = declaration.visibility
+    loop declaration in names.declarations {
+        source_index :: sources.get(declaration.module_index) ?? next
+        effective := declaration.visibility
+        prefix := ""
+        segments :: declaration.name.split(".").to_list()
+        loop index in 0..<segments.len() - 1 {
+            prefix = if index == 0 -> segments[index].copy() else -> "{prefix}.{segments[index]}"
+            if own.get(SemIndexScopedDeclaration{module_index: declaration.module_index, name: prefix.copy()}) == .Val(enclosing) {
+                if semindex_visibility_rank(enclosing) < semindex_visibility_rank(effective) -> effective = enclosing
+            }
+        }
+        db.visibility[DeclarationKey{module_path: module_sources[source_index].display.copy(), start: declaration.span.start, end: declaration.span.end}] = effective
+    }
+}
+
+// #6014: a `?` hint after every call whose failure passes up automatically.
+// Sema marks such a call root with a note-less TryWithContext (explicit `?`
+// is a Try, `?(note)` carries its note); the checked bodies are the source,
+// never a second reading of the AST. A generic body's instances share spans.
+fn semindex_add_propagation_hints(db: &SymbolDB, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        seen := [Int:Bool]{}
+        loop checked_module in checked.modules {
+            if checked_module.module_identity != source.module_identity -> next
+            loop function in checked_module.functions {
+                if function.synthetic -> next
+                loop node in function.tree.nodes {
+                    if node.kind == .TryWithContext(_, note, _, _, _, _) {
+                        if note != None || seen.get(node.span.end) != None -> next
+                        seen[node.span.end] = true
+                        &db.inlay.push(InlayHint{span: Span{start: node.span.end, end: node.span.end}, module_path: source.display.copy(), label: "?"})
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Declaration indices retain item/state order without copying the checked AST's
@@ -212,7 +276,7 @@ fn semindex_apply_inferred_effect_rows(db: &SymbolDB, module_index: Int, items: 
                 inferred := [EffectRowEntry]{}
                 loop name in row -> &inferred.push(EffectRowEntry{name: name, span: db.defs[index].def_span})
                 display_ret :: if failure == {
-                    .Checked(value) -> Val(failure_contract_effective_type(value))
+                    .Checked(value) -> failure_contract_shown_return(value)
                     .Unavailable(_) -> ret
                 }
                 signature :: semindex_fn_signature(db.defs[index].name, params, contract, variadic, display_ret, failure, Val(inferred), None, db.view_provenance.get(db.defs[index].identity), access, defaults, policies)

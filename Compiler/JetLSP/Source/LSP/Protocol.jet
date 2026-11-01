@@ -2,7 +2,7 @@
 // Foundation owns the strict bounded protocol parser and JSON quoting.
 use core.encoding.[Dyn]
 use core.term as lsp_protocol_term
-use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
+use jet_foundation.[foundation_parse_protocol_json, foundation_json_integer, foundation_json_quote]
 use jet_devserver.[number]
 
 #Error
@@ -22,10 +22,7 @@ fn lsp_parse_rpc_message(body: String) -> Dyn LSPRPCError! {
     }
     if (message.field("method") ?? return Err(LSPRPCError{code: -32600, message: "Invalid Request"})) != .Text(_) -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
     if message.field("id") == .Val(id) {
-        if id == {
-            .Null | .Int(_) | .Text(_) -> {}
-            else -> { return Err(LSPRPCError{code: -32600, message: "Invalid Request"}) }
-        }
+        if id != .Null && id != .Text(_) && foundation_json_integer(id) == None -> return Err(LSPRPCError{code: -32600, message: "Invalid Request"})
     }
     if message.field("params") == .Val(params) {
         if params == {
@@ -37,11 +34,9 @@ fn lsp_parse_rpc_message(body: String) -> Dyn LSPRPCError! {
 }
 
 fn lsp_serialize_id(id: Dyn) -> String Never! {
-    if id == {
-        .Int(number) -> "{number}"
-        .Text(text) -> foundation_json_quote(text)
-        else -> "null"
-    }
+    if id == .Text(text) -> return foundation_json_quote(text)
+    if foundation_json_integer(id) == .Val(number) -> return "{number}"
+    "null"
 }
 
 fn lsp_response(id: Dyn, result_json: String) -> String Never! {
@@ -57,10 +52,8 @@ fn lsp_cancellation_key(params: Dyn?) -> String? Never! {
     // Presence takes priority, even if the first field has an invalid ID.
     // Rust's or_else only reads requestId when id is absent, not invalid/null.
     id :: value.field("id") ?? value.field("requestId") ?? return None
-    if id == {
-        .Int(_) | .Text(_) -> Val(lsp_serialize_id(id))
-        else -> None
-    }
+    if id != .Text(_) && foundation_json_integer(id) == None -> return None
+    Val(lsp_serialize_id(id))
 }
 
 // Rust318–326. The actual fallible Stderr methods are canonical

@@ -12,6 +12,7 @@ use jet_foundation.[
     TAppliedRuleArgumentMenu,
     TAppliedRuleCatalog,
     Type,
+    ast_visit_statement,
     type_name,
 ]
 
@@ -359,6 +360,7 @@ fn sema_scope_members_vocabulary(marker: String) -> [String]? Never! {
 // (E0618) and never in an ordinary function or method body (E0615).
 fn sema_scope_members_check(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
+    sema_scope_members_check_assertionless_tests(items, &diagnostics)
     loop item in items {
         if item == {
             .Test(test) -> sema_scope_members_check_marker_body("Test", test.body, &diagnostics)
@@ -380,6 +382,40 @@ fn sema_scope_members_check(items: [Item]) -> [Diagnostic] {
         }
     }
     diagnostics
+}
+
+// Rust ScopeMembers.rs `check_assertionless_tests` (@ 6083377777): a top-level
+// `#Test` whose body never calls `assert`/`assert_eq` or `expect(…).snapshot`
+// is L2901. The walk reads every expression the body holds, nested blocks and
+// lambdas included, as Rust's `statements_have_assertion` does.
+fn sema_scope_members_check_assertionless_tests(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .Test(test) {
+            found := false
+            loop statement in test.body -> ast_visit_statement(statement, (expression: Expr) -> sema_scope_members_note_assertion(&found, expression), true)
+            if !found -> &diagnostics.push(sema_lint("L2901", test.span, "This #Test block has no assertions.", "A test with no assertions cannot find bugs because it always passes.", "Add at least one assertion, or remove the test if it only exercises compilation."))
+        }
+    }
+}
+
+fn sema_scope_members_note_assertion(found: &Bool, expression: Expr) Never! {
+    if expression == {
+        .Call(call, _) -> {
+            if call.name == "assert" || call.name == "assert_eq" -> found = true
+        }
+        .MethodCall(receiver, method, _, _, _, _, _) -> {
+            if method == "snapshot" && sema_scope_members_is_expect_call(receiver) -> found = true
+        }
+        else -> {}
+    }
+}
+
+fn sema_scope_members_is_expect_call(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Call(call, _) -> call.name == "expect"
+        .Paren(inner, _, _) -> sema_scope_members_is_expect_call(inner)
+        else -> false
+    }
 }
 
 // Rust `check_marker_body`: each direct-child member is validated against the

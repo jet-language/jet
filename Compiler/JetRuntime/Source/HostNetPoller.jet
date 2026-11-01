@@ -8,7 +8,7 @@
 // Events carry an ID, not a node pointer: stale kernel events cannot dereference
 // freed nodes. Both ID/state bucket tables are guarded by the root mutex.
 net_poller_root := I64{0}
-// runtime-init: 4
+// runtime-init: 4 when net_poller_root
 #Export(c) fn jet_rt_net_poller_init() {
     if (net_poller_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{80}, I64{8})

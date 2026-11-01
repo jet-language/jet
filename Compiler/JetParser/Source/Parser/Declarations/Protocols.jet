@@ -56,10 +56,15 @@ fn parser_protocol_message(state: &JetParserState) -> ProtocolMessage {
     if parser_current_kind(&state) == TOKEN_UNIFIED_ARROW {
         arrow :: parser_bump(&state)
         receiver :: parser_expect_name(&state, "for the protocol receiver")
-        if parser_value(state, receiver) != endpoint.expected {
-            parser_protocol_error(&state, receiver.span, "the protocol receiver must be the opposite endpoint", "an endpoint-pair spelling still names the receiving endpoint", "write only the sender and remove the receiver arrow")
+        // One report per line: a wrong receiver is named, a right one is the
+        // retired repetition.
+        found :: parser_value(state, receiver)
+        written :: parser_value(state, sender)
+        if found != endpoint.expected {
+            parser_protocol_error(&state, receiver.span, "expected receiver `{endpoint.expected}`, found `{found}`", "the retired endpoint-pair spelling still had to name the opposite endpoint", "write `{written}: …`")
+        } else {
+            parser_protocol_error(&state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
         }
-        parser_protocol_error(&state, arrow.span, "protocol lines no longer repeat the receiver", "the sender already determines the direction", "write `client: Message(...)` or `server: Message(...)`")
     }
     parser_expect(&state, TOKEN_COLON, "after a protocol message sender")
     message :: parser_expect_name(&state, "for a protocol message name")

@@ -1,0 +1,42 @@
+// `min`, `max` and `clamp` are prelude names over one ordered type, with no
+// import. `min`/`max` take two or more arguments; a NaN argument is the
+// result; `clamp` accepts reversed bounds. `math.min_float`/`max_float` are
+// the NaN-skipping Float pair (see min_max_nan.jet).
+
+#Comparable
+struct Version {
+    major: Int
+    minor: Int
+}
+
+CORES :: 8
+LIMIT :: max(4, CORES)
+
+fn run() {
+    print(min(3, 9))
+    print(max(3, 9, 12, 1))
+    print(min(7, 3, 9, 12, 5))
+    extra :: [Int]{4, 1}
+    print(min(9, 6, ...extra))
+    print(min(I8{3}, I8{-2}))
+    print(max(U8{3}, U8{7}))
+    print(min(F32{1.5}, F32{0.5}))
+    print(max(Float{1.5}, Float{2.5}, Float{0.5}))
+    print(min(Decimal{2.5}, Decimal{1.5}))
+    print(max("apple", "pear", "fig"))
+    print(min(Version{major: 1, minor: 2}, Version{major: 1, minor: 1}).minor)
+    print(min(Duration.seconds(3), Duration.seconds(2)) == Duration.seconds(2))
+    print(max(Duration.seconds(3), Duration.seconds(2)) == Duration.seconds(3))
+    waits := [Duration]{Duration.seconds(3), Duration.seconds(1), Duration.seconds(2)}
+    &waits.sort()
+    print(waits[0] == Duration.seconds(1))
+    print(LIMIT)
+    print(clamp(15, 0, 10))
+    print(clamp(-5, 0, 10))
+    print(clamp(5, 10, 0))
+    print(clamp(Float{0.25}, Float{0.0}, Float{1.0}))
+    print(min(Float{1.0}, Float.NAN, Float{0.5}).is_nan())
+    print(max(Float.NAN, Float{1.0}).is_nan())
+    print(clamp(Float.NAN, Float{0.0}, Float{1.0}).is_nan())
+    print(clamp(Float{0.5}, Float.NAN, Float{1.0}).is_nan())
+}

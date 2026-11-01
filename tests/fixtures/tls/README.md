@@ -15,9 +15,9 @@ openssl req -x509 -newkey rsa:2048 \
   -subj /CN=localhost \
   -addext subjectAltName=DNS:localhost,IP:127.0.0.1
 ```
-# SMTP custom-root fixture
+# Custom-root fixture
 
-`smtp.ca.cert.pem` signs `smtp.server.cert.pem`; the leaf certificate is valid
-only for `localhost`. `smtp.server.key.pem` is test-only. Card #530 uses this
-chain to prove `SystemPlusCa` extends native roots without disabling hostname
-verification.
+`custom-root.ca.cert.pem` signs `custom-root.server.cert.pem`; the leaf
+certificate is valid only for `localhost`. `custom-root.server.key.pem` is
+test-only. TLS and HTTP client tests use this chain to prove custom trust roots
+extend or replace native roots without disabling hostname verification.

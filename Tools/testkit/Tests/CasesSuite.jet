@@ -1,6 +1,7 @@
 use core.files as files
 use core.sys as sys
 use core.process as process
+use core.time as time
 
 fn cases_test_root(label: String) -> String {
     path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-cases-{process.current_pid()}-{label}")
@@ -156,4 +157,27 @@ fn cases_test_source(root: String, name: String, text: String) {
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstdout: ~ invalid\n")
     assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "REFUSED")
     files.remove_all(root) ?? panic("remove known-failing case scratch")
+}
+
+#Test("processes a case leaves running in its scratch are stopped before the scratch goes") {
+    root :: cases_test_root("strays")
+    scratch :: files.join(root, "scratch")
+    // Job control gives the background sleep a process group of its own, so the
+    // step's own group sweep misses it, as it misses a core.process grandchild.
+    cases_test_source(root, "stray", "step: jet -c 'set -m; sleep 300 >/dev/null 2>&1 & echo $!'\n")
+    outcome :: kit_cases_run(cases_test_entry("stray"), cases_test_context(root, scratch))[0]
+    assert_eq(outcome.verdict.status, "PASS")
+    pid :: Int.parse(outcome.run.stdout.trim().copy()) ?? panic("stray pid: {outcome.run.stdout}")
+    assert(kit_steps_process_nonzombie(pid, "proc-readable-nonzombie"))
+    kit_exec_stop_strays(scratch)
+    stopped := false
+    loop _ in 0..<500 {
+        if !kit_steps_process_nonzombie(pid, "proc-readable-nonzombie") {
+            stopped = true
+            break
+        }
+        time.sleep(10ms)
+    }
+    assert(stopped)
+    files.remove_all(root) ?? panic("remove stray case scratch")
 }

@@ -143,8 +143,8 @@ Compiler-backed inspection and fix planning declare the execution host's actual
 `Net` for the checked build-input HTTP provider already admitted by the CLI
 package; these ceilings do not change the package's authority grants.
 The compiler assembly retains the pre-merge command boundary: unwired
-post-merge `Jobs`, package bundle/flash ports, `Supply`, and `ToolchainPin`
-remain in the repository but are explicitly excluded from its source inventory.
+post-merge `Jobs`, package bundle/flash ports, and `Supply` remain in the
+repository but are explicitly excluded from its source inventory.
 Other unlisted CLI sources still fail assembly.
 The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
 examining response bytes; it never lets the provider's failure carrier escape
@@ -178,6 +178,19 @@ also permits portable boundary fixtures. Completion candidates retain written
 order, positional ordering, and duplicate visible job names; internal jobs do
 not become argv-reachable.
 ## Root command index
+
+Bare `jet`, with no command (global flags such as `--color=never` allowed),
+prints the command palette and exits 0: every canonical command under its
+category (Build & Run, Projects & Environments, Packages, Jetos, Development
+Server, Reference), then the Error Codes row and a pointer to `jet help`. The
+palette is the same static text with or without a terminal and never opens
+`/dev/tty`. Only `jet repl` starts the REPL: a line session that checks each
+input against the session so far, then builds and runs it after the earlier
+statements; `:help` lists its meta-commands. Raw-terminal keys, `--console`,
+`:rerun`, `:history` and `?name` docs for names the session did not define
+report E2104 until they are built (#6195). `jet eval <expression>` runs one REPL
+turn and prints its value. `?` is not a command: `jet ?` gets the
+unknown-command E2101.
 
 The root index below mirrors `jet help` from this checkout's compiler. It lists
 the most used commands first, in the order `node Tools/cli-census/census.mjs`
@@ -391,6 +404,17 @@ names the compared file and its before/after byte checkpoints. Hand edits
 do not inherit stale rename intent. A merge conflict leaves the output
 unwritten; a clean candidate must parse and pass semantic checking before
 publication.
+
+`review <base.jet> <head.jet>` compares two error-free checked sides. Meaning
+aligns the checked definitions of the one semantic index by stable id,
+compiler identity, then signature and module; a recorded rename or move
+receipt for the compared files aligns what the facts alone cannot. Authority
+compares each side's gate ledger, including the package and lock writers, and
+its checked effect rows; a widened or changed authority blocks `reviewable`.
+`--base-receipt` and `--receipt` compare proof receipts, and equal sampled
+traces never count as universal agreement. `review --diagnostics` instead
+compares checker diagnostics by occurrence identity; a side whose checker
+stopped before its bodies leaves relations unknown, never resolved.
 ## Command groups
 
 The generated help groups subcommands as follows:
@@ -421,7 +445,7 @@ authored member path without changing package-qualified semantic identity.
 
 Doc-mode compiler results retain the selected target triple and layout
 capabilities, typed layout reflection values, and transitive memory-denial
-projections from the checker that diagnoses E0921. Prepared `@origin` reads
+projections from the checker that diagnoses E0921. Prepared `$origin` reads
 retain their checked optional `OriginInfo` values on the owning function;
 untracked or moved locals have no readable origin.
 `expand --facts memory`, `layout`, and `origin` render those retained facts
@@ -534,7 +558,7 @@ generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
 `Core/`); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
-by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
+by `jet Tools/agent/CoreSourceRows.jet`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
 holds current.
 
@@ -570,8 +594,10 @@ positional words after the file; under the shorthand every word after the
 file is the program's (a `--` right after it only separates), so a
 `#!/usr/bin/env jet` file runs as `./file.jet args`. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
-starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
+starts. `--json` reports the same problems as the standard `diagnostics` JSON
+status envelope on stderr, leaving stdout to the program; it never changes the
+exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
+`--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
 
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.
@@ -633,6 +659,11 @@ E1803, exit 1; a file with no package manifest leads the Fix with the exact
 receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
 
+`jet doc --check [<file.jet|dir>]` exits 1 when a public API item has no `///`
+summary (L2201). Command entries are not library API: a module-level `fn run`,
+`fn build`, `fn test` or `fn dev` (a `#CLI` program's entry is its `fn run`)
+and a `#Job fn` are exempt, in a loose script and a package alike.
+
 `jet test <file> [<filter>]` compiles the file in test mode: each named
 `#Test` body is checked and lowered as a synthetic function (a property
 test's ungeneratable parameter types are E0613, a file with no named test is
@@ -653,10 +684,19 @@ captured output is shown under `--capture=all`, or for a failed run under the
 default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
 honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
 `--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
-`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, and `--threads`.
-Directory and package targets, doctests, a `fn test` override, a bare
-`--shuffle`, and the other test flags are refused with E2104 until they are
-ported. The test-result cache, the evidence report, and the package claims
+`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, `--threads`,
+`--measure`, and `--json`.
+Doctests (fenced ```` ```jet ```` blocks in `///` comments) run as claims of
+the same harness, named `doctest at <file>:<line>`, and `--docs` runs them alone; a wrong `// =>` value
+fails with E2901, and `-u` rewrites it instead (D-TEST4). `--measure` runs only
+the claims with a `.measure` member, serially and under the release profile
+unless `--profile` names one. It prints one record per claim, as a `measure
+NAME:` line or, with `--json`, as one JSON object line with the same fields.
+It also evaluates the claim's `.Test(name)` budgets against that record
+(D-CLAIM-BENCH1). Directory and package
+targets, a `fn test` override, a bare `--shuffle`, and the other test flags are
+refused with E2104 until they are ported. The test-result cache, the evidence
+report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
 harness exit (the outcome for a package without a claims floor).
 
@@ -664,11 +704,33 @@ harness exit (the outcome for a package without a claims floor).
 project: `package.jet`
 with the template's `authority: { allow: [...] }` row, `.jet/lock` with the running toolchain
 pin and the build stamp (the git revision when the folder is inside a
-repository), the template's `run.jet`, the four comment-only `@*.jet` command
-homes for `overrides`, and `.gitignore`, then the status lines on stderr
+repository), the template's `run.jet` (the `jet run` home), the three
+comment-only command homes `build.jet`, `dev.jet` and `test.jet` for
+`overrides`, and `.gitignore`, then the status lines on stderr
 (muted by `--quiet`). A bare `jet new` prints the command help with exit 2.
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.
+
+`jet init [<script.jet>]` writes `package.jet` in the working directory,
+named after the directory (`app` when it has no name) and pinned with
+`jet: <channel>` to the running toolchain; an existing `package.jet` is E1252
+and is never overwritten. With a script, each inline `use pkg#version` ref in it
+is added to the new manifest's `deps` block, and `lifted N inline
+dependencies into package.jet` precedes `created package.jet (pinned jet
+<channel>)` on stderr (muted by `--quiet` and `--json`). `jet init --check`
+with no migration-era role files (`pkg.jet`, `env.jet`, `workspace.jet`,
+`config.jet`) beside it reports that no files changed. The role-file
+transition itself (`--restore-role-files`, `--check` beside role files, and a
+bare `jet init` beside them without `package.jet`) is refused with E2104 until
+it is ported.
+
+`jet update jet [<channel>]` re-resolves the project's toolchain pin, moved to
+`channel` when given (else the manifest's `jet:` channel, else the running
+toolchain's), and records the resolved version in `.jet/lock`; its status
+line is on stderr (muted by `--quiet` and
+`--json`), and a pin diagnostic is always on stderr with exit 1. Outside a
+project it is a user error. `jet update` of dependencies is refused with E2104
+until the package fetch is ported.
 
 `jet fmt [paths…] [-]` formats `.jet` sources with the Jet formatter
 ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter)):
@@ -706,6 +768,41 @@ takes the selected environment's `formatter:` package, stages the matching
 temporary directory, and runs `jetpack env … -- <formatter> <staged…>`;
 `--check`/`--diff`/`--dry-run` report the files whose bytes changed (exit 1),
 otherwise those files are written back. No formatter declared is E1340.
+
+`jet audit copies [--json] [<entry.jet>]` (also `jet audit <file.jet>` and
+`jet inspect audit copies`) lists the implicit copies of the entry's checked
+package without writing anything. The entry is the named file, a directory's
+stock entry, or the entry of the project around the working directory. The
+sites are the ones `fmt --explicit-copies` writes: the Safe `.copy()` edits
+sema gives every module of the entry's source root under
+`#Policy(copies: .Explicit)`, each at its copied expression. The text form is
+`implicit read-view copies: N` and then one
+`  <path>:<line>:<col>  span=<start>..<end>  size=dynamic  kind=implicit` row
+per site, sorted by path and then by offset. `--json` emits the `audit.copies` status
+envelope with a `copies` array of `{path, line, column, span{start, end},
+size, kind}`. A source that does not check reports its diagnostics on stderr
+(the `diagnostics` envelope under `--json`) with exit 1. `jet audit memory`
+is the memory-ledger audit; the dependency audit is refused with E2104
+until it is ported.
+
+`jet audit foreign [--json] [<entry.jet>]` (also `jet inspect audit foreign`)
+reports the foreign code of an executable entry, chosen as `audit copies`
+chooses it. It checks the entry and links its image in memory as `jet run`
+does; the image is never written or run. The text form has one line per fact:
+`foreign declarations:` (`none`, or a count followed by one
+`  <path>:<line>  <language>  <name> -> <symbol>` row per `#Import(<lang>)` or
+`#FFI(<lang>)` declaration), `FFI effects reached:`, `C libraries linked:`,
+`dynamic loader:` (the ELF interpreter, or `none (static ELF, no needed
+libraries)`), `needed libraries:` when the image names any, and
+`host effects:`, the effects the entry asks of its host, which Jet's runtime
+serves through system calls. The last line, `foreign code: none`, appears only
+when the declarations, `FFI` effects, C libraries and loader needs are all
+empty; otherwise it reads `foreign code: present`. `--json` emits the
+`audit.foreign` status envelope with `declarations` (`{path, line, language,
+name, symbol}`), `ffi_effects`, `c_libraries`, `loader` (`{interpreter,
+dynamic, needed}`), `host_effects` and `foreign_free`. The exit code is 0
+whenever the report runs; a source that does not check reports its
+diagnostics as `audit copies` does, with exit 1.
 
 The Jet-hosted `lint --a11y` and `lint --complexity` leaves use the checked
 compiler diagnostics. Accessibility findings exit 1 and go to stderr, as
@@ -893,25 +990,51 @@ Decision inspection builds the checked program into the slot IR from its
 `fn run` and runs the IR optimizer at the level `jet build` uses: O1, or O2
 under `--release` or the `release`/`hardened` profiles. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
-fused compares, coalesced copies, removed dead and unreachable code, scalar
+fused compares, short circuits branched, coalesced copies, removed dead and unreachable code, scalar
 replaced aggregates) and names each function the IR builder could not build.
+At O2 it adds one row per sum, count or fill Loop the `reduce` pass handed to
+an asm leaf or declined (`<form> reduction <function>: vectorized` or
+`declined (<why>)`), one row per index a versioned Loop writes
+(`stepped index <function>: guarded before the Loop`, or `declined (<why>)`
+when that index is tested at the head of every pass), and one row per factor
+of a versioned Loop's Mul that is guarded or that the Loop writes
+(`factor <function>: guarded to 31 bits before the Loop`, so that the product
+needs no overflow test, or `declined (<why>)`).
+It also lists, as built before any pass, each counted loop sema's loop proof
+covers (`loop <function> <file>:<line>`): the proved extent and element type,
+the aliasing, early-exit, effect and cross-iteration verdicts, how many list
+accesses sema proved in bounds and how many of them the build lowered with no
+bounds check. Each loop lowers one scalar round per index.
+Last it names the program's `main:`. A program gets `program-owned` when none
+of its stop edges cleans up anything (each edge only returns or frees memory)
+and every runtime route it calls behaves the same with no process root. It
+then runs under a main of its own with no stop points. A stop writes the same
+report and exits with the same code as under the root. Any other program
+gets `process root:` and the first function, route or stop edge that needs
+the root.
 
-Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
-Its no-follow read retains one file descriptor, checks its regular-file type,
-owner and private permissions, and bounds the bytes to 1 MiB. Linux start identity
-and the two-second publication age bind it to the requested process. The closed
-snapshot schema bounds values, tasks and channels to 4096 rows; event observations
-retain exactly fifteen payload-free fields, at most 256 records, strictly
+Live inspection consumes only the runtime's private snapshot. The runtime writes
+raw records: little-endian words, and texts as a byte length then the bytes.
+The reader decodes and checks them; the running program does not encode.
+The reader's no-follow read keeps one file descriptor open and checks the file
+type, owner and private permissions. It reads at most 1 MiB.
+The snapshot binds to the requested process by pid and by a publication age
+under two seconds. On Linux it also binds by start time: a process that started
+after the writer's clock start is a reused pid. On Linux the reader takes the
+process CPU time from `/proc`. The record has a magic number, sections that
+appear at most once, no unknown sections and no trailing bytes. Tasks and
+values are limited to 4096 rows each, and the view shows at most 4096 channels.
+Event observations
+keep exactly fifteen payload-free fields, at most 256 records, strictly
 increasing sequences, and the runtime's closed enums and unavailable-count sentinel.
-Text and JSON share this validated snapshot, including published rendered values
-and sorted shape identities. The snapshot's `decisions` slot carries no compiler
-decision and is not read. No process memory is read.
-Duplicate keys anywhere in a snapshot are rejected as corrupt or forged runtime
-transport by the strict Core JSON parser. This intentionally does not preserve
-the retired host's first-scalar/last-container duplicate-key behavior.
+The reader derives the id order and the effect and resource counters from the
+records. Each Unicode control character in a text is shown as one space.
+Text and JSON output share the same validated snapshot, including published
+rendered values and sorted shape identities. No process memory is read.
 
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
-fields and the unbuilt functions as text rows.
+fields, the unbuilt functions and the loop proofs (`loop_proofs`) as text
+rows, and the program's main (`main`) as text.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,

@@ -177,7 +177,7 @@ fn render_value(value: DBValue) -> String Never! {
     if value == {
         .Null -> "null"
         .Int(number) -> "{number}"
-        .Float(number) -> float_text(number)
+        .Float(number) -> __float_text(number)
         .Text(text) -> text
         .Bool(boolean) -> "{boolean}"
         .Blob(bytes) -> "{bytes}"
@@ -186,7 +186,7 @@ fn render_value(value: DBValue) -> String Never! {
 
 // SQL values use the shortest decimal f64 display spelling, not Jet's debug
 // spelling (which preserves ".0" and may use an exponent).
-fn float_text(value: Float) -> String Never! {
+fn __float_text(value: Float) -> String Never! {
     text :: "{value}"
     raw :: text.bytes()
     exponent_at := -1
@@ -613,8 +613,15 @@ fn __policy_apply(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool)
         return Err(__db_error("row policy supports SELECT, INSERT, UPDATE, and DELETE only"))
     }
     target :: __sql_target_index(tokens, kind)
-    if target < 0 || tokens[target].word != __sql_lower_text(policy.table) {
-        return Err(__db_error("policy scope targets table `{policy.table}`"))
+    table :: __sql_lower_text(policy.table)
+    // A row policy constrains the rows of its own table (#6070). SQL that
+    // targets no table (`SELECT 1`) or another table runs unchanged, unless it
+    // names the policy's table anywhere (a join, a subquery, a column read),
+    // which would read its rows past the policy.
+    if target < 0 || tokens[target].word != table {
+        if __sql_word_index(tokens, table) >= 0 -> return Err(__db_error("policy-scoped SQL that reads `{policy.table}` must target it as its one simple table"))
+        // copy: the caller keeps its SQL value; the scope runs this one.
+        return Ok(sql.copy())
     }
     if !__sql_simple_target(raw, tokens, kind) -> return Err(__db_error("policy-scoped SQL must name one simple target table without joins or subqueries"))
     if !policy.owner -> return Ok(sql.copy())
@@ -655,8 +662,12 @@ fn __policy_apply(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool)
 // ---- connections and scopes ----------------------------------------------
 
 // One SQLite connection shared by a DBConnection and every scope derived from
-// it. `close` shuts the driver down in place for all of them.
-struct __DBState { driver: __Driver }
+// it. `close` shuts the driver down in place for all of them. `path` is the
+// location it was opened at, for display.
+struct __DBState {
+    driver: __Driver
+    path: String
+}
 
 struct DBConnection { state: Shared<__DBState> }
 struct DBScope {
@@ -667,7 +678,7 @@ struct DBScope {
 
 fn __db_open(path: String, failure: String) -> DBConnection Never! {
     driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: shared __DBState{driver: ^driver}}
+    DBConnection{state: shared __DBState{driver: ^driver, path: path.copy()}}
 }
 fn open(path: String) -[DB]> DBConnection Never! { __db_open(path, "database open failed") }
 fn open_memory() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory database open failed") }
@@ -701,6 +712,15 @@ impl DBConnection {
     fn commit(self) -[DB]> Bool Never! { __db_commit(self.state) }
     fn rollback(self) -[DB]> Bool Never! { __db_rollback(self.state) }
     fn close(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
+}
+
+// One line: where the database lives and whether it is still open.
+impl DBConnection.Display {
+    fn display(self) -> String {
+        guard :: self.state.guard_edit()
+        status :: if raw(guard.value.driver) == (U64{0}) -> "closed" else -> "open"
+        "DBConnection({guard.value.path}, {status})"
+    }
 }
 
 fn __scope_execute(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
@@ -1298,9 +1318,21 @@ fn __dyn_value(value: DBValue) -> Dyn Never! {
     }
 }
 
-fn decode<T: Decode>(row: [String: DBValue]) -> T [FieldError]! {
+// Typed `decode<T>(row)`: sema supplies `names`, the column name and decode
+// key of each of T's fields whose column differs from its key; every other
+// column decodes under its own name.
+fn decode<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: String)]) -> T [FieldError]! {
     entries := [(key: String, value: Dyn)]{}
-    loop (key, value) in row -> &entries.push((key: key.copy(), value: __dyn_value(value)))
+    loop (column, value) in row {
+        key := column.copy()
+        loop rename in names {
+            if rename.db_name == column {
+                key = rename.key.copy()
+                break
+            }
+        }
+        &entries.push((key: ^key, value: __dyn_value(value)))
+    }
     tree :: stream.object_from_entries(^entries)
     if tree.decode<T>() == {
         .Ok(value) -> Ok(value)
@@ -1604,7 +1636,7 @@ fn cell_wire_width(value: DBValue) -> Int Never! {
     payload :: if value == {
         .Null -> 0
         .Int(number) -> decimal_width(number)
-        .Float(number) -> float_text(number).len()
+        .Float(number) -> __float_text(number).len()
         .Text(text) -> sqlite_mem.__string_byte_len(text)
         .Bool(_) -> 1
         .Blob(bytes) -> bytes.len() * 2
@@ -1834,8 +1866,17 @@ fn __driver_cache_parity_probe() Never! {
     assert_eq(same.text, "SELECT * FROM tasks LIMIT 1")
     schema :: __policy_apply(__sql_raw("CREATE TABLE tasks (owner TEXT)"), open, "alice", true) ?? panic("schema")
     assert_eq(schema.text, "CREATE TABLE tasks (owner TEXT)")
+    // SQL that targets no table or another table runs unchanged (#6070).
+    outside_sql :: [String]{"SELECT 1", "SELECT title FROM other WHERE id = 1", "INSERT INTO other (title) VALUES ('x')"}
+    loop text in outside_sql {
+        outside :: __policy_apply(__sql_raw(text), owned, "alice", false) ?? panic("outside `{text}`")
+        assert_eq(outside.text, text)
+        assert_eq(outside.values.len(), 0)
+    }
     rejected :: [(sql: String, message: String)]{
-        (sql: "SELECT title FROM other", message: "policy scope targets table `tasks`"),
+        (sql: "SELECT title FROM other JOIN tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
+        (sql: "SELECT title FROM other WHERE owner IN (SELECT owner FROM tasks)", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
+        (sql: "SELECT 1 FROM main.tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
         (sql: "SELECT 1 FROM tasks; DROP TABLE tasks", message: "policy-scoped SQL must be one statement without control characters"),
         (sql: "SELECT * FROM tasks -- note", message: "policy-scoped SQL cannot contain comments"),
         (sql: "CREATE TABLE tasks (x)", message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls"),

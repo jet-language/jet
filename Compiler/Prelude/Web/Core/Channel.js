@@ -1,5 +1,5 @@
 // D-CONC-CHAN1 / D-CONC-CHAN2 / I9: the JS adapter for the canonical channel
-// and readiness Prelude. Web.rs only marshals TIR values to these doors.
+// and readiness Prelude. The Web lowering only marshals checked values to these doors.
 
 function jet_web_closed_result() {
   return { tag: "Err", values: [{ tag: "Closed", values: [] }] };

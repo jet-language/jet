@@ -1,4 +1,4 @@
-// Shared structural collection checker and TIR producer. Zip and para_* stay
+// Shared structural collection checker and checked-tree producer. Zip and para_* stay
 // in their dedicated paths so their input-shape and crossing proofs are not duplicated.
 use jet_foundation.[
     AccessConvention,
@@ -84,7 +84,7 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
         else -> sema_call_type_assignable(required, value.ty, environment, program)
     }
     if compatible == (Val(true)) -> return Val(value)
-    if !callback && sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
+    if !callback && sema_expr_numeric_value_widening(value, required) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
@@ -92,8 +92,14 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
     return None
 }
 
+// A total callback value (`T Never!`, a lambda bound without an expected
+// type) cannot fail: the adapter takes its success, as a direct call does.
 fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
-    sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
+    returned :: sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
+    if returned == .Result(ok, err) {
+        if err == (Type.Named{name: "Never"}) -> return ok.copy()
+    }
+    returned
 }
 
 // A callable value handed to an eager sequence adapter keeps its checked
@@ -205,7 +211,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_builtin_method_arity(receiver_value.ty, method, updated_args.len(), span) ?? sema_call_collections_arity_error(method, contract, updated_args.len(), span))
-        _ := sema_ownership_check_call_receiver(&state, receiver, contract.receiver_access, scopes, span, &diagnostics)
+        _ := sema_ownership_check_method_receiver(&state, receiver, contract.receiver_access, method, scopes, span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     copies_receiver := if contract.row.op == {.Copy -> true else -> false}
@@ -329,7 +335,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     // resource read in place is refused (CopySites.jet).
     if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove" {
         loop index in 0..<updated_args.len() {
-            if !marked[index] && index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, context, &diagnostics, false) -> return SemaMethodSpecialCheck{handled: true, value: None}
+            if !marked[index] && index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, state, context, &diagnostics, false) -> return SemaMethodSpecialCheck{handled: true, value: None}
             if !marked[index] && !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, &state, context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
@@ -353,17 +359,17 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                     else -> {}
                 }
             }
-            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: builtin_receiver, operation: builtin, args: builtin_args}, span)
+            sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: builtin_receiver, operation: builtin, args: builtin_args}, span)
         }
-        .Closure(closure) -> sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)
+        .Closure(closure) -> sema_tree_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: closure, args: typed}, span)
         .ListShuffle -> {
-            lazy := sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
-            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: lazy, operation: TBuiltinOp.IterShuffle, args: [TExpr]{}}, span)
+            lazy := sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+            sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: lazy, operation: TBuiltinOp.IterShuffle, args: [TExpr]{}}, span)
         }
         .SetClosure(closure) -> {
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             list_type := Type.List{element: element}
-            set_list := sema_tir_node(list_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
+            set_list := sema_tree_node(list_type, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
             if {
                 closure == TClosureOp.FlatMap -> {
                     inner :: if result_type == {
@@ -373,25 +379,25 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
                         else -> Type.Int
                     }
                     mapped_type := Type.List{element: inner}
-                    mapped := sema_tir_node(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
-                    sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: mapped, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+                    mapped := sema_tree_node(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
+                    sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: mapped, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
                 }
                 else -> {
-                    sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
+                    sema_tree_node(result_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
                 }
             }
         }
         .SetMinimum -> {
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
-            set_list := sema_tir_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
-            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
+            set_list := sema_tree_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.SetToList, args: [TExpr]{}}, span)
+            sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: set_list, operation: TBuiltinOp.Min{float: false}, args: [TExpr]{}}, span)
         }
         .IterToSet -> {
             // #4009: `Set.from` collects a list; drain the iterator through the
             // same `.to_list()` a user would write before building the set.
             element :: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
-            drained := sema_tir_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
-            sema_tir_node(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
+            drained := sema_tree_node(Type.List{element: element}, TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.IterToList, args: [TExpr]{}}, span)
+            sema_tree_node(result_type, TExprKind.BuiltinMethod{receiver: drained, operation: TBuiltinOp.SetFrom, args: [TExpr]{}}, span)
         }
     }
     checked := sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)
@@ -410,7 +416,7 @@ fn sema_call_collections_runs_on_iter(operation: TBuiltinOp) -> Bool Never! {
 
 fn sema_call_collections_list_as_iter(value: TExpr, span: Span) -> TExpr Never! {
     element :: sema_call_collections_list_element(value.ty) ?? return value
-    sema_tir_node(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
+    sema_tree_node(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
 }
 
 // Rust Type::without_user_tags, then a List or FixedList element.

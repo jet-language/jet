@@ -252,17 +252,13 @@ for (const peer of peerLedger) {
     const measurement = peerMeasurementsByKey.get(`${key}|${metric}`);
     const jetValue = Number(jetMeasurementByMetric.get(`${peer.task_id}|${metric}`));
     const peerValue = Number(measurement?.median);
-    const tolerance = Number(peer.language === "rust" ? policy?.rust_tolerance_ratio : policy?.tolerance_ratio);
+    const tolerance = Number(policy?.tolerance_ratio);
     if (!policy || !measurement || !Number.isFinite(jetValue) || !Number.isFinite(peerValue) ||
         !Number.isFinite(tolerance) || jetValue < 0 || peerValue < 0 || tolerance <= 0 ||
         (jetValue === 0 && peerValue === 0)) {
       fail(`peer comparison is not independently reviewable: ${key}/${metric}`);
     }
-    const loss = peerValue === 0
-      ? jetValue > 0
-      : peer.language === "rust"
-        ? jetValue > peerValue * tolerance
-        : jetValue >= peerValue * tolerance;
+    const loss = peerValue === 0 ? jetValue > 0 : jetValue >= peerValue * tolerance;
     if (loss) fail(`peer comparison loss: ${key}/${metric} (Jet=${jetValue} peer=${peerValue})`);
   }
 }

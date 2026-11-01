@@ -7,14 +7,16 @@ use jetpack_trust.[
     trust_semantic_lock_load, trust_semantic_lock_merge_revalidate_commit,
     trust_strip_semantic_sections, trust_write_semantic_lock,
 ]
-use jet_pkg_model.[pkg_lock_parse]
+use jet_pkg_model.[LockedSourceChannel, pkg_lock_parse, pkg_lock_record_source_channel]
 use core.crypto as crypto
 use core.files as files
 
+// The project outlives this helper, so it is a `tmpdir`: a `temp_dir` would
+// remove it when its `TempDir` drops at return (#6119).
 fn trust_test_project(label: String) -> String {
-    scratch :: files.temp_dir("jet-jp13-{label}") ?? panic("scratch project")
-    files.create_dir_all(files.join(scratch.path, ".jet")) ?? panic("managed directory")
-    scratch.path
+    root :: files.tmpdir("jet-jp13-{label}") ?? panic("scratch project")
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("managed directory")
+    root
 }
 
 TRUST_TEST_MACHINE_ONLY_LOCK :: comptime { `version = 1
@@ -56,6 +58,34 @@ dependencies = ["app"]
     assert_eq(loaded.inputs.len(), 2)
     assert_eq(loaded.source_maps.len(), 1)
     assert_eq(loaded.records[0].identity.exact, "1.2.3")
+}
+
+// The unified lock is the sole primary copy of the merge provenance, so a
+// machine-lock writer that loads, changes and rewrites `.jet/lock` must carry
+// Trust's SemanticLock tail through unchanged.
+#Test("machine lock write keeps every semantic block byte-identical") {
+    root :: trust_test_project("machine-write")
+    lock_path :: trust_semantic_lock_live_path(root)
+    files.write(lock_path, TRUST_TEST_MACHINE_ONLY_LOCK) ?? panic("write machine lock")
+    semantic := SemanticLockFile.with_records([SemanticRecord]{trust_test_pkg("app", "core.log", "1.2.3", "sha256-log")})
+    semantic.inputs = [LockInput]{
+        {name: "nixpkgs", url: "github:NixOS/nixpkgs/abc", follows: ""},
+        {name: "home", url: "github:nix-community/home-manager", follows: "nixpkgs"}
+    }
+    semantic.source_maps = [SourceMapEntry]{SourceMapEntry{pattern: "core.*", sources: [String]{"catalog:core.log", "core"}}}
+    trust_semantic_lock_atomic_commit(root, semantic) ?? panic("atomic commit")
+    tail :: trust_write_semantic_lock(semantic)
+    headers :: [String]{"semantic-lock-version", "[[lock_input]]", "[[source_map]]", "[[semantic_record]]", "[[semantic_record.rationale]]"}
+    loop header in headers -> assert(tail.contains(header), "the fixture covers `{header}`")
+    assert((files.read(lock_path) ?? panic("read committed lock")).ends_with("\n\n{tail}"))
+
+    pkg_lock_record_source_channel(root, LockedSourceChannel{name: "releases", channel: "latest", exact: "can1357/oh-my-pi@github#v18.0.4"}) ?? panic("machine lock write")
+    rewritten :: files.read(lock_path) ?? panic("read rewritten lock")
+    assert(rewritten.contains("[[source_channel]]"), "the machine write landed")
+    assert(rewritten.ends_with("\n\n{tail}"), "the semantic tail is byte-identical")
+    assert_eq(rewritten.split("[[semantic_record]]").to_list().len(), 2)
+    assert_eq((pkg_lock_parse(rewritten) ?? panic("rewritten lock parses")).semantic_text, tail)
+    assert_eq(trust_write_semantic_lock(trust_semantic_lock_load(root) ?? panic("semantic load")), tail)
 }
 
 #Test("merge revalidate commit rejects conflicts before write") {

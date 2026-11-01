@@ -1,0 +1,18 @@
+use core.mem
+
+#[Unsafe("the operands are scalar registers and r10 is a declared clobber"), FFI(asm)]
+fn add_registers(a: Int, b: Int) -> Int {
+    """
+    mov r10, {a}
+    add r10, {b}
+    mov {a}, r10 ; -> return
+    ; clobbers r10
+    """
+}
+
+fn run() {
+    #Unsafe("call the audited register-only assembly contract") {
+        print(add_registers(20, 22))
+    }
+    print(add_registers(1, 2))
+}

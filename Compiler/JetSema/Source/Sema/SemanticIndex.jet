@@ -43,28 +43,32 @@ use jet_foundation.[
     derivation_payload_json,
     derivation_record,
     expr_span,
-    failure_contract_effective_type,
+    failure_contract_shown_type,
     failure_contract_source,
     sha256_hex,
     type_name,
 ]
 
+// `missing` names the first fact that left the index incomplete ("" when complete).
 struct SemaCompilerSemanticIndexFacts {
     value: TComptimeValue
     complete: Bool
+    missing: String{""}
 }
 struct SemaCompilerModuleSource {
     module_identity: String
     source: String
 }
 
-fn sema_compiler_index_module_sources_valid(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource]) -> Bool Never! {
+// The first registered module without exactly one source, or source without a
+// registered module; "" when the sources match the registration one-to-one.
+fn sema_compiler_index_module_sources_missing(registration: SemaRegistrationGraph, module_sources: [SemaCompilerModuleSource]) -> String Never! {
     loop registered_module_index in 0..<registration.modules.len() {
         matches := 0
         loop module_source in module_sources {
             if module_source.module_identity == registration.modules[registered_module_index].module_identity -> matches += 1
         }
-        if matches != 1 -> return false
+        if matches != 1 -> return "registered module `{registration.modules[registered_module_index].module_identity}` has {matches} sources"
     }
     loop module_source in module_sources {
         found := false
@@ -74,9 +78,9 @@ fn sema_compiler_index_module_sources_valid(registration: SemaRegistrationGraph,
                 break
             }
         }
-        if !found -> return false
+        if !found -> return "source module `{module_source.module_identity}` is not registered"
     }
-    true
+    ""
 }
 
 fn sema_compiler_index_module_source(module_sources: [SemaCompilerModuleSource], module_identity: String) -> String? {
@@ -422,7 +426,7 @@ fn sema_compiler_index_output_value(output: ResolvedOutput, binding: ConstDef, r
             TComptimeField{name: "reference_span", value: sema_compiler_index_span(output.reference)},
             TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
             TComptimeField{name: "return_type", value: sema_compiler_index_option_string(output.return_type.map((ty) -> type_name(ty)))},
-            TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(failure_contract_effective_type(output.failure_contract)))},
+            TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(failure_contract_shown_type(output.failure_contract)))},
             TComptimeField{name: "failure_source", value: sema_compiler_index_string(failure_contract_source(output.failure_contract))},
             TComptimeField{name: "authority", value: sema_compiler_index_string("safe-jet")},
             TComptimeField{name: "effects", value: sema_compiler_index_strings(effects)},
@@ -606,9 +610,8 @@ struct SemaCompilerIndexWalkState {
     structural: [SemaCompilerIndexStructuralRecord]
     arithmetic: [TComptimeValue]
     parents: [Int]
-    ordinal_parents: [Int?]
-    ordinal_slots: [String]
-    ordinal_values: [Int]
+    // The next ordinal of each (parent, slot) pair, keyed by sema_compiler_index_ordinal_key.
+    ordinals: [String:Int]
     slot: String
     slot_is_list: Bool
     module_identity: String
@@ -620,9 +623,7 @@ fn sema_compiler_index_walk_state() -> SemaCompilerIndexWalkState Never! {
         structural: [SemaCompilerIndexStructuralRecord]{},
         arithmetic: [TComptimeValue]{},
         parents: [Int]{},
-        ordinal_parents: [Int?]{},
-        ordinal_slots: [String]{},
-        ordinal_values: [Int]{},
+        ordinals: [String:Int]{},
         slot: "root",
         slot_is_list: true,
         module_identity: "",
@@ -818,25 +819,19 @@ fn sema_compiler_index_stmt_span(statement: Stmt) -> Span {
     }
 }
 
+// One (parent, slot) pair as a map key: a node id never contains `:`.
+fn sema_compiler_index_ordinal_key(parent: Int?, slot: String) -> String Never! {
+    if parent == .Val(id) -> return "{id}:{slot}"
+    "-:{slot}"
+}
+
 fn sema_compiler_index_walk_node(state: &SemaCompilerIndexWalkState, class: String, shape: String, module_path: String, span: Span) -> Int? {
     if span.end < span.start -> return None
     parent := Int?{None}
     if state.parents.len() > 0 -> parent = Val(state.parents[state.parents.len() - 1])
-    ordinal := 0
-    found := false
-    loop index in 0..<state.ordinal_slots.len() {
-        if state.ordinal_parents[index] == parent && state.ordinal_slots[index] == state.slot {
-            ordinal = state.ordinal_values[index]
-            state.ordinal_values[index] = ordinal + 1
-            found = true
-            break
-        }
-    }
-    if !found {
-        &state.ordinal_parents.push(parent)
-        &state.ordinal_slots.push(state.slot)
-        &state.ordinal_values.push(1)
-    }
+    key :: sema_compiler_index_ordinal_key(parent, state.slot)
+    ordinal :: state.ordinals.get(key) ?? 0
+    state.ordinals[key] = ordinal + 1
     id := state.nodes.len()
     slot_kind := if state.slot_is_list -> "list" else -> "scalar"
     &state.structural.push(SemaCompilerIndexStructuralRecord{
@@ -1250,6 +1245,10 @@ fn sema_compiler_index_walk_derive_body(state: &SemaCompilerIndexWalkState, body
 }
 
 fn sema_compiler_index_walk_item(state: &SemaCompilerIndexWalkState, item: Item, module_path: String) {
+    // A standard family the units prelude injected (owner `core.units`) is a
+    // catalog copy whose span is in the prelude text, not a definition of
+    // this module's source.
+    if item == .UnitFamily(family) && family.resolved_owner == (Val("core.units")) -> return
     id :: sema_compiler_index_walk_node(&state, "item", sema_compiler_index_item_shape(item), module_path, sema_compiler_index_item_span(item)) ?? return
     &state.parents.push(id)
     if item == {
@@ -1454,9 +1453,10 @@ fn sema_compiler_index_normalize_definition(source: String) -> String Never! {
     String.from_bytes(output) ?? source
 }
 
+// `missing` names the first item whose derivation could not be read ("" when complete).
 struct SemaCompilerIndexDerivationFacts {
     value: TComptimeValue
-    complete: Bool
+    missing: String
 }
 
 fn sema_compiler_index_derivation_value(record: DerivationRecord) -> TComptimeValue Never! {
@@ -1514,20 +1514,20 @@ fn sema_compiler_index_derivation_value(record: DerivationRecord) -> TComptimeVa
 
 fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structural: [SemaCompilerIndexStructuralRecord], module_sources: [SemaCompilerModuleSource]) -> SemaCompilerIndexDerivationFacts Never! {
     records := [DerivationRecord]{}
-    complete := true
+    missing := ""
     loop node in structural {
         if node.parent != None || node.class != "item" -> next
         module_index :: sema_registration_module_index(registration, node.module_identity) ?? {
-            complete = false
+            if missing == "" -> missing = "item at {node.span.start}..{node.span.end} of `{node.module_identity}` has no registered module"
             next
         }
         registered_module :: registration.modules[module_index]
         source :: sema_compiler_index_module_source(module_sources, node.module_identity) ?? {
-            complete = false
+            if missing == "" -> missing = "module `{node.module_identity}` has no source"
             next
         }
         definition_source :: sema_compiler_index_source_fragment(source, node.span) ?? {
-            complete = false
+            if missing == "" -> missing = "item at {node.span.start}..{node.span.end} lies outside the {source.count_bytes()}-byte source of `{node.module_identity}`"
             next
         }
         symbol := Symbol?{None}
@@ -1568,7 +1568,7 @@ fn sema_compiler_index_derivations(registration: SemaRegistrationGraph, structur
     &records.sort_by((left: DerivationRecord, right: DerivationRecord) -> (left.subject <=> right.subject).then(left.claim <=> right.claim))
     values := [TComptimeValue]{}
     loop record in records -> &values.push(sema_compiler_index_derivation_value(record))
-    SemaCompilerIndexDerivationFacts{value: TComptimeValue.List{values: values}, complete: complete}
+    SemaCompilerIndexDerivationFacts{value: TComptimeValue.List{values: values}, missing: missing}
 }
 // Function key -> the view provenance values of the first checked function
 // with that key (module, then declaration, order), built once per index; a
@@ -1692,7 +1692,7 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
         sema_compiler_index_walk_items_slot(&walk, "root", registration.modules[registered_module_index].program.items, registration.modules[registered_module_index].module_path)
     }
     derivations := sema_compiler_index_derivations(registration, walk.structural, module_sources)
-    complete := registration.complete && graph.complete && sema_compiler_index_module_sources_valid(registration, module_sources)
+    missing := if !registration.complete -> "the registration graph is incomplete" else if !graph.complete -> "the checked graph is incomplete" else -> sema_compiler_index_module_sources_missing(registration, module_sources)
     loop registered_module_index in 0..<registration.modules.len() {
         found := false
         loop checked_module in graph.modules {
@@ -1701,7 +1701,7 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
                 break
             }
         }
-        if !found -> complete = false
+        if !found && missing == "" -> missing = "registered module `{registration.modules[registered_module_index].module_identity}` has no checked result"
     }
     loop checked_module in graph.modules {
         found := false
@@ -1711,9 +1711,9 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
                 break
             }
         }
-        if !found -> complete = false
+        if !found && missing == "" -> missing = "checked module `{checked_module.module_identity}` is not registered"
     }
-    if !derivations.complete -> complete = false
+    if derivations.missing != "" && missing == "" -> missing = "derivations: {derivations.missing}"
     index := TComptimeValue.Struct{type_name: "CompilerSemanticIndex", fields: [TComptimeField]{
         TComptimeField{name: "schema_version", value: sema_compiler_index_int(20)},
         TComptimeField{name: "source_digest", value: sema_compiler_index_string(sha256_hex(source))},
@@ -1728,5 +1728,5 @@ fn sema_compiler_semantic_index_from_checked(registration: SemaRegistrationGraph
         TComptimeField{name: "fact_registry", value: sema_compiler_index_fact_registry(registration)},
         TComptimeField{name: "derivations", value: derivations.value},
     }}
-    SemaCompilerSemanticIndexFacts{value: index, complete: complete}
+    SemaCompilerSemanticIndexFacts{value: index, complete: missing == "", missing: missing}
 }

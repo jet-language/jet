@@ -16,7 +16,7 @@
 //
 // Generic functions and records work only in the package's entry file today:
 // outside it the Rust reference fails cost projection (E2104 "type-
-// parameterized callable has no complete TIR specialization") and cannot
+// parameterized callable has no complete IR specialization") and cannot
 // unify a generic record across files (E0904/E0112), and the generated
 // compiler loses the nominal identity (E0108) or the lowered type (E0003). A
 // generic-heavy domain is therefore one entry file (`entryFile`), the way

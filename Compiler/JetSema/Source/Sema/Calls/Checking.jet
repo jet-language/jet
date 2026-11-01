@@ -341,6 +341,12 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             .Val(_) -> true
             .None -> false
         }
+        // A `^` argument out of pinned storage is the move E0219, reported
+        // before checking the argument reads it beside the pin (E0220).
+        if !default_in_owner && args[index].convention == AccessConvention.Move && !sema_pin_check_move(&state, args[index].expr, scopes, &diagnostics) {
+            complete = false
+            next
+        }
         binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, &scopes, &state, args[index].expr) else -> [String]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
@@ -352,8 +358,11 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // A borrowed trait parameter lends the original concrete storage.
         // Expected-type coercion would instead construct an owned TraitBox.
         borrowed_trait :: trait_parameter && parameter.convention != AccessConvention.Move
+        // A unit parameter checks its argument on its own, so another unit of
+        // its family can convert into it below.
+        unit_parameter :: sema_expr_unit_fact(required, environment, program) != None
         argument_expected := Type?{None}
-        if !self_typed && !borrowed_trait -> argument_expected = Val(required)
+        if !self_typed && !borrowed_trait && !unit_parameter -> argument_expected = Val(required)
         diagnostic_start :: diagnostics.len()
         checked_argument :: if {
             default_in_owner -> sema_call_check_owner_default(^owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, &tail_store, &context, span, &binder_keys, &diagnostics)
@@ -368,13 +377,36 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             }
         }
         checked_value :: checked_argument ?? {
-            if !default_in_owner && binder_refs.len() == 0 -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if !default_in_owner && binder_refs.len() == 0 {
+                if sema_call_parameter_type_undeclared(required, environment, program) -> sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, &diagnostics) else -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
             complete = false
             next
         }
-        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
-        value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
-        compatible :: if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
+        // A self-typed read that does not fit reports the generic E0108 at
+        // the value; like any other argument, that becomes the call's E0112.
+        // Integer narrowing keeps its own E0108 (Rust check_type_assignable
+        // reports it in place of the argument's E0112).
+        slot_start :: diagnostics.len()
+        widened :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) else -> Val(checked_value)
+        value := widened ?? {
+            if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, environment, program)) == None -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, slot_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return None
+        }
+        compatible := if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        // A parameter whose written type names nothing reported E0119 at its
+        // declaration; it takes any argument, so the call's own checks (the
+        // move marker, E0201) still run without a cascade E0112 (#6294).
+        if !compatible && sema_call_parameter_type_undeclared(required, environment, program) -> compatible = true
+        if !compatible && sema_expr_unit_implicit_applies(required, value.ty, environment, program) {
+            converted :: sema_expr_unit_implicit_conversion(value, required, environment, program, &scopes, context, &diagnostics) ?? {
+                complete = false
+                next
+            }
+            value = converted
+            compatible = true
+        }
         if !compatible {
             // (Rust `check_variadic_bound_tail`,
             // E1313): a trait-bounded variadic argument is checked against
@@ -398,6 +430,17 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             &diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), expr_span(args[index].expr)))
             complete = false
             next
+        }
+        // E3211 (Rust direct_calls.rs:2216 @ 6083377777): a written String
+        // literal with a NUL byte can never reach a C-boundary `String`
+        // parameter intact, since C strings end at the first NUL. The slot is
+        // the declaration slot the binder chose, so a labelled call is
+        // checked against the parameter it actually reaches.
+        if abi == .Val(callable_abi) {
+            if callable_abi.is_c_abi && required == Type.String && sema_call_literal_has_nul(args[index].expr) {
+                row :: diagnostic_registry_row("E3211") ?? panic("E3211 must have a registry row")
+                &diagnostics.push(sema_error("E3211", expr_span(args[index].expr), row.what, row.why, row.fix))
+            }
         }
         // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
@@ -462,10 +505,29 @@ fn sema_call_note_route_implicit_takes(params: [SemaCallParam], args: [CallArg],
     }
 }
 
+// A string literal with no interpolation whose written text holds a NUL byte.
+fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
+    if value == .Str(parts, _, _) {
+        nul :: String.from_bytes([U8{0}]) ?? panic("NUL is UTF-8")
+        found := false
+        loop part in parts {
+            if part == {
+                .Lit(text) -> {
+                    if text.contains(nul) -> found = true
+                }
+                else -> return false
+            }
+        }
+        return found
+    }
+    false
+}
+
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
 fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
+    if sema_plain_carrier_mismatch(required, offered, span) == .Val(carrier) -> return carrier
     // A value of a type that does not implement the one trait a trait-value
     // parameter names is the missing implementation, not a type mismatch.
     if required == .TraitObject(bounds) {
@@ -478,6 +540,24 @@ fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offer
         }
     }
     sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
+}
+
+// A parameter type that names nothing already has its E0119 where the
+// declaration wrote it; an argument's mismatch against it is that same error
+// again (#6294).
+fn sema_call_parameter_type_undeclared(required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    generic_names :: loop param in environment.generic_params -> param.name
+    if program.registration_graph == .Val(graph) -> return sema_type_names_undeclared(graph, sema_scope_caller_row(environment, graph), required, generic_names)
+    if environment.registration_graph == .Val(graph) -> return sema_type_names_undeclared(graph, sema_scope_caller_row(environment, graph), required, generic_names)
+    false
+}
+
+// Drops the generic E0108 the argument's own check reported against an
+// undeclared parameter type, keeping every other report of the argument.
+fn sema_call_argument_drop_mismatch(value: Expr, diagnostic_start: Int, diagnostics: &[Diagnostic]) {
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return
+    loop index in mismatch_index..<diagnostics.len() - 1 -> diagnostics[index] = diagnostics[index + 1]
+    _ :: &diagnostics.pop()
 }
 
 // The argument's own check rejected it against its parameter with the generic
@@ -608,16 +688,16 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
             access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
-            init = sema_tir_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
+            init = sema_tree_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
-        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, original.ty)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
-        local_value :: sema_tir_node(original.ty, TExprKind.Local{local: local}, original.span)
+        local_value :: sema_tree_node(original.ty, TExprKind.Local{local: local}, original.span)
         moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
-        lowered[index].value = if moves_pin -> sema_tir_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        lowered[index].value = if moves_pin -> sema_tree_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
     bindings
@@ -631,7 +711,7 @@ fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) ->
     ty :: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
-    sema_tir_node(ty, TExprKind.InlineBlock{body: body}, span)
+    sema_tree_node(ty, TExprKind.InlineBlock{body: body}, span)
 }
 
 // The place a `^`-marked call argument moves exactly: a field read, or a
@@ -673,7 +753,7 @@ fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Ex
     payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
     if payload < 0 -> return None
     moved :: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value
-    Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
+    Val(sema_tree_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
 }
 
 fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
@@ -716,7 +796,7 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
     lowered
 }
 
-// Normalize the checked rest slot once, before publishing TIR. BuildList
+// Normalize the checked rest slot once, before publishing the checked tree. BuildList
 // owns scalar elements; ListSpread clones spread elements through the same
 // checked Clone/effect mechanism as a written list literal.
 fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [SemaCallParam], args: [CallArg], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -730,10 +810,10 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             // The boundary copy itself clones the fixed list's elements.
             // Do not first clone the array and then clone that copy again.
             if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-            if args[index].convention == AccessConvention.Move -> value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
-            value = sema_tir_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
+            if args[index].convention == AccessConvention.Move -> value = sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tree_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
         } else if args[index].convention == AccessConvention.Move {
-            value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
         } else if lowered[index].spread {
             // A lone spread is a direct List borrow; mixed spread cloning is
             // judged below on the canonical ListSpread, not on its List root.
@@ -754,10 +834,10 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
+                value = sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
-                value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+                value = sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
             }
         }
         lowered[index].value = ^value
@@ -807,7 +887,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             loop argument in tail -> &values.push(argument.value)
             kind = TExprKind.List{values: ^values, trait_coercion: None}
         }
-        value :: sema_tir_expr(list_ty, kind, span)
+        value :: sema_tree_expr(list_ty, kind, span)
         &packed.push(TCallArg{
             value: ^value, template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,

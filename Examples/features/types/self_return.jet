@@ -1,0 +1,50 @@
+// `Self` in a method signature names the impl's type: a static `-> Self`
+// method returns that type, so methods chain on its result. A trait method
+// written `-> Self` is implemented with either `-> Self` or the type's name.
+enum UsageOf { Program Children }
+
+impl UsageOf {
+    fn label(self) -> String {
+        if self == {
+            .Program -> "this program"
+            .Children -> "children"
+        }
+    }
+    fn mine() -> Self { UsageOf.Program }
+    fn same(self) -> Self { self.copy() }
+}
+
+struct Point { x: Int }
+impl Point {
+    fn origin() -> Self { Point{x: 0} }
+    fn moved(self, by: Int) -> Self { Point{x: self.x + by} }
+    fn shown(self) -> String { "p{self.x}" }
+}
+
+trait Grow {
+    fn grown(self) -> Self
+    fn fresh() -> Self
+}
+
+struct Counter { n: Int }
+impl Counter.Grow {
+    fn grown(self) -> Self { Counter{n: self.n + 1} }
+    fn fresh() -> Self { Counter{n: 0} }
+}
+
+struct Doubler { n: Int }
+impl Doubler.Grow {
+    fn grown(self) -> Doubler { Doubler{n: self.n * 2} }
+    fn fresh() -> Doubler { Doubler{n: 1} }
+}
+
+fn run() {
+    m :: UsageOf.mine()
+    print(m.label())
+    print(UsageOf.Children.same().label())
+    print(Point.origin().shown())
+    print(Point.origin().moved(3).moved(4).x)
+    print(Counter{n: 1}.grown().grown().n)
+    print(Counter.fresh().n)
+    print(Doubler.fresh().grown().grown().n)
+}

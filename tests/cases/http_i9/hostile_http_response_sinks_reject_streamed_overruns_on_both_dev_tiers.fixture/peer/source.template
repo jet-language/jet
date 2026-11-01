@@ -21,9 +21,9 @@ fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     }
     return false
 }
-fn request_head(stream: TCPStream) -> [U8] {
+fn request_head(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block :: stream.read(512) ?? panic("request read")
@@ -37,16 +37,16 @@ fn publish(listener: TCPListener, path: String) {
     files.write_atomic(path, address.bytes()) ?? panic("publish address")
 }
 // Literal algorithm port of http_i9.rs132-242; compact valid fixed-DEFLATE witness, not a mock.
-struct Bits {
+struct DeflateBits {
     bytes: [U8]
     bit: Int
 }
-fn bit_write(bits: &Bits, value: Int, count: Int) {
+fn bit_write(bits: &DeflateBits, value: Int, count: Int) {
     loop offset in 0..<count {
         if bits.bit == 0 -> &bits.bytes.push(U8{0})
-        if (value & (1 << offset)) != 0 {
+        if value.bit_and(1 << offset) != 0 {
             last :: bits.bytes.len() - 1
-            bits.bytes[last] = U8{Int.from_u8(bits.bytes[last]) | (1 << bits.bit)}
+            bits.bytes[last] = U8{Int.from_u8(bits.bytes[last]).bit_or(1 << bits.bit)}
         }
         bits.bit = (bits.bit + 1) % 8
     }
@@ -54,17 +54,32 @@ fn bit_write(bits: &Bits, value: Int, count: Int) {
 fn reverse_bits(code: Int, count: Int) -> Int {
     current := code
     reversed := 0
-    loop i in 0..<count { reversed = (reversed << 1) | (current & 1); current >>= 1 }
+    loop i in 0..<count {
+        reversed = (reversed << 1).bit_or(current.bit_and(1))
+        current >>= 1
+    }
     return reversed
 }
 fn fixed_code(symbol: Int) -> (code: Int, count: Int) {
     code := 0
     count := 0
     if {
-        symbol <= 143 -> { code = 48 + symbol; count = 8 }
-        symbol <= 255 -> { code = 400 + symbol - 144; count = 9 }
-        symbol <= 279 -> { code = symbol - 256; count = 7 }
-        symbol <= 287 -> { code = 192 + symbol - 280; count = 8 }
+        symbol <= 143 -> {
+            code = 48 + symbol
+            count = 8
+        }
+        symbol <= 255 -> {
+            code = 400 + symbol - 144
+            count = 9
+        }
+        symbol <= 279 -> {
+            code = symbol - 256
+            count = 7
+        }
+        symbol <= 287 -> {
+            code = 192 + symbol - 280
+            count = 8
+        }
         else -> panic("fixed DEFLATE symbol")
     }
     return (code: reverse_bits(code, count), count: count)
@@ -72,7 +87,7 @@ fn fixed_code(symbol: Int) -> (code: Int, count: Int) {
 fn gzip_bomb() -> [U8] {
     length :: 8388609
     frame := [U8]{31, 139, 8, 0, 0, 0, 0, 0, 0, 255}
-    bits := Bits{bytes: [U8]{}, bit: 0}
+    bits := DeflateBits{bytes: [U8]{}, bit: 0}
     bit_write(&bits, 1, 1)
     bit_write(&bits, 1, 2)
     literal :: fixed_code(120)
@@ -107,15 +122,15 @@ fn gzip_bomb() -> [U8] {
     loop index in 0..<256 {
         crc := index
         loop j in 0..<8 {
-            if (crc & 1) != 0 { crc = (crc >> 1) ^ 3988292384 } else { crc >>= 1 }
+            if crc.bit_and(1) != 0 { crc = (crc >> 1).bit_xor(3988292384) } else { crc >>= 1 }
         }
         &table.push(crc)
     }
     crc := 4294967295
-    loop i in 0..<length { crc = (crc >> 8) ^ table[(crc & 255) ^ 120] }
-    crc = crc ^ 4294967295
-    loop i in 0..<4 { &frame.push(U8{(crc >> (8 * i)) & 255}) }
-    loop i in 0..<4 { &frame.push(U8{(length >> (8 * i)) & 255}) }
+    loop i in 0..<length { crc = (crc >> 8).bit_xor(table[crc.bit_and(255).bit_xor(120)]) }
+    crc = crc.bit_xor(4294967295)
+    loop i in 0..<4 { &frame.push(U8{(crc >> (8 * i)).bit_and(255)}) }
+    loop i in 0..<4 { &frame.push(U8{(length >> (8 * i)).bit_and(255)}) }
     assert(frame.len() < 1048576)
     return frame
 }
@@ -126,9 +141,9 @@ fn run() {
     block := [U8]{}
     loop i in 0..<65536 { &block.push(U8{120}) }
     loop connection in 0..<12 {
-        stream :: &listener.accept() ?? panic("connection")
-        net.set_write_timeout(stream, 10000) ?? panic("write timeout")
-        request :: request_head(stream)
+        stream := &listener.accept() ?? panic("connection")
+        net.set_write_timeout(&stream, 10000) ?? panic("write timeout")
+        request :: request_head(&stream)
         if contains_bytes(request, "/gzip-get".bytes(), false) || contains_bytes(request, "/gzip-request".bytes(), false) {
     _ :: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Encoding: gzip{PEER_CRLF}Content-Length: {gzip.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
             _ :: stream.write_all(gzip)

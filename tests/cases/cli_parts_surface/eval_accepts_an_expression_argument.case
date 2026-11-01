@@ -5,7 +5,9 @@ step: jet eval "1 + 2" --json
 env: NO_COLOR=1
 exit: 0
 stderr: !~ "E2105" # original predicate
-stdout.trim: = three.out # original predicate
+json: stdout doc $ : object # original `stdout.trim = "3"`; `--json` is the one machine envelope (machine_output/every_json_report_door_uses_the_one_machine_envelope.case step eval; Rust run_eval_expression printed StatusEnvelope)
+json: stdout doc $.action = "eval"
+json: stdout doc $.value = 3
 step: jet eval "1 + 2"
 env: NO_COLOR=1
 exit: 0

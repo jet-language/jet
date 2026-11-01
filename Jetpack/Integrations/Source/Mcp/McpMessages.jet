@@ -3,6 +3,7 @@
 // Core `Dyn`s; text goes through Core JSON only. Objects this core
 // builds list their keys in byte order, as the reference's BTreeMap does;
 // caller-supplied params, results, and capability values keep their order.
+use jet_foundation.[foundation_json_integer]
 use jet_pkg_model.[pkg_json_object, pkg_json_parse_bounded, pkg_json_render, pkg_json_text, pkg_text_has_control]
 
 impl MCPCodec {
@@ -44,11 +45,9 @@ enum MCPRequestID {
     }
 
     fn from_json_tree(value: Dyn) -> MCPRequestID MCPCodecError! {
-        if value == {
-            .Int(number) -> Ok(MCPRequestID.Number(number))
-            .Text(text) -> Ok(MCPRequestID.Text(text))
-            else -> Err(MCPCodecError.InvalidMessage("request id must be an integer or string"))
-        }
+        if value == .Text(text) -> return Ok(MCPRequestID.Text(text))
+        number :: foundation_json_integer(value) ?? return Err(MCPCodecError.InvalidMessage("request id must be an integer or string"))
+        Ok(MCPRequestID.Number(number))
     }
 }
 
@@ -112,11 +111,8 @@ struct MCPRPCError {
 
     fn from_json_tree(value: Dyn) -> MCPRPCError MCPCodecError! {
         object :: pkg_json_object(value) ?? return Err(MCPCodecError.InvalidMessage("response error must be a JSON object"))
-        raw_code :: object.get("code") ?? Dyn.Null
-        if raw_code == {
-            .Int(code) -> return Ok(MCPRPCError{code: code, message: pkg_mcp_required_string(object, "message"), data: object.get("data")})
-            else -> return Err(MCPCodecError.InvalidMessage("response error code must be an integer"))
-        }
+        code :: foundation_json_integer(object.get("code") ?? Dyn.Null) ?? return Err(MCPCodecError.InvalidMessage("response error code must be an integer"))
+        Ok(MCPRPCError{code: code, message: pkg_mcp_required_string(object, "message"), data: object.get("data")})
     }
 }
 

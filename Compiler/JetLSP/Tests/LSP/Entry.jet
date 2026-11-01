@@ -86,7 +86,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     project :: TestProject.new()
     // GATE #4494: remove the real manifest, preserving inline-package coverage.
     entry_fs.remove_file(entry_path.join(project.root, entry_path.from_text(Syntax.PACKAGE_FILE, project.root.platform))) ?? panic("remove the ordinary manifest for inline-package coverage")
-    source :: "package {{\n    name: \"lsp-inline\"\n}}\n\npub(package) fn secret() -> String {{\n    return \"ok\"\n}}\n\nfn run() {{\n    print(secret())\n}}\n"
+    source :: "package {{\n    name: \"lsp-inline\"\n}}\n\npriv(package) module vault {{\n    fn secret() -> String {{\n        return \"ok\"\n    }}\n}}\n\nfn run() {{\n    print(vault.secret())\n}}\n"
     (diagnostics, bundle, _) :: check_document_with_bundle(project.entry(), source)
     assert(diagnostics.iter().all((d) -> { d.code != "E1360" && d.code != "E1361" && d.code != "E1362" && d.code != "E1363" }), "inline Package should not produce carrier diagnostics: {diagnostics:Debug}")
     assert(bundle != None, "LSP should retain a checked bundle")
@@ -173,7 +173,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
 #Test("hover_shows_source_module_for_imported_root_call") {
     project :: TestProject.new()
     // GATE #4494: write the actual imported source, not checked facts.
-    entry_fs.write(entry_path.join(project.root, entry_path.from_text("library.jet", project.root.platform)), "pub fn render(#Root value: Int) -> Int {{ return value }}\n".bytes()) ?? panic("write imported root-call library")
+    entry_fs.write(entry_path.join(project.root, entry_path.from_text("library.jet", project.root.platform)), "fn render(#Root value: Int) -> Int {{ return value }}\n".bytes()) ?? panic("write imported root-call library")
     src :: "use \"./library\" as one\nfn run() {{ value :: 1\n    value.render()\n}}\n"
     (diagnostics, maybe_bundle, facts) :: check_document_with_bundle(project.entry(), src)
     assert(diagnostics.iter().all((d) -> { d.severity != Severity.Error }), "imported root-call fixture should check: {diagnostics:Debug}")
@@ -286,7 +286,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
 
 // Rust: Source/LSP/mod.rs:549
 #Test("rename_preserves_case_for_all_declaration_families") {
-    src :: "UserId :: distinct Int\nalias Count :: Int\n#UnitFamily(Length) {{ meter }}\nstruct Door {{ state {{ Open }} }}\nprotocol Wire {{ client: Send(value: Int) }}\nmodule holder<T> {{ pub struct Box {{ value: T }} }}\nmodule cache :: holder<Int>\nfn run() {{}}\n"
+    src :: "UserId :: distinct Int\nCount :: Int\n#UnitFamily(Length) {{ meter }}\nstruct Door {{ state {{ Open }} }}\nprotocol Wire {{ client: Send(value: Int) }}\nmodule holder<T> {{ struct Box {{ value: T }} }}\nmodule cache :: holder<Int>\nfn run() {{}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
     db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
     (tokens, _) :: lex(src)
@@ -372,6 +372,27 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(!hints.iter().any((hint) -> { hint.label == "low: " || hint.label == "high: " }), "written labels must not receive duplicate ghost text: {hints:Debug}")
 }
 
+// #6014 C3: a `?` hint right after each of the 4 calls whose failure passes up
+// automatically; the explicit `?`, the `?(note)` and the `??`-handled call
+// get none.
+#Test("inlay_hints_mark_each_automatic_propagation") {
+    src :: "fn parse(raw: String) -> Int {{\n    if raw == \"\" -> return Err(\"empty\")\n    7\n}}\nfn run() {{\n    a :: parse(\"1\")\n    b :: parse(\"2\")\n    c :: parse(\"3\")?\n    d :: parse(\"4\") ?? 0\n    e :: parse(\"5\")?(\"five\")\n    print(parse(\"6\"))\n    print(a + b + c + d + e + parse(\"7\"))\n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all((d) -> { d.severity != Severity.Error }), "propagation fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    marks := [Int]{}
+    loop hint in db.inlay_hints_for(project.entry()) {
+        if hint[0].label == "?" -> &marks.push(hint[0].span.end)
+    }
+    &marks.sort()
+    expected := [Int]{}
+    loop call in ([String]{"parse(\"1\")", "parse(\"2\")", "parse(\"6\")", "parse(\"7\")"}) {
+        start :: src.find(call) ?? panic("fixture call {call}")
+        &expected.push(start + call.bytes().len())
+    }
+    assert_eq(marks, expected)
+}
+
 // Rust: Source/LSP/mod.rs:721
 #Test("inlay_and_hover_for_inferred_struct_lit_from_place") {
     src :: "struct Point {{ x: Int y: Int }}\nfn run() {{\n    p := Point{{ x: 1, y: 2 }}\n    p = {{ x: 3, y: 4 }}\n}}\n"
@@ -395,7 +416,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
 
 // Rust: Source/LSP/mod.rs:767
 #Test("completion_hides_soft_public_names_until_explicitly_requested") {
-    src :: "pub fn _helper() {{}}\nfn run() {{}}\n"
+    src :: "fn _helper() {{}}\nfn run() {{}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
     db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
     assert_eq(db.symbols.lookup("_helper").len(), 1)

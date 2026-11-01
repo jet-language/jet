@@ -17,7 +17,7 @@ use jet_foundation.[
     CallablePolicy,
     access_sigil,
     type_name,
-    failure_contract_effective_type,
+    failure_contract_shown_type,
     failure_contract_source,
 ]
 
@@ -213,5 +213,5 @@ fn semindex_hover_for_fn(function: Func) -> String Never! {
     chain :: policies.join(", ")
     policy_text :: if chain != "" -> " ; policies=[{chain}]" else -> ""
     failure :: func_failure_contract(function)
-    "fn {function.name}({parts.join(", ")}) {type_name(func_effective_return_type(function))}{arrow}{policy_text}\nfailure: {type_name(failure_contract_effective_type(failure))} ({failure_contract_source(failure)})"
+    "fn {function.name}({parts.join(", ")}) {type_name(func_effective_return_type(function))}{arrow}{policy_text}\nfailure: {type_name(failure_contract_shown_type(failure))} ({failure_contract_source(failure)})"
 }

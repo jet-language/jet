@@ -1,0 +1,9 @@
+// core-conformance: core.sys.set_memory_limit
+use core.sys as os
+
+fn run() {
+    limit :: os.memory_limit() ?? panic("memory_limit")
+    os.set_memory_limit(limit.soft, limit.hard) ?? panic("set_memory_limit")
+    after :: os.memory_limit() ?? panic("memory_limit after")
+    print(after.soft == limit.soft && after.hard == limit.hard)
+}

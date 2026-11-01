@@ -15,6 +15,7 @@ use jet_foundation.[
     Item,
     DerivationMethod,
     NamedSpan,
+    NameVisibility,
     ParamZone,
     Span,
     Type,
@@ -23,7 +24,7 @@ use jet_foundation.[
     DerivationRecord,
     derivation_identity,
     derivation_record,
-    failure_contract_effective_type,
+    failure_contract_shown_type,
     failure_contract_source,
     sha256_hex_bytes,
     type_name,
@@ -120,6 +121,14 @@ struct StructuralOrdinalKey {
     slot: String
 }
 
+// A declaration's loaded display path and name span: the key LSP consumers
+// already hold for a definition (SymbolDef.def_span, SemanticSymbol.span).
+struct DeclarationKey {
+    module_path: String
+    start: Int
+    end: Int
+}
+
 // Rust SymbolDB (126–148): one consumer of the shared semantic-index build.
 struct SymbolDB {
     index: SemIndex
@@ -139,6 +148,9 @@ struct SymbolDB {
     slot_boundaries: [StructuralSlotBoundary]
     symbols: SemanticSymbolIndex
     structural_ordinals: [StructuralOrdinalKey:Int]
+    // Sema's checked declaration visibility, narrowed by every enclosing
+    // declaration (a member of a `priv module` is never Public).
+    visibility: [DeclarationKey:NameVisibility]
 }
 
 // Rust CallerFrame (150–154).
@@ -198,6 +210,7 @@ impl SymbolDB {
             slot_boundaries: [StructuralSlotBoundary]{},
             symbols: SemanticSymbolIndex.language(),
             structural_ordinals: [StructuralOrdinalKey:Int]{},
+            visibility: [DeclarationKey:NameVisibility]{},
         }
     }
 
@@ -336,6 +349,12 @@ impl SymbolDB {
             if self.inlay[index].module_path == path -> &matches.push(self.inlay_window(index))
         }
         matches
+    }
+
+    // Checked visibility of the declaration named at `span` in `module_path`;
+    // None when Sema published no declaration there.
+    fn declaration_visibility(self, module_path: String, span: SourceSpan) -> NameVisibility? Never! {
+        self.visibility.get(DeclarationKey{module_path: module_path.copy(), start: span.start, end: span.end})
     }
 }
 
@@ -516,7 +535,7 @@ fn semindex_output_facts(registration: SemaRegistrationGraph, module_sources: [S
                             reference_span: semindex_source_span(output.reference),
                             params: ^params,
                             return_type: ^return_type,
-                            failure_contract: type_name(failure_contract_effective_type(output.failure_contract)),
+                            failure_contract: type_name(failure_contract_shown_type(output.failure_contract)),
                             failure_source: failure_contract_source(output.failure_contract),
                             authority: output.authority.as_str(),
                             effects: output.effects.copy(),

@@ -173,7 +173,9 @@ fn cli_test_image_jetpack(project: String, args: [String]) -[Env, Exec]> Process
     cli_test_jetpack(args).cwd(project).env("NO_COLOR", "1")
 }
 
-// The repository root (the test driver's working directory).
-fn cli_test_repo_root() -[FS, Env]> String {
-    files.cwd() ?? panic("the test driver has a working directory")
+// The repository root the committed fixtures are read from: JET_TOOLCHAIN_ROOT,
+// which check.sh exports as the Jet tree it runs from. The claims run inside
+// an assembled scratch project, so the working directory is never that tree.
+fn cli_test_repo_root() -[Env]> String {
+    sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
 }

@@ -1,6 +1,6 @@
 // Replay the loader's immutable source closure through the
 // ordinary parser; sema's resolver binds each member in its declaring module.
-use jet_foundation.[CompilerTraceSink, Diagnostic, ImportDecl, Item, SourceFile, Marker, diagnostic_with_source_path]
+use jet_foundation.[CompilerTraceSink, Diagnostic, ImportDecl, Item, SourceFile, Marker, diagnostic_with_source_path, sema_casing_marker_qualifier]
 use jet_lexer.[lex, lex_generated]
 use jet_parser.[NamedMarkerGroupTokens, named_marker_groups, expand_named_marker_groups_with_uses, parse_lexed_with_source, parser_line_starts]
 use jet_sema.[SemaRegistrationImportEdge, SemaMarkerModuleResolution, SemaMarkerModuleBinding, sema_marker_module_target_in_scope, sema_marker_module_resolve_items, sema_marker_module_declarations, sema_marker_module_declaration_by_span, sema_marker_module_bind_program]
@@ -47,7 +47,7 @@ fn jet_driver_marker_group_source(source_files: [SourceFile], path: String) -> S
 fn jet_driver_marker_group_resolve(modules: [JetDriverLoadedModule], edges: [SemaRegistrationImportEdge], module_identity: String, name: String, scope: String) -> SemaMarkerModuleResolution {
     prefix := scope
     loop {
-        candidate :: if prefix == "" -> name else -> "{prefix}.{name}"
+        candidate :: if prefix == "" -> name else -> "{sema_casing_marker_qualifier(prefix)}.{name}"
         target :: sema_marker_module_target_in_scope(edges, module_identity, candidate, scope)
         if target.status != "found" -> return SemaMarkerModuleResolution{status: target.status, declaring_module_identity: target.module_identity, declaration: None}
         loop module_row in modules {
@@ -61,6 +61,16 @@ fn jet_driver_marker_group_resolve(modules: [JetDriverLoadedModule], edges: [Sem
         prefix = parts.slice(0, parts.len() - 1).join(".")
     }
     SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: module_identity, declaration: None}
+}
+
+// A group's applied name: the import alias and module path before its last
+// segment take their PascalCase marker spelling (D-MARKER-CASE1=A).
+fn jet_driver_marker_group_name(alias: String, name: String) -> String Never! {
+    parts :: name.split(".").to_list()
+    path :: parts.slice(0, parts.len() - 1).join(".")
+    qualifier :: if alias == "" -> path else if path == "" -> alias else -> "{alias}.{path}"
+    if qualifier == "" -> return name.copy()
+    "{sema_casing_marker_qualifier(qualifier)}.{parts[parts.len() - 1]}"
 }
 
 fn jet_driver_marker_group_item_key(item: Item) -> String Never! {
@@ -173,7 +183,7 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
                     if edge.source_scope != "" && edge.source_scope != scope && !scope.starts_with("{edge.source_scope}.") -> next
                     alias := edge.declaration.alias
                     if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) -> alias = module_alias
-                    if member.name.starts_with("{alias}.") && !used_names.contains(alias) -> &used_names.push(alias)
+                    if member.name.starts_with("{sema_casing_marker_qualifier(alias)}.") && !used_names.contains(alias) -> &used_names.push(alias)
                 }
             }
             &groups.push(JetDriverMarkerGroup{tokens: tokens, declaring_module: modules[module_index].module_identity, scope: scope, members: members})
@@ -192,7 +202,13 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
     loop module_row in modules -> jet_driver_marker_group_dependency_order(module_row.module_identity, indices, edges, &visited, &order)
     complete := true
     loop module_index in order {
-        rows := raw.get(modules[module_index].module_identity) ?? [JetDriverMarkerGroup]{}
+        rows := [JetDriverMarkerGroup]{}
+        own :: raw.get(modules[module_index].module_identity) ?? [JetDriverMarkerGroup]{}
+        loop group in own {
+            row := group
+            row.tokens.name = jet_driver_marker_group_name("", group.tokens.name)
+            &rows.push(row)
+        }
         loop edge in edges {
             if edge.source_module_identity != modules[module_index].module_identity -> next
             target_groups :: raw.get(edge.target_module_identity) ?? next
@@ -200,7 +216,7 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
             if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) -> alias = module_alias
             if edge.source_scope != "" -> alias = "{edge.source_scope}.{alias}"
             loop group in target_groups {
-                qualified :: "{alias}.{group.tokens.name}"
+                qualified :: jet_driver_marker_group_name(alias, group.tokens.name)
                 resolved :: jet_driver_marker_group_resolve(modules, edges, modules[module_index].module_identity, qualified, edge.source_scope)
                 if resolved.status != "found" -> next
                 row := group
@@ -214,7 +230,9 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
         loop row in rows -> &groups.push(row.tokens)
         unit :: units[modules[module_index].source_unit_index]
         original :: jet_driver_marker_group_source(source_files, unit.path) ?? return false
-        source :: if jet_driver_unit_is_core(unit) -> jet_driver_mask_inline_package(original, jet_driver_inline_package(original)) else -> original
+        // The relex reads the source the ordinary parse read: any inline
+        // `package { … }` carrier masked away.
+        source :: jet_driver_mask_inline_package(original, jet_driver_inline_package(original))
         source_bytes :: source.bytes()
         if trace_sink == .Val(sink) -> sink.begin("load.marker_groups.relex", unit.path, module_index, modules.len())
         lexed := if jet_driver_unit_is_core(unit) -> lex_generated(source_bytes) else -> lex(source_bytes)
@@ -237,7 +255,7 @@ fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], e
                 alias := edge.declaration.alias
                 if edge.declaration.kind == .Unqualified(module_alias, _, _, _, _) -> alias = module_alias
                 prefix :: if edge.source_scope == "" -> alias else -> "{edge.source_scope}.{alias}"
-                if application.name.starts_with("{prefix}.") && !used_names.contains(alias) -> &used_names.push(alias)
+                if application.name.starts_with("{sema_casing_marker_qualifier(prefix)}.") && !used_names.contains(alias) -> &used_names.push(alias)
             }
         }
         lexed.tokens = expanded.tokens

@@ -1,10 +1,28 @@
 use app as application
+use core.reactive.loadable.[Loadable]
+
+#Error
+enum UserError {
+    Missing
+}
+
+fn user_name(id: String) -[DB.Read]> String UserError! {
+    if id == "" -> return Err(UserError.Missing)
+    "v1:{id}"
+}
+
+fn shown(state: Loadable<String, UserError>) -> String {
+    if state == {
+        .Loaded(value) -> value
+        .Failed(_) -> "failed"
+        else -> "pending"
+    }
+}
 
 fn run() {
-    query :: application.live("users", "alice")
-    print(application.live_get(query))
-    hit :: application.invalidate("users")
-    print(hit)
-    print(application.live_get(query))
-    print(application.live_show(query))
+    binding :: application.live(user_name, "alice")
+    print(shown(application.state(binding)))
+    application.push(user_name, "alice", value: "v2:alice")
+    print(shown(application.state(binding)))
+    print(application.live_stats())
 }

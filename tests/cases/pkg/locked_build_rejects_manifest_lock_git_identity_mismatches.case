@@ -24,10 +24,9 @@ cwd: mylib_source
 exit: 0
 step: git rev-parse HEAD
 cwd: mylib_source
-exit: any
-# Original setup checks output spawning, UTF-8, trim and length, not rev-parse exit.
+exit: any # Original setup checks output spawning, UTF-8, trim and length, not rev-parse exit.
 capture: revision = text stdout.trim
-cap:revision: len = 40
+cap:revision: len = 40 # original revision.len() == 40
 step: git clone --bare {work}/mylib_source {work}/mylib.git
 exit: 0
 write: package.jet package.template
@@ -43,17 +42,17 @@ capture: hostile_lock = text file.replace("file://{work}/mylib.git", "file://{wo
 write: .jet/lock lock-mutation.template
 step: jet build --locked run.jet
 exit: nonzero
-stderr.after_first("Error ["): ^= "E1204]"
+stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 stderr: = identity.expected
 capture: hostile_lock = text file.replace("source = { git = \"file://{work}/mylib.git\", rev = \"{cap:revision}\" }", "source = { git = \"file://{work}/mylib.git\", tag = \"hostile-selector\" }") base.lock
 write: .jet/lock lock-mutation.template
 step: jet build --locked run.jet
 exit: nonzero
-stderr.after_first("Error ["): ^= "E1204]"
+stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 stderr: = identity.expected
 capture: hostile_lock = text file.replace("locked = { rev = \"{cap:revision}\"", "locked = { rev = \"0000000000000000000000000000000000000000\"") base.lock
 write: .jet/lock lock-mutation.template
 step: jet build --locked run.jet
 exit: nonzero
-stderr.after_first("Error ["): ^= "E1204]"
+stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 stderr: = identity.expected

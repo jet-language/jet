@@ -235,6 +235,11 @@ fn build_plan_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule]
     &generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
     generated
 }
+// Every setting value `fn build` contributed (`b.contribute`), in call order.
+fn build_plan_contributions(plan: BuildSessionPlan) -> [BuildSessionContribution] Never! {
+    permit :: plan.storage.guard_read()
+    permit.value.contributions.copy()
+}
 fn build_plan_selected_generated(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit :: plan.storage.guard_read()
     selected_targets := [Int]{}

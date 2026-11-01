@@ -1,0 +1,47 @@
+// A payload-free enum names its backing integer with `#Layout(U8)`. A case's
+// number is its written value, or one more than the case before it (the
+// first case counts from 0). `to_int()` reads the number; `from_int(n)`
+// returns the case or an error for a number no case has.
+#Layout(U8)
+enum Opcode {
+    Nop
+    Load = 16
+    Store
+    Halt = 255
+}
+
+#Layout(I16)
+enum Level {
+    Low = -1
+    Mid
+    High
+}
+
+#Layout(U32)
+enum Mode {
+    Read = 4
+    Write = 2
+    Exec = 1
+}
+
+fn describe(value: Int) -> String {
+    op :: Opcode.from_int(value) ?? return "no opcode {value}: {err}"
+    "opcode {op.to_int()}"
+}
+
+fn run() {
+    print(Opcode.Nop.to_int())
+    print(Opcode.Load.to_int())
+    print(Opcode.Store.to_int())
+    print(Opcode.Halt.to_int())
+    print(describe(17))
+    print(describe(18))
+    print(Level.Low.to_int())
+    print(Level.High.to_int())
+    level :: Level.from_int(0) ?? Level.Low
+    print(level == Level.Mid)
+    mask := 0
+    loop mode in [Mode.Read, Mode.Exec] -> mask += mode.to_int()
+    print(mask)
+    print((Mode.from_int(2) ?? Mode.Exec) == Mode.Write)
+}

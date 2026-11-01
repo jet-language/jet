@@ -94,7 +94,7 @@ fn rt_sha512_k(round: I64) -> I64 {
     }
 }
 fn rt_sha512_byte(input: I64, length: I64, at: I64, end: I64) -> I64 {
-    if (at < length) -> return rt_text_byte(input + at)
+    if (at < length) -> return rt_text_byte(wrapping(input + at))
     if (at == length) -> return I64{128}
     if (at >= end - I64{8}) {
         shift :: (end - I64{1} - at) * I64{8}
@@ -104,9 +104,9 @@ fn rt_sha512_byte(input: I64, length: I64, at: I64, end: I64) -> I64 {
     I64{0}
 }
 fn rt_sha512_parts3_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, length: I64, at: I64, end: I64) -> I64 {
-    if (at < left_len) -> return rt_text_byte(left + at)
-    if (at < left_len + right_len) -> return rt_text_byte(right + at - left_len)
-    if (at < length) -> return rt_text_byte(third + at - left_len - right_len)
+    if (at < left_len) -> return rt_text_byte(wrapping(left + at))
+    if (at < left_len + right_len) -> return rt_text_byte(wrapping(wrapping(right + at) - left_len))
+    if (at < length) -> return rt_text_byte(wrapping(wrapping(wrapping(third + at) - left_len) - right_len))
     return rt_sha512_byte(I64{1}, length, at, end)
 }
 #Arithmetic(.Wrapping)

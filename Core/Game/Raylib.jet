@@ -1,19 +1,26 @@
 use core as core
 
-// core.game.raylib — display-gated raylib bridge.
+// core.game.raylib — raylib's immediate-mode drawing on a Jet software
+// rasterizer.
 //
-// Window, input, drawing, and texture operations use the existing registered
-// raw host bindings. The descriptor-backed Jet FFI rail replaces those leaves
-// at native cutover; display availability is never fabricated by source.
+// Drawing scan-converts in Core: every primitive becomes clipped runs of one
+// packed RGBA color, and `__fill_rect` paints each run into the runtime's RGBA
+// canvas (src-over blend, or a copy for clears); text paints each glyph's
+// runs in one `__fill_mask` call. `begin_drawing` sizes the
+// canvas from the window; `end_drawing` presents the frame and writes a PAM
+// capture to $JET_RAYLIB_CAPTURE when that variable is set. Textures decode
+// in Core too: `load_texture_atlas` reads the atlas's PNG, decodes it to RGBA8
+// and hands the pixels to the runtime, which keeps them with the canvas and
+// blits atlas regions for `draw_sprite`. Window and input operations keep
+// their registered host leaves; display availability is never fabricated by
+// source. A window crosses every leaf as the runtime's RaylibWindow record
+// (UiRaylibMetadata.jet): its size, title, and whether a native display backs
+// it.
 struct RaylibWindow {
     width: Int
     height: Int
     title: String
-    open: Bool
-    drawing: Bool
-    should_close: Bool
-    fps: Int
-    commands: [String]
+    native: Bool
 }
 
 struct RaylibColor {
@@ -31,8 +38,446 @@ struct RaylibSound {
     path: String
 }
 
+// raylib's Vector2 and Rectangle. Float geometry snaps to a 1/256-pixel grid
+// and covers the pixels whose centers lie inside it, with one tie rule for
+// centers exactly on an edge.
+struct RaylibVector2 {
+    x: Float
+    y: Float
+}
+
+struct RaylibRectangle {
+    x: Float
+    y: Float
+    width: Float
+    height: Float
+}
+
 fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor Never! {
     RaylibColor{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
+}
+
+fn vector2(x: Float, y: Float) -> RaylibVector2 Never! {
+    RaylibVector2{x: x, y: y}
+}
+
+fn rectangle(x: Float, y: Float, width: Float, height: Float) -> RaylibRectangle Never! {
+    RaylibRectangle{x: x, y: y, width: width, height: height}
+}
+
+// FLT_EPSILON, the tolerance raylib uses for degenerate lines.
+C_FLT_EPSILON :: Float{0.00000011920928955078125}
+
+// Collision checks: raylib's formulas from rshapes.c, evaluated in Float where
+// raylib uses 32-bit floats. They draw nothing and need no effect.
+fn check_collision_recs(rec1: RaylibRectangle, rec2: RaylibRectangle) -> Bool Never! {
+    rec1.x < rec2.x + rec2.width && rec1.x + rec1.width > rec2.x && rec1.y < rec2.y + rec2.height && rec1.y + rec1.height > rec2.y
+}
+
+fn check_collision_circles(center1: RaylibVector2, radius1: Float, center2: RaylibVector2, radius2: Float) -> Bool Never! {
+    dx :: center2.x - center1.x
+    dy :: center2.y - center1.y
+    sum :: radius1 + radius2
+    dx * dx + dy * dy <= sum * sum
+}
+
+// The distance from the circle's center to the rectangle's center decides,
+// with the corner case measured to the nearest corner.
+fn check_collision_circle_rec(center: RaylibVector2, radius: Float, rec: RaylibRectangle) -> Bool Never! {
+    half_w :: rec.width / 2.0
+    half_h :: rec.height / 2.0
+    dx :: abs_float(center.x - (rec.x + half_w))
+    dy :: abs_float(center.y - (rec.y + half_h))
+    if dx > half_w + radius || dy > half_h + radius -> return false
+    if dx <= half_w || dy <= half_h -> return true
+    corner_x :: dx - half_w
+    corner_y :: dy - half_h
+    corner_x * corner_x + corner_y * corner_y <= radius * radius
+}
+
+// The segment from `p1` to `p2` against the circle: the nearest point of the
+// segment lies within `radius` of the center.
+fn check_collision_circle_line(center: RaylibVector2, radius: Float, p1: RaylibVector2, p2: RaylibVector2) -> Bool Never! {
+    dx :: p1.x - p2.x
+    dy :: p1.y - p2.y
+    if abs_float(dx) + abs_float(dy) <= C_FLT_EPSILON -> return check_collision_circles(p1, 0.0, center, radius)
+    along := ((center.x - p1.x) * (p2.x - p1.x) + (center.y - p1.y) * (p2.y - p1.y)) / (dx * dx + dy * dy)
+    if along > 1.0 {
+        along = Float{1.0}
+    } else if along < 0.0 {
+        along = Float{0.0}
+    }
+    near_x :: p1.x - along * dx - center.x
+    near_y :: p1.y - along * dy - center.y
+    near_x * near_x + near_y * near_y <= radius * radius
+}
+
+// Inside means left or top edge included, right or bottom edge excluded.
+fn check_collision_point_rec(point: RaylibVector2, rec: RaylibRectangle) -> Bool Never! {
+    point.x >= rec.x && point.x < rec.x + rec.width && point.y >= rec.y && point.y < rec.y + rec.height
+}
+
+fn check_collision_point_circle(point: RaylibVector2, center: RaylibVector2, radius: Float) -> Bool Never! {
+    dx :: point.x - center.x
+    dy :: point.y - center.y
+    dx * dx + dy * dy <= radius * radius
+}
+
+// Barycentric weights; a point on an edge or a vertex is outside, as in
+// raylib.
+fn check_collision_point_triangle(point: RaylibVector2, p1: RaylibVector2, p2: RaylibVector2, p3: RaylibVector2) -> Bool Never! {
+    area :: (p2.y - p3.y) * (p1.x - p3.x) + (p3.x - p2.x) * (p1.y - p3.y)
+    alpha :: ((p2.y - p3.y) * (point.x - p3.x) + (p3.x - p2.x) * (point.y - p3.y)) / area
+    beta :: ((p3.y - p1.y) * (point.x - p3.x) + (p1.x - p3.x) * (point.y - p3.y)) / area
+    gamma :: Float{1.0} - alpha - beta
+    alpha > 0.0 && beta > 0.0 && gamma > 0.0
+}
+
+// The point lies within `threshold` pixels of the line through `p1` and `p2`,
+// measured as raylib does (the cross product against the longer axis), and
+// between the two points along that axis.
+fn check_collision_point_line(point: RaylibVector2, p1: RaylibVector2, p2: RaylibVector2, threshold: Int) -> Bool Never! {
+    dxl :: p2.x - p1.x
+    dyl :: p2.y - p1.y
+    cross :: (point.x - p1.x) * dyl - (point.y - p1.y) * dxl
+    margin :: Float{threshold} * max_float(abs_float(dxl), abs_float(dyl))
+    if abs_float(cross) >= margin -> return false
+    if abs_float(dxl) >= abs_float(dyl) {
+        if dxl > 0.0 -> return p1.x <= point.x && point.x <= p2.x
+        return p2.x <= point.x && point.x <= p1.x
+    }
+    if dyl > 0.0 -> return p1.y <= point.y && point.y <= p2.y
+    p2.y <= point.y && point.y <= p1.y
+}
+
+// Even-odd crossing count over the polygon's edges; fewer than three points
+// enclose nothing.
+fn check_collision_point_poly(point: RaylibVector2, points: [RaylibVector2]) -> Bool Never! {
+    inside := false
+    if points.len() < 3 -> return inside
+    previous := points.len() - 1
+    loop at in 0..<points.len() {
+        a :: points[at]
+        b :: points[previous]
+        if (a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x -> inside = !inside
+        previous = at
+    }
+    inside
+}
+
+// The crossing point of the segments start1..end1 and start2..end2, or None
+// when they are parallel or cross outside either segment. raylib returns the
+// same point through a pointer beside a Bool.
+fn check_collision_lines(start1: RaylibVector2, end1: RaylibVector2, start2: RaylibVector2, end2: RaylibVector2) -> RaylibVector2? Never! {
+    div :: (end2.y - start2.y) * (end1.x - start1.x) - (end2.x - start2.x) * (end1.y - start1.y)
+    if abs_float(div) < C_FLT_EPSILON -> return None
+    cross1 :: start1.x * end1.y - start1.y * end1.x
+    cross2 :: start2.x * end2.y - start2.y * end2.x
+    xi :: ((start2.x - end2.x) * cross1 - (start1.x - end1.x) * cross2) / div
+    yi :: ((start2.y - end2.y) * cross1 - (start1.y - end1.y) * cross2) / div
+    if outside_span(xi, start1.x, end1.x) || outside_span(xi, start2.x, end2.x) || outside_span(yi, start1.y, end1.y) || outside_span(yi, start2.y, end2.y) -> return None
+    Val(RaylibVector2{x: xi, y: yi})
+}
+
+// `value` lies outside [min(a, b), max(a, b)] on an axis the segment spans;
+// a segment flat on that axis never excludes.
+fn outside_span(value: Float, a: Float, b: Float) -> Bool {
+    if abs_float(a - b) <= C_FLT_EPSILON -> return false
+    value < min_float(a, b) || value > max_float(a, b)
+}
+
+// The overlap of two rectangles, or a zero rectangle when they do not overlap.
+fn get_collision_rec(rec1: RaylibRectangle, rec2: RaylibRectangle) -> RaylibRectangle Never! {
+    left :: max_float(rec1.x, rec2.x)
+    right :: min_float(rec1.x + rec1.width, rec2.x + rec2.width)
+    top :: max_float(rec1.y, rec2.y)
+    bottom :: min_float(rec1.y + rec1.height, rec2.y + rec2.height)
+    if left < right && top < bottom -> return RaylibRectangle{x: left, y: top, width: right - left, height: bottom - top}
+    RaylibRectangle{x: 0.0, y: 0.0, width: 0.0, height: 0.0}
+}
+
+// raylib's CPU image functions on an RGBA8 RaylibImage. They need no window
+// and no effect. The functions that change an image take it through `&`, as
+// raylib's take an Image pointer, and leave an image with no pixels as it is.
+
+// A plain image. A side below 1, a side above 16384 or more than 2^24 pixels
+// makes no image.
+fn gen_image_color(width: Int, height: Int, color: RaylibColor) -> RaylibImage Never! {
+    if !image_size_ok(width, height) -> return no_image()
+    rgba :: pack_rgba(color)
+    pixels := [U8]{}
+    loop _ in 0..<(width * height) -> push_rgba(&pixels, rgba)
+    RaylibImage{width: width, height: height, pixels: pixels}
+}
+
+// Checks of checks_x by checks_y pixels with `first` at the top left; a check
+// side below 1 counts as 1. Sizes follow gen_image_color.
+fn gen_image_checked(width: Int, height: Int, checks_x: Int, checks_y: Int, first: RaylibColor, second: RaylibColor) -> RaylibImage Never! {
+    if !image_size_ok(width, height) -> return no_image()
+    step_x :: max_int(checks_x, 1)
+    step_y :: max_int(checks_y, 1)
+    even :: pack_rgba(first)
+    odd :: pack_rgba(second)
+    pixels := [U8]{}
+    loop y in 0..<height {
+        loop x in 0..<width {
+            rgba :: if (x /% step_x + y /% step_y) %% 2 == 0 -> even else -> odd
+            push_rgba(&pixels, rgba)
+        }
+    }
+    RaylibImage{width: width, height: height, pixels: pixels}
+}
+
+// The pixel at (x, y), or a zero color outside the image.
+fn get_image_color(image: RaylibImage, x: Int, y: Int) -> RaylibColor Never! {
+    if x < 0 || x >= image.width || y < 0 || y >= image.height -> return RaylibColor{r: 0, g: 0, b: 0, a: 0}
+    at :: (y * image.width + x) * 4
+    RaylibColor{r: byte_at(image.pixels, at), g: byte_at(image.pixels, at + 1), b: byte_at(image.pixels, at + 2), a: byte_at(image.pixels, at + 3)}
+}
+
+// Image drawing copies the color, alpha included, as raylib's does on RGBA8.
+fn image_clear_background(image: &RaylibImage, color: RaylibColor) Never! {
+    rgba :: pack_rgba(color)
+    at := 0
+    loop at < image.pixels.len() {
+        put_rgba(&image.pixels, at, rgba)
+        at += 4
+    }
+}
+
+fn image_draw_pixel(image: &RaylibImage, x: Int, y: Int, color: RaylibColor) Never! {
+    if x < 0 || x >= image.width || y < 0 || y >= image.height -> return
+    put_rgba(&image.pixels, (y * image.width + x) * 4, pack_rgba(color))
+}
+
+fn image_draw_rectangle(image: &RaylibImage, x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! {
+    image_draw_rectangle_rec(&image, int_rectangle(x, y, width, height), color)
+}
+
+// raylib's ImageDrawRectangleRec: the rectangle is clipped to the image and
+// truncated to whole pixels. Like raylib's, a rectangle left with less than
+// one column still sets its first pixel unless it sits at the left edge, and
+// one with columns but less than one row fills its first row.
+fn image_draw_rectangle_rec(image: &RaylibImage, rec: RaylibRectangle, color: RaylibColor) Never! {
+    if image.width == 0 || image.height == 0 -> return
+    x := rec.x
+    y := rec.y
+    width := rec.width
+    height := rec.height
+    if x < 0.0 {
+        width = width + x
+        x = Float{0.0}
+    }
+    if y < 0.0 {
+        height = height + y
+        y = Float{0.0}
+    }
+    if width < 0.0 -> width = Float{0.0}
+    if height < 0.0 -> height = Float{0.0}
+    image_w :: Float{image.width}
+    image_h :: Float{image.height}
+    if x + width >= image_w -> width = image_w - x
+    if y + height >= image_h -> height = image_h - y
+    if x >= image_w || y >= image_h -> return
+    if x + width <= 0.0 || y + height <= 0.0 -> return
+    left :: trunc_int(x)
+    top :: trunc_int(y)
+    columns :: trunc_int(width)
+    rgba :: pack_rgba(color)
+    if columns < 1 {
+        put_rgba(&image.pixels, (top * image.width + left) * 4, rgba)
+        return
+    }
+    loop row in top..<(top + max_int(trunc_int(height), 1)) {
+        loop column in left..<(left + columns) -> put_rgba(&image.pixels, (row * image.width + column) * 4, rgba)
+    }
+}
+
+// raylib's ImageCrop: the rectangle is clipped to the image and truncated to
+// whole pixels; one past the right or bottom edge leaves the image as it is.
+// One with no whole column or row leaves no pixels, its truncated sides (not
+// below 0) as the size, as raylib's does.
+fn image_crop(image: &RaylibImage, crop: RaylibRectangle) Never! {
+    if image.width == 0 || image.height == 0 -> return
+    x := crop.x
+    y := crop.y
+    width := crop.width
+    height := crop.height
+    if x < 0.0 {
+        width = width + x
+        x = Float{0.0}
+    }
+    if y < 0.0 {
+        height = height + y
+        y = Float{0.0}
+    }
+    image_w :: Float{image.width}
+    image_h :: Float{image.height}
+    if x + width > image_w -> width = image_w - x
+    if y + height > image_h -> height = image_h - y
+    if x > image_w || y > image_h -> return
+    left :: trunc_int(x)
+    top :: trunc_int(y)
+    columns :: trunc_int(width)
+    rows :: trunc_int(height)
+    if columns < 1 || rows < 1 {
+        image.pixels = [U8]{}
+        image.width = max_int(columns, 0)
+        image.height = max_int(rows, 0)
+        return
+    }
+    pixels := [U8]{}
+    loop row in top..<(top + rows) {
+        start :: (row * image.width + left) * 4
+        loop at in start..<(start + columns * 4) -> &pixels.push(image.pixels[at])
+    }
+    image.pixels = pixels
+    image.width = columns
+    image.height = rows
+}
+
+// raylib's ImageResizeNN: source column (x * ratio) >> 16 with
+// ratio = (width << 16) / new_width + 1, and rows alike. A source past the
+// last column or row, which raylib reads beyond the image at extreme
+// enlargements, takes the last one. A new size outside gen_image_color's
+// limits leaves the image as it is.
+fn image_resize_nn(image: &RaylibImage, new_width: Int, new_height: Int) Never! {
+    if image.width == 0 || image.height == 0 || !image_size_ok(new_width, new_height) -> return
+    x_ratio :: (image.width << 16) /% new_width + 1
+    y_ratio :: (image.height << 16) /% new_height + 1
+    pixels := [U8]{}
+    loop y in 0..<new_height {
+        row :: min_int((y * y_ratio) >> 16, image.height - 1) * image.width
+        loop x in 0..<new_width {
+            at :: (row + min_int((x * x_ratio) >> 16, image.width - 1)) * 4
+            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+        }
+    }
+    image.pixels = pixels
+    image.width = new_width
+    image.height = new_height
+}
+
+fn image_flip_vertical(image: &RaylibImage) Never! {
+    pixels := [U8]{}
+    row := image.height - 1
+    loop row >= 0 {
+        start :: row * image.width * 4
+        loop at in start..<(start + image.width * 4) -> &pixels.push(image.pixels[at])
+        row -= 1
+    }
+    image.pixels = pixels
+}
+
+fn image_flip_horizontal(image: &RaylibImage) Never! {
+    pixels := [U8]{}
+    loop y in 0..<image.height {
+        loop x in 0..<image.width {
+            at :: (y * image.width + image.width - 1 - x) * 4
+            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+        }
+    }
+    image.pixels = pixels
+}
+
+// A quarter turn clockwise: column x of the result is row height - 1 - x of
+// the image read left to right.
+fn image_rotate_cw(image: &RaylibImage) Never! {
+    pixels := [U8]{}
+    loop x in 0..<image.width {
+        y := image.height - 1
+        loop y >= 0 {
+            at :: (y * image.width + x) * 4
+            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+            y -= 1
+        }
+    }
+    turn_image(&image, pixels)
+}
+
+// A quarter turn counterclockwise: row i of the result is column
+// width - 1 - i of the image read top to bottom.
+fn image_rotate_ccw(image: &RaylibImage) Never! {
+    pixels := [U8]{}
+    x := image.width - 1
+    loop x >= 0 {
+        loop y in 0..<image.height {
+            at :: (y * image.width + x) * 4
+            loop k in 0..<4 -> &pixels.push(image.pixels[at + k])
+        }
+        x -= 1
+    }
+    turn_image(&image, pixels)
+}
+
+// raylib's ImageColorTint: each channel becomes channel * tint / 255, rounded
+// down, alpha included.
+fn image_color_tint(image: &RaylibImage, color: RaylibColor) Never! {
+    tint :: [Int]{clamp8(color.r), clamp8(color.g), clamp8(color.b), clamp8(color.a)}
+    loop at in 0..<image.pixels.len() {
+        image.pixels[at] = U8{byte_at(image.pixels, at) * tint[at %% 4] /% 255}
+    }
+}
+
+// raylib's ImageColorInvert: red, green and blue become 255 minus themselves.
+fn image_color_invert(image: &RaylibImage) Never! {
+    loop at in 0..<image.pixels.len() {
+        if at %% 4 != 3 -> image.pixels[at] = U8{255 - byte_at(image.pixels, at)}
+    }
+}
+
+// raylib's ImageColorBrightness: brightness is clamped to -255..255 and added
+// to red, green and blue. A sum above 255 becomes 255 and, as in raylib, a
+// sum below 0 becomes 1.
+fn image_color_brightness(image: &RaylibImage, brightness: Int) Never! {
+    amount :: max_int(min_int(brightness, 255), -255)
+    loop at in 0..<image.pixels.len() {
+        if at %% 4 != 3 {
+            sum :: byte_at(image.pixels, at) + amount
+            value :: if sum < 0 -> 1 else -> min_int(sum, 255)
+            image.pixels[at] = U8{value}
+        }
+    }
+}
+
+// raylib's ImageColorReplace: pixels equal to `color` in all four channels
+// become `replace`.
+fn image_color_replace(image: &RaylibImage, color: RaylibColor, replace: RaylibColor) Never! {
+    target :: pack_rgba(color)
+    rgba :: pack_rgba(replace)
+    at := 0
+    loop at < image.pixels.len() {
+        if image_rgba(image.pixels, at) == target -> put_rgba(&image.pixels, at, rgba)
+        at += 4
+    }
+}
+
+fn image_size_ok(width: Int, height: Int) -> Bool {
+    width >= 1 && height >= 1 && width <= C_PNG_SIDE_MAX && height <= C_PNG_SIDE_MAX && width * height <= C_PNG_PIXELS_MAX
+}
+
+fn push_rgba(pixels: &[U8], rgba: Int) {
+    &pixels.push(U8{rgba >> 24})
+    &pixels.push(U8{(rgba >> 16).bit_and(255)})
+    &pixels.push(U8{(rgba >> 8).bit_and(255)})
+    &pixels.push(U8{rgba.bit_and(255)})
+}
+
+fn image_rgba(pixels: [U8], at: Int) -> Int {
+    png_rgba(byte_at(pixels, at), byte_at(pixels, at + 1), byte_at(pixels, at + 2), byte_at(pixels, at + 3))
+}
+
+fn turn_image(image: &RaylibImage, pixels: [U8]) {
+    width :: image.width
+    image.pixels = pixels
+    image.width = image.height
+    image.height = width
+}
+
+// A Float rounded toward zero; past the Int range it is 0.
+fn trunc_int(value: Float) -> Int {
+    if value < 0.0 -> return -(Int.from_float(core.math.floor(-value)) ?? 0)
+    Int.from_float(core.math.floor(value)) ?? 0
 }
 
 fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
@@ -59,18 +504,232 @@ fn end_drawing() Never! -[GPU]> {
     core.game.raylib.__end_drawing()
 }
 
+// Clears copy the color, alpha included, as raylib's ClearBackground does.
 fn clear_background(color: RaylibColor) Never! -[GPU]> {
-    core.game.raylib.__clear_background(color)
+    canvas :: canvas_extent()
+    core.game.raylib.__fill_rect(0, 0, canvas.width, canvas.height, pack_rgba(color), true)
 }
 
+// The clip of push_clipped against the canvas side cap, painted directly: a
+// rectangle is the hot call of a frame, and building its run (a list or an
+// optional) per call costs more than the fill of a small tile. The runtime
+// clips the capped run to the canvas, so no call asks for the canvas size.
+// Each edge lies within 0..C_CANVAS_SIDE_MAX, so the runtime's widths need
+// no range check: an edge past either end leaves nothing between them.
 fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
-    core.game.raylib.__draw_rectangle(x, y, width, height, color)
+    left :: canvas_side(x)
+    top :: canvas_side(y)
+    right :: canvas_side(x + width)
+    bottom :: canvas_side(y + height)
+    if left >= right -> return
+    if top >= bottom -> return
+    core.game.raylib.__fill_rect(left, top, right - left, bottom - top, pack_rgba(color), false)
 }
 
+// `value` held to 0..C_CANVAS_SIDE_MAX.
+fn canvas_side(value: Int) -> Int {
+    if value < 0 -> return 0
+    if value > C_CANVAS_SIDE_MAX -> return C_CANVAS_SIDE_MAX
+    value
+}
+
+// Each glyph paints as one mask (`__fill_mask`), the runs of text_runs in a
+// single call. A glyph wholly outside the canvas paints nothing, so every
+// pen that crosses stays within a few cells of it. A scale past the mask's
+// cell bound paints the runs one by one instead.
 fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
-    core.game.raylib.__draw_text(text, x, y, size, color)
+    canvas :: canvas_extent()
+    rgba :: pack_rgba(color)
+    scale :: text_scale(size)
+    if scale > C_FONT_MASK_SCALE_MAX {
+        paint(text_runs(canvas, text, x, y, size, rgba))
+        return
+    }
+    width :: 5 * scale
+    height :: 7 * scale
+    pen_x := x
+    pen_y := y
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 10 {
+            pen_x = x
+            pen_y += C_FONT_LINE * scale
+            next
+        }
+        // UTF-8 continuation bytes belong to the scalar already drawn.
+        if code >= 128 && code < 192 -> next
+        glyph := C_FONT_UNKNOWN
+        if code >= 32 && code <= 126 -> glyph = code - 32
+        if pen_x < canvas.width && pen_y < canvas.height && pen_x + width > 0 && pen_y + height > 0 {
+            core.game.raylib.__fill_mask(pen_x, pen_y, scale, glyph_mask(glyph), rgba)
+        }
+        pen_x += C_FONT_ADVANCE * scale
+    }
 }
 
+// raylib's MeasureText for the font draw_text uses: the width in pixels of the
+// widest line. Each scalar is 5 columns plus 1 of spacing at the text's
+// scale, and the last scalar on a line adds no spacing. Lines split at "\n",
+// and empty text or empty lines measure 0.
+fn measure_text(text: String, size: Int) -> Int Never! {
+    scale :: text_scale(size)
+    widest := 0
+    count := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 10 {
+            widest = max_int(widest, count)
+            count = 0
+            next
+        }
+        if code >= 128 && code < 192 -> next
+        count += 1
+    }
+    widest = max_int(widest, count)
+    if widest == 0 -> return 0
+    (C_FONT_ADVANCE * widest - 1) * scale
+}
+
+// raylib's DrawLine: both endpoints are drawn.
+fn draw_line(start_x: Int, start_y: Int, end_x: Int, end_y: Int, color: RaylibColor) Never! -[GPU]> {
+    paint(line_runs(canvas_extent(), start_x, start_y, end_x, end_y, pack_rgba(color)))
+}
+
+// raylib's DrawCircle with a whole-pixel radius; a radius below 1 draws nothing.
+fn draw_circle(center_x: Int, center_y: Int, radius: Int, color: RaylibColor) Never! -[GPU]> {
+    paint(circle_runs(canvas_extent(), center_x, center_y, radius, pack_rgba(color)))
+}
+
+// raylib's DrawTriangle on integer vertices. Either winding fills; a
+// degenerate triangle draws nothing.
+fn draw_triangle(x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, color: RaylibColor) Never! -[GPU]> {
+    paint(triangle_runs(canvas_extent(), x0, y0, x1, y1, x2, y2, pack_rgba(color)))
+}
+
+// raylib's DrawPixel.
+fn draw_pixel(x: Int, y: Int, color: RaylibColor) Never! -[GPU]> {
+    paint(rect_runs(canvas_extent(), x, y, 1, 1, pack_rgba(color)))
+}
+
+// raylib's DrawRectangleRec.
+fn draw_rectangle_rec(rec: RaylibRectangle, color: RaylibColor) Never! -[GPU]> {
+    paint(rec_runs(canvas_extent(), rec, pack_rgba(color)))
+}
+
+// raylib's DrawRectangleLines: a one-pixel border inside the rectangle.
+fn draw_rectangle_lines(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
+    paint(rect_lines_runs(canvas_extent(), x, y, width, height, pack_rgba(color)))
+}
+
+// raylib's DrawRectangleLinesEx: four bands `line_thick` wide inside the
+// rectangle, drawn one after another as raylib draws them.
+fn draw_rectangle_lines_ex(rec: RaylibRectangle, line_thick: Float, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    rgba :: pack_rgba(color)
+    loop band in lines_ex_bands(rec, line_thick) -> paint(rec_runs(canvas, band, rgba))
+}
+
+// raylib's DrawRectangleGradientV: `top` along the top edge, `bottom` along
+// the bottom edge.
+fn draw_rectangle_gradient_v(x: Int, y: Int, width: Int, height: Int, top: RaylibColor, bottom: RaylibColor) Never! -[GPU]> {
+    paint(gradient_runs(canvas_extent(), int_rectangle(x, y, width, height), pack_rgba(top), pack_rgba(bottom), pack_rgba(bottom), pack_rgba(top)))
+}
+
+// raylib's DrawRectangleGradientH: `left` along the left edge, `right` along
+// the right edge.
+fn draw_rectangle_gradient_h(x: Int, y: Int, width: Int, height: Int, left: RaylibColor, right: RaylibColor) Never! -[GPU]> {
+    paint(gradient_runs(canvas_extent(), int_rectangle(x, y, width, height), pack_rgba(left), pack_rgba(left), pack_rgba(right), pack_rgba(right)))
+}
+
+// raylib's DrawRectangleGradientEx: the corner colors run counter-clockwise
+// from the top left.
+fn draw_rectangle_gradient_ex(rec: RaylibRectangle, top_left: RaylibColor, bottom_left: RaylibColor, bottom_right: RaylibColor, top_right: RaylibColor) Never! -[GPU]> {
+    paint(gradient_runs(canvas_extent(), rec, pack_rgba(top_left), pack_rgba(bottom_left), pack_rgba(bottom_right), pack_rgba(top_right)))
+}
+
+// raylib's DrawRectangleRounded: one convex outline of four corner arcs. A
+// segment count below 4 picks raylib's count for the radius; a roundness at
+// or below 0, or a side below 1, draws the plain rectangle.
+fn draw_rectangle_rounded(rec: RaylibRectangle, roundness: Float, segments: Int, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    rgba :: pack_rgba(color)
+    if roundness <= 0.0 || rec.width < 1.0 || rec.height < 1.0 {
+        paint(rec_runs(canvas, rec, rgba))
+        return
+    }
+    paint(cover_runs(canvas, pieces_cover(canvas, rounded_pieces(rec, roundness, segments, 0.0, 4.0)), rgba))
+}
+
+// raylib's DrawRectangleRoundedLines: a one-pixel band just outside the
+// rounded rectangle.
+fn draw_rectangle_rounded_lines(rec: RaylibRectangle, roundness: Float, segments: Int, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    rgba :: pack_rgba(color)
+    if roundness <= 0.0 {
+        around :: RaylibRectangle{x: rec.x - 1.0, y: rec.y - 1.0, width: rec.width + 2.0, height: rec.height + 2.0}
+        loop band in lines_ex_bands(around, 1.0) -> paint(rec_runs(canvas, band, rgba))
+        return
+    }
+    outer :: pieces_cover(canvas, rounded_pieces(rec, roundness, segments, 1.0, 2.0))
+    inner :: pieces_cover(canvas, rounded_pieces(rec, roundness, segments, 0.0, 2.0))
+    paint(difference_runs(canvas, outer, inner, rgba))
+}
+
+// raylib's DrawCircleLines with a whole-pixel radius: the pixels of
+// draw_circle's disc that touch a pixel outside it.
+fn draw_circle_lines(center_x: Int, center_y: Int, radius: Int, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    paint(outline_runs(canvas, disc_cover(canvas, center_x, center_y, radius), pack_rgba(color)))
+}
+
+// raylib's DrawEllipse: the pixels at whole offsets (dx, dy) from the center
+// with (dx * radius_v)^2 + (dy * radius_h)^2 <= (radius_h * radius_v)^2.
+fn draw_ellipse(center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    paint(cover_runs(canvas, ellipse_cover(canvas, center_x, center_y, radius_h, radius_v), pack_rgba(color)))
+}
+
+// raylib's DrawEllipseLines: the pixels of draw_ellipse's area that touch a
+// pixel outside it.
+fn draw_ellipse_lines(center_x: Int, center_y: Int, radius_h: Float, radius_v: Float, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    paint(outline_runs(canvas, ellipse_cover(canvas, center_x, center_y, radius_h, radius_v), pack_rgba(color)))
+}
+
+// raylib's DrawRing: the annulus sector between the radii from `start_angle`
+// to `end_angle` in degrees, as raylib's quads (a sector when the inner
+// radius is 0 or less). Each pixel is drawn once.
+fn draw_ring(center: RaylibVector2, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    pieces :: ring_pieces(center, inner_radius, outer_radius, start_angle, end_angle, segments)
+    paint(cover_runs(canvas, pieces_cover(canvas, pieces), pack_rgba(color)))
+}
+
+// raylib's DrawRingLines: the pixels of draw_ring's area that touch a pixel
+// outside it.
+fn draw_ring_lines(center: RaylibVector2, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    pieces :: ring_pieces(center, inner_radius, outer_radius, start_angle, end_angle, segments)
+    paint(outline_runs(canvas, pieces_cover(canvas, pieces), pack_rgba(color)))
+}
+
+// raylib's DrawPoly: a regular polygon with its first vertex at `rotation`
+// degrees; fewer than 3 sides draw 3.
+fn draw_poly(center: RaylibVector2, sides: Int, radius: Float, rotation: Float, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    paint(cover_runs(canvas, pieces_cover(canvas, poly_pieces(center, sides, radius, rotation)), pack_rgba(color)))
+}
+
+// raylib's DrawPolyLines: the pixels of draw_poly's area that touch a pixel
+// outside it.
+fn draw_poly_lines(center: RaylibVector2, sides: Int, radius: Float, rotation: Float, color: RaylibColor) Never! -[GPU]> {
+    canvas :: canvas_extent()
+    paint(outline_runs(canvas, pieces_cover(canvas, poly_pieces(center, sides, radius, rotation)), pack_rgba(color)))
+}
+
+// Blits the first region named `source` from the atlas texture with its
+// top-left corner at (x, y). Texture pixels blend src-over like any run; an
+// atlas without a decoded texture, or an unknown region, draws nothing.
 fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
     core.game.raylib.__draw_sprite(atlas, source, x, y)
 }
@@ -94,8 +753,15 @@ fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
     core.game.raylib.__gamepad_axis(gamepad, axis)
 }
 
+// The runtime parses the atlas text and resolves its texture path; Core reads
+// and decodes that PNG. A texture that cannot be read or decoded leaves the
+// atlas without one, as raylib's LoadTexture leaves an invalid texture.
 fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
-    core.game.raylib.__load_texture_atlas(path)
+    atlas :: core.game.raylib.__load_texture_atlas(path)
+    bytes :: core.files.read_bytes(core.game.raylib.__atlas_texture_path(atlas)) ?? return atlas
+    image :: decode_png(bytes)
+    if image.width == 0 -> return atlas
+    core.game.raylib.__atlas_bind_texture(atlas, image.pixels, image.width)
 }
 
 // Sound handles retain the supplied path. Acceptance is the existing non-empty
@@ -119,6 +785,1076 @@ fn clamp_fps(value: Int) -> Int {
     if value < 1 -> return 1
     if value > 240 -> return 240
     value
+}
+
+// The software rasterizer. A primitive scan-converts into runs: rectangles of
+// one packed 0xRRGGBBAA color, already clipped to the canvas, so every value
+// that crosses `__fill_rect` is a small canvas coordinate. Pixel (x, y) covers
+// [x, x + 1) x [y, y + 1) and is sampled at its center.
+struct RaylibRun {
+    x: Int
+    y: Int
+    width: Int
+    height: Int
+    rgba: Int
+}
+
+struct RaylibCanvas {
+    width: Int
+    height: Int
+}
+
+// The inclusive column range a triangle row keeps; empty when lo > hi.
+struct RaylibSpan {
+    lo: Int
+    hi: Int
+}
+
+// The runtime caps each canvas side below 65536, so one word carries both.
+fn canvas_extent() -[GPU]> RaylibCanvas Never! {
+    packed :: core.game.raylib.__canvas_extent()
+    RaylibCanvas{width: packed >> 16, height: packed.bit_and(65535)}
+}
+
+fn paint(runs: [RaylibRun]) Never! -[GPU]> {
+    loop run in runs -> core.game.raylib.__fill_rect(run.x, run.y, run.width, run.height, run.rgba, false)
+}
+
+fn pack_rgba(color: RaylibColor) -> Int {
+    (clamp8(color.r) << 24) + (clamp8(color.g) << 16) + (clamp8(color.b) << 8) + clamp8(color.a)
+}
+
+fn min_int(a: Int, b: Int) -> Int {
+    if a < b -> return a
+    b
+}
+
+fn max_int(a: Int, b: Int) -> Int {
+    if a > b -> return a
+    b
+}
+
+fn abs_int(a: Int) -> Int {
+    if a < 0 -> return -a
+    a
+}
+
+fn abs_float(value: Float) -> Float {
+    if value < 0.0 -> return -value
+    value
+}
+
+fn min_float(a: Float, b: Float) -> Float {
+    if a < b -> return a
+    b
+}
+
+fn max_float(a: Float, b: Float) -> Float {
+    if a > b -> return a
+    b
+}
+
+// floor(sqrt(n)) for n >= 0, by Newton's method from above.
+fn isqrt_floor(n: Int) -> Int {
+    if n < 2 -> return n
+    x := n
+    y := (x + 1) /% 2
+    loop y < x {
+        x = y
+        y = (x + n /% x) /% 2
+    }
+    x
+}
+
+// round(n / d) for d > 0, halves rounding up.
+fn round_div(n: Int, d: Int) -> Int {
+    (2 * n + d) /% (2 * d)
+}
+
+fn push_clipped(runs: &[RaylibRun], canvas: RaylibCanvas, x: Int, y: Int, width: Int, height: Int, rgba: Int) {
+    left :: max_int(x, 0)
+    top :: max_int(y, 0)
+    right :: min_int(x + width, canvas.width)
+    bottom :: min_int(y + height, canvas.height)
+    if left >= right || top >= bottom -> return
+    &runs.push(RaylibRun{x: left, y: top, width: right - left, height: bottom - top, rgba: rgba})
+}
+
+fn rect_runs(canvas: RaylibCanvas, x: Int, y: Int, width: Int, height: Int, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    push_clipped(&runs, canvas, x, y, width, height, rgba)
+    runs
+}
+
+// Both endpoints are drawn. The major axis takes one pixel per step and the
+// minor coordinate is the exact rounded line value there, so only the visible
+// steps are walked; pixels in one row (or column) merge into one run.
+fn line_runs(canvas: RaylibCanvas, x0: Int, y0: Int, x1: Int, y1: Int, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    if x0 == x1 && y0 == y1 {
+        push_clipped(&runs, canvas, x0, y0, 1, 1, rgba)
+        return runs
+    }
+    ax := x0
+    ay := y0
+    bx := x1
+    by := y1
+    if abs_int(x1 - x0) >= abs_int(y1 - y0) {
+        if x0 > x1 {
+            ax = x1
+            ay = y1
+            bx = x0
+            by = y0
+        }
+        run_x := 0
+        run_y := 0
+        run_width := 0
+        x := max_int(ax, 0)
+        last :: min_int(bx, canvas.width - 1)
+        loop x <= last {
+            y :: ay + round_div((x - ax) * (by - ay), bx - ax)
+            if run_width > 0 && y == run_y && x == run_x + run_width {
+                run_width += 1
+            } else {
+                if run_width > 0 -> push_clipped(&runs, canvas, run_x, run_y, run_width, 1, rgba)
+                run_x = x
+                run_y = y
+                run_width = 1
+            }
+            x += 1
+        }
+        if run_width > 0 -> push_clipped(&runs, canvas, run_x, run_y, run_width, 1, rgba)
+        return runs
+    }
+    if y0 > y1 {
+        ax = x1
+        ay = y1
+        bx = x0
+        by = y0
+    }
+    run_x := 0
+    run_y := 0
+    run_height := 0
+    y := max_int(ay, 0)
+    last :: min_int(by, canvas.height - 1)
+    loop y <= last {
+        x :: ax + round_div((y - ay) * (bx - ax), by - ay)
+        if run_height > 0 && x == run_x && y == run_y + run_height {
+            run_height += 1
+        } else {
+            if run_height > 0 -> push_clipped(&runs, canvas, run_x, run_y, 1, run_height, rgba)
+            run_x = x
+            run_y = y
+            run_height = 1
+        }
+        y += 1
+    }
+    if run_height > 0 -> push_clipped(&runs, canvas, run_x, run_y, 1, run_height, rgba)
+    runs
+}
+
+// A filled disc: every pixel whose offset from the center satisfies
+// dx^2 + dy^2 <= radius^2, one run per visible row.
+fn circle_runs(canvas: RaylibCanvas, center_x: Int, center_y: Int, radius: Int, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    if radius <= 0 -> return runs
+    row := max_int(center_y - radius, 0)
+    last :: min_int(center_y + radius, canvas.height - 1)
+    loop row <= last {
+        dy :: row - center_y
+        half :: isqrt_floor(radius * radius - dy * dy)
+        push_clipped(&runs, canvas, center_x - half, row, 2 * half + 1, 1, rgba)
+        row += 1
+    }
+    runs
+}
+
+// Narrows a row's span to the pixel centers on the inner side of the edge
+// a -> b. Twice the edge function at center (x + 1/2, row + 1/2) is p*x + q.
+// A center exactly on the edge is kept for one direction of the edge only,
+// so triangles sharing an edge never both cover (or both miss) a pixel.
+fn edge_span(span: RaylibSpan, ax: Int, ay: Int, bx: Int, by: Int, row: Int) -> RaylibSpan {
+    ex :: bx - ax
+    ey :: by - ay
+    p :: -2 * ey
+    q :: ex * (2 * row + 1 - 2 * ay) - ey * (1 - 2 * ax)
+    inclusive :: ey > 0 || (ey == 0 && ex < 0)
+    half_plane(span, p, q, inclusive)
+}
+
+// Narrows a row's span to the columns x with p*x + q > 0, or = 0 when
+// `inclusive`.
+fn half_plane(span: RaylibSpan, p: Int, q: Int, inclusive: Bool) -> RaylibSpan {
+    if p == 0 {
+        if q > 0 || (q == 0 && inclusive) -> return RaylibSpan{lo: span.lo, hi: span.hi}
+        return RaylibSpan{lo: 1, hi: 0}
+    }
+    if p > 0 {
+        bound := ((-q) /% p) + 1
+        if inclusive -> bound = -(q /% p)
+        return RaylibSpan{lo: max_int(span.lo, bound), hi: span.hi}
+    }
+    bound := -((-q) /% (-p)) - 1
+    if inclusive -> bound = q /% (-p)
+    RaylibSpan{lo: span.lo, hi: min_int(span.hi, bound)}
+}
+
+// A filled triangle in either winding: the pixels whose centers lie inside,
+// one run per visible row. A degenerate triangle covers nothing.
+fn triangle_runs(canvas: RaylibCanvas, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    area :: (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0)
+    if area == 0 -> return runs
+    bx := x1
+    by := y1
+    cx := x2
+    cy := y2
+    if area < 0 {
+        bx = x2
+        by = y2
+        cx = x1
+        cy = y1
+    }
+    row := max_int(min_int(y0, min_int(y1, y2)), 0)
+    last :: min_int(max_int(y0, max_int(y1, y2)) - 1, canvas.height - 1)
+    loop row <= last {
+        span := RaylibSpan{lo: 0, hi: canvas.width - 1}
+        span = edge_span(span, x0, y0, bx, by, row)
+        span = edge_span(span, bx, by, cx, cy, row)
+        span = edge_span(span, cx, cy, x0, y0, row)
+        if span.lo <= span.hi -> &runs.push(RaylibRun{x: span.lo, y: row, width: span.hi - span.lo + 1, height: 1, rgba: rgba})
+        row += 1
+    }
+    runs
+}
+
+fn int_rectangle(x: Int, y: Int, width: Int, height: Int) -> RaylibRectangle {
+    RaylibRectangle{x: Float{x}, y: Float{y}, width: Float{width}, height: Float{height}}
+}
+
+// Float geometry snaps to 1/256 of a pixel; coordinates are held within 2^20
+// pixels of the origin, far past any canvas.
+C_SUBPIXEL_LIMIT :: 268435456
+
+C_DEG2RAD :: Float{0.017453292519943295}
+
+C_TAU :: Float{6.283185307179586}
+
+fn subpixel(value: Float) -> Int {
+    scaled :: core.math.floor(value * 256.0 + 0.5)
+    if scaled > 268435456.0 -> return C_SUBPIXEL_LIMIT
+    if scaled < -268435456.0 -> return -C_SUBPIXEL_LIMIT
+    Int.from_float(scaled) ?? 0
+}
+
+// The first pixel whose center lies at or past subpixel coordinate `at`.
+fn center_from(at: Int) -> Int {
+    -((128 - at) /% 256)
+}
+
+// The pixels whose centers lie in the rectangle, left and top edges included.
+fn rec_runs(canvas: RaylibCanvas, rec: RaylibRectangle, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    if rec.width <= 0.0 || rec.height <= 0.0 -> return runs
+    left :: center_from(subpixel(rec.x))
+    top :: center_from(subpixel(rec.y))
+    right :: center_from(subpixel(rec.x + rec.width))
+    bottom :: center_from(subpixel(rec.y + rec.height))
+    push_clipped(&runs, canvas, left, top, right - left, bottom - top, rgba)
+    runs
+}
+
+// The rectangle's outermost pixels, each in one run.
+fn rect_lines_runs(canvas: RaylibCanvas, x: Int, y: Int, width: Int, height: Int, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    if width <= 0 || height <= 0 -> return runs
+    push_clipped(&runs, canvas, x, y, width, 1, rgba)
+    if height > 2 {
+        push_clipped(&runs, canvas, x, y + 1, 1, height - 2, rgba)
+        if width > 1 -> push_clipped(&runs, canvas, x + width - 1, y + 1, 1, height - 2, rgba)
+    }
+    if height > 1 -> push_clipped(&runs, canvas, x, y + height - 1, width, 1, rgba)
+    runs
+}
+
+// raylib's DrawRectangleLinesEx bands, top, bottom, left, right: a thickness
+// past either side becomes half the shorter side.
+fn lines_ex_bands(rec: RaylibRectangle, line_thick: Float) -> [RaylibRectangle] {
+    thick := line_thick
+    if thick > rec.width || thick > rec.height {
+        if rec.width >= rec.height {
+            thick = rec.height / 2.0
+        } else {
+            thick = rec.width / 2.0
+        }
+    }
+    side :: rec.height - thick * 2.0
+    bands := [RaylibRectangle]{}
+    &bands.push(RaylibRectangle{x: rec.x, y: rec.y, width: rec.width, height: thick})
+    &bands.push(RaylibRectangle{x: rec.x, y: rec.y - thick + rec.height, width: rec.width, height: thick})
+    &bands.push(RaylibRectangle{x: rec.x, y: rec.y + thick, width: thick, height: side})
+    &bands.push(RaylibRectangle{x: rec.x - thick + rec.width, y: rec.y + thick, width: thick, height: side})
+    bands
+}
+
+// The corner colors blend linearly over the two triangles a GPU draws the
+// quad as, split on the top-left to bottom-right diagonal; each pixel takes
+// the blend at its center, rounded to the nearest level. Equal neighbours in
+// a row share a run.
+fn gradient_runs(canvas: RaylibCanvas, rec: RaylibRectangle, top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    if rec.width <= 0.0 || rec.height <= 0.0 -> return runs
+    left :: max_int(center_from(subpixel(rec.x)), 0)
+    right :: min_int(center_from(subpixel(rec.x + rec.width)), canvas.width)
+    bottom :: min_int(center_from(subpixel(rec.y + rec.height)), canvas.height)
+    if left >= right -> return runs
+    row := max_int(center_from(subpixel(rec.y)), 0)
+    loop row < bottom {
+        v :: (Float{row} + 0.5 - rec.y) / rec.height
+        start := left
+        current := 0
+        column := left
+        loop column < right {
+            u :: (Float{column} + 0.5 - rec.x) / rec.width
+            rgba :: gradient_rgba(top_left, bottom_left, bottom_right, top_right, u, v)
+            if column > start && rgba != current {
+                &runs.push(RaylibRun{x: start, y: row, width: column - start, height: 1, rgba: current})
+                start = column
+            }
+            current = rgba
+            column += 1
+        }
+        &runs.push(RaylibRun{x: start, y: row, width: right - start, height: 1, rgba: current})
+        row += 1
+    }
+    runs
+}
+
+// The packed color at (u, v) in the unit square.
+fn gradient_rgba(top_left: Int, bottom_left: Int, bottom_right: Int, top_right: Int, u: Float, v: Float) -> Int {
+    rgba := 0
+    shift := 24
+    loop shift >= 0 {
+        tl :: (top_left >> shift).bit_and(255)
+        bl :: (bottom_left >> shift).bit_and(255)
+        br :: (bottom_right >> shift).bit_and(255)
+        tr :: (top_right >> shift).bit_and(255)
+        level := Float{0.0}
+        if v >= u {
+            level = Float{tl} * (Float{1.0} - v) + Float{bl} * (v - u) + Float{br} * u
+        } else {
+            level = Float{tl} * (Float{1.0} - u) + Float{tr} * (u - v) + Float{br} * v
+        }
+        rgba = (rgba << 8) + clamp8(Int.from_float(core.math.floor(level + 0.5)) ?? 0)
+        shift -= 8
+    }
+    rgba
+}
+
+// A convex polygon in subpixels, wound so its signed area is positive, the
+// winding triangle_runs fills.
+struct RaylibPiece {
+    xs: [Int]
+    ys: [Int]
+}
+
+// Snaps a convex polygon given in either winding and keeps it if it has area.
+fn push_piece(pieces: &[RaylibPiece], xs: [Float], ys: [Float]) {
+    sx := [Int]{}
+    sy := [Int]{}
+    loop at in 0..<xs.len() {
+        &sx.push(subpixel(xs[at]))
+        &sy.push(subpixel(ys[at]))
+    }
+    count :: sx.len()
+    area := 0
+    loop at in 0..<count {
+        following :: (at + 1) %% count
+        area += sx[at] * sy[following] - sx[following] * sy[at]
+    }
+    if area == 0 -> return
+    if area > 0 {
+        &pieces.push(RaylibPiece{xs: sx, ys: sy})
+        return
+    }
+    rx := [Int]{}
+    ry := [Int]{}
+    at := count - 1
+    loop at >= 0 {
+        &rx.push(sx[at])
+        &ry.push(sy[at])
+        at -= 1
+    }
+    &pieces.push(RaylibPiece{xs: rx, ys: ry})
+}
+
+// The columns of `row` whose centers lie inside the piece, within lo..hi.
+// Edges keep the triangle tie rule, so pieces sharing an edge split it.
+fn piece_span(piece: RaylibPiece, row: Int, lo: Int, hi: Int) -> RaylibSpan {
+    span := RaylibSpan{lo: lo, hi: hi}
+    center :: row * 256 + 128
+    count :: piece.xs.len()
+    loop at in 0..<count {
+        following :: (at + 1) %% count
+        ax :: piece.xs[at]
+        ay :: piece.ys[at]
+        ex :: piece.xs[following] - ax
+        ey :: piece.ys[following] - ay
+        if ex == 0 && ey == 0 -> next
+        span = half_plane(span, -256 * ey, ex * (center - ay) - ey * (128 - ax), ey > 0 || (ey == 0 && ex < 0))
+        if span.lo > span.hi -> return span
+    }
+    span
+}
+
+// The pixels a shape covers. Row k, canvas row top + k, holds the sorted,
+// disjoint, non-touching column spans spans[starts[k] ..< starts[k + 1]].
+// A cover reaches one pixel past each canvas edge, so an outline follows the
+// shape and not the canvas border.
+struct RaylibCover {
+    top: Int
+    starts: [Int]
+    spans: [RaylibSpan]
+}
+
+// The union of the pieces.
+fn pieces_cover(canvas: RaylibCanvas, pieces: [RaylibPiece]) -> RaylibCover {
+    first := canvas.height + 1
+    last := -2
+    loop piece in pieces {
+        loop y in piece.ys {
+            first = min_int(first, center_from(y))
+            last = max_int(last, center_from(y + 1) - 1)
+        }
+    }
+    first = max_int(first, -1)
+    last = min_int(last, canvas.height)
+    starts := [Int]{0}
+    spans := [RaylibSpan]{}
+    row := first
+    loop row <= last {
+        row_spans := [RaylibSpan]{}
+        loop piece in pieces {
+            span :: piece_span(piece, row, -1, canvas.width)
+            if span.lo <= span.hi -> &row_spans.push(span)
+        }
+        merge_spans(&spans, row_spans)
+        &starts.push(spans.len())
+        row += 1
+    }
+    RaylibCover{top: first, starts: starts, spans: spans}
+}
+
+// Appends the union of `spans` in column order, joining spans that overlap
+// or touch.
+fn merge_spans(out: &[RaylibSpan], spans: [RaylibSpan]) {
+    taken := [Bool]{}
+    loop _ in 0..<spans.len() -> &taken.push(false)
+    lo := 0
+    hi := -1
+    open := false
+    loop _ in 0..<spans.len() {
+        pick := -1
+        loop at in 0..<spans.len() {
+            if !taken[at] && (pick < 0 || spans[at].lo < spans[pick].lo) -> pick = at
+        }
+        taken[pick] = true
+        if open && spans[pick].lo <= hi + 1 {
+            hi = max_int(hi, spans[pick].hi)
+        } else {
+            if open -> &out.push(RaylibSpan{lo: lo, hi: hi})
+            lo = spans[pick].lo
+            hi = spans[pick].hi
+            open = true
+        }
+    }
+    if open -> &out.push(RaylibSpan{lo: lo, hi: hi})
+}
+
+// draw_circle's disc as a cover.
+fn disc_cover(canvas: RaylibCanvas, center_x: Int, center_y: Int, radius: Int) -> RaylibCover {
+    starts := [Int]{0}
+    spans := [RaylibSpan]{}
+    first :: max_int(center_y - radius, -1)
+    if radius <= 0 -> return RaylibCover{top: first, starts: starts, spans: spans}
+    last :: min_int(center_y + radius, canvas.height)
+    row := first
+    loop row <= last {
+        dy :: row - center_y
+        half :: isqrt_floor(radius * radius - dy * dy)
+        lo :: max_int(center_x - half, -1)
+        hi :: min_int(center_x + half, canvas.width)
+        if lo <= hi -> &spans.push(RaylibSpan{lo: lo, hi: hi})
+        &starts.push(spans.len())
+        row += 1
+    }
+    RaylibCover{top: first, starts: starts, spans: spans}
+}
+
+// draw_ellipse's area as a cover. Each row starts from the square-root
+// estimate and settles on the widest offset the exact test keeps.
+fn ellipse_cover(canvas: RaylibCanvas, center_x: Int, center_y: Int, radius_h: Float, radius_v: Float) -> RaylibCover {
+    starts := [Int]{0}
+    spans := [RaylibSpan]{}
+    if !(radius_h > 0.0) || !(radius_v > 0.0) -> return RaylibCover{top: 0, starts: starts, spans: spans}
+    reach_h :: whole_reach(radius_h)
+    reach_v :: whole_reach(radius_v)
+    limit :: (radius_h * radius_v) * (radius_h * radius_v)
+    first :: max_int(center_y - reach_v, -1)
+    last :: min_int(center_y + reach_v, canvas.height)
+    row := first
+    loop row <= last {
+        dy :: Float{row - center_y} * radius_h
+        if dy * dy <= limit {
+            estimate :: core.math.floor(core.math.sqrt(limit - dy * dy) / radius_v)
+            half := reach_h
+            reach :: Float{reach_h}
+            if estimate < reach -> half = max_int(Int.from_float(estimate) ?? 0, 0)
+            loop half < reach_h && ellipse_inside(half + 1, dy, radius_v, limit) -> half += 1
+            loop half > 0 && !ellipse_inside(half, dy, radius_v, limit) -> half -= 1
+            lo :: max_int(center_x - half, -1)
+            hi :: min_int(center_x + half, canvas.width)
+            if lo <= hi -> &spans.push(RaylibSpan{lo: lo, hi: hi})
+        }
+        &starts.push(spans.len())
+        row += 1
+    }
+    RaylibCover{top: first, starts: starts, spans: spans}
+}
+
+fn ellipse_inside(dx: Int, dy: Float, radius_v: Float, limit: Float) -> Bool {
+    x :: Float{dx} * radius_v
+    x * x + dy * dy <= limit
+}
+
+// floor(radius) + 1, capped far past any canvas.
+fn whole_reach(radius: Float) -> Int {
+    if radius >= 1073741824.0 -> return 1073741824
+    (Int.from_float(core.math.floor(radius)) ?? 0) + 1
+}
+
+fn cover_runs(canvas: RaylibCanvas, cover: RaylibCover, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    loop k in 0..<(cover.starts.len() - 1) {
+        loop at in cover.starts[k]..<cover.starts[k + 1] {
+            push_clipped(&runs, canvas, cover.spans[at].lo, cover.top + k, cover.spans[at].hi - cover.spans[at].lo + 1, 1, rgba)
+        }
+    }
+    runs
+}
+
+// The cover's pixels with a 4-neighbour outside it.
+fn outline_runs(canvas: RaylibCanvas, cover: RaylibCover, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    loop k in 0..<(cover.starts.len() - 1) {
+        row :: cover.top + k
+        if row < 0 || row >= canvas.height -> next
+        loop at in cover.starts[k]..<cover.starts[k + 1] {
+            lo :: cover.spans[at].lo
+            hi :: cover.spans[at].hi
+            push_gaps(&runs, canvas, row, lo, hi, interior_spans(cover, k, lo + 1, hi - 1), rgba)
+        }
+    }
+    runs
+}
+
+// The columns within lo..hi covered in both rows next to row k.
+fn interior_spans(cover: RaylibCover, k: Int, lo: Int, hi: Int) -> [RaylibSpan] {
+    inside := [RaylibSpan]{}
+    if k == 0 || k + 2 >= cover.starts.len() -> return inside
+    loop above in cover.starts[k - 1]..<cover.starts[k] {
+        a_lo :: max_int(cover.spans[above].lo, lo)
+        a_hi :: min_int(cover.spans[above].hi, hi)
+        if a_lo > a_hi -> next
+        loop below in cover.starts[k + 1]..<cover.starts[k + 2] {
+            b_lo :: max_int(cover.spans[below].lo, a_lo)
+            b_hi :: min_int(cover.spans[below].hi, a_hi)
+            if b_lo <= b_hi -> &inside.push(RaylibSpan{lo: b_lo, hi: b_hi})
+        }
+    }
+    inside
+}
+
+// The pixels `outer` covers and `inner` does not.
+fn difference_runs(canvas: RaylibCanvas, outer: RaylibCover, inner: RaylibCover, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    loop k in 0..<(outer.starts.len() - 1) {
+        row :: outer.top + k
+        holes := [RaylibSpan]{}
+        j :: row - inner.top
+        if j >= 0 && j + 1 < inner.starts.len() {
+            loop at in inner.starts[j]..<inner.starts[j + 1] -> &holes.push(RaylibSpan{lo: inner.spans[at].lo, hi: inner.spans[at].hi})
+        }
+        loop at in outer.starts[k]..<outer.starts[k + 1] {
+            push_gaps(&runs, canvas, row, outer.spans[at].lo, outer.spans[at].hi, holes, rgba)
+        }
+    }
+    runs
+}
+
+// Runs for the columns lo..hi of `row` outside the sorted `holes`.
+fn push_gaps(runs: &[RaylibRun], canvas: RaylibCanvas, row: Int, lo: Int, hi: Int, holes: [RaylibSpan], rgba: Int) {
+    pen := lo
+    loop hole in holes {
+        if hole.hi < pen || hole.lo > hi -> next
+        push_clipped(&runs, canvas, pen, row, hole.lo - pen, 1, rgba)
+        pen = hole.hi + 1
+    }
+    push_clipped(&runs, canvas, pen, row, hi + 1 - pen, 1, rgba)
+}
+
+// acos(2 * (1 - 0.5 / radius)^2 - 1): raylib's widest arc step whose chord
+// strays at most half a pixel from the circle.
+fn arc_step(radius: Float) -> Float {
+    ratio :: Float{1.0} - Float{0.5} / radius
+    core.math.acos(Float{2.0} * ratio * ratio - 1.0)
+}
+
+// raylib's rounded rectangle: four corner arcs of `segments` steps, at the
+// corner radius plus `grow`. Below 4 segments, a corner takes 1/`divisor` of
+// raylib's segment count for a full circle of the radius.
+fn rounded_pieces(rec: RaylibRectangle, roundness: Float, segments: Int, grow: Float, divisor: Float) -> [RaylibPiece] {
+    pieces := [RaylibPiece]{}
+    share := roundness
+    if share >= 1.0 -> share = 1.0
+    radius := rec.width * share / 2.0
+    if rec.width > rec.height -> radius = rec.height * share / 2.0
+    if radius <= 0.0 -> return pieces
+    count := segments
+    if count < 4 {
+        count = Int.from_float(core.math.trunc(core.math.ceil(C_TAU / arc_step(radius)) / divisor)) ?? 0
+        if count <= 0 -> count = 4
+    }
+    step :: Float{90.0} / Float{count}
+    reach :: radius + grow
+    xs := [Float]{}
+    ys := [Float]{}
+    loop corner in 0..<4 {
+        cx := rec.x + radius
+        cy := rec.y + radius
+        start := Float{180.0}
+        if corner == 1 {
+            cx = (rec.x + rec.width) - radius
+            start = 270.0
+        } else if corner == 2 {
+            cx = (rec.x + rec.width) - radius
+            cy = (rec.y + rec.height) - radius
+            start = 0.0
+        } else if corner == 3 {
+            cy = (rec.y + rec.height) - radius
+            start = 90.0
+        }
+        loop at in 0..<(count + 1) {
+            angle :: (start + step * Float{at}) * C_DEG2RAD
+            &xs.push(cx + core.math.cos(angle) * reach)
+            &ys.push(cy + core.math.sin(angle) * reach)
+        }
+    }
+    push_piece(&pieces, xs, ys)
+    pieces
+}
+
+// raylib's DrawRing quads, or its DrawCircleSector triangles when the inner
+// radius is 0 or less, with raylib's argument fixes and segment count.
+fn ring_pieces(center: RaylibVector2, inner_radius: Float, outer_radius: Float, start_angle: Float, end_angle: Float, segments: Int) -> [RaylibPiece] {
+    pieces := [RaylibPiece]{}
+    if start_angle == end_angle -> return pieces
+    inner := inner_radius
+    outer := outer_radius
+    if outer < inner {
+        inner = outer_radius
+        outer = inner_radius
+        if outer <= 0.0 -> outer = 0.1
+    }
+    start := start_angle
+    finish := end_angle
+    if finish < start {
+        start = end_angle
+        finish = start_angle
+    }
+    least :: Int.from_float(core.math.ceil((finish - start) / 90.0)) ?? 1
+    count := segments
+    if count < least {
+        count = Int.from_float(core.math.trunc((finish - start) * core.math.ceil(C_TAU / arc_step(outer)) / 360.0)) ?? 0
+        if count <= 0 -> count = least
+    }
+    if count <= 0 -> return pieces
+    sector :: inner <= 0.0
+    if sector && outer <= 0.0 -> outer = 0.1
+    step :: (finish - start) / Float{count}
+    loop at in 0..<count {
+        before :: (start + step * Float{at}) * C_DEG2RAD
+        after :: (start + step * Float{at + 1}) * C_DEG2RAD
+        xs := [Float]{}
+        ys := [Float]{}
+        if sector {
+            &xs.push(center.x)
+            &ys.push(center.y)
+            &xs.push(center.x + core.math.cos(before) * outer)
+            &ys.push(center.y + core.math.sin(before) * outer)
+        } else {
+            &xs.push(center.x + core.math.cos(before) * outer)
+            &ys.push(center.y + core.math.sin(before) * outer)
+            &xs.push(center.x + core.math.cos(before) * inner)
+            &ys.push(center.y + core.math.sin(before) * inner)
+            &xs.push(center.x + core.math.cos(after) * inner)
+            &ys.push(center.y + core.math.sin(after) * inner)
+        }
+        &xs.push(center.x + core.math.cos(after) * outer)
+        &ys.push(center.y + core.math.sin(after) * outer)
+        push_piece(&pieces, xs, ys)
+    }
+    pieces
+}
+
+// raylib's DrawPoly outline: vertex i at rotation + 360 * i / sides degrees.
+fn poly_pieces(center: RaylibVector2, sides: Int, radius: Float, rotation: Float) -> [RaylibPiece] {
+    count :: max_int(sides, 3)
+    xs := [Float]{}
+    ys := [Float]{}
+    loop at in 0..<count {
+        angle :: (rotation + Float{360.0} * Float{at} / Float{count}) * C_DEG2RAD
+        &xs.push(center.x + core.math.cos(angle) * radius)
+        &ys.push(center.y + core.math.sin(angle) * radius)
+    }
+    pieces := [RaylibPiece]{}
+    push_piece(&pieces, xs, ys)
+    pieces
+}
+
+// A decoded RGBA8 image, row-major; width 0 is no image.
+struct RaylibImage {
+    width: Int
+    height: Int
+    pixels: [U8]
+}
+
+// IHDR's color type and bit depth, and the samples per pixel they imply.
+struct RaylibPNGFormat {
+    color_type: Int
+    depth: Int
+    channels: Int
+}
+
+// A texture side above the canvas cap could never be drawn whole.
+C_PNG_SIDE_MAX :: 16384
+
+// 64 MiB of RGBA8, the core.archive codec budget.
+C_PNG_PIXELS_MAX :: 16777216
+
+C_PNG_IHDR :: 0x49484452
+
+C_PNG_PLTE :: 0x504C5445
+
+C_PNG_TRNS :: 0x74524E53
+
+C_PNG_IDAT :: 0x49444154
+
+C_PNG_IEND :: 0x49454E44
+
+// Adam7 pass origins and steps, in pass order.
+C_ADAM7_X :: [Int]{0, 4, 0, 2, 0, 1, 0}
+
+C_ADAM7_Y :: [Int]{0, 0, 4, 0, 2, 0, 1}
+
+C_ADAM7_DX :: [Int]{8, 8, 4, 4, 2, 2, 1}
+
+C_ADAM7_DY :: [Int]{8, 8, 8, 4, 4, 2, 2}
+
+fn no_image() -> RaylibImage {
+    RaylibImage{width: 0, height: 0, pixels: [U8]{}}
+}
+
+fn byte_at(data: [U8], at: Int) -> Int {
+    Int.from_u8(data[at])
+}
+
+fn be32(data: [U8], at: Int) -> Int {
+    (byte_at(data, at) << 24) + (byte_at(data, at + 1) << 16) + (byte_at(data, at + 2) << 8) + byte_at(data, at + 3)
+}
+
+// Samples per pixel for a valid color type and bit depth, else 0.
+fn png_channels(color_type: Int, depth: Int) -> Int {
+    if color_type == 0 && (depth == 1 || depth == 2 || depth == 4 || depth == 8 || depth == 16) -> return 1
+    if color_type == 3 && (depth == 1 || depth == 2 || depth == 4 || depth == 8) -> return 1
+    if depth != 8 && depth != 16 -> return 0
+    if color_type == 2 -> return 3
+    if color_type == 4 -> return 2
+    if color_type == 6 -> return 4
+    0
+}
+
+// The PNG subset raylib's LoadImage decodes through stb_image: every color
+// type and bit depth, PLTE and tRNS transparency, all five row filters and
+// Adam7 interlacing. Sixteen-bit samples keep their high byte and gray below
+// eight bits scales to 0..255. Chunk CRCs are not checked, as stb_image does
+// not check them; any structural fault decodes to no image.
+fn decode_png(data: [U8]) -> RaylibImage {
+    signature :: [Int]{137, 80, 78, 71, 13, 10, 26, 10}
+    if data.len() < 8 -> return no_image()
+    loop i in 0..<8 {
+        if byte_at(data, i) != signature[i] -> return no_image()
+    }
+    width := 0
+    height := 0
+    format := RaylibPNGFormat{color_type: 0, depth: 0, channels: 0}
+    interlace := 0
+    palette := [U8]{}
+    key := [U8]{}
+    compressed := [U8]{}
+    at := 8
+    loop at + 8 <= data.len() {
+        length :: be32(data, at)
+        kind :: be32(data, at + 4)
+        start :: at + 8
+        if length > data.len() - start - 4 -> return no_image()
+        if (at == 8) != (kind == C_PNG_IHDR) -> return no_image()
+        if kind == C_PNG_IHDR {
+            if length != 13 -> return no_image()
+            width = be32(data, start)
+            height = be32(data, start + 4)
+            depth :: byte_at(data, start + 8)
+            color_type :: byte_at(data, start + 9)
+            format = RaylibPNGFormat{color_type: color_type, depth: depth, channels: png_channels(color_type, depth)}
+            interlace = byte_at(data, start + 12)
+            if format.channels == 0 || byte_at(data, start + 10) != 0 || byte_at(data, start + 11) != 0 || interlace > 1 -> return no_image()
+        } else if kind == C_PNG_PLTE {
+            loop i in 0..<length -> &palette.push(data[start + i])
+        } else if kind == C_PNG_TRNS {
+            loop i in 0..<length -> &key.push(data[start + i])
+        } else if kind == C_PNG_IDAT {
+            loop i in 0..<length -> &compressed.push(data[start + i])
+        } else if kind == C_PNG_IEND {
+            break
+        }
+        at = start + length + 4
+    }
+    if width < 1 || height < 1 || width > C_PNG_SIDE_MAX || height > C_PNG_SIDE_MAX || width * height > C_PNG_PIXELS_MAX -> return no_image()
+    if format.color_type == 3 && (palette.len() == 0 || palette.len() % 3 != 0) -> return no_image()
+    raw :: core.archive.decompress(compressed) ?? return no_image()
+    pixels := [U8]{}
+    loop _ in 0..<(width * height * 4) -> &pixels.push(U8{0})
+    bits :: format.channels * format.depth
+    step :: max_int(bits /% 8, 1)
+    passes :: if interlace == 1 -> 7 else -> 1
+    offset := 0
+    loop index in 0..<passes {
+        origin_x :: if interlace == 1 -> C_ADAM7_X[index] else -> 0
+        origin_y :: if interlace == 1 -> C_ADAM7_Y[index] else -> 0
+        step_x :: if interlace == 1 -> C_ADAM7_DX[index] else -> 1
+        step_y :: if interlace == 1 -> C_ADAM7_DY[index] else -> 1
+        pass_width :: if width > origin_x -> (width - origin_x + step_x - 1) /% step_x else -> 0
+        pass_height :: if height > origin_y -> (height - origin_y + step_y - 1) /% step_y else -> 0
+        if pass_width == 0 || pass_height == 0 -> next
+        row_bytes :: (pass_width * bits + 7) /% 8
+        previous := [U8]{}
+        loop _ in 0..<row_bytes -> &previous.push(U8{0})
+        loop row in 0..<pass_height {
+            if offset + 1 + row_bytes > raw.len() -> return no_image()
+            line :: png_unfilter(raw, offset, row_bytes, step, previous) ?? return no_image()
+            loop column in 0..<pass_width {
+                target :: ((origin_y + row * step_y) * width + origin_x + column * step_x) * 4
+                put_rgba(&pixels, target, png_sample(line, column, format, palette, key))
+            }
+            previous = line
+            offset += 1 + row_bytes
+        }
+    }
+    RaylibImage{width: width, height: height, pixels: pixels}
+}
+
+// One reconstructed scanline: raw[offset] names the filter and the row's
+// bytes follow it; `previous` is the reconstructed row above, zeros first.
+// An unknown filter is no row.
+fn png_unfilter(raw: [U8], offset: Int, row_bytes: Int, step: Int, previous: [U8]) -> [U8]? {
+    filter :: byte_at(raw, offset)
+    if filter > 4 -> return None
+    line := [U8]{}
+    loop i in 0..<row_bytes {
+        left :: if i >= step -> byte_at(line, i - step) else -> 0
+        up :: byte_at(previous, i)
+        corner :: if i >= step -> byte_at(previous, i - step) else -> 0
+        predictor := 0
+        if filter == 1 {
+            predictor = left
+        } else if filter == 2 {
+            predictor = up
+        } else if filter == 3 {
+            predictor = (left + up) /% 2
+        } else if filter == 4 {
+            predictor = paeth(left, up, corner)
+        }
+        value :: (byte_at(raw, offset + 1 + i) + predictor).bit_and(255)
+        &line.push(U8{value})
+    }
+    Val(line)
+}
+
+fn paeth(left: Int, up: Int, corner: Int) -> Int {
+    estimate :: left + up - corner
+    to_left :: abs_int(estimate - left)
+    to_up :: abs_int(estimate - up)
+    to_corner :: abs_int(estimate - corner)
+    if to_left <= to_up && to_left <= to_corner -> return left
+    if to_up <= to_corner -> return up
+    corner
+}
+
+fn put_rgba(pixels: &[U8], at: Int, rgba: Int) {
+    red :: rgba >> 24
+    green :: (rgba >> 16).bit_and(255)
+    blue :: (rgba >> 8).bit_and(255)
+    alpha :: rgba.bit_and(255)
+    pixels[at] = U8{red}
+    pixels[at + 1] = U8{green}
+    pixels[at + 2] = U8{blue}
+    pixels[at + 3] = U8{alpha}
+}
+
+fn png_rgba(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
+    (red << 24) + (green << 16) + (blue << 8) + alpha
+}
+
+// Whether tRNS's 16-bit key word at `index` equals the full sample value.
+fn png_key_match(key: [U8], index: Int, value: Int) -> Bool {
+    (byte_at(key, index) << 8) + byte_at(key, index + 1) == value
+}
+
+// A palette entry with its tRNS alpha; an index past the palette is opaque
+// black, which the PNG specification permits decoders to show.
+fn png_palette(palette: [U8], key: [U8], index: Int) -> Int {
+    at :: index * 3
+    if at + 3 > palette.len() -> return png_rgba(0, 0, 0, 255)
+    alpha :: if index < key.len() -> byte_at(key, index) else -> 255
+    png_rgba(byte_at(palette, at), byte_at(palette, at + 1), byte_at(palette, at + 2), alpha)
+}
+
+// A whole sample: two big-endian bytes at sixteen bits, else one.
+fn png_word(line: [U8], at: Int, wide: Bool) -> Int {
+    if wide -> return (byte_at(line, at) << 8) + byte_at(line, at + 1)
+    byte_at(line, at)
+}
+
+// The packed 0xRRGGBBAA of pixel `column` of a reconstructed scanline.
+fn png_sample(line: [U8], column: Int, format: RaylibPNGFormat, palette: [U8], key: [U8]) -> Int {
+    depth :: format.depth
+    if depth < 8 {
+        bit :: column * depth
+        value :: (byte_at(line, bit /% 8) >> (8 - depth - bit % 8)).bit_and((1 << depth) - 1)
+        if format.color_type == 3 -> return png_palette(palette, key, value)
+        gray :: value * (255 /% ((1 << depth) - 1))
+        alpha :: if key.len() == 2 && png_key_match(key, 0, value) -> 0 else -> 255
+        return png_rgba(gray, gray, gray, alpha)
+    }
+    if format.color_type == 3 -> return png_palette(palette, key, byte_at(line, column))
+    wide :: depth == 16
+    size :: if wide -> 2 else -> 1
+    base :: column * format.channels * size
+    if format.color_type == 0 {
+        gray :: byte_at(line, base)
+        alpha :: if key.len() == 2 && png_key_match(key, 0, png_word(line, base, wide)) -> 0 else -> 255
+        return png_rgba(gray, gray, gray, alpha)
+    }
+    if format.color_type == 4 {
+        gray :: byte_at(line, base)
+        return png_rgba(gray, gray, gray, byte_at(line, base + size))
+    }
+    red :: byte_at(line, base)
+    green :: byte_at(line, base + size)
+    blue :: byte_at(line, base + 2 * size)
+    if format.color_type == 6 -> return png_rgba(red, green, blue, byte_at(line, base + 3 * size))
+    keyed :: key.len() == 6 && png_key_match(key, 0, png_word(line, base, wide)) && png_key_match(key, 2, png_word(line, base + size, wide)) && png_key_match(key, 4, png_word(line, base + 2 * size, wide))
+    png_rgba(red, green, blue, if keyed -> 0 else -> 255)
+}
+
+// The built-in 5x7 font for ASCII 0x20..0x7E: five column bytes per glyph,
+// bit 0 the top row. A glyph cell is 6 x 10 at scale 1, the 10-pixel base
+// size of raylib's default font; sizes scale it by whole pixels.
+C_FONT_ADVANCE :: 6
+
+C_FONT_LINE :: 10
+
+C_FONT_UNKNOWN :: 31
+
+// The largest scale whose glyph cells `__fill_mask` paints.
+C_FONT_MASK_SCALE_MAX :: 4294967296
+
+// The runtime's cap on each canvas side.
+C_CANVAS_SIDE_MAX :: 16384
+
+C_FONT5X7 :: [Int]{
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x07, 0x00, 0x07, 0x00, 0x14, 0x7F, 0x14, 0x7F, 0x14, 0x24, 0x2A, 0x7F, 0x2A, 0x12,
+    0x23, 0x13, 0x08, 0x64, 0x62, 0x36, 0x49, 0x55, 0x22, 0x50, 0x00, 0x05, 0x03, 0x00, 0x00, 0x00, 0x1C, 0x22, 0x41, 0x00, 0x00, 0x41, 0x22, 0x1C, 0x00,
+    0x08, 0x2A, 0x1C, 0x2A, 0x08, 0x08, 0x08, 0x3E, 0x08, 0x08, 0x00, 0x50, 0x30, 0x00, 0x00, 0x08, 0x08, 0x08, 0x08, 0x08, 0x00, 0x60, 0x60, 0x00, 0x00,
+    0x20, 0x10, 0x08, 0x04, 0x02, 0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x42, 0x7F, 0x40, 0x00, 0x42, 0x61, 0x51, 0x49, 0x46, 0x21, 0x41, 0x45, 0x4B, 0x31,
+    0x18, 0x14, 0x12, 0x7F, 0x10, 0x27, 0x45, 0x45, 0x45, 0x39, 0x3C, 0x4A, 0x49, 0x49, 0x30, 0x01, 0x71, 0x09, 0x05, 0x03, 0x36, 0x49, 0x49, 0x49, 0x36,
+    0x06, 0x49, 0x49, 0x29, 0x1E, 0x00, 0x36, 0x36, 0x00, 0x00, 0x00, 0x56, 0x36, 0x00, 0x00, 0x08, 0x14, 0x22, 0x41, 0x00, 0x14, 0x14, 0x14, 0x14, 0x14,
+    0x00, 0x41, 0x22, 0x14, 0x08, 0x02, 0x01, 0x51, 0x09, 0x06, 0x32, 0x49, 0x79, 0x41, 0x3E, 0x7E, 0x11, 0x11, 0x11, 0x7E, 0x7F, 0x49, 0x49, 0x49, 0x36,
+    0x3E, 0x41, 0x41, 0x41, 0x22, 0x7F, 0x41, 0x41, 0x22, 0x1C, 0x7F, 0x49, 0x49, 0x49, 0x41, 0x7F, 0x09, 0x09, 0x09, 0x01, 0x3E, 0x41, 0x49, 0x49, 0x7A,
+    0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x20, 0x40, 0x41, 0x3F, 0x01, 0x7F, 0x08, 0x14, 0x22, 0x41, 0x7F, 0x40, 0x40, 0x40, 0x40,
+    0x7F, 0x02, 0x0C, 0x02, 0x7F, 0x7F, 0x04, 0x08, 0x10, 0x7F, 0x3E, 0x41, 0x41, 0x41, 0x3E, 0x7F, 0x09, 0x09, 0x09, 0x06, 0x3E, 0x41, 0x51, 0x21, 0x5E,
+    0x7F, 0x09, 0x19, 0x29, 0x46, 0x46, 0x49, 0x49, 0x49, 0x31, 0x01, 0x01, 0x7F, 0x01, 0x01, 0x3F, 0x40, 0x40, 0x40, 0x3F, 0x1F, 0x20, 0x40, 0x20, 0x1F,
+    0x3F, 0x40, 0x38, 0x40, 0x3F, 0x63, 0x14, 0x08, 0x14, 0x63, 0x07, 0x08, 0x70, 0x08, 0x07, 0x61, 0x51, 0x49, 0x45, 0x43, 0x00, 0x7F, 0x41, 0x41, 0x00,
+    0x02, 0x04, 0x08, 0x10, 0x20, 0x00, 0x41, 0x41, 0x7F, 0x00, 0x04, 0x02, 0x01, 0x02, 0x04, 0x40, 0x40, 0x40, 0x40, 0x40, 0x00, 0x01, 0x02, 0x04, 0x00,
+    0x20, 0x54, 0x54, 0x54, 0x78, 0x7F, 0x48, 0x44, 0x44, 0x38, 0x38, 0x44, 0x44, 0x44, 0x20, 0x38, 0x44, 0x44, 0x48, 0x7F, 0x38, 0x54, 0x54, 0x54, 0x18,
+    0x08, 0x7E, 0x09, 0x01, 0x02, 0x0C, 0x52, 0x52, 0x52, 0x3E, 0x7F, 0x08, 0x04, 0x04, 0x78, 0x00, 0x44, 0x7D, 0x40, 0x00, 0x20, 0x40, 0x44, 0x3D, 0x00,
+    0x7F, 0x10, 0x28, 0x44, 0x00, 0x00, 0x41, 0x7F, 0x40, 0x00, 0x7C, 0x04, 0x18, 0x04, 0x78, 0x7C, 0x08, 0x04, 0x04, 0x78, 0x38, 0x44, 0x44, 0x44, 0x38,
+    0x7C, 0x14, 0x14, 0x14, 0x08, 0x08, 0x14, 0x14, 0x18, 0x7C, 0x7C, 0x08, 0x04, 0x04, 0x08, 0x48, 0x54, 0x54, 0x54, 0x20, 0x04, 0x3F, 0x44, 0x40, 0x20,
+    0x3C, 0x40, 0x40, 0x20, 0x7C, 0x1C, 0x20, 0x40, 0x20, 0x1C, 0x3C, 0x40, 0x30, 0x40, 0x3C, 0x44, 0x28, 0x10, 0x28, 0x44, 0x0C, 0x50, 0x50, 0x50, 0x3C,
+    0x44, 0x64, 0x54, 0x4C, 0x44, 0x00, 0x08, 0x36, 0x41, 0x00, 0x00, 0x00, 0x7F, 0x00, 0x00, 0x00, 0x41, 0x36, 0x08, 0x00, 0x08, 0x04, 0x08, 0x10, 0x08,
+}
+
+// raylib draws sizes below the base size at the base size.
+fn text_scale(size: Int) -> Int {
+    max_int((size + C_FONT_LINE /% 2) /% C_FONT_LINE, 1)
+}
+
+// A glyph's five column bytes as one `__fill_mask` mask, column c at bit 8 * c.
+fn glyph_mask(glyph: Int) -> Int {
+    at :: glyph * 5
+    C_FONT5X7[at] + (C_FONT5X7[at + 1] << 8) + (C_FONT5X7[at + 2] << 16) + (C_FONT5X7[at + 3] << 24) + (C_FONT5X7[at + 4] << 32)
+}
+
+fn glyph_runs(runs: &[RaylibRun], canvas: RaylibCanvas, glyph: Int, x: Int, y: Int, scale: Int, rgba: Int) {
+    column := 0
+    loop column < 5 {
+        bits :: C_FONT5X7[glyph * 5 + column]
+        row := 0
+        loop row < 7 {
+            if (bits >> row).bit_and(1) == 0 {
+                row += 1
+                next
+            }
+            start :: row
+            loop row < 7 && (bits >> row).bit_and(1) != 0 -> row += 1
+            push_clipped(&runs, canvas, x + column * scale, y + start * scale, scale, (row - start) * scale, rgba)
+        }
+        column += 1
+    }
+}
+
+// One glyph per scalar: "\n" starts a new line at x, and a scalar outside the
+// font draws as "?". Glyphs wholly outside the canvas emit nothing.
+fn text_runs(canvas: RaylibCanvas, text: String, x: Int, y: Int, size: Int, rgba: Int) -> [RaylibRun] {
+    runs := [RaylibRun]{}
+    scale :: text_scale(size)
+    pen_x := x
+    pen_y := y
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 10 {
+            pen_x = x
+            pen_y += C_FONT_LINE * scale
+            next
+        }
+        // UTF-8 continuation bytes belong to the scalar already drawn.
+        if code >= 128 && code < 192 -> next
+        glyph := C_FONT_UNKNOWN
+        if code >= 32 && code <= 126 -> glyph = code - 32
+        glyph_runs(&runs, canvas, glyph, pen_x, pen_y, scale, rgba)
+        pen_x += C_FONT_ADVANCE * scale
+    }
+    runs
 }
 
 fn key_code(key: String) -> Int Never! {
@@ -202,4 +1938,448 @@ fn axis_code(axis: String) -> Int Never! {
 #Test("color retains channels") {
     c :: color(13, 57, 101, 149)
     assert(c.r == 13 && c.g == 57 && c.b == 101 && c.a == 149)
+}
+
+fn run_words(runs: [RaylibRun]) -> [Int] {
+    words := [Int]{}
+    loop run in runs {
+        &words.push(run.x)
+        &words.push(run.y)
+        &words.push(run.width)
+        &words.push(run.height)
+        &words.push(run.rgba)
+    }
+    words
+}
+
+fn coverage(runs: [RaylibRun], width: Int, height: Int) -> [Int] {
+    counts := [Int]{}
+    loop _ in 0..<(width * height) -> &counts.push(0)
+    loop run in runs {
+        loop y in run.y..<(run.y + run.height) {
+            loop x in run.x..<(run.x + run.width) -> counts[y * width + x] = counts[y * width + x] + 1
+        }
+    }
+    counts
+}
+
+#Test("raster rectangles clip to the canvas and colors pack as RGBA") {
+    canvas :: RaylibCanvas{width: 10, height: 8}
+    assert_eq(run_words(rect_runs(canvas, -2, 3, 5, 10, 7)), [Int]{0, 3, 3, 5, 7})
+    assert_eq(rect_runs(canvas, 10, 0, 4, 4, 7).len(), 0)
+    assert_eq(rect_runs(canvas, 2, 2, 0, 4, 7).len(), 0)
+    assert_eq(pack_rgba(color(255, 220, 120, 255)), 0xFFDC78FF)
+    assert_eq(pack_rgba(RaylibColor{r: 300, g: -1, b: 0, a: 128}), 0xFF000080)
+}
+
+#Test("raster lines round exactly and merge runs") {
+    canvas :: RaylibCanvas{width: 10, height: 8}
+    shallow :: [Int]{0, 0, 1, 1, 1, 1, 1, 2, 1, 1, 3, 2, 2, 1, 1}
+    assert_eq(run_words(line_runs(canvas, 0, 0, 4, 2, 1)), shallow)
+    assert_eq(run_words(line_runs(canvas, 4, 2, 0, 0, 1)), shallow)
+    assert_eq(run_words(line_runs(canvas, 2, 1, 2, 5, 1)), [Int]{2, 1, 1, 5, 1})
+    assert_eq(run_words(line_runs(canvas, 3, 3, 3, 3, 1)), [Int]{3, 3, 1, 1, 1})
+    diagonal := [Int]{}
+    loop i in 0..<8 {
+        &diagonal.push(i)
+        &diagonal.push(i)
+        &diagonal.push(1)
+        &diagonal.push(1)
+        &diagonal.push(1)
+    }
+    assert_eq(run_words(line_runs(canvas, -3, -3, 12, 12, 1)), diagonal)
+    // Only visible steps are walked, whatever the endpoints.
+    assert_eq(run_words(line_runs(canvas, 0, 0, 1000000000000, 1, 1)), [Int]{0, 0, 10, 1, 1})
+}
+
+#Test("raster circles fill the exact disc") {
+    canvas :: RaylibCanvas{width: 10, height: 10}
+    assert_eq(run_words(circle_runs(canvas, 5, 5, 2, 1)), [Int]{5, 3, 1, 1, 1, 4, 4, 3, 1, 1, 3, 5, 5, 1, 1, 4, 6, 3, 1, 1, 5, 7, 1, 1, 1})
+    assert_eq(circle_runs(canvas, 5, 5, 0, 1).len(), 0)
+    assert_eq(isqrt_floor(15), 3)
+    assert_eq(isqrt_floor(16), 4)
+    assert_eq(isqrt_floor(3), 1)
+    huge :: circle_runs(RaylibCanvas{width: 10, height: 8}, 5, 5, 1000000000000, 1)
+    assert_eq(huge.len(), 8)
+    assert(huge[0].x == 0 && huge[0].width == 10 && huge[7].y == 7)
+}
+
+#Test("raster triangles sharing an edge cover each pixel once") {
+    canvas :: RaylibCanvas{width: 6, height: 6}
+    upper :: triangle_runs(canvas, 0, 0, 4, 0, 4, 4, 1)
+    assert_eq(run_words(upper), [Int]{1, 0, 3, 1, 1, 2, 1, 2, 1, 1, 3, 2, 1, 1, 1})
+    assert_eq(run_words(triangle_runs(canvas, 0, 0, 4, 4, 4, 0, 1)), run_words(upper))
+    lower :: triangle_runs(canvas, 0, 0, 4, 4, 0, 4, 1)
+    assert_eq(run_words(lower), [Int]{0, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 2, 3, 1, 1, 0, 3, 4, 1, 1})
+    both := [RaylibRun]{}
+    loop run in upper -> &both.push(run)
+    loop run in lower -> &both.push(run)
+    counts :: coverage(both, 6, 6)
+    loop y in 0..<6 {
+        loop x in 0..<6 {
+            expected := 0
+            if x < 4 && y < 4 -> expected = 1
+            assert_eq(counts[y * 6 + x], expected)
+        }
+    }
+    assert_eq(triangle_runs(canvas, 0, 0, 2, 2, 4, 4, 1).len(), 0)
+}
+
+#Test("raster text draws the 5x7 font by whole-pixel scale") {
+    canvas :: RaylibCanvas{width: 40, height: 40}
+    assert_eq(C_FONT5X7.len(), 475)
+    assert_eq(C_FONT5X7[33 * 5], 0x7E)
+    assert_eq(run_words(text_runs(canvas, "I", 0, 0, 10, 1)), [Int]{1, 0, 1, 1, 1, 1, 6, 1, 1, 1, 2, 0, 1, 7, 1, 3, 0, 1, 1, 1, 3, 6, 1, 1, 1})
+    assert_eq(run_words(text_runs(canvas, "I", 1, 2, 20, 1)), [Int]{3, 2, 2, 2, 1, 3, 14, 2, 2, 1, 5, 2, 2, 14, 1, 7, 2, 2, 2, 1, 7, 14, 2, 2, 1})
+    assert_eq(text_scale(4), 1)
+    assert_eq(text_scale(16), 2)
+    lines :: text_runs(canvas, "I\nI", 0, 0, 10, 1)
+    assert_eq(lines.len(), 10)
+    assert_eq(lines[5].y, 10)
+    assert_eq(text_runs(canvas, "II", 0, 0, 10, 1)[5].x, 7)
+    assert_eq(run_words(text_runs(canvas, "é", 0, 0, 10, 1)), run_words(text_runs(canvas, "?", 0, 0, 10, 1)))
+    // The mask `draw_text` paints holds the same columns, column c at bit 8 * c.
+    assert_eq(glyph_mask(41), 0x417F4100)
+    loop glyph in 0..<95 {
+        loop column in 0..<5 -> assert_eq((glyph_mask(glyph) >> (8 * column)).bit_and(255), C_FONT5X7[glyph * 5 + column])
+    }
+}
+
+#Test("raster float rectangles take the pixels whose centers they hold") {
+    canvas :: RaylibCanvas{width: 10, height: 8}
+    assert_eq(subpixel(1.5), 384)
+    assert_eq(center_from(384), 1)
+    assert_eq(center_from(383), 1)
+    assert_eq(center_from(385), 2)
+    assert_eq(run_words(rec_runs(canvas, rectangle(1.5, 0.5, 3.0, 2.0), 7)), [Int]{1, 0, 3, 2, 7})
+    assert_eq(rec_runs(canvas, rectangle(1.6, 0.0, 0.8, 1.0), 7).len(), 0)
+    assert_eq(rec_runs(canvas, rectangle(1.0, 1.0, -2.0, 3.0), 7).len(), 0)
+    assert_eq(subpixel(1.0e300), C_SUBPIXEL_LIMIT)
+    assert_eq(run_words(rec_runs(canvas, rectangle(-1.0e300, 0.0, 2.0e300, 1.0), 7)), [Int]{0, 0, 10, 1, 7})
+}
+
+#Test("raster rectangle outlines draw each border pixel once") {
+    canvas :: RaylibCanvas{width: 10, height: 8}
+    outline :: rect_lines_runs(canvas, 1, 1, 4, 3, 1)
+    assert_eq(run_words(outline), [Int]{1, 1, 4, 1, 1, 1, 2, 1, 1, 1, 4, 2, 1, 1, 1, 1, 3, 4, 1, 1})
+    loop count in coverage(outline, 10, 8) -> assert(count <= 1)
+    assert_eq(run_words(rect_lines_runs(canvas, 0, 0, 3, 1, 1)), [Int]{0, 0, 3, 1, 1})
+    assert_eq(run_words(rect_lines_runs(canvas, 0, 0, 1, 3, 1)), [Int]{0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 2, 1, 1, 1})
+    bands :: lines_ex_bands(rectangle(0.0, 0.0, 10.0, 6.0), 2.0)
+    assert(bands[0].height == 2.0 && bands[1].y == 4.0 && bands[2].y == 2.0 && bands[2].height == 2.0 && bands[3].x == 8.0)
+    wide :: lines_ex_bands(rectangle(0.0, 0.0, 10.0, 6.0), 7.0)
+    assert(wide[0].height == 3.0 && wide[1].y == 3.0 && wide[2].height == 0.0 && wide[3].x == 7.0)
+}
+
+#Test("raster gradients shade each pixel center over the two triangles") {
+    canvas :: RaylibCanvas{width: 4, height: 4}
+    vertical :: gradient_runs(canvas, int_rectangle(0, 0, 4, 2), 0x000000FF, 0xFF0000FF, 0xFF0000FF, 0x000000FF)
+    assert_eq(run_words(vertical), [Int]{0, 0, 4, 1, 0x400000FF, 0, 1, 4, 1, 0xBF0000FF})
+    horizontal :: gradient_runs(canvas, int_rectangle(0, 0, 2, 1), 0x000000FF, 0x000000FF, 0xFF0000FF, 0xFF0000FF)
+    assert_eq(run_words(horizontal), [Int]{0, 0, 1, 1, 0x400000FF, 1, 0, 1, 1, 0xBF0000FF})
+    // The bottom-left color reaches only the triangle below the diagonal.
+    assert_eq(gradient_rgba(0, 0xFF000000, 0, 0, 0.25, 0.75), 0x80000000)
+    assert_eq(gradient_rgba(0, 0xFF000000, 0, 0, 0.75, 0.25), 0)
+    assert_eq(gradient_rgba(0x64000000, 0, 0xC8000000, 0, 0.5, 0.5), 0x96000000)
+    assert_eq(gradient_runs(canvas, rectangle(0.0, 0.0, 0.0, 2.0), 1, 1, 1, 1).len(), 0)
+}
+
+fn triangle_piece(xs: [Float], ys: [Float]) -> [RaylibPiece] {
+    pieces := [RaylibPiece]{}
+    push_piece(&pieces, xs, ys)
+    pieces
+}
+
+#Test("raster pieces fill as triangles do and share edges exactly") {
+    canvas :: RaylibCanvas{width: 6, height: 6}
+    upper :: triangle_runs(canvas, 0, 0, 4, 0, 4, 4, 1)
+    clockwise :: triangle_piece([Float]{0.0, 4.0, 4.0}, [Float]{0.0, 0.0, 4.0})
+    counter :: triangle_piece([Float]{0.0, 4.0, 4.0}, [Float]{0.0, 4.0, 0.0})
+    assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, clockwise), 1)), run_words(upper))
+    assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, counter), 1)), run_words(upper))
+    pieces := [RaylibPiece]{}
+    push_piece(&pieces, [Float]{0.0, 4.0, 4.0}, [Float]{0.0, 0.0, 4.0})
+    push_piece(&pieces, [Float]{0.0, 4.0, 0.0}, [Float]{0.0, 4.0, 4.0})
+    assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, pieces), 1)), [Int]{0, 0, 4, 1, 1, 0, 1, 4, 1, 1, 0, 2, 4, 1, 1, 0, 3, 4, 1, 1})
+    assert_eq(triangle_piece([Float]{0.0, 2.0, 4.0}, [Float]{0.0, 2.0, 4.0}).len(), 0)
+}
+
+#Test("raster polygons and outlines keep the boundary pixels") {
+    canvas :: RaylibCanvas{width: 10, height: 10}
+    square :: poly_pieces(vector2(5.0, 5.0), 4, 2.8284271247461903, 45.0)
+    assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, square), 1)), [Int]{3, 3, 4, 1, 1, 3, 4, 4, 1, 1, 3, 5, 4, 1, 1, 3, 6, 4, 1, 1})
+    assert_eq(run_words(outline_runs(canvas, pieces_cover(canvas, square), 1)), [Int]{3, 3, 4, 1, 1, 3, 4, 1, 1, 1, 6, 4, 1, 1, 1, 3, 5, 1, 1, 1, 6, 5, 1, 1, 1, 3, 6, 4, 1, 1})
+    assert_eq(poly_pieces(vector2(5.0, 5.0), 1, 3.0, 0.0)[0].xs.len(), 3)
+    ring :: [Int]{5, 3, 1, 1, 1, 4, 4, 1, 1, 1, 6, 4, 1, 1, 1, 3, 5, 1, 1, 1, 7, 5, 1, 1, 1, 4, 6, 1, 1, 1, 6, 6, 1, 1, 1, 5, 7, 1, 1, 1}
+    assert_eq(run_words(outline_runs(canvas, disc_cover(canvas, 5, 5, 2), 1)), ring)
+    assert_eq(outline_runs(canvas, disc_cover(canvas, 5, 5, 0), 1).len(), 0)
+}
+
+#Test("raster ellipses keep the exact inside test") {
+    canvas :: RaylibCanvas{width: 10, height: 10}
+    flat :: ellipse_cover(canvas, 5, 5, 3.0, 1.0)
+    assert_eq(run_words(cover_runs(canvas, flat, 1)), [Int]{5, 4, 1, 1, 1, 2, 5, 7, 1, 1, 5, 6, 1, 1, 1})
+    assert_eq(run_words(outline_runs(canvas, flat, 1)), [Int]{5, 4, 1, 1, 1, 2, 5, 3, 1, 1, 6, 5, 3, 1, 1, 5, 6, 1, 1, 1})
+    assert_eq(run_words(cover_runs(canvas, ellipse_cover(canvas, 5, 5, 2.0, 2.0), 1)), run_words(circle_runs(canvas, 5, 5, 2, 1)))
+    assert_eq(cover_runs(canvas, ellipse_cover(canvas, 5, 5, 0.0, 2.0), 1).len(), 0)
+    huge :: cover_runs(RaylibCanvas{width: 10, height: 8}, ellipse_cover(RaylibCanvas{width: 10, height: 8}, 5, 5, 1.0e12, 1.0e12), 1)
+    assert_eq(huge.len(), 8)
+    assert(huge[0].x == 0 && huge[0].width == 10 && huge[7].y == 7)
+}
+
+fn piece_words(pieces: [RaylibPiece]) -> [Int] {
+    words := [Int]{}
+    loop piece in pieces {
+        loop at in 0..<piece.xs.len() {
+            &words.push(piece.xs[at])
+            &words.push(piece.ys[at])
+        }
+    }
+    words
+}
+
+#Test("raster rings follow raylib's argument fixes and segment counts") {
+    canvas :: RaylibCanvas{width: 6, height: 6}
+    center :: vector2(0.0, 0.0)
+    sector :: ring_pieces(center, 0.0, 4.0, 0.0, 90.0, 1)
+    assert_eq(run_words(cover_runs(canvas, pieces_cover(canvas, sector), 1)), run_words(triangle_runs(canvas, 0, 0, 4, 0, 0, 4, 1)))
+    assert_eq(piece_words(ring_pieces(center, 3.0, 1.0, 90.0, 0.0, 4)), piece_words(ring_pieces(center, 1.0, 3.0, 0.0, 90.0, 4)))
+    assert_eq(ring_pieces(center, 1.0, 3.0, 0.0, 90.0, 4).len(), 4)
+    assert_eq(ring_pieces(center, 1.0, 3.0, 0.0, 90.0, 0).len(), 1)
+    assert_eq(ring_pieces(center, 1.0, 3.0, 30.0, 30.0, 4).len(), 0)
+    // The pieces of a ring split their shared edges, so each pixel is drawn once.
+    full :: ring_pieces(vector2(5.0, 5.0), 2.0, 4.5, 0.0, 360.0, 12)
+    square :: RaylibCanvas{width: 10, height: 10}
+    runs := [RaylibRun]{}
+    loop piece in full {
+        one := [RaylibPiece]{}
+        &one.push(piece)
+        loop run in cover_runs(square, pieces_cover(square, one), 1) -> &runs.push(run)
+    }
+    counts :: coverage(runs, 10, 10)
+    union :: coverage(cover_runs(square, pieces_cover(square, full), 1), 10, 10)
+    assert_eq(counts, union)
+    assert_eq(union[5 * 10 + 5], 0)
+    assert_eq(union[5 * 10 + 8], 1)
+    assert_eq(union[5 * 10 + 9], 0)
+}
+
+#Test("raster rounded rectangles follow raylib's corner arcs") {
+    canvas :: RaylibCanvas{width: 12, height: 8}
+    rec :: rectangle(0.0, 0.0, 8.0, 4.0)
+    assert_eq(rounded_pieces(rec, 1.0, 4, 0.0, 4.0)[0].xs.len(), 20)
+    assert_eq(rounded_pieces(rec, 1.0, 0, 0.0, 4.0)[0].xs.len(), 8)
+    assert_eq(rounded_pieces(rec, 1.0, 0, 0.0, 2.0)[0].xs.len(), 12)
+    assert_eq(rounded_pieces(rec, 2.0, 4, 0.0, 4.0)[0].xs, rounded_pieces(rec, 1.0, 4, 0.0, 4.0)[0].xs)
+    fill :: cover_runs(canvas, pieces_cover(canvas, rounded_pieces(rec, 1.0, 4, 0.0, 4.0)), 1)
+    assert_eq(run_words(fill), [Int]{1, 0, 6, 1, 1, 0, 1, 8, 1, 1, 0, 2, 8, 1, 1, 1, 3, 6, 1, 1})
+    placed :: rectangle(2.0, 2.0, 8.0, 4.0)
+    outer :: pieces_cover(canvas, rounded_pieces(placed, 1.0, 4, 1.0, 2.0))
+    inner :: pieces_cover(canvas, rounded_pieces(placed, 1.0, 4, 0.0, 2.0))
+    band :: difference_runs(canvas, outer, inner, 1)
+    both := [RaylibRun]{}
+    loop run in band -> &both.push(run)
+    loop run in cover_runs(canvas, inner, 1) -> &both.push(run)
+    assert_eq(coverage(both, 12, 8), coverage(cover_runs(canvas, outer, 1), 12, 8))
+    words :: run_words(band)
+    assert(words[0] == 2 && words[1] == 1 && words[2] == 8 && words[3] == 1)
+}
+
+#Test("collisions follow raylib's edge rules") {
+    box :: rectangle(0.0, 0.0, 4.0, 2.0)
+    assert(check_collision_recs(box, rectangle(3.5, 1.5, 1.0, 1.0)))
+    assert(!check_collision_recs(box, rectangle(4.0, 0.0, 1.0, 1.0)))
+    assert(check_collision_point_rec(vector2(0.0, 0.0), box))
+    assert(!check_collision_point_rec(vector2(4.0, 1.0), box))
+    assert(check_collision_circles(vector2(0.0, 0.0), 1.0, vector2(3.0, 4.0), 4.0))
+    assert(!check_collision_circles(vector2(0.0, 0.0), 1.0, vector2(3.0, 4.0), 3.5))
+    assert(check_collision_point_circle(vector2(3.0, 4.0), vector2(0.0, 0.0), 5.0))
+    assert(!check_collision_point_circle(vector2(3.0, 4.1), vector2(0.0, 0.0), 5.0))
+    // Beside an edge the distance is along one axis; past a corner it is to the corner.
+    assert(check_collision_circle_rec(vector2(5.0, 1.0), 1.0, box))
+    assert(check_collision_circle_rec(vector2(5.0, 3.0), 1.5, box))
+    assert(!check_collision_circle_rec(vector2(5.0, 3.0), 1.4, box))
+    assert(check_collision_circle_line(vector2(2.0, 1.0), 1.0, vector2(0.0, 0.0), vector2(4.0, 0.0)))
+    assert(!check_collision_circle_line(vector2(6.0, 0.0), 1.5, vector2(0.0, 0.0), vector2(4.0, 0.0)))
+    assert(check_collision_circle_line(vector2(0.5, 0.0), 1.0, vector2(0.0, 0.0), vector2(0.0, 0.0)))
+    // A point on a triangle's edge is outside.
+    assert(check_collision_point_triangle(vector2(1.0, 1.0), vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 4.0)))
+    assert(!check_collision_point_triangle(vector2(2.0, 0.0), vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 4.0)))
+    assert(check_collision_point_line(vector2(2.0, 0.5), vector2(0.0, 0.0), vector2(4.0, 0.0), 1))
+    assert(!check_collision_point_line(vector2(2.0, 1.0), vector2(0.0, 0.0), vector2(4.0, 0.0), 1))
+    assert(!check_collision_point_line(vector2(5.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 0.0), 1))
+    square :: [RaylibVector2]{vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(4.0, 4.0), vector2(0.0, 4.0)}
+    assert(check_collision_point_poly(vector2(2.0, 2.0), square))
+    assert(!check_collision_point_poly(vector2(5.0, 2.0), square))
+    assert(!check_collision_point_poly(vector2(1.0, 0.5), [RaylibVector2]{vector2(0.0, 0.0), vector2(4.0, 0.0)}))
+    crossing :: check_collision_lines(vector2(0.0, 0.0), vector2(4.0, 4.0), vector2(0.0, 4.0), vector2(4.0, 0.0)) ?? vector2(-1.0, -1.0)
+    assert(crossing.x == 2.0 && crossing.y == 2.0)
+    parallel :: check_collision_lines(vector2(0.0, 0.0), vector2(4.0, 0.0), vector2(0.0, 1.0), vector2(4.0, 1.0)) ?? vector2(-1.0, -1.0)
+    assert(parallel.x == -1.0)
+    short :: check_collision_lines(vector2(0.0, 0.0), vector2(1.0, 1.0), vector2(0.0, 4.0), vector2(4.0, 0.0)) ?? vector2(-1.0, -1.0)
+    assert(short.x == -1.0)
+    // A vertical segment spans no x range, so only its y range can exclude.
+    upright :: check_collision_lines(vector2(2.0, 0.0), vector2(2.0, 4.0), vector2(0.0, 1.0), vector2(4.0, 3.0)) ?? vector2(-1.0, -1.0)
+    assert(upright.x == 2.0 && upright.y == 2.0)
+    overlap :: get_collision_rec(box, rectangle(3.0, -1.0, 4.0, 2.5))
+    assert(overlap.x == 3.0 && overlap.y == 0.0 && overlap.width == 1.0 && overlap.height == 1.5)
+    apart :: get_collision_rec(box, rectangle(4.0, 0.0, 1.0, 1.0))
+    assert(apart.x == 0.0 && apart.width == 0.0 && apart.height == 0.0)
+}
+
+#Test("image ops follow raylib's pixel rules") {
+    red :: RaylibColor{r: 255, g: 0, b: 0, a: 255}
+    blue :: RaylibColor{r: 0, g: 0, b: 255, a: 255}
+    black :: RaylibColor{r: 0, g: 0, b: 0, a: 255}
+    checks := gen_image_checked(4, 2, 2, 1, red, blue)
+    assert(checks.width == 4 && checks.height == 2 && checks.pixels.len() == 32)
+    assert(get_image_color(checks, 1, 0).r == 255 && get_image_color(checks, 2, 0).b == 255)
+    assert(get_image_color(checks, 0, 1).b == 255 && get_image_color(checks, 3, 1).r == 255)
+    assert(get_image_color(checks, 4, 0).a == 0 && get_image_color(checks, 0, -1).a == 0)
+    assert(gen_image_color(0, 3, red).width == 0 && gen_image_color(16385, 1, red).pixels.len() == 0)
+    // Flipped, row 0 reads blue blue red red and row 1 red red blue blue.
+    image_flip_horizontal(&checks)
+    assert(get_image_color(checks, 0, 0).b == 255 && get_image_color(checks, 3, 0).r == 255)
+    image_flip_vertical(&checks)
+    assert(get_image_color(checks, 0, 0).r == 255 && get_image_color(checks, 0, 1).b == 255)
+    image_flip_vertical(&checks)
+    // Turned clockwise, the 4x2 image is 2x4 and its top row is row 1 then row 0's first pixels.
+    image_rotate_cw(&checks)
+    assert(checks.width == 2 && checks.height == 4)
+    assert(get_image_color(checks, 0, 0).r == 255 && get_image_color(checks, 1, 0).b == 255)
+    assert(get_image_color(checks, 0, 3).b == 255 && get_image_color(checks, 1, 3).r == 255)
+    image_rotate_ccw(&checks)
+    assert(checks.width == 4 && checks.height == 2)
+    assert(get_image_color(checks, 0, 0).b == 255 && get_image_color(checks, 3, 1).b == 255)
+    // A rectangle under one column sets only its first pixel; under one row, its first row.
+    canvas := gen_image_color(4, 4, black)
+    image_draw_rectangle_rec(&canvas, rectangle(1.0, 1.0, 0.5, 3.0), red)
+    assert(get_image_color(canvas, 1, 1).r == 255 && get_image_color(canvas, 1, 2).r == 0)
+    image_draw_rectangle_rec(&canvas, rectangle(0.0, 3.0, 4.0, 0.5), blue)
+    assert(get_image_color(canvas, 0, 3).b == 255 && get_image_color(canvas, 3, 3).b == 255)
+    image_draw_rectangle_rec(&canvas, rectangle(0.0, 0.0, 0.0, 2.0), blue)
+    assert(get_image_color(canvas, 0, 0).b == 0)
+    image_draw_pixel(&canvas, 4, 0, red)
+    image_draw_pixel(&canvas, 3, 0, red)
+    assert(get_image_color(canvas, 3, 0).r == 255)
+    image_draw_rectangle(&canvas, 1, 1, 2, 2, blue)
+    image_crop(&canvas, rectangle(1.0, 1.0, 2.0, 2.0))
+    assert(canvas.width == 2 && canvas.height == 2 && get_image_color(canvas, 1, 1).b == 255)
+    image_crop(&canvas, rectangle(0.0, 0.0, 0.5, 2.0))
+    assert(canvas.width == 0 && canvas.height == 2 && canvas.pixels.len() == 0)
+    // Columns 0 0 1 1 for a 2 to 4 enlargement.
+    pair := gen_image_checked(2, 1, 1, 1, red, blue)
+    image_resize_nn(&pair, 4, 1)
+    assert(pair.width == 4 && get_image_color(pair, 1, 0).r == 255 && get_image_color(pair, 2, 0).b == 255)
+    image_resize_nn(&pair, 0, 1)
+    assert(pair.width == 4)
+    // 200 * 128 / 255 rounds down to 100; a sum below 0 becomes 1.
+    tone := gen_image_color(1, 1, RaylibColor{r: 200, g: 100, b: 50, a: 255})
+    image_color_tint(&tone, RaylibColor{r: 128, g: 255, b: 0, a: 255})
+    tinted :: get_image_color(tone, 0, 0)
+    assert(tinted.r == 100 && tinted.g == 100 && tinted.b == 0 && tinted.a == 255)
+    image_color_invert(&tone)
+    inverted :: get_image_color(tone, 0, 0)
+    assert(inverted.r == 155 && inverted.b == 255 && inverted.a == 255)
+    image_color_brightness(&tone, -200)
+    darker :: get_image_color(tone, 0, 0)
+    assert(darker.r == 1 && darker.g == 1 && darker.b == 55)
+    image_color_replace(&tone, RaylibColor{r: 1, g: 1, b: 55, a: 255}, red)
+    assert(get_image_color(tone, 0, 0).r == 255 && get_image_color(tone, 0, 0).b == 0)
+    image_clear_background(&tone, blue)
+    assert(get_image_color(tone, 0, 0).b == 255)
+}
+
+#Test("measure_text spans what draw_text draws") {
+    assert_eq(measure_text("", 10), 0)
+    assert_eq(measure_text("\n", 10), 0)
+    assert_eq(measure_text("Hi", 10), 11)
+    assert_eq(measure_text("Hi", 4), 11)
+    assert_eq(measure_text("Hi", 20), 22)
+    assert_eq(measure_text("A", 15), 10)
+    assert_eq(measure_text("ab\nlonger\nc", 10), 35)
+    assert_eq(measure_text("é?", 10), 11)
+    // "H" fills its fifth column, so the drawn pixels end at the measured width.
+    runs :: text_runs(RaylibCanvas{width: 100, height: 40}, "HH", 0, 0, 20, 1)
+    right := 0
+    loop run in runs -> right = max_int(right, run.x + run.width)
+    assert_eq(right, measure_text("HH", 20))
+}
+
+fn push_be32(out: &[U8], value: Int) {
+    shifts :: [Int]{24, 16, 8, 0}
+    loop shift in shifts {
+        byte :: (value >> shift).bit_and(255)
+        &out.push(U8{byte})
+    }
+}
+
+fn push_chunk(out: &[U8], kind: Int, body: [U8]) {
+    push_be32(&out, body.len())
+    push_be32(&out, kind)
+    loop byte in body -> &out.push(byte)
+    push_be32(&out, 0)
+}
+
+// A PNG of one zlib stream of already filtered scanlines.
+fn png_bytes(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
+    out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
+    header := [U8]{}
+    push_be32(&header, width)
+    push_be32(&header, height)
+    fields :: [Int]{depth, color_type, 0, 0, interlace}
+    loop value in fields -> &header.push(U8{value})
+    push_chunk(&out, C_PNG_IHDR, header)
+    if palette.len() > 0 -> push_chunk(&out, C_PNG_PLTE, palette)
+    if key.len() > 0 -> push_chunk(&out, C_PNG_TRNS, key)
+    push_chunk(&out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
+    push_chunk(&out, C_PNG_IEND, [U8]{})
+    out
+}
+
+fn image_words(image: RaylibImage) -> [Int] {
+    words := [Int]{image.width, image.height}
+    at := 0
+    loop at < image.pixels.len() {
+        &words.push(png_rgba(byte_at(image.pixels, at), byte_at(image.pixels, at + 1), byte_at(image.pixels, at + 2), byte_at(image.pixels, at + 3)))
+        at += 4
+    }
+    words
+}
+
+fn gray(value: Int) -> Int {
+    png_rgba(value, value, value, 255)
+}
+
+#Test("png rows reconstruct through every filter") {
+    raw :: [U8]{1, 10, 20, 2, 5, 15, 3, 13, 18, 4, 0, 0}
+    image :: decode_png(png_bytes(2, 4, 8, 0, 0, [U8]{}, [U8]{}, raw))
+    assert_eq(image_words(image), [Int]{2, 4, gray(10), gray(30), gray(15), gray(45), gray(20), gray(50), gray(20), gray(50)})
+}
+
+#Test("png palettes, low depths and tRNS keys") {
+    palette :: [U8]{255, 0, 0, 0, 255, 0, 0, 0, 255}
+    indexed :: decode_png(png_bytes(3, 1, 2, 3, 0, palette, [U8]{128}, [U8]{0, 0x18}))
+    assert_eq(image_words(indexed), [Int]{3, 1, 0xFF000080, 0x00FF00FF, 0x0000FFFF})
+    bits :: decode_png(png_bytes(3, 1, 1, 0, 0, [U8]{}, [U8]{0, 0}, [U8]{0, 0xA0}))
+    assert_eq(image_words(bits), [Int]{3, 1, 0xFFFFFFFF, 0, 0xFFFFFFFF})
+    keyed :: decode_png(png_bytes(1, 1, 16, 2, 0, [U8]{}, [U8]{0, 1, 0, 2, 0, 3}, [U8]{0, 0, 1, 0, 2, 0, 3}))
+    assert_eq(image_words(keyed), [Int]{1, 1, 0})
+}
+
+#Test("png sixteen-bit samples, gray alpha and Adam7") {
+    wide :: decode_png(png_bytes(1, 1, 16, 6, 0, [U8]{}, [U8]{}, [U8]{0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}))
+    assert_eq(image_words(wide), [Int]{1, 1, 0x12569ADE})
+    alpha :: decode_png(png_bytes(1, 1, 8, 4, 0, [U8]{}, [U8]{}, [U8]{0, 77, 33}))
+    assert_eq(image_words(alpha), [Int]{1, 1, png_rgba(77, 77, 77, 33)})
+    interlaced :: decode_png(png_bytes(2, 2, 8, 0, 1, [U8]{}, [U8]{}, [U8]{0, 1, 0, 2, 0, 3, 4}))
+    assert_eq(image_words(interlaced), [Int]{2, 2, gray(1), gray(2), gray(3), gray(4)})
+}
+
+#Test("png faults decode to no image") {
+    assert_eq(decode_png([U8]{1, 2, 3}).width, 0)
+    assert_eq(decode_png(png_bytes(2, 1, 8, 0, 0, [U8]{}, [U8]{}, [U8]{5, 1, 2})).width, 0)
+    assert_eq(decode_png(png_bytes(1, 1, 8, 3, 0, [U8]{}, [U8]{}, [U8]{0, 0})).width, 0)
+    assert_eq(decode_png(png_bytes(2, 2, 8, 0, 0, [U8]{}, [U8]{}, [U8]{0, 1, 2})).width, 0)
+    assert_eq(decode_png(png_bytes(1, 1, 3, 0, 0, [U8]{}, [U8]{}, [U8]{0, 0})).width, 0)
 }

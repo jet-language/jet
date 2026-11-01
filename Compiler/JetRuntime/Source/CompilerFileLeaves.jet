@@ -30,7 +30,7 @@
             end := position
             found := false
             loop end < filled {
-                byte :: rt_text_byte(buffer + end)
+                byte :: rt_text_byte(wrapping(buffer + end))
                 end += I64{1}
                 if (byte == I64{10}) {
                     found = true
@@ -48,7 +48,7 @@
                 bytes = next_bytes
                 capacity = grown
             }
-            rt_text_bytes_copy(bytes + used, buffer + position, count)
+            rt_text_bytes_copy(wrapping(bytes + used), wrapping(buffer + position), count)
             used = required
             fd_put(reader, I64{56}, end)
             if found -> break

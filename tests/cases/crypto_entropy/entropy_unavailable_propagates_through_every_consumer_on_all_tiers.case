@@ -9,7 +9,7 @@ env: NO_COLOR=1
 normalize: replace "{work}" "$CASE"
 step: cc no-entropy.c -o no-entropy
 exit: 0
-step: jet build bytes.jet
+step: jet build --allow=Rand bytes.jet
 env: JET_STORE_DIR={work}/cache-bytes/aot
 exit: 0
 step bytes_aot: {work}/no-entropy {work}/.jet/build/bytes
@@ -19,7 +19,7 @@ stdout: ^= "before\n" # original starts_with
 stdout: !~ "drew" # original never produces entropy-backed value
 when bytes_aot.stdout !~ "typed failure": exit: nonzero
 when bytes_aot.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
-step bytes_default: {work}/no-entropy {jet} run bytes.jet
+step bytes_default: {work}/no-entropy {jet} run --allow=Rand bytes.jet
 env: JET_STORE_DIR={work}/cache-bytes/build
 exit: any # original status is tuple component, not success-only
 stdout: ^= "before\n" # original starts_with
@@ -29,7 +29,7 @@ when bytes_default.stdout !~ "typed failure": stderr: ~ "could not provide crypt
 exit: == bytes_aot
 stdout: == bytes_aot
 stderr: == bytes_aot
-step: jet build uuid.jet
+step: jet build --allow=Rand uuid.jet
 env: JET_STORE_DIR={work}/cache-uuid/aot
 exit: 0
 step uuid_aot: {work}/no-entropy {work}/.jet/build/uuid
@@ -39,7 +39,7 @@ stdout: ^= "before\n" # original starts_with
 stdout: !~ "drew" # original never produces entropy-backed value
 when uuid_aot.stdout !~ "typed failure": exit: nonzero
 when uuid_aot.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
-step uuid_default: {work}/no-entropy {jet} run uuid.jet
+step uuid_default: {work}/no-entropy {jet} run --allow=Rand uuid.jet
 env: JET_STORE_DIR={work}/cache-uuid/build
 exit: any # original status is tuple component, not success-only
 stdout: ^= "before\n" # original starts_with
@@ -49,7 +49,7 @@ when uuid_default.stdout !~ "typed failure": stderr: ~ "could not provide crypto
 exit: == uuid_aot
 stdout: == uuid_aot
 stderr: == uuid_aot
-step: jet build keygen.jet
+step: jet build --allow=Rand keygen.jet
 env: JET_STORE_DIR={work}/cache-keygen/aot
 exit: 0
 step keygen_aot: {work}/no-entropy {work}/.jet/build/keygen
@@ -59,7 +59,7 @@ stdout: ^= "before\n" # original starts_with
 stdout: !~ "drew" # original never produces entropy-backed value
 when keygen_aot.stdout !~ "typed failure": exit: nonzero
 when keygen_aot.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
-step keygen_default: {work}/no-entropy {jet} run keygen.jet
+step keygen_default: {work}/no-entropy {jet} run --allow=Rand keygen.jet
 env: JET_STORE_DIR={work}/cache-keygen/build
 exit: any # original status is tuple component, not success-only
 stdout: ^= "before\n" # original starts_with

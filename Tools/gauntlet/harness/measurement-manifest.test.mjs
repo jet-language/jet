@@ -5,9 +5,11 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildScoreboard, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, validateEntryShape, validateResultShape } from "./run.mjs";
+import { buildScoreboard, CEILING_POLICY, ceilingReferenceIssues, comparisons, httpProbe, metricApplicability, processTreeRssKb, probeMatches, publicationState, ratioVerdict, STRICT_PERFORMANCE_POLICY, strictPerformancePolicyIssues, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals } from "./live-reload.mjs";
 import { compileThroughputContractIssues } from "./compile-throughput.mjs";
+import { BUILD_SYSTEM_CELLS, buildSystemContractIssues } from "./build-system.mjs";
+import { EDIT_FILES, generate as generateBuildSystemProject } from "../axes/build-system/generate.mjs";
 
 const gauntletDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = path.resolve(gauntletDir, "../..");
@@ -203,19 +205,14 @@ function repoSourcePath(relative) {
   return resolved;
 }
 
-test("scoreboard applies the Rust noise band to every Rust rail", () => {
-  assert.equal(ratioVerdict(0.99, "rust"), "win");
-  assert.equal(ratioVerdict(1, "rust"), "parity");
-  assert.equal(ratioVerdict(1.05, "rust"), "parity");
-  assert.equal(ratioVerdict(1.0501, "rust"), "loss");
-  assert.equal(ratioVerdict(0.99, "zig"), "win");
-  assert.equal(ratioVerdict(1, "zig"), "loss");
-  assert.equal(ratioVerdict(1.01, "c"), "loss");
-  assert.equal(ratioVerdict(1.01, "rust-expert"), "parity");
-  assert.equal(ratioVerdict(1.01, "unknown-expert"), "loss");
-  assert.equal(ratioVerdict(Number.NaN, "rust"), null);
-  assert.equal(ratioVerdict(0, "rust"), null);
-  assert.equal(ratioVerdict(-1, "zig"), null);
+test("scoreboard judges every peer, Rust included, by the strict <1 comparator", () => {
+  assert.equal(ratioVerdict(0.99), "win");
+  assert.equal(ratioVerdict(1), "loss");
+  assert.equal(ratioVerdict(1.05), "loss");
+  assert.equal(ratioVerdict(1.01), "loss");
+  assert.equal(ratioVerdict(Number.NaN), null);
+  assert.equal(ratioVerdict(0), null);
+  assert.equal(ratioVerdict(-1), null);
 });
 
 test("expert peer comparisons use the matched Jet expert AOT row", () => {
@@ -371,7 +368,7 @@ test("candidate peer loss is retained in the aggregate cell verdict", () => {
     cards: new Map(),
   });
   const record = scoreboard.cells[0].entries[0];
-  assert.equal(record.peers.find((peer) => peer.language === "rust").verdict, "parity");
+  assert.equal(record.peers.find((peer) => peer.language === "rust").verdict, "loss");
   assert.equal(record.peers.find((peer) => peer.language === "cxx").verdict, "loss");
   assert.equal(record.verdict, "loss");
 });
@@ -592,6 +589,75 @@ test("publication rejects peer sample identity mismatch", () => {
   assert.ok(publication.blockers.some((blocker) => blocker.includes("peer sample identity")));
 });
 
+test("the matrix encodes the peer floor and the machine ceiling, and every ceiling reference names its gauntlet cells", async () => {
+  const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
+  assert.deepEqual(strictPerformancePolicyIssues(matrix), []);
+  const ceiling = matrix.strict_performance_policy.ceiling;
+  assert.deepEqual(ceiling, JSON.parse(JSON.stringify(CEILING_POLICY)));
+  assert.deepEqual(ceiling.stages.map((stage) => [stage.id, stage.role]), [["peer_floor", "initial"], ["machine_ceiling", "final"]]);
+  assert.deepEqual(ceiling.stages[1].comparators, { meet: "<=1", miss: ">1" });
+  assert.equal(ceiling.peer_win_closes_cell, false);
+  assert.equal(ceiling.missing_reference, "uncovered");
+  assert.ok(matrix.strict_performance_policy.failure_statuses.includes(ceiling.missing_reference));
+  const references = JSON.parse(await fs.readFile(repoSourcePath(ceiling.references), "utf8"));
+  assert.deepEqual(await ceilingReferenceIssues(matrix, references), []);
+  // AGENTS.md carries the ceiling paragraph word for word.
+  const agents = (await fs.readFile(path.join(repoDir, "AGENTS.md"), "utf8")).replace(/\s+/g, " ");
+  const paragraph = STRICT_PERFORMANCE_POLICY.text.split("\n\n").find((item) => item.startsWith("Peers are the initial benchmark"));
+  assert.ok(paragraph);
+  assert.ok(agents.includes(paragraph), "AGENTS.md Performance gate lacks the machine-ceiling paragraph");
+  const missing = await ceilingReferenceIssues(matrix, [{ name: "nope", gauntlet: ["no.such-cell"] }, { name: "sieve" }]);
+  assert.ok(missing.includes("nope: machine-ceiling reference names unknown matrix cell no.such-cell"));
+  assert.ok(missing.includes("nope: machine-ceiling reference has no ref.S"));
+  assert.ok(missing.includes("sieve: machine-ceiling reference does not name its gauntlet cells"));
+});
+
+test("a peer win never closes a cell whose machine ceiling is unmet", () => {
+  const fixture = scoreboardFixture();
+  const tower = { status: "available", revision: 1, cards: new Map() };
+  const reference = [{ name: "fixture-ref", gauntlet: ["fixture.cell"] }];
+  const rows = (cycles, size, output = "same") => ({
+    rows: [
+      { cell: "fixture-ref", variant: "asm", cycles_x: 1, size_x: 1, output: "same" },
+      { cell: "fixture-ref", variant: "jet-default", cycles_x: cycles, size_x: size, output },
+      { cell: "fixture-ref", variant: "jet-release", cycles_x: cycles, size_x: size, output },
+    ],
+  });
+  const judge = (ceiling) => buildScoreboard(fixture.matrix, [fixture.result], fixture.manifest, tower, ceiling);
+
+  const uncovered = judge(undefined);
+  const cell = uncovered.cells[0];
+  assert.equal(cell.peer_verdict, "win");
+  assert.equal(cell.ceiling.status, "uncovered");
+  assert.equal(cell.ceiling_verdict, "uncovered");
+  assert.equal(cell.verdict, "unmeasured");
+  assert.deepEqual(Object.keys(cell.ceiling.metrics), ["runtime_wall_seconds", "runtime_first_stdout_seconds", "binary_bytes"]);
+  assert.deepEqual(uncovered.ceiling_coverage.uncovered, ["fixture.cell"]);
+  const blockers = fixturePublication(fixture, uncovered).blockers;
+  assert.ok(blockers.includes("fixture.cell/machine-ceiling/runtime_wall_seconds: metric uncovered (no hand-written machine-code reference names this cell)"));
+  assert.ok(blockers.includes("fixture.cell/machine-ceiling/binary_bytes: metric uncovered (no hand-written machine-code reference names this cell)"));
+
+  const unmeasured = judge({ references: reference, measurements: null }).cells[0];
+  assert.equal(unmeasured.ceiling.status, "covered");
+  assert.equal(unmeasured.ceiling_verdict, "unmeasured");
+  assert.equal(unmeasured.verdict, "unmeasured");
+
+  const miss = judge({ references: reference, measurements: rows(1.2, 0.9) }).cells[0];
+  assert.equal(miss.ceiling.metrics.runtime_wall_seconds.verdict, "miss");
+  assert.equal(miss.ceiling.metrics.binary_bytes.verdict, "meet");
+  assert.equal(miss.verdict, "loss");
+
+  const wrong = judge({ references: reference, measurements: rows(0.5, 0.5, "DIFF (status 1)") }).cells[0];
+  assert.equal(wrong.ceiling_verdict, "wrong");
+  assert.equal(wrong.verdict, "unmeasured");
+
+  const meet = judge({ references: reference, measurements: rows(1, 0.8) });
+  assert.equal(meet.cells[0].ceiling_verdict, "meet");
+  assert.equal(meet.cells[0].verdict, "win");
+  assert.deepEqual(meet.ceiling_coverage.covered, [{ cell: "fixture.cell", references: ["fixture-ref"] }]);
+  assert.equal(fixturePublication(fixture, meet).blockers.some((blocker) => blocker.includes("machine-ceiling")), false);
+});
+
 test("web-app results omit undeclared Jet tiers", () => {
   const fixture = scoreboardFixture();
   fixture.result.entry.mode = "web-app";
@@ -610,10 +676,7 @@ test("web-app results omit undeclared Jet tiers", () => {
 
 test("measurement manifest covers every corpus entry and source pair", async () => {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  assert.deepEqual(manifest.report_contract.ratio_verdicts, {
-    rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
-    non_rust: { win: "<1", parity: null, loss: ">=1" },
-  });
+  assert.deepEqual(manifest.report_contract.ratio_verdicts, { win: "<1", loss: ">=1" });
   assert.equal(manifest.report_contract.loss_owner_required_for, "any_comparable_metric_loss");
   assert.deepEqual(manifest.report_contract.peer_measurement, {
     ratio_tiers: ["aot", "run"],
@@ -651,6 +714,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     live_reload: "gauntlet-axis-live-reload-v1",
     memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
     compile_throughput: "gauntlet-axis-compile-throughput-v1",
+    build_system: "gauntlet-axis-build-system-v1",
   });
   assert.equal(manifest.report_contract.axis_publication, "required_axes_complete_and_unblocked");
   for (const axis of Object.values(manifest.axes)) assert.equal(axis.status, "required");
@@ -690,6 +754,21 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
   assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
   assert.ok(pins.phase_budgets.every((row) => row.owners.length > 0));
+
+  // The Nix peer: five paired cells, the stricter target on the three
+  // everyday loops, and a generated project whose edit files exist.
+  const buildSystem = manifest.axes.build_system;
+  assert.deepEqual(buildSystemContractIssues(buildSystem), []);
+  assert.equal(await exists(repoSourcePath(buildSystem.harness)), true);
+  assert.deepEqual(buildSystem.cells.map((cell) => cell.id), BUILD_SYSTEM_CELLS);
+  for (const cell of buildSystem.cells) {
+    assert.deepEqual(cell.target, ["eval", "noop", "incremental"].includes(cell.id) ? { ratio_max: 0.25 } : { ratio_lt: 1.0 });
+  }
+  const project = generateBuildSystemProject();
+  assert.deepEqual(buildSystem.project.edit_files, EDIT_FILES);
+  for (const file of Object.values(EDIT_FILES)) assert.equal(typeof project[file], "string", `${file}: not generated`);
+  assert.ok(project["jet/@build.jet"].includes("fn build(b: Build)"));
+  assert.ok(project["nix/flake.nix"].includes("stdenv.mkDerivation"));
 
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
   assert.equal(matrix.cells.length, manifest.corpus.matrix_cell_count);

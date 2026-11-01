@@ -260,13 +260,7 @@ impl PackageFacts {
                 return Err(pkg_entry_error(self.origin, error.message()))
             }
         }
-        candidates := [CheckedFile]{}
-        loop file in ^listed {
-            is_role_file :: COMMAND_ROLE_FILES.contains(pkg_path_file_name(file.relative))
-            parent :: pkg_path_parent(file.relative)
-            if !is_role_file || parent == "" || parent == "." -> &candidates.push(^file)
-        }
-        entries := if self.discover_function_entries_from_files(resolver, ^candidates, BUILD_ENTRY_FN, true, true) == {
+        entries := if self.discover_function_entries_from_files(resolver, ^listed, BUILD_ENTRY_FN, true, true) == {
             .Ok(found) -> found
             .Err(error) -> {
                 return Err(pkg_entry_error(self.origin, error.message()))
@@ -310,7 +304,7 @@ impl PackageFacts {
                 } else if !is_role_file {
                     &root_files.push(^file)
                 }
-            } else if parent == "src" && !is_role_file {
+            } else if parent == "src" {
                 &src_files.push(^file)
             }
         }
@@ -527,7 +521,6 @@ fn pkg_path_under_any(relative: String, directories: [String]) -> Bool Never! {
 
 fn pkg_sorted_checked_files(input: ^[CheckedFile]) -> [CheckedFile] Never! {
     out := ^input
-    out = loop fresh_item in out -> fresh_item
     &out.sort_by((a, b) -> a.relative <=> b.relative)
     out
 }

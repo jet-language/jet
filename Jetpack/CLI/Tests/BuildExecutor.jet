@@ -72,7 +72,7 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
         .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../escape.o"))
         .Ok(_) -> panic("an escaping output must be refused")
     }
-    assert(&build.action("inside", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"build/inside.o"})) == .Ok(_))
+    _ :: &build.action("inside", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"build/inside.o"})) ?? panic("an inside output must be accepted")
 }
 
 #Test("resolve under: normal components join under the base, parent and root components are refused") {
@@ -100,11 +100,15 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     // then stops the action at the sandbox boundary instead.
     previous :: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
-    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net})
-    build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-    if result == {
-        .Err(error) -> assert(error == BuildExecutionError.SandboxUnavailable)
-        .Ok(_) -> panic("the fake sandbox must stop the action")
+    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec, BuildEffect.Net}) == {
+        .Err(error) -> {
+            build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+            assert(error == BuildExecutionError.SandboxUnavailable)
+        }
+        .Ok(_) -> {
+            build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+            panic("the fake sandbox must stop the action")
+        }
     }
     assert(!files.exists(marker))
     files.remove_all(root).drop("test cleanup")
@@ -142,11 +146,15 @@ fn build_test_plan(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildPl
     plan :: build_test_plan([BuildEffect]{BuildEffect.Exec}, BUILD_TEST_COPY_SCRIPT)
     previous :: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
-    refused :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec})
-    build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-    if refused == {
-        .Err(error) -> assert(error == BuildExecutionError.SandboxUnavailable)
-        .Ok(_) -> panic("an unavailable sandbox must refuse")
+    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+        .Err(error) -> {
+            build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+            assert(error == BuildExecutionError.SandboxUnavailable)
+        }
+        .Ok(_) -> {
+            build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+            panic("an unavailable sandbox must refuse")
+        }
     }
     assert(!files.exists(files.join(root, "out.txt")))
     assert(build_native_sandbox_error(plan.actions[0], NativeSandboxError.Unsupported("x")) == BuildExecutionError.SandboxUnavailable)
@@ -371,7 +379,7 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
     other := HermeticBuildContext.new()
     own :: &build.toolchain("own", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("own toolchain")
     foreign :: &other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
-    assert(&build.action("own", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) == .Ok(_))
+    _ :: &build.action("own", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
     if &build.action("foreign", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownToolchain(foreign.id))
         .Ok(_) -> panic("another context's toolchain must be refused")
@@ -423,7 +431,7 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
     digest :: store.put_blob("object".bytes()) ?? panic("blob")
     record :: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
     build_write_action_record(store, "act-sha256:k", record) ?? panic("write record")
-    read :: build_read_action_record(store, "act-sha256:k") ?? panic("read record")
+    read :: build_read_action_record(store, "act-sha256:k") ? found -> found ! error -> panic("read record")
     found :: read ?? panic("record present")
     build_restore_action_outputs(store, root, action, found) ?? panic("restore matching record")
     assert_eq(files.read(files.join(root, "a.o")) ?? panic("restored output"), "object")
@@ -480,11 +488,15 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
     build_write_action_record(store, key, ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: 3}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(.NoLocalActionRecord)}) ?? panic("record")
     previous :: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "1")
-    result :: build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec})
-    build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-    if result == {
-        .Err(error) -> assert(error == BuildExecutionError.Reported{report})
-        .Ok(_) -> panic("a recorded failure must replay")
+    if build_execute_build_plan(plan, root, store, [BuildEffect]{BuildEffect.Exec}) == {
+        .Err(error) -> {
+            build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+            assert(error == BuildExecutionError.Reported{report})
+        }
+        .Ok(_) -> {
+            build_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+            panic("a recorded failure must replay")
+        }
     }
     files.remove_all(root).drop("test cleanup")
 }
@@ -555,8 +567,7 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
 #Test("toolchain mounts: an absolute mount is accepted, relative and parent destinations are refused") {
     provenance :: BuildProvenance.user_declared("fixture", None)
     build := HermeticBuildContext.new()
-    accepted :: &build.toolchain("absolute", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", "/toolchain", "sha256:x"))
-    assert(accepted == .Ok(_))
+    _ :: &build.toolchain("absolute", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", "/toolchain", "sha256:x")) ?? panic("an absolute mount must be accepted")
     destinations :: [String]{"toolchain", "/toolchain/../etc"}
     loop destination in destinations {
         if &build.toolchain("bad-{destination.len()}", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", destination, "sha256:x")) == {

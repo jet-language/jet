@@ -1,0 +1,351 @@
+// The instruction table: every accepted instruction's text name, opcode,
+// immediate shape, and for the instructions with a fixed operand signature,
+// that signature. The decoder, the text reader and the validator all read
+// this one table. A signature is "params:results" over the letters
+// i (i32), l (i64), f (f32), d (f64); "" for instructions the validator types
+// individually. `width` is a memory access's byte width (its natural alignment).
+
+WASM_IMM_NONE :: 0
+WASM_IMM_BLOCK :: 1
+WASM_IMM_LABEL :: 2
+WASM_IMM_BR_TABLE :: 3
+WASM_IMM_FUNC :: 4
+WASM_IMM_CALL_INDIRECT :: 5
+WASM_IMM_LOCAL :: 6
+WASM_IMM_GLOBAL :: 7
+WASM_IMM_MEMARG :: 8
+WASM_IMM_MEMORY :: 9
+WASM_IMM_I32 :: 10
+WASM_IMM_I64 :: 11
+WASM_IMM_F32 :: 12
+WASM_IMM_F64 :: 13
+WASM_IMM_SELECT_T :: 14
+WASM_IMM_REFTYPE :: 15
+WASM_IMM_TABLE :: 16
+WASM_IMM_TABLE_COPY :: 17
+WASM_IMM_TABLE_INIT :: 18
+WASM_IMM_ELEM :: 19
+WASM_IMM_MEMORY_INIT :: 20
+WASM_IMM_DATA :: 21
+WASM_IMM_MEMORY_COPY :: 22
+
+WASM_OP_UNREACHABLE :: 0x00
+WASM_OP_NOP :: 0x01
+WASM_OP_BLOCK :: 0x02
+WASM_OP_LOOP :: 0x03
+WASM_OP_IF :: 0x04
+WASM_OP_ELSE :: 0x05
+WASM_OP_END :: 0x0b
+WASM_OP_BR :: 0x0c
+WASM_OP_BR_IF :: 0x0d
+WASM_OP_BR_TABLE :: 0x0e
+WASM_OP_RETURN :: 0x0f
+WASM_OP_CALL :: 0x10
+WASM_OP_CALL_INDIRECT :: 0x11
+WASM_OP_DROP :: 0x1a
+WASM_OP_SELECT :: 0x1b
+WASM_OP_SELECT_T :: 0x1c
+WASM_OP_LOCAL_GET :: 0x20
+WASM_OP_LOCAL_SET :: 0x21
+WASM_OP_LOCAL_TEE :: 0x22
+WASM_OP_GLOBAL_GET :: 0x23
+WASM_OP_GLOBAL_SET :: 0x24
+WASM_OP_TABLE_GET :: 0x25
+WASM_OP_TABLE_SET :: 0x26
+WASM_OP_MEMORY_SIZE :: 0x3f
+WASM_OP_MEMORY_GROW :: 0x40
+WASM_OP_I32_CONST :: 0x41
+WASM_OP_I64_CONST :: 0x42
+WASM_OP_F32_CONST :: 0x43
+WASM_OP_F64_CONST :: 0x44
+WASM_OP_REF_NULL :: 0xd0
+WASM_OP_REF_IS_NULL :: 0xd1
+WASM_OP_REF_FUNC :: 0xd2
+WASM_OP_MEMORY_INIT :: 0xfc08
+WASM_OP_DATA_DROP :: 0xfc09
+WASM_OP_MEMORY_COPY :: 0xfc0a
+WASM_OP_MEMORY_FILL :: 0xfc0b
+WASM_OP_TABLE_INIT :: 0xfc0c
+WASM_OP_ELEM_DROP :: 0xfc0d
+WASM_OP_TABLE_COPY :: 0xfc0e
+WASM_OP_TABLE_GROW :: 0xfc0f
+WASM_OP_TABLE_SIZE :: 0xfc10
+WASM_OP_TABLE_FILL :: 0xfc11
+
+struct WasmOpInfo {
+    name: String
+    op: Int
+    imm: Int
+    sig: String
+    width: Int
+}
+
+fn wasm_op(name: String, op: Int, imm: Int, sig: String) -> WasmOpInfo Never! {
+    WasmOpInfo{name: name, op: op, imm: imm, sig: sig, width: 0}
+}
+
+fn wasm_mem_op(name: String, op: Int, sig: String, width: Int) -> WasmOpInfo Never! {
+    WasmOpInfo{name: name, op: op, imm: WASM_IMM_MEMARG, sig: sig, width: width}
+}
+
+fn wasm_op_rows() -> [WasmOpInfo] Never! {
+    [WasmOpInfo]{
+        wasm_op("unreachable", 0x00, WASM_IMM_NONE, ""),
+        wasm_op("nop", 0x01, WASM_IMM_NONE, ":"),
+        wasm_op("block", 0x02, WASM_IMM_BLOCK, ""),
+        wasm_op("loop", 0x03, WASM_IMM_BLOCK, ""),
+        wasm_op("if", 0x04, WASM_IMM_BLOCK, ""),
+        wasm_op("else", 0x05, WASM_IMM_NONE, ""),
+        wasm_op("end", 0x0b, WASM_IMM_NONE, ""),
+        wasm_op("br", 0x0c, WASM_IMM_LABEL, ""),
+        wasm_op("br_if", 0x0d, WASM_IMM_LABEL, ""),
+        wasm_op("br_table", 0x0e, WASM_IMM_BR_TABLE, ""),
+        wasm_op("return", 0x0f, WASM_IMM_NONE, ""),
+        wasm_op("call", 0x10, WASM_IMM_FUNC, ""),
+        wasm_op("call_indirect", 0x11, WASM_IMM_CALL_INDIRECT, ""),
+        wasm_op("drop", 0x1a, WASM_IMM_NONE, ""),
+        wasm_op("select", 0x1b, WASM_IMM_NONE, ""),
+        wasm_op("select", 0x1c, WASM_IMM_SELECT_T, ""),
+        wasm_op("local.get", 0x20, WASM_IMM_LOCAL, ""),
+        wasm_op("local.set", 0x21, WASM_IMM_LOCAL, ""),
+        wasm_op("local.tee", 0x22, WASM_IMM_LOCAL, ""),
+        wasm_op("global.get", 0x23, WASM_IMM_GLOBAL, ""),
+        wasm_op("global.set", 0x24, WASM_IMM_GLOBAL, ""),
+        wasm_op("table.get", 0x25, WASM_IMM_TABLE, ""),
+        wasm_op("table.set", 0x26, WASM_IMM_TABLE, ""),
+        wasm_mem_op("i32.load", 0x28, "i:i", 4),
+        wasm_mem_op("i64.load", 0x29, "i:l", 8),
+        wasm_mem_op("f32.load", 0x2a, "i:f", 4),
+        wasm_mem_op("f64.load", 0x2b, "i:d", 8),
+        wasm_mem_op("i32.load8_s", 0x2c, "i:i", 1),
+        wasm_mem_op("i32.load8_u", 0x2d, "i:i", 1),
+        wasm_mem_op("i32.load16_s", 0x2e, "i:i", 2),
+        wasm_mem_op("i32.load16_u", 0x2f, "i:i", 2),
+        wasm_mem_op("i64.load8_s", 0x30, "i:l", 1),
+        wasm_mem_op("i64.load8_u", 0x31, "i:l", 1),
+        wasm_mem_op("i64.load16_s", 0x32, "i:l", 2),
+        wasm_mem_op("i64.load16_u", 0x33, "i:l", 2),
+        wasm_mem_op("i64.load32_s", 0x34, "i:l", 4),
+        wasm_mem_op("i64.load32_u", 0x35, "i:l", 4),
+        wasm_mem_op("i32.store", 0x36, "ii:", 4),
+        wasm_mem_op("i64.store", 0x37, "il:", 8),
+        wasm_mem_op("f32.store", 0x38, "if:", 4),
+        wasm_mem_op("f64.store", 0x39, "id:", 8),
+        wasm_mem_op("i32.store8", 0x3a, "ii:", 1),
+        wasm_mem_op("i32.store16", 0x3b, "ii:", 2),
+        wasm_mem_op("i64.store8", 0x3c, "il:", 1),
+        wasm_mem_op("i64.store16", 0x3d, "il:", 2),
+        wasm_mem_op("i64.store32", 0x3e, "il:", 4),
+        wasm_op("memory.size", 0x3f, WASM_IMM_MEMORY, ":i"),
+        wasm_op("memory.grow", 0x40, WASM_IMM_MEMORY, "i:i"),
+        wasm_op("i32.const", 0x41, WASM_IMM_I32, ":i"),
+        wasm_op("i64.const", 0x42, WASM_IMM_I64, ":l"),
+        wasm_op("f32.const", 0x43, WASM_IMM_F32, ":f"),
+        wasm_op("f64.const", 0x44, WASM_IMM_F64, ":d"),
+        wasm_op("i32.eqz", 0x45, WASM_IMM_NONE, "i:i"),
+        wasm_op("i32.eq", 0x46, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.ne", 0x47, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.lt_s", 0x48, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.lt_u", 0x49, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.gt_s", 0x4a, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.gt_u", 0x4b, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.le_s", 0x4c, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.le_u", 0x4d, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.ge_s", 0x4e, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.ge_u", 0x4f, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i64.eqz", 0x50, WASM_IMM_NONE, "l:i"),
+        wasm_op("i64.eq", 0x51, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.ne", 0x52, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.lt_s", 0x53, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.lt_u", 0x54, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.gt_s", 0x55, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.gt_u", 0x56, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.le_s", 0x57, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.le_u", 0x58, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.ge_s", 0x59, WASM_IMM_NONE, "ll:i"),
+        wasm_op("i64.ge_u", 0x5a, WASM_IMM_NONE, "ll:i"),
+        wasm_op("f32.eq", 0x5b, WASM_IMM_NONE, "ff:i"),
+        wasm_op("f32.ne", 0x5c, WASM_IMM_NONE, "ff:i"),
+        wasm_op("f32.lt", 0x5d, WASM_IMM_NONE, "ff:i"),
+        wasm_op("f32.gt", 0x5e, WASM_IMM_NONE, "ff:i"),
+        wasm_op("f32.le", 0x5f, WASM_IMM_NONE, "ff:i"),
+        wasm_op("f32.ge", 0x60, WASM_IMM_NONE, "ff:i"),
+        wasm_op("f64.eq", 0x61, WASM_IMM_NONE, "dd:i"),
+        wasm_op("f64.ne", 0x62, WASM_IMM_NONE, "dd:i"),
+        wasm_op("f64.lt", 0x63, WASM_IMM_NONE, "dd:i"),
+        wasm_op("f64.gt", 0x64, WASM_IMM_NONE, "dd:i"),
+        wasm_op("f64.le", 0x65, WASM_IMM_NONE, "dd:i"),
+        wasm_op("f64.ge", 0x66, WASM_IMM_NONE, "dd:i"),
+        wasm_op("i32.clz", 0x67, WASM_IMM_NONE, "i:i"),
+        wasm_op("i32.ctz", 0x68, WASM_IMM_NONE, "i:i"),
+        wasm_op("i32.popcnt", 0x69, WASM_IMM_NONE, "i:i"),
+        wasm_op("i32.add", 0x6a, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.sub", 0x6b, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.mul", 0x6c, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.div_s", 0x6d, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.div_u", 0x6e, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.rem_s", 0x6f, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.rem_u", 0x70, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.and", 0x71, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.or", 0x72, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.xor", 0x73, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.shl", 0x74, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.shr_s", 0x75, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.shr_u", 0x76, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.rotl", 0x77, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i32.rotr", 0x78, WASM_IMM_NONE, "ii:i"),
+        wasm_op("i64.clz", 0x79, WASM_IMM_NONE, "l:l"),
+        wasm_op("i64.ctz", 0x7a, WASM_IMM_NONE, "l:l"),
+        wasm_op("i64.popcnt", 0x7b, WASM_IMM_NONE, "l:l"),
+        wasm_op("i64.add", 0x7c, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.sub", 0x7d, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.mul", 0x7e, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.div_s", 0x7f, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.div_u", 0x80, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.rem_s", 0x81, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.rem_u", 0x82, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.and", 0x83, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.or", 0x84, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.xor", 0x85, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.shl", 0x86, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.shr_s", 0x87, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.shr_u", 0x88, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.rotl", 0x89, WASM_IMM_NONE, "ll:l"),
+        wasm_op("i64.rotr", 0x8a, WASM_IMM_NONE, "ll:l"),
+        wasm_op("f32.abs", 0x8b, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.neg", 0x8c, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.ceil", 0x8d, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.floor", 0x8e, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.trunc", 0x8f, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.nearest", 0x90, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.sqrt", 0x91, WASM_IMM_NONE, "f:f"),
+        wasm_op("f32.add", 0x92, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f32.sub", 0x93, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f32.mul", 0x94, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f32.div", 0x95, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f32.min", 0x96, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f32.max", 0x97, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f32.copysign", 0x98, WASM_IMM_NONE, "ff:f"),
+        wasm_op("f64.abs", 0x99, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.neg", 0x9a, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.ceil", 0x9b, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.floor", 0x9c, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.trunc", 0x9d, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.nearest", 0x9e, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.sqrt", 0x9f, WASM_IMM_NONE, "d:d"),
+        wasm_op("f64.add", 0xa0, WASM_IMM_NONE, "dd:d"),
+        wasm_op("f64.sub", 0xa1, WASM_IMM_NONE, "dd:d"),
+        wasm_op("f64.mul", 0xa2, WASM_IMM_NONE, "dd:d"),
+        wasm_op("f64.div", 0xa3, WASM_IMM_NONE, "dd:d"),
+        wasm_op("f64.min", 0xa4, WASM_IMM_NONE, "dd:d"),
+        wasm_op("f64.max", 0xa5, WASM_IMM_NONE, "dd:d"),
+        wasm_op("f64.copysign", 0xa6, WASM_IMM_NONE, "dd:d"),
+        wasm_op("i32.wrap_i64", 0xa7, WASM_IMM_NONE, "l:i"),
+        wasm_op("i32.trunc_f32_s", 0xa8, WASM_IMM_NONE, "f:i"),
+        wasm_op("i32.trunc_f32_u", 0xa9, WASM_IMM_NONE, "f:i"),
+        wasm_op("i32.trunc_f64_s", 0xaa, WASM_IMM_NONE, "d:i"),
+        wasm_op("i32.trunc_f64_u", 0xab, WASM_IMM_NONE, "d:i"),
+        wasm_op("i64.extend_i32_s", 0xac, WASM_IMM_NONE, "i:l"),
+        wasm_op("i64.extend_i32_u", 0xad, WASM_IMM_NONE, "i:l"),
+        wasm_op("i64.trunc_f32_s", 0xae, WASM_IMM_NONE, "f:l"),
+        wasm_op("i64.trunc_f32_u", 0xaf, WASM_IMM_NONE, "f:l"),
+        wasm_op("i64.trunc_f64_s", 0xb0, WASM_IMM_NONE, "d:l"),
+        wasm_op("i64.trunc_f64_u", 0xb1, WASM_IMM_NONE, "d:l"),
+        wasm_op("f32.convert_i32_s", 0xb2, WASM_IMM_NONE, "i:f"),
+        wasm_op("f32.convert_i32_u", 0xb3, WASM_IMM_NONE, "i:f"),
+        wasm_op("f32.convert_i64_s", 0xb4, WASM_IMM_NONE, "l:f"),
+        wasm_op("f32.convert_i64_u", 0xb5, WASM_IMM_NONE, "l:f"),
+        wasm_op("f32.demote_f64", 0xb6, WASM_IMM_NONE, "d:f"),
+        wasm_op("f64.convert_i32_s", 0xb7, WASM_IMM_NONE, "i:d"),
+        wasm_op("f64.convert_i32_u", 0xb8, WASM_IMM_NONE, "i:d"),
+        wasm_op("f64.convert_i64_s", 0xb9, WASM_IMM_NONE, "l:d"),
+        wasm_op("f64.convert_i64_u", 0xba, WASM_IMM_NONE, "l:d"),
+        wasm_op("f64.promote_f32", 0xbb, WASM_IMM_NONE, "f:d"),
+        wasm_op("i32.reinterpret_f32", 0xbc, WASM_IMM_NONE, "f:i"),
+        wasm_op("i64.reinterpret_f64", 0xbd, WASM_IMM_NONE, "d:l"),
+        wasm_op("f32.reinterpret_i32", 0xbe, WASM_IMM_NONE, "i:f"),
+        wasm_op("f64.reinterpret_i64", 0xbf, WASM_IMM_NONE, "l:d"),
+        wasm_op("i32.extend8_s", 0xc0, WASM_IMM_NONE, "i:i"),
+        wasm_op("i32.extend16_s", 0xc1, WASM_IMM_NONE, "i:i"),
+        wasm_op("i64.extend8_s", 0xc2, WASM_IMM_NONE, "l:l"),
+        wasm_op("i64.extend16_s", 0xc3, WASM_IMM_NONE, "l:l"),
+        wasm_op("i64.extend32_s", 0xc4, WASM_IMM_NONE, "l:l"),
+        wasm_op("ref.null", 0xd0, WASM_IMM_REFTYPE, ""),
+        wasm_op("ref.is_null", 0xd1, WASM_IMM_NONE, ""),
+        wasm_op("ref.func", 0xd2, WASM_IMM_FUNC, ""),
+        wasm_op("i32.trunc_sat_f32_s", 0xfc00, WASM_IMM_NONE, "f:i"),
+        wasm_op("i32.trunc_sat_f32_u", 0xfc01, WASM_IMM_NONE, "f:i"),
+        wasm_op("i32.trunc_sat_f64_s", 0xfc02, WASM_IMM_NONE, "d:i"),
+        wasm_op("i32.trunc_sat_f64_u", 0xfc03, WASM_IMM_NONE, "d:i"),
+        wasm_op("i64.trunc_sat_f32_s", 0xfc04, WASM_IMM_NONE, "f:l"),
+        wasm_op("i64.trunc_sat_f32_u", 0xfc05, WASM_IMM_NONE, "f:l"),
+        wasm_op("i64.trunc_sat_f64_s", 0xfc06, WASM_IMM_NONE, "d:l"),
+        wasm_op("i64.trunc_sat_f64_u", 0xfc07, WASM_IMM_NONE, "d:l"),
+        wasm_op("memory.init", 0xfc08, WASM_IMM_MEMORY_INIT, "iii:"),
+        wasm_op("data.drop", 0xfc09, WASM_IMM_DATA, ":"),
+        wasm_op("memory.copy", 0xfc0a, WASM_IMM_MEMORY_COPY, "iii:"),
+        wasm_op("memory.fill", 0xfc0b, WASM_IMM_MEMORY, "iii:"),
+        wasm_op("table.init", 0xfc0c, WASM_IMM_TABLE_INIT, "iii:"),
+        wasm_op("elem.drop", 0xfc0d, WASM_IMM_ELEM, ":"),
+        wasm_op("table.copy", 0xfc0e, WASM_IMM_TABLE_COPY, "iii:"),
+        wasm_op("table.grow", 0xfc0f, WASM_IMM_TABLE, ""),
+        wasm_op("table.size", 0xfc10, WASM_IMM_TABLE, ":i"),
+        wasm_op("table.fill", 0xfc11, WASM_IMM_TABLE, ""),
+    }
+}
+
+// The instruction table indexed both ways: by opcode and by text name. The
+// untyped `select` (0x1b) owns the name; the typed form is chosen by the text
+// reader when a result type follows.
+struct WasmOpTable {
+    rows: [WasmOpInfo]
+    by_op: [Int:Int]
+    by_name: [String:Int]
+
+    fn new() -> WasmOpTable Never! {
+        rows :: wasm_op_rows()
+        by_op := [Int:Int]{}
+        by_name := [String:Int]{}
+        loop index in 0..<rows.len() {
+            row :: rows[index]
+            by_op[row.op] = index
+            if by_name.get(row.name) == None -> by_name[row.name] = index
+        }
+        WasmOpTable{rows: rows, by_op: by_op, by_name: by_name}
+    }
+
+    fn info(self, op: Int) -> WasmOpInfo? {
+        index :: self.by_op.get(op) ?? return None
+        Val(self.rows[index])
+    }
+
+    fn named(self, name: String) -> WasmOpInfo? {
+        index :: self.by_name.get(name) ?? return None
+        Val(self.rows[index])
+    }
+}
+
+// A signature letter's value type.
+fn wasm_sig_type(letter: Int) -> Int Never! {
+    if letter == {
+        0x69 -> WASM_I32
+        0x6c -> WASM_I64
+        0x66 -> WASM_F32
+        else -> WASM_F64
+    }
+}
+
+// The params (before ':') or results (after it) of a fixed signature.
+fn wasm_sig_side(sig: String, results: Bool) -> [Int] Never! {
+    out := [Int]{}
+    after := false
+    loop byte in sig.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 0x3a {
+            after = true
+            next
+        }
+        if after == results -> &out.push(wasm_sig_type(code))
+    }
+    out
+}

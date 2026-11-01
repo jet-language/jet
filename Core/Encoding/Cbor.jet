@@ -94,7 +94,15 @@ fn unsupported(path: String, reason: String) -> CBORError Never! {
 fn validate(value: Dyn, path: String) CBORError! {
     #Unsafe("inspect private typed carriers without changing public Dyn variants") {
         if value == {
-            .Number(text) -> return Err(unsupported(path, "JSON number carrier {text:Debug} is not a CBOR value"))
+            .Number(_) -> {
+                if value.decode<Int>() == {
+                    .Ok(_) -> {}
+                    .Err(_) -> {
+                        number :: value.decode<Float>() ?? return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
+                        if !math.is_finite(number) -> return Err(unsupported(path, "number {value} is outside the CBOR Int and float64 range"))
+                    }
+                }
+            }
             .Array(items) -> {
                 loop i in 0..<items.len() -> validate(items[i], "{path}[{i}]") ?? return Err(err)
             }
@@ -162,6 +170,13 @@ fn encode_value(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
                 else -> append_length(&out, 1, -(n + 1))
             }
             .Float(n) -> append_float(&out, n)
+            // A validated Number lexeme is its exact Int when integral, else its float64.
+            .Number(_) -> {
+                if value.decode<Int>() == {
+                    .Ok(n) -> encode_value(Dyn.Int(n), &out, canonical) ?? return Err(err)
+                    .Err(_) -> append_float(&out, value.decode<Float>() ?? return Err(unsupported("$", "number {value} is outside the CBOR Int and float64 range")))
+                }
+            }
             .Text(text) -> {
                 bytes :: text.bytes()
                 append_length(&out, 3, bytes.len())
@@ -170,6 +185,11 @@ fn encode_value(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
             .Bytes(bytes) -> {
                 append_length(&out, 2, bytes.len())
                 loop byte in bytes -> &out.push(byte)
+            }
+            // DateTime is tag 0 over its RFC 3339 text.
+            .DateTime(_) -> {
+                &out.push(U8{192})
+                encode_value(Dyn.Text(value.to_text() ?? ""), &out, canonical) ?? return Err(err)
             }
             .Array(items) -> {
                 append_length(&out, 4, items.len())

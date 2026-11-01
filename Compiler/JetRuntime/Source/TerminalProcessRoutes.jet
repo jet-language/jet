@@ -41,8 +41,8 @@ fn terminal_process_invalid_size(cols: I64, rows: I64) -> I64 {
 #Export(c) fn jet_terminal_session_resize(session: I64, size: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{0})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    cols :: ui_carrier_word(size + UI_CARRIER_TERMINAL_SIZE_COLS)
-    rows :: ui_carrier_word(size + UI_CARRIER_TERMINAL_SIZE_ROWS)
+    cols :: ui_carrier_word(wrapping(size + UI_CARRIER_TERMINAL_SIZE_COLS))
+    rows :: ui_carrier_word(wrapping(size + UI_CARRIER_TERMINAL_SIZE_ROWS))
     // Validate the raw i64 record before borrowing the descriptor. These are
     // not tagged exact Int words, and invalid dimensions outrank EBADF.
     if (cols < I64{1} || cols > I64{65535} || rows < I64{1} || rows > I64{65535}) {

@@ -32,10 +32,6 @@ const MODULE_EXPORTS = join(ROOT, "Compiler/JetFoundation/Source/Registry/CoreCa
 const CORPUS = join(ROOT, "tests/conformance/corpus");
 const EXCLUSIONS = join(ROOT, "tests/conformance/exclusions.tsv");
 
-// The Core registry also publishes these math fields. `zero` is deliberately
-// absent: sema treats `core.math.zero()` as a callable operation.
-const VALUE_NAMES = new Set(["pi", "e", "tau", "infinity", "nan"]);
-
 // Seed only witnesses whose call shape is known. The denominator check, not
 // this map, decides whether the rest of Core is covered.
 const RECIPES = new Map([
@@ -52,14 +48,6 @@ use core.math as math
 
 fn run() {
     result :: math.round(2.5)
-    print(result)
-}
-`],
-  ["core.math.zero", `// core-conformance: core.math.zero
-use core.math as math
-
-fn run() {
-    result :: math.zero()
     print(result)
 }
 `],
@@ -356,6 +344,7 @@ const UNIT_RESULT_KEYS = new Set([
   "core.files.hard_link",
   "core.files.write_bytes",
   "core.mem.volatile_write",
+  "core.crypto.wipe",
   "core.log.fatal",
   "core.http.server.static_files",
   "core.http.server.cors",
@@ -372,6 +361,10 @@ const UNIT_RESULT_KEYS = new Set([
   "core.sys.set",
   "core.sys.stop",
   "core.tasks.yield_now",
+  "app.invalidate",
+  "app.push",
+  "core.web.invalidate",
+  "core.web.push",
 ]);
 // Never-returning Core effects terminate the witness instead of yielding a
 // value. Their standalone call is the observable contract.
@@ -651,7 +644,7 @@ function inventory() {
   for (const [module, names] of modules) {
     for (const name of names) {
       if (/^[A-Z]/.test(name) || isReservedSeam(name)) continue;
-      if (VALUE_NAMES.has(name) || moduleNames.has(`${module}.${name}`)) continue;
+      if (moduleNames.has(`${module}.${name}`)) continue;
       rows.push(`${module}.${name}`);
     }
   }

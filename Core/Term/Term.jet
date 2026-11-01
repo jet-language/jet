@@ -29,13 +29,10 @@ struct StdinHandle {
 
     // The declaration's fd is informational; every token reads shared stdin.
     // StdinReader.rs:9-43 owns no independent unread buffer or close operation.
+    // The raw leaf already drops the line's trailing LF and CR bytes.
     fn read_line(&self) -[IO, Time.Wait]> String? IOError! {
         stdio_checkpoint(.Read, "stdin", "IO.Read")
-        line :: core.term.__stdin_line()
-        if line == {
-            .None -> None
-            .Val(text) -> Val(stdin_chomp(text))
-        }
+        core.term.__stdin_line()
     }
     // Whether standard input is a terminal, mirroring
     // Stdout.is_tty and Stderr.is_tty. It reads no input and never fails; the read
@@ -112,8 +109,11 @@ fn eprint(text: String) Never! -[IO, Time.Wait]> {
     &out.write("{text}\n").drop("stderr write")
 }
 
+// IoLineStream.rs jet_std_io_input: the prompt is written and flushed, then
+// one line is read without its line ending; a closed stream reads as "".
 fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
-    core.term.input(prompt)
+    terminal_prompt(prompt, false)
+    readline()
 }
 
 fn input_secret(prompt: String) -[IO, Time.Wait]> String IOError! {
@@ -240,7 +240,15 @@ struct WinSize {
     h: Int
 }
 fn progress(label: String) IOError! -[IO, Time.Wait]> {
-    if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok()
+    if core.term.__terminal8_machine_output() -> return Ok()
+    // Without a terminal on stderr the label is a plain stdout line, so a
+    // piped run still records its progress.
+    if !core.term.__terminal8_stderr_tty() {
+        terminal_write_preflight("stdout")
+        line_cause :: core.term.__terminal8_write_stdout("{label}\n", true)
+        if line_cause != None -> return Err(terminal_other(.Flush, Val("stdout"), line_cause))
+        return Ok()
+    }
     terminal_write_preflight("stderr")
     carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     cause :: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)
@@ -549,28 +557,10 @@ fn parse_int(text: String) -> Int? {
     Val(n)
 }
 
-
-fn stdin_chomp(text: String) -> String Never! {
-    raw := text.bytes()
-    original_len :: raw.len()
-    loop raw.len() > 0 {
-        last :: raw[raw.len() - 1]
-        if last != (U8{10}) && last != (U8{13}) -> break
-        &raw.pop().drop("discard a trailing line ending")
-    }
-    if raw.len() == original_len -> return text.copy()
-    String.from_bytes(raw) ?? panic("ASCII line endings preserve UTF-8")
-}
-
-#Test("stdin source token and trimming preserve declaration and EOF distinction") {
+#Test("stdin source token preserves its declaration") {
     assert(stdin().fd == 0 && buffered().fd == 0)
     assert(stdin() == StdinHandle{fd: 0})
     assert(stdin() != StdinHandle{fd: 9})
-    endings :: String.from_bytes([U8]{13, 10, 13, 13, 10}) ?? panic("line ending fixture UTF-8")
-    unicode :: String.from_bytes([U8]{104, 195, 169, 108, 108, 111, 13, 10, 13}) ?? panic("line ending fixture UTF-8")
-    assert(stdin_chomp(endings) == "")
-    assert(stdin_chomp(unicode) == "héllo")
-    assert(stdin_chomp("no ending") == "no ending")
 }
 
 fn stdio_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {

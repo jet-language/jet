@@ -26,6 +26,7 @@ use jet_driver.[
 use jet_foundation.[
     JET_CLI_COMMANDS,
     JET_CLI_HANDLERS,
+    BuildOptions,
     Diagnostic,
     DiagnosticRegistryStatus,
     Func,
@@ -41,6 +42,7 @@ use jet_foundation.[
     type_name,
     DIAGNOSTIC_ERROR,
 ]
+use jet_eval.[jet_eval_compiler_services_source_map]
 use jet_lexer.[
     lex,
 ]
@@ -237,7 +239,8 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
 
 // `jet inspect decisions` up to the projection: the profile name (`--release`
 // wins over `--profile`, default `debug`), which selects the optimization
-// level, the scope name, and the resolved entry.
+// level, the build option flags over it (`--inline=off`), the scope name,
+// and the resolved entry.
 fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     plane :: request.plane
     profile := "debug"
@@ -259,6 +262,11 @@ fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: B
         "release" | "hardened" -> release_build = true
         "debug" | "ci" -> {}
         else -> return jet_cli_not_ported("inspect {plane} --profile {profile}", color)
+    }
+    build := BuildOptions?{None}
+    if jet_cli_decisions_options(request.options, release_build) == {
+        .Refused(code, what, fix) -> return jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)
+        .Resolved(options, _) -> build = Val(options)
     }
     scope := "package"
     target := String?{None}
@@ -282,7 +290,7 @@ fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: B
     }
     project := true
     if request.scope == .Target(named) -> project = cli_files.is_dir(named)
-    JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, release_build: release_build, scope: scope}}
+    JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, build: build, scope: scope}}
 }
 
 // CmdInspect.rs run_inspect_live: one securely retained, validated snapshot
@@ -370,10 +378,11 @@ struct JetCLIInspectJob {
     depth: Int{3}
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
     root: String{""}
-    // `decisions`: the profile name, whether it optimizes at the release
-    // level, and the scope name (`subject` is the named target).
+    // `decisions`: the profile name, the build options it optimizes under
+    // (the profile's, with the build option flags over them), and the scope
+    // name (`subject` is the named target).
     profile: String{"debug"}
-    release_build: Bool{false}
+    build: BuildOptions?{None}
     scope: String{""}
 }
 
@@ -757,53 +766,22 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FF
     jet_cli_done("{jet_cli_status_render("inspect.compiler.{name}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
-// Rust `str::trim_start` over ASCII whitespace.
-fn jet_cli_compiler_trim_start(line: String) -> String Never! {
-    bytes :: line.bytes()
-    start := 0
-    loop start < bytes.len() {
-        code :: Int.from_u8(bytes[start])
-        if code != 32 && code != 9 && code != 10 && code != 11 && code != 12 && code != 13 -> break
-        start += 1
-    }
-    line.slice(start..<line.len())
-}
-
-// Compiler.rs `source_map_from_generated_rust` + `status_source_map`: each
-// `// jet:source-map source=<path>` line opens a source (listed once), and
-// each `// jet:line <n>` line maps its generated line to the open source.
+// Compiler.rs `status_source_map` over the shared marker reader
+// (jet_eval_compiler_services_source_map).
 fn jet_cli_compiler_source_map(rust_source: String) -> JetCLIStatusValue Never! {
-    sources := [String]{}
-    current := String?{None}
+    map :: jet_eval_compiler_services_source_map(rust_source)
     lines := [JetCLIStatusValue]{}
-    raw_lines := rust_source.split("\n").to_list()
-    if rust_source.ends_with("\n") -> _ := &raw_lines.pop()
-    loop (index, raw) in raw_lines {
-        raw_bytes :: raw.bytes()
-        carriage :: raw_bytes.len() > 0 && Int.from_u8(raw_bytes[raw_bytes.len() - 1]) == 13
-        line :: if carriage -> raw.slice(0..<(raw.len() - 1)) else -> raw
-        trimmed :: jet_cli_compiler_trim_start(line)
-        source_marker :: "// jet:source-map source="
-        if trimmed.starts_with(source_marker) {
-            source :: trimmed.slice(source_marker.len()..<trimmed.len())
-            current = Val(source)
-            if !sources.contains(source) -> &sources.push(source)
-            next
-        }
-        line_marker :: "// jet:line "
-        if trimmed.starts_with(line_marker) {
-            number :: jet_cli_inspect_count(trimmed.slice(line_marker.len()..<trimmed.len()).trim()) ?? next
-            &lines.push(jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("generated_line", jet_cli_status_int(index + 1)),
-                jet_cli_status_field("source", jet_cli_status_optional_text(current)),
-                jet_cli_status_field("source_line", jet_cli_status_int(number)),
-            }))
-        }
+    loop line in map.generated_lines {
+        &lines.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("generated_line", jet_cli_status_int(line.generated_line)),
+            jet_cli_status_field("source", jet_cli_status_optional_text(line.source)),
+            jet_cli_status_field("source_line", jet_cli_status_int(line.source_line)),
+        }))
     }
     jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
         jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("sources", jet_cli_status_texts(sources)),
+        jet_cli_status_field("sources", jet_cli_status_texts(map.sources)),
         jet_cli_status_field("generated_lines", jet_cli_status_array(lines)),
     })
 }
@@ -1688,6 +1666,12 @@ fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompile
 // CmdInspect.rs `check_result_value` for a passed explicit-file check: the
 // `jet.check/v1` record impact and expand carry.
 fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(jet_cli_check_result_fields(source, elapsed_ms, diagnostics))
+}
+
+// The `jet.check/v1` fields of a passed explicit-file check: the record impact
+// and expand nest, and the fields a clean `jet check --json <file>` status carries.
+fn jet_cli_check_result_fields(source: String, elapsed_ms: Int, diagnostics: Int) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
         &rows.push(jet_cli_status_object([JetCLIStatusField]{
@@ -1705,7 +1689,7 @@ fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int
         jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
         jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
     })
-    jet_cli_status_object([JetCLIStatusField]{
+    [JetCLIStatusField]{
         jet_cli_status_field("status", jet_cli_status_text("passed")),
         jet_cli_status_field("contract", jet_cli_status_text("jet.check/v1")),
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
@@ -1713,7 +1697,7 @@ fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int
         jet_cli_status_field("elapsed_ms", jet_cli_status_int(elapsed_ms)),
         jet_cli_status_field("provenance", provenance),
         jet_cli_status_field("rows", jet_cli_status_array(rows)),
-    })
+    }
 }
 
 // CmdInspect.rs `check_result_text` for a passed explicit-file check.

@@ -1,0 +1,29 @@
+// Ports of the C link-input tests from the deleted tests/cffi.rs
+// (#6096 cffi-pkg-config): pkg-config output parsing and `c@` refs in the
+// `deps:` block, both read by the one Jet parser for each input.
+use jetpack_integrations.[pkg_cffi_parse_pkg_config]
+use jet_pkg_model.[DepSource, PackageFacts]
+
+// tests/cffi.rs:2922
+#Test("parse_pkg_config_extracts_flags") {
+    flags :: pkg_cffi_parse_pkg_config("-I/usr/include/foo -L/usr/lib -lfoo -lbar", "foo")
+    assert_eq(flags.include_dirs, [String]{"/usr/include/foo"})
+    assert_eq(flags.lib_dirs, [String]{"/usr/lib"})
+    assert_eq(flags.link_names, [String]{"foo", "bar"})
+}
+
+// tests/cffi.rs:2930
+#Test("parse_pkg_config_defaults_link_name") {
+    flags :: pkg_cffi_parse_pkg_config("-I/usr/include/foo", "foo")
+    assert_eq(flags.link_names, [String]{"foo"})
+}
+
+// tests/cffi.rs:2936: native C deps live in the `deps:` block as `c@<target>`
+// refs, parsed by the package parser.
+#Test("deps_block_parses_c_lib_refs") {
+    manifest :: "\nname: \"p\"\nversion: \"0.1.0\"\ndeps: {{\n    raylib: c@system,\n    foo:    c@\"/opt/foo\",\n}}\n"
+    facts :: PackageFacts.parse(manifest, "test") ?? panic("manifest parses: {err}")
+    assert(facts.deps.get("raylib") == Val(DepSource.CLib{target: "system"}), "raylib is a c@system ref")
+    assert(facts.deps.get("foo") == Val(DepSource.CLib{target: "/opt/foo"}), "foo is a c@ path ref")
+    assert(facts.deps.get("sqlite3") == None, "an undeclared name is not a dependency")
+}

@@ -5,8 +5,7 @@
 use core.web.browser as browser
 
 fn report_surface() {
-    config_result :: browser.config()
-    if config_result == {
+    if browser.config() == {
         .Ok(config) -> {
             _config_from_env :: browser.config_from_env()
             _engines :: config.engines()
@@ -37,8 +36,7 @@ fn report_surface() {
 fn add_case(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport { browser.report_add_case(report, case) }
 
 fn report_external(config: BrowserTestConfig, case: BrowserTestCase, server: BrowserTestServer) {
-    started :: browser.server_start(config)
-    if started == {
+    if browser.server_start(config) == {
         .Ok(started_server) -> browser.server_stop(started_server)
         .Err(_) -> {}
     }
@@ -60,8 +58,7 @@ fn browser_session(endpoint: String, page_url: String) {
     timeout :: browser.timeout(5000) ?? return
     _locked :: browser.locked("chromium")
 
-    connected :: browser.connect(endpoint)
-    if connected == {
+    if browser.connect(endpoint) == {
         .Ok(other) -> {
             _other_abilities :: other.abilities()
             _other_closed :: other.close()
@@ -100,8 +97,7 @@ fn browser_session(endpoint: String, page_url: String) {
     _receipt_isolated :: receipt.isolated()
     _receipt_cleaned :: receipt.cleaned()
 
-    event :: &b.next_event(timeout)
-    if event == {
+    if &b.next_event(timeout) == {
         .Ok(value) -> {
             _kind :: value.kind()
             _request_id :: value.request_id()
@@ -128,7 +124,7 @@ fn browser_session(endpoint: String, page_url: String) {
     labeled_input :: page.get_by_label("Name")
     placeholder_input :: page.get_by_placeholder("Type a name")
     test_id :: page.get_by_test_id("surface-status")
-    css_status :: page.get_by_css("#surface-status")
+    _css_status :: page.get_by_css("#surface-status")
     _role_wait :: role_button.wait(timeout)
     _text_wait_gone :: text_status.wait_gone(timeout)
     _click :: role_button.click()

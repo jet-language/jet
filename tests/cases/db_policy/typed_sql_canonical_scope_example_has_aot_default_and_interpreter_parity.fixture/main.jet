@@ -38,6 +38,11 @@ fn run() {
     _tx :: db.transaction(scoped, "policy-tx", [SQL{"UPDATE tasks SET title = 'one'"}]) ?? panic("transaction")
     print("transaction:ok")
     scoped.query(SQL{"SELECT title FROM other"}) ? _rows -> {
+        print("other-table:accepted")
+    } ! _error -> {
+        print("other-table:rejected")
+    }
+    scoped.query(SQL{"SELECT title FROM other JOIN tasks"}) ? _rows -> {
         print("bypass:accepted")
     } ! _error -> {
         print("bypass:rejected")

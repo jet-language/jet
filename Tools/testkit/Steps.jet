@@ -143,7 +143,9 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         modifier :: kit_expect_named(["env", "unset", "env-clear", "isolate", "pty", "pty-send", "pty-resize", "pty-close", "stderr-to-stdout", "timeout", "cwd", "limit", "stdin"], key) || (key == "normalize" && (value.starts_with("json ") || value.starts_with("replace "))) || (kit_expect_named(["stdout", "stderr"], key) && (value == "null" || value.starts_with("file ")))
         process_line :: key == "step" || key.starts_with("step ") || key.starts_with("spawn ") || key.starts_with("session ") || key.starts_with("poll ")
-        if modifier && !modifier_adjacent && !((key == "env" || key == "normalize") && !process_seen) {
+        // A terminal session's input may follow its recv and send steps.
+        session_input :: (key == "pty-send" || key == "pty-close") && plan.steps.len() > 0 && kit_steps_terminal_session(plan.steps, plan.steps[plan.steps.len() - 1].label, joined)
+        if modifier && !modifier_adjacent && !session_input && !((key == "env" || key == "normalize") && !process_seen) {
             plan.error = "line {line_number}: modifier not adjacent to its step"
             return plan
         }
@@ -157,7 +159,9 @@ fn kit_steps_parse(source: String) -> KitPlan {
             modifier_adjacent = true
             process_seen = true
         } else if !modifier -> modifier_adjacent = false
-        if !(key == "normalize" && value.starts_with("replace ")) && !kit_steps_capture_tokens(value, captures) {
+        // A guarded line resolves its capture tokens only when selected.
+        guarded :: conditions.len() > 0 || kit_expect_named(blocks, "when")
+        if !guarded && !(key == "normalize" && value.starts_with("replace ")) && !kit_steps_capture_tokens(value, captures) {
             plan.error = "line {line_number}: undefined capture token"
             return plan
         }
@@ -186,6 +190,15 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 return plan
             }
             plan.opt_in = value
+            next
+        }
+        if key == "host-port" {
+            port :: Int.parse(value.copy()) ?? 0
+            if port < 1 || port > 65535 || plan.host_port != 0 || plan.steps.len() != 0 {
+                plan.error = "line {line_number}: host-port needs one header port in 1..65535"
+                return plan
+            }
+            plan.host_port = port
             next
         }
         if key == "tools-any" || key == "probes-any" {
@@ -542,7 +555,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         independent :: kit_steps_independent_assertion(key, original)
-        if !process_seen && (key == "exit" || key == "elapsed" || ((key == "json" || kit_steps_subject_valid(key)) && !independent)) {
+        if !process_seen && (key == "exit" || key == "elapsed" || ((key == "json" || kit_steps_assertion_subject_valid(key)) && !independent)) {
             plan.error = "line {line_number}: assertion without process step"
             return plan
         }
@@ -551,7 +564,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             } else {
                 owner :: plan.steps[plan.steps.len() - 1]
-                if kit_expect_named(["when", "end when", "for", "repeat", "end for", "end repeat", "parallel", "end parallel"], owner.action) || (owner.action != "" && owner.conditions.len() > 0) {
+                if kit_expect_named(["when", "end when", "for", "repeat", "end for", "end repeat", "parallel", "end parallel"], owner.action) || owner.conditions.len() > 0 {
                     &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
                 }
             }
@@ -567,7 +580,14 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid process wiring"
                 return plan
             }
-            plan.steps[i].refused_capability = if key == "stderr-to-stdout" -> "process-merge-stderr" else -> "pty"
+            if key == "stderr-to-stdout" {
+                plan.steps[i].refused_capability = "process-merge-stderr"
+                next
+            }
+            plan = kit_steps_terminal_line(plan, key, original, joined) ?? {
+                plan.error = "line {line_number}: {err}"
+                return plan
+            }
             next
         }
         if modifier && kit_expect_named(["stdout", "stderr"], key) {
@@ -636,7 +656,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         if key == "limit" {
             bounds :: kit_steps_words(value) ?? []
             if bounds.len() == 0 {
-                plan.error = "line {line_number}: limit needs time or memory"
+                plan.error = "line {line_number}: limit needs time, memory or resident"
                 return plan
             }
             loop bound in bounds {
@@ -647,8 +667,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 }
                 name :: kit_steps_byte_slice(bound, 0, equals)
                 amount :: Int.parse(kit_steps_byte_slice(bound, equals + 1, bound.count_bytes())) ?? 0
-                if amount <= 0 || (name != "time" && name != "memory") {
-                    plan.error = "line {line_number}: invalid positive time/memory limit"
+                if amount <= 0 || (name != "time" && name != "memory" && name != "resident") {
+                    plan.error = "line {line_number}: invalid positive time/memory/resident limit"
                     return plan
                 }
                 if name == "time" {
@@ -657,12 +677,23 @@ fn kit_steps_parse(source: String) -> KitPlan {
                         return plan
                     }
                     plan.steps[i].limit_time = amount
-                } else {
+                } else if name == "memory" {
                     if plan.steps[i].limit_memory != 0 {
                         plan.error = "line {line_number}: duplicate memory limit"
                         return plan
                     }
                     plan.steps[i].limit_memory = amount
+                } else {
+                    // Only a foreground step runs under the resident watcher.
+                    if plan.steps[i].action == "spawn" || plan.steps[i].action == "session" {
+                        plan.error = "line {line_number}: a resident limit needs a foreground step"
+                        return plan
+                    }
+                    if plan.steps[i].limit_resident != 0 {
+                        plan.error = "line {line_number}: duplicate resident limit"
+                        return plan
+                    }
+                    plan.steps[i].limit_resident = amount
                 }
             }
             next
@@ -781,7 +812,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.steps[i].exit_explicit = true
             next
         }
-        if !kit_steps_subject_valid(key) {
+        if !kit_steps_assertion_subject_valid(key) {
             plan.error = "line {line_number}: unknown key {key}"
             return plan
         }
@@ -911,13 +942,16 @@ fn kit_steps_step_environment(step: KitStep, env: KitEnv, work: String, scratch:
     result
 }
 
-fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitRun {
+fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, fixture: String, built: String, overlay: [KitEnvVar]) -> KitRun {
     if step.action == "copy" || step.action == "remove" || step.action == "concat" || step.action == "write" -> return kit_steps_file_action(step, env, work, scratch, built, snapshots)
-    prepared :: kit_steps_prepare(step, env, work, scratch, snapshots, built, overlay) ?? return kit_exec_failed("{err}")
-    kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
+    prepared :: kit_steps_prepare(step, env, work, scratch, snapshots, fixture, built, overlay) ?? return kit_exec_failed("{err}")
+    if step.terminal == {
+        .Val(terminal) -> kit_exec_invoke_terminal(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay, terminal)
+        .None -> kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
+    }
 }
 
-fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {
+fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, fixture: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {
     files.create_dir_all(files.join(scratch, "tmp")) ?? return Err("create child temp directory: {err}")
     policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
     environment :: kit_steps_step_environment(step, policy, work, scratch, built, overlay)
@@ -941,7 +975,7 @@ fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, 
         if built == "" -> return Err("built step has no artifact")
         argv[0] = built
     }
-    stdin :: if step.stdin == "" || step.stdin == "null" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return Err("stdin snapshot: {err}")
+    stdin :: if step.stdin == "" || step.stdin == "null" -> "" else -> files.read(kit_steps_snapshot_path(snapshots, fixture, step.stdin)) ?? return Err("stdin snapshot: {err}")
     cwd :: if step.cwd == "" -> work else -> kit_steps_work_path(step.cwd, env, work, scratch, built) ?? return Err("cwd escapes work directory")
     if step.isolate == "no-nix" {
         bootstrap :: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch
@@ -955,13 +989,22 @@ fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
     policy.env_clear = step.env_clear
     if step.duration > 0 -> policy.timeout = time.duration_ns(step.duration)
     if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time) ?? return None
-    if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory
+    // `limit: memory=` is KiB; Core's process memory limit is bytes.
+    if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory * 1024
+    // `limit: resident=` (KiB) bounds the step's whole process tree: the
+    // programs a `jet run`/`jet test` step builds run as its grandchildren.
+    if step.limit_resident > 0 {
+        bytes :: step.limit_resident * 1024
+        if policy.resident_limit == 0 || bytes < policy.resident_limit -> policy.resident_limit = bytes
+        policy.resident_tree = true
+    }
     Val(policy)
 }
 
 fn kit_steps_failure(step: KitStep, result: KitRun) -> KitVerdict? {
     if step.limit_time > 0 && (result.timed_out || result.limit_hit == "time") -> return Val(kit_expect_verdict("FAIL", "limit hit: time={step.limit_time}s"))
     if step.limit_memory > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: memory={step.limit_memory}KiB"))
+    if step.limit_resident > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: resident={step.limit_resident}KiB"))
     isolated :: kit_no_nix_failure(step, result)
     if isolated != None -> return isolated
     if result.code == 101 && (Int.parse(step.exit) ?? -1) == 101 && result.error == "" && !result.timed_out && result.signal == None -> return None
@@ -1004,22 +1047,52 @@ fn kit_steps_one_of(id: String, directory: String, snapshots: String, actual: St
 }
 
 
+// A failed step carries its command's streams as the row's diff, so a suite report shows why it failed.
+fn kit_steps_streams_verdict(verdict: ^KitVerdict, context: KitStepCtx, step: KitStep, result: KitRun) -> KitVerdict {
+    if (verdict.status != "FAIL" && verdict.status != "ERROR") || verdict.diff != "" || (result.stderr == "" && result.stdout == "") -> return verdict
+    out := "--- streams/{context.id}: `{step.argv.join(" ")}` exit {result.code}\n"
+    count := 0
+    loop line in result.stderr.split("\n") {
+        if count >= 24 -> break
+        if line != "" {
+            out = "{out}stderr| {line}\n"
+            count += 1
+        }
+    }
+    loop line in result.stdout.split("\n") {
+        if count >= 32 -> break
+        if line != "" {
+            out = "{out}stdout| {line}\n"
+            count += 1
+        }
+    }
+    KitVerdict{status: verdict.status, detail: verdict.detail, diff: out}
+}
+
 fn kit_steps_check(step: KitStep, context: KitStepCtx, state: KitStepState, source_name: String) -> KitVerdict {
     result :: state.last
-    failure :: kit_steps_failure(step, result)
-    if failure == {
-        .Val(value) -> return value
-        .None -> {}
+    // An assert or capture step runs no process: the process step before it
+    // already judged its own run, and before the first process there is none.
+    // Only an `exit:` written after it still judges that run's status.
+    process :: step.action != "assert" && step.action != "capture"
+    if process {
+        failure :: kit_steps_failure(step, result)
+        if failure == {
+            .Val(value) -> return kit_steps_streams_verdict(^value, context, step, result)
+            .None -> {}
+        }
     }
-    if step.exit == "nonzero" {
-        if result.code == 0 -> return kit_expect_verdict("FAIL", "exit 0; expected nonzero")
-    } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
-        forbidden :: Int.parse(kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim().copy()) ?? 0
-        if result.code == forbidden -> return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
-    } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}")
+    if process || step.exit_explicit {
+        if step.exit == "nonzero" {
+            if result.code == 0 -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit 0; expected nonzero"), context, step, result)
+        } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
+            forbidden :: Int.parse(kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim().copy()) ?? 0
+            if result.code == forbidden -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}"), context, step, result)
+        } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}"), context, step, result)
+    }
     loop assertion in step.assertions {
         verdict :: kit_steps_check_assertion(assertion, context, state, source_name, true)
-        if verdict.status != "PASS" -> return verdict
+        if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
     }
     kit_expect_verdict("PASS", "")
 }
@@ -1049,6 +1122,7 @@ fn kit_steps_context(plan: KitPlan, id: String, env: KitEnv, work: String, scrat
     KitStepCtx{plan: plan, id: id, env: env, work: work, scratch: scratch, snapshots: snapshots, bless: bless, golden: None}
 }
 
+// The entry file a `jet build` step names, or "" for a bare package build.
 fn kit_steps_build_entry(step: KitStep) -> String {
     i := 2
     loop i < step.argv.len() {
@@ -1057,7 +1131,146 @@ fn kit_steps_build_entry(step: KitStep) -> String {
         if kit_expect_named(["--profile", "--target", "--output", "--allow", "--deny", "--gate", "--set", "--threads", "--builder", "-p"], argument) -> i += 2
         else -> i += 1
     }
-    "run.jet"
+    ""
+}
+
+// The package manifest's words and its `{ } [ ] : , .` punctuation, in order;
+// a quoted string stays one word and a `//` comment is dropped.
+fn kit_steps_manifest_tokens(text: String) -> [String] {
+    bytes :: text.bytes()
+    tokens := [String]{}
+    i := 0
+    loop i < bytes.len() {
+        c :: Int.from_u8(bytes[i])
+        if c == 47 && i + 1 < bytes.len() && bytes[i + 1] == (U8{47}) {
+            loop i < bytes.len() && bytes[i] != (U8{10}) {
+                i += 1
+            }
+            next
+        }
+        if c == 123 || c == 125 || c == 91 || c == 93 || c == 58 || c == 44 || c == 46 {
+            &tokens.push(kit_steps_byte_slice(text, i, i + 1))
+            i += 1
+            next
+        }
+        start :: i
+        if c == 34 {
+            i += 1
+            loop i < bytes.len() && bytes[i] != (U8{34}) {
+                if bytes[i] == (U8{92}) -> i += 1
+                i += 1
+            }
+            i = if i < bytes.len() -> i + 1 else -> bytes.len()
+            &tokens.push(kit_steps_byte_slice(text, start, i))
+            next
+        }
+        loop i < bytes.len() && kit_steps_manifest_word_byte(Int.from_u8(bytes[i])) {
+            i += 1
+        }
+        if i == start {
+            i += 1
+            next
+        }
+        &tokens.push(kit_steps_byte_slice(text, start, i))
+    }
+    tokens
+}
+
+fn kit_steps_manifest_word_byte(c: Int) -> Bool {
+    (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 45
+}
+
+// The index of the `}` or `]` closing the bracket at `open`.
+fn kit_steps_manifest_close(tokens: [String], open: Int) -> Int {
+    depth := 0
+    i := open
+    loop i < tokens.len() {
+        if tokens[i] == "{{" || tokens[i] == "[" -> depth += 1
+        else if tokens[i] == "}}" || tokens[i] == "]" {
+            depth -= 1
+            if depth == 0 -> return i
+        }
+        i += 1
+    }
+    tokens.len()
+}
+
+// The `file` stem of the run output's `entry: file.callable` in the package
+// manifest at `root`: the output `defaults.run` names, else the one
+// Executable output. None for a package that declares no such output.
+fn kit_steps_manifest_entry_stem(root: String) -> String? {
+    text :: kit_exec_optional(files.join(root, "package.jet")) ?? return None
+    tokens :: kit_steps_manifest_tokens(text)
+    names := [String]{}
+    stems := [String]{}
+    selected := ""
+    i := 0
+    loop i < tokens.len() {
+        if tokens[i] == "{{" || tokens[i] == "[" {
+            i = kit_steps_manifest_close(tokens, i) + 1
+            next
+        }
+        if i + 2 >= tokens.len() || tokens[i + 1] != ":" || tokens[i + 2] != "{{" {
+            i += 1
+            next
+        }
+        close :: kit_steps_manifest_close(tokens, i + 2)
+        if tokens[i] == "defaults" {
+            loop j in (i + 3)..<close {
+                if tokens[j] == "run" && j + 2 < close && tokens[j + 1] == ":" -> selected = tokens[j + 2].copy()
+            }
+        } else if tokens[i] == "outputs" {
+            j := i + 3
+            loop j < close {
+                // `name: .Kind{ … }` or `name: Kind{ … }`.
+                kind_at :: if j + 2 < close && tokens[j + 2] == "." -> j + 3 else -> j + 2
+                if j + 1 >= close || tokens[j + 1] != ":" || kind_at + 1 >= close || tokens[kind_at + 1] != "{{" {
+                    j += 1
+                    next
+                }
+                record_close :: kit_steps_manifest_close(tokens, kind_at + 1)
+                if tokens[kind_at] == "Executable" {
+                    loop k in (kind_at + 2)..<record_close {
+                        if tokens[k] == "entry" && k + 3 < record_close && tokens[k + 1] == ":" && tokens[k + 3] == "." {
+                            &names.push(tokens[j].copy())
+                            &stems.push(tokens[k + 2].copy())
+                        }
+                    }
+                }
+                j = record_close + 1
+            }
+        }
+        i = close + 1
+    }
+    if selected != "" {
+        loop (index, name) in names {
+            if name == selected -> return Val(stems[index].copy())
+        }
+        return None
+    }
+    if stems.len() == 1 -> return Val(stems[0].copy())
+    None
+}
+
+// A `--target web` build writes `.jet/build/app.js` (beside app.wasm) for
+// any entry, not an executable named for it.
+fn kit_steps_web_build(step: KitStep) -> Bool {
+    loop i in 2..<step.argv.len() {
+        argument :: step.argv[i]
+        if argument == "--target=web" -> return true
+        if argument == "--target" && i + 1 < step.argv.len() && step.argv[i + 1] == "web" -> return true
+    }
+    false
+}
+
+// `jet build --help` / `-h` prints the command help and builds nothing.
+fn kit_steps_help_request(step: KitStep) -> Bool {
+    loop i in 2..<step.argv.len() {
+        argument :: step.argv[i]
+        if argument == "--" -> return false
+        if argument == "--help" || argument == "-h" -> return true
+    }
+    false
 }
 
 fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
@@ -1066,12 +1279,20 @@ fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: Ki
     if step.argv[0] == "built" && !state.built_once -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "built step has no preceding successful build")}
     policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid process policy")
     overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
-    state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay)
-    if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
+    state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay)
+    if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && !kit_steps_help_request(step) && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
         cwd :: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
         entry := kit_steps_build_entry(step)
+        if entry == "" {
+            // A bare `jet build` names its artifact for the package's run
+            // output entry file (Docs/spec/reference/cli.md:581,
+            // Docs/spec/contributing/examples.md:84); a package without one
+            // builds `run.jet`.
+            root :: files.dirname(files.dirname(files.dirname(kit_steps_artifact("run.jet", cwd, ""))))
+            entry = "{kit_steps_manifest_entry_stem(root) ?? "run"}.jet"
+        }
         if files.exists(files.join(files.join(cwd, entry), "run.jet")) -> entry = files.join(entry, "run.jet")
-        state.built = kit_steps_artifact(entry, cwd, context.plan.artifact)
+        state.built = kit_steps_artifact(entry, cwd, if kit_steps_web_build(step) -> "app.js" else -> context.plan.artifact)
         state.built_once = true
         if !files.exists(state.built) -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
     }

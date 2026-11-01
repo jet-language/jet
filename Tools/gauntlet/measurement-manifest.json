@@ -7,9 +7,9 @@
     "eligible_pair": "jet_and_python_sources"
   },
   "corpus": {
-    "entry_count": 24,
-    "python_pair_count": 22,
-    "matrix_cell_count": 27,
+    "entry_count": 25,
+    "python_pair_count": 23,
+    "matrix_cell_count": 28,
     "allowed_uncovered_cells": [],
     "entry_names": [
       "binparse",
@@ -20,6 +20,7 @@
       "embedded-data",
       "embedded-sensor-ring",
       "fft-4096",
+      "game-frame",
       "http-client",
       "http-service",
       "logreport",
@@ -57,17 +58,15 @@
       "web": "runtime_first_stdout_seconds",
       "web-app": "runtime_first_stdout_seconds"
     },
-    "ratio_verdicts": {
-      "rust": {"win": "<1", "parity": "<=1.05", "loss": ">1.05"},
-      "non_rust": {"win": "<1", "parity": null, "loss": ">=1"}
-    },
+    "ratio_verdicts": {"win": "<1", "loss": ">=1"},
     "missing_metric_verdict": "unmeasured",
     "output_verification": "byte_exact_utf8_or_declared_probe_sequence",
     "loss_owner_required_for": "any_comparable_metric_loss",
     "axis_schemas": {
       "live_reload": "gauntlet-axis-live-reload-v1",
       "memory_safety_fuzz": "gauntlet-axis-memory-safety-fuzz-v1",
-      "compile_throughput": "gauntlet-axis-compile-throughput-v1"
+      "compile_throughput": "gauntlet-axis-compile-throughput-v1",
+      "build_system": "gauntlet-axis-build-system-v1"
     },
     "axis_publication": "required_axes_complete_and_unblocked",
     "metric_applicability": {
@@ -497,6 +496,75 @@
           "loss_owner": 4551
         }
       ]
+    },
+    "build_system": {
+      "status": "required",
+      "schema": "gauntlet-axis-build-system-v1",
+      "basis": "Owner direction 2026-10-28: Jet's build and package system must be lightning fast and substantially faster than Nix, as well as more powerful and easier to use, audit and reason about. Nix is a required peer.",
+      "metric": "wall_ns",
+      "harness": "Tools/gauntlet/harness/build-system.mjs",
+      "project": {
+        "generator": "node Tools/gauntlet/axes/build-system/generate.mjs {dir}",
+        "shape": "the mid-size build-time program (Tools/perf/build-time/midsize.mjs, 90 units) in 9 unit files plus the entry; Jet: a package whose @build.jet `fn build` registers one executable; Nix: a flake whose stdenv.mkDerivation runs make over the same program in C (gcc -O1, parallel), nixpkgs pinned to the repository's flake.lock",
+        "expected_output_file": "Tools/perf/build-time/midsize.out",
+        "edit_files": {"jet": "jet/units_4.jet", "nix": "nix/src/units_4.c"}
+      },
+      "peers": [
+        {"id": "jet", "required": true, "builds": "jet build in the package root; JET_CACHE_DIR under the work dir"},
+        {"id": "nix", "required": true, "builds": "the system daemon store with substitution off for local cells; a private local store and a file:// binary cache for cold_cache"}
+      ],
+      "cells": [
+        {
+          "id": "eval",
+          "meaning": "evaluate the build configuration without building",
+          "prepare": "nothing; the previous round left the project built",
+          "jet": ["{jet}", "check", "@build.jet"],
+          "nix": ["nix", "eval", "--raw", "{flake}.drvPath"],
+          "target": {"ratio_max": 0.25}
+        },
+        {
+          "id": "noop",
+          "meaning": "rebuild with nothing changed",
+          "prepare": "nothing; the previous build is current",
+          "jet": ["{jet}", "build"],
+          "nix": ["nix", "build", "--no-link", "--print-out-paths", "--option", "substitute", "false", "{flake}"],
+          "target": {"ratio_max": 0.25}
+        },
+        {
+          "id": "incremental",
+          "meaning": "rebuild after a one-file edit",
+          "prepare": "append one new unused function to the peer's edit file",
+          "jet": ["{jet}", "build"],
+          "nix": ["nix", "build", "--no-link", "--print-out-paths", "--option", "substitute", "false", "{flake}"],
+          "target": {"ratio_max": 0.25}
+        },
+        {
+          "id": "cold_cache",
+          "meaning": "build a checkout with no local build state while a populated cache or substituter holds the current build",
+          "prepare": "jet: remove the package's .jet directory and keep JET_CACHE_DIR; nix: copy the current output to the file:// cache and delete it from the private store",
+          "jet": ["{jet}", "build"],
+          "nix": ["nix", "build", "--store", "{nix_store}", "--no-link", "--print-out-paths", "--option", "substituters", "{nix_cache}", "--option", "require-sigs", "false", "{flake}"],
+          "target": {"ratio_lt": 1.0}
+        },
+        {
+          "id": "scratch",
+          "meaning": "hermetic from-scratch build of the project with its toolchain present",
+          "prepare": "jet: remove the package's .jet directory and empty JET_CACHE_DIR; nix: --rebuild runs the derivation again in its sandbox",
+          "jet": ["{jet}", "build"],
+          "nix": ["nix", "build", "--no-link", "--print-out-paths", "--rebuild", "--option", "substitute", "false", "{flake}"],
+          "target": {"ratio_lt": 1.0}
+        }
+      ],
+      "samples": 5,
+      "warmups": 1,
+      "fairness": [
+        "one program, byte-identical output, validated after every timed build",
+        "fresh process per sample; peers interleaved, order alternating per round",
+        "preparation is never timed",
+        "Nix keeps its evaluation cache and its own toolchain closure; Jet keeps its shipped runtime and Core",
+        "Nix local cells run without substituter queries, so unreachable caches cost Nix nothing"
+      ],
+      "comparator": "ratio = jet median / nix median; eval, noop and incremental need ratio <= 0.25, cold_cache and scratch need ratio < 1.00; a failed command, wrong output or missing sample fails closed"
     }
   },
   "loss_owners": {
@@ -514,6 +582,13 @@
     "embedded-data": {"source": 2265},
     "embedded-sensor-ring": {"source": 2265},
     "fft-4096": {"source": 2265},
+    "game-frame": {
+      "runtime": 5086,
+      "rss": 5086,
+      "build": 5086,
+      "binary": 5086,
+      "source": 2265
+    },
     "http-client": {"source": 2265},
     "http-service": {
       "runtime": 2255,
@@ -587,6 +662,7 @@
     { "name": "embedded-data", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "embedded-sensor-ring", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "fft-4096", "jet": "jet/run.jet", "python": "python/main.py" },
+    { "name": "game-frame", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "http-client", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "http-service", "jet": "jet/run.jet", "python": "python/main.py" },
     { "name": "logreport", "jet": "jet/run.jet", "python": "python/main.py" },

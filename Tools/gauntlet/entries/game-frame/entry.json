@@ -1,0 +1,48 @@
+{
+  "name": "game-frame",
+  "tier": "program",
+  "cells": ["games.frame"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "spec": {
+    "behavior": "Render 1200 frames of a 2D game scene on a 320x200 RGBA8 software canvas and print the frame, tile, sprite and glyph counts. Each frame clears to (16,20,32,255); draws the visible tiles of a scrolling 21x12 map of opaque 15x15 tiles; draws 48 moving 12x12 sprites at alpha 180; draws a 320x12 HUD bar at alpha 160; and draws two lines of 5x7 bitmap-font text, a white HUD line at scale 1 and a gold title at scale 2 and alpha 200.",
+    "canvas": "320x200 RGBA8, row-major, cleared by an opaque full-canvas replace each frame",
+    "tiles": "for ty in 0..12, tx in 0..21: p = ((tx + f / 16) * 7 + ty * 5) % 4; p == 0 is empty; else rect (tx * 16 - f % 16, ty * 16 + 8, 15, 15) in palette[p] = (52,101,164,255), (78,154,6,255), (196,160,0,255)",
+    "sprites": "for i in 0..48: rect ((i * 41 + f * (1 + i % 4)) % 344 - 12, (i * 29 + f * (1 + i % 3)) % 224 - 12, 12, 12) in ((i * 53) % 256, (i * 97) % 256, (i * 31 + f) % 256, 180)",
+    "text": "\"SCORE {(f * 7) % 100000} FRAME {f}\" at (4, 2) size 10 in white; \"JET RASTER\" at (196, 176) size 20 in (255,220,120,200). Scale is max((size + 5) / 10, 1), advance 6 * scale; each glyph column draws one rectangle per vertical run of set bits of the 95-glyph 5x7 font",
+    "blend": "every rectangle clips to the canvas; opaque colors copy; alpha 0 skips; otherwise every channel, alpha included, becomes (s * a + d * (255 - a) + 127) / 255",
+    "capture": "with JET_RAYLIB_CAPTURE set, every presented frame is written to that path as a P7 RGB_ALPHA PAM; all six rails produce the same final-frame bytes",
+    "args": [],
+    "fixtureGen": null,
+    "expected": "expected.out"
+  },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    }
+  },
+  "authoring": {
+    "jet": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Draws through the shipped core.game.raylib software rasterizer (window_open, begin_drawing, clear_background, draw_rectangle, draw_text, end_drawing); runs headless, no foreign code."},
+    "rust": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a Vec<u8> canvas with the same clip, blend, font and vertical glyph runs; capture via std::env::var_os."},
+    "python": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Pure Python over a bytearray canvas: opaque fills use slice assignment, translucent fills use per-(source, alpha) bytes.translate tables over strided channel slices. NumPy is not available in the host toolchain."},
+    "c": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The closest real peer, C raylib, renders through OpenGL and has no headless software path, so the matched peer is a hand-written C rasterizer with the same algorithm."},
+    "zig": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a static [256000]u8 canvas; capture via init.environ_map and std.Io.Dir.createFile."},
+    "node": {"author": "NativeRaylib-1", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."}
+  },
+  "rewrite_provenance": {
+    "worker": "NativeRaylib-1",
+    "variant": "jet",
+    "changed": "Added the games.frame cell: a 1200-frame 2D game scene on Jet's native software rasterizer, with five matched rails implementing the same rasterizer by hand.",
+    "matched": "All rails draw the same rectangles with the same clip and per-channel src-over blend, the same 5x7 font split into the same vertical runs, print the same counts, and write byte-identical PAM captures (final frame sha256 e4ad242c58b6d7781169311511ff37f6b0fd98d7c090a74bbc87b9185610e277).",
+    "expected_output_sha256": null,
+    "measurement": "node Tools/gauntlet/harness/run.mjs --entry game-frame --runs 5 (lane run, 2026-10-31): all six rails ok with byte-exact stdout; median runtime_wall_seconds jet 0.0386, rust 0.0443, c 0.0766, zig 0.0493, node 0.306, python 2.348"
+  }
+}

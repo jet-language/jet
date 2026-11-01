@@ -10,9 +10,9 @@ fn s6_head_crlf() -> String {
 }
 
 fn s6_head_exchange(addr: String, lines: [String]) -> String {
-    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream := net.tcp_connect(addr) ?? panic("connect")
     stream.write_all(lines.join(s6_head_crlf()).bytes()) ?? panic("request write")
-    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    net.tcp_shutdown(&stream, NetShutdown.Write) ?? panic("finish request")
     parts := [String]{}
     loop {
         part :: stream.read_text(8192) ?? panic("response read")

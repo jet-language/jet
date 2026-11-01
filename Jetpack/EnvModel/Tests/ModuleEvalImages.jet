@@ -38,7 +38,7 @@ use jetpack_foundation.[PACKAGE_FILE]
     assert_eq(plan.images.len(), 1)
     image :: plan.images[0]
     assert_eq(image.name, "server")
-    assert_eq(image.kind, ImageKind.Oci)
+    assert_eq(image.kind, ImageKind.OCI)
     assert_eq(image.from, "app")
     // Sorted + deduped, not source order.
     assert_eq(image.expose, [Int]{443, 8080})
@@ -60,7 +60,7 @@ use jetpack_foundation.[PACKAGE_FILE]
 #Test("oci kind is inferred when omitted") {
     dir :: envmodel_test_oci_base_dir("inferred-kind")
     plan :: envmodel_evaluate_env("module image.server {{ from: packages.app }}", dir) ?? panic("the image plans")
-    assert_eq(plan.images[0].kind, ImageKind.Oci)
+    assert_eq(plan.images[0].kind, ImageKind.OCI)
     files.remove_all(dir) ?? return
 }
 

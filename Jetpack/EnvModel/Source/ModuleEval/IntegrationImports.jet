@@ -69,7 +69,7 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
             integration.options["build_tools"] = "34.0.0"
             integration.options["ndk"] = "26.3"
             integration.options["license"] = "policy-required"
-            integration.packages = [String]{"android-tools@nixpkgs", "android-sdk@nixpkgs"}
+            integration.packages = [String]{"android-tools@jetpack", "android-sdk@jetpack"}
             &integration.tasks.push("android-sdk-check")
             &integration.providers.push("nixpkgs")
             &integration.host_checks.push("target:linux-or-android")
@@ -77,7 +77,7 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
         .Apple -> {
             integration.options["targets"] = "IOS"
             integration.options["license"] = "policy-required"
-            &integration.packages.push("apple-sdk@nixpkgs")
+            &integration.packages.push("apple-sdk@jetpack")
             &integration.tasks.push("apple-sdk-check")
             &integration.providers.push("nixpkgs")
             &integration.host_checks.push("target:darwin-or-macos")
@@ -101,7 +101,7 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
         }
         .Editor -> {
             integration.preset = "vscode"
-            &integration.packages.push("vscode@nixpkgs")
+            &integration.packages.push("vscode@jetpack")
             &integration.providers.push("nixpkgs")
         }
         .CloudCredentials -> {
@@ -131,6 +131,7 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
 }
 
 fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
+    if envmodel_record_literal(expr) == .Val(record) -> return Ok(envmodel_integration_arg_value(record, scope, globals))
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(base, member, _, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})

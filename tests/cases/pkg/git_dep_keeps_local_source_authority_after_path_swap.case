@@ -21,8 +21,8 @@ env: JET_TEST_GIT_SOURCE={work}/project/source.git
 env: JET_TEST_GIT_BACKUP={work}/project/source.original
 env: JET_TEST_GIT_OUTSIDE={work}/outside
 exit: 0
-file: project/.jet/build/deps/safe/package.jet ~ "name: \"safe\""
-file: project/.jet/build/deps/safe/package.jet !~ "name: \"evil\""
-file.filter(= "authority=fd"): project/git-authority.log nonempty
-file.filter(= "authority=path"): project/git-authority.log empty
+file: project/.jet/build/deps/safe/package.jet ~ "name: \"safe\"" # original contains predicate
+file: project/.jet/build/deps/safe/package.jet !~ "name: \"evil\"" # original negative contains predicate
+file.filter(= "authority=fd"): project/git-authority.log nonempty # original authority log predicate
+file.filter(= "authority=path"): project/git-authority.log empty # original authority log predicate
 # Typed dep_dirs.get("safe") assertion remains archived; CLI checks the actual installed dependency manifest.

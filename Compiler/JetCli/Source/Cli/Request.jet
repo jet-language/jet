@@ -46,6 +46,8 @@ use jet_driver.[
     jet_driver_shared_build_inputs,
     jet_driver_shared_build_http_inputs,
     jet_driver_core_text_file,
+    jet_driver_dependency_selector,
+    jet_driver_version_selector_matches,
     JetDriverScriptDependency,
 ]
 use jet_eval.[
@@ -56,8 +58,10 @@ use jet_eval.[
     jet_eval_native_session,
 ]
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
-use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
-use jet_pkg_model.[BuildStamp, DepSpec, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
+use jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
+use jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
+use jet_sema.[SemaOutputIntent]
+use jet_web.[web_runtime_partition]
 
 // The production CLI's compile, under the driver's all-phases collector when
 // JET_KEEP_GOING=1. A diagnostic trap is a failed compile, never an artifact.
@@ -122,8 +126,9 @@ fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
 
 // Packaging uses the ordinary hosted source loader: the checked
 // NativeLibrary program (the compile stopped before lowering, without an
-// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1
-// and written as `{prefix}.o` with its export list and ABI receipt.
+// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1,
+// checked by IR Lint after the build and after the optimizer, and written
+// as `{prefix}.o` with its export list and ABI receipt.
 fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
     owned := ^front
     result := ^owned.compile
@@ -137,11 +142,29 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     library := ir_build_library(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
     issues := compiler_take_rows<String>(&library.errors)
     loop failure in library.failures -> &issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    // The memory term is read now: the front end before this holds most of it.
+    threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if issues.len() == 0 {
-        // The memory term is read now: the front end before this holds most of it.
-        threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+        loop finding in ir_lint_module(&library.program, "ir.build", threads) -> &issues.push(jet_cli_runtime_lint_issue(finding))
+    }
+    if issues.len() == 0 {
         _ := ir_optimize_module(&library.program, ir_opt_options(1), threads)
+        loop finding in ir_lint_module(&library.program, "ir.opt", threads) -> &issues.push(jet_cli_runtime_lint_issue(finding))
+    }
+    if issues.len() == 0 {
         compiled := ir_x64_compile_module(^library.program, threads)
+        // JET_FRONT_RUNTIME_WEB_OUTPUT: the runtime partition of a web build
+        // (JetWeb Build.jet), selected from the same lowered module, as
+        // `{prefix}.wasm` with its receipt `{prefix}.wasm.tsv`.
+        if cli_sys.get("JET_FRONT_RUNTIME_WEB_OUTPUT") == .Val(web_prefix) {
+            web := web_runtime_partition(compiled.program, library.exports)
+            if web.errors.len() > 0 {
+                cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
+                return jet_driver_compile_escaped_failure("the runtime's web partition failed; see {prefix}.issues")
+            }
+            cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web partition: {err}")
+            cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web receipt: {err}")
+        }
         object := ir_x64_library_object(^compiled, library.exports, true)
         if object.errors.len() == 0 {
             cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
@@ -158,6 +181,12 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     jet_driver_compile_escaped_failure("runtime library lowering failed; see {prefix}.issues")
 }
 
+// An IR Lint finding (Lint.jet) over the runtime library: a compiler bug,
+// one issue row naming the function, the pass and the rule.
+fn jet_cli_runtime_lint_issue(finding: IRLintFinding) -> String Never! {
+    "{finding.function}: IR Lint after {finding.pass}, {finding.rule}: {finding.message}"
+}
+
 // JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
 // with the platform inputs into the Rust-free runtime pack, and
 // JET_FRONT_RUNTIME_IMAGE_OUTPUT: the pack prelinked at the run base, which
@@ -172,9 +201,9 @@ fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object:
             &names.push(path)
             &bytes.push(input)
         }
-        // Preserve the hosted backend's direct memory/unwind imports (the
-        // same explicit C roots as LinkRuntime.jet), never archive-wide roots.
-        roots :: [String]{"memcpy", "memmove", "memset", "memcmp", "_Unwind_Backtrace"}
+        // Preserve the hosted backend's direct memory imports (the same
+        // explicit C roots as LinkRuntime.jet), never archive-wide roots.
+        roots :: [String]{"memcpy", "memmove", "memset", "memcmp"}
         linked :: x64_link_runtime_pack(names, ^bytes, roots)
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")
@@ -553,9 +582,11 @@ fn jet_cli_path_dependency_escape(name: String, relative: String, parent: String
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E1206", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// Authorize each path root once, in dependency-name order. The driver's
-// catalog still owns dependency binding and semantic diagnostics; this host
-// only reads trees the declared graph permits. No provider or network is run.
+// Authorize each path root once, in dependency-name order, and each version
+// dependency's first-party battery (jet_cli_first_party_battery). The
+// driver's catalog still owns dependency binding and semantic diagnostics;
+// this host only reads trees the declared graph permits. No provider or
+// network is run.
 fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
     entry :: roots[0].canonical_path
     root_reach :: jet_cli_root_path_reach(entry, jet_cli_root_dependencies(roots[0]))
@@ -566,6 +597,13 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
         names := dependencies.keys().to_list()
         &names.sort()
         loop name in names {
+            if dependencies[name] == .Registry(source) {
+                // No battery leaves the dependency unbound: the driver emits
+                // E0603 at the declaration.
+                battery :: jet_cli_first_party_battery(name, source) ?? next
+                if jet_cli_authorize_dependency_root(&roots, battery, color) == .Val(refusal) -> return Val(refusal)
+                next
+            }
             if dependencies[name] == .Path(relative) {
                 path :: jet_cli_report_path(Val(parent), relative)
                 canonical :: cli_files.realpath(path) ?? ""
@@ -579,28 +617,54 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
                 if index != 0 && !declared_by_root && !jet_cli_dependency_within(canonical, parent) {
                     return Val(jet_cli_path_dependency_escape(name, relative, parent, color))
                 }
-                found := false
-                loop existing in roots {
-                    if existing.canonical_path == canonical -> found = true
-                }
-                if found -> next
-                stat :: cli_files.stat(canonical) ?? next
-                if !stat.is_dir -> next
-                files := [JetDriverAuthorizedSourceFile]{}
-                directories := [AppAuthorizedDirectory]{}
-                caches := [JetDriverAuthorizedSourceFile]{}
-                budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-                if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
-                    return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
-                }
-                if jet_cli_foreign_cache_files(canonical, &caches, &budget) == .Val(problem) {
-                    return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
-                }
-                &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
+                if jet_cli_authorize_dependency_root(&roots, canonical, color) == .Val(refusal) -> return Val(refusal)
             }
         }
         index += 1
     }
+    None
+}
+
+// The toolchain directory of the first-party batteries.
+JET_CLI_BATTERIES_DIR :: "Jetpack/Provider/Batteries"
+
+// The canonical root of the first-party battery a version dependency `name`
+// (`source`, its selector) names, or None. Like the Rust jetpack's embedded
+// batteries registry (crates/jetpack/build.rs generated
+// batteries_registry.rs from crates/jetpack/batteries/*), the toolchain
+// ships the batteries: `$JET_TOOLCHAIN_ROOT/Jetpack/Provider/Batteries/<name>`
+// resolves only when its package.jet declares that name and a version the
+// selector matches.
+fn jet_cli_first_party_battery(name: String, source: String) -[FS, Env]> String? Never! {
+    selector :: jet_driver_dependency_selector(source, name) ?? return None
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
+    directory :: jet_cli_authority_path(toolchain, "{JET_CLI_BATTERIES_DIR}/{name}")
+    manifest_path :: jet_cli_authority_path(directory, "package.jet")
+    text :: cli_files.read(manifest_path) ?? return None
+    manifest :: pkg_manifest_parse(manifest_path, text) ?? return None
+    if manifest.package.name != name || !(jet_driver_version_selector_matches(selector, manifest.package.version) ?? false) -> return None
+    Val(cli_files.realpath(directory) ?? return None)
+}
+
+// Authorizes the directory `canonical` as one more source root unless a root
+// already holds it; the refusal when its tree can't be read securely.
+fn jet_cli_authorize_dependency_root(roots: &[JetDriverAuthorizedSourceRoot], canonical: String, color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+    loop existing in roots {
+        if existing.canonical_path == canonical -> return None
+    }
+    stat :: cli_files.stat(canonical) ?? return None
+    if !stat.is_dir -> return None
+    files := [JetDriverAuthorizedSourceFile]{}
+    directories := [AppAuthorizedDirectory]{}
+    caches := [JetDriverAuthorizedSourceFile]{}
+    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
+        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    }
+    if jet_cli_foreign_cache_files(canonical, &caches, &budget) == .Val(problem) {
+        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    }
+    &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
     None
 }
 
@@ -788,13 +852,20 @@ impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
 }
 
 // The driver request for `snapshot` on this host: the Core rows, the
-// canonical effect source, the host facts, the lock's build stamp, and at
-// most `threads` compiler threads (`None` admits threads automatically, up
-// to one per physical core).
+// canonical effect source, the host facts, the lock's build stamp and build
+// contributions, and at most `threads` compiler threads (`None` admits
+// threads automatically, up to one per physical core).
 fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os :: cli_sys.name()
     cores :: cli_sys.cpu_count()
-    stamp :: jet_cli_build_stamp(snapshot)
+    stamp := BuildStamp?{None}
+    contributions := [LockedBuildContribution]{}
+    lock :: jet_cli_entry_lock(snapshot)
+    if lock == .Val(found) {
+        // copy: `found` is a payload view of `lock`.
+        stamp = found.build_stamp.copy()
+        contributions = found.build_contributions.copy()
+    }
     JetDriverCompileRequest{
         authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
@@ -808,18 +879,18 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
         build_stamp: stamp,
+        build_contributions: contributions,
     }
 }
 
-// The `[build.stamp]` of the entry root's `.jet/lock` (Lock.rs `build_stamp`
-// over `load`). A missing or unparsable lock, or one without a stamp, is None:
-// the compile keeps the driver's default stamp and never captures a fresh one
-// from git and the clock.
-fn jet_cli_build_stamp(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> BuildStamp? {
+// The entry root's `.jet/lock` (Lock.rs `load`), whose `[build.stamp]` and
+// `[[build.contribution]]` rows a compile folds. A missing or unparsable lock
+// is None: the compile keeps the driver's default stamp, never captures a
+// fresh one from git and the clock, and folds no contribution.
+fn jet_cli_entry_lock(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> LockFile? {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
-        lock := pkg_lock_load(root.canonical_path) ?? return None
-        return ^lock.build_stamp
+        return pkg_lock_load(root.canonical_path)
     }
     None
 }
@@ -1220,18 +1291,22 @@ enum JetCLIExecutableCompiled {
     Refused(output: JetDriverVerbOutput)
 }
 
-// The executable compile of `file` (its source walk is the `sources` span).
-fn jet_cli_compile_executable_file(file: String, color: Bool, threads: Int?, options: BuildOptions, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+// The executable compile of `file` (its source walk is the `sources` span),
+// starting at the function `entry` when one is selected.
+fn jet_cli_compile_executable_file(file: String, entry: String?, color: Bool, threads: Int?, options: BuildOptions, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_executable(^prepared, options, None, trace_sink)
+    jet_cli_compile_executable(^prepared, entry, options, None, trace_sink, color)
 }
 
 // jet_cli_compile_prepared for the native executable route under the build
 // `options`: their selected profile is the front end's (`$build.profile`, its
-// package.jet settings); `input_log` as there.
-fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+// package.jet settings); `entry` selects the function the program starts at
+// (None: the package's own entry); `input_log` as there. The settings the
+// package's `fn build` contributes are recorded and folded first
+// (jet_cli_contributed_request); `color` renders that step's refusal.
+fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool) -> JetCLIExecutableCompiled {
     if ^prepared == {
         .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1240,9 +1315,22 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, options: BuildOptions, 
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
             if options.profile != "" -> selected.profile = options.profile
+            contributed := jet_cli_contributed_request(^selected, color)
+            // copy: `refusal` is a payload view of `contributed`.
+            if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
+            compiled_request := ^contributed.request
+            if entry != None -> compiled_request.selected_entry = entry.copy()
+            // A single program compile without a named start function is a
+            // singular intent: sema selects its entry in the decided order
+            // (explicit address, legacy `fn run`, sole compatible Output,
+            // checked `defaults: { run: … }`, then an ambiguity error;
+            // syntax-decisions.md:7421-7429) and reports E0101 when none is
+            // selected and the manifest binds no `outputs.*.entry`; the driver
+            // starts at the selected Output's function, else that binding.
+            if compiled_request.selected_entry == None -> compiled_request.output_intent = SemaOutputIntent.Run
             // copy: a three-field row; the request moves into the compiler below.
-            compiler_threads :: selected.compiler_threads.copy()
-            front := jet_cli_lowering_inputs(^selected, trace_sink)
+            compiler_threads :: compiled_request.compiler_threads.copy()
+            front := jet_cli_lowering_inputs(^compiled_request, trace_sink)
             // The native route traces through the same sink and builds on the
             // request's threads (Host.jet jet_cli_native_executable).
             front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)

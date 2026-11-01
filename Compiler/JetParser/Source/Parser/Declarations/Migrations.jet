@@ -35,6 +35,12 @@ fn parser_migration_recover_operation(state: &JetParserState) Never! {
     }
 }
 
+// D-MIGRATE1: `migration <TypeName> {` opens a migration block; `migration`
+// stays a contextual name everywhere else.
+fn parser_migration_ahead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "migration" && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LBRACE
+}
+
 fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
     start :: parser_bump(&state)
     type_name :: parser_expect_name(&state, "as the migrated type name")

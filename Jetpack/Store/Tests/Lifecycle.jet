@@ -18,6 +18,13 @@ fn store_lifecycle_test_identity(id: String, incarnation: Int, witness: String) 
     RootIdentity.new(RootKind.Manual, RootID.new(id) ?? panic("root id"), ProducerID.new("test-producer") ?? panic("producer"), Incarnation.new(incarnation) ?? panic("incarnation"), RootWitness.new(witness) ?? panic("witness"))
 }
 
+// One writer preparing a replacement of `root` with its own verification
+// state, as a separate writer process would; true when the prepare succeeds.
+fn store_lifecycle_test_prepare_alone(roots: HangarRoots, witness: String, digest_seed: String) -[FS, Env, Time]> Bool Never! {
+    verification := StoreVerification.new()
+    store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("root", 2, witness), [String]{store_lifecycle_test_digest(digest_seed)}, store_lifecycle_test_at(3)) == .Ok(_)
+}
+
 // A closure journal delta that knows `targets`, as the lifecycle inputs read.
 fn store_lifecycle_test_install_closure(roots: HangarRoots, targets: [String]) Never! {
     journal :: files.join(files.join(roots.hangar_dir(), "closure-db"), "journal")
@@ -130,8 +137,7 @@ fn store_lifecycle_test_hex64(index: Int) -> String Never! {
     roots :: fixture.roots
     a :: store_lifecycle_test_digest("a")
     store_lifecycle_test_commit_root(&verification, roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
-    failed :: store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), store_lifecycle_test_digest("b"), 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterWrite, 28), false)
-    if failed == {
+    if store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), store_lifecycle_test_digest("b"), 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterWrite, 28), false) == {
         .Ok(_) -> panic("an injected ENOSPC must fail the prepare")
         .Err(error) -> assert_eq(store_lifecycle_test_os_code(error), Val(28))
     }
@@ -147,8 +153,7 @@ fn store_lifecycle_test_hex64(index: Int) -> String Never! {
     a :: store_lifecycle_test_digest("a")
     b :: store_lifecycle_test_digest("b")
     store_lifecycle_test_commit_root(&verification, roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
-    failed :: store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), b, 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterRename, 5), false)
-    assert(failed == .Err(_))
+    assert(store_lifecycle_test_prepare_controlled(roots, fixture.known, store_lifecycle_test_identity("root", 2, "w2"), b, 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterRename, 5), false) == .Err(_))
     assert_eq(store_lifecycle_test_protected(&verification, roots), [String]{a, b})
     store_test_drop_roots(roots)
 }
@@ -161,8 +166,7 @@ fn store_lifecycle_test_hex64(index: Int) -> String Never! {
     b :: store_lifecycle_test_digest("b")
     store_lifecycle_test_commit_root(&verification, roots, store_lifecycle_test_identity("root", 1, "w1"), a, 1, 2)
     second :: store_lifecycle_test_identity("root", 2, "w2")
-    failed :: store_lifecycle_test_prepare_controlled(roots, fixture.known, second, b, 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterDirectorySync, 5), false)
-    assert(failed == .Err(_))
+    assert(store_lifecycle_test_prepare_controlled(roots, fixture.known, second, b, 3, LifecycleWriteControl.fail_at(LifecycleWritePhase.AfterDirectorySync, 5), false) == .Err(_))
     retried :: store_lifecycle_prepare(&verification, roots, second, [String]{b}, store_lifecycle_test_at(30)) ?? panic("retry")
     assert_eq(retried.protected_targets, [String]{a, b})
     assert_eq(retried.roots[second.id.as_str()].prepared_at.get(), 3)
@@ -278,8 +282,7 @@ fn store_lifecycle_test_hex64(index: Int) -> String Never! {
     roots :: fixture.roots
     oversized := [String]{}
     loop _ in 0..<(STORE_LIFECYCLE_MAX_TARGETS_PER_ROOT + 1) -> &oversized.push(store_lifecycle_test_digest("a"))
-    bounded :: store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("bounded", 1, "w1"), oversized, store_lifecycle_test_at(1))
-    assert(store_lifecycle_test_message(bounded).contains("target-count bound"))
+    assert(store_lifecycle_test_message(store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("bounded", 1, "w1"), oversized, store_lifecycle_test_at(1))).contains("target-count bound"))
 
     journal :: files.join(files.join(roots.hangar_dir(), STORE_LIFECYCLE_DB_DIR), STORE_LIFECYCLE_JOURNAL_DIR)
     files.create_dir_all(journal) ?? panic("journal")
@@ -416,8 +419,8 @@ fn store_lifecycle_test_hex64(index: Int) -> String Never! {
     fixture :: store_lifecycle_test_fixture()
     roots :: fixture.roots
     store_lifecycle_test_commit_root(&verification, roots, store_lifecycle_test_identity("root", 1, "w1"), store_lifecycle_test_digest("a"), 1, 2)
-    left :: task { store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("root", 2, "w2-left"), [String]{store_lifecycle_test_digest("b")}, store_lifecycle_test_at(3)) == .Ok(_) }
-    right :: task { store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("root", 2, "w2-right"), [String]{store_lifecycle_test_digest("c")}, store_lifecycle_test_at(3)) == .Ok(_) }
+    left :: task { store_lifecycle_test_prepare_alone(roots, "w2-left", "b") }
+    right :: task { store_lifecycle_test_prepare_alone(roots, "w2-right", "c") }
     left_ok :: left.join() ?? panic("left task")
     right_ok :: right.join() ?? panic("right task")
     assert(left_ok != right_ok)

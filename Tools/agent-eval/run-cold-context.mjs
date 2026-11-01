@@ -33,7 +33,7 @@ const requiredVerbs = [
   "process.argv", "process.run", "process.cmd", "sys.get", "sys.set",
   "json.parse", "json.decode", "json.to_string", "csv.parse", "csv.to_string",
   "text.trim", "text.lower", "text.upper", "text.splitn", "regex.compile",
-  "regex.replace", "math.abs", "math.min", "math.max", "math.round",
+  "regex.replace", "math.abs", "math.floor", "math.ceil", "math.round",
   "math.sqrt", "time.now", "time.sleep", "net.tcp_listen", "net.tcp_connect",
   "http.get", "http.post", "http.serve",
 ];

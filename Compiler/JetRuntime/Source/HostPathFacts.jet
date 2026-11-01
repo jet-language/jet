@@ -5,7 +5,7 @@
 fn fs_text_has_nul(path: I64) -> Bool {
     at := I64{0}
     loop at < rt_text_len(path) {
-        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) -> return true
+        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) -> return true
         at += I64{1}
     }
     false
@@ -19,10 +19,10 @@ fn fs_text_has_nul(path: I64) -> Bool {
         return I64{0}
     }
     scratch :: jet_rt_alloc(I64{160}, I64{8})
-    jet_fs_stat_raw(path, true, scratch, scratch + I64{128})
-    failed :: rt_text_word(scratch + I64{128}) != I64{0}
-    code :: rt_text_word(scratch + I64{136})
-    directory :: (rt_text_word(scratch + I64{16}).bit_and(I64{61440})) == I64{16384}
+    jet_fs_stat_raw(path, true, scratch, wrapping(scratch + I64{128}))
+    failed :: rt_text_word(wrapping(scratch + I64{128})) != I64{0}
+    code :: rt_text_word(wrapping(scratch + I64{136}))
+    directory :: (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}
     jet_rt_free(scratch, I64{160}, I64{8})
     if failed {
         rt_text_store(error, host_errno_cause(code))
@@ -46,7 +46,7 @@ fn fs_text_has_nul(path: I64) -> Bool {
     result :: rt_text_copy(rt_text_data(base), rt_text_len(base))
     if (result == I64{0}) -> return I64{0}
     length :: rt_text_len(base)
-    if (length != I64{0} && rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
+    if (length != I64{0} && rt_text_byte(wrapping(wrapping(rt_text_data(base) + length) - I64{1})) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
     jet_rt_string_builder_push(result, path)
     result
 }
@@ -64,7 +64,7 @@ fn fs_text_has_nul(path: I64) -> Bool {
 #Export(c) fn jet_fs_temp_path_sample_raw(available: I64, nanos_out: I64) {
     sample :: time_clock_read(I64{0})
     seconds :: sync_load(sample)
-    nanos :: sync_load(sample + I64{8})
+    nanos :: sync_load(wrapping(sample + I64{8}))
     text :: jet_rt_string_builder_new()
     if (seconds >= I64{0}) {
         if (seconds == I64{0}) {

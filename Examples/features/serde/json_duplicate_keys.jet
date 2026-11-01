@@ -1,9 +1,17 @@
+package {
+    name: "serde_json_duplicate_keys"
+    version: "0.1.0"
+    authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
+}
 // Duplicate JSON object names (D-CORE-JSON-DUP1=A). `parse`, typed `decode`,
-// and `reader` reject a repeated name with its path and position.
+// and the file-backed `reader` reject a repeated name with its path and
+// position; the reader yields the events before the repeat, then fails.
 // `parse_allow_duplicates` is the named opt-in that keeps the later value, and
 // `reader_allow_duplicates` reports every occurrence as its own events.
 use core.encoding as encoding
 use core.encoding.json as json
+use core.files as files
+use core.testing as testing
 
 struct CountRecord {
     count: Int
@@ -43,31 +51,48 @@ fn strict_decode(text: String) {
     print("decode<CountRecord>: unexpectedly accepted {record.count}")
 }
 
-fn strict_reader(text: String) {
-    events := json.reader(text)
-    first :: &events.next() ?? {
-        line :: err.line ?? 0
-        column :: err.column ?? 0
-        print("reader: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
-        return
+fn strict_reader(path: Path) (EncodingError | IOError)! {
+    input :: files.open(path) ?? return Err(err)
+    events := json.reader(^input) ?? return Err(err)
+    loop {
+        if &events.next() == {
+            .Ok(next) -> {
+                event :: next ?? {
+                    print("reader: unexpectedly reached the end")
+                    return Ok(())
+                }
+                print("reader: {event_name(event)}")
+            }
+            .Err(err) -> {
+                line :: err.line ?? 0
+                column :: err.column ?? 0
+                print("reader: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
+                return Ok(())
+            }
+        }
     }
-    print("reader: unexpectedly started with {event_name(first)}")
 }
 
-fn allow_reader(text: String) {
-    events := json.reader_allow_duplicates(text)
-    loop _ in 0..<6 {
-        event :: &events.next() ?? panic("allowed events")
+fn allow_reader(path: Path) (EncodingError | IOError)! {
+    input :: files.open(path) ?? return Err(err)
+    events := json.reader_allow_duplicates(^input) ?? return Err(err)
+    loop {
+        // A failed read propagates; `??` handles the end of the stream.
+        event :: &events.next() ?? break
         print("allow reader: {event_name(event)}")
     }
 }
 
-fn run() {
+fn run() (EncodingError | IOError)! {
     text :: "{{\"count\":2,\"count\":3}}"
     strict_parse(text)
     strict_decode(text)
-    strict_reader(text)
+    // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
+    path :: Path.from(testing.temp_dir("json-duplicate-keys")).join("count.json")
+    files.write(path.to_string(), text) ?? return
+    strict_reader(path) ?? return
     later :: json.parse_allow_duplicates(text) ?? panic("allowed parse")
     print("allow parse: {json.canonical(later) ?? panic("canonical")}")
-    allow_reader(text)
+    allow_reader(path) ?? return
+    files.remove(path) ?? return
 }

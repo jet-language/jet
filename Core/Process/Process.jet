@@ -110,7 +110,7 @@ fn check(receipt: ProcessReceipt) IOError! {
 
 fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
     child :: spec.stdin(.Stream).spawn()
-    child.stdin.write(text)
+    child.stdin.write_all(text.bytes())
     child.stdin.close()
     receipt :: child.wait()
     check(receipt)
@@ -198,6 +198,55 @@ fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
 
 fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
+}
+
+// D-CORE-PROCPOOL1=A: a bounded worker pool. At most `jobs` specs run at once
+// in one task group, and the results keep input order. A nonzero exit is an Ok
+// receipt (the caller checks `.success`); a spec that cannot start is an Err in
+// its own slot, so one bad spec never hides the others. Every child but a
+// detached one is marked to die with this process (Linux PR_SET_PDEATHSIG).
+fn run_all(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [Result<ProcessReceipt, IOError>] IOError! {
+    if jobs < 1 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve, resource: Val("process.run_all"), os_code: None,
+            cause: Val("process.run_all needs jobs >= 1, got {jobs}"),
+        }))
+    }
+    results := [Result<ProcessReceipt, IOError>]{}
+    task.group pool(limit: jobs) {
+        handles :: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
+        loop handle in handles {
+            outcome :: ^handle.join() ?? (receipt: None, error: Val(run_all_cancelled()))
+            if outcome.receipt == {
+                .Val(receipt) -> &results.push(Ok(receipt))
+                .None -> &results.push(Err(outcome.error ?? run_all_cancelled()))
+            }
+        }
+    }
+    Ok(results)
+}
+
+fn run_all_job(spec: ProcessSpec) -[Exec, Time.Wait]> (receipt: ProcessReceipt?, error: IOError?) Never! {
+    if spec.run() == {
+        .Ok(receipt) -> (receipt: Val(receipt), error: None)
+        .Err(error) -> (receipt: None, error: Val(error))
+    }
+}
+
+fn run_all_cancelled() -> IOError Never! {
+    IOError.Cancelled(IOContext{
+        operation: .Resolve, resource: Val("process.run_all"), os_code: None,
+        cause: Val("the job was cancelled before it finished"),
+    })
+}
+
+// D-PROCESS-SESSION2=D: `ProcessSpec.abilities()`, the open keyed report of
+// what a terminal-backed launch can use. Stable keys are the checked
+// TerminalFact names; a preview fact is any other string key. Every host the
+// runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds
+// the three stable facts whatever the spec asks for.
+fn __spec_abilities(_spec: ProcessSpec) -> Set<String> Never! {
+    Set.from([String]{"terminal", "resize", "raw"})
 }
 
 fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
@@ -501,6 +550,59 @@ fn __stdout_next_line(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? I
 
 fn __stderr_next_line(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
+}
+
+/// A child's output pipe read in pieces: `loop chunk in child.stdout.chunks(size)`
+/// yields each non-empty piece of at most `size` bytes. The loop ends at end of
+/// input or at the first failed read; a size below one fails before any read.
+struct ProcessChunks {
+    __stdout: ProcessStdoutStream?{None}
+    __stderr: ProcessStderrStream?{None}
+    __size: Int
+}
+
+struct __ProcessChunkCursor {
+    stdout: ProcessStdoutStream?
+    stderr: ProcessStderrStream?
+    size: Int
+    done: Bool
+}
+
+impl __ProcessChunkCursor.Iterator {
+    type Item = [U8]
+
+    fn next(&self) -[Exec, Time.Wait]> [U8]? {
+        if self.done -> return None
+        piece := [U8]{}
+        if self.stdout == .Val(stream) {
+            piece = stream.read(self.size) ?? [U8]{}
+        } else if self.stderr == .Val(stream) {
+            piece = stream.read(self.size) ?? [U8]{}
+        }
+        if piece.len() == 0 {
+            self.done = true
+            return None
+        }
+        Val(piece)
+    }
+}
+
+impl ProcessChunks.Iterable {
+    type Iter = __ProcessChunkCursor
+
+    fn iter(^self) -> __ProcessChunkCursor {
+        __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
+    }
+}
+
+// The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
+// check to (Sema ProcessHandles).
+fn __stdout_chunks(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+    ProcessChunks{__stdout: Val(stream), __size: size}
+}
+
+fn __stderr_chunks(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+    ProcessChunks{__stderr: Val(stream), __size: size}
 }
 
 fn pipe_line(^input: [U8]) -> String? IOError! {

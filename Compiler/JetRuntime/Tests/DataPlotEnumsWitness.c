@@ -1,5 +1,5 @@
 /* Link the REAL Jet provider object with -Wl,--wrap=jet_rt_free.
- * Private carrier layout comes from DataABI.jet, never Rust/MIR storage.
+ * Private carrier layout comes from DataABI.jet, never Rust/IR storage.
  * Rust derives Clone/PartialEq: DataPlot.rs:269-344,748-754,865-917,
  * 1024-1031,1144-1168,1255-1262,2357-2361. */
 #include <assert.h>

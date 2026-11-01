@@ -59,7 +59,11 @@ test lists every failing case row. `TESTKIT_ARGS` carries the kit flags below, s
 `.case` step words.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
-builds with `--release`. Every tier compares against the same expected bytes.
+builds with `--release`. Every tier compares against the same expected bytes,
+except that `<stem>.<tier>.out`, `.err.out` or `.stderr.out` replaces the stem's
+streams for that tier alone, for a program whose output follows its build
+profile. A rejected build compares its stderr against the tier's `.err.out`
+with exit 1, and no run follows it.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 
@@ -72,7 +76,11 @@ streams and sidecars live beside their source or project directory.
 
 Sidecars replace filename-specific harness rules. `requires:` declares GTK,
 foreign tools, or environment requirements; missing hosts report `SKIP-HOST`.
-`run: none` keeps a serves-until-stopped entry compile-only. `normalize: argv0`
+`run: none` keeps a serves-until-stopped entry compile-only. `host-port: N`
+declares a fixed TCP port the program binds; the kit and
+`Tools/agent/run-feature-examples.mjs` hold the host-wide flock
+`/tmp/jet-host-port-N.lock` while the case runs, waiting at most one step
+timeout, so concurrent runs on one host take turns. `normalize: argv0`
 pins CLI usage to the source name. Ordered `step:` commands accept quoted argv,
 `stdin:`, `exit:`, exact `stdout:` / `stderr:`, and `file:` assertions.
 `step: build` invokes the selected tier; `step: built [args…]` runs its artifact
@@ -94,6 +102,35 @@ Shared kit record types, the step sequencer and the gate entry are colocated in
 constructors.
 Fixture copies preserve file permission bits, including executable tools nested
 under `state/` when that directory is staged as `.jet/` in the case workspace.
+Integer right-hand sides of `file: P size`, `stdout: lines` and numeric
+`json:` comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) may be `{cap:x}+N` or
+`N*{cap:x}`: non-negative integer `+` and `*` only, no other operators.
+Integer transform arguments on an assertion subject, such as
+`file.slice({cap:a},{cap:b}): P ~ "text" # reason`, may be whole `{cap:x}`
+tokens; such a subject is matched raw, without normalization, so captured
+byte offsets stay exact.
+`recv LABEL [line] [collect] [until PREDICATES] [timeout|within D] [every D]
+[optional]` reads a live session's stdout. Content-Length sessions read
+frame bodies, `line` sessions and the `line` keyword read lines, and other
+sessions read raw bytes. Without `until` the step's stdout is the next unit
+(raw: whatever has arrived). With `until`, raw output accumulates until the
+predicates hold, lines accumulate through the first line that holds, and
+frames before the first matching frame are discarded; `collect` tests the
+newline-joined units gathered so far. Predicates are `$PATH = JSON`,
+`ndjson …` or stdout assertion forms joined by `&&`. Without a deadline the
+run's step timeout applies; `optional` passes with partial output at the
+deadline instead of failing. A later `close` or `wait` reports only the stdout
+no `recv` consumed.
+`pty: true [size ROWSxCOLS]` runs a step or session on a terminal (0x0 or no
+size leaves the size unset); its stdin and stdout share the terminal, so
+stdout is the transcript, echo and `\r\n` included. On a step,
+`pty-send: "TEXT" after D` and `pty-close: after D` run D after the previous
+send or close (the first after spawn), and `pty-resize: ROWSxCOLS at D` runs D
+after spawn. On a session they may also follow its `recv` and `send` lines and
+run where they stand. A close types the terminal's end-of-file character; a
+session's `close` does the same before waiting, since closing the terminal
+would hang up the child. Partial wiring such as `pty: stdout,stderr` is
+refused as `pty-stdio`.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.

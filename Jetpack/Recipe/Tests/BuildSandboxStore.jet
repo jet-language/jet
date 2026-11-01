@@ -24,12 +24,13 @@ fn recipe_sandbox_store_ctx(roots: HangarRoots) -> ProviderCtx {
     verification := StoreVerification.new()
     previous :: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "unavailable")
-    result :: store_realize_verified(&verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec, table})
-    recipe_sandbox_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
-    if result == {
-        .Ok(_) -> panic("an unavailable build sandbox must refuse Core Cargo")
-        .Err(error) -> assert("{error}".contains("SandboxUnavailable"))
+    refusal :: if store_realize_verified(&verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec, table}) == {
+        .Ok(_) -> ""
+        .Err(error) -> "{error}"
     }
+    recipe_sandbox_test_restore_env("JETPACK_FAKE_SANDBOX", previous)
+    assert(refusal != "", "an unavailable build sandbox must refuse Core Cargo")
+    assert(refusal.contains("SandboxUnavailable"))
     assert(!files.exists(marker))
     assert(store_list(&verification, roots).is_empty())
     files.remove_all(base).drop("test cleanup")

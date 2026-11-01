@@ -36,22 +36,55 @@ fn ir_trait_identity(p: IRProgram, ty: Type) -> String Never! {
 // Whether `receiver` is a trait value whose `method` dispatches dynamically.
 fn ir_trait_receiver(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef) -> Bool Never! {
     if method.trait_owner == None -> return false
-    ir_untag(ir_subst(m, receiver)) == .TraitObject(_)
+    ir_untag(receiver) == .TraitObject(_)
 }
 
 // The function a method call names: its own checked row, else the trait
 // implementation of the concrete receiver (a bounded generic's receiver is
-// concrete per instance).
+// concrete per instance). An implementation for the receiver's exact type
+// wins; else the generic owner's (`impl Point2.Trait` for a `Point2<Float, W>`
+// receiver), whose instance the call builds from the receiver's arguments.
 fn ir_method_key(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef) -> String Never! {
     if ir_function_row(p, method.symbol.key) != None -> return method.symbol.key.copy()
     owner :: method.trait_owner ?? return method.symbol.key.copy()
-    concrete :: ir_trait_identity(p, ir_subst(m, receiver))
+    concrete :: ir_trait_identity(p, receiver)
     candidates :: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
     loop row in candidates {
         implementer :: ir_trait_implementer(p, row, owner) ?? next
         if ir_trait_identity(p, implementer) == concrete -> return p.functions[row].key.copy()
     }
+    head :: ir_trait_head_identity(p, receiver) ?? return method.symbol.key.copy()
+    loop row in candidates {
+        implementer :: ir_trait_implementer(p, row, owner) ?? next
+        implementer_head :: ir_trait_head_identity(p, implementer) ?? ir_trait_identity(p, implementer)
+        if implementer_head == head -> return p.functions[row].key.copy()
+    }
     method.symbol.key.copy()
+}
+
+// The identity of generic application `ty`'s nominal head, None for any
+// other type.
+fn ir_trait_head_identity(p: IRProgram, ty: Type) -> String? Never! {
+    if ir_untag(ty) == .Apply(name, _) -> return Val(ir_trait_identity(p, Type.Named{name: name.copy()}))
+    None
+}
+
+// The constant key of trait constant `name` of the implementation of trait
+// `trait_short` (its short name) for the type of identity `owner`.
+fn ir_trait_constant_key(trait_short: String, owner: String, name: String) -> String Never! {
+    "trait-constant:{trait_short}|{owner}|{name}"
+}
+
+// `T.name` over a type parameter: the constant of the implementation of
+// `trait_short` the instance's concrete `owner` has; an implementation for
+// the exact type wins, else the generic owner's (`impl Box.Shape` for a
+// `Box<Int>`).
+fn ir_trait_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Type, trait_short: String, name: String, span: Span) -> Int Never! {
+    concrete :: ir_fact(p, &b, owner, span)
+    exact :: ir_trait_constant_key(trait_short, ir_trait_identity(p, concrete), name)
+    if p.constants.get(exact) != None -> return ir_constant(&m, p, &b, ty, exact, span)
+    head :: ir_trait_head_identity(p, concrete) ?? return ir_fail_slot(&b, span, "no `{trait_short}` constant `{name}` for {ir_type_name(concrete)}")
+    ir_constant(&m, p, &b, ty, ir_trait_constant_key(trait_short, head, name), span)
 }
 
 // The concrete owner of function `row` when it implements a method of the
@@ -82,10 +115,12 @@ fn ir_trait_boxes(p: IRProgram, b: &IRBuilder, values: [Int], target: Type) -> [
 // `value` boxed as a trait value of `target`: a box of 8 + its payload size
 // (at least a word) holding the concrete type's key at 0 and the owned
 // payload at 8. A value that already is a trait value is kept.
-fn ir_trait_box(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target: Type, span: Span) -> Int Never! {
+fn ir_trait_box(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, span: Span) -> Int Never! {
+    target :: ir_fact(p, &b, written, span)
+    if ir_failed(b) -> return -1
     bounds :: if ir_untag(target) == .TraitObject(names) -> names else -> { return ir_fail_slot(&b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait") }
     if bounds.len() != 1 -> return ir_fail_slot(&b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait")
-    concrete :: ir_subst(m, ir_ty(p, b, value))
+    concrete :: ir_ty(p, b, value)
     if ir_untag(concrete) == .TraitObject(_) -> return ir_expr(&m, p, &b, value)
     row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
     size := 0
@@ -161,8 +196,14 @@ fn ir_trait_call(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, metho
         value :: ir_call(&m, p, &b, target.key, [Type]{}, self_slot, [IRWriteBack]{}, args, span)
         if ir_failed(b) -> return -1
         if result >= 0 && value >= 0 {
-            ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+            // One implementation may return its plain success where another
+            // returns the `T Never!` carrier (ir_plain_return).
+            result_row :: b.f.slot_type[result]
+            adapted :: ir_adapt(&m, p, &b, value, result_row, span)
+            if ir_failed(b) -> return -1
+            ir_emit(&b.f, IROp.Copy, result, adapted, -1, -1, b.line)
             b.fresh[value] = false
+            b.fresh[adapted] = false
         }
         ir_else(&b.f, b.line)
     }

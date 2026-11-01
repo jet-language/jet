@@ -1,0 +1,20 @@
+// An inline module function's parameter shadows a sibling function of the
+// same name: inside `clamp`, `index` reads the parameter, while `cell` still
+// calls the sibling `index`.
+module grid {
+    fn index(row: Int, column: Int) -> Int { row * 10 + column }
+
+    fn clamp(index: Int) -> Int {
+        bounded :: if index < 0 -> 0 else -> index
+        bounded
+    }
+
+    fn cell(row: Int, column: Int) -> Int { index(row, clamp(column)) }
+}
+
+fn run() {
+    print(grid.clamp(-4))
+    print(grid.clamp(7))
+    print(grid.cell(3, -2))
+    print(grid.cell(2, 5))
+}

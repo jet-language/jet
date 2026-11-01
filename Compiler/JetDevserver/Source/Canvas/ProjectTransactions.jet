@@ -496,7 +496,7 @@ fn apply_project_create_package(ctx: ProjectContext, request: String, touched: [
     Package.PackageFacts.parse(manifest, manifest_rel).map_err((e) -> project_edit_error("diagnostic", "{e}"))?
     entry :: if {
         target == "library" -> {
-            "pub fn {name}_ready() -> Bool {{\n    return true\n}}\n"
+            "fn {name}_ready() -> Bool {{\n    return true\n}}\n"
         }
         else -> { "fn run() -> {{\n    print(\"{name}\")\n}}\n" }
     }

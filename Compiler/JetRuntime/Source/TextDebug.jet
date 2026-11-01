@@ -24,7 +24,7 @@ fn rt_text_push_debug_str(target: I64, text: I64, rust_nul: Bool) {
     at := I64{0}
     start := I64{0}
     loop at < length {
-        scalar :: trap_scalar(data + at)
+        scalar :: trap_scalar(wrapping(data + at))
         cp :: scalar.code
         width :: scalar.width
         short :: if (rust_nul && cp == I64{0}) -> I64{48} else -> trap_debug_short(cp)

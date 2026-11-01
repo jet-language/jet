@@ -179,20 +179,13 @@ function commitValue(value) {
   return /^[0-9a-f]{40}$/i.test(text) ? text.toLowerCase() : null;
 }
 
-function isRustPeer(peer) {
-  return peer === "rust" || peer.startsWith("rust-");
-}
-
-function expectedPairVerdict(peer, ratio, policy) {
+// Every peer, Rust included, shares one comparator: Jet/peer below 1 wins.
+function expectedPairVerdict(ratio, policy) {
   if (!finite(ratio)) return "unmeasured";
-  const rust = isRustPeer(peer);
-  const rule = rust ? policy?.rust : policy?.non_rust;
-  if (!rule || rule.win !== "<1") return "unmeasured";
-  if (ratio < 1) return "win";
-  if (rust && rule.parity === "<=1.05" && ratio <= 1.05) return "parity";
-  return "loss";
+  if (policy?.win !== "<1" || policy?.loss !== ">=1") return "unmeasured";
+  return ratio < 1 ? "win" : "loss";
 }
-const verdictRank = Object.freeze({ loss: 0, unmeasured: 1, not_applicable: 2, parity: 3, win: 4 });
+const verdictRank = Object.freeze({ loss: 0, unmeasured: 1, not_applicable: 2, win: 3 });
 const resultStatuses = new Set(["measured", "unmeasured", "not_applicable"]);
 function worstVerdict(values) {
   const known = values.filter((value) => Object.hasOwn(verdictRank, value));
@@ -520,8 +513,7 @@ function validateManifest(manifest) {
   if (contract?.id !== reportContract) issues.push(`report_contract.id must be ${reportContract}`);
   if (contract?.scope !== "full_matrix") issues.push("report_contract.scope must be full_matrix");
   if (canonical(contract?.required_jet_tiers) !== canonical(["aot", "run"])) issues.push("report_contract.required_jet_tiers must be [aot, run]");
-  if (canonical(contract?.ratio_verdicts?.rust) !== canonical({ win: "<1", parity: "<=1.05", loss: ">1.05" })) issues.push("Rust comparator policy is not the strict <=1.05 policy");
-  if (canonical(contract?.ratio_verdicts?.non_rust) !== canonical({ win: "<1", parity: null, loss: ">=1" })) issues.push("non-Rust comparator policy is not the strict <1 policy");
+  if (canonical(contract?.ratio_verdicts) !== canonical({ win: "<1", loss: ">=1" })) issues.push("comparator policy is not the strict <1 policy for every peer");
   for (const issue of validatePerformanceSurfacePairs(manifest.performance_surface_pairs)) issues.push(issue);
   const gate = manifest.integrated_gate;
   if (!isObject(gate)) {
@@ -838,14 +830,14 @@ function evaluateGate(inputs, options = {}) {
           }
           const calculated = tierValue.jet / tierValue.peer;
           if (Math.abs(calculated - tierValue.ratio) > Math.max(1e-9, Math.abs(calculated) * 1e-9)) add("wrong-ratio", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: `reported ratio ${tierValue.ratio} does not equal Jet/peer ${calculated}` });
-          const comparatorVerdict = expectedPairVerdict(peer, tierValue.ratio, policy);
+          const comparatorVerdict = expectedPairVerdict(tierValue.ratio, policy);
           const verdict = !outputVerified && comparatorVerdict !== "loss" && comparatorVerdict !== "unmeasured"
             ? "unmeasured"
             : comparatorVerdict;
           tierResult.verdict = verdict;
           if (tierValue.verdict !== undefined && tierValue.verdict !== comparatorVerdict) add("wrong-verdict", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: `reported verdict ${tierValue.verdict} does not satisfy the canonical ${comparatorVerdict} comparator` });
           if (comparatorVerdict === "loss") {
-            tierResult.cause = `Jet/peer ratio ${tierValue.ratio} violates ${isRustPeer(peer) ? "Rust <=1.05 parity" : "non-Rust <1.00 win"}`;
+            tierResult.cause = `Jet/peer ratio ${tierValue.ratio} violates the <1.00 win`;
             add("loss", { cell: cellId, entry: expectedEntry, peer, tier, metric, evidence_file: sourceFile ?? evidence, cause: tierResult.cause });
             metricWorstVerdict = "loss";
           } else if (comparatorVerdict === "unmeasured") {
@@ -855,7 +847,7 @@ function evaluateGate(inputs, options = {}) {
           } else if (!outputVerified) {
             tierResult.cause = outputVerificationCause;
             if (metricWorstVerdict !== "loss") metricWorstVerdict = "unmeasured";
-          } else if (comparatorVerdict === "parity" && metricWorstVerdict === "win") metricWorstVerdict = "parity";
+          }
         }
         metricResult.verdict = metricWorstVerdict;
         rows.push(metricResult);
@@ -865,8 +857,7 @@ function evaluateGate(inputs, options = {}) {
       const allNotApplicable = rows.length > 0 && rows.every((item) => item.verdict === "not_applicable");
       const hasLoss = rows.some((item) => item.verdict === "loss");
       const hasUnmeasured = rows.some((item) => item.verdict === "fail" || item.verdict === "unmeasured");
-      const hasParity = rows.some((item) => item.verdict === "parity");
-      const aggregate = hasUnmeasured ? "unmeasured" : (hasLoss ? "loss" : (allNotApplicable ? "not_applicable" : (hasParity ? "parity" : "win")));
+      const aggregate = hasUnmeasured ? "unmeasured" : (hasLoss ? "loss" : (allNotApplicable ? "not_applicable" : "win"));
       metricResults.set(metric, { metric, verdict: aggregate, peers: rows });
     }
     cellResult.metrics = [...metricResults.values()];
@@ -881,7 +872,7 @@ function evaluateGate(inputs, options = {}) {
     cellResult.reported_verdict = statusCell.verdict ?? null;
     if (statusCell.verdict === undefined) add("wrong-verdict", { cell: cellId, entry: expectedEntry, evidence_file: inputs?.paths?.status, cause: "status cell has no aggregate verdict" });
     else if (statusCell.verdict !== cellVerdict) add("wrong-verdict", { cell: cellId, entry: expectedEntry, evidence_file: inputs?.paths?.status, cause: `reported cell verdict ${statusCell.verdict} does not equal computed ${cellVerdict}` });
-    if (statusCell.verdict && !["win", "parity", "loss", "unmeasured"].includes(statusCell.verdict)) add("wrong-verdict", { cell: cellId, entry: expectedEntry, evidence_file: inputs?.paths?.status, cause: `unknown cell verdict ${statusCell.verdict}` });
+    if (statusCell.verdict && !["win", "loss", "unmeasured"].includes(statusCell.verdict)) add("wrong-verdict", { cell: cellId, entry: expectedEntry, evidence_file: inputs?.paths?.status, cause: `unknown cell verdict ${statusCell.verdict}` });
     cellResult.verdict = cellVerdict;
     if (findings.slice(cellStart).some((finding) => finding.cell === cellId) && cellResult.verdict === "win") cellResult.verdict = "unmeasured";
     cellResults.push(cellResult);
@@ -892,7 +883,6 @@ function evaluateGate(inputs, options = {}) {
   const computedCellSummary = {
     cells: cellResults.length,
     win: cellResults.filter((cell) => cell.verdict === "win").length,
-    parity: cellResults.filter((cell) => cell.verdict === "parity").length,
     loss: cellResults.filter((cell) => cell.verdict === "loss").length,
     unmeasured: cellResults.filter((cell) => cell.verdict === "unmeasured").length,
   };
@@ -904,7 +894,7 @@ function evaluateGate(inputs, options = {}) {
   if (status?.contract !== statusContract) add("malformed-input", { evidence_file: inputs?.paths?.status, cause: `status contract must be ${statusContract}` });
   if (status?.source?.report_contract !== reportContract) add("policy-mismatch", { evidence_file: inputs?.paths?.status, cause: "status source report contract does not match measurement manifest" });
   if (canonical(status?.policy?.primary_metric_by_mode) !== canonical(contract.primary_metric_by_mode)) add("policy-mismatch", { evidence_file: inputs?.paths?.status, cause: "status primary metric policy differs from canonical manifest" });
-  if (canonical({ rust: status?.policy?.verdict_policy?.rust, non_rust: status?.policy?.verdict_policy?.non_rust }) !== canonical(policy)) add("policy-mismatch", { evidence_file: inputs?.paths?.status, cause: "status comparator policy differs from canonical manifest" });
+  if (canonical({ win: status?.policy?.verdict_policy?.win, loss: status?.policy?.verdict_policy?.loss }) !== canonical(policy)) add("policy-mismatch", { evidence_file: inputs?.paths?.status, cause: "status comparator policy differs from canonical manifest" });
   if (status?.publication?.status !== "complete" || status?.publication?.complete !== true) add("publication", { evidence_file: inputs?.paths?.status, cause: "gauntlet status publication is not complete" });
   if (status?.provenance?.matrix_sha256 && inputs?.files?.matrix?.text !== null && inputs?.files?.matrix?.text !== undefined && status.provenance.matrix_sha256 !== sha256(inputs.files.matrix.text)) add("identity-mismatch", { evidence_file: inputs?.paths?.status, cause: "status matrix provenance does not match matrix evidence" });
   if (status?.provenance?.measurement_manifest_sha256 && inputs?.manifestResult?.text !== null && inputs?.manifestResult?.text !== undefined && status.provenance.measurement_manifest_sha256 !== sha256(inputs.manifestResult.text)) add("identity-mismatch", { evidence_file: inputs?.paths?.status, cause: "status measurement-manifest provenance does not match manifest evidence" });
@@ -1040,11 +1030,11 @@ function evaluateGate(inputs, options = {}) {
     return counts;
   }, {});
   findings.sort((left, right) => canonical(left).localeCompare(canonical(right)));
-  const cellFailures = cellResults.filter((cell) => !["win", "parity"].includes(cell.verdict)).length;
+  const cellFailures = cellResults.filter((cell) => cell.verdict !== "win").length;
   const metricRows = cellResults.flatMap((cell) => cell.metrics.flatMap((metric) => metric.peers ?? []));
   const worstCase = findings.some((finding) => finding.kind === "loss") ? "loss"
     : findings.some((finding) => ["unavailable", "inconclusive", "stale", "future-evidence", "wrong-output"].includes(finding.kind)) ? "unmeasured"
-      : findings.length > 0 ? "failure" : (cellResults.some((cell) => cell.metrics.some((metric) => metric.verdict === "parity")) ? "parity" : "win");
+      : findings.length > 0 ? "failure" : "win";
   return {
     schema: gateSchema,
     version: 1,

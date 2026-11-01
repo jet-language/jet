@@ -32,7 +32,7 @@ fn sema_protocols_expand(items: &[Item], diagnostics: &[Diagnostic]) {
                 &diagnostics.push(sema_error("E0153", declaration.name_span, "protocol `{declaration.name}` failed to expand into handle types", "the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the protocol block — a fragment did not parse", "check the protocol declaration for typos; if this persists, file a bug"))
             } else {
                 generated := parsed.program.items
-                sema_protocol_mark_generated(&generated)
+                sema_protocol_mark_generated(&generated, declaration.name)
                 loop value in generated -> &expanded.push(value)
             }
         }
@@ -43,8 +43,10 @@ fn sema_protocols_expand(items: &[Item], diagnostics: &[Diagnostic]) {
 }
 
 // The generated transition methods are compiler scaffolding: they keep their
-// declared returns raw.
-fn sema_protocol_mark_generated(items: &[Item]) Never! {
+// declared returns raw. The fragment declares the handles by their leaf names
+// (`struct Client`); they take the protocol's qualified names
+// (`Payment.Client`) here, because a written struct name is one identifier.
+fn sema_protocol_mark_generated(items: &[Item], protocol: String) Never! {
     loop index in 0..<items.len() {
         if items[index] == {
             .Impl(definition) -> {
@@ -54,6 +56,7 @@ fn sema_protocol_mark_generated(items: &[Item]) Never! {
             }
             .Struct(definition) -> {
                 updated := definition
+                updated.name = "{protocol}.{definition.name}"
                 sema_protocol_mark_methods(&updated.methods)
                 items[index] = Item.Struct{value: updated}
             }
@@ -79,8 +82,8 @@ fn sema_protocol_source(declaration: ProtocolDecl) -> String Never! {
     states :: loop index in 0..<(declaration.messages.len() + 1) -> "S{index}"
     state_list :: states.join(", ")
     out := [String]{}
-    &out.push("#SingleUse struct {client} {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
-    &out.push("#SingleUse struct {server} {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
+    &out.push("#SingleUse struct Client {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
+    &out.push("#SingleUse struct Server {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
     &out.push("impl {client} {{\n")
     &out.push("    #Transition(_, S0) fn client() -> {client} {{ {{_token: 0}} }}\n\n")
     loop (index, message) in declaration.messages {

@@ -7,6 +7,7 @@ use core.term as lsp_loop_term
 use core.encoding.[Dyn]
 use jet_driver.[JetDriverCompilerQueries]
 use jet_lexer.[Token, lex]
+use jet_foundation.[foundation_json_integer]
 use jet_pkg_model.[pkg_mask_inline_package_source]
 
 // A request-local version witness, not a second checked bundle/cache.
@@ -97,38 +98,34 @@ fn lsp_update_document(state: LSPDiagnosticState, params: Dyn?, is_open: Bool, p
     if uri_value == {
         .Text(uri) -> {
             version_value :: document.field("version") ?? return None
-            if version_value == {
-                .Int(version) -> {
-                    if version < -2147483648 || version > 2147483647 -> return None
-                    if is_open {
-                        text_value :: document.field("text") ?? return None
-                        if text_value == {
-                            .Text(text) -> {
-                                path :: core.files.runtime.kernel_path_components.from_text(lsp_uri_to_path(uri, platform == core.files.runtime.kernel_path_components.PathPlatform.Windows), platform)
-                                state.docs[uri] = LSPDocument.new(path, text.copy(), version)
-                            }
-                            else -> { return None }
-                        }
-                    } else {
-                        changes :: value.field("contentChanges") ?? return None
-                        if changes == {
-                            .Array(rows) -> {
-                                current :: state.docs.get(uri) ?? return None
-                                if version <= current.version -> return None
-                                updated := LSPDocument.new(current.path.copy(), current.text.copy(), version)
-                                loop change in rows {
-                                    if !lsp_apply_content_change(&updated, change) -> return None
-                                }
-                                state.docs[uri] = updated
-                                state.dirty[uri] = true
-                            }
-                            else -> { return None }
-                        }
+            version :: foundation_json_integer(version_value) ?? return None
+            if version < -2147483648 || version > 2147483647 -> return None
+            if is_open {
+                text_value :: document.field("text") ?? return None
+                if text_value == {
+                    .Text(text) -> {
+                        path :: core.files.runtime.kernel_path_components.from_text(lsp_uri_to_path(uri, platform == core.files.runtime.kernel_path_components.PathPlatform.Windows), platform)
+                        state.docs[uri] = LSPDocument.new(path, text.copy(), version)
                     }
-                    return Val(uri.copy())
+                    else -> { return None }
                 }
-                else -> { return None }
+            } else {
+                changes :: value.field("contentChanges") ?? return None
+                if changes == {
+                    .Array(rows) -> {
+                        current :: state.docs.get(uri) ?? return None
+                        if version <= current.version -> return None
+                        updated := LSPDocument.new(current.path.copy(), current.text.copy(), version)
+                        loop change in rows {
+                            if !lsp_apply_content_change(&updated, change) -> return None
+                        }
+                        state.docs[uri] = updated
+                        state.dirty[uri] = true
+                    }
+                    else -> { return None }
+                }
             }
+            return Val(uri.copy())
         }
         else -> { return None }
     }

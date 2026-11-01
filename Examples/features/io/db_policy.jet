@@ -1,4 +1,7 @@
 // D-DBPOLICY-BIND1=A: one explicit scope carries policy and user identity.
+// The row policy constrains the rows of its own table (#6070): SQL that
+// targets no table or another table runs unchanged, and SQL that reads the
+// policy's table any other way is refused.
 package {
     name: "db_policy"
     authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
@@ -11,15 +14,32 @@ fn run() {
     policy :: db.policy("tasks", "owner == user") ?? panic("policy")
     scoped := conn.with_policy(policy, "alice")
     print(db.policy_audit(scoped))
-    _created :: db.migrate(scoped, "tasks-v1", [SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}]) ?? panic("create")
+    _created :: db.migrate(scoped, "tasks-v1", [
+        SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"},
+        SQL{"CREATE TABLE notes (body TEXT)"},
+    ]) ?? panic("create")
     owner :: "bob"
     title :: "one"
     _one :: scoped.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")
+    mine :: "two"
+    _two :: scoped.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {mine})"}) ?? panic("insert")
     rows :: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
     print("rows:{rows.len()}")
-    if scoped.query(SQL{"SELECT title FROM other"}) == {
-        .Ok(_) -> { print("bypass:accepted") }
-        .Err(_) -> { print("bypass:rejected") }
+    carol := conn.with_policy(policy, "carol")
+    other :: "three"
+    _three :: carol.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {other})"}) ?? panic("carol insert")
+    visible :: scoped.query(SQL{"SELECT title FROM tasks"}) ?? panic("query")
+    print("visible:{visible.len()}")
+    one :: scoped.query_one(SQL{"SELECT 1 AS one"}) ?? panic("select 1")
+    value :: db.row_int(one, "one") ?? panic("one")
+    print("select-1:{value}")
+    body :: "shared"
+    _note :: scoped.execute(SQL{"INSERT INTO notes (body) VALUES ({body})"}) ?? panic("note")
+    notes :: scoped.query(SQL{"SELECT body FROM notes"}) ?? panic("notes")
+    print("notes:{notes.len()}")
+    if scoped.query(SQL{"SELECT body FROM notes JOIN tasks"}) == {
+        .Ok(_) -> { print("join:accepted") }
+        .Err(_) -> { print("join:rejected") }
     }
     _closed :: scoped.close()
 }

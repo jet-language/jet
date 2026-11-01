@@ -1,7 +1,7 @@
 use core.build.[BuildGraphNode]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
-use jet_pkg_model.[BuildStamp]
+use jet_pkg_model.[BuildStamp, LockedBuildContribution, PackageGrant]
 use jet_foundation.[
     AppAuthorizedDirectory,
     CompilerThreads,
@@ -258,6 +258,10 @@ struct JetDriverCompileRequest {
     // (Lock.rs `build_stamp`): the provenance `$build.stamp.*` folds from.
     // None keeps the default stamp (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
+    // The `[[build.contribution]]` rows of that lock (D-CONF-SPLIT1): what
+    // `fn build` contributed to declared settings, which
+    // jet_driver_build_settings folds over the defaults and profile values.
+    build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
 }
 
 struct JetDriverGatePolicy {
@@ -438,6 +442,9 @@ struct JetDriverPackageInfo {
     authority_allow: [String]?
     authority_deny: [String]?
     authority_needs: [String]
+    // `authority.grants`: per-dependency rights the effect budget adds to
+    // `allow` for that dependency's code.
+    authority_grants: [PackageGrant]{[PackageGrant]{}}
     entry: JetDriverPackageEntry?
     manifest_path: String?
     // The canonical Package policy reader's declarations; their source is the
@@ -619,6 +626,17 @@ struct JetDriverCompileResult {
     // The entry package's member files that declare a top-level `fn run`,
     // from the load's parse (JetDriverLoadResult.run_member_paths).
     run_member_paths: [String]{[String]{}}
+    // The entry package's `allocator:` policy (jet_driver_entry_allocator).
+    allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
+}
+
+// The `allocator:` policy of the entry package of `load`
+// (jet_driver_parse_program_allocator); the system heap when it has none.
+fn jet_driver_entry_allocator(load: JetDriverLoadResult) -> AllocatorPolicy Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return package.allocator_policy
+    }
+    AllocatorPolicy.HostedDefault
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

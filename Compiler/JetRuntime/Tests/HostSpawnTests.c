@@ -86,7 +86,7 @@ int main(int argc,char **argv) {
     assert(fixture_process_cpu_seconds_raw(INT64_MAX)==INT64_MAX/1000);
     assert(fixture_process_cpu_seconds_raw(INT64_MAX-998)==INT64_MAX/1000);
     char executable[4096]; ssize_t n=readlink("/proc/self/exe",executable,sizeof(executable)-1); assert(n>0); executable[n]=0;
-    W spec[27]={0}; spec[7]=1; spec[8]=2; spec[9]=2; spec[10]=2;
+    W spec[28]={0}; spec[7]=1; spec[8]=2; spec[9]=2; spec[10]=2;
     char *env[]={"BINARY=\xff",NULL}, *echo[]={executable,"echo",NULL}; Error e; char bytes[32];
     Child *c=spawn(spec, executable, echo, env);
     assert(jet_process_write_raw(c,0,"b\0in",4,&e)==4); good(&e); jet_process_close_stream_raw(c,0,&e); good(&e);
@@ -148,7 +148,7 @@ int main(int argc,char **argv) {
     char too_long[5000];memset(too_long,'x',sizeof too_long-1);too_long[sizeof too_long-1]=0;assert(!jet_process_path_canonicalize_raw(too_long,&length,&capacity,&e));posix(&e,0,ENAMETOOLONG);
     Text *message=jet_host_os_error_text_raw(1,ENOENT);assert(message && message->len>0);jet_rt_string_drop(message);
     // Reviewed private carrier transfer/clone retains directories and deep E4s.
-    W owned[27]={0};Text borrowed=text(root);owned[1]=1;owned[2]=(W)(intptr_t)jet_rt_string_clone(&borrowed);void *packed=jet_process_spec_take_raw(owned),*clone=jet_process_spec_clone_raw(packed);jet_process_spec_drop_raw(packed);jet_process_spec_drop_raw(clone);
+    W owned[28]={0};Text borrowed=text(root);owned[1]=1;owned[2]=(W)(intptr_t)jet_rt_string_clone(&borrowed);void *packed=jet_process_spec_take_raw(owned),*clone=jet_process_spec_clone_raw(packed);jet_process_spec_drop_raw(packed);jet_process_spec_drop_raw(clone);
     assert(!unlink(nonutf)&&!unlink(symlink1)&&!unlink(symlink2)&&!rmdir(other)&&!rmdir(root));
     puts("process raw: ok");
 }

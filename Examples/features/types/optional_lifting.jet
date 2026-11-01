@@ -12,6 +12,19 @@ fn find(n: Int) -> Int? {
     return None
 }
 
+struct Box {
+    v: Int
+}
+
+// A call result fills an optional argument or place the same way a name does.
+fn make_box(v: Int) -> Box {
+    Box{v: v}
+}
+
+fn box_value(box: Box?) -> Int {
+    (box ?? Box{v: 0}).v
+}
+
 fn run() {
     limit := Val(10)          // no expected type: Val still infers Int?
     cfg :: Config{limit: 5}
@@ -27,4 +40,10 @@ fn run() {
     print(ids[0] ?? 0)
     print(ids[1] ?? -1)
     print(limit ?? 0)
+    print(box_value(make_box(7)))
+    held := Box?{None}
+    held = make_box(8)
+    print(box_value(held))
+    print(Config{limit: find(4)}.limit ?? 0)
+    print(Config{limit: box_value(make_box(9))}.limit ?? 0)
 }

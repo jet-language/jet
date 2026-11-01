@@ -95,7 +95,7 @@ fn process_execution_launch_input(spec: I64, input: I64, collect: Bool, err: I64
     jet_rt_string_builder_push(cause, rt_static_text(", stderr="))
     errors :: fd_word(receipt, I64{16})
     end := if (rt_text_len(errors) > I64{4096}) -> { I64{4096} } else -> { rt_text_len(errors) }
-    loop end > (I64{0}) && end < rt_text_len(errors) && rt_text_byte(rt_text_data(errors) + end).bit_and(I64{192}) == (I64{128}) -> end -= I64{1}
+    loop end > (I64{0}) && end < rt_text_len(errors) && rt_text_byte(wrapping(rt_text_data(errors) + end)).bit_and(I64{192}) == (I64{128}) -> end -= I64{1}
     rt_text_append(cause, rt_text_data(errors), end)
     jet_rt_handle_drop_process_receipt(receipt)
     process_execution_error(spec, HOST_IO_OP_CLOSE, jet_rt_string_builder_finish(cause), err)

@@ -1,7 +1,7 @@
 // Source/LSP/Position.rs: LspPos, LspRange, LineTable and position/edit helpers.
 // Source/LSP/Server.rs:809–827: bounded protocol uinteger/position/range decoding.
 // All offsets and Span endpoints are UTF-8 bytes; character is UTF-16 units.
-use jet_foundation.[Span, diagnostic_utf8_width]
+use jet_foundation.[Span, diagnostic_utf8_width, foundation_json_integer]
 use core.encoding.[Dyn]
 use jet_devserver.[number]
 
@@ -141,7 +141,7 @@ fn lsp_range_json(range: LSPRange) -> String Never! {
 }
 
 fn lsp_uinteger(value: Dyn) -> Int? Never! {
-    if value == .Int(number) {
+    if foundation_json_integer(value) == .Val(number) {
         if number >= 0 && number <= 2147483647 -> return Val(number)
     }
     None

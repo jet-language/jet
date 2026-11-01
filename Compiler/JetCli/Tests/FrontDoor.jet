@@ -1,7 +1,7 @@
 // The real front door keeps opaque engine arguments and renderable channels.
 use jet_cli.[
-    JET_CLI_JETPACK_BINARY, JetCLIPlan, jet_cli_command_help, jet_cli_engine_commands, jet_cli_help,
-    jet_cli_plan, jet_cli_renderable, jet_cli_structural_help,
+    JET_CLI_JETPACK_BINARY, JetCLIPlan, jet_cli_alias_args, jet_cli_command_help, jet_cli_engine_commands,
+    jet_cli_help, jet_cli_plan, jet_cli_renderable, jet_cli_structural_help,
 ]
 use jet_driver.[JET_DRIVER_EXIT_USAGE]
 
@@ -71,4 +71,28 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
     cli_front_fixture_done(jet_cli_plan([String]{"try"}), "", jet_cli_command_help("try"), JET_DRIVER_EXIT_USAGE)
     cli_front_fixture_done(jet_cli_plan([String]{"try", "--keep", "--quiet"}), "", "", JET_DRIVER_EXIT_USAGE)
     cli_front_fixture_done(jet_cli_plan([String]{"try", "--json"}), "", "", JET_DRIVER_EXIT_USAGE)
+}
+
+fn cli_front_alias_fixture(alias: String, verb: String) Never! {
+    tail :: [String]{"-c", "main.c", "--", "source with spaces.c"}
+    argv := [String]{alias}
+    expected := [String]{}
+    if verb != "" -> &expected.push(verb)
+    loop argument in tail {
+        &argv.push(argument)
+        &expected.push(argument)
+    }
+    assert_eq(jet_cli_alias_args(argv), expected)
+    if verb != "" -> cli_front_fixture_engine(jet_cli_plan(jet_cli_alias_args(argv)), verb, expected)
+}
+
+// cc-driver.md: `jet-cc` is `jet cc`; `jet-cxx` and `jet-c++` are `jet c++`.
+#Test("compiler aliases select their verb from argv0") {
+    cli_front_alias_fixture("jet-cc", "cc")
+    cli_front_alias_fixture("/opt/jet/bin/jet-cxx", "c++")
+    cli_front_alias_fixture("../bin/jet-c++", "c++")
+    cli_front_alias_fixture("C:\\jet\\jet-cc.exe", "cc")
+    loop name in ([String]{"jet", "/usr/bin/jet", "jet-ccx", "xjet-cc", "jet-cc.sh"}) -> cli_front_alias_fixture(name, "")
+    assert_eq(jet_cli_alias_args([String]{}), [String]{})
+    assert_eq(jet_cli_alias_args([String]{"jet-cc"}), [String]{"cc"})
 }

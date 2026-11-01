@@ -1,21 +1,54 @@
 // REPL source classification. Rust: jet-repl lib.rs 1591-1634, 1709-1788,
 // 1839-1999. This adapter feeds the canonical parser; it owns no interpreter.
-use jet_foundation.[Diagnostic, Item, ParseResult, Stmt]
+// Every input the parser accepts is checked by the compiler on the shared
+// path (`jet repl`, JetCli Repl.jet); nothing here refuses a feature by name.
+use jet_foundation.[Diagnostic, DiagnosticLabel, Item, ParseResult, Span, Stmt, TextEdit]
 use jet_lexer.[lex]
 use jet_parser.[parse_generated_source, parse_source]
 
 enum ReplInput {
     Meta(command: String, argument: String?)
-    Stmts(body: [Stmt], suppress_echo: Bool, check_source: String)
+    // `check_source` is the user's statement text; `echo` marks the
+    // expression form, whose value the session binds and shows.
+    Stmts(body: [Stmt], suppress_echo: Bool, echo: Bool, check_source: String)
     Item(source: String)
     Import(source: String)
     Empty
-    Reject(feature: String)
 }
 
 enum ReplInputParse {
     Accepted(input: ReplInput)
+    // Spans are anchored to the user's input text (lib.rs `reanchor_repl_diagnostic`).
     Rejected(diagnostics: [Diagnostic])
+}
+
+// lib.rs `reanchor_repl_diagnostic`: shift a span `offset` bytes back to the
+// user's input; a span inside the generated wrapper clamps to 0.
+fn repl_reanchor_span(span: Span, offset: Int) -> Span Never! {
+    start :: if span.start - offset < 0 -> 0 else -> span.start - offset
+    end :: if span.end - offset < 0 -> start else -> span.end - offset
+    Span{start: start, end: if end < start -> start else -> end}
+}
+
+// Every span a report renders (primary, labels, edit), shifted to the input.
+fn repl_reanchor(diagnostic: ^Diagnostic, offset: Int) -> Diagnostic Never! {
+    updated := diagnostic
+    if updated.span == .Val(span) -> updated.span = Val(repl_reanchor_span(span, offset))
+    labels := [DiagnosticLabel]{}
+    loop label in updated.labels -> &labels.push(DiagnosticLabel{span: repl_reanchor_span(label.span, offset), message: label.message})
+    updated.labels = labels
+    if updated.edit == .Val(edit) -> updated.edit = Val(TextEdit{span: repl_reanchor_span(edit.span, offset), new_text: edit.new_text})
+    updated
+}
+
+fn repl_reanchor_all(diagnostics: [Diagnostic], offset: Int) -> [Diagnostic] Never! {
+    shifted := [Diagnostic]{}
+    loop diagnostic in diagnostics -> &shifted.push(repl_reanchor(diagnostic.copy(), offset))
+    shifted
+}
+
+fn repl_rejected(diagnostics: [Diagnostic], offset: Int) -> ReplInputParse Never! {
+    ReplInputParse.Rejected{diagnostics: repl_reanchor_all(diagnostics, offset)}
 }
 
 fn repl_skip_leading_comments(source: String) -> String Never! {
@@ -64,55 +97,6 @@ fn repl_looks_like_import(source: String) -> Bool Never! {
     text.starts_with("use ") || text == "use"
 }
 
-fn repl_import_path(source: String) -> String? Never! {
-    text := source
-    if text.starts_with("pub ") -> text = text.slice(4..<text.len())
-    if !text.starts_with("use ") -> return None
-    rest :: text.slice(4..<text.len()).trim_start()
-    end := rest.len()
-    bytes :: rest.bytes()
-    loop index in 0..<bytes.len() {
-        byte :: bytes[index]
-        if byte == 9 || byte == 10 || byte == 11 || byte == 12 || byte == 13 || byte == 32 {
-            end = index
-            break
-        }
-    }
-    if end == 0 -> return None
-    loop end > 0 && bytes[end - 1] == 59 -> end -= 1
-    Val(rest.slice(0..<end))
-}
-
-fn repl_reject_feature(source: String) -> String? Never! {
-    text :: source.trim()
-    import :: repl_import_path(text)
-    if text.contains("#Unsafe") && !(text.contains("core.crypto.expert") || text.contains("core.crypto.vault") || text.contains("expert.")) {
-        return Val("`#Unsafe`")
-    }
-    if text.contains("extern rust") -> return Val("`extern rust`")
-    if text.contains("#Extern") || text.contains("#Bindgen") {
-        return Val("C-FFI (`#Extern`/`#Bindgen`)")
-    }
-    if text.contains("core.tasks") || text.contains("core.channels") {
-        return Val("tasks/channels (`core.tasks`)")
-    }
-    if text.contains("core.mem") -> return Val("`core.mem` (low-level memory tier)")
-    if text.contains("core.http") -> return Val("the HTTP client/server (`core.http`)")
-    if text.contains("core.db") -> return Val("`core.db` (SQLite)")
-    if import != Val("core.reactive.loadable") && text.contains("core.reactive") {
-        return Val("`core.reactive`")
-    }
-    if import != Val("core.crypto.expert") && text.contains("core.crypto") {
-        return Val("`core.crypto`")
-    }
-    if text.contains("core.auth") -> return Val("`core.auth` token verification")
-    if text.contains("core.log") -> return Val("`core.log`")
-    if text.contains("core.term") || text.contains("live {{") || text.contains("live{{") {
-        return Val("`core.term` / `live` blocks (terminal direct-input)")
-    }
-    None
-}
-
 fn repl_starts_with_stmt_keyword(text: String) -> Bool Never! {
     text.contains("::") || text.contains(":=") || text.starts_with("return ") || text.starts_with("return") || text.starts_with("if ") || text.starts_with("loop ") || text.starts_with("break") || text.starts_with("continue") || text.starts_with("print(") || text.starts_with("eprint(")
 }
@@ -147,16 +131,12 @@ fn repl_classify(source: String, step: Int) -> ReplInputParse {
         name :: text.slice(1..<text.len()).trim()
         return ReplInputParse.Accepted{input: ReplInput.Meta{command: "?", argument: if name == "" -> None else -> Val(name)}}
     }
-    if repl_reject_feature(text) == .Val(feature) {
-        return ReplInputParse.Accepted{input: ReplInput.Reject{feature: feature}}
-    }
+    header :: "// repl:{step}\n"
     if repl_looks_like_import(text) {
         normalized :: text.trim_end()
-        full :: "// repl:{step}\n{normalized}\n"
+        full :: "{header}{normalized}\n"
         parsed :: parse_source(full.bytes())
-        if parsed.diagnostics.len() > 0 {
-            return ReplInputParse.Rejected{diagnostics: parsed.diagnostics}
-        }
+        if parsed.diagnostics.len() > 0 -> return repl_rejected(parsed.diagnostics, header.len())
         if parsed.program.items.len() == 0 && parsed.program.imports.len() > 0 {
             return ReplInputParse.Accepted{input: ReplInput.Import{source: "{normalized}\n"}}
         }
@@ -164,40 +144,37 @@ fn repl_classify(source: String, step: Int) -> ReplInputParse {
     suppress :: text.ends_with(";") && !repl_looks_like_item(text) && !text.ends_with("}};")
     if repl_looks_like_item(text) {
         item_source :: "{text}\n"
-        parsed :: parse_source("// repl:{step}\n{item_source}".bytes())
-        if parsed.diagnostics.len() > 0 {
-            return ReplInputParse.Rejected{diagnostics: parsed.diagnostics}
-        }
+        parsed :: parse_source("{header}{item_source}".bytes())
+        if parsed.diagnostics.len() > 0 -> return repl_rejected(parsed.diagnostics, header.len())
         return ReplInputParse.Accepted{input: ReplInput.Item{source: item_source}}
     }
     user_lexed :: lex(text.bytes())
-    if user_lexed.diagnostics.len() > 0 {
-        return ReplInputParse.Rejected{diagnostics: user_lexed.diagnostics}
-    }
+    if user_lexed.diagnostics.len() > 0 -> return repl_rejected(user_lexed.diagnostics, 0)
     plain_input :: text.trim_end()
-    plain_source :: "// repl:{step}\nfn __repl__() {{\n{plain_input}\n}}\n"
+    wrapper :: "{header}fn __repl__() {{\n"
+    plain_source :: "{wrapper}{plain_input}\n}}\n"
     plain_attempt := ParseResult?{None}
     if repl_starts_with_stmt_keyword(text) || suppress {
         parsed :: parse_generated_source(plain_source.bytes())
         if parsed.diagnostics.len() == 0 && repl_first_function_body(parsed.program.items) == .Val(body) {
             if body.len() > 0 {
-                return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, check_source: plain_input}}
+                return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
             }
         }
         plain_attempt = Val(parsed)
     }
     echo_stmt :: "__repl_echo__ :: {text}"
-    echo_source :: "// repl:{step}\nfn __repl__() {{\n{echo_stmt}\n}}\n"
+    echo_source :: "{wrapper}{echo_stmt}\n}}\n"
     echo :: parse_generated_source(echo_source.bytes())
     if echo.diagnostics.len() == 0 && repl_first_function_body(echo.program.items) == .Val(body) {
         if body.len() > 0 {
-            return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, check_source: echo_stmt}}
+            return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: true, check_source: plain_input}}
         }
     }
     plain :: plain_attempt ?? parse_generated_source(plain_source.bytes())
-    if plain.diagnostics.len() > 0 -> return ReplInputParse.Rejected{diagnostics: plain.diagnostics}
+    if plain.diagnostics.len() > 0 -> return repl_rejected(plain.diagnostics, wrapper.len())
     if repl_first_function_body(plain.program.items) == .Val(body) {
-        return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, check_source: plain_input}}
+        return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, echo: false, check_source: plain_input}}
     }
     ReplInputParse.Accepted{input: ReplInput.Empty}
 }

@@ -38,8 +38,17 @@ fn pkg_data_json_kind(value: Dyn) -> JSONBindKind Never! {
         .Text(_) -> JSONBindKind.Text
         .Array(_) -> JSONBindKind.Array
         .Object(_) -> JSONBindKind.Object
-        else -> JSONBindKind.Other
+        else -> if pkg_data_json_number_lexeme(value) == .Val(_) -> JSONBindKind.Number else -> JSONBindKind.Other
     }
+}
+
+// Core's JSON parser keeps every number as its exact lexeme in a private Dyn
+// carrier, which renders back as that lexeme: the number's spelling, or None
+// for any other value.
+fn pkg_data_json_number_lexeme(value: Dyn) -> String? Never! {
+    text :: json.dumps(value) ?? return None
+    if text == "" || !"-0123456789".contains(text.slice(0..<1)) -> return None
+    Val(text)
 }
 
 // The one type every value shares, and whether any value is null.
@@ -92,6 +101,8 @@ fn pkg_data_json_number_type(numbers: [Dyn]) -> BoundType Never! {
             .Float(_) -> return BoundType.Scalar("Float")
             else -> {}
         }
+        lexeme :: pkg_data_json_number_lexeme(value) ?? next
+        if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return BoundType.Scalar("Float")
     }
     BoundType.Scalar("Int")
 }

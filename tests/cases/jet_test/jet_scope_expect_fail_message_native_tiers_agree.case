@@ -1,0 +1,20 @@
+# Port of jet_test.rs::jet_scope_expect_fail_message_native_tiers_agree (#6196):
+# an `.expect_fail(code?, message:)` region catches the raw panic stop and
+# checks its code and message the same way on none/basic/full.
+fixture: fixtures/package
+env: NO_COLOR=1
+step o0: jet test --show-default --capture=all --optimize=none {root}/tests/fixtures/scope_expect_fail_message.jet
+exit: 1
+stdout: = "message substring matches: pass\ncode and message match: pass\nwrong message fails: FAIL\nwrong code fails: FAIL\nclean finish fails: FAIL\ncase sensitive message fails: FAIL\nrendered prefix is not message: FAIL\ncollision mutation fails: FAIL\n2 passed, 6 failed, 0 skipped\n"
+stderr: ~ "expected a stop whose message contains \"fingerprint collision\", got E3001: assertion failed: modules.len() > 0" # the raw panic text, not the rendered report, is compared
+stderr: ~ "expected a stop with E3010 whose message contains \"fingerprint collision\", got E3001: fingerprint collision" # the code is checked as well as the message
+stderr: ~ "but it passed" # a region that finishes cleanly is the unmet expectation
+stderr: ~ "got E3001: internal compiler error: E0859 generic module instance digest conflict" # a one-phrase mutation of the expected message fails
+step: jet test --show-default --capture=all --optimize=basic {root}/tests/fixtures/scope_expect_fail_message.jet
+exit: 1
+stdout: == o0
+stderr: == o0
+step: jet test --show-default --capture=all --optimize=full {root}/tests/fixtures/scope_expect_fail_message.jet
+exit: 1
+stdout: == o0
+stderr: == o0

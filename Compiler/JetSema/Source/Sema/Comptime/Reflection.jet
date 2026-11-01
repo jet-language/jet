@@ -682,7 +682,7 @@ fn sema_comptime_reflection_layout_info(kind: String, guarantee: String, source:
 fn sema_comptime_reflection_struct_layout(definition: StructDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue Never! {
     target :: jet_target_layout_engine_target(engine)
     kind := "default"
-    guarantee := "physical layout unspecified"
+    guarantee := "optimized"
     if definition.layout == {
         .Val(layout) -> if layout == {
             .C -> {
@@ -714,11 +714,15 @@ fn sema_comptime_reflection_struct_layout(definition: StructDef, engine: TargetL
         }
         .None -> {}
     }
+    // A field reports its layout shape name (`Rename(layout: …)`), so typed
+    // `[.name]` selection and `.name` read the one shape fact; the byte facts
+    // stay keyed by the declared field.
     layout_fields := [TComptimeValue]{}
     loop field_index in 0..<definition.fields.len() {
         if definition.fields[field_index].computed != None -> next
         layout_fact :: sema_comptime_reflection_layout_field(facts, definition.fields[field_index].name)
-        &layout_fields.push(sema_comptime_reflection_layout_field_info(definition.fields[field_index].name, definition.fields[field_index].ty, target, guarantee, "struct declaration", layout_fact))
+        layout_name :: sema_checked_field_shape_names(definition, definition.fields[field_index]).layout ?? definition.fields[field_index].name
+        &layout_fields.push(sema_comptime_reflection_layout_field_info(layout_name, definition.fields[field_index].ty, target, guarantee, "struct declaration", layout_fact))
     }
     sema_comptime_reflection_layout_info(kind, guarantee, "struct declaration", target, facts, requested, effective, layout_fields)
 }
@@ -1592,6 +1596,14 @@ fn sema_comptime_reflection_type_info(
         }
     }
     declaration :: item ?? return None
+    // An alias names the same type as its target, so it reflects the target.
+    if declaration == .TypeAlias(definition) {
+        row :: sema_type_resolve_nominal_row_at(graph, definition.target, index) ?? return None
+        target_module :: graph.modules[row.module_index]
+        target_name :: target_module.nominals[row.row].symbol.name
+        if row.module_index == index && target_name == type_name -> return None
+        return sema_comptime_reflection_type_info(graph, target_module.module_identity, target_name, catalog)
+    }
     registry :: sema_scope_members_build_marker_registry(graph, module_identity, registered_module.program, catalog) ?? return None
     engine :: sema_comptime_reflection_layout_engine(graph)
     identity := "{module_identity}::{type_name}"

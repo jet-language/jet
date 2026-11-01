@@ -3,7 +3,9 @@
 // while the allocator is live, `reset` reuses the storage once every view is
 // dead, exhaustion is a typed `AllocError` value (D-ALLOCFAIL1), and there is
 // no heap fallback: the number of Int allocations that fit is bounded by the
-// 128-byte buffer and is the same after a reset.
+// 128-byte buffer and is the same after a reset. Each allocation takes its
+// payload from the buffer's start and its 32-byte reverse-drop header from
+// the buffer's end, and an allocation fails before the two meet.
 use core.mem
 
 struct Point {
@@ -27,7 +29,9 @@ fn run() {
     print("after reset {again}")
     &fixed.reset()
 
-    // Exhaustion is a typed failure; the count cannot exceed 128 / 8.
+    // Exhaustion is a typed failure. One Int allocation uses 8 payload bytes
+    // plus a 32-byte header: 3 of them use 3 * (8 + 32) = 120 of the 128
+    // bytes, and a fourth would need 160, so exactly 3 fit.
     fills := [Int]{}
     round := 0
     loop round < 2 {

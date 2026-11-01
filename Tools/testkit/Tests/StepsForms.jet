@@ -94,11 +94,25 @@ use core.encoding.hex as hex
     root :: cases_test_root("forms-captures")
     directory :: files.join(root, "tests/cases/group")
     kit_exec_write(files.join(directory, "sorted.txt"), "a\nb\n")
-    source :: "step first: printf 'b\\na\\n'\ncapture: n = lines stdout\ncapture: text = text stdout\ncap:text: lines = {{cap:n}} # original predicate\ncap:text: sorted-lines = sorted.txt # original predicate\nstep second: printf 'b\\na\\nb\\na\\n'\nstdout: lines = 2*{{cap:n}} # original predicate\nstdout: lines = {{cap:n}}+2 # original predicate\nstdout: != first # original predicate\nstdout: in-order-of {{cap:text}} # original predicate\n"
+    source :: "step first: printf 'b\\\\na\\\\n'\ncapture: n = lines stdout\ncapture: text = text stdout\ncap:text: lines = {{cap:n}} # original predicate\ncap:text: sorted-lines = sorted.txt # original predicate\nstep second: printf 'b\\\\na\\\\nb\\\\na\\\\n'\nstdout: lines = 2*{{cap:n}} # original predicate\nstdout: lines = {{cap:n}}+2 # original predicate\nstdout: != first # original predicate\nstdout: in-order-of {{cap:text}} # original predicate\n"
     assert_eq(cases_test_advanced(root, "capture", source).verdict.status, "PASS")
     wrong :: "step first: printf a\nstep second: printf a\nstdout: != first # original predicate\n"
     assert_eq(cases_test_advanced(root, "equal", wrong).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove forms capture scratch")
+}
+
+#Test("integer capture arithmetic right-hand sides and captured transform offsets execute from case text") {
+    root :: cases_test_root("forms-arithmetic")
+    prefix :: "write: data = \"abcdef\"\nwrite: pad = \"XX\"\nwrite: tail = \"XXhello\"\ncapture: n = size file data\ncapture: start = size file pad\ncapture: end = size file tail\n"
+    good :: "{prefix}file: data size = {{cap:n}}+0\nfile: data size <= 2*{{cap:n}}\nfile: data size < {{cap:n}}+1\nfile.slice({{cap:start}},{{cap:end}}): tail ~ \"hello\" # captured byte span\nstep: printf '{{\"double\":12,\"more\":7}}'\njson: stdout doc $.double = 2*{{cap:n}}\njson: stdout doc $.more >= {{cap:n}}+1\njson: stdout doc $.more != {{cap:n}}+2\n"
+    assert_eq(cases_test_advanced(root, "good", good).verdict.status, "PASS")
+    loop (index, wrong) in ["file: data size = 2*{{cap:n}}", "file.slice({{cap:end}},{{cap:end}}): tail ~ \"h\" # captured byte span", "step: printf '{{\"double\":12}}'\njson: stdout doc $.double = {{cap:n}}+1"] {
+        assert_eq(cases_test_advanced(root, "wrong-{index}", "{prefix}{wrong}\n").verdict.status, "FAIL")
+    }
+    loop (index, invalid) in ["file: data size = {{cap:n}}-1", "step: printf '[]'\njson: stdout doc $ has 2*{{cap:n}}", "step: printf x\nstdout.slice({{cap:start}},x): ~ \"x\" # captured byte span"] {
+        assert_eq(cases_test_advanced(root, "invalid-{index}", "{prefix}{invalid}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove arithmetic scratch")
 }
 
 #Test("comptime_diff parity hex frames preserve newline delimiter payloads and reject same-length inequality") {
@@ -124,9 +138,9 @@ use core.encoding.hex as hex
 
 #Test("normalize_journey_paths ports checked_text line paths CRLF and final LF through real cases") {
     root :: cases_test_root("forms-journey-paths")
-    source :: "step: printf 'error (some/thing.jet:12)\\r\\nnote (other.txt:1)\\n'\nstdout.normalize_journey_paths: = \"error (<source>:12)\\nnote (other.txt:1)\\n\" # original checked_text.rs135-156\n"
+    source :: "step: printf 'error (some/thing.jet:12)\\\\r\\\\nnote (other.txt:1)\\\\n'\nstdout.normalize_journey_paths: = \"error (<source>:12)\\nnote (other.txt:1)\\n\" # original checked_text.rs135-156\n"
     assert_eq(cases_test_advanced(root, "normalize", source).verdict.status, "PASS")
-    malformed :: "step: printf 'prefix : suffix (file.jet\\n'\nstdout.normalize_journey_paths: = \"unused\" # original checked_text.rs135-156 invalid slice\n"
+    malformed :: "step: printf 'prefix : suffix (file.jet\\\\n'\nstdout.normalize_journey_paths: = \"unused\" # original checked_text.rs135-156 invalid slice\n"
     assert_eq(cases_test_advanced(root, "bad-range", malformed).verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove journey path scratch")
 }

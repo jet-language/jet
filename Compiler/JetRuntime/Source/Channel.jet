@@ -8,36 +8,36 @@
 // Single wake is Vec::pop (LIFO); close walks Vec insertion order (FIFO).
 
 fn channel_update(channel: I64) {
-    jet_rt_observe_channel_update(sync_load(channel + I64{136}), sync_load(channel + I64{16}), sync_load(channel + I64{152}), sync_load(channel + I64{144}), sync_load(channel + I64{88}))
+    jet_rt_observe_channel_update(sync_load(wrapping(channel + I64{136})), sync_load(wrapping(channel + I64{16})), sync_load(wrapping(channel + I64{152})), sync_load(wrapping(channel + I64{144})), sync_load(wrapping(channel + I64{88})))
 }
 
 fn channel_new(bound: I64, kind: I64, delay_ms: I64) -> I64 {
     channel :: jet_rt_alloc(I64{160}, I64{8})
     thread_zero(channel, I64{160})
-    sync_store(channel + I64{8}, I64{1})
-    sync_store(channel + I64{48}, bound)
-    sync_store(channel + I64{104}, kind)
-    sync_store(channel + I64{112}, delay_ms)
-    sync_store(channel + I64{128}, I64{1})
-    sync_store(channel + I64{136}, jet_rt_observe_channel_new(if (bound >= I64{0}) -> I64{1} else -> I64{0}, bound))
+    sync_store(wrapping(channel + I64{8}), I64{1})
+    sync_store(wrapping(channel + I64{48}), bound)
+    sync_store(wrapping(channel + I64{104}), kind)
+    sync_store(wrapping(channel + I64{112}), delay_ms)
+    sync_store(wrapping(channel + I64{128}), I64{1})
+    sync_store(wrapping(channel + I64{136}), jet_rt_observe_channel_new(if (bound >= I64{0}) -> I64{1} else -> I64{0}, bound))
     channel_update(channel)
     channel
 }
 
-fn channel_retain(channel: I64) { _ := sync_add(channel + I64{8}, I64{1}) }
+fn channel_retain(channel: I64) { _ := sync_add(wrapping(channel + I64{8}), I64{1}) }
 
 fn channel_release(channel: I64) {
-    if (sync_add(channel + I64{8}, I64{-1}) != I64{1}) {
+    if (sync_add(wrapping(channel + I64{8}), I64{-1}) != I64{1}) {
         return
     }
-    meta :: sync_load(channel + I64{56})
-    capacity :: sync_load(channel + I64{24})
-    data :: sync_load(channel + I64{32})
+    meta :: sync_load(wrapping(channel + I64{56}))
+    capacity :: sync_load(wrapping(channel + I64{24}))
+    data :: sync_load(wrapping(channel + I64{32}))
     stride :: if (meta == I64{0}) -> I64{0} else -> coll_size(meta)
     if (meta != I64{0}) {
         jet_rt_session_shield_enter()
-        length :: sync_load(channel + I64{16})
-        head :: sync_load(channel + I64{40})
+        length :: sync_load(wrapping(channel + I64{16}))
+        head :: sync_load(wrapping(channel + I64{40}))
         at := I64{0}
         loop at < length {
             coll_slot_drop(data + ((head + at) % capacity) * coll_size(meta), meta)
@@ -47,55 +47,55 @@ fn channel_release(channel: I64) {
         jet_rt_session_shield_leave()
     }
     if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
-    jet_rt_observe_channel_drop(sync_load(channel + I64{136}))
+    jet_rt_observe_channel_drop(sync_load(wrapping(channel + I64{136})))
     jet_rt_free(channel, I64{160}, I64{8})
 }
 
 fn channel_grow(channel: I64, needed: I64) {
-    capacity :: sync_load(channel + I64{24})
+    capacity :: sync_load(wrapping(channel + I64{24}))
     if (needed <= capacity) {
         return
     }
     grown := if (capacity == I64{0}) -> I64{4} else -> capacity
     loop grown < needed -> grown *= I64{2}
-    bound :: sync_load(channel + I64{48})
+    bound :: sync_load(wrapping(channel + I64{48}))
     if (bound > I64{0} && grown > bound) { grown = bound }
-    meta :: sync_load(channel + I64{56})
+    meta :: sync_load(wrapping(channel + I64{56}))
     stride :: coll_size(meta)
     buffer :: jet_rt_alloc(grown * stride, I64{8})
-    data :: sync_load(channel + I64{32})
-    length :: sync_load(channel + I64{16})
-    head :: sync_load(channel + I64{40})
+    data :: sync_load(wrapping(channel + I64{32}))
+    length :: sync_load(wrapping(channel + I64{16}))
+    head :: sync_load(wrapping(channel + I64{40}))
     at := I64{0}
     loop at < length {
-        coll_copy(data + ((head + at) % capacity) * stride, buffer + at * stride, coll_payload(meta))
+        coll_copy(wrapping(data + ((head + at) % capacity) * stride), wrapping(buffer + at * stride), coll_payload(meta))
         at += I64{1}
     }
     if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
-    sync_store(channel + I64{24}, grown)
-    sync_store(channel + I64{32}, buffer)
-    sync_store(channel + I64{40}, I64{0})
+    sync_store(wrapping(channel + I64{24}), grown)
+    sync_store(wrapping(channel + I64{32}), buffer)
+    sync_store(wrapping(channel + I64{40}), I64{0})
 }
 
 fn channel_wait_add(channel: I64, node: I64, sending: Bool) {
     offset :: if sending -> I64{72} else -> I64{64}
     count :: if sending -> I64{152} else -> I64{144}
-    sync_store(node, sync_load(channel + offset))
-    sync_store(node + I64{16}, (sync_load(node + I64{16}).bit_and(I64{2})).bit_or(I64{1}))
-    sync_store(channel + offset, node)
-    _ := sync_add(channel + count, I64{1})
+    sync_store(node, sync_load(wrapping(channel + offset)))
+    sync_store(wrapping(node + I64{16}), (sync_load(wrapping(node + I64{16})).bit_and(I64{2})).bit_or(I64{1}))
+    sync_store(wrapping(channel + offset), node)
+    _ := sync_add(wrapping(channel + count), I64{1})
 }
 
 fn channel_wait_remove(channel: I64, node: I64, sending: Bool) {
-    if ((sync_load(node + I64{16}).bit_and(I64{1})) == I64{0}) {
+    if ((sync_load(wrapping(node + I64{16})).bit_and(I64{1})) == I64{0}) {
         return
     }
     link := channel + (if sending -> I64{72} else -> I64{64})
     loop sync_load(link) != (I64{0}) {
         if (sync_load(link) == node) {
             sync_store(link, sync_load(node))
-            sync_store(node + I64{16}, sync_load(node + I64{16}).bit_and(I64{2}))
-            _ := sync_add(channel + (if sending -> I64{152} else -> I64{144}), I64{-1})
+            sync_store(wrapping(node + I64{16}), sync_load(wrapping(node + I64{16})).bit_and(I64{2}))
+            _ := sync_add(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{-1})
             return
         }
         link = sync_load(link)
@@ -104,21 +104,21 @@ fn channel_wait_remove(channel: I64, node: I64, sending: Bool) {
 
 fn channel_wake_one(channel: I64, sending: Bool) {
     offset :: if sending -> I64{72} else -> I64{64}
-    node :: sync_load(channel + offset)
+    node :: sync_load(wrapping(channel + offset))
     if (node == I64{0}) {
         return
     }
-    sync_store(channel + offset, sync_load(node))
-    sync_store(node + I64{16}, I64{2})
-    _ := sync_add(channel + (if sending -> I64{152} else -> I64{144}), I64{-1})
-    sync_park_wake(sync_load(node + I64{8}))
+    sync_store(wrapping(channel + offset), sync_load(node))
+    sync_store(wrapping(node + I64{16}), I64{2})
+    _ := sync_add(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{-1})
+    sync_park_wake(sync_load(wrapping(node + I64{8})))
 }
 
 fn channel_wake_all(channel: I64, sending: Bool) {
     offset :: if sending -> I64{72} else -> I64{64}
-    node := sync_load(channel + offset)
-    sync_store(channel + offset, I64{0})
-    sync_store(channel + (if sending -> I64{152} else -> I64{144}), I64{0})
+    node := sync_load(wrapping(channel + offset))
+    sync_store(wrapping(channel + offset), I64{0})
+    sync_store(wrapping(channel + (if sending -> I64{152} else -> I64{144})), I64{0})
     ordered := I64{0}
     loop node != (I64{0}) {
         following :: sync_load(node)
@@ -128,8 +128,8 @@ fn channel_wake_all(channel: I64, sending: Bool) {
     }
     loop ordered != (I64{0}) {
         following :: sync_load(ordered)
-        sync_store(ordered + I64{16}, I64{2})
-        sync_park_wake(sync_load(ordered + I64{8}))
+        sync_store(wrapping(ordered + I64{16}), I64{2})
+        sync_park_wake(sync_load(wrapping(ordered + I64{8})))
         ordered = following
     }
 }
@@ -138,17 +138,17 @@ fn channel_wake_all(channel: I64, sending: Bool) {
 // Wake history survives re-registration; waiter layout remains 24 bytes.
 fn channel_select_remove(channel: I64, node: I64) {
     sync_mutex_lock(channel)
-    woken :: (sync_load(node + I64{16}).bit_and(I64{2})) != I64{0}
+    woken :: (sync_load(wrapping(node + I64{16})).bit_and(I64{2})) != I64{0}
     channel_wait_remove(channel, node, false)
-    if (woken && sync_load(channel + I64{16}) != I64{0}) { channel_wake_one(channel, false) }
+    if (woken && sync_load(wrapping(channel + I64{16})) != I64{0}) { channel_wake_one(channel, false) }
     channel_update(channel)
     sync_mutex_unlock(channel)
 }
 
 fn channel_close(channel: I64, cancelled: Bool) {
     sync_mutex_lock(channel)
-    sync_store(channel + I64{88}, I64{1})
-    if cancelled -> sync_store(channel + I64{96}, I64{1})
+    sync_store(wrapping(channel + I64{88}), I64{1})
+    if cancelled -> sync_store(wrapping(channel + I64{96}), I64{1})
     channel_wake_all(channel, false)
     channel_wake_all(channel, true)
     channel_update(channel)
@@ -156,13 +156,13 @@ fn channel_close(channel: I64, cancelled: Bool) {
 }
 
 fn channel_pop_locked(channel: I64, out: I64) -> Bool {
-    length :: sync_load(channel + I64{16})
+    length :: sync_load(wrapping(channel + I64{16}))
     if (length == I64{0}) { return false }
-    head :: sync_load(channel + I64{40})
-    meta :: sync_load(channel + I64{56})
-    coll_copy(sync_load(channel + I64{32}) + head * coll_size(meta), out, coll_payload(meta))
-    sync_store(channel + I64{40}, (head + I64{1}) % sync_load(channel + I64{24}))
-    sync_store(channel + I64{16}, length - I64{1})
+    head :: sync_load(wrapping(channel + I64{40}))
+    meta :: sync_load(wrapping(channel + I64{56}))
+    coll_copy(wrapping(sync_load(wrapping(channel + I64{32})) + head * coll_size(meta)), out, coll_payload(meta))
+    sync_store(wrapping(channel + I64{40}), (head + I64{1}) % sync_load(wrapping(channel + I64{24})))
+    sync_store(wrapping(channel + I64{16}), length - I64{1})
     channel_wake_one(channel, true)
     true
 }
@@ -172,7 +172,7 @@ fn channel_pop_locked(channel: I64, out: I64) -> Bool {
 fn channel_wait_new(slot: I64) -> I64 {
     node :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(node, I64{24})
-    sync_store(node + I64{8}, slot)
+    sync_store(wrapping(node + I64{8}), slot)
     node
 }
 
@@ -190,7 +190,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
             sync_mutex_unlock(channel)
             break
         }
-        if (sync_load(channel + I64{88}) != I64{0}) {
+        if (sync_load(wrapping(channel + I64{88})) != I64{0}) {
             channel_update(channel)
             sync_mutex_unlock(channel)
             break
@@ -226,7 +226,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
         if (bound < I64{1}) { bound = I64{1} }
     }
     channel :: channel_new(bound, I64{0}, I64{0})
-    sync_store(channel + I64{120}, I64{1})
+    sync_store(wrapping(channel + I64{120}), I64{1})
     channel_retain(channel)
     sync_store(tx, channel)
     sync_store(rx, channel)
@@ -240,22 +240,22 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
         sync_mutex_lock(channel)
-        if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
+        if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
             channel_update(channel)
             sync_mutex_unlock(channel)
             break
         }
-        bound :: sync_load(channel + I64{48})
-        length :: sync_load(channel + I64{16})
-        reserved :: sync_load(channel + I64{80})
+        bound :: sync_load(wrapping(channel + I64{48}))
+        length :: sync_load(wrapping(channel + I64{16}))
+        reserved :: sync_load(wrapping(channel + I64{80}))
         if (bound < I64{0} || length + reserved < bound) {
-            if (sync_load(channel + I64{56}) == I64{0}) {
-                sync_store(channel + I64{56}, coll_meta_copy(meta))
+            if (sync_load(wrapping(channel + I64{56})) == I64{0}) {
+                sync_store(wrapping(channel + I64{56}), coll_meta_copy(meta))
             }
             channel_grow(channel, length + reserved + I64{1})
-            target :: sync_load(channel + I64{32}) + ((sync_load(channel + I64{40}) + length) % sync_load(channel + I64{24})) * coll_size(meta)
+            target :: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * coll_size(meta))
             coll_copy(slot, target, coll_payload(meta))
-            sync_store(channel + I64{16}, length + I64{1})
+            sync_store(wrapping(channel + I64{16}), length + I64{1})
             channel_wake_one(channel, false)
             channel_update(channel)
             sync_mutex_unlock(channel)
@@ -294,7 +294,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
 #Export(c) fn jet_rt_native_sender_clone(channel: I64) -> I64 {
     channel_retain(channel)
     sync_mutex_lock(channel)
-    _ := sync_add(channel + I64{120}, I64{1})
+    _ := sync_add(wrapping(channel + I64{120}), I64{1})
     channel_update(channel)
     sync_mutex_unlock(channel)
     channel
@@ -303,7 +303,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
 #Export(c) fn jet_rt_native_receiver_clone(channel: I64) -> I64 {
     channel_retain(channel)
     sync_mutex_lock(channel)
-    _ := sync_add(channel + I64{128}, I64{1})
+    _ := sync_add(wrapping(channel + I64{128}), I64{1})
     channel_update(channel)
     sync_mutex_unlock(channel)
     channel
@@ -314,8 +314,8 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
         return
     }
     sync_mutex_lock(channel)
-    if (sync_add(channel + I64{120}, I64{-1}) == I64{1}) {
-        sync_store(channel + I64{88}, I64{1})
+    if (sync_add(wrapping(channel + I64{120}), I64{-1}) == I64{1}) {
+        sync_store(wrapping(channel + I64{88}), I64{1})
         channel_wake_all(channel, false)
     }
     channel_update(channel)
@@ -328,8 +328,8 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
         return
     }
     sync_mutex_lock(channel)
-    if (sync_add(channel + I64{128}, I64{-1}) == I64{1}) {
-        sync_store(channel + I64{88}, I64{1})
+    if (sync_add(wrapping(channel + I64{128}), I64{-1}) == I64{1}) {
+        sync_store(wrapping(channel + I64{88}), I64{1})
         channel_wake_all(channel, true)
     }
     channel_update(channel)
@@ -339,7 +339,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
 
 #Export(c) fn jet_rt_native_receiver_is_ready(channel: I64) -> I64 {
     sync_mutex_lock(channel)
-    ready :: sync_load(channel + I64{16}) != I64{0} || sync_load(channel + I64{88}) != I64{0}
+    ready :: sync_load(wrapping(channel + I64{16})) != I64{0} || sync_load(wrapping(channel + I64{88})) != I64{0}
     sync_mutex_unlock(channel)
     if ready -> I64{1} else -> I64{0}
 }
@@ -347,7 +347,7 @@ fn channel_receive(channel: I64, out: I64) -> Bool {
 #Export(c) fn jet_rt_native_receiver_try_receive(channel: I64, meta: I64) -> I64 {
     sync_mutex_lock(channel)
     result := I64{0}
-    if (sync_load(channel + I64{16}) != I64{0}) {
+    if (sync_load(wrapping(channel + I64{16})) != I64{0}) {
         result = coll_slot_new(meta)
         _ := channel_pop_locked(channel, result)
     }
@@ -382,24 +382,24 @@ fn channel_reserve_send(channel: I64, meta: I64) -> I64 {
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
         sync_mutex_lock(channel)
-        if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
+        if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
             channel_update(channel)
             sync_mutex_unlock(channel)
             break
         }
-        length :: sync_load(channel + I64{16})
-        reserved :: sync_load(channel + I64{80})
-        bound :: sync_load(channel + I64{48})
+        length :: sync_load(wrapping(channel + I64{16}))
+        reserved :: sync_load(wrapping(channel + I64{80}))
+        bound :: sync_load(wrapping(channel + I64{48}))
         if (bound < I64{0} || length + reserved < bound) {
-            if (sync_load(channel + I64{56}) == I64{0}) {
-                sync_store(channel + I64{56}, coll_meta_copy(meta))
+            if (sync_load(wrapping(channel + I64{56})) == I64{0}) {
+                sync_store(wrapping(channel + I64{56}), coll_meta_copy(meta))
             }
             channel_grow(channel, length + reserved + I64{1})
-            sync_store(channel + I64{80}, reserved + I64{1})
+            sync_store(wrapping(channel + I64{80}), reserved + I64{1})
             channel_retain(channel)
             reservation = jet_rt_alloc(I64{16}, I64{8})
             sync_store(reservation, channel)
-            sync_store(reservation + I64{8}, I64{1})
+            sync_store(wrapping(reservation + I64{8}), I64{1})
             channel_update(channel)
             sync_mutex_unlock(channel)
             break
@@ -431,9 +431,9 @@ fn channel_reservation_drop(reservation: I64) {
     }
     channel :: sync_load(reservation)
     sync_mutex_lock(channel)
-    if (sync_load(reservation + I64{8}) != I64{0}) {
-        sync_store(reservation + I64{8}, I64{0})
-        _ := sync_add(channel + I64{80}, I64{-1})
+    if (sync_load(wrapping(reservation + I64{8})) != I64{0}) {
+        sync_store(wrapping(reservation + I64{8}), I64{0})
+        _ := sync_add(wrapping(channel + I64{80}), I64{-1})
         channel_wake_one(channel, true)
     }
     channel_update(channel)
@@ -447,16 +447,16 @@ fn channel_reservation_drop(reservation: I64) {
 fn channel_reservation_commit(reservation: I64, slot: I64) -> Bool {
     channel :: sync_load(reservation)
     sync_mutex_lock(channel)
-    accepted :: sync_load(channel + I64{88}) == I64{0} && sync_load(channel + I64{128}) != I64{0}
-    _ := sync_add(channel + I64{80}, I64{-1})
-    sync_store(reservation + I64{8}, I64{0})
+    accepted :: sync_load(wrapping(channel + I64{88})) == I64{0} && sync_load(wrapping(channel + I64{128})) != I64{0}
+    _ := sync_add(wrapping(channel + I64{80}), I64{-1})
+    sync_store(wrapping(reservation + I64{8}), I64{0})
     if {
         accepted -> {
-            length :: sync_load(channel + I64{16})
-            meta :: sync_load(channel + I64{56})
-            target :: sync_load(channel + I64{32}) + ((sync_load(channel + I64{40}) + length) % sync_load(channel + I64{24})) * coll_size(meta)
+            length :: sync_load(wrapping(channel + I64{16}))
+            meta :: sync_load(wrapping(channel + I64{56}))
+            target :: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * coll_size(meta))
             coll_copy(slot, target, coll_payload(meta))
-            sync_store(channel + I64{16}, length + I64{1})
+            sync_store(wrapping(channel + I64{16}), length + I64{1})
             channel_wake_one(channel, false)
         }
         else -> channel_wake_one(channel, true)
@@ -474,10 +474,10 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
     closed := true
     at := I64{0}
     loop at < count {
-        channel :: sync_load(receivers + at * I64{8})
+        channel :: sync_load(wrapping(receivers + at * I64{8}))
         sync_mutex_lock(channel)
-        if (sync_load(channel + I64{16}) != I64{0}) {
-            payload :: coll_slot_new(sync_load(channel + I64{56}))
+        if (sync_load(wrapping(channel + I64{16})) != I64{0}) {
+            payload :: coll_slot_new(sync_load(wrapping(channel + I64{56})))
             _ := channel_pop_locked(channel, payload)
             channel_update(channel)
             sync_mutex_unlock(channel)
@@ -485,13 +485,13 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
             sync_store(value, payload)
             return I64{1}
         }
-        if (sync_load(channel + I64{88}) == I64{0}) { closed = false }
+        if (sync_load(wrapping(channel + I64{88})) == I64{0}) { closed = false }
         sync_mutex_unlock(channel)
         at += I64{1}
     }
     at = I64{0}
     loop at < timer_count {
-        if (now >= sync_load(timer_data + at * I64{16})) {
+        if (now >= sync_load(wrapping(timer_data + at * I64{16}))) {
             sync_store(arm, jet_int_owned_from_i64(count + at))
             sync_store(value, I64{0})
             return I64{1}
@@ -506,7 +506,7 @@ fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count
 fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, converted: I64, timer_count: I64) {
     at := I64{0}
     loop at < count {
-        jet_rt_native_receiver_drop(sync_load(receivers + at * I64{8}))
+        jet_rt_native_receiver_drop(sync_load(wrapping(receivers + at * I64{8})))
         at += I64{1}
     }
     if (capacity != I64{0}) { jet_rt_free(receivers, capacity * I64{8}, I64{8}) }
@@ -515,11 +515,11 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
 
 #Export(c) fn jet_rt_native_select_wait(recvs: I64, timers: I64, probing: I64, arm: I64, value: I64) {
     count :: sync_load(recvs)
-    capacity :: sync_load(recvs + I64{8})
-    receivers :: sync_load(recvs + I64{16})
+    capacity :: sync_load(wrapping(recvs + I64{8}))
+    receivers :: sync_load(wrapping(recvs + I64{16}))
     timer_count :: sync_load(timers)
-    timer_capacity :: sync_load(timers + I64{8})
-    durations :: sync_load(timers + I64{16})
+    timer_capacity :: sync_load(wrapping(timers + I64{8}))
+    durations :: sync_load(wrapping(timers + I64{16}))
     thread_zero(recvs, I64{24})
     thread_zero(timers, I64{24})
     converted := I64{0}
@@ -531,7 +531,7 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
     at := I64{0}
     stopped := false
     loop at < timer_count {
-        raw :: sync_load(durations + at * I64{8})
+        raw :: sync_load(wrapping(durations + at * I64{8}))
         nanoseconds :: jet_int_owned_to_i64(raw)
         jet_rt_int_drop(raw)
         if (jet_scheduler_native_propagate() != I64{0}) {
@@ -543,12 +543,12 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
         millis :: nanoseconds /% I64{1000000}
         delay :: if (millis < I64{0}) -> I64{0} else -> millis * I64{1000000}
         deadline :: if (delay > I64{9223372036854775807} - started) -> I64{9223372036854775807} else -> started + delay
-        sync_store(converted + at * I64{16}, deadline)
+        sync_store(wrapping(converted + at * I64{16}), deadline)
         at += I64{1}
     }
     if stopped {
         loop at < timer_count {
-            jet_rt_int_drop(sync_load(durations + at * I64{8}))
+            jet_rt_int_drop(sync_load(wrapping(durations + at * I64{8})))
             at += I64{1}
         }
         if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
@@ -567,9 +567,9 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
         }
         at = I64{0}
         loop at < count {
-            channel :: sync_load(receivers + at * I64{8})
+            channel :: sync_load(wrapping(receivers + at * I64{8}))
             node :: registrations + at * I64{24}
-            sync_store(node + I64{8}, park)
+            sync_store(wrapping(node + I64{8}), park)
             sync_mutex_lock(channel)
             channel_wait_add(channel, node, false)
             channel_update(channel)
@@ -578,7 +578,7 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
         }
         at = I64{0}
         loop at < timer_count {
-            sync_store(converted + at * I64{16} + I64{8}, scheduler_timer_schedule(sync_load(converted + at * I64{16}), park))
+            sync_store(wrapping(wrapping(converted + at * I64{16}) + I64{8}), scheduler_timer_schedule(sync_load(wrapping(converted + at * I64{16})), park))
             at += I64{1}
         }
         reason :: channel_text(I64{2})
@@ -586,10 +586,10 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
             if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
             at = I64{0}
             loop at < count {
-                channel :: sync_load(receivers + at * I64{8})
+                channel :: sync_load(wrapping(receivers + at * I64{8}))
                 node :: registrations + at * I64{24}
                 sync_mutex_lock(channel)
-                if ((sync_load(node + I64{16}).bit_and(I64{1})) == I64{0}) {
+                if ((sync_load(wrapping(node + I64{16})).bit_and(I64{1})) == I64{0}) {
                     channel_wait_add(channel, node, false)
                 }
                 sync_mutex_unlock(channel)
@@ -604,13 +604,13 @@ fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, convert
         jet_rt_string_drop(reason)
         at = I64{0}
         loop at < count {
-            channel :: sync_load(receivers + at * I64{8})
-            channel_select_remove(channel, registrations + at * I64{24})
+            channel :: sync_load(wrapping(receivers + at * I64{8}))
+            channel_select_remove(channel, wrapping(registrations + at * I64{24}))
             at += I64{1}
         }
         at = I64{0}
         loop at < timer_count {
-            scheduler_timer_cancel(sync_load(converted + at * I64{16} + I64{8}))
+            scheduler_timer_cancel(sync_load(wrapping(wrapping(converted + at * I64{16}) + I64{8})))
             at += I64{1}
         }
         if (count != I64{0}) { jet_rt_free(registrations, count * I64{24}, I64{8}) }
@@ -646,30 +646,30 @@ fn channel_text(kind: I64) -> I64 {
         (kind == I64{0} || kind == I64{1}) -> {
             sync_store(buffer, I64{2336353831671130211})
             if {
-                (kind == I64{0}) -> sync_store(buffer + I64{8}, I64{28559167692432754})
-                else -> sync_store(buffer + I64{8}, I64{1684956531})
+                (kind == I64{0}) -> sync_store(wrapping(buffer + I64{8}), I64{28559167692432754})
+                else -> sync_store(wrapping(buffer + I64{8}), I64{1684956531})
             }
         }
         (kind == I64{2}) -> {
             sync_store(buffer, I64{8583988860020352371})
-            sync_store(buffer + I64{8}, I64{7629153})
+            sync_store(wrapping(buffer + I64{8}), I64{7629153})
         }
         (kind == I64{3}) -> {
             sync_store(buffer, I64{8223683306451986515})
-            sync_store(buffer + I64{8}, I64{2336927755350406757})
-            sync_store(buffer + I64{16}, I64{7598805615236769127})
-            sync_store(buffer + I64{24}, I64{8458156441480490607})
-            sync_store(buffer + I64{32}, I64{1684370547})
+            sync_store(wrapping(buffer + I64{8}), I64{2336927755350406757})
+            sync_store(wrapping(buffer + I64{16}), I64{7598805615236769127})
+            sync_store(wrapping(buffer + I64{24}), I64{8458156441480490607})
+            sync_store(wrapping(buffer + I64{32}), I64{1684370547})
         }
         (kind == I64{4}) -> {
             sync_store(buffer, I64{7142836979261793651})
-            sync_store(buffer + I64{8}, I64{431198793580})
+            sync_store(wrapping(buffer + I64{8}), I64{431198793580})
         }
         else -> {
             sync_store(buffer, I64{2322296528115098995})
-            sync_store(buffer + I64{8}, I64{2338332969558634350})
-            sync_store(buffer + I64{16}, I64{8243122732010005874})
-            sync_store(buffer + I64{24}, I64{25701})
+            sync_store(wrapping(buffer + I64{8}), I64{2338332969558634350})
+            sync_store(wrapping(buffer + I64{16}), I64{8243122732010005874})
+            sync_store(wrapping(buffer + I64{24}), I64{25701})
         }
     }
     text

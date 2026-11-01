@@ -164,7 +164,7 @@ fn fd_read_error(result: I64, error: I64) -> I64 {
         unread :: if (fd_word(state, I64{40}) > I64{0}) -> fd_word(state, I64{48}) - fd_word(state, I64{56}) else -> I64{0}
         if (unread != I64{0}) {
             result = if (requested < unread) -> requested else -> unread
-            rt_text_bytes_copy(bytes, fd_word(state, I64{32}) + fd_word(state, I64{56}), result)
+            rt_text_bytes_copy(bytes, wrapping(fd_word(state, I64{32}) + fd_word(state, I64{56})), result)
             fd_put(state, I64{56}, fd_word(state, I64{56}) + result)
         } else {
             result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)

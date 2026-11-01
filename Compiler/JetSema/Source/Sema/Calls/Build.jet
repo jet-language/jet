@@ -162,11 +162,11 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
                 generated_program := ast_program()
                 generated_program.items = items
                 source :: jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
-                &values.push(sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: source}}}, argument.span))
+                &values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: source}}}, argument.span))
             }
         }
     }
-    value :: sema_tir_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    value :: sema_tree_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -229,10 +229,10 @@ fn sema_call_build_option(receiver: Expr, receiver_value: TExpr, method: String,
         if !ownership.accepted || !ownership.complete -> return failed
     }
     values :: [TExpr]{
-        sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, args[0].span),
-        sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, argument.span),
+        sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: name}}}, args[0].span),
+        sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: value}}}, argument.span),
     }
-    result :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    result :: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
 }
 

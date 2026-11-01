@@ -1,4 +1,4 @@
-// Canonical source-owned checking/TIR for Core compute special forms.
+// Canonical source-owned checking and checked-tree nodes for Core compute special forms.
 // Ordinary Core math/text/identity calls stay in the shared Core path.
 use jet_foundation.[
     AST_NODE_GENERATED,
@@ -15,17 +15,60 @@ use jet_foundation.[
     Span,
     SymbolKind,
     TFailureCarrier,
+    TFieldRef,
     Type,
     TypeTupleField,
     UnOp,
     compute_shape_type,
+    core_record_field,
     expr_span,
     is_compute_tensor_family,
+    symbol_id,
 ]
 
 struct SemaComputeModelsSpecialCheck {
     handled: Bool
     value: TExpr?
+}
+
+// D-SHAPE-PLACE1=A Tensor bracket windows (core-library.md:4293-4295): a
+// Tensor range is a window on its owner's row-major `data`, through the flat
+// first-axis slab range `core.compute.__window` selects. A bare window reads,
+// `&tensor[range]` writes through, and element access and bounds follow the
+// list window law. The window reads the tensor twice (storage and shape), so
+// it must start from a place (spec.md:1306, E0213).
+fn sema_call_compute_tensor_window(base: Expr, tensor: TExpr, range: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !sema_expression_is_place(base) {
+        &diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
+        return None
+    }
+    if sema_call_core_module_identity(environment, program, "core.compute") == None {
+        &diagnostics.push(sema_error("E0003", span, "a Tensor window needs the core.compute source module", "a Tensor range selects first-axis slabs through core.compute", "load the registered core.compute source module"))
+        return None
+    }
+    owner := "Tensor"
+    if sema_expr_unwrap_tag(tensor.ty) == .Named(name) -> owner = name
+    data_ty :: core_record_field(owner, "data") ?? Type.List{element: Type.Float}
+    data :: sema_tree_node(data_ty, TExprKind.Field{receiver: tensor.copy(), field: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner, "data"), name: "data", ty: data_ty, boxed: false}}, span)
+    flat :: sema_call_core_source("core.compute", "__window", [TExpr]{tensor, range}, Type.Named{name: "Range"}, true, span, environment, program, &diagnostics) ?? return None
+    zero_start :: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+    zero_end :: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+    Val(sema_tree_node(data_ty, TExprKind.Slice{base: data, start: zero_start, end: zero_end, range: Val(flat), location: sema_expression_panic_location(environment, program, scopes, span)}, span))
+}
+
+// `tensor[range].copy()` (D-SHAPE-PLACE1=A `~place`): the checked window
+// `value`'s slabs as an independent Tensor on the owner's device and
+// profile, not a list copy. Unhandled for any other copied value.
+fn sema_call_compute_window_copy(value: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+    if value.kind == .Slice(data, _, _, window, _) {
+        if data.kind == .Field(tensor, field) && field.name == "data" && is_compute_tensor_family(tensor.ty) && window == .Val(flat) {
+            if flat.kind == .Call(_, _, window_args) && window_args.len() == 2 {
+                copied :: sema_call_core_source("core.compute", "__window_copy", [TExpr]{tensor, window_args[1].value, value}, Type.Named{name: "Tensor"}, true, span, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+                return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected_owned(^copied, expected, environment, program, &diagnostics)}
+            }
+        }
+    }
+    SemaComputeModelsSpecialCheck{handled: false, value: None}
 }
 
 fn sema_call_compute_gradient_value_type(output: Type) -> Type? {
@@ -97,33 +140,25 @@ fn sema_call_compute_owned_params(types: [Type], accesses: [AccessConvention]) -
     return params
 }
 
-fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    updated_args := args
+// `compute.vec` / `compute.matrix` check through their Core source
+// constructors; the Tensor result takes the Vec/Matrix alias type, which
+// carries the literal extents as shape facts (D-COMPUTE-TYPE1).
+fn sema_call_try_compute_alias(module_name: String, member: String, target: SemaCallDirectTarget, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+    if module_name != "core.compute" || (member != "vec" && member != "matrix") -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
+    &context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
+    if !sema_call_compute_explicit_type_args(member, type_args, 0, span, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     arity := if member == "vec" -> 2 else -> 3
-    if updated_args.len() != arity {
-        loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        sema_call_compute_arity_error(member, arity, updated_args.len(), span, &diagnostics)
+    if args.len() != arity {
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_call_compute_arity_error(member, arity, args.len(), span, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
     }
-    typed := [TExpr]{}
-    value_types := if member == "vec" -> [Type]{Type.Int, Type.Float} else -> [Type]{Type.Int, Type.Int, Type.Float}
-    valid := true
-    loop (index, argument) in updated_args {
-        value :: sema_check_expression(argument.expr, Val(value_types[index]), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            valid = false
-            next
-        }
-        &typed.push(value)
-    }
-    if !valid -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    accesses := (loop _ in value_types -> AccessConvention.Read)
-    ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(value_types, accesses), &updated_args, scopes, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    result_type :: sema_call_compute_alias_type(member, updated_args) ?? Type.Result{ok: Type.Named{name: "Tensor"}, err: Type.Named{name: "ComputeError"}}
-    fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
-    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    _ := sema_call_core_record_effects(record, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
-    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, "core.compute.{member}", [Type]{}, args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.ownership_call_depth -= 1
+    checked := value ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    checked.ty = sema_call_compute_alias_type(member, args) ?? panic("core.compute.{member} has an alias type")
+    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, &diagnostics)}
 }
 
 fn sema_call_compute_wrt_name(item: Expr) -> String? {
@@ -207,7 +242,6 @@ fn sema_call_compute_tensor_value(argument: CallArg, environment: SemaScopeEnvir
 }
 
 fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    _ := sema_compute_record_core_call(record, span, &context)
     if args.len() == 0 {
         sema_call_compute_arity_error(member, 1, 0, span, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
@@ -276,10 +310,6 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     gradient_output := member == "gradient" && gradient_value_type != None
     if !is_compute_tensor_family(output) && !gradient_output {
         &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "the reverse and forward transforms have one Tensor output and keep Tensor storage law", "return a Tensor from the differentiated function"))
-        valid = false
-    }
-    if gradient_value_type != None && member != "gradient" {
-        &diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a function returning `Tensor`", "only a gradient transform can differentiate a named Tensor tuple; value and pull surfaces require one Tensor output", "return one Tensor from the differentiated function"))
         valid = false
     }
     invalid_parameter := false
@@ -401,8 +431,8 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     runtime_args := [TExpr]{function_value}
     loop value in typed_values -> &runtime_args.push(value)
     target_values := [TExpr]{}
-    loop target in selected -> &target_values.push(sema_tir_node(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
-    &runtime_args.push(sema_tir_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
+    loop target in selected -> &target_values.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
+    &runtime_args.push(sema_tree_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
     fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
     effective_type_args := [Type]{function_value.ty}
     values_args := [CallArg]{args[0]}
@@ -412,7 +442,7 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     accesses := (loop _ in ownership_types -> AccessConvention.Read)
     ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), &values_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tree(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
     return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
 }
@@ -420,14 +450,12 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
 // The caller owns route selection and invokes this helper before the generic
 // Core-call producer.
 fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    if record.module_name != "core.compute" -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
+    // D-COMPUTE-AUTODIFF1=D (Rust core_call.rs): every `core.compute` call is
+    // recorded before any route returns, so a source-owned member stays
+    // visible to the autodiff trace check exactly like a transform.
+    if !sema_compute_record_core_call(record, span, &context) -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
     if record.member == "gradient" || record.member == "value_and_gradient" || record.member == "vjp" || record.member == "jvp" {
         return sema_call_compute_transform(record, record.member, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    }
-    if record.member == "vec" || record.member == "matrix" {
-        _ := sema_compute_record_core_call(record, span, &context)
-        if !sema_call_compute_explicit_type_args(record.member, type_args, 0, span, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-        return sema_call_compute_check_alias(record.member, record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     return SemaComputeModelsSpecialCheck{handled: false, value: None}
 }

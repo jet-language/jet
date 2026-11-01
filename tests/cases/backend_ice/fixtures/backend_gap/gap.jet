@@ -1,0 +1,21 @@
+package {
+    name: "gap"
+}
+
+use core.ui.host.ime as ime
+use core.ui.host.drag_drop as drag_drop
+
+fn nine() {
+    event :: ime.poll() ?? panic("poll")
+    print("made")
+}
+
+#Test("nine polls one IME event") {
+    nine()
+}
+
+fn run() {
+    nine()
+    dropped :: drag_drop.poll() ?? panic("drop")
+    print("made")
+}

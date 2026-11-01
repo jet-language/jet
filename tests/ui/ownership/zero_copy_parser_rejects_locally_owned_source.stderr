@@ -4,7 +4,7 @@ Error [E2307]: `text` cannot be stored in a struct field without an owning copy
  11 |     return Token{ text: text, rest: rest }
     |                         ^^^^
  Why: `text` is a zero-copy view into `source` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
- Fix: Write `~text` first, or remove `copies: .Explicit` to use the default owning copy
+ Fix: Write `text.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 
 Error [E2307]: `rest` cannot be stored in a struct field without an owning copy
@@ -13,7 +13,7 @@ Error [E2307]: `rest` cannot be stored in a struct field without an owning copy
  11 |     return Token{ text: text, rest: rest }
     |                                     ^^^^
  Why: `rest` is a zero-copy view into `source` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
- Fix: Write `~rest` first, or remove `copies: .Explicit` to use the default owning copy
+ Fix: Write `rest.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 
 Error [E2305]: This view points into `source`, which this function owns

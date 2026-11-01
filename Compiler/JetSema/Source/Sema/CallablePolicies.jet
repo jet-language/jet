@@ -150,10 +150,10 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, policy.name, params, None, true, binding, &arguments, environment, program, &scopes, &tail_store, &context, policy.name_span, &diagnostics) ?? return None
     captured := callee
     captured_ty :: all_params[count].ty ?? return None
-    tir_expr_retype(&captured, captured_ty)
+    tree_expr_retype(&captured, captured_ty)
     conventions := (loop parameter in params -> parameter.convention)
     wrapper_decl :: sema_call_callee_decl(program, wrapper.symbol.id, policy.name_span, &diagnostics) ?? return None
-    value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper: Val(wrapper_decl), captures: [TCapture]{}, callee: captured}}, policy.name_span)
+    value :: sema_tree_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper: Val(wrapper_decl), captures: [TCapture]{}, callee: captured}}, policy.name_span)
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
 }
 
@@ -182,7 +182,7 @@ fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environmen
     policies :: if program.registration_graph == .Val(graph) -> sema_policy_registered_calls(graph, target.symbol.id) ?? return None else -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
     function :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
-    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
+    callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
     index := policies.len()
     loop index > 0 {
         index -= 1
@@ -201,7 +201,7 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
     target_name :: if last.expr == .Ident(name, _, _) -> name else -> ""
     target :: sema_call_resolve_direct(target_name, [Type]{}, environment, program, &scopes, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     function :: sema_call_callee_decl(program, target.symbol.id, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, last.span)
+    callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, last.span)
     index := call.args.len() - 1
     loop index > 0 {
         index -= 1
@@ -221,19 +221,27 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
 // which the statement checker checks or refuses; only another applied rule
 // is a policy application the self-hosted checker does not support.
 fn sema_policy_has_unsupported_applications(program: Program) -> Bool Never! {
+    sema_policy_unsupported_applications(program).len() > 0
+}
+
+// The applied rules of `program` the checker has no route for, in source
+// order (sema_marker_module_check reports each one).
+fn sema_policy_unsupported_applications(program: Program) -> [AppliedRuleApplication] Never! {
+    unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "allow" -> return true
+        if application.marker.name != "allow" -> &unsupported.push(application)
     }
     loop application in program.rule_facts {
-        // A file `#Target` or `#NoPrelude` is lowered by the parser into the
-        // Program's target fields or its no_prelude flag, which are checked on
+        // A file `#Target`, `#NoPrelude` or `#HTML(page)` is lowered by the
+        // parser into the Program's target fields, its no_prelude flag or its
+        // html_path (the web output's companion page), which are checked on
         // their own.
-        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude") -> next
+        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude" || application.marker.name == "HTML") -> next
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "allow" -> return true
+        if application.marker.name != "allow" -> &unsupported.push(application)
     }
-    false
+    unsupported
 }
 
 fn sema_policy_statement_form(application: AppliedRuleApplication) -> Bool Never! {

@@ -10,8 +10,8 @@ fn repl_steps_require(ok: Bool, name: String) Never! {
 fn repl_steps_classifier_contract() {
     loop text in ([String]{"t :: s", "s :: \"\""}) {
         classified :: repl_classify(text, 1)
-        if classified == .Accepted(.Stmts(body, suppress, check_source)) {
-            repl_steps_require(!suppress && check_source == text && body.len() == 1, "binding source preserved")
+        if classified == .Accepted(.Stmts(body, suppress, echo, check_source)) {
+            repl_steps_require(!suppress && !echo && check_source == text && body.len() == 1, "binding source preserved")
             if body[0] == .Val(_) {
 
             } else { panic("binding classified as expression") }

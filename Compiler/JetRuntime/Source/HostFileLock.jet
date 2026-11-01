@@ -9,18 +9,18 @@
 fn fs_lock_call(value: I64, errno: I64) -> I64 {
     call :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(call, value)
-    rt_text_store(call + I64{8}, errno)
-    rt_text_store(call + I64{16}, I64{1})
+    rt_text_store(wrapping(call + I64{8}), errno)
+    rt_text_store(wrapping(call + I64{16}), I64{1})
     call
 }
 
 fn fs_lock_wait(acquired: Bool, timed_out: Bool, errno: I64, deadline: I64) -> I64 {
     wait :: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(wait, if acquired -> I64{1} else -> I64{0})
-    rt_text_store(wait + I64{8}, if timed_out -> I64{1} else -> I64{0})
-    rt_text_store(wait + I64{16}, errno)
-    rt_text_store(wait + I64{24}, I64{1})
-    rt_text_store(wait + I64{32}, deadline)
+    rt_text_store(wrapping(wait + I64{8}), if timed_out -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(wait + I64{16}), errno)
+    rt_text_store(wrapping(wait + I64{24}), I64{1})
+    rt_text_store(wrapping(wait + I64{32}), deadline)
     wait
 }
 
@@ -30,18 +30,18 @@ fn fs_lock_wait(acquired: Bool, timed_out: Bool, errno: I64, deadline: I64) -> I
 fn fs_lock_identity(result: I64, facts: I64) -> I64 {
     identity :: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(identity, I64{56})
-    rt_text_store(identity + I64{48}, I64{1})
+    rt_text_store(wrapping(identity + I64{48}), I64{1})
     if (result < I64{0} || facts == I64{0}) {
-        rt_text_store(identity + I64{40}, -result)
+        rt_text_store(wrapping(identity + I64{40}), -result)
         return identity
     }
-    inode :: rt_text_word(facts + I64{8})
-    kind :: rt_text_word(facts + I64{16}).bit_and(I64{61440})
+    inode :: rt_text_word(wrapping(facts + I64{8}))
+    kind :: rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})
     rt_text_store(identity, rt_text_word(facts))
-    rt_text_store(identity + I64{8}, inode.bit_and(I64{4294967295}))
-    rt_text_store(identity + I64{16}, (inode >> I64{32}).bit_and(I64{4294967295}))
-    rt_text_store(identity + I64{24}, if (kind == I64{32768}) -> I64{1} else -> I64{0})
-    rt_text_store(identity + I64{32}, if (kind == I64{40960}) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(identity + I64{8}), inode.bit_and(I64{4294967295}))
+    rt_text_store(wrapping(identity + I64{16}), (inode >> I64{32}).bit_and(I64{4294967295}))
+    rt_text_store(wrapping(identity + I64{24}), if (kind == I64{32768}) -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(identity + I64{32}), if (kind == I64{40960}) -> I64{1} else -> I64{0})
     identity
 }
 
@@ -93,8 +93,8 @@ fn fs_lock_identity(result: I64, facts: I64) -> I64 {
 #Export(c) fn jet_fs_lock_path_identity_raw(path: I64) -> I64 {
     if fs_text_has_nul(path) -> return fs_lock_identity(I64{0}, I64{0})
     scratch :: jet_rt_alloc(I64{160}, I64{8})
-    jet_fs_stat_raw(path, false, scratch, scratch + I64{128})
-    result :: if (rt_text_word(scratch + I64{128}) != I64{0}) -> -rt_text_word(scratch + I64{136}) else -> I64{0}
+    jet_fs_stat_raw(path, false, scratch, wrapping(scratch + I64{128}))
+    result :: if (rt_text_word(wrapping(scratch + I64{128})) != I64{0}) -> -rt_text_word(wrapping(scratch + I64{136})) else -> I64{0}
     identity :: fs_lock_identity(result, scratch)
     jet_rt_free(scratch, I64{160}, I64{8})
     identity
@@ -103,7 +103,7 @@ fn fs_lock_identity(result: I64, facts: I64) -> I64 {
 fn fs_lock_sleep(nanos: I64) {
     request :: jet_rt_alloc(I64{16}, I64{8})
     rt_text_store(request, I64{0})
-    rt_text_store(request + I64{8}, nanos)
+    rt_text_store(wrapping(request + I64{8}), nanos)
     loop {
         // std::thread::sleep resumes with the remaining time after EINTR.
         if (host_call(I64{35}, request, request, I64{0}) != I64{-4}) -> break
@@ -171,12 +171,12 @@ fn fs_lock_byte(flag: U8) -> I64 { if (flag != U8{0}) -> I64{1} else -> I64{0} }
     platform :: host_native_int(m2)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     call :: fs_lock_call(value, errno)
-    rt_text_store(call + I64{16}, platform)
+    rt_text_store(wrapping(call + I64{16}), platform)
     call
 }
 #Export(c) fn jet_rt_record_get_jet_fs_lock_call_value(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_call_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_call_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_call_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_call_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{16}))) }
 #Export(c) fn jet_rt_handle_clone_jet_fs_lock_call(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{24}, I64{8})
     coll_copy(value, result, I64{24})
@@ -190,7 +190,7 @@ fn fs_lock_byte(flag: U8) -> I64 { if (flag != U8{0}) -> I64{1} else -> I64{0} }
 fn fs_lock_words_eq(left: I64, right: I64, size: I64) -> Bool {
     at := I64{0}
     loop at < size {
-        if (rt_text_word(left + at) != rt_text_word(right + at)) -> return false
+        if (rt_text_word(wrapping(left + at)) != rt_text_word(wrapping(right + at))) -> return false
         at += I64{8}
     }
     true
@@ -209,21 +209,21 @@ fn fs_lock_words_eq(left: I64, right: I64, size: I64) -> Bool {
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     identity :: jet_rt_alloc(I64{56}, I64{8})
     rt_text_store(identity, device)
-    rt_text_store(identity + I64{8}, low)
-    rt_text_store(identity + I64{16}, high)
-    rt_text_store(identity + I64{24}, fs_lock_byte(m3))
-    rt_text_store(identity + I64{32}, fs_lock_byte(m4))
-    rt_text_store(identity + I64{40}, errno)
-    rt_text_store(identity + I64{48}, platform)
+    rt_text_store(wrapping(identity + I64{8}), low)
+    rt_text_store(wrapping(identity + I64{16}), high)
+    rt_text_store(wrapping(identity + I64{24}), fs_lock_byte(m3))
+    rt_text_store(wrapping(identity + I64{32}), fs_lock_byte(m4))
+    rt_text_store(wrapping(identity + I64{40}), errno)
+    rt_text_store(wrapping(identity + I64{48}), platform)
     identity
 }
 #Export(c) fn jet_rt_record_get_jet_fs_lock_identity_device(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_low(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_high(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_regular(value: I64) -> Bool { fs_lock_flag(rt_text_word(value + I64{24})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_reparse(value: I64) -> Bool { fs_lock_flag(rt_text_word(value + I64{32})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{40})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{48})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_low(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_high(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{16}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_regular(value: I64) -> Bool { fs_lock_flag(rt_text_word(wrapping(value + I64{24}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_reparse(value: I64) -> Bool { fs_lock_flag(rt_text_word(wrapping(value + I64{32}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{40}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{48}))) }
 #Export(c) fn jet_rt_handle_clone_jet_fs_lock_identity(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{56}, I64{8})
     coll_copy(value, result, I64{56})
@@ -242,14 +242,14 @@ fn fs_lock_words_eq(left: I64, right: I64, size: I64) -> Bool {
     deadline :: host_native_int(m4)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     wait :: fs_lock_wait(m0 != U8{0}, m1 != U8{0}, errno, deadline)
-    rt_text_store(wait + I64{24}, platform)
+    rt_text_store(wrapping(wait + I64{24}), platform)
     wait
 }
 #Export(c) fn jet_rt_record_get_jet_fs_lock_wait_acquired(value: I64) -> Bool { fs_lock_flag(rt_text_word(value)) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_timed_out(value: I64) -> Bool { fs_lock_flag(rt_text_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{24})) }
-#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_deadline_ns(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_timed_out(value: I64) -> Bool { fs_lock_flag(rt_text_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{16}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{24}))) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_deadline_ns(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(value + I64{32}))) }
 #Export(c) fn jet_rt_handle_clone_jet_fs_lock_wait(value: I64) -> I64 {
     result :: jet_rt_alloc(I64{40}, I64{8})
     coll_copy(value, result, I64{40})

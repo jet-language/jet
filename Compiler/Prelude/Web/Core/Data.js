@@ -173,51 +173,6 @@ function jet_data_stream_cancel(stream, typeArgs = []) {
   return jet_data_web_invoke("stream_cancel", [stream], jet_data_web_type_args(typeArgs));
 }
 
-function jet_data_query(rows, typeArgs = []) {
-  return jet_data_web_invoke("query", [rows], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_filter(query, predicate, typeArgs = []) {
-  const callback = jet_data_web_register_callback(predicate);
-  return jet_data_web_invoke("filter", [query, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_sort_by(query, key, typeArgs = []) {
-  const callback = jet_data_web_register_callback(key);
-  return jet_data_web_invoke("sort_by", [query, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_map(query, mapper, typeArgs = []) {
-  const callback = jet_data_web_register_callback(mapper);
-  return jet_data_web_invoke("map", [query, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_min(query, key, typeArgs = []) {
-  const callback = jet_data_web_register_callback(key);
-  return jet_data_web_invoke("min", [query, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_max(query, key, typeArgs = []) {
-  const callback = jet_data_web_register_callback(key);
-  return jet_data_web_invoke("max", [query, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_inner_join(left, right, leftKey, rightKey, typeArgs = []) {
-  const leftCallback = jet_data_web_register_callback(leftKey);
-  const rightCallback = jet_data_web_register_callback(rightKey);
-  return jet_data_web_invoke(
-    "inner_join",
-    [left, right, leftCallback, rightCallback],
-    jet_data_web_type_args(typeArgs),
-  );
-}
-function jet_data_query_left_join(left, right, leftKey, rightKey, typeArgs = []) {
-  const leftCallback = jet_data_web_register_callback(leftKey);
-  const rightCallback = jet_data_web_register_callback(rightKey);
-  return jet_data_web_invoke(
-    "left_join",
-    [left, right, leftCallback, rightCallback],
-    jet_data_web_type_args(typeArgs),
-  );
-}
-function jet_data_query_group_by(query, key, typeArgs = []) {
-  const callback = jet_data_web_register_callback(key);
-  return jet_data_web_invoke("group_by", [query, callback], jet_data_web_type_args(typeArgs));
-}
 function jet_data_query_watch(query, typeArgs = []) {
   return jet_data_web_invoke("watch", [query], jet_data_web_type_args(typeArgs));
 }
@@ -229,23 +184,6 @@ function jet_data_watch_status(watch, typeArgs = []) {
 }
 function jet_data_watch_cancel(watch, typeArgs = []) {
   return jet_data_web_invoke("watch_cancel", [watch], jet_data_web_type_args(typeArgs));
-}
-function jet_data_group_count_query(grouped, typeArgs = []) {
-  return jet_data_web_invoke("group_count", [grouped], jet_data_web_type_args(typeArgs));
-}
-function jet_data_group_sum_query(grouped, value, typeArgs = []) {
-  const callback = jet_data_web_register_callback(value);
-  return jet_data_web_invoke("group_sum", [grouped, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_group_mean_query(grouped, value, typeArgs = []) {
-  const callback = jet_data_web_register_callback(value);
-  return jet_data_web_invoke("group_mean", [grouped, callback], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_collect(value, typeArgs = []) {
-  return jet_data_web_invoke("collect", [value], jet_data_web_type_args(typeArgs));
-}
-function jet_data_query_plan(value, typeArgs = []) {
-  return jet_data_web_invoke("plan", [value], jet_data_web_type_args(typeArgs));
 }
 function jet_data_count(value, typeArgs = []) {
   return jet_data_web_invoke("count", [value], jet_data_web_type_args(typeArgs));
@@ -273,9 +211,6 @@ function jet_data_track(value, key, typeArgs = []) {
   const callback = jet_data_web_register_callback(key);
   return jet_data_web_invoke("track", [value, callback], jet_data_web_type_args(typeArgs));
 }
-function jet_data_query_tracked(tracked, typeArgs = []) {
-  return jet_data_web_invoke("tracked_query", [tracked], jet_data_web_type_args(typeArgs));
-}
 function jet_data_track_insert(tracked, row, typeArgs = []) {
   return jet_data_web_invoke("track_insert", [tracked, row], jet_data_web_type_args(typeArgs));
 }
@@ -284,9 +219,6 @@ function jet_data_track_replace(tracked, key, row, typeArgs = []) {
 }
 function jet_data_track_remove(tracked, key, typeArgs = []) {
   return jet_data_web_invoke("track_remove", [tracked, key], jet_data_web_type_args(typeArgs));
-}
-function jet_data_csv_reader(input, limits, typeArgs = []) {
-  return jet_data_web_invoke("csv_reader", [input, limits], jet_data_web_type_args(typeArgs));
 }
 function jet_data_json_reader(input, limits, typeArgs = []) {
   return jet_data_web_invoke("json_reader", [input, limits], jet_data_web_type_args(typeArgs));

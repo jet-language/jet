@@ -39,9 +39,13 @@ fn recipe_sandbox_test_exec(tool: String, args: [String]) -> BuildRecipe {
     previous :: sys.get(secret_name)
     sys.set(secret_name, "sentinel")
     recipe :: recipe_sandbox_test_exec("sh", [String]{"-c", "test \"${{JET_TEST_SECRET_DO_NOT_LEAK:-}}\" = \"\" && printf clean > \"$JET_BUILD_OUTPUT/clean\""})
-    result :: recipe_run(recipe, ctx, None)
-    recipe_sandbox_test_restore_env(secret_name, previous)
-    result ?? panic("build hook must run")
+    if recipe_run(recipe, ctx, None) == {
+        .Ok(_) -> recipe_sandbox_test_restore_env(secret_name, previous)
+        .Err(_) -> {
+            recipe_sandbox_test_restore_env(secret_name, previous)
+            panic("build hook must run")
+        }
+    }
     assert_eq(files.read(files.join(ctx.output_root, "clean")) ?? panic("clean output"), "clean")
     files.remove_all(base).drop("test cleanup")
 }
@@ -73,16 +77,16 @@ fn recipe_sandbox_test_exec(tool: String, args: [String]) -> BuildRecipe {
     marker :: "{base}-logged-host-escape"
     command :: "if printf hostile > '{marker}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""
     attempt := BuildAttempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
-    result :: recipe_run_logged(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None, &attempt)
     status :: foundation_native_sandbox_status()
-    if status.available {
-        report :: result ?? panic("logged recipe sandbox should run")
-        assert_eq(report.sandbox_class, "linux-bwrap")
-        assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
-    } else {
-        if result == {
-            .Ok(_) -> panic("unavailable sandbox must refuse")
-            .Err(error) -> assert_eq(error.code, "E1275")
+    if recipe_run_logged(recipe_sandbox_test_exec("sh", [String]{"-c", command}), ctx, None, &attempt) == {
+        .Ok(report) -> {
+            assert(status.available, "unavailable sandbox must refuse")
+            assert_eq(report.sandbox_class, "linux-bwrap")
+            assert_eq(files.read(files.join(ctx.output_root, "ok")) ?? panic("ok output"), "ok")
+        }
+        .Err(error) -> {
+            assert(!status.available, "logged recipe sandbox should run")
+            assert_eq(error.code, "E1275")
         }
     }
     assert(!files.exists(marker))
@@ -98,9 +102,16 @@ fn recipe_sandbox_test_exec(tool: String, args: [String]) -> BuildRecipe {
     previous :: sys.get("JET_WINDOWS_HOST_SECRET")
     sys.set("JET_WINDOWS_HOST_SECRET", "must-not-enter-appcontainer")
     recipe :: recipe_sandbox_test_exec("cmd", [String]{"/C", "if defined JET_WINDOWS_HOST_SECRET (exit /b 13) else type \"%CD%\\input\" > \"%JET_BUILD_OUTPUT%\\ok\""})
-    result :: recipe_run(recipe, ctx, None)
-    recipe_sandbox_test_restore_env("JET_WINDOWS_HOST_SECRET", previous)
-    report :: result ?? panic("AppContainer build should run")
+    report :: if recipe_run(recipe, ctx, None) == {
+        .Ok(report) -> {
+            recipe_sandbox_test_restore_env("JET_WINDOWS_HOST_SECRET", previous)
+            report
+        }
+        .Err(_) -> {
+            recipe_sandbox_test_restore_env("JET_WINDOWS_HOST_SECRET", previous)
+            panic("AppContainer build should run")
+        }
+    }
     assert_eq(report.sandbox_class, "windows-appcontainer")
     policies :: [String]{"source-readonly,output-readwrite", "process=appcontainer+job-kill-on-close+active-process=256", "network=denied", "environment=clear+declared", "devices=appcontainer-default-deny", "resources=memory-2GiB+active-process-256"}
     loop policy in policies {
@@ -122,8 +133,7 @@ fn recipe_sandbox_test_exec(tool: String, args: [String]) -> BuildRecipe {
     files.create_dir_all(files.join(real, "output")) ?? panic("output")
     files.symlink(real, linked) ?? panic("directory link")
     command :: "echo launched>\"{marker}\" & if exist \"{marker}\" (exit /b 70) else exit /b 0"
-    result :: foundation_run_native_sandboxed(recipe_sandbox_test_cmd(), [String]{"/C", command}, files.join(linked, "source"), Val(files.join(linked, "output")), [String: String]{}, false)
-    if result == {
+    if foundation_run_native_sandboxed(recipe_sandbox_test_cmd(), [String]{"/C", command}, files.join(linked, "source"), Val(files.join(linked, "output")), [String: String]{}, false) == {
         .Ok(_) -> panic("a reparse-point parent must be rejected before launch")
         .Err(_) -> {}
     }

@@ -5,7 +5,6 @@ import { execFileSync } from 'node:child_process';
 import { dirname, resolve, join } from 'node:path';
 
 import { fileURLToPath } from 'node:url';
-import { readCandidateRecord } from './hardening-manifest.mjs';
 import { assertPinnedSource } from './proof-source.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -45,28 +44,6 @@ export function selectCloseout(milestones, head, requested) {
   if (!eligible.length) throw new Error(`no review-ready milestone has a closeout token for source commit ${head}`);
   throw new Error(`multiple closeout tokens match ${head}; set JET_CLOSEOUT_MILESTONE to one of: ${eligible.map(m => m.id).join(', ')}`);
 }
-function candidateRecordPath() {
-  const configured = process.env.JET_CANDIDATE_RECORD;
-  if (configured) return resolve(REPO, configured);
-  const candidates = [
-    join(REPO, '.jet/candidate.json'),
-    join(REPO, 'candidate.json'),
-    join(REPO, '.cache/jet-hardening/v1/candidate.json'),
-  ];
-  return candidates.find(existsSync) || candidates[0];
-}
-
-function candidateAtHead(head) {
-  const path = candidateRecordPath();
-  if (!existsSync(path)) throw new Error(`candidate record is missing: ${path}`);
-  try {
-    return readCandidateRecord(path, { sourceCommit: head, requireQualified: true });
-  } catch (error) {
-    throw new Error(`candidate record blocked: ${error.message}`);
-  }
-}
-
-
 function frozenHead() {
   const changed = nonTowerChanges(run('git', ['status', '--porcelain=v1', '--untracked-files=all']));
   if (changed.length) {
@@ -84,9 +61,8 @@ function check(requested = process.env.JET_CLOSEOUT_MILESTONE) {
   const head = existsSync(manifest)
     ? assertPinnedSource(REPO, JSON.parse(readFileSync(manifest, 'utf8')).commit).commit
     : frozenHead();
-  const candidate = candidateAtHead(head);
   const milestone = selectCloseout(milestones(), head, requested);
-  console.log(`CLOSEOUT TOKEN OK ${milestone.id} ${head} candidate ${candidate.candidate_identity.id}`);
+  console.log(`CLOSEOUT TOKEN OK ${milestone.id} ${head}`);
   return milestone;
 }
 

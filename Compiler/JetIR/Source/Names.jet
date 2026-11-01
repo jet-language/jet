@@ -23,6 +23,7 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
         .Uninit -> "Uninit"
         .CtLit(_) -> "CtLit"
         .ConstRef(_) -> "ConstRef"
+        .TraitConst(_, _, _) -> "TraitConst"
         .GlobalShared(_, _) -> "GlobalShared"
         .Call(_, _, _) -> "Call"
         .IndirectCall(_, _, _, _) -> "IndirectCall"
@@ -37,7 +38,6 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
         .Drop(_) -> "Drop"
         .Close(_) -> "Close"
         .Move(_) -> "Move"
-        .AmbientInput(_) -> "AmbientInput"
         .RequireStop(_, _, _) -> "RequireStop"
         .Binary(_, _, _, _, _) -> "Binary"
         .CompareChain(_, _, _) -> "CompareChain"
@@ -74,8 +74,6 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
         .ListSpread(_) -> "ListSpread"
         .MapLit(_) -> "MapLit"
         .PoolSlot(_, _, _, _, _, _) -> "PoolSlot"
-        .MathLaneIndex(_, _, _, _) -> "MathLaneIndex"
-        .MathSwizzleRead(_, _, _) -> "MathSwizzleRead"
         .Clone(_, _) -> "Clone"
         .ExplicitCopy(_) -> "ExplicitCopy"
         .MaterializeView(_) -> "MaterializeView"
@@ -83,7 +81,6 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
         .DecodeUnder(_, _) -> "DecodeUnder"
         .BuiltinMethod(_, _, _) -> "BuiltinMethod"
         .IfExpr(_, _, _, _, _) -> "IfExpr"
-        .ResultHandler(_, _, _, _, _, _, _, _) -> "ResultHandler"
         .RawOf(_) -> "RawOf"
         .InvariantViolation(_, _) -> "InvariantViolation"
         .DistinctRaw(_) -> "DistinctRaw"
@@ -97,7 +94,6 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
         .PatternMatches(_, _) -> "PatternMatches"
         .OptionLift2(_, _, _) -> "OptionLift2"
         .ClosureMethod(_, _, _) -> "ClosureMethod"
-        .HostBorrowCallback(_, _) -> "HostBorrowCallback"
         .NumericMethod(_, _) -> "NumericMethod"
         .NumericBinaryMethod(_, _, _) -> "NumericBinaryMethod"
         .OverflowOpt(_, _, _, _, _) -> "OverflowOpt"
@@ -112,6 +108,7 @@ fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
         .SelectWait(_, _) -> "SelectWait"
         .FnValue(_) -> "FnValue"
         .Never(_) -> "Never"
+        .TypeTest(_, _) -> "TypeTest"
     }
 }
 
@@ -157,6 +154,7 @@ fn ir_host_call_name(call: BodyHostCall) -> String Never! {
         .YieldSend(_) -> "YieldSend"
         .NumericBounds(_, _) -> "NumericBounds"
         .ComptimeInput(_, _) -> "ComptimeInput"
+        .MemoStats(_, _) -> "MemoStats"
     }
 }
 

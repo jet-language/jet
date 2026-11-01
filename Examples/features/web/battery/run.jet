@@ -1,10 +1,13 @@
 use web as battery
+use core.files as files
+use core.http as http
 use core.http.client as client
 use core.http.server as server
 use core.net as net
 use core.web as core_web
 
-// One fixture identity is shared by page helpers and native request callbacks.
+// The App graph's pages read this fixture when the graph is served; the
+// request run below migrates its own temporary database.
 DB_PATH :: "/tmp/jet-web-battery.sqlite"
 
 fn app_home() -> WebPage {
@@ -35,7 +38,7 @@ fn app_graph() -> App {
         .action("create-order", app_create_action)
         .form("order", app_create_action)
         .island()
-        .assets("Examples/features/web/battery/public")
+        .assets("public")
         .hydration_dev()
 }
 
@@ -67,17 +70,17 @@ struct Orders {
     path: String
     state: Shared<RouteState>
 
-    #server.Get("/")
+    #Server.Get("/")
     fn home(self) -> HTTPResponse HTTPError! {
         Ok(battery.ok_response("<h1>Orders</h1><a href=\"/orders\">list</a>"))
     }
 
-    #server.Get("/old")
+    #Server.Get("/old")
     fn redirect(self) -> HTTPResponse HTTPError! {
         Ok(battery.redirect_response("/orders"))
     }
 
-    #server.Get("/orders")
+    #Server.Get("/orders")
     fn list(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         count :: battery.count_orders(self.path) ?? return Ok(battery.status_response(500, "database read failed"))
         version :: self.state.guard_read().value.cache_version
@@ -85,16 +88,17 @@ struct Orders {
         Ok(battery.ok_response(body))
     }
 
-    #server.Get("/orders/:id")
+    #Server.Get("/orders/:id")
     fn detail(self, id: Int) -> HTTPResponse HTTPError! {
         if id < 1 -> return Ok(battery.not_found_response("bad order id"))
         Ok(battery.ok_response("<h1>Order {id}</h1><p>{battery.order_detail_path(id)}</p>"))
     }
 
-    #server.Post("/orders")
+    #Server.Post("/orders")
     fn create(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
-        item :: req.form("item") ?? return Ok(battery.invalid_response("missing item"))
-        quantity_text :: req.form("quantity") ?? return Ok(battery.invalid_response("missing quantity"))
+        fields :: http.form_decode(req.text() ?? return Ok(battery.invalid_response("unreadable form")))
+        item :: http.query_get(fields, "item") ?? return Ok(battery.invalid_response("missing item"))
+        quantity_text :: http.query_get(fields, "quantity") ?? return Ok(battery.invalid_response("missing quantity"))
         view :: battery.validate_order_form(item, quantity_text)
         if !view.valid -> return Ok(battery.invalid_response(view.errors))
         quantity :: quantity_text.to_int() ?? return Ok(battery.invalid_response(view.errors))
@@ -103,7 +107,7 @@ struct Orders {
         Ok(battery.created_response("created order rows={inserted}"))
     }
 
-    #server.Post("/login")
+    #Server.Post("/login")
     fn login(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         input :: req.json<Login>() ?? return Ok(battery.invalid_response("invalid login"))
         state :: battery.login_state(input.user, input.password) ?? return Ok(battery.status_response(401, "login failed"))
@@ -112,7 +116,7 @@ struct Orders {
         Ok(response.header("set-cookie", state.cookie))
     }
 
-    #server.Get("/protected")
+    #Server.Get("/protected")
     fn protected(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
         cookie :: req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
         session_id :: self.state.guard_read().value.session_id
@@ -122,52 +126,43 @@ struct Orders {
     }
 }
 
-fn run() (HTTPError | NetError | TaskFailure)! {
-    db_path :: "/tmp/jet-web-battery.sqlite"
-    // The temporary file is migrated once and seeded only when empty. Every
-    // request then uses the same named policy scope, so output statuses remain
-    // deterministic while the fixture is safe to inspect after a run.
-    _migration :: battery.migrate_orders(DB_PATH) ?? return
-    _reset :: battery.reset_orders(DB_PATH) ?? return
-    seeded_count :: battery.seed_orders(DB_PATH) ?? return
+fn run() {
+    // Each run migrates and seeds its own database file, so concurrent runs
+    // never share rows and every status below is deterministic.
+    dir :: files.temp_dir("web-battery") ?? panic("no temp directory")
+    db_path :: files.join(dir.path, "orders.sqlite")
+    _migration :: battery.migrate_orders(db_path) ?? panic("migration failed")
+    _reset :: battery.reset_orders(db_path) ?? panic("reset failed")
+    seeded_count :: battery.seed_orders(db_path) ?? panic("seed failed")
 
     _app_graph :: app_graph()
     _page :: battery.ssr_orders_page(seeded_count, "alice")
     print("route-list:{battery.order_list_path(3)}")
     print("route-detail:{battery.order_detail_path(1)}")
-    decoded_limit :: battery.decode_limit("/orders/1?limit=3") ?? return
+    decoded_limit :: battery.decode_limit("/orders/1?limit=3") ?? panic("limit not decoded")
     print("query-decode:{decoded_limit}")
     print("route-report:{battery.route_report("/orders/1?limit=3")}")
     print("form-valid:{battery.validate_order_form("pen", "3").valid}")
     print("form-invalid:{battery.form_error_display("", "0")}")
-    print("query:{battery.query_report(DB_PATH)}")
+    print("query:{battery.query_report(db_path)}")
     print("island:{battery.island_props(seeded_count, "alice")}")
     print("register:{battery.register_demo_user()}")
     print("login-ok:{battery.login_status("alice", "argon2id:demo")}")
     print("login-failure:{battery.login_status("alice", "wrong")}")
 
-    login_state :: battery.login_state("alice", "argon2id:demo") ?? return
+    login_state :: battery.login_state("alice", "argon2id:demo") ?? panic("login failed")
     state :: shared RouteState{cache_version: 0, session_id: login_state.session_id}
     print("protected-ok:{battery.protected_status(login_state.session_id, login_state.cookie)}")
     print("protected-failure:{battery.protected_status("missing", "")}")
-    loop command in battery.future_commands() -> print("future:{command}")
-    loop gate in battery.open_core_gates() -> print("gate:{gate}")
 
     listener :: net.tcp_listen("127.0.0.1:0")
     addr :: listener.local_addr()
+    // Each route is registered once: the tagged methods of the mounted
+    // `Orders` value, plus the static assets (`public/`, relative to the
+    // project directory the example runs in).
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) -> {
-        return Ok(battery.ok_response("<h1>Orders</h1><a href=\"/orders\">list</a>"))
-    })
-    mux.get("/old", (_req: HTTPRequest) -> {
-        return Ok(battery.redirect_response("/orders"))
-    })
-    mux.get("/orders", (req: HTTPRequest) -> list_orders(DB_PATH, cache_version, req))
-    mux.get("/orders/:id", (id: Int) -> detail_order(id))
-    mux.post("/orders", (req: HTTPRequest) -> create_order(DB_PATH, cache_version, req))
-    mux.post("/login", (req: HTTPRequest) -> login(session_cell, req))
-    mux.get("/protected", (req: HTTPRequest) -> protected(session_cell, req))
-
+    mux.mount(Orders{path: db_path, state: state})
+    server.static_files(mux, "/assets", "public")
     task_handle :: task {
         server.serve_once_listener(listener, mux)
         server.serve_once_listener(listener, mux)
@@ -183,7 +178,8 @@ fn run() (HTTPError | NetError | TaskFailure)! {
 
     home :: client.get("http://{addr}/")
     print("home:{home.status()}")
-    redirected :: client.get("http://{addr}/old")
+    // Redirects are not followed here, so the 303 and its location show.
+    redirected :: client.request("GET", "http://{addr}/old").redirects(0).send()
     print("redirect:{redirected.status()}:{redirected.header("location") ?? "missing"}")
     listed :: client.get("http://{addr}/orders?limit=3")
     print("list-before:{listed.status()}:{listed.body().text(8192) ?? "bad"}")
@@ -205,6 +201,5 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     print("protected:{protected_response.status()}")
     asset :: client.get("http://{addr}/assets/index.html")
     print("asset:{asset.status()}:{asset.body().text(8192) ?? "bad"}")
-    completed :: task_handle.join() ?? return Err(err)
-    completed ?? return Err(err)
+    task_handle.join() ?? panic("server task failed")
 }

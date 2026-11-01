@@ -10,9 +10,9 @@ stdout: count "{work}/probe.jet:" = 1 # original predicate
 stdout: line ^= "  {work}/probe.jet:9:21 " # original predicate
 step: jet fmt --explicit-copies {work}/probe.jet
 exit: 0
-file: probe.jet ~ "Holder{xs: ~a}" # original predicate
-file: probe.jet !~ "struct ~" # original predicate
-file: probe.jet count "~" = 1 # original predicate
+file: probe.jet ~ "Holder{xs: a.copy()}" # respelled from the retired copy sigil; fmt writes .copy()
+file: probe.jet !~ "struct Holder.copy()" # respelled from the retired copy sigil
+file: probe.jet count ".copy()" = 1 # respelled from the retired copy sigil
 copy: probe.jet rewritten.txt
 concat: probe.jet policy.header rewritten.txt
 step: jet check {work}/probe.jet

@@ -18,8 +18,12 @@ use jet_foundation.[
     FailureContract,
     TypeParam,
     PolicyDeclaration,
+    PolicyScope,
+    PolicySourceText,
     RuleSite,
     POLICY_RULES,
+    diagnostic_source_text,
+    policy_explain,
     policy_resolve,
     type_name,
 ]
@@ -107,9 +111,16 @@ fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
             loop declaration in program.policy_declarations {
                 if semindex_policy_applies_to_function(declaration, function.span) -> &declarations.push(declaration)
             }
+            // The function's own and its module's declarations are written in
+            // `source`; package and organization rows name their own files.
+            sources := [PolicySourceText]{}
+            loop declaration in declarations {
+                if declaration.scope == PolicyScope.Package || declaration.scope == PolicyScope.Organization -> next
+                if sources.len() == 0 -> &sources.push(PolicySourceText{path: declaration.source, text: diagnostic_source_text(source)})
+            }
             loop rule in POLICY_RULES {
                 if policy_resolve(rule.key, declarations) == .Ok(effective) {
-                    if effective == .Val(value) -> hover += "\npolicy: {policy_explain(value)}"
+                    if effective == .Val(value) -> hover += "\npolicy: {policy_explain(value, sources)}"
                 }
             }
             &db.hover.push(HoverEntry{span: function.name_span, module_path: mp, text: ^hover})

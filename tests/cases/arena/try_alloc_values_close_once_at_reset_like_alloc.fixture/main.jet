@@ -1,0 +1,62 @@
+use core.mem
+
+struct Tracked {
+    label: String
+}
+
+impl Tracked.Close {
+    fn close(^self) -[IO]> { print("drop {self.label}") }
+}
+
+// Each way of reading a try_alloc's Ok yields a view: the value closes and
+// drops when the arena resets, latest allocation first, and never again.
+fn arms() {
+    arena := mem.Arena.new()
+    arena.try_alloc(Tracked{label: "t1"}) ? value -> {
+        print("got {value.label}")
+    }
+    ! error -> {
+        print("refused {error.requested_bytes}")
+    }
+    if arena.try_alloc(Tracked{label: "t2"}) == .Ok(value) {
+        print("got {value.label}")
+    }
+    third :: arena.try_alloc(Tracked{label: "t3"}) ?? panic("refused")
+    print("got {third.label}")
+    print("reset arena")
+    &arena.reset()
+    print("after reset")
+    close(^arena)
+    print("arms done")
+}
+
+// A propagating call hands on the view; the arena's close closes the value.
+fn tried() AllocError! {
+    arena := mem.Arena.new()
+    value :: arena.try_alloc(Tracked{label: "t4"})
+    print("got {value.label}")
+    print("close arena")
+    close(^arena)
+    print("tried done")
+}
+
+// A Fixed allocator closes what it accepted when it is closed.
+fn fixed_case() {
+    fixed :: mem.Fixed.new(size: 64)
+    fixed.try_alloc(Tracked{label: "f1"}) ? value -> {
+        print("got {value.label}")
+    }
+    ! error -> {
+        print("refused {error.requested_bytes}")
+    }
+    print("close fixed")
+    close(^fixed)
+    print("fixed done")
+}
+
+fn run() {
+    arms()
+    tried() ?? panic("refused")
+    fixed_case()
+    print("end")
+}

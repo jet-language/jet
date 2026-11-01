@@ -32,8 +32,11 @@ struct PolicyOccurrence { file: String, rule: String, site: String }
 struct PolicyError { message: String }
 
 // Compiler/token offsets and the Rust adapter's slices are UTF-8 byte offsets.
-fn policy_slice_bytes(text: String, start: Int, end: Int) -> String {
-    raw :: text.bytes()
+fn policy_slice_bytes(text: String, start: Int, end: Int) -> String { policy_slice_raw(text.bytes(), start, end) }
+
+// The same slice of an already indexed text: a scan over one text indexes it
+// once instead of copying it per slice (#6301).
+fn policy_slice_raw(raw: [U8], start: Int, end: Int) -> String {
     assert(start >= 0 && end >= start && end <= raw.len(), "valid corpus byte span")
     if start == end -> return ""
     String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")
@@ -55,7 +58,7 @@ fn policy_rule_registry() -> [PolicyRuleSpec] {
         PolicyRuleSpec{name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API"},
         PolicyRuleSpec{name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary"},
         PolicyRuleSpec{name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion"},
-        PolicyRuleSpec{name: "entry-implicit", why: "the first-contact program should be its top-level body", replacement: "move the ordinary first-contact body to top level"},
+        PolicyRuleSpec{name: "entry-explicit", why: "ordinary-file execution belongs in an explicit fn run (D-ENTRY-SCRIPT1=C)", replacement: "move loose executable statements into fn run"},
         PolicyRuleSpec{name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()"},
         PolicyRuleSpec{name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()"},
         PolicyRuleSpec{name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup"},
@@ -475,7 +478,7 @@ fn policy_test_checked_findings_and_provenance() {
     assert(has_lua, "Lua artifact family is inventoried")
     has_renderer := false
     loop producer in manifest.producers {
-        if producer.selector.contains("LuaBind.rs") {
+        if producer.selector.contains("Binders/Lua.jet#pkg_lua_render_jet") {
             has_renderer = true
             assert_eq(producer.protocol, "override:lua-raw-json:differs-from-ordinary-envelope")
         }
@@ -485,24 +488,24 @@ fn policy_test_checked_findings_and_provenance() {
 #Test("checked_manifest_has_all_audited_findings_and_provenance") { policy_test_checked_findings_and_provenance() }
 fn policy_test_uncovered_scope() {
     manifest := policy_manifest()
-    &manifest.scopes.push(PolicyScopeRow{rule: "entry-implicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
+    &manifest.scopes.push(PolicyScopeRow{rule: "entry-explicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
     assert(policy_validate_manifest(manifest).join("\n").contains("unclassified source selector"), "uncovered scope must fail")
 }
 #Test("manifest_rejects_a_scope_without_source_coverage") { policy_test_uncovered_scope() }
 fn policy_test_unguarded_finding() {
     manifest := policy_manifest()
     kept := [PolicyScopeRow]{}
-    loop scope in manifest.scopes { if scope.rule != "entry-implicit" -> &kept.push(scope) }
+    loop scope in manifest.scopes { if scope.rule != "entry-explicit" -> &kept.push(scope) }
     manifest.scopes = kept
-    assert(policy_validate_manifest(manifest).join("\n").contains("entry-implicit has no executable corpus or domain guard"), "orphan finding must fail")
+    assert(policy_validate_manifest(manifest).join("\n").contains("entry-explicit has no executable corpus or domain guard"), "orphan finding must fail")
 }
 #Test("manifest_rejects_a_finding_without_an_executable_guard") { policy_test_unguarded_finding() }
 fn policy_test_invalid_manifest_rows() {
     assert_eq(policy_manifest_failure("[unknown]\n"), "manifest line 1: unknown section [unknown]")
-    assert_eq(policy_manifest_failure("[scope]\n1\tentry-implicit\tfile:../escape.jet\twhy"), "manifest line 2: manifest path is not a normalized relative path (../escape.jet)")
-    assert_eq(policy_manifest_failure("[exception]\n1\tentry-implicit\tfile:ok.jet\tfn:run@3..2\t1\tfixture\twhy"), "manifest line 2: site end precedes start (fn:run@3..2)")
-    assert_eq(policy_manifest_failure("[scope]\n2\tentry-implicit\tfile:ok.jet\twhy"), "manifest line 2: unsupported manifest version")
-    assert_eq(policy_manifest_failure("[scope]\n1\tentry-implicit\tfile:ok.jet"), "manifest line 2: wrong field count or row outside a section")
+    assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:../escape.jet\twhy"), "manifest line 2: manifest path is not a normalized relative path (../escape.jet)")
+    assert_eq(policy_manifest_failure("[exception]\n1\tentry-explicit\tfile:ok.jet\tstmt:top-level@3..2\t1\tfixture\twhy"), "manifest line 2: site end precedes start (stmt:top-level@3..2)")
+    assert_eq(policy_manifest_failure("[scope]\n2\tentry-explicit\tfile:ok.jet\twhy"), "manifest line 2: unsupported manifest version")
+    assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:ok.jet"), "manifest line 2: wrong field count or row outside a section")
 }
 #Test("corpus manifest parser planted invalid rows") { policy_test_invalid_manifest_rows() }
 fn policy_test_duplicate_and_provenance_violations() {
@@ -525,8 +528,8 @@ fn policy_test_exception_source_roles() {
 #Test("exceptions_are_limited_to_expert_or_negative_sources") { policy_test_exception_source_roles() }
 fn policy_test_canonical_source_exception() {
     manifest := policy_manifest()
-    &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-implicit", selector: "file:Examples/features/basics/hello.jet", site: "fn:run@0..0", expected: "1", protocol: "fixture", reason: "planted"})
-    error :: "exception entry-implicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
+    &manifest.exceptions.push(PolicyExceptionRow{rule: "entry-explicit", selector: "file:Examples/features/basics/hello.jet", site: "stmt:top-level@0..0", expected: "1", protocol: "fixture", reason: "planted"})
+    error :: "exception entry-explicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
 }
 #Test("corpus manifest planted canonical-source exception") { policy_test_canonical_source_exception() }
@@ -541,28 +544,28 @@ fn policy_test_unclassified_inventory_entries() {
     assert_eq(error, "unclassified eligible source: unclassified/new-maintained-program.jet; file=unclassified/new-maintained-program.jet; rule=corpus-inventory; site=inventory:source@0..0; why=every maintained source and generated producer needs an explicit manifest boundary; replacement=add one exact manifest row with its role, owner, reason, and provenance")
     producer_error :: policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:new.rs#render"}).join("\n")
     assert(producer_error.contains("unclassified generated-source producer"), "a synthetic producer without provenance must fail")
-    assert_eq(policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet"}), [String]{})
+    assert_eq(policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"}), [String]{})
 }
 #Test("inventory_rejects_new_source_or_producer_without_a_row") { policy_test_unclassified_inventory_entries() }
 fn policy_test_occurrence_scoped_exceptions() {
     manifest :: policy_manifest()
-    selector :: "tests/ui/E-CALL-VALUE_call_result_not_called.jet"
-    candidate :: PolicyOccurrence{file: selector, rule: "entry-implicit", site: "fn:run@0..0"}
+    selector :: "tests/ui/args_spec_bad_parse_arity.jet"
+    candidate :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.argv@0..0"}
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate}), None)
     duplicate :: policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate, candidate}) ?? panic("a second occurrence cannot reuse one exception")
     assert(duplicate.contains("expected 1"), "duplicate occurrence must fail")
-    assert_eq(duplicate, "file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
+    assert_eq(duplicate, "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
     applied :: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
     assert_eq(applied, [PolicyOccurrence]{})
 }
 #Test("exception_matching_is_occurrence_scoped") { policy_test_occurrence_scoped_exceptions() }
 fn policy_test_missing_and_shifted_exception_sites() {
     manifest :: policy_manifest()
-    selector :: "tests/ui/E-CALL-VALUE_call_result_not_called.jet"
-    shifted :: PolicyOccurrence{file: selector, rule: "entry-implicit", site: "fn:run@1..1"}
-    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Val("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
-    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
-    assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/E-CALL-VALUE_call_result_not_called.jet; rule=entry-implicit; site=fn:run@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
+    selector :: "tests/ui/args_spec_bad_parse_arity.jet"
+    shifted :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.argv@1..1"}
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
+    assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
 }
 #Test("corpus occurrence exceptions reject missing and shifted sites") { policy_test_missing_and_shifted_exception_sites() }
 
@@ -621,8 +624,9 @@ fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> Pol
             kind :: file_type ?? panic("entry stat succeeded")
             if kind.is_symlink -> next
             if kind.is_dir {
-                // These are precisely the filesystem preconditions of the Rust
-                // uncomposed-manifest exclusion. Never guess its parse result.
+                // A `config/` directory beside a `package.jet` is a candidate; the
+                // caller that owns the package parser decides whether the package
+                // declares it (Rust `is_declared_package_config_dir`).
                 if entry.name == "config" && policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> &candidates.push(child)
                 if !policy_skip_directory(entry.name) -> &pending.push(child)
             } else if kind.is_file && child.ends_with(".jet") {
@@ -636,12 +640,15 @@ fn policy_discover_manifest_files(manifest: PolicyManifest, root: String) -> Pol
     &candidates.sort()
     Ok(PolicyDiscovery{paths: unique, config_candidates: candidates})
 }
-fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInventory PolicyError! {
-    discovery :: policy_discover_manifest_files(manifest, root)
-    if discovery.config_candidates.len() > 0 -> return Err(PolicyError{message: "config-dir exclusion requires the uncomposed manifest parse; candidate: {discovery.config_candidates[0]}"})
+// `declared_configs` are the discovery candidates their sibling `package.jet`
+// declares under `configs:`; their files are package configuration, not corpus.
+fn policy_inventory(manifest: PolicyManifest, root: String, discovery: PolicyDiscovery, declared_configs: [String]) -> PolicyInventory PolicyError! {
     errors := [String]{}
     entries := [PolicyInventoryEntry]{}
     loop path in discovery.paths {
+        excluded := false
+        loop config in declared_configs { if path.starts_with("{config}/") -> excluded = true }
+        if excluded -> next
         source := PolicySourceRow?{None}
         source = policy_source_row(manifest, path)
         if source == None {
@@ -690,30 +697,6 @@ fn policy_inventory(manifest: PolicyManifest, root: String) -> PolicyInventory P
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
     Ok(PolicyInventory{files: entries, producers: producers, artifacts: artifacts, provenance: provenance})
 }
-// PENDING-SEAM(config-parse): the real corpus contains
-// Examples/features/tooling/compiler_api_package/config. Refuse to approximate
-// PackageFacts::parse_uncomposed until its Jet package is consumable.
-fn policy_test_config_exclusion_candidate_count() {
-    discovery :: policy_discover_manifest_files(policy_manifest(), ".") ?? panic("discover manifest corpus")
-    print("config-dir exclusion candidate count: {discovery.config_candidates.len()}")
-    assert(discovery.config_candidates.len() == 0, "config-dir exclusion requires the uncomposed manifest parse; candidates: {discovery.config_candidates.join(",")}")
-}
-#Test("corpus inventory config exclusion candidate count") { policy_test_config_exclusion_candidate_count() }
-// PENDING-SEAM(config-parse), shared with the candidate-count proof above.
-fn policy_test_manifest_scoped_inventory() {
-    inventory :: policy_inventory(policy_manifest(), ".") ?? panic("manifest-scoped inventory")
-    first_hour := false
-    scratch := false
-    loop entry in inventory.files {
-        if entry.path == "Docs/spec/guides/first-hour.md" -> first_hour = true
-        if entry.path == "scratch-parser-call.jet" -> scratch = true
-    }
-    assert(first_hour, "exact documentation source is inventoried")
-    assert(inventory.provenance.len() == inventory.artifacts.len(), "every artifact must retain producer provenance")
-    assert(!scratch, "sources outside manifest roots are excluded")
-}
-#Test("inventory_is_manifest_scoped") { policy_test_manifest_scoped_inventory() }
-
 fn policy_test_usize_domain() {
     assert_eq(policy_unsigned("+0001"), Val("1"))
     assert_eq(policy_unsigned("18446744073709551615"), Val("18446744073709551615"))

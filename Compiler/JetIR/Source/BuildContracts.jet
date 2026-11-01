@@ -11,14 +11,16 @@ use jet_foundation.[Span, BodyContract, TContractResult, TPanicLoc, TPanicLocal,
 struct IRContractFrame { result: TContractResult, post: [BodyContract] }
 
 // One checked clause: a proven or stripped clause emits nothing. Its report
-// quotes the clause's source line.
+// quotes the clause's source line with the caret under its span: the callee
+// name of a `#Pre` call site, the clause of a `#Post`.
 fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
     if contract.disposition != .Check -> return
     if contract.file != b.f.source_file -> return ir_fail(&b, contract.span, "contract source differs from its function source")
     source_line :: ir_source_line_text(p, contract.file, contract.line) ?? return ir_fail(&b, contract.span, "contract line {contract.line} is outside its source")
+    column :: ir_source_column(p, contract.file, contract.span.start) ?? return ir_fail(&b, contract.span, "contract span falls outside its source")
     site :: b.line
     b.line = contract.line
-    location :: TPanicLoc{file: contract.file, source_line: source_line, line: contract.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}}
+    location :: TPanicLoc{file: contract.file, source_line: source_line, line: contract.line, column: column, caret: contract.span.end - contract.span.start, function: "", locals: [TPanicLocal]{}}
     _ :: ir_require_stop(&m, p, &b, BodyRequireKind.Require{cond: contract.condition, msg: Val(contract.message)}, location, false, contract.span)
     b.line = site
 }
@@ -52,7 +54,7 @@ fn ir_contract_return(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
     if slot >= 0 -> b.fresh[slot] = false
     if frame.result.mode == {
         .Direct -> {
-            ir_contract_bind(&b, frame.result, slot)
+            ir_contract_bind(&m, p, &b, frame.result, slot, span)
             ir_contract_posts(&m, p, &b, frame.post)
         }
         .ResultPayload | .OptionPayload -> {
@@ -62,12 +64,13 @@ fn ir_contract_return(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
                 result_mode :: frame.result.mode == .ResultPayload
                 present :: if result_mode -> ir_result_is_ok(&m, &b, slot) else -> ir_option_is_some(&m, &b, slot)
                 ir_open_if(&b.f, present, b.line)
-                binding_row :: ir_value_type(&m, p, frame.result.binding_ty) ?? -1
+                binding_ty :: ir_fact(p, &b, frame.result.binding_ty, span)
+                binding_row :: ir_value_type(&m, p, binding_ty) ?? -1
                 payload := -1
                 if binding_row >= 0 {
                     payload = if result_mode -> ir_load_at(&m, &b, slot, 8, binding_row) else -> ir_option_payload(&m, &b, slot, binding_row)
                 }
-                ir_contract_bind(&b, frame.result, slot)
+                ir_contract_bind(&m, p, &b, frame.result, slot, span)
                 ir_contract_bind_payload(&b, frame.result, payload)
                 ir_contract_posts(&m, p, &b, frame.post)
                 ir_end(&b.f, b.line)
@@ -88,9 +91,10 @@ fn ir_contract_posts(m: &IRModule, p: IRProgram, b: &IRBuilder, post: [BodyContr
 
 // `result`'s carrier variable names the returned `slot` (not owned: the
 // return hands it on).
-fn ir_contract_bind(b: &IRBuilder, result: TContractResult, slot: Int) Never! {
+fn ir_contract_bind(m: &IRModule, p: IRProgram, b: &IRBuilder, result: TContractResult, slot: Int, span: Span) Never! {
     if slot < 0 -> return
     local :: result.carrier_local
+    _ :: ir_binder_holds(&m, p, &b, local, slot, span)
     symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
     &b.bindings.push(IRBinding{name: local.name, slot: slot, owned: false, symbol: symbol})
 }

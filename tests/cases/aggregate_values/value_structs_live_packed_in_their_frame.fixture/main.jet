@@ -1,0 +1,25 @@
+struct Mixed {
+    a: U8
+    b: Int
+    c: U8
+    d: Int
+    e: U8
+}
+
+fn bump(value: &Mixed, by: Int) {
+    value.a = value.a + U8{1}
+    value.b = value.b * by
+    value.d = value.d - by
+}
+
+fn total(value: Mixed) -> Int {
+    return Int.from_u8(value.a) + value.b + Int.from_u8(value.c) + value.d + Int.from_u8(value.e)
+}
+
+fn run() {
+    value := Mixed{a: U8{1}, b: 10, c: U8{2}, d: 20, e: U8{3}}
+    loop round in 1..<4 -> bump(&value, round)
+    other := value
+    other.b = 0
+    print("{total(value)} {total(other)} {value.a} {other.b}")
+}

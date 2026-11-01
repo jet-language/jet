@@ -4,14 +4,14 @@
 fixture: hostile_http_response_sinks_reject_streamed_overruns_on_both_dev_tiers.fixture
 env: NO_COLOR=1
 write: peer/main.jet peer/source.template
-step: jet build peer/main.jet
+step: jet build --allow=FS.Write,Net peer/main.jet
 exit: 0
 spawn peer: built
 await: file addr.txt timeout 30s
 capture: addr = text file addr.txt
 write: server/main.jet main.template
 write: controller/main.jet controller/source.template
-step: jet build controller/main.jet
+step: jet build --allow=Exec,Time controller/main.jet
 exit: 0
 step: built
 exit: 0

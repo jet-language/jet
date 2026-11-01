@@ -2,8 +2,12 @@ use core as core
 use core.http as http
 use core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
 use core.encoding.json as json_codec
+use core.net.url as route_url
+use core.net.tls as server_tls
+use core.encoding.[Dyn]
 
-// core.http.server — HTTP/1.1 serving over core.net TCP.
+// core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
+// when bound with `tls: server.tls(cert, key)`.
 //
 // A mux holds routes and middleware layers; a server owns one listener and
 // answers one request per connection with `Connection: close`. Request
@@ -14,6 +18,16 @@ use core.encoding.json as json_codec
 //
 // Public arity/label rows keep the implicit-Optional admission: their source
 // entries receive the normalized options.
+
+// Body-less route markers record route facts. Only `mux.mount(value)`
+// exposes the tagged methods of that value's struct.
+marker Get(path: String, $sites: [.Method])
+marker Post(path: String, $sites: [.Method])
+marker Put(path: String, $sites: [.Method])
+marker Delete(path: String, $sites: [.Method])
+marker Patch(path: String, $sites: [.Method])
+marker Head(path: String, $sites: [.Method])
+marker Options(path: String, $sites: [.Method])
 
 C_MAX_HEAD_BYTES :: 32768
 C_MAX_LINE_BYTES :: 8192
@@ -39,10 +53,24 @@ struct HTTPCorsPolicy {
     max_age_secs: Int
 }
 
-// Server TLS credentials, kept verbatim until a listener loads them.
+// Server TLS credentials, kept verbatim until a listener loads them. The
+// identity check and handshake are reached through `__ops`, which only
+// `tls(cert, key)` fills, so a server without `tls:` links no TLS.
 struct HTTPServerTLS {
     cert_pem: String
     key_pem: String
+    __ops: Shared<__HTTPTLSOps>
+}
+
+struct __HTTPTLSOps {
+    // The bind-time identity check: "" or the reason the identity is unusable.
+    check: fn(String, String) -[Net]> String Never!
+    // The server handshake over an accepted stream, within the budget; None
+    // drops a failed handshake. A function value's parameters only read, so
+    // the stream arrives as the one item of a shared list the handshake pops
+    // it from: the TLS stream is then its one owner, and the caller, whose
+    // list is empty, does not close it again.
+    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> __HTTPSecure? Never!
 }
 
 /// What one served lifetime did: connections accepted, refused for load,
@@ -86,6 +114,10 @@ struct __HTTPRoute {
     pattern: String
     segments: [__HTTPSegment]
     handler: HTTPHandler
+    // The compiler-checked endpoint contract a `mux.get(…)`-style
+    // registration carries ("" for Core's own static and app routes);
+    // `web.openapi(mux)` renders it.
+    contract: String
 }
 
 struct __HTTPParsedRoute {
@@ -109,16 +141,23 @@ struct HTTPMux {
 }
 
 impl HTTPMux {
-    // `mux.get(pattern, handler)` and its sibling verbs land here.
-    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) Never! -[Net]> {
+    // `mux.get(pattern, handler)` and its sibling verbs land here with the
+    // route's checked contract when the pattern is a literal. The compiler
+    // wrote that contract complete, and `web.openapi(mux)` checks it against
+    // the route when it renders, so registration parses no JSON.
+    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
         parsed :: __route_parse(pattern)
         if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
-        shape :: __route_shape(parsed.segments)
-        loop existing in __mux_routes(self) {
-            if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
-        }
-        guard := self.__state.guard_edit()
-        &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: parsed.segments, handler: __handler(^handler)})
+        __mux_register(self, method, pattern, parsed.segments, __handler(^handler), contract)
+    }
+
+    // A route whose pattern is a run-time value: its contract
+    // (`"pattern":""`) gets its path inputs from the pattern registered.
+    fn __route_dynamic(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
+        parsed :: __route_parse(pattern)
+        if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
+        checked :: __route_contract(method, pattern, parsed.segments, contract)
+        __mux_register(self, method, pattern, parsed.segments, __handler(^handler), checked)
     }
 
     // `mux.middleware(layer)`: the first registered layer is the outermost.
@@ -126,6 +165,15 @@ impl HTTPMux {
         guard := self.__state.guard_edit()
         &guard.value.layers.push(shared __HTTPLayerCell{wrap: ^middleware})
     }
+}
+
+fn __mux_register(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String) Never! {
+    shape :: __route_shape(segments)
+    loop existing in __mux_routes(mux) {
+        if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
+    }
+    guard := mux.__state.guard_edit()
+    &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract})
 }
 
 struct __HTTPServerState {
@@ -141,6 +189,7 @@ struct HTTPServer {
     __listener: TCPListener
     __mux: HTTPMux
     __deadline: Duration?
+    __tls: HTTPServerTLS?
     __done: Sender<Int>
     __finished: Receiver<Int>
 }
@@ -160,7 +209,9 @@ impl HTTPServer {
             if self.__listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
                 .Ok(stream) -> {
                     accepted = accepted + 1
-                    if __serve_connection(stream, self.__mux, self.__deadline) -> completed = completed + 1
+                    if __accept_conn(^stream, self.__tls, self.__deadline) == .Val(conn) {
+                        if __serve_connection(conn, self.__mux, self.__deadline) -> completed = completed + 1
+                    }
                 }
                 .Err(error) -> {
                     if !__accept_timed_out(error) {
@@ -182,8 +233,8 @@ impl HTTPServer {
     }
 
     // Requests are answered one at a time, so the grace period never has an
-    // in-flight request left to cancel.
-    fn shutdown(self, grace: Duration) -[Net]> HTTPShutdownReport HTTPError! {
+    // in-flight request left to cancel; it defaults to none.
+    fn shutdown(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
         phase :: __server_request_stop(self)
         if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
         if phase == 1 {
@@ -245,7 +296,7 @@ fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
     }
-    _ :: __serve_connection(stream, mux, None)
+    _ :: __serve_connection(__HTTPConn{tcp: Val(^stream), tls: None}, mux, None)
     Ok(())
 }
 
@@ -255,8 +306,15 @@ fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Dura
     Ok(())
 }
 
+// D-TLSSERVE1=A (Docs/spec/syntax-decisions.md:5083, Docs/spec/spec.md:1928-1931):
+// the labelled `tls:` option serves HTTPS. Its identity is checked here, so an
+// unusable certificate or key fails the bind instead of every handshake.
 fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
-    if tls == .Val(_) -> return Err(.IO{operation: "TLS server requires the native TLS adapter"})
+    if tls == .Val(identity) {
+        ops :: identity.__ops.guard_read()
+        problem :: ops.value.check(identity.cert_pem, identity.key_pem)
+        if problem != "" -> return Err(.IO{operation: problem})
+    }
     listener :: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     pair :: core.tasks.__channel_bounded<Int>(1)
     Ok(HTTPServer{
@@ -264,6 +322,7 @@ fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Durat
         __listener: listener,
         __mux: mux,
         __deadline: deadline,
+        __tls: tls,
         __done: pair.sender,
         __finished: pair.receiver,
     })
@@ -278,7 +337,7 @@ fn __http_serve_entry(mux: HTTPMux, deadline: Duration) -[Net]> HTTPServer Never
 fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net, FS.Read]> {
     mount :: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base :: __trim_trailing_slashes(prefix)
-    mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)))
+    mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)), "")
 }
 
 fn response(status: Int, body: String) -> HTTPResponse Never! {
@@ -319,7 +378,38 @@ fn static_files(mux: HTTPMux, prefix: String, root: String) Never! -[Net, FS.Rea
 }
 
 fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
-    HTTPServerTLS{cert_pem: cert, key_pem: key}
+    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: shared __HTTPTLSOps{check: __tls_check, accept: __tls_accept}}
+}
+
+fn __tls_check(cert_pem: String, key_pem: String) -[Net]> String Never! {
+    _ :: server_tls.__server_context(cert_pem, key_pem) ?? return "{err}"
+    ""
+}
+
+// The accepted stream, out of the list `__accept_conn` handed over.
+fn __tls_accepted(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
+    guard := accepted.guard_edit()
+    &guard.value.pop()
+}
+
+fn __tls_accept(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
+    tcp :: __tls_accepted(accepted) ?? return None
+    secure :: server_tls.__server(^tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
+    Val(__HTTPSecure{
+        read: (max_bytes: Int, deadline: Duration) -> secure.read(max_bytes, deadline: deadline),
+        write_all: (bytes: [U8], deadline: Duration) -> {
+            if secure.write_all(bytes, deadline: deadline) == {
+                .Ok(_) -> true
+                .Err(_) -> false
+            }
+        },
+        close: () -> {
+            if secure.close() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        },
+    })
 }
 
 fn sse(body: String) -> HTTPResponse Never! {
@@ -688,6 +778,156 @@ fn __route_shape(segments: [__HTTPSegment]) -> String Never! {
     out
 }
 
+// The OpenAPI path of a parsed route: static segments percent-encoded,
+// parameters as `{name}` (HTTPRoute.rs jet_http_route_openapi_path).
+fn __route_openapi_path(segments: [__HTTPSegment]) -> String Never! {
+    path := "/"
+    loop (index, segment) in segments {
+        if index > 0 -> path = "{path}/"
+        piece :: if segment == {
+            .Static(text) -> route_url.percent_encode(text)
+            .Param(name) | .CatchAll(name) -> "{{{name}}}"
+        }
+        path = "{path}{piece}"
+    }
+    path
+}
+
+// A registration's checked contract, completed and checked once
+// (HTTPServer.rs jet_http_mux_register): a dynamic pattern's contract
+// (`"pattern":""`) gets its path inputs from the pattern registered.
+fn __route_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
+    completed :: if contract.contains("\"pattern\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
+    __route_require_contract(method, pattern, completed)
+    completed
+}
+
+fn __contract_member(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+    loop pair in fields {
+        if pair.key == name -> return Val(pair.value)
+    }
+    None
+}
+
+fn __contract_text(fields: [(key: String, value: Dyn)], name: String) -> String? {
+    value :: __contract_member(fields, name) ?? return None
+    if value == {
+        .Text(text) -> return Val(text)
+        else -> return None
+    }
+}
+
+// `fields` with member `name` replaced (it must be present).
+fn __contract_set(fields: [(key: String, value: Dyn)], name: String, value: Dyn) -> [(key: String, value: Dyn)] Never! {
+    out := [(key: String, value: Dyn)]{}
+    found := false
+    loop pair in fields {
+        if pair.key == name {
+            &out.push((key: name.copy(), value: value.copy()))
+            found = true
+        } else {
+            &out.push(pair)
+        }
+    }
+    if !found -> panic("checked HTTP route descriptor has no `{name}`")
+    out
+}
+
+// HTTPServer.rs jet_http_route_complete_contract.
+fn __route_complete_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
+    parsed :: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
+    fields := if parsed == {
+        .Object(members) -> members
+        else -> panic("checked HTTP route descriptor is not an object")
+    }
+    inputs :: __contract_member(fields, "parameters") ?? panic("checked HTTP route descriptor has no inputs")
+    parameters :: if inputs == {
+        .Array(items) -> items
+        else -> panic("checked HTTP route descriptor inputs are not an array")
+    }
+    loop segment in segments {
+        name :: if segment == {
+            .Param(found) | .CatchAll(found) -> found
+            .Static(_) -> { next }
+        }
+        bound := false
+        loop parameter in parameters {
+            if parameter == .Object(members) {
+                if (__contract_text(members, "name") ?? "") == name -> bound = true
+            }
+        }
+        if !bound -> panic("HTTP route `{pattern}` path field `{name}` has no typed handler input")
+    }
+    completed := [Dyn]{}
+    loop parameter in parameters {
+        members := if parameter == {
+            .Object(entries) -> entries
+            else -> panic("checked HTTP route input is not an object")
+        }
+        name :: __contract_text(members, "name") ?? panic("checked HTTP route input has no name")
+        catch_all := Bool?{None}
+        loop segment in segments {
+            if segment == {
+                .Param(candidate) -> { if candidate == name -> catch_all = Val(false) }
+                .CatchAll(candidate) -> { if candidate == name -> catch_all = Val(true) }
+                .Static(_) -> {}
+            }
+        }
+        if catch_all == .Val(wildcard) {
+            members = __contract_set(members, "in", Dyn.Text("path"))
+            members = __contract_set(members, "required", Dyn.Bool(true))
+            members = __contract_set(members, "catch_all", Dyn.Bool(wildcard))
+        } else if method != "GET" && method != "HEAD" {
+            panic("HTTP route `{pattern}` has unbound non-GET handler input `{name}`")
+        }
+        &completed.push(Dyn.Object(members))
+    }
+    fields = __contract_set(fields, "parameters", Dyn.Array(completed))
+    fields = __contract_set(fields, "pattern", Dyn.Text(pattern.copy()))
+    fields = __contract_set(fields, "path", Dyn.Text(__route_openapi_path(segments)))
+    fields = __contract_set(fields, "operation_id", Dyn.Text(""))
+    json_codec.dump(Dyn.Object(fields)) ?? panic("checked HTTP route descriptor does not render: {err.reason}")
+}
+
+// HTTPServer.rs jet_http_require_route_contract, for a mux route: its
+// responses may be empty at registration; `web.openapi` refuses that later.
+fn __route_require_contract(method: String, pattern: String, contract: String) Never! {
+    route :: "route `{method} {pattern}`"
+    parsed :: json_codec.parse(contract) ?? panic("E2805: {route} has an invalid checked endpoint contract")
+    fields :: if parsed == {
+        .Object(members) -> members
+        else -> panic("E2805: {route} has a non-object endpoint contract")
+    }
+    names :: [String]{"method", "pattern", "path", "operation_id", "summary", "parameters", "request_body", "responses", "security", "provenance"}
+    loop field in names {
+        if __contract_kind(fields, field) == "" -> panic("E2805: {route} has an incomplete endpoint contract")
+    }
+    if (__contract_text(fields, "method") ?? "") != method || (__contract_text(fields, "pattern") ?? "") != pattern -> panic("E2805: {route} does not match its endpoint contract")
+    if __contract_kind(fields, "responses") != "array" -> panic("E2805: {route} has invalid endpoint responses")
+    if __contract_kind(fields, "parameters") != "array" -> panic("E2805: {route} has invalid endpoint parameters")
+    if __contract_kind(fields, "security") != "array" -> panic("E2805: {route} has invalid endpoint security policy")
+    body :: __contract_member(fields, "request_body") ?? panic("E2805: {route} has an invalid endpoint request body")
+    valid :: if body == {
+        .Null -> true
+        .Object(members) -> __contract_kind(members, "required") == "bool" && (__contract_text(members, "content_type") ?? "") != "" && __contract_kind(members, "schema") == "object"
+        else -> false
+    }
+    if !valid -> panic("E2805: {route} has an invalid endpoint request body")
+}
+
+// The JSON kind of member `name`; "" when it is absent.
+fn __contract_kind(fields: [(key: String, value: Dyn)], name: String) -> String Never! {
+    value :: __contract_member(fields, name) ?? return ""
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+        .Text(_) -> "text"
+        else -> "number"
+    }
+}
+
 // A path's decoded segments; `None` for a target the router refuses.
 fn __path_segments(path: String) -> [String]? Never! {
     raw :: path.bytes()
@@ -804,8 +1044,40 @@ struct __HTTPChunked {
     trailers: Headers
 }
 
+// One accepted connection: exactly one of tcp/tls. A server bound with
+// `tls: server.tls(cert, key)` serves the TCP stream after the TLS handshake
+// (D-TLSSERVE1=A, Docs/spec/syntax-decisions.md:5083).
+struct __HTTPConn {
+    tcp: TCPStream?
+    tls: __HTTPSecure?
+}
+
+// A TLS connection's stream, held only by these operations; `__tls_accept`
+// builds them, so a server without `tls:` reaches no TLS code.
+struct __HTTPSecure {
+    read: fn(Int, Duration) -[Net, Time.Wait]> [U8] IOError!
+    // Whether every byte was sent within the deadline.
+    write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool
+    // Sends close_notify and closes the socket the stream owns.
+    close: fn() -[Net, Time.Wait]> Unit
+}
+
+// The accepted stream, which the connection now owns, after the server
+// handshake within the connection budget when the server has a TLS identity;
+// None drops a failed handshake.
+fn __accept_conn(stream: ^TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
+    if tls == .Val(identity) {
+        budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+        ops :: identity.__ops.guard_read()
+        accepted :: shared [TCPStream]{^stream}
+        secure :: ops.value.accept(accepted, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
+        return Val(__HTTPConn{tcp: None, tls: Val(secure)})
+    }
+    Val(__HTTPConn{tcp: Val(^stream), tls: None})
+}
+
 // Whether the connection's request was answered by the mux.
-fn __serve_connection(stream: TCPStream, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
+fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
     budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := __HTTPWire{buffer: [U8]{}, end_ns: core.time.__clock_mono_ns() + budget}
     answered := false
@@ -821,32 +1093,51 @@ fn __serve_connection(stream: TCPStream, mux: HTTPMux, deadline: Duration?) -[Ne
             }
         }
     }
-    if stream.close() == {
-        .Ok(_) -> {}
-        .Err(_) -> {}
+    // A TLS stream sends close_notify and closes the socket it owns.
+    if stream.tls == .Val(secure) -> secure.close()
+    if stream.tcp == .Val(plain) {
+        if plain.close() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
     }
     answered
 }
 
-fn __send(stream: TCPStream, bytes: [U8], end_ns: Int) -[Net]> Bool Never! {
+fn __send(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
     remaining :: end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return false
-    if stream.write_all(bytes, deadline: Duration{ns: remaining}) == {
-        .Ok(_) -> true
-        .Err(_) -> false
+    if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
+    if stream.tcp == .Val(plain) {
+        return if plain.write_all(bytes, deadline: Duration{ns: remaining}) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
     }
+    false
 }
 
 // Append what the peer sends next; false at end of stream.
-fn __wire_fill(stream: TCPStream, &wire: __HTTPWire) -[Net]> Bool __HTTPFault! {
+fn __wire_fill(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Bool __HTTPFault! {
     remaining :: wire.end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
     got := [U8]{}
-    if stream.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
-        .Ok(bytes) -> got = bytes
-        .Err(error) -> {
-            if __accept_timed_out(error) -> return Err(.Reply(408))
-            return Ok(false)
+    if stream.tls == .Val(secure) {
+        if secure.read(C_READ_BYTES, Duration{ns: remaining}) == {
+            .Ok(bytes) -> got = bytes
+            .Err(error) -> {
+                if error == .TimedOut(_) -> return Err(.Reply(408))
+                return Ok(false)
+            }
+        }
+    }
+    if stream.tcp == .Val(plain) {
+        if plain.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
+            .Ok(bytes) -> got = bytes
+            .Err(error) -> {
+                if __accept_timed_out(error) -> return Err(.Reply(408))
+                return Ok(false)
+            }
         }
     }
     if got.len() == 0 -> return Ok(false)
@@ -855,7 +1146,7 @@ fn __wire_fill(stream: TCPStream, &wire: __HTTPWire) -[Net]> Bool __HTTPFault! {
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-fn __wire_need(stream: TCPStream, &wire: __HTTPWire, need: Int) __HTTPFault! -[Net]> {
+fn __wire_need(stream: __HTTPConn, &wire: __HTTPWire, need: Int) __HTTPFault! -[Net, Time.Wait]> {
     loop wire.buffer.len() < need {
         more :: __wire_fill(stream, &wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))
@@ -864,7 +1155,7 @@ fn __wire_need(stream: TCPStream, &wire: __HTTPWire, need: Int) __HTTPFault! -[N
 }
 
 // The index of the CRLF ending the line at `from`, filling as needed.
-fn __wire_line(stream: TCPStream, &wire: __HTTPWire, from: Int) -[Net]> Int __HTTPFault! {
+fn __wire_line(stream: __HTTPConn, &wire: __HTTPWire, from: Int) -[Net, Time.Wait]> Int __HTTPFault! {
     at := __crlf_at(wire.buffer, from)
     loop at < 0 {
         if wire.buffer.len() - from > C_MAX_LINE_BYTES -> return Err(.Reply(400))
@@ -903,7 +1194,7 @@ fn __field_line(raw: [U8]) -> Header? Never! {
     Val(Header{name: name, value: http.trim(value)})
 }
 
-fn __read_request(stream: TCPStream, &wire: __HTTPWire) -[Net]> HTTPRequest __HTTPFault! {
+fn __read_request(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> HTTPRequest __HTTPFault! {
     split := http.find_double_crlf(wire.buffer)
     loop split < 0 {
         if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
@@ -1003,7 +1294,7 @@ fn __chunk_size(line: [U8]) -> Int? Never! {
     Val(size)
 }
 
-fn __read_chunked(stream: TCPStream, &wire: __HTTPWire, start: Int, declared: [String]) -[Net]> __HTTPChunked __HTTPFault! {
+fn __read_chunked(stream: __HTTPConn, &wire: __HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> __HTTPChunked __HTTPFault! {
     at := start
     body := [U8]{}
     loop {
@@ -1373,7 +1664,7 @@ fn __imf_date(seconds: Int) -> String Never! {
 }
 
 #Test("JSON response encoding rejects non-finite numbers on the HTTP error rail") {
-    if json(200, math.nan()) == {
+    if json(200, Float.NAN) == {
         .Err(error) -> assert(error == .InvalidFraming)
         .Ok(_) -> panic("non-finite JSON response accepted")
     }

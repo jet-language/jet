@@ -278,7 +278,7 @@ if (skipped.length > 0) {
 // print the identical claim ledger.
 const claimHead = /^#Test\("([^"\\{}]+)"\)\s*\{\s*$/;
 const testNames = [];
-function renderTests(text, sourcePath) {
+function renderTests(text, sourcePath, section) {
   // `check` type-checks test claims exactly as the AOT harness will see them.
   const lines = text.split("\n");
   let claims = 0;
@@ -294,7 +294,7 @@ function renderTests(text, sourcePath) {
     claims += 1;
     if (testNames.some((claim) => claim.name === match[1])) fail(`${sourcePath}:${index + 1}: duplicate test claim "${match[1]}"`);
     const fnName = `jetpack_test_claim_${testNames.length}`;
-    testNames.push({ name: match[1], fnName });
+    testNames.push({ name: match[1], fnName, section });
     if (mode === "run") lines[index] = `fn ${fnName}() {`;
   }
   // Shared test helpers live in `*Support.jet` files: helpers only, never claims.
@@ -375,7 +375,7 @@ function blankPackageImports(text) {
 for (const entry of units) {
   append(`// [jet-bootstrap source: ${entry.sourcePath}]\n`);
   const text = blankPackageImports(entry.text);
-  const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath) : text;
+  const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath, entry.section) : text;
   const body = rendered ?? text;
   const bytes = Buffer.from(body, "utf8");
   const startByte = generatedByte;
@@ -400,10 +400,13 @@ for (const entry of units) {
 
 if (mode === "run") {
   // One driver prints the same claim ledger the AOT harness proves, so a
-  // failure on either tier names the same claim.
-  append("// [jetpack-bootstrap generated: default-tier test driver]\nfn run() {\n");
-  for (const { name, fnName } of testNames) append(`    ${fnName}()\n    print("pass ${name}")\n`);
-  append(`    print("jetpack-bootstrap: ${testNames.length} claims passed")\n}\n`);
+  // failure on either tier names the same claim. A failing claim stops the
+  // process (E3001); check.sh resumes after it with JETPACK_CLAIM_FROM set to
+  // the next claim's index, so one run reports every failing claim.
+  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse core.sys as jetpack_bootstrap_sys\nfn run() {\n");
+  append(`    from :: Int.parse(jetpack_bootstrap_sys.get("JETPACK_CLAIM_FROM") ?? "0") ?? 0\n`);
+  for (const [index, { name, fnName }] of testNames.entries()) append(`    if from <= ${index} {\n        ${fnName}()\n        print("pass ${name}")\n    }\n`);
+  append(`    print("jetpack-bootstrap: claims done")\n}\n`);
 }
 if (mode === "publication") {
   // Preserve the publisher's typed failure for the canonical entry reporter.
@@ -430,7 +433,11 @@ await writeFile(mapPath, `${JSON.stringify({
     line_starts,
   })),
   files: mapped,
+  // Each staged embed_file copy and the repository file it came from.
+  embedded_files: [...embeddedFiles].map(([copy, target]) => ({ copy: `src/${copy}`, source_file: relative(sourceRootDir, target).split(sep).join("/") })),
   tests: testNames.map(({ name }) => name),
+  // Each claim's tests.list area, for known-failing `jetpack-claim:<Area>/<claim>` rows.
+  test_areas: testNames.map(({ section }) => section),
 }, null, 2)}\n`, "utf8");
 console.log(`assembled ${units.length} Jet sources (${mode}, ${testNames.length} test claims) into ${unitPath}`);
 console.log(`source provenance: ${mapPath}`);

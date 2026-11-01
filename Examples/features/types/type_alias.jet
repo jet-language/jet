@@ -1,10 +1,12 @@
 // D-TYPEALIAS1: transparent generic type aliases shorten fallible signatures.
+// Owner ruling #6176: an alias is a `Name :: Type` or `Name<T> :: Type`
+// declaration; the `alias` keyword is gone.
 #Error
 enum AppError {
     Empty
 }
 
-alias Parsed<T> :: T AppError!
+Parsed<T> :: T AppError!
 
 fn parse_count(raw: String) -> Parsed<Int> { if raw == "" -> Err(AppError.Empty) else -> Ok(42) }
 
@@ -16,11 +18,17 @@ struct Box<T> {
     value: T
 }
 
-alias P<T> :: Point
+P<T> :: Point
 
-alias Wrapped<T> :: Box<T>
+Wrapped<T> :: Box<T>
 
-alias Chained<T> :: Wrapped<T>
+Chained<T> :: Wrapped<T>
+
+Spot :: Point
+
+module shapes {
+    Pair<T> :: Box<T>
+}
 
 fn run() {
     n :: parse_count("7") ?? 0
@@ -31,4 +39,8 @@ fn run() {
     print(boxed.value)
     chained :: Chained<String>{value: "jet"}
     print(chained.value)
+    spot :: Spot{x: 5}
+    print(spot.x)
+    pair :: shapes.Pair<Int>{value: 9}
+    print(pair.value)
 }

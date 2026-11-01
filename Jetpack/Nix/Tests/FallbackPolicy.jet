@@ -40,8 +40,16 @@ use jetpack_nix.[
     assert_eq(receipt.invocations, 1)
     facts :: receipt.facts()
     parsed :: json.parse(facts.get("nix.fallback.policy.receipt") ?? panic("policy receipt fact")) ?? panic("machine-readable policy receipt")
-    assert_eq(&parsed.field("schema") ?? panic("schema"), Dyn.Text(NIX_FALLBACK_RECEIPT_SCHEMA))
-    assert_eq(&parsed.field("allowed") ?? panic("allowed"), Dyn.Bool(true))
+    schema :: parsed.field("schema") ?? panic("schema")
+    if schema == {
+        .Text(text) -> assert_eq(text, NIX_FALLBACK_RECEIPT_SCHEMA)
+        else -> panic("the receipt schema must be text")
+    }
+    allowed :: parsed.field("allowed") ?? panic("allowed")
+    if allowed == {
+        .Bool(value) -> assert(value)
+        else -> panic("the receipt allowance must be a boolean")
+    }
 }
 
 #Test("nix explicit refusal is not overridden by interactive mode") {

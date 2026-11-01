@@ -1,6 +1,6 @@
 /* Link REAL composed Jet providers including RtBurn1 Limits with BOTH
  * -Wl,--wrap=jet_rt_alloc -Wl,--wrap=jet_rt_free. No mock providers.
- * Client-created private DP carriers mirror DataABI only, not Rust/MIR.
+ * Client-created private DP carriers mirror DataABI only, not Rust/IR.
  * Rust derive/declarations: DataPlot.rs:1377-1392,2256-2267,2373-2386.
  * Every allocation in the scope must be released exactly once at its size/
  * alignment. Limits are opaque: the witness never reads their field layout. */

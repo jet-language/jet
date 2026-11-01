@@ -1,0 +1,121 @@
+use jet_foundation.[InternalTag, Span, TagMarker, TLocal, Type]
+
+// ---------------------------------------------------------------------------
+// Views of the core.mem allocators (Arena, Bump, Pool, Fixed; built by
+// ir_allocator_method). The view `alloc(v)` answers reads the value in the
+// storage the allocator reserved, and a variable bound to the view aliases
+// that storage (ir_bind_view). The Result `try_alloc(v)` answers is a view
+// Result: its box keeps the view's bytes and, past the widest payload, the
+// storage's address (ir_view_result_tail), and owns neither; every name or
+// value its Ok yields is a view of that storage (ir_view_result_payload).
+
+// The view of the value of type row `row` at `address`: a read of it there,
+// owned by the allocator, which remembers its storage (b.views).
+fn ir_allocator_view(m: &IRModule, b: &IRBuilder, address: Int, row: Int) -> Int Never! {
+    view :: ir_load_at(&m, &b, address, 0, row)
+    if view >= 0 -> b.views[view] = address
+    view
+}
+
+// A variable bound to an allocator view aliases the allocator's storage, as
+// a scalar write window aliases its place: a read loads the value there and
+// the variable owns nothing. False when `value` is no view.
+fn ir_bind_view(m: &IRModule, b: &IRBuilder, local: TLocal, value: Int) -> Bool Never! {
+    address :: b.views.get(value) ?? return false
+    symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
+    row :: b.f.slot_type[value]
+    if ir_kind_of(m, b, value) == .Aggregate {
+        &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
+    } else {
+        &b.bindings.push(IRBinding{name: local.name, slot: address, indirect: row, symbol: symbol})
+    }
+    true
+}
+
+// The storage address of allocator view `value` (a node of a view type): a
+// view variable's alias, or the storage a view temporary was read from.
+fn ir_view_address(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+    if ir_body_node(p, b, value).kind == .Local(local) {
+        binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "allocator view of unknown local {local.name}")
+        if binding.indirect >= 0 || ir_kind_of(m, b, binding.slot) == .Aggregate -> return binding.slot
+        return ir_fail_slot(&b, span, "allocator view {local.name} without its storage")
+    }
+    slot :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || slot < 0 -> return -1
+    b.views.get(slot) ?? ir_fail_slot(&b, span, "allocator view without its storage")
+}
+
+// Whether checked type `ty` is an allocator view.
+fn ir_allocator_view_type(ty: Type) -> Bool Never! {
+    if ty == .Tagged(marker, _) -> return marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView})
+    false
+}
+
+// Whether checked type `ty` is a Result whose Ok is an allocator view.
+fn ir_view_result(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Result(ok, _) -> return ir_allocator_view_type(ok)
+    false
+}
+
+// The byte offset of the storage address in a box of the view Result `ty`:
+// past the selector word and the widest payload.
+fn ir_view_result_tail(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+    if ir_untag(ty) == .Result(ok, err) {
+        ok_size :: ir_type_size(&m, p, ok)
+        err_size :: ir_type_size(&m, p, err)
+        return 8 + ir_align8(if ok_size > err_size -> ok_size else -> err_size)
+    }
+    8
+}
+
+// Writes the Ok view `view` into the view Result box `boxed`: the view's
+// bytes at 8, a read of the value its allocator keeps (no owner gained), and
+// the storage's address at `tail`.
+fn ir_view_result_store(m: &IRModule, b: &IRBuilder, boxed: Int, view: Int, tail: Int) Never! {
+    address :: b.views.get(view) ?? return ir_fail(&b, Span{start: 0, end: 0}, "allocator view without its storage")
+    if ir_kind_of(m, b, view) == .Aggregate {
+        target :: ir_temp_like(&m, &b, view)
+        size :: m.types[b.f.slot_type[view]].size
+        ir_emit(&b.f, IROp.Offset, target, boxed, 8, -1, b.line)
+        ir_emit(&b.f, IROp.CopyBytes, -1, target, view, size, b.line)
+    } else {
+        ir_emit(&b.f, IROp.Store, -1, boxed, 8, view, b.line)
+    }
+    ir_emit(&b.f, IROp.Store, -1, boxed, tail, address, b.line)
+}
+
+// The storage address the Ok of the view Result box `boxed` keeps (0 in an
+// Err box).
+fn ir_view_result_address(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    address :: ir_temp(&m, &b, pointer_row)
+    boxed_ty :: m.types[b.f.slot_type[boxed]].ty.copy()
+    tail :: ir_view_result_tail(&m, p, boxed_ty)
+    ir_emit(&b.f, IROp.Load, address, boxed, tail, -1, b.line)
+    address
+}
+
+// The Ok view (payload row `row`) of the view Result box `boxed` holding Ok,
+// a view of its allocator's storage as `alloc(v)` answers; a fresh box is
+// released, as it owns no payload.
+fn ir_view_result_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, row: Int) -> Int Never! {
+    address :: ir_view_result_address(&m, p, &b, boxed)
+    ir_release(&m, &b, boxed)
+    view :: ir_allocator_view(&m, &b, address, row)
+    if view >= 0 -> b.fresh[view] = false
+    view
+}
+
+// The name `name` bound to the Ok view (payload row `row`) of the view
+// Result box `boxed` holding Ok: it aliases the value in the allocator's
+// storage, as a variable bound to a view does (ir_bind_view), and owns
+// nothing.
+fn ir_bind_view_result(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, boxed: Int, row: Int) Never! {
+    address :: ir_view_result_address(&m, p, &b, boxed)
+    if m.types[row].kind == .Aggregate {
+        view :: ir_allocator_view(&m, &b, address, row)
+        &b.bindings.push(IRBinding{name: name, slot: view})
+    } else {
+        &b.bindings.push(IRBinding{name: name, slot: address, indirect: row})
+    }
+}

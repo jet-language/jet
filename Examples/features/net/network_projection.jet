@@ -59,7 +59,10 @@ fn run() {
         }
     }
 
-    records :: net.dns_srv("_jet._tcp.example.test", 1000)
+    // `.test` names never resolve (RFC 6761): the lookup yields no records
+    // whether the resolver answers "not found" or cannot be reached.
+    records :: net.dns_srv("_jet._tcp.example.test", 1000) ?? [SRVRecord]{}
+    print("srv-records:{records.len()}")
     loop record in records {
         print("srv:{net.dns_srv_target(record)}:{net.dns_srv_port(record)}:{net.dns_srv_priority(record)}:{net.dns_srv_weight(record)}")
     }

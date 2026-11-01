@@ -43,8 +43,10 @@ fn envmodel_test_load_error(cache: &WorkspaceDeclarationCache, dir: String) -[FS
 }
 
 fn envmodel_test_load_is_none(cache: &WorkspaceDeclarationCache, dir: String) -[FS, Env, Exec, Time.Wait]> Bool {
-    loaded :: envmodel_workspace_load(&cache, dir) ?? panic("load must not fail")
-    loaded == None
+    if envmodel_workspace_load(&cache, dir) == {
+        .Ok(loaded) -> loaded == None
+        .Err(_) -> panic("load must not fail")
+    }
 }
 
 fn envmodel_test_member_names(plan: WorkspacePlan) -> [String] {

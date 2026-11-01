@@ -1,5 +1,4 @@
 # PORT tests/pkg.rs::git_revision_with_multibyte_prefix_does_not_panic:4022-4057; original helpers min_manifest/manifest_with_deps/with_store retained.
-# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
 # PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
 # Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
 fixture: fixtures/git_revision_with_multibyte_prefix_does_not_panic
@@ -7,8 +6,9 @@ requires: tool:git
 mkdir: store
 env: JET_PACKAGE_STORE_DIR={work}/store
 step: jet fetch
-exit: nonzero
-exit: != 101
-stderr: !~ "internal compiler error:"
-stderr: !~ "panicked at"
+exit: nonzero # original: the missing repository must fail
+exit: != 101 # original no-panic predicate
+stderr: !~ "internal compiler error:" # original no-panic predicate
+stderr: !~ "panicked at" # original no-panic predicate
+stderr: !~ "[E2104]" # the failure must come from fetching the multibyte revision, not from an unbuilt `jet fetch`
 # Missing repository returns an error rather than panic; original does NOT require a particular diagnostic code.

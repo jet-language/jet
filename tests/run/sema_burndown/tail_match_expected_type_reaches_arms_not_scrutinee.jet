@@ -1,0 +1,35 @@
+// #4324: a tail-position match takes the function's return type as the
+// expected type of its arms only; the scrutinee's call chain is checked on
+// its own.
+#Error
+struct Fault {
+    reason: String
+}
+
+struct Spec {
+    text: String
+}
+
+impl Spec {
+    fn run(self) -> Int Fault! {
+        if self.text == "" -> return Err(Fault{reason: "empty"})
+        self.text.len()
+    }
+}
+
+fn make(text: String) -> Spec {
+    Spec{text: text}
+}
+
+fn succeeded(text: String) -> Bool Never! {
+    if make(text).run() == {
+        .Ok(n) -> n > 2
+        .Err(_) -> false
+    }
+}
+
+fn run() {
+    print(succeeded("abc"))
+    print(succeeded("ab"))
+    print(succeeded(""))
+}

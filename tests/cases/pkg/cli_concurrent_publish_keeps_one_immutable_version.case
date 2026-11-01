@@ -88,10 +88,10 @@ wait: right
 exit: any # Original asserts exactly one success collectively below.
 when exit == 0: append: wins.txt "right\n"
 when exit != 0: stderr: ~ "E1234" # Original loser immutable-version diagnostic.
-file: wins.txt lines = 1
+file: wins.txt lines = 1 # original exactly one publish succeeds
 step: git --git-dir {work}/registry.git show HEAD:index/racekit/racekit.jsonl
 exit: 0
-stdout: count-lines ~ "\"version\":\"1.0.0\"" = 1
+stdout: count-lines ~ "\"version\":\"1.0.0\"" = 1 # original contains predicate
 step: git --git-dir {work}/registry.git cat-file -e HEAD:artifacts/racekit/1.0.0/package.jet
 exit: 0
 step: git --git-dir {work}/registry.git cat-file -e HEAD:metadata/racekit.json

@@ -1,0 +1,43 @@
+// A constant divisor divides by a multiply instead of a divide. Each of
+// `/%`, `%` and `%%` must agree with the same division by a divisor known
+// only at run time, across signs and both ends of the one-word range.
+fn by_constants(n: Int) -> [Int] {
+    [Int]{
+        n /% 3, n % 3, n %% 3,
+        n /% 7, n % 7, n %% 7,
+        n /% 10, n % 10, n %% 10,
+        n /% 13, n % 13, n %% 13,
+        n /% 641, n % 641, n %% 641,
+        n /% 1000003, n % 1000003, n %% 1000003,
+        n /% 2305843009213693953, n % 2305843009213693953, n %% 2305843009213693953,
+    }
+}
+
+fn by_values(n: Int, divisors: [Int]) -> [Int] {
+    out := [Int]{}
+    loop d in divisors {
+        &out.push(n /% d)
+        &out.push(n % d)
+        &out.push(n %% d)
+    }
+    out
+}
+
+fn run() {
+    divisors :: [Int]{3, 7, 10, 13, 641, 1000003, 2305843009213693953}
+    inputs := [Int]{0, 1, -1, 12, -12, 13, -13, 14, -14, 4611686018427387903, -4611686018427387904, 9223372036854775807, -9223372036854775808}
+    n := -1000
+    loop n <= 1000 {
+        &inputs.push(n * 7919)
+        n += 1
+    }
+    mismatches := 0
+    loop value in inputs {
+        if by_constants(value) != by_values(value, divisors) -> mismatches += 1
+    }
+    print(inputs.len())
+    print(mismatches)
+    print(by_constants(-7)[0..<3])
+    print(by_constants(-1000003)[9..<12])
+    print(by_constants(4611686018427387903)[18..<21])
+}

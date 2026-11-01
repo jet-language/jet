@@ -206,6 +206,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     // own. This query keeps `session` to abort or finish it, and `request` is returned in every
     // response.
     config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: base_dir})
+    config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
     run := jet_driver_invocation_run(^inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
     errors := ^compiled.diagnostics
     evaluated :: ^run.result ?? {
@@ -261,6 +262,25 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     jet_driver_build_install_nodes(plan, nodes.copy())
     graph :: build_plan_graph(plan)
     return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None}}
+}
+// Whether the entry package declares a `fn build`, the build entry
+// jet_driver_query_build_plan evaluates, read from the loaded sources alone.
+// False when the sources don't load: the compile reports why.
+fn jet_driver_entry_package_has_build(request: JetDriverCompileRequest) -> Bool {
+    load :: jet_driver_load(request)
+    if !load.complete -> return false
+    package := String?{None}
+    loop loaded_module in load.modules {
+        if loaded_module.module_identity == load.entry_module_identity -> package = Val(loaded_module.package_identity.copy())
+    }
+    entry_package :: package ?? return false
+    loop loaded_module in load.modules {
+        if loaded_module.package_identity != entry_package -> next
+        loop item in loaded_module.program.items {
+            if item == .Func(function) && function.name == "build" -> return true
+        }
+    }
+    false
 }
 fn jet_driver_query_build_nodes(request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     // Nodes are the checked graph's exact compiler facts, never a projection

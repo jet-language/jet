@@ -440,7 +440,7 @@ use std.path.[PathBuf]
     dir :: temp_dir("imported_event_dispatcher")
     helper :: dir.join("helper.jet")
     entry :: dir.join("main.jet")
-    fs.write(helper, "use core.event as event\n\npub fn make_scope() {{\n    scope :: event.scope()\n}}\n").unwrap()
+    fs.write(helper, "use core.event as event\n\nfn make_scope() {{\n    scope :: event.scope()\n}}\n").unwrap()
     fs.write(entry, "use \"./helper\" as h\n\nfn run() {{\n    h.make_scope()\n}}\n").unwrap()
     graph :: Canvas.graph_json_for_file(helper).expect("imported event graph")
     assert(graph.contains("\"kind\":\"event_scope_create\""), graph)

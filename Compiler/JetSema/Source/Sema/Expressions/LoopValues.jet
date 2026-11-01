@@ -29,7 +29,7 @@ fn sema_loop_value_check_result_exit(context: &SemaCheckContext, frame_index: In
     }
     sema_loop_value_set_result_type(&context, frame_index, common)
     if type_identity_equal(common, value.ty) -> return Val(value)
-    if sema_expr_numeric_widening_to(value.ty, common) == (Val(true)) {
+    if sema_expr_numeric_value_widening(value, common) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, common, value.span, line, &diagnostics)
     }
@@ -58,7 +58,7 @@ fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: S
     }
     sema_loop_value_set_collecting_type(&context, common)
     if type_identity_equal(common, checked.ty) -> return Val(checked)
-    if sema_expr_numeric_widening_to(checked.ty, common) == (Val(true)) {
+    if sema_expr_numeric_value_widening(checked, common) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, common, checked.span, line, &diagnostics)
     }
@@ -66,18 +66,18 @@ fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: S
 }
 
 fn sema_loop_value_collect_local_expr(local: TLocal, item_type: Type, span: Span) -> TExpr Never! {
-    sema_tir_node(Type.List{element: item_type}, TExprKind.Local{local: local}, span)
+    sema_tree_node(Type.List{element: item_type}, TExprKind.Local{local: local}, span)
 }
 
 fn sema_loop_value_collect_push(local: TLocal, item_type: Type, value: TExpr, span: Span) -> TStmt Never! {
     receiver :: sema_loop_value_collect_local_expr(local, item_type, span)
-    call := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{value}}, span)
+    call := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.BuiltinMethod{receiver: receiver, operation: TBuiltinOp.Push, args: [TExpr]{value}}, span)
     TStmt.ExprStmt{value: call, span: span}
 }
 
 fn sema_loop_value_collect_widen(value: TExpr, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if type_identity_equal(value.ty, item_type) -> return Val(value)
-    if sema_expr_numeric_widening_to(value.ty, item_type) != (Val(true)) -> return None
+    if sema_expr_numeric_value_widening(value, item_type) != (Val(true)) -> return None
     line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
     sema_expr_numeric_literal_conversion(value, item_type, value.span, line, &diagnostics)
 }
@@ -249,9 +249,9 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
 
 fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [TStmt]? {
     collector_type := Type.List{element: item_type}
-    local := checked_generated_local("__jet_collect_{span.start}", span)
+    local := checked_generated_local("__jet_collect_{span.start}", span, collector_type)
     local.mutable = true
-    empty := sema_tir_node(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
+    empty := sema_tree_node(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
     lowered := [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: collector_type, wrapper: TLetWrapper.Plain}, init: empty, gc_promotion: None, gc_transferred: false, span: span}}
     loop statement in body -> &lowered.push(statement)
     if !sema_loop_value_rewrite_collecting_statements(&lowered, local, item_type, environment, program, &diagnostics) -> return None
@@ -271,7 +271,7 @@ fn sema_loop_value_widen_result_breaks_in(statements: &[TStmt], root_label: Stri
         if statement == {
             .BreakValue(label, value, span) -> {
                 if sema_loop_value_result_exit_matches(label, root_label, allow_unlabeled) && !type_identity_equal(value.ty, result_type) {
-                    if sema_expr_numeric_widening_to(value.ty, result_type) != (Val(true)) {
+                    if sema_expr_numeric_value_widening(value, result_type) != (Val(true)) {
                         &diagnostics.push(sema_error("E0076", value.span, "this loop breaks with `{type_name(value.ty)}`, but another exit uses `{type_name(result_type)}`", "an ordinary loop used as a value has one result type", "make every break payload use the same type"))
                         return false
                     }

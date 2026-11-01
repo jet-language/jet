@@ -32,7 +32,7 @@ fn env_shell_test_pty(shell_command: String, input: String, no_color: Bool) -> S
     spec = if no_color -> spec.env("NO_COLOR", "").env("TERM", "dumb") else -> spec.env("TERM", "xterm-256color")
     spec = spec.stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(time.duration_seconds(10))
     child := spec.spawn() ?? panic("spawn PTY through script(1)")
-    child.stdin.write(input) ?? panic("write PTY input")
+    child.stdin.write_text(input) ?? panic("write PTY input")
     child.stdin.close()
     receipt :: child.wait() ?? panic("wait for PTY shell")
     if receipt.timed_out -> panic("PTY shell did not reach exit sentinel within 10s")
@@ -46,16 +46,16 @@ fn env_shell_test_pty(shell_command: String, input: String, no_color: Bool) -> S
 fn env_shell_test_pty_prefill_oracle(shell_command: String, marker: String, trigger: String) -> String {
     spec :: process.cmd([String]{"script", "-qec", shell_command, "/dev/null"}).env("NO_COLOR", "1").env("TERM", "dumb").stdin(.Stream).stdout(.Capture).stderr(.Capture)
     child := spec.spawn() ?? panic("spawn PTY through script(1)")
-    child.stdin.write("echo JET_HELP_WIDGET_START\n") ?? panic("write start")
+    child.stdin.write_text("echo JET_HELP_WIDGET_START\n") ?? panic("write start")
     time.sleep(time.duration_ms(250))
-    child.stdin.write("jet --version\n") ?? panic("write version")
+    child.stdin.write_text("jet --version\n") ?? panic("write version")
     time.sleep(time.duration_ms(250))
-    child.stdin.write(trigger) ?? panic("write trigger")
+    child.stdin.write_text(trigger) ?? panic("write trigger")
     time.sleep(time.duration_ms(350))
     assert(!files.exists(marker), "help selection executed before explicit Enter")
-    child.stdin.write("; printf 'JET_EXPLICIT_ACCEPT\\n'\n") ?? panic("write accept")
+    child.stdin.write_text("; printf 'JET_EXPLICIT_ACCEPT\\n'\n") ?? panic("write accept")
     time.sleep(time.duration_ms(150))
-    child.stdin.write("echo JET_HELP_WIDGET_RETURNED\nexit 0\n") ?? panic("write exit")
+    child.stdin.write_text("echo JET_HELP_WIDGET_RETURNED\nexit 0\n") ?? panic("write exit")
     child.stdin.close()
     receipt :: child.wait() ?? panic("wait for PTY shell")
     if !receipt.success -> panic("stdout:\n{receipt.output}\nstderr:\n{receipt.errors}")
@@ -238,16 +238,16 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
     assert(!bash.contains(hostile))
     assert(bash.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""))
     bash_check := process.cmd([String]{"bash", "-n"}).stdin(.Stream).spawn() ?? panic("spawn bash -n")
-    &bash_check.stdin.write(bash) ?? panic("write bash rc")
-    &bash_check.stdin.close() ?? panic("close bash rc")
+    bash_check.stdin.write_text(bash) ?? panic("write bash rc")
+    bash_check.stdin.close()
     assert((bash_check.wait() ?? panic("wait bash -n")).success)
 
     fish :: env_shell_fish_init(hostile, PromptPathMode.Short, PromptStripMode.Off)
     assert(!fish.contains(hostile))
     assert(fish.contains("printf '%s ' \"$JETPACK_PROMPT_LABEL\""))
     fish_check := process.cmd([String]{"fish", "-n"}).stdin(.Stream).spawn() ?? panic("spawn fish -n")
-    &fish_check.stdin.write(fish) ?? panic("write fish init")
-    &fish_check.stdin.close() ?? panic("close fish init")
+    fish_check.stdin.write_text(fish) ?? panic("write fish init")
+    fish_check.stdin.close()
     assert((fish_check.wait() ?? panic("wait fish -n")).success)
 
     zsh :: env_shell_zsh_rc(hostile, PromptPathMode.Short, PromptStripMode.Off)
@@ -317,15 +317,21 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
 }
 
 #Test("bash prompt pty reports real command and git facts without color") {
+    // The prompt reads git facts from its working directory, so the claim
+    // runs bash in its own fresh repository on a known branch rather than in
+    // whatever directory the runner starts in (often not a git worktree).
+    branch :: "jetpack-prompt-branch"
+    repo :: env_shell_write_temp_dir("jetpack-prompt-git-repo")
+    git :: process.cmd([String]{"git", "init", "-q", "-b", branch, repo}).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1").stdout(.Capture).stderr(.Capture).run() ?? panic("git init")
+    assert(git.success, "git init failed: {git.errors}")
     rc :: env_shell_write_temp("jetpack-prompt-test-bashrc", env_shell_bash_rc("web-api", PromptPathMode.Short, PromptStripMode.On))
-    output :: env_shell_test_pty("bash --noprofile --rcfile {rc} -i", "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() {{ sleep .3; [ \"$1\" = build ]; }}\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\nexit\n", true)
+    output :: env_shell_test_pty("cd {env_hook_sh_quote(repo)} && bash --noprofile --rcfile {rc} -i", "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() {{ sleep .3; [ \"$1\" = build ]; }}\njet build\njet test\n{env_shell_control(7)}\n__jetpack_status_words\nexit\n", true)
     env_shell_remove_file(rc)
+    env_shell_remove_tree(repo)
     assert(output.contains("build ok"), output)
     assert(output.contains("test failed (1)"), output)
     assert(output.contains("-> test failed. Rerun: jet test"), output)
-    git :: process.cmd([String]{"git", "rev-parse", "--abbrev-ref", "HEAD"}).stdout(.Capture).stderr(.Capture).run() ?? panic("git rev-parse")
-    branch :: git.output.trim()
-    assert(output.contains("git {branch} changed") || output.contains("git {branch} clean"), "expected git {branch} changed|clean in: {output}")
+    assert(output.contains("git {branch} clean"), "expected git {branch} clean in: {output}")
     assert(output.contains("running build"), output)
     env_shell_test_assert_no_esc_after_marker(output)
     assert(!output.contains("unknown"), output)
@@ -371,7 +377,8 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
 #Test("run command returns child status") {
     env := env_shell_test_env([String]{})
     assert_eq(&env.run_command([String]{"true"}), 0)
-    assert(&env.run_command([String]{"false"}) != 0)
+    failed :: &env.run_command([String]{"false"})
+    assert(failed != 0)
 }
 
 #Test("run command exposes bin on path") {

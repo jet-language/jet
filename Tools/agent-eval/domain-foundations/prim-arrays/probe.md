@@ -44,7 +44,7 @@ Tag: `impossible`. Archived `medical-imaging/probes/missing_image_check.out:1-4`
 
 ### prim-arrays-G6 — Tensor dtype is not semantic or generic
 
-Tag: `impossible`. `dtype_fixed.jet` passes `U8` inputs to `compute.from_list`, but `jet run` prints `values:[1.0, 2.0]`; `D-M-RASTER1.json:12-13` records `JetTensor.data: Arc<Vec<f64>>` and no dtype field. An explicit `Tensor<T>` wrapper builds only when specialized to Float; `jet check dtype_generic.jet` reports `E2104: type-parameterized callable has no complete TIR specialization`. Workaround: use Float/f64 and carry requested dtype as unenforced metadata. Areas: data, AI/ML, science.
+Tag: `impossible`. `dtype_fixed.jet` passes `U8` inputs to `compute.from_list`, but `jet run` prints `values:[1.0, 2.0]`; `D-M-RASTER1.json:12-13` records `JetTensor.data: Arc<Vec<f64>>` and no dtype field. An explicit `Tensor<T>` wrapper builds only when specialized to Float; `jet check dtype_generic.jet` reports `E2104: type-parameterized callable has no complete IR specialization`. Workaround: use Float/f64 and carry requested dtype as unenforced metadata. Areas: data, AI/ML, science.
 
 ### prim-arrays-G7 — Dense 4K map is far slower than incumbents
 
@@ -55,7 +55,7 @@ Tag: `slow`. Release `jet build` of `map_4k.jet` succeeded. `/home/nate/Projects
 - The safe user-space fallback is an anonymous tuple. A nominal `struct` containing Tensor cannot pass AOT codegen, so library APIs cannot state a durable array type this way.
 - `compute.set` is usable in default `jet run` but not AOT, so an implementation that works interactively can fail at the production build boundary.
 - The manual image example is 39 lines for two elementary operations. The manual chunk example is 31 lines for one eager read-and-map loop. These are evidence of missing primitives, not recommended APIs.
-- `Tensor<T>` syntax parses, but the generic callable has incomplete check/TIR coverage and the Core constructors still expose Float storage.
+- `Tensor<T>` syntax parses, but the generic callable has incomplete check/IR coverage and the Core constructors still expose Float storage.
 
 ## Defects
 

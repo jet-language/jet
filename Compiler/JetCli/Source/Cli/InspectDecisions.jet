@@ -1,10 +1,13 @@
 // `jet inspect decisions`: the IR optimizer's report for the checked program,
-// optimized at the level `jet build` compiles it (jet_cli_native_level: O1,
-// O2 under a release profile), plus the functions the IR builder could not
-// build and the invocation's selected canonical-pass gaps.
+// optimized at the level and with the inlining `jet build` compiles it with
+// (jet_cli_native_level: O1, O2 under a release profile; the build option
+// flags over the profile), plus the functions the IR builder could not
+// build, each counted loop sema's loop proof covers as it lowered
+// (ir_loop_proof_rows), the main the build gives the program (JetIR
+// EntryOwned.jet) and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
-use jet_foundation.[BuildOptions, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
-use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
+use jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
+use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_entry_root_need, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
 struct JetCLIDecisions {
@@ -12,15 +15,34 @@ struct JetCLIDecisions {
     // `name [key]: message at file:start..end` per function the IR builder
     // could not build; the optimizer ran over the rest.
     unbuilt: [String]
+    // ir_loop_proof_rows of the built program.
+    loops: [String]
+    // The program's main: "program-owned", or why it runs under the process
+    // root (ir_entry_root_need).
+    main: String
+}
+
+// The build options `jet inspect decisions` optimizes under, as `jet build`
+// resolves them: the stock options, or the stock `release` profile's when
+// `release`, with the build option flags of `options` (`--inline=off`,
+// `--optimize=full`) over them; or the refusal of a flag.
+fn jet_cli_decisions_options(options: [String], release: Bool) -> BuildOptionsResolved Never! {
+    written := [BuildOptionChoice]{}
+    if release -> &written.push(jet_cli_stock_release_choice())
+    if build_option_flags(options) == {
+        .Refused(code, what, fix) -> return BuildOptionsResolved.Refused{code: code, what: what, fix: fix}
+        .Resolved(given, _) -> loop flag in given.written -> &written.push(flag.copy())
+    }
+    build_options_resolve("build", if release -> "release" else -> "", written)
 }
 
 // The optimizer's options at `level` with `build`'s (the build options)
 // `small` (inlining kept to the O1 limits) and `inline` (which callees
 // inlining takes), plus the environment's pass knobs: JET_OPT_DISABLE (pass
-// names to skip), JET_OPT_SSA_VERIFY, JET_OPT_SSA_STRESS and JET_OPT_DUMP
+// names to skip), JET_OPT_VERIFY, JET_OPT_SSA_STRESS and JET_OPT_DUMP
 // (Opt.jet IROptOptions).
 fn jet_cli_opt_options(level: Int, build: BuildOptions) -> IROptOptions {
-    ir_opt_options_from(level, build_options_value(build, "small") == "true", ir_opt_inline_of(build_options_value(build, "inline")), decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
+    ir_opt_options_from(level, build_options_value(build, "small") == "true", ir_opt_inline_of(build_options_value(build, "inline")), decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
 }
 
 // Builds `inputs` into one IR module from its entry and optimizes it as
@@ -31,8 +53,11 @@ fn jet_cli_decisions(inputs: ^JetDriverLoweringInputs, build: BuildOptions, thre
     built := ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, checked.entry_key ?? "", ir_checks_stock(), threads)
     unbuilt := [String]{}
     loop failure in built.failures -> &unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    loops :: ir_loop_proof_rows(built.program)
+    need :: ir_entry_root_need(built.program)
+    main :: if need == "" -> "program-owned" else -> "process root: {need}"
     report :: ir_optimize_module_measured(&built.program, jet_cli_opt_options(jet_cli_native_level(build), build), threads)
-    JetCLIDecisions{report: report, unbuilt: ^unbuilt}
+    JetCLIDecisions{report: report, unbuilt: ^unbuilt, loops: loops, main: main}
 }
 
 fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: String, profile: String, canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool) -> String Never! {
@@ -40,6 +65,8 @@ fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: Str
     if !json {
         text := "decisions: scope={scope} source={file} profile={profile}\n{ir_opt_report_text(r)}\n"
         loop row in decisions.unbuilt -> text = "{text}unbuilt {row}\n"
+        loop row in decisions.loops -> text = "{text}{row}\n"
+        text = "{text}main: {decisions.main}\n"
         if canonical_route_gaps.len() > 0 -> text = "{text}{jet_cli_canonical_route_gap_text(canonical_route_gaps)}"
         return text
     }
@@ -53,6 +80,8 @@ fn jet_cli_decisions_report(decisions: JetCLIDecisions, scope: String, file: Str
         jet_cli_status_field("dead_removed", jet_cli_status_int(r.dead_removed)), jet_cli_status_field("unreachable_removed", jet_cli_status_int(r.unreachable_removed)),
         jet_cli_status_field("aggregates_replaced", jet_cli_status_int(r.aggregates_replaced)),
         jet_cli_status_field("unbuilt", jet_cli_status_texts(decisions.unbuilt)),
+        jet_cli_status_field("loop_proofs", jet_cli_status_texts(decisions.loops)),
+        jet_cli_status_field("main", jet_cli_status_text(decisions.main)),
     }
     // Explicit opt-in gaps are a separately labeled extension, never execution records.
     if canonical_route_gaps.len() > 0 -> &fields.push(jet_cli_status_field("canonical_route_gaps", jet_cli_status_array(jet_cli_canonical_route_gap_values(canonical_route_gaps))))
@@ -85,7 +114,8 @@ fn jet_cli_inspect_decisions_host(job: JetCLIInspectJob, source: String) -> JetD
             inputs := ^front.inputs ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             if inputs.entry_key == None -> jet_cli_inspect_finish(job, jet_cli_build_failed("`{job.file}` has no `fn run` to optimize", "the IR optimizer reports the program reachable from its `fn run`", "add `fn run()` to the file, or check it with `jet check {job.file}`", job.color))
             threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-            build :: if job.release_build -> jet_cli_stock_release_options() else -> build_options_stock("build")
+            build := build_options_stock("build")
+            if job.build == .Val(given) -> build = given.copy()
             decisions :: jet_cli_decisions(^inputs, build, threads)
             report :: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})

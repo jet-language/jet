@@ -50,10 +50,10 @@ cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 exit: 0
-file: package-root/systems/generations.log lines = 1
-file: package-root/systems/generations.log count "\t" = 4
+file: package-root/systems/generations.log lines = 1 # original single ledger row
+file: package-root/systems/generations.log count "\t" = 4 # original count predicate
 capture: witness file package-root/systems/generations/root-recovery/generation-root.json doc $.witness
-file.trim_end.split("\t", 4): package-root/systems/generations.log = "{cap:witness}"
+file.trim_end.split("\t", 4): package-root/systems/generations.log = "{cap:witness}" # original ledger.trim_end().split('\t')[4]
 step expected: jet run lifecycle-expected.jet {work}/package-root/systems/generations/root-recovery/generation-root.json external-consumer:jetos-generation:d68db8f4f63784e2062f9df39019967a7fa3e06ba0026d7696d32011c62d26e7
 exit: 0
 step: jet run lifecycle.jet {work}/package-root

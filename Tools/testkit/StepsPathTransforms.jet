@@ -62,25 +62,3 @@ fn kit_steps_mask(text: String) -> Int? {
     }
     Val(value)
 }
-
-fn kit_steps_bit_and(value: Int, mask: Int) -> Int {
-    number := value
-    remaining := mask
-    bit := 1
-    result := 0
-    loop index in 0..<64 {
-        if remaining == 0 -> break
-        odd :: number % 2 != 0
-        mask_odd :: remaining % 2 != 0
-        if odd && mask_odd -> result += bit
-        negative :: number < 0
-        number = number /% 2
-        if negative && odd -> number -= 1
-        mask_negative :: remaining < 0
-        remaining = remaining /% 2
-        if mask_negative && mask_odd -> remaining -= 1
-        if index == 62 -> bit = -9223372036854775807 - 1
-        else if index < 62 -> bit *= 2
-    }
-    result
-}

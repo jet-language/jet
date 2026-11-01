@@ -1,4 +1,4 @@
-// MIR Web HTTPRouter carrier and typed route registration.
+// IR Web HTTPRouter carrier and typed route registration.
 const JET_HTTP_ROUTE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const JET_HTTP_ROUTE_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
 const JET_HTTP_MAX_BODY_BYTES = 1024 * 1024;

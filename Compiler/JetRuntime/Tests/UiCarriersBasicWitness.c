@@ -1,5 +1,5 @@
 /* REAL Jet objects only, linked with --wrap=jet_rt_alloc/jet_rt_free.
- * UiCarriersABI private layouts; never source/MIR/Rust allocations.
+ * UiCarriersABI private layouts; never source/IR/Rust allocations.
  * CommonTypes.rs:35-60; Open.rs:88-102; Browser.rs:92-112; Ui.rs:678-682.
  * width-stop/policy-stop are separate process modes: exit70, empty stdout,
  * stderr must match DataPlotStops-ctor-range.stderr. Execution unclaimed. */

@@ -1,9 +1,9 @@
 
 // core.encoding.json — RFC 8259 JSON as Dyn.
 //
-// `parse` is the strict codec: objects keep insertion order, whole numbers
-// become `Dyn.Int` (exact `Int`, not binary64), fractions become
-// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
+// `parse` is the strict codec: objects keep insertion order, every number
+// stays its exact validated lexeme as `Dyn.Number` until a typed read
+// range-checks it (#4602), and `NaN` / `Infinity` are syntax errors. Untyped `decode`
 // applies the historical lenient coercion walk and emits an audit line for
 // each coercion. Typed `decode<T>` runs `__decode_typed`.
 //
@@ -15,10 +15,9 @@
 // Native typed-decode carriers are inspected only inside audited Core regions;
 // strict parse errors stay on their original EncodingError location rail.
 //
-// Duplicate object names `parse`, `decode`, and
-// `reader` reject them with the key's path, line, and column. The named
-// `parse_allow_duplicates` keeps the later value in the first key's position;
-// bounded native streaming readers remain strict. The duplicate check uses
+// Duplicate object names: `parse` and `decode` reject them with the key's
+// path, line, and column. The named `parse_allow_duplicates` keeps the later
+// value in the first key's position. The duplicate check uses
 // the object's own key map, so the input bound
 // (`EncodingLimits.safe().max_item_bytes`) also bounds it.
 //
@@ -32,7 +31,8 @@
 
 use core as core
 use core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
-use core.files.[FileWriter]
+use core.files.[FileReader, FileWriter]
+use core.encoding.base64 as base64
 use core.math as math
 use __core_encoding_stream as stream
 
@@ -193,17 +193,26 @@ fn canonical(value: Dyn) -> String EncodingError! {
     Ok(stream.text_from_bytes(^out) ?? "")
 }
 
-/// A pull reader over text already held by the caller. File readers use the
-/// bounded native stream contract and consume a `^FileReader`.
-fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+/// A bounded pull reader over a consumed file. The source pull engine owns
+/// framing, limits and sticky errors; text already in memory uses `parse` and
+/// `events`. (D-ENCSTREAM-SURFACE1=A) A repeated key in one object is a
+/// sticky `Syntax` error. (D-CORE-JSON-DUP1=A)
+fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONReader EncodingError! {
+    source :: stream.json_reader(^input, limits, false) ?? return Err(err)
+    Ok(JSONReader{input: ^source})
+}
 
-/// Report each occurrence of a duplicate key as an event.
-fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+/// The duplicate-permitting file reader reports each key occurrence as its
+/// own `Key` event. (D-CORE-JSON-DUP1=A)
+fn reader_allow_duplicates(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONReader EncodingError! {
+    source :: stream.json_reader(^input, limits, true) ?? return Err(err)
+    Ok(JSONReader{input: ^source})
+}
 
 struct JSONReader {
-    parser: Parser
+    input: stream.JSONPull
 
-    fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
+    fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { &self.input.next() }
 }
 
 /// Bounded event output. The source push engine owns framing, canonicalization,
@@ -304,10 +313,6 @@ struct Parser {
     depth: Int
     max_depth: Int
     path: [String]
-    pending: [DataEvent]
-    pending_index: Int
-    parsed: Bool
-    recording: Bool
     allow_duplicates: Bool
     typed_numbers: Bool
     // Numbers parse as their validated `Dyn.Number` lexemes (parse_json).
@@ -315,7 +320,7 @@ struct Parser {
 }
 
 impl Parser {
-    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool) -> Parser Never! {
+    fn new(bytes: [U8], allow_duplicates: Bool) -> Parser Never! {
         Parser{
             bytes: bytes,
             index: 0,
@@ -324,10 +329,6 @@ impl Parser {
             depth: 0,
             max_depth: safe_limits().max_depth,
             path: [String]{},
-            pending: [DataEvent]{},
-            pending_index: 0,
-            parsed: false,
-            recording: recording,
             allow_duplicates: allow_duplicates,
             typed_numbers: false,
             exact_numbers: false,
@@ -423,9 +424,6 @@ impl Parser {
                     }
                 }
             }
-        }
-        if self.recording {
-            loop event in append_events(value) -> &self.pending.push(event)
         }
         Ok(value)
     }
@@ -592,13 +590,11 @@ impl Parser {
     fn parse_array(&self) -> Dyn EncodingError! {
         if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
         if !&self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
-        if self.recording -> &self.pending.push(DataEvent.ArrayStart)
         items := [Dyn]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{93}) {
             _ :: &self.bump()
             self.depth -= 1
-            if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
             return Ok(Dyn.Array(items))
         }
         index := 0
@@ -612,7 +608,6 @@ impl Parser {
             if b == (U8{93}) {
                 _ :: &self.bump()
                 self.depth -= 1
-                if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
                 return Ok(Dyn.Array(items))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
@@ -626,14 +621,12 @@ impl Parser {
     fn parse_object(&self) -> Dyn EncodingError! {
         if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !&self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
-        if self.recording -> &self.pending.push(DataEvent.ObjectStart)
         entries := [(key: String, value: Dyn)]{}
         positions := [String: Int]{}
         &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
         if (self.peek() ?? (U8{0})) == (U8{125}) {
             _ :: &self.bump()
             self.depth -= 1
-            if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
             return Ok(stream.object_from_entries(^entries))
         }
         loop {
@@ -643,7 +636,6 @@ impl Parser {
             &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
             &self.path.push(key)
-            if self.recording -> &self.pending.push(DataEvent.Key(key))
             if positions.get(key) == .Val(position) {
                 if !self.allow_duplicates {
                     error :: self.err("duplicate object key `{key}`")
@@ -664,7 +656,6 @@ impl Parser {
             if b == (U8{125}) {
                 _ :: &self.bump()
                 self.depth -= 1
-                if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
                 return Ok(stream.object_from_entries(^entries))
             }
             if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
@@ -678,25 +669,6 @@ impl Parser {
         self.depth += 1
         self.depth <= self.max_depth
     }
-
-    fn next_event(&self) -> DataEvent EncodingError! {
-        if !self.parsed {
-            if self.bytes.len() > safe_limits().max_item_bytes {
-                return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
-            }
-            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if self.eof() -> return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, ""))
-            value :: &self.parse_value()
-            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
-            if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
-            if !self.recording -> self.pending = append_events(value)
-            self.parsed = true
-        }
-        if self.pending_index >= self.pending.len() -> return Err(self.err("JSON reader is exhausted"))
-        event :: self.pending[self.pending_index]
-        self.pending_index += 1
-        Ok(event)
-    }
 }
 
 fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> Dyn EncodingError! {
@@ -704,7 +676,7 @@ fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> D
     if raw.len() > limits.max_item_bytes {
         return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({limits.max_item_bytes})"))
     }
-    p := Parser.new(raw, allow_duplicates, false)
+    p := Parser.new(raw, allow_duplicates)
     p.exact_numbers = true
     p.max_depth = limits.max_depth
     value :: &p.parse_value()
@@ -716,7 +688,7 @@ fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> D
 fn __parse_typed(text: String) -> Dyn EncodingError! {
     raw :: text.bytes()
     if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
-    parser := Parser.new(raw, false, false)
+    parser := Parser.new(raw, false)
     parser.typed_numbers = true
     value :: &parser.parse_value()
     &parser.skip_ws() ?? return Err(parser.err("failed while scanning JSON whitespace"))
@@ -843,7 +815,9 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
     }
     if value == {
         .Null -> write_ascii(&out, "null")
-        .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
+        // Bytes render as standard padded base64 text, as in write_json
+        // (encoding-decisions.md: canonical and compact JSON share the rule).
+        .Bytes(bytes) -> write_json_string(&out, base64.encode(bytes))
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")
@@ -921,14 +895,8 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! 
     if value == {
         .Null -> write_ascii(&out, "null")
         .Number(text) -> write_ascii(&out, text)
-        .Bytes(bytes) -> {
-            &out.push(U8{91})
-            loop index in 0..<bytes.len() {
-                if index > 0 -> &out.push(U8{44})
-                write_ascii(&out, "{bytes[index]}")
-            }
-            &out.push(U8{93})
-        }
+        // Bytes render as standard padded base64 text (encoding-decisions.md).
+        .Bytes(bytes) -> write_json_string(&out, base64.encode(bytes))
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")
@@ -1484,7 +1452,7 @@ fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
 }
 
 #Test("JSON text serializers reject non-finite Float on the EncodingError rail") {
-    numbers :: [Float]{math.nan(), math.infinity(), -math.infinity()}
+    numbers :: [Float]{math.NAN, math.INFINITY, -math.INFINITY}
     loop number in numbers {
         tree :: Dyn.Array([Dyn]{Dyn.Float(number)})
         if to_string(tree) == {
@@ -1517,11 +1485,13 @@ fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
     assert_eq(parse(wire) ?? panic("C0 decode"), Dyn.Text(controls))
 }
 
-#Test("strict JSON separates whole numbers, fractions, and exponents") {
-    assert_eq(parse("42") ?? panic("integer JSON"), Dyn.Int(42))
-    assert_eq(parse("1.5") ?? panic("fractional JSON"), Dyn.Float(1.5))
-    assert_eq(parse("1e2") ?? panic("exponent JSON"), Dyn.Float(100.0))
-    assert_eq(parse("-2E-1") ?? panic("signed exponent JSON"), Dyn.Float(-0.2))
+// #4602: strict parse keeps every number, whole or not, as its exact
+// `Dyn.Number` lexeme until a typed read range-checks it.
+#Test("strict JSON keeps each number as its exact lexeme") {
+    assert_eq(parse("42") ?? panic("integer JSON"), stream.typed_number("42"))
+    assert_eq(parse("1.5") ?? panic("fractional JSON"), stream.typed_number("1.5"))
+    assert_eq(parse("1e2") ?? panic("exponent JSON"), stream.typed_number("1e2"))
+    assert_eq(parse("-2E-1") ?? panic("signed exponent JSON"), stream.typed_number("-2E-1"))
 }
 
 #Test("JSON object patch returns ordered Object backing") {

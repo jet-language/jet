@@ -20,6 +20,7 @@ use jet_foundation.[
     RuleSite,
     Span,
     Stmt,
+    StrPart,
     SwitchArm,
     TupleField,
     Type,
@@ -50,6 +51,7 @@ use jet_lexer.[
     TOKEN_EQ_EQ,
     TOKEN_FALSE,
     TOKEN_FLOAT,
+    TOKEN_GT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
@@ -66,6 +68,7 @@ use jet_lexer.[
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
+    TOKEN_LT,
     TOKEN_MINUS,
     TOKEN_MINUS_EQ,
     TOKEN_NULL,
@@ -376,8 +379,17 @@ fn parser_parse_tail_if(state: &JetParserState) -> Stmt {
     parsed :: parser_parse_expression(&state, 1, 0)
     at_tail :: parser_current_kind(&state) == TOKEN_RBRACE || (parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
     if at_tail && !parser_error_since(state, saved_diagnostics) -> return Stmt.Expr{expr: parsed.expr}
+    value_errors :: state.diagnostics.len() - saved_diagnostics
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    parser_parse_statement(&state)
+    statement :: parser_parse_statement(&state)
+    if !at_tail || !parser_error_since(state, saved_diagnostics) -> return statement
+    // Both readings fail: keep the value form when the statement reading
+    // only adds errors, so one bad arm head (E0366) does not cascade into
+    // value arms read as statements (Rust reports the arm error alone).
+    if state.diagnostics.len() - saved_diagnostics <= value_errors -> return statement
+    parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+    reparsed :: parser_parse_expression(&state, 1, 0)
+    Stmt.Expr{expr: reparsed.expr}
 }
 
 fn parser_expression_is_collecting_loop(expr: Expr) -> Bool Never! {
@@ -830,11 +842,17 @@ fn parser_select_after_field() -> String Never! {
 fn parser_parse_guard_arm_body(state: &JetParserState) -> [Stmt] {
     token :: parser_current(&state)
     if token.kind == TOKEN_LBRACE -> return parser_parse_block(&state).statements
-    if token.kind == TOKEN_KW_IF {
+    // A nested braced guard table closes itself; only a braceless nested
+    // `if` leaves the owner of a following arm ambiguous.
+    if token.kind == TOKEN_KW_IF && parser_kind_at(&state, 1) != TOKEN_LBRACE {
         parser_add_fatal_code(&state, "E0329", token.span, "a nested guard body needs braces", "a braceless guard owns exactly one non-`if` statement, so direct nesting would be ambiguous", "wrap the nested `if` in `{{ ... }}`")
         return [Stmt]{}
     }
-    [Stmt]{parser_parse_statement(&state)}
+    // A one-statement arm body may end before the table's `else` arm.
+    state.adjacent_if_body_depth += 1
+    statement :: parser_parse_statement(&state)
+    state.adjacent_if_body_depth -= 1
+    [Stmt]{statement}
 }
 
 // Q2: a dispatch arm body is a braced block or one braceless statement.
@@ -1004,7 +1022,7 @@ fn parser_parse_range_arm_head(state: &JetParserState, subject: Expr) -> Expr? {
     } else {
         step :: parser_current(&state)
         if step.kind == TOKEN_IDENT && parser_value(state, step) == "step" {
-            parser_add_error_code(&state, "E0319", span, "`step` is not allowed in a range arm — range arms test a band, not a sequence", "a range arm just checks if the subject falls between the two ends", "remove `step …`, or use a full condition: `subject >= {low} && subject <= {high} && subject % n == 0 ->`")
+            parser_add_error_code(&state, "E0319", span, "`step` is not allowed in a range arm — range arms test a band, not a sequence", "`step` is a retired loop spelling; a range arm just checks if the subject falls between the two ends", "remove `step …`, or use a full condition: `subject >= {low} && subject <= {high} && subject % n == 0 ->`")
             parser_bump(&state)
             if parser_current_kind(&state) == TOKEN_INT -> parser_bump(&state)
         }
@@ -1242,9 +1260,9 @@ fn parser_parse_break_statement(state: &JetParserState) -> Stmt {
             parser_finish_statement(&state)
             return Stmt.BreakLabelValue{name: parser_value(state, name), name_span: name.span, value: value.expr, span: parser_cover(start.span, close.span)}
         }
-        close :: parser_expect(&state, TOKEN_RPAREN, "`)` after loop label")
+        parser_expect(&state, TOKEN_RPAREN, "`)` after loop label")
         parser_finish_statement(&state)
-        return Stmt.BreakLabel{name: parser_value(state, name), span: parser_cover(start.span, close.span)}
+        return Stmt.BreakLabel{name: parser_value(state, name), span: start.span}
     }
     if parser_current_kind(&state) != TOKEN_SEMI && parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         value :: parser_parse_expression(&state, 1, 0)
@@ -1504,6 +1522,16 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
         }
     }
     value :: parser_parse_expression(&state, 1, 0)
+    // `name :: Layout{ … }` (Rust layout_ctor_binding): a typed-literal
+    // constraint body is the layout statement over its elements.
+    if parser_layout_elements(value.expr) == .Val(elements) {
+        binding_name :: parser_value(state, name)
+        if mutable -> parser_add_error_code(&state, "E0003", name.span, "a `Layout{{ … }}` binding is immutable", "`Layout` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding", "write `{binding_name} :: Layout{{ … }}`")
+        body := [Stmt]{}
+        loop element in elements -> &body.push(Stmt.Expr{expr: parser_desugar_layout_expr(&state, binding_name, element)})
+        parser_finish_statement(&state)
+        return Stmt.Layout{name: binding_name, name_span: name.span, body: body, span: parser_cover(name.span, value.span)}
+    }
     binding := ast_binding(parser_value(state, name), name.span, mutable, value.expr, Val(sigil.span))
     // `name := Type{ uninit }` — `uninit` only as the
     // whole typed-literal body, and only on a mutable binding. Sema proves
@@ -1518,6 +1546,74 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     }
     parser_finish_statement(&state)
     Stmt.Val{binding: binding}
+}
+
+// The constraint elements of a `Layout{ … }` typed literal; None for any
+// other expression (a `Layout{ field: … }` record literal of a declared
+// `Layout` included).
+fn parser_layout_elements(expr: Expr) -> [Expr]? Never! {
+    if expr == .TypedLit(head, body, _, _) {
+        layout :: if head == .Val(ty) -> ty == (Type.Named{name: "Layout"}) else -> false
+        if !layout -> return None
+        if body == {
+            .Elements(elements) -> return Val(elements.copy())
+            .Value(element) -> return Val([Expr]{element.copy()})
+            .Empty -> return Val([Expr]{})
+            else -> return None
+        }
+    }
+    None
+}
+
+// Rust layout_anchor_method: the accessor of a horizontal (`left`, `right`,
+// `width`) or vertical (`top`, `bottom`, `height`) anchor.
+fn parser_layout_anchor_method(field: String) -> String? Never! {
+    if field == "left" || field == "right" || field == "width" -> return Val("h")
+    if field == "top" || field == "bottom" || field == "height" -> return Val("v")
+    None
+}
+
+fn parser_layout_text_arg(state: &JetParserState, text: String, span: Span) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: parser_node_id(&state)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+
+fn parser_desugar_layout_args(state: &JetParserState, layout_name: String, args: [CallArg]) -> [CallArg] Never! {
+    out := [CallArg]{}
+    loop arg in args {
+        rewritten := arg.copy()
+        rewritten.expr = parser_desugar_layout_expr(&state, layout_name, arg.expr)
+        &out.push(rewritten)
+    }
+    out
+}
+
+// Rust desugar_layout_anchors: a structural parse-time rewrite. Inside
+// `name :: Layout{ … }`, a bare `box.anchor` read becomes
+// `name.h("box", "anchor")` / `name.v("box", "anchor")`, and `self.anchor`
+// names the container box after the binding; any other field access is left
+// to sema. The formatter's jfmt_resugar_layout_expr is its inverse.
+fn parser_desugar_layout_expr(state: &JetParserState, layout_name: String, e: Expr) -> Expr Never! {
+    if e == .Field(base, field, field_span, _) {
+        if base == .Ident(box_name, ident_span, _) {
+            if parser_layout_anchor_method(field) == .Val(method) {
+                box_text :: if box_name == "self" -> layout_name.copy() else -> box_name.copy()
+                args :: [CallArg]{parser_layout_text_arg(&state, box_text, ident_span), parser_layout_text_arg(&state, field.copy(), field_span)}
+                return Expr.MethodCall{receiver: Expr.Ident{name: layout_name.copy(), span: ident_span, id: parser_node_id(&state)}, method: method, method_span: field_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: parser_node_id(&state)}
+            }
+        }
+    }
+    if e == {
+        .Binary(op, l, r, span, node) -> Expr.Binary{op: op, left: parser_desugar_layout_expr(&state, layout_name, l), right: parser_desugar_layout_expr(&state, layout_name, r), span: span, id: node}
+        .Unary(op, x, span, node) -> Expr.Unary{op: op, operand: parser_desugar_layout_expr(&state, layout_name, x), span: span, id: node}
+        .Field(base, field, span, node) -> Expr.Field{base: parser_desugar_layout_expr(&state, layout_name, base), member: field, span: span, id: node}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> Expr.MethodCall{receiver: parser_desugar_layout_expr(&state, layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: parser_desugar_layout_args(&state, layout_name, args), id: node}
+        .Call(call, node) -> {
+            rewritten := call.copy()
+            rewritten.args = parser_desugar_layout_args(&state, layout_name, call.args)
+            Expr.Call{call: rewritten, id: node}
+        }
+        else -> e.copy()
+    }
 }
 
 // The `uninit` span when a headed typed literal's whole
@@ -1563,7 +1659,7 @@ fn parser_parse_defer_statement(state: &JetParserState) -> Stmt {
 }
 
 // Rust `KW_ASSERT`: `assert a, b` records unsafe-evidence names as the
-// internal assertion call that sema removes before TIR.
+// internal assertion call that sema removes before IR lowering.
 fn parser_parse_assert_names(state: &JetParserState) -> Stmt {
     start :: parser_bump(&state)
     args := [CallArg]{}
@@ -1586,6 +1682,12 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
     if start.kind == TOKEN_KW_IN {
         parser_bump(&state)
         parser_add_error(&state, start.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
+    }
+    if parser_at_foreign_loop_statement(&state) {
+        word :: parser_value(state, start)
+        parser_bump(&state)
+        parser_report_foreign_loop_word(&state, word, start.span)
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
     }
     named :: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
@@ -1613,6 +1715,12 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
         return Stmt.Assign{target: ^target, op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
     }
     if named && !parser_named_line_does_work(&state, left.expr) {
+        // Rust `stmt`: a bare foreign loop word computes nothing; it is a word
+        // Jet does not spell, not an unused value.
+        if left.expr == .Ident(word, span, _) && parser_is_foreign_loop_word(word) {
+            parser_report_foreign_loop_word(&state, word, span)
+            return Stmt.Expr{expr: left.expr}
+        }
         parser_add_error(&state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x :: ...` or `print(...)`")
         return Stmt.Expr{expr: left.expr}
     }
@@ -1627,6 +1735,62 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
 fn parser_report_not_a_statement(state: &JetParserState, start: Token) {
     found :: parser_describe_token(state, start)
     parser_add_error(&state, start.span, "expected a call, binding, assignment, or `return`, found {found}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x :: 1")
+}
+
+// Rust `foreign_keyword_kind`: the retired foreign loop words (D-S14-PAUSE).
+// None is Jet syntax; each is recognized only to report a current-syntax error.
+fn parser_is_foreign_loop_word(word: String) -> Bool Never! {
+    word == "for" || word == "while" || word == "continue" || word == "do" || word == "repeat" || word == "until"
+}
+
+// Rust `at_foreign_loop_word_statement`: the current name opens a foreign
+// loop statement. `for`/`while` need a block ahead on the line, `continue`
+// ends the line (optionally with a label name), and `do`/`repeat`/`until`
+// open a block directly.
+fn parser_at_foreign_loop_statement(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_IDENT -> return false
+    word :: parser_value_at(&state, 0)
+    if word == "for" || word == "while" -> return parser_foreign_loop_has_block(&state)
+    if word == "continue" {
+        next_kind :: parser_kind_at(&state, 1)
+        if next_kind == TOKEN_SEMI || next_kind == TOKEN_RBRACE || next_kind == TOKEN_EOF -> return true
+        after :: parser_kind_at(&state, 2)
+        return next_kind == TOKEN_IDENT && (after == TOKEN_SEMI || after == TOKEN_RBRACE || after == TOKEN_EOF)
+    }
+    if word == "do" || word == "repeat" || word == "until" -> return parser_kind_at(&state, 1) == TOKEN_LBRACE
+    false
+}
+
+// Rust `foreign_loop_has_block`: a `{` at bracket depth zero before the line ends.
+fn parser_foreign_loop_has_block(state: &JetParserState) -> Bool Never! {
+    parens := 0
+    brackets := 0
+    offset := 1
+    loop {
+        kind :: parser_kind_at(&state, offset)
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+        if parens == 0 && brackets == 0 {
+            if kind == TOKEN_LBRACE -> return true
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE -> return false
+        }
+        if kind == TOKEN_EOF -> return false
+        offset += 1
+    }
+    false
+}
+
+// Rust `foreign_keyword_diagnostic` for the loop words.
+fn parser_report_foreign_loop_word(state: &JetParserState, word: String, span: Span) {
+    current :: "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords"
+    if {
+        word == "for" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `loop item in source {{ … }}`")
+        word == "while" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `loop condition {{ … }}`; for repeated input, use `loop line in io.stdin().lines()` and stop in the body with `if test {{ break }}`")
+        word == "continue" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `next`")
+        else -> parser_add_error(&state, span, "expected a statement, found `{word}`", "Jet uses one body-first loop form; put the stop test inside the body and exit with `break`", "write `loop {{ … if test {{ break }} }}`; for repeated input, use `loop line in io.stdin().lines()`")
+    }
 }
 
 // Rust `starts_expr`: the tokens that can open an expression line.
@@ -1801,6 +1965,26 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     marker_span :: parser_cover(hash.span, end)
     marker :: Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: marker_span, ct: None}
+    // `#Track name :: value` and `#Meta(…) name :: value` mark the local
+    // binding they prefix (D-TRACK-ORIGIN1=A, D-CANVASMETA1=B), as do the
+    // reactive pins `#Local` and `#Shared`.
+    // The marker may stand on its own line above the binding.
+    if word == "Track" || word == "Meta" || word == "Local" || word == "Shared" {
+        offset := 0
+        loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
+        binding_kind :: parser_kind_at(&state, offset + 1)
+        if parser_kind_at(&state, offset) == TOKEN_IDENT && (binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON) {
+            parser_skip_semicolons(&state)
+            statement :: parser_parse_binding_statement(&state)
+            if statement == .Val(binding) {
+                // copy: the parsed binding is rebuilt to carry its marker.
+                marked := binding.copy()
+                &marked.markers.push(marker)
+                return Stmt.Val{binding: marked}
+            }
+            return statement
+        }
+    }
     // S82: an allowance attaches to one ordinary statement,
     // not an invented block node. Its target stays for sema and gate audit.
     if word == "allow" {
@@ -1846,17 +2030,36 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
             return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: switched_span}
         }
     }
+    // The retired angle form `#SQL<Row> { … }` names its row type with the
+    // ordinary call form now.
+    if word == "SQL" && parser_current_kind(&state) == TOKEN_LT && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_GT && parser_kind_at(&state, 3) == TOKEN_LBRACE {
+        parser_bump(&state)
+        parser_bump(&state)
+        close :: parser_bump(&state)
+        parser_parse_body_block(&state, false)
+        parser_add_error_code(&state, "E0927", parser_cover(marker_span, close.span), "`#{word}<…>` is retired", "marker arguments use the ordinary call form from the registry", "write `#{word}(Row) {{ … }}`")
+        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+    }
     saved_tail_depth :: state.callable_tail_depth
     value_tail :: marker.name == "Unsafe" && state.callable_tail_value && state.callable_tail_depth == state.block_depth
     if value_tail -> state.callable_tail_depth = state.block_depth + 1
     body :: parser_parse_body_block(&state, value_tail)
     state.callable_tail_depth = saved_tail_depth
     span :: parser_cover(hash.span, body.span)
-    // Rust `bind_rule_fact(…, RuleSite::Block)`: every marked block is a
+    // Rust `bind_rule_fact(…, RuleSite::Block)`: a marked block is a
     // Block-site application, so the vocabulary, site, repeatability and
-    // argument checks see it like any other applied rule.
-    // copy: the application row and the statement built below each keep the marker.
-    &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(span), site: Val(RuleSite.Block)})
+    // argument checks see it like any other applied rule. A bare
+    // `#Transact { … }` binds no handle and records no application
+    // (Rust `at_transact_stmt`, Statements/control.rs:1482 @ 6083377777).
+    if marker.name != "Transact" || args.len() > 0 {
+        // copy: the application row and the statement built below each keep the marker.
+        application := marker.copy()
+        // Rust `#FX(name: Effects…)` (Statements/control.rs:1381 @ 6083377777):
+        // `name:` binds the scoped Authority handle, not a rule parameter, so the
+        // application row carries the effects unlabeled.
+        if marker.name == "FX" -> application.arg_labels = (loop _ in marker.arg_labels -> CallLabel?{None})
+        &state.statement_rules.push(AppliedRuleApplication{marker: application, target: Val(span), site: Val(RuleSite.Block)})
+    }
     if marker.name == {
         "Unsafe" -> {
             reason := String?{None}

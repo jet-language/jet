@@ -34,8 +34,8 @@ fn numeric_node_power10(node: I64, power: I64) {
 // Compare a with 2*b without allocating/copying a third workspace. A base1e9
 // doubling has carry-in exactly (previous limb>=5e8), even at the high limb.
 fn numeric_node_compare_twice(a: I64, b: I64) -> I64 {
-    al :: int_load(a + I64{32})
-    bl :: int_load(b + I64{32})
+    al :: int_load(wrapping(a + I64{32}))
+    bl :: int_load(wrapping(b + I64{32}))
     doubled :: bl + (if (int_get(b, bl - I64{1}) >= I64{500000000}) -> I64{1} else -> I64{0})
     if (al != doubled) -> return if (al < doubled) -> I64{-1} else -> I64{1}
     at := al
@@ -107,7 +107,7 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
     at := start
     sign := I64{0}
     if (at < end) {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         if (byte == I64{43} || byte == I64{45}) {
             if (byte == I64{45}) -> sign = I64{-9223372036854775808}
             at += I64{1}
@@ -119,7 +119,7 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
         special := I64{0}
         i := I64{0}
         loop i < length {
-            special = special.bit_or((rt_text_byte(data + at + i).bit_and(I64{223})) << (i * I64{8}))
+            special = special.bit_or((rt_text_byte(wrapping(wrapping(data + at) + i)).bit_and(I64{223})) << (i * I64{8}))
             i += I64{1}
         }
         if ((length == I64{3} && special == I64{4607561}) || (length == I64{8} && special == I64{6436850368004902473})) {
@@ -139,7 +139,7 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
     last_nonzero := I64{-1}
     dot := false
     loop at < end {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         if (byte == I64{46} && !dot) {
             dot = true
             at += I64{1}
@@ -160,16 +160,16 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
     }
     if (digits == I64{0}) -> return numeric_float_error(text, err)
     explicit := I64{0}
-    if (at < end && (rt_text_byte(data + at) == I64{101} || rt_text_byte(data + at) == I64{69})) {
+    if (at < end && (rt_text_byte(wrapping(data + at)) == I64{101} || rt_text_byte(wrapping(data + at)) == I64{69})) {
         at += I64{1}
         negative := false
-        if (at < end && (rt_text_byte(data + at) == I64{43} || rt_text_byte(data + at) == I64{45})) {
-            negative = rt_text_byte(data + at) == I64{45}
+        if (at < end && (rt_text_byte(wrapping(data + at)) == I64{43} || rt_text_byte(wrapping(data + at)) == I64{45})) {
+            negative = rt_text_byte(wrapping(data + at)) == I64{45}
             at += I64{1}
         }
         exponent_start :: at
         loop at < end {
-            byte :: rt_text_byte(data + at)
+            byte :: rt_text_byte(wrapping(data + at))
             if (byte < I64{48} || byte > I64{57}) -> break
             // Matches Rust parse_scientific: stop accumulating only AFTER the
             // previous magnitude reaches 0x10000; still validate every digit.
@@ -201,7 +201,7 @@ fn numeric_float_error(text: I64, err: I64) -> I64 {
     numerator :: int_new(significant_digits /% I64{9} + I64{40} + (if (power > I64{0}) -> power /% I64{9} else -> I64{0}))
     at = first_nonzero
     loop at <= last_nonzero {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         if (byte != I64{46}) -> int_scale(numerator, I64{10}, byte - I64{48})
         at += I64{1}
     }

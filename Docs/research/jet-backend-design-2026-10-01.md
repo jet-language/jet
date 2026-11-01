@@ -121,9 +121,10 @@ read-only data; each table's ID equals its index.
   before emitting the template bytes. Allocation treats asm as a call.
   Supported templates contain word-register push/pop, mov (register,
   immediate, qword memory), movzx byte loads, syscall, indirect register
-  calls, lock cmpxchg, xchg, pause, cld/std, and the string moves `rep
-  movsb`/`rep movsq` (they write rcx, rsi and rdi; a template that sets the
-  direction flag clears it again). Memory addresses admit a base register
+  calls, lock cmpxchg, xchg, pause, cld/std, the string moves `rep
+  movsb`/`rep movsq` (they write rcx, rsi and rdi) and the word store `rep
+  stosq` (it repeats rax and writes rcx and rdi); a template that sets the
+  direction flag clears it again. Memory addresses admit a base register
   or named input with an optional signed-32-bit `+ displacement`.
   Callee-saved/frame registers, unsupported syntax, unbalanced stacks,
   misaligned calls, missing/duplicate return anchors, and named input reads
@@ -1423,9 +1424,12 @@ then one `sub rsp` for spill slots and StackSlot storage, padded so rsp is
 16-byte aligned at every call. Spill slot k lives at
 `[rbp - 8 * (saved + k + 1)]`. StackSlot storage lies below the spill slots,
 each at the next multiple of its alignment (rbp is 16-byte aligned after the
-push), and a StackSlot is `lea reg, [rbp - disp]`. Every return
-restores rsp with `lea rsp, [rbp - 8 * saved]`, pops the saved registers and
-rbp, and returns. Entry parameters arrive in the System V argument registers
+push), and a StackSlot is `lea reg, [rbp - disp]`. A return
+restores rsp with `lea rsp, [rbp - 8 * saved]` when the frame has storage
+below the saved registers (with none, rsp already points at them), pops the
+saved registers and rbp, and returns; the stop exit always restores rsp,
+since a slow path may reach it with stack arguments pushed. Entry parameters
+arrive in the System V argument registers
 and are moved (in parallel) to their allocated homes. The frame keeps rbp as
 a frame pointer; its call frame information is in each function's FDE
 (Debug information, below).
@@ -2592,8 +2596,9 @@ The standing O0/O1/O2 gate and producer-admission contract are described in
 [`safety.md`](../spec/safety.md#standing-native-safety-gate); absent tier/runtime
 coverage is explicitly non-green.
 
-Fuzz corpus (#4619): `Tools/agent/safety-fuzz.mjs <outdir> --seed N --count K`
-writes K type-directed generated programs and their expected stdout in the
+Fuzz corpus (#4619): `Tools/agent/safety-gate.mjs <outdir> <artifacts.json> N K`
+has the `safety-fuzz.mjs` generator write K type-directed generated programs
+per kind from seed N, and their expected stdout, in the
 Examples/features layout (`<outdir>/corpus/Examples/features/fuzz/`), then runs
 run-goldens, run-differential and run-lint-corpus over it through
 `JET_GOLDEN_FEATURES`. The expected output comes from a model evaluator with
@@ -3461,14 +3466,16 @@ Error reasons and the JSON/Syntax, offset-zero, line-present, column-absent
 adapter remain unchanged. This is not Core's separate policy parser.
 
 `DynNative.jet` marshals the compiler's checked enum through the descriptor
-in `Lower/Dyn.jet`, rather than assuming source/runtime tags or element
-offsets coincide. Both directions clone borrowed owners; packed byte lists,
-padded Object entries and recursive payload wrappers follow descriptor facts.
-Compiler JSON does not construct DateTime. Main explicitly scoped that
-bridge variant out of cutover: it raises the registered E3001 panic
-`Dyn DateTime is not yet bridged natively`, never a silent ZonedDateTime
-reinterpretation. The complete ZonedDateTime projection requires a separate
-schema extension after cutover.
+`ir_dyn_schema` (JetIR `BuildRoutes.jet`) emits, rather than assuming
+source/runtime tags or element offsets coincide. Both directions clone
+borrowed owners; packed byte lists, padded Object entries and recursive
+payload wrappers follow descriptor facts. DateTime (#6280) follows the
+descriptor's ZonedDateTime facts: native to runtime keeps the instant and the
+zone's offset at that instant (Core's `civil_zone_info` lookup); runtime to
+native builds Core's fixed-offset zone (`UTC`, or `±HH:MM` with one info).
+A program that never loads core.time has no ZonedDateTime layout; its facts
+are -1, and bridging a DateTime there is the registered E3001 stop. A tag
+absent from the descriptor is the same stop.
 
 `JetRuntime/Tests/DataTreeWitness.c` retains its existing filename but uses
 only canonical Dyn exports. It requires a real Jet object and

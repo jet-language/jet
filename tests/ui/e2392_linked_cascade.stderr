@@ -12,6 +12,6 @@ Error [E2404]: `load_row` fails with `SourceErr`, which can't propagate into `Ta
     |
  15 |     load_row(1)
     |     ^^^^^^^^
- Why: `load_row` is defined at `e2392_linked_cascade.jet:12:4` with effective failure contract `explicit !SourceErr`; the caller's `explicit !TargetErr` contract has no route from `SourceErr` to `TargetErr`
+ Why: `load_row` is defined at `e2392_linked_cascade.jet:12:4` with effective failure contract `explicit SourceErr!`; the caller's `explicit TargetErr!` contract has no route from `SourceErr` to `TargetErr`
  Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -> TargetErr { … }`; otherwise handle `load_row` locally with `??`
 More: jet-lang.dev/e/E2404

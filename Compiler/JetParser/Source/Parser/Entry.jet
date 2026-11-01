@@ -28,6 +28,7 @@ use jet_foundation.[
     name_count,
     name_find,
     name_index,
+    sema_casing_marker_qualifier,
     type_name,
 ]
 use jet_lexer.[
@@ -78,8 +79,9 @@ fn parse_source(source: [U8]) -> ParseResult {
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
-// the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
-// loader's embedded-Core path parses this way; a user file never does.
+// the reserved `__name` namespace (Rust `Lexer::lex_generated`). The loader's
+// embedded-Core path and compiler-generated call arguments (core.testing
+// histories, #6410) parse this way; a user file never does.
 fn parse_generated_source(source: [U8]) -> ParseResult {
     parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
@@ -667,7 +669,44 @@ fn parser_used_import_names(tokens: [Token], tables: TokenTables, imports: [Impo
         if name_find(tables.names, name) == .Val(found) -> used_ids[name_index(found)] = true
     }
     parser_collect_used_import_names(tokens, tables, indexed_spans, candidate_ids, &used_ids, &used)
+    parser_collect_marker_import_names(tokens, tables, candidates, &used)
     used
+}
+
+// D-MARKER-CASE1=A: a qualified marker names its import through the alias's
+// PascalCase spelling (`#Server.Get` uses `server`). A marker head is the
+// identifier after `#`, or after `[` or `,` at the top of a `#[ … ]` list,
+// when a `.` follows it.
+// Rust: none (Jet-only pass)
+fn parser_collect_marker_import_names(tokens: [Token], tables: TokenTables, candidates: [String], used: &[String]) Never! {
+    aliases := [String]{}
+    spellings := [String]{}
+    loop candidate in candidates {
+        spelled :: sema_casing_marker_qualifier(candidate)
+        if spelled != candidate {
+            &aliases.push(candidate)
+            &spellings.push(spelled)
+        }
+    }
+    if aliases.len() == 0 -> return
+    depth := 0
+    loop index in 0..<tokens.len() {
+        kind :: tokens[index].kind
+        if depth > 0 {
+            if kind == TOKEN_LBRACKET || kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RBRACKET || kind == TOKEN_RPAREN -> depth -= 1
+        } else if kind == TOKEN_LBRACKET && index > 0 && tokens[index - 1].kind == TOKEN_HASH {
+            depth = 1
+        }
+        if kind != TOKEN_IDENT || index == 0 || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_DOT -> next
+        before :: tokens[index - 1].kind
+        head :: before == TOKEN_HASH || (depth == 1 && (before == TOKEN_LBRACKET || before == TOKEN_COMMA))
+        if !head -> next
+        name :: token_decoded(tables, tokens[index])
+        loop position in 0..<spellings.len() {
+            if spellings[position] == name && !used.contains(aliases[position]) -> &used.push(aliases[position])
+        }
+    }
 }
 
 // Rust: none (Jet-only pass)
@@ -1161,7 +1200,7 @@ fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
         parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
         kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> true
-        token.kind == TOKEN_IDENT && parser_value(state, token) == "alias" -> true
+        parser_type_alias_ahead_at(&state, 0) -> true
         token.kind == TOKEN_IDENT && parser_value(state, token) == "private" -> parser_foreign_private_ahead(&state)
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
@@ -1255,5 +1294,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV) || (kind == TOKEN_IDENT && parser_value_at(&state, offset) == "alias")
+    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_type_alias_ahead_at(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
 }

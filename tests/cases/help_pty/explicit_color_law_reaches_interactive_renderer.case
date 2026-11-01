@@ -1,8 +1,7 @@
 # PENDING-GRAMMAR(batch-four)
 requires: os:unix
-refused: pty
 normalize: replace "\r" ""
-step: jet ? --color=always
+step: jet --color=always
 pty: true size 24x120
 unset: NO_COLOR
 unset: FORCE_COLOR
@@ -10,7 +9,7 @@ pty-send: "q" after 150ms
 pty-close: after 150ms
 exit: 0
 stdout: ~any "\u001b[1;96m" "\u001b[48;5;24" # original predicate: either explicit style marker activates renderer
-step: jet ? --color=never
+step: jet --color=never
 pty: true size 24x120
 unset: NO_COLOR
 unset: FORCE_COLOR
@@ -19,7 +18,7 @@ pty-close: after 150ms
 exit: 0
 stdout: !~ "\u001b[1;96m" # original predicate: transcript does not contain these bytes
 stdout: !~ "\u001b[48;5;24" # original predicate: transcript does not contain these bytes
-step: jet ? --color=auto
+step: jet --color=auto
 pty: true size 24x120
 unset: NO_COLOR
 unset: FORCE_COLOR

@@ -12,10 +12,10 @@ stdout: line ^= "  {work}/probe.jet:16:37 " # original predicate
 stdout: before "probe.jet:7:16 " "probe.jet:16:37 " # original predicate
 step: jet fmt --explicit-copies {work}/probe.jet
 exit: 0
-file: probe.jet ~ "User{name: ~name" # original predicate
-file: probe.jet ~ "tags: ~names}" # original predicate
-file: probe.jet !~ "struct ~" # original predicate
-file: probe.jet count "~" = 2 # original predicate
+file: probe.jet ~ "User{name: name.copy()" # respelled from the retired copy sigil; fmt writes .copy()
+file: probe.jet ~ "tags: names.copy()}" # respelled from the retired copy sigil
+file: probe.jet !~ "struct User.copy()" # respelled from the retired copy sigil
+file: probe.jet count ".copy()" = 2 # respelled from the retired copy sigil
 copy: probe.jet rewritten.txt
 concat: probe.jet policy.header rewritten.txt
 step: jet check {work}/probe.jet

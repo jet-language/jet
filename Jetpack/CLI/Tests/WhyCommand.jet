@@ -58,7 +58,10 @@ fn cli_why_test_text(tree: Dyn) -> String {
     }
     assert_eq(cli_why_test_text(cli_why_test_field(tree, "action")), "why")
     requesting :: cli_why_test_field(tree, "requesting")
-    assert_eq(cli_why_test_field(cli_why_test_field(requesting, "env_file"), "line"), Dyn.Int(12))
+    if cli_why_test_field(cli_why_test_field(requesting, "env_file"), "line") == {
+        .Int(line) -> assert_eq(line, 12)
+        else -> panic("requesting.env_file.line is an Int")
+    }
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(tree, "trust"), "grade")), "signed")
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(tree, "origin"), "endpoint")), "https://index.example")
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(requesting, "lock_file"), "text")), "name = \"ripgrep\"")
@@ -67,5 +70,8 @@ fn cli_why_test_text(tree: Dyn) -> String {
         else -> panic("dependents is a list")
     }
     assert_eq(cli_why_test_text(dependents[0]), "tool@1.0 (tool@jetpack)")
-    assert_eq(cli_why_test_field(cli_why_test_field(tree, "disk"), "bytes"), Dyn.Int(4096))
+    if cli_why_test_field(cli_why_test_field(tree, "disk"), "bytes") == {
+        .Int(bytes) -> assert_eq(bytes, 4096)
+        else -> panic("disk.bytes is an Int")
+    }
 }

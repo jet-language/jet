@@ -18,8 +18,23 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, Bod
 // `shield` set and nothing else: an early exit leaves the session Shield.
 // A `#Context(deadline: …)` block is a frame with only `deadline`, the
 // two-word save area of the deadline it replaced (-1: none): an early exit
-// restores that deadline.
-struct IRTxFrame { handle: Int, stm: Int, snapshots: [IRTxSnapshot], loops: Int, shield: Bool, deadline: Int }
+// restores that deadline. A `#Live` block is a frame with only `terminal`:
+// an early exit restores the terminal mode it replaced. An `#Unsafe` scope
+// is a frame with only `sentry`, the save area of the sentry gate it
+// replaced, and a function taking raw addresses one with only
+// `sentry_frame`, its sentry stack frame (BuildSentry.jet): an early exit
+// leaves them.
+struct IRTxFrame {
+    handle: Int
+    stm: Int
+    snapshots: [IRTxSnapshot]
+    loops: Int
+    shield: Bool
+    deadline: Int
+    sentry: Int{-1}
+    sentry_frame: Int{-1}
+    terminal: Bool{false}
+}
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
 // exit, through `restore` of its Rollback implementation `rollback` when it
@@ -158,7 +173,7 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
         ir_emit(&b.f, IROp.Store, -1, boxed, 0, zero, b.line)
         ir_emit(&b.f, IROp.Store, -1, boxed, 8, zero, b.line)
         ir_emit(&b.f, IROp.Store, -1, boxed, 16, zero, b.line)
-        ir_bind_local(&m, p, &b, local, boxed)
+        ir_bind_local(&m, p, &b, local, boxed, span)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction {local.name} without its binding")
         handle_slot = binding.slot
     }
@@ -166,8 +181,8 @@ fn ir_transact(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snaps
     if stm != None {
         stm_row :: ir_stm_row(&m)
         state :: ir_runtime(&m, &b, "jet_rt_native_stm_begin", [Int]{}, stm_row)
-        local :: checked_generated_local("jet_stm_{b.f.slot_type.len()}", span)
-        ir_bind_local(&m, p, &b, local, state)
+        local :: checked_generated_local("jet_stm_{b.f.slot_type.len()}", span, m.types[stm_row].ty.copy())
+        ir_bind_local(&m, p, &b, local, state, span)
         binding :: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction Stm without its binding")
         stm_slot = binding.slot
     }
@@ -206,6 +221,24 @@ fn ir_shield(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     ir_scope_close(&m, &b)
     _ :: &b.transactions.pop()
     _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+}
+
+// `#Live { .. }`: the body runs with stdin in unbuffered, no-echo mode
+// (jet_term_mode_enter, RouteTerm.jet), entered before it and restored after
+// its bindings drop, or by an early exit (ir_tx_unwind) or a stop edge
+// (ir_stop_return, ir_stop_catches).
+fn ir_live(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    raw :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, raw, 1, -1, -1, b.line)
+    _ :: ir_runtime(&m, &b, "jet_term_mode_enter", [Int]{raw}, bool_row)
+    &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, terminal: true})
+    ir_scope_open(&b)
+    ir_stmts(&m, p, &b, body)
+    if ir_failed(b) -> return
+    ir_scope_close(&m, &b)
+    _ :: &b.transactions.pop()
+    _ :: ir_runtime(&m, &b, "jet_term_mode_leave", [Int]{}, -1)
 }
 
 // `#Context(field: value, …) { .. }`: the guard values run in order; a
@@ -252,7 +285,9 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
     ty :: m.types[value_row].ty.copy()
     saved_ty := ty.copy()
     value := -1
-    if snapshot.rollback_type == .Val(owner) {
+    rollback :: if snapshot.rollback_type == .Val(written) -> Val(ir_fact(p, &b, written, span)) else -> Type?{None}
+    if ir_failed(b) -> return None
+    if rollback == .Val(owner) {
         method :: snapshot.snapshot_method ?? {
             ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
             return None
@@ -278,9 +313,9 @@ fn ir_tx_snapshot(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransact
         ir_fail(&b, span, "transaction snapshot of {snapshot.local.name} without a value")
         return None
     }
-    saved :: checked_generated_local("jet_txn_snapshot_{value}", span)
-    ir_bind_local(&m, p, &b, saved, value)
-    Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: snapshot.rollback_type, restore: snapshot.restore_method})
+    saved :: checked_generated_local("jet_txn_snapshot_{value}", span, m.types[b.f.slot_type[value]].ty.copy())
+    ir_bind_local(&m, p, &b, saved, value, span)
+    Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: rollback, restore: snapshot.restore_method})
 }
 
 // `local.<method>(args)` of its Rollback implementation, typed by the
@@ -335,23 +370,64 @@ fn ir_tx_unwind(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Spa
                 ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
                 ir_emit(&b.f, IROp.Const, frame.handle, 0, -1, -1, b.line)
             }
-            if frame.shield {
-                _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
-            }
-            if frame.deadline >= 0 {
-                _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
-            }
+            ir_tx_leave_scopes(&m, &b, frame)
         }
         index -= 1
     }
     b.transactions = open
 }
 
+// The runtime scopes an early exit out of `frame` leaves: the session
+// Shield, the replaced deadline, the replaced sentry gate, the sentry
+// stack frame and the replaced terminal mode.
+fn ir_tx_leave_scopes(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
+    if frame.shield {
+        _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+    }
+    if frame.deadline >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
+    }
+    if frame.sentry >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_sentry_scope_leave", [Int]{frame.sentry}, -1)
+    }
+    if frame.sentry_frame >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_sentry_frame_leave", [Int]{frame.sentry_frame}, -1)
+    }
+    if frame.terminal {
+        _ :: ir_runtime(&m, &b, "jet_term_mode_leave", [Int]{}, -1)
+    }
+}
+
+// Whether a frame opened at or above `base` holds state a caught stop
+// cannot leave in place (a handle, an Stm, snapshots, a Shield or a
+// deadline); sentry and terminal frames only need leaving
+// (ir_tx_leave_sentries).
+fn ir_tx_frames_hold_state(frames: [IRTxFrame], base: Int) -> Bool Never! {
+    loop index in base..<frames.len() {
+        frame :: frames[index]
+        if frame.handle >= 0 || frame.stm >= 0 || frame.snapshots.len() > 0 || frame.shield || frame.deadline >= 0 -> return true
+    }
+    false
+}
+
+// A caught stop leaving the sentry and terminal frames opened at or above
+// `base`, innermost first.
+fn ir_tx_leave_sentries(m: &IRModule, b: &IRBuilder, base: Int) Never! {
+    frames :: b.transactions
+    index := frames.len() - 1
+    loop index >= base {
+        ir_tx_leave_scopes(&m, &b, frames[index])
+        index -= 1
+    }
+}
+
 // A return of `slot` (-1: nothing): the open contract scope's `post` clauses
-// check it, then it leaves the open transactions, taken before their
-// snapshots are restored.
+// check it, a memoized body files it (ir_memo_file), then it leaves the open
+// transactions, taken before their snapshots are restored.
 fn ir_return_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
     ir_contract_return(&m, p, &b, slot, span)
+    if ir_failed(b) -> return
+    ir_memo_file(&m, p, &b, slot, span)
     if ir_failed(b) -> return
     kept := slot
     if b.transactions.len() > 0 && slot >= 0 && !b.fresh[slot] && ir_kind_of(m, b, slot) != .Aggregate {

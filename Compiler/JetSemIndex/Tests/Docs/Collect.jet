@@ -21,7 +21,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 // Original tests/jetdoc.rs:226–245 input and collector-side assertions, with
 // no enrichment/serialization shortcut standing in for the CLI JSON test.
 #Test("nested_state_docs_stay_on_the_struct_item") {
-    source :: "pub struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
+    source :: "struct Door {{ state {{ Closed, Open }} }}\nfn run() {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -33,7 +33,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_comments_attach_to_each_declaration_not_global_or_state") {
-    source :: "/// Module overview.\n\n/// Door summary é.\npub struct Door {{\n    state {{ Closed, Open }}\n    /// Field summary λ.\n    pub value: Int\n    /// Method summary.\n    /// Example: `door.read()`\n    fn read(self) -> Int {{ 1 }}\n}}\n\nfn run() {{}}\n"
+    source :: "/// Module overview.\n\n/// Door summary é.\nstruct Door {{\n    state {{ Closed, Open }}\n    /// Field summary λ.\n    value: Int\n    /// Method summary.\n    /// Example: `door.read()`\n    fn read(self) -> Int {{ 1 }}\n}}\n\nfn run() {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -47,7 +47,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert_eq(rows[method].examples, [String]{"`door.read()`"})
     assert_eq(rows[run].summary, "")
     assert_eq(rows[field].source.line, 7)
-    assert_eq(rows[field].source.column, 9)
+    assert_eq(rows[field].source.column, 5)
     assert_eq(rows[field].source.path, "main.jet")
     assert_eq(rows[field].source.link, "main.jet#L7")
     // Retain actual name bytes and the exclusive byte end for the field row.
@@ -61,16 +61,16 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_inherited_visibility_keeps_fields_and_package_bits_independent") {
-    source :: "pub module Outer {{\n    pub(package) struct Box {{\n        hidden: Int\n        pub visible: Int\n        pub(package) sibling: Int\n        fn method(self) {{}}\n    }}\n    enum Choice {{ First, Second }}\n    trait Service {{ fn call(self) }}\n    fn work() {{}}\n}}\n"
+    source :: "module Outer {{\n    struct Box {{\n        priv hidden: Int\n        visible: Int\n        fn method(self) {{}}\n    }}\n    enum Choice {{ First, Second }}\n    trait Service {{ fn call(self) }}\n    fn work() {{}}\n}}\npriv(package) module Sibling {{}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
     box :: doc_collect_test_item(rows, "Outer::Box", "struct")
     hidden :: doc_collect_test_item(rows, "Outer::Box::hidden", "field")
     visible :: doc_collect_test_item(rows, "Outer::Box::visible", "field")
-    sibling :: doc_collect_test_item(rows, "Outer::Box::sibling", "field")
+    sibling :: doc_collect_test_item(rows, "Sibling", "module")
     assert(rows[box].public)
-    assert(rows[box].package_public)
+    assert(!rows[box].package_public)
     assert(!rows[hidden].public)
     assert(!rows[hidden].package_public)
     assert(rows[visible].public)
@@ -86,7 +86,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_nested_impls_retain_authored_rows_sorted_method_names_and_rust_owner") {
-    source :: "pub module Outer {{\n    struct Box {{\n        fn own(self) {{}}\n        impl Zed {{ fn z(self) {{}} fn a(self) {{}} }}\n        impl Alpha {{ fn alpha(self) {{}} }}\n    }}\n    enum Choice {{\n        First\n        impl Zed {{ fn choose(self) {{}} }}\n    }}\n}}\n"
+    source :: "module Outer {{\n    struct Box {{\n        fn own(self) {{}}\n        impl Zed {{ fn z(self) {{}} fn a(self) {{}} }}\n        impl Alpha {{ fn alpha(self) {{}} }}\n    }}\n    enum Choice {{\n        First\n        impl Zed {{ fn choose(self) {{}} }}\n    }}\n}}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -150,7 +150,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_pubfile_leaf_declarations_keep_exact_special_visibility") {
-    source :: "#PubFile\n#MustUse\nToken :: distinct Int\nalias Count :: Int\n#UnitFamily(Currency) {{ usd, eur }}\ntag Safe {{ deny: [console] }}\neffect Clock\nmarker Checked($sites: [.Block]) {{}}\nfact Known()\nANSWER :: 42\nfn run() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
+    source :: "#MustUse\nToken :: distinct Int\nCount :: Int\n#UnitFamily(Currency) {{ usd, eur }}\ntag Safe {{ deny: [console] }}\neffect Clock\nmarker Checked($sites: [.Block]) {{}}\nfact Known()\nANSWER :: 42\nfn run() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -171,7 +171,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_module_alias_and_external_module_preserve_declaration_context") {
-    source :: "/// External module docs.\npub(package) module External;\n/// Alias docs.\npub module Alias :: External;\n"
+    source :: "/// External module docs.\npriv(package) module External;\n/// Alias docs.\nmodule Alias :: External;\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)

@@ -164,6 +164,11 @@ struct JSONPull {
     terminal: EncodingError?
     allocation: AllocationBudget
     output_heap: Int
+    // Strict readers retain each open object's keys to reject a repeated
+    // key; `seen_starts` marks where each open object's keys begin.
+    allow_duplicates: Bool
+    seen_keys: [String]
+    seen_starts: [Int]
 
     fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(first)
@@ -204,8 +209,20 @@ struct JSONPull {
             }
         }
         self.frames = [ReadFrame]{}
+        loop key in self.seen_keys -> bytes += key.count_bytes() + mem.__type_size<String>()
+        self.seen_keys = [String]{}
+        self.seen_starts = [Int]{}
         self.allocation.release(bytes + self.output_heap)
         self.output_heap = 0
+    }
+
+    fn close_seen(&self) Never! {
+        if self.allow_duplicates -> return
+        start :: &self.seen_starts.pop() ?? panic("matched JSON object key set")
+        loop self.seen_keys.len() > start {
+            key :: &self.seen_keys.pop() ?? panic("retained JSON object key")
+            self.allocation.release(key.count_bytes() + mem.__type_size<String>())
+        }
     }
 
     fn error(self, kind: EncodingErrorKind, reason: String) -> EncodingError Never! {
@@ -446,6 +463,7 @@ struct JSONPull {
                 return Ok(DataEvent.ArrayStart)
             }
             &self.push_frame(.ObjectKeyOrEnd(true))
+            if !self.allow_duplicates -> &self.seen_starts.push(self.seen_keys.len())
             return Ok(DataEvent.ObjectStart)
         }
         if byte == (U8{45}) || (byte >= (U8{48}) && byte <= (U8{57})) -> return &self.number(byte)
@@ -514,12 +532,25 @@ struct JSONPull {
                         if !first -> return Err(self.error(.Syntax, "expected an object key after `,`"))
                         _ :: &self.consume()
                         _ :: &self.frames.pop()
+                        &self.close_seen()
                         return Ok(Val(DataEvent.ObjectEnd))
                     }
                     if !first && byte == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
                     if byte != (Val(U8{34})) -> return Err(self.error(.Syntax, "expected a quoted object key"))
                     key :: &self.read_string()
                     heap :: key.count_bytes()
+                    if !self.allow_duplicates {
+                        start :: self.seen_starts[self.seen_starts.len() - 1]
+                        loop index in start..<self.seen_keys.len() {
+                            if self.seen_keys[index] == key {
+                                error := self.error(.Syntax, "duplicate object key `{key}`")
+                                error.path = "{self.path()}[{quote_path(key)}]"
+                                return Err(error)
+                            }
+                        }
+                        if !self.allocation.charge(heap + mem.__type_size<String>()) -> return Err(self.item_error("string"))
+                        &self.seen_keys.push(key.copy())
+                    }
                     if !self.allocation.charge(heap) -> return Err(self.item_error("string"))
                     self.frames[count - 1] = .ObjectColonValue{key: key.copy(), key_heap: U64{heap}}
                     return Ok(Val(DataEvent.Key(key)))
@@ -547,6 +578,7 @@ struct JSONPull {
                     } else if byte == (Val(U8{125})) {
                         _ :: &self.consume()
                         _ :: &self.frames.pop()
+                        &self.close_seen()
                         self.allocation.release(Int.from_u64(heap))
                         return Ok(Val(DataEvent.ObjectEnd))
                     } else {
@@ -604,6 +636,7 @@ struct JSONPull {
                 return Ok(Dyn.Text(text))
             }
             .ArrayStart -> {
+                self.fold_charge(1, &heap)
                 values := [Dyn]{}
                 loop {
                     child :: &self.next()
@@ -616,6 +649,7 @@ struct JSONPull {
                 }
             }
             .ObjectStart -> {
+                self.fold_charge(1, &heap)
                 entries := [(key: String, value: Dyn)]{}
                 loop {
                     child :: &self.next()
@@ -651,9 +685,9 @@ fn fold_reserve<T>(parser: JSONPull, values: &[T], heap: &FoldBudget) EncodingEr
     heap.tracked += mem.__list_capacity<T>(values) * mem.__type_size<T>() - old
 }
 
-fn json_reader(input: ^FileReader, limits: EncodingLimits) -> JSONPull EncodingError! {
+fn json_reader(input: ^FileReader, limits: EncodingLimits, allow_duplicates: Bool) -> JSONPull EncodingError! {
     validate_limits(limits)
-    Ok(JSONPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0})
+    Ok(JSONPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0, allow_duplicates: allow_duplicates, seen_keys: [String]{}, seen_starts: [Int]{}})
 }
 
 fn valid_number(bytes: [U8]) -> Bool Never! {
@@ -708,8 +742,8 @@ fn int_is_binary64(n: Int) -> Bool Never! {
 }
 
 // ECMAScript Number::toString (ECMA-262 7.1.12.1) for a finite binary64, as
-// RFC 8785 requires. `"{value}"` supplies the shortest round-trip digits; this
-// function only re-spells them: exponent form below 1e-6 and from 1e21,
+// RFC 8785 requires. `jcs_shortest` supplies the shortest round-trip digits;
+// this function only re-spells them: exponent form below 1e-6 and from 1e21,
 // positional otherwise, `e+`/`e-` exponents, and `-0` as `0`.
 fn jcs_number(value: Float) -> String Never! {
     if value == (Float{0.0}) -> return "0"
@@ -720,7 +754,7 @@ fn jcs_number(value: Float) -> String Never! {
     exponent_bytes := [U8]{}
     decimal := -1
     in_exponent := false
-    loop b in "{magnitude}".bytes() {
+    loop b in jcs_shortest(magnitude).bytes() {
         if in_exponent {
             &exponent_bytes.push(b)
             next
@@ -778,6 +812,95 @@ fn jcs_number(value: Float) -> String Never! {
     if e >= 0 -> &out.push(U8{43})
     write_ascii(&out, "{e}")
     String.from_bytes(out) ?? ""
+}
+
+// Float display gives shortest round-trip digits but may round an exact tie
+// up. ECMA-262 wants the candidate nearest the exact value, with an even last
+// digit on a tie, and the last digit's neighbours are the only other
+// candidates of that length, so test them against the exact binary64 value.
+fn jcs_shortest(magnitude: Float) -> String Never! {
+    shortest :: "{magnitude}"
+    bytes :: shortest.bytes()
+    end := bytes.len()
+    loop i in 0..<bytes.len() {
+        if bytes[i] == (U8{101}) || bytes[i] == (U8{69}) {
+            end = i
+            break
+        }
+    }
+    index := end - 1
+    loop index >= 0 && (bytes[index] < (U8{48}) || bytes[index] > (U8{57})) -> index -= 1
+    if index < 0 -> return shortest
+    digit :: Int.from_u8(bytes[index]) - 48
+    bits :: math.to_bits(magnitude)
+    candidates := [String]{}
+    loop replacement in [digit - 1, digit + 1] {
+        if replacement < 0 || replacement > 9 -> next
+        candidate := bytes.copy()
+        candidate[index] = U8.from_int(48 + replacement) ?? panic("ASCII digit")
+        text :: String.from_bytes(candidate) ?? panic("ASCII float candidate")
+        if Float.parse(text) == .Ok(parsed) && math.to_bits(parsed) == bits -> &candidates.push(text)
+    }
+    if candidates.len() == 0 -> return shortest
+    // The exact value is significand * 2^power; every candidate shares one
+    // decimal exponent, so all distances use the same cross-multiplied scale.
+    biased :: (bits /% 4503599627370496) %% 2048
+    fraction :: bits %% 4503599627370496
+    significand :: if biased == 0 -> fraction else -> fraction + 4503599627370496
+    power :: if biased == 0 -> -1074 else -> biased - 1075
+    best := shortest.copy()
+    best_distance := jcs_distance(shortest, significand, power)
+    best_odd := digit %% 2 == 1
+    loop candidate in candidates {
+        distance :: jcs_distance(candidate, significand, power)
+        odd :: (Int.from_u8(candidate.bytes()[index]) - 48) %% 2 == 1
+        if distance < best_distance || (distance == best_distance && best_odd && !odd) {
+            best = candidate.copy()
+            best_distance = distance
+            best_odd = odd
+        }
+    }
+    best
+}
+
+// |digits * 10^decimal_power - significand * 2^power|, scaled by the positive
+// powers of 2 and 10 that make both sides integers.
+fn jcs_distance(text: String, significand: Int, power: Int) -> Int Never! {
+    digits := 0
+    fraction_digits := 0
+    seen_point := false
+    exponent_bytes := [U8]{}
+    in_exponent := false
+    loop b in text.bytes() {
+        if in_exponent {
+            &exponent_bytes.push(b)
+            next
+        }
+        if b == (U8{101}) || b == (U8{69}) {
+            in_exponent = true
+            next
+        }
+        if b == (U8{46}) {
+            seen_point = true
+            next
+        }
+        digits = digits * 10 + (Int.from_u8(b) - 48)
+        if seen_point -> fraction_digits += 1
+    }
+    exponent := 0
+    if exponent_bytes.len() > 0 -> exponent = Int.parse(String.from_bytes(exponent_bytes) ?? "0") ?? 0
+    decimal_power :: exponent - fraction_digits
+    left := digits
+    right := significand
+    if power < 0 -> left = left * int_power(2, -power) else -> right = right * int_power(2, power)
+    if decimal_power < 0 -> right = right * int_power(10, -decimal_power) else -> left = left * int_power(10, decimal_power)
+    if left >= right -> left - right else -> right - left
+}
+
+fn int_power(base: Int, exponent: Int) -> Int Never! {
+    out := 1
+    loop _ in 0..<exponent -> out = out * base
+    out
 }
 
 // UTF-16 code units of a key, the RFC 8785 sort order.
@@ -868,7 +991,10 @@ fn text_from_bytes(bytes: ^[U8]) -> String EncodingError! {
 
 fn byte_at(text: String, index: Int) -> U8 Never! {
     length :: text.count_bytes()
-    if index < 0 || index >= length -> panic("the list has {length} items, so position {index} doesn't exist")
+    if index < 0 || index >= length {
+        noun :: if length == 1 -> "item" else -> "items"
+        panic("the list has {length} {noun}, so position {index} doesn't exist")
+    }
     result := U8{0}
     #Unsafe("the byte position was checked against this String's storage length") {
         result = encoding.__string_byte(text, U64{index})
@@ -1287,6 +1413,7 @@ struct JSONPush {
             }
             .Text(value) -> encoded = self.canonical_quote(value)
             .ArrayStart | .ObjectStart -> {}
+            .Bytes(_) -> return Err(self.error(.Unsupported, "JSON cannot encode Bytes; encode bytes as Text explicitly"))
             else -> return Err(self.error(.Unsupported, "internal JSON carriers cannot be written as DataEvent values"))
         }
         &self.canonical_before_value()
@@ -1523,9 +1650,12 @@ struct JSONLinesPull {
         value :: if &self.next_inner() == {
             .Ok(row) -> row
             .Err(failure) -> {
-                error := failure
+                // A record fold error carries no path; the parser still holds
+                // the record's open frames, so its own path is the deepest known.
+                inner := failure
+                if inner.path == "" -> inner.path = self.parser.path()
+                error := jsonl_under(inner, "$[{self.record_index}]")
                 error.format = .JSONL
-                error.path = "/{self.record_index}{error.path}"
                 &self.parser.discard()
                 self.terminal = Val(error)
                 return Err(error)
@@ -1573,7 +1703,8 @@ struct JSONLinesPull {
 }
 
 fn jsonl_reader(input: ^FileReader, limits: EncodingLimits, typed_numbers: Bool) -> JSONLinesPull EncodingError! {
-    parser := json_reader(^input, limits) ?? return Err(err)
+    // The record fold rejects a repeated key itself while building each record.
+    parser := json_reader(^input, limits, true) ?? return Err(err)
     parser.record_mode = true
     parser.typed_numbers = typed_numbers
     Ok(JSONLinesPull{parser: parser, record_index: 0, terminal: None})

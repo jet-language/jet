@@ -200,14 +200,14 @@ fn provider_fetch_remote_repo(remote: RemoteSource, ctx: ProviderCtx) -[FS, Env,
 fn provider_clone_into_staging(remote: RemoteSource, cache: String, cache_parent: HeldCacheParent, staging: HeldDirectoryEntry) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     tmp :: files.join(staging.directory.path, "checkout")
 
-    cloned :: provider_hardened_git_command().args_extend([String]{"clone", "--quiet", "--", remote.url}).arg(tmp).run() ?? return Err(ProviderError.CoreBuild("could not run `git clone`: {err}"))
+    cloned :: foundation_hardened_git_command().args_extend([String]{"clone", "--quiet", "--", remote.url}).arg(tmp).run() ?? return Err(ProviderError.CoreBuild("could not run `git clone`: {err}"))
     if !cloned.success {
         return Err(ProviderError.CoreBuild("failed to fetch `{remote.label}`: {provider_last_line(cloned.errors, "git clone failed")}"))
     }
     if remote.rev == {
         .Val(rev) -> {
             if !provider_remote_revision_is_safe(Val(rev)) -> return Err(ProviderError.CoreBuild("remote revision is not allowed"))
-            checked :: provider_hardened_git_command().args_extend([String]{"-C", tmp, "checkout", "--quiet", rev}).run() ?? return Err(ProviderError.CoreBuild("could not run `git checkout`: {err}"))
+            checked :: foundation_hardened_git_command().args_extend([String]{"-C", tmp, "checkout", "--quiet", rev}).run() ?? return Err(ProviderError.CoreBuild("could not run `git checkout`: {err}"))
             if !checked.success {
                 return Err(ProviderError.CoreBuild("failed to check out `{rev}` from `{remote.label}`: {provider_last_line(checked.errors, "git checkout failed")}"))
             }

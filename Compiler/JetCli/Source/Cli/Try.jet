@@ -6,7 +6,7 @@ use jet_driver.[
     jet_driver_compiler_queries_documents, jet_driver_compiler_queries_stats,
     jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
     jet_driver_apply_edits, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput,
-    jet_driver_inline_package, jet_driver_mask_inline_package,
+    jet_driver_inline_package, jet_driver_mask_inline_package, JetDriverIceRow, jet_driver_ice_record,
 ]
 use jet_foundation.[
     Diagnostic, Span, TextEdit, sha256_bytes, sha256_hex_bytes, diagnostic_render_all,
@@ -184,7 +184,7 @@ fn jet_cli_try_stage_files(groups: [JetCLITryFileEdits], sources: &[String:Strin
         before :: if sources.get(group.path) == {
             .Val(source) -> source.bytes()
             .None -> {
-                if checked_rename -> return Err(JetCLITryError.Output{output: jet_cli_ice("the retained rename index lost its original source ownership")})
+                if checked_rename -> return Err(jet_cli_try_ice("rename-index", "the retained rename index lost its original source ownership"))
                 cli_files.read_bytes(group.path) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("could not read `{group.path}`: {jet_cli_io_error_text(err)}")})
             }
         }
@@ -200,7 +200,15 @@ fn jet_cli_try_index(entry: String, baseline: &JetCLITryChecked) -> JetCLISemInd
     if jet_cli_errors(baseline.checked.diagnostics).len() > 0 {
         return Err(JetCLITryError.Output{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(entry, baseline.entry_source, baseline.checked.diagnostics, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}})
     }
-    Err(JetCLITryError.Output{output: jet_cli_ice("the baseline compiler query did not retain a complete checked index")})
+    Err(jet_cli_try_ice("checked-index", "the baseline compiler query did not retain a complete checked index"))
+}
+
+// A `jet try` internal failure: one census row of pass `cli.try` naming the
+// broken rule, reported with exit 101 (jet_cli_ice_report).
+fn jet_cli_try_ice(rule: String, message: String) -> JetCLITryError {
+    census := [JetDriverIceRow]{}
+    jet_driver_ice_record(&census, "-", "cli.try", rule, message)
+    JetCLITryError.Output{output: jet_cli_ice_report("`jet try` failed", census)}
 }
 fn jet_cli_try_stage(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -> [JetCLISourceChange] JetCLITryError! {
     groups := [JetCLITryFileEdits]{}
@@ -245,7 +253,8 @@ fn jet_cli_try_parse(source: String) -> JetCompilerServicesParseFacts JetCLIRead
 fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bool) -> JetCLITryChecked JetCLITryError! {
     overlays := [JetCLIOverlay]{}
     loop document in jet_driver_compiler_queries_documents(&queries) -> &overlays.push(JetCLIOverlay{path: document.path, source: document.source})
-    if jet_cli_prepare_overlays(entry, entry, overlays, false, None, JetDriverCompileMode.Doc) == {
+    // The retained checked projection `try` reads is a Program-mode product.
+    if jet_cli_prepare_overlays(entry, entry, overlays, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> { return Err(JetCLITryError.Output{output: output}) }
         .Prepared(request, snapshot) -> {
             source := String?{None}
@@ -261,13 +270,13 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
             } else -> {
                 jet_driver_compiler_queries_check_text(&queries, parsed, ^request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
             }
-            if checked.internal_problem == .Val(problem) -> return Err(JetCLITryError.Output{output: jet_cli_ice(problem)})
+            if checked.internal_problem == .Val(problem) -> return Err(jet_cli_try_ice("query", problem))
             index := JetCLISemIndex?{None}
             if disk && checked.complete {
                 if checked.product == {
                     .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile)) }
-                    .CheckedCompilerValue(_) -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query returned an unrequested compiler value")}) }
-                    .Failed -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query completed without its requested checked product")}) }
+                    .CheckedCompilerValue(_) -> { return Err(jet_cli_try_ice("product", "the invocation query returned an unrequested compiler value")) }
+                    .Failed -> { return Err(jet_cli_try_ice("product", "the invocation query completed without its requested checked product")) }
                 }
             }
             return Ok(JetCLITryChecked{checked: checked, index: index, sources: sources, entry_source: text})
@@ -275,7 +284,7 @@ fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bo
     }
 }
 fn jet_cli_try_counter_delta(before: Int, after: Int) -> Int JetCLITryError! {
-    if after < before -> return Err(JetCLITryError.Output{output: jet_cli_ice("incremental body counters decreased within one try invocation")})
+    if after < before -> return Err(jet_cli_try_ice("counters", "incremental body counters decreased within one try invocation"))
     Ok(after - before)
 }
 fn jet_cli_try_verdict(queries: &JetDriverCompilerQueries, before: JetDriverCompilerQueryStats, entry: String, changes: [JetCLISourceChange], entry_source: String) -> JetCLITryVerdict JetCLITryError! {
@@ -344,7 +353,13 @@ fn jet_cli_try_run(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
             current :: cli_files.read_bytes(change.path) ?? return jet_cli_try_fail("could not re-read `{change.path}`: {jet_cli_io_error_text(err)}")
             if current != change.before -> return jet_cli_try_fail("try target `{change.path}` changed while it was being checked; no files written")
         }
-        loop change in changes -> _ :: jet_cli_commit_fix(change.path, change.before, change.after, Val(operations)) ?? return jet_cli_try_fail(err.message)
+        // One held transaction at the plan's project root (the directory of
+        // the try plan): every staged file lands together, journaled under
+        // that root's `.jet/codemods` with the receipt as its log name.
+        plan_path :: cli_files.realpath(path) ?? return jet_cli_try_fail("could not canonicalize try plan `{path}`: {jet_cli_io_error_text(err)}")
+        root :: jet_cli_parent(plan_path) ?? return jet_cli_try_fail("try plan has no parent directory")
+        log_name :: "{receipt}.log.json"
+        _ :: jet_cli_commit_source_changes(root, changes, log_name, jet_cli_fix_log(root, receipt, changes, operations)) ?? return jet_cli_try_fail(err.message)
     }
     jet_cli_try_output(plan, verdict, receipt, keep, json, source)
 }

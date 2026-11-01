@@ -537,7 +537,7 @@ fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, ca
         .ByteBufferWrite(method) -> return ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", 2, [Bool]{true, method == "write" || method == "write_bytes"}, Val(Effect.Mem))
         .ByteBufferToBytes -> return ir_builtin_plain_route("byte_buffer_to_bytes", "JetByteBuffer::to_bytes", 1, [Bool]{true}, None)
         .ByteBufferFrom -> return ir_builtin_plain_route("byte_buffer_from", "JetByteBuffer::from", 1, [Bool]{true}, None)
-        .ByteBufferWithCapacity -> return ir_builtin_plain_route("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, [Bool]{false}, None)
+        .ByteBufferWithCapacity -> return ir_builtin_plain_route("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, [Bool]{true}, None)
         .Repeat -> return ir_builtin_plain_route("string_repeat", "jet_string_repeat", 2, [Bool]{true, false}, None)
         .ListSlice -> return ir_builtin_plain_route("list_slice", "jet_list_slice", 3, [Bool]{true, false, false}, None)
         .ListBinarySearch -> return ir_builtin_plain_route("list_binary_search", "jet_list_binary_search", 2, [Bool]{true, true}, None)
@@ -613,8 +613,6 @@ fn ir_builtin_string_method_route(method: String, result: Type, carrier: TFailur
     if method == "reverse" -> return ir_builtin_plain_route("reverse", "jet_text_reverse", 1, [Bool]{true}, None)
     if method == "normalize" -> return ir_builtin_plain_route("normalize", "jet_text_normalize_nfc", 1, [Bool]{true}, None)
     if method == "rsplit" -> return ir_builtin_plain_route("rsplit", "jet_iter_string_rsplit", 2, [Bool]{true, true}, None)
-    if method == "matches" -> return ir_builtin_plain_route("matches", "jet_std::jet_string_matches", 2, [Bool]{true, true}, None)
-    if method == "match" -> return ir_builtin_plain_route("match", "jet_std::jet_string_match", 2, [Bool]{true, true}, None)
     if method == "isalnum" -> return ir_builtin_plain_route("isalnum", "jet_text_isalnum", 1, [Bool]{true}, None)
     if method == "isalpha" -> return ir_builtin_plain_route("isalpha", "jet_text_is_alphabetic", 1, [Bool]{true}, None)
     if method == "isascii" -> return ir_builtin_plain_route("isascii", "jet_text_unicode_is_ascii", 1, [Bool]{true}, None)
@@ -641,22 +639,12 @@ fn ir_builtin_string_method_route(method: String, result: Type, carrier: TFailur
 fn ir_builtin_byte_buffer_method_route(method: String) -> IRBuiltinRoute Never! {
     if method == "capacity" -> return ir_builtin_plain_route("byte_buffer_capacity", "JetByteBuffer::capacity", 1, [Bool]{true}, None)
     arity := 0
-    if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" -> arity = 1
+    if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" || method == "parse" -> arity = 1
     if method == "get" || method == "seek" || method == "read_bytes" || method == "read_string" || method == "contains" || method == "starts_with" || method == "ends_with" || method == "index_of" || method == "last_index_of" || method == "split" || method == "partition" || method == "join" || method == "equal" || method == "compare" || method == "copy_to" || method == "write_to" -> arity = 2
     if method == "replace" -> arity = 3
     if arity == 0 -> panic("checked ByteBufferMethod has no canonical route")
+    // Every operand is borrowed: an index or count is read from its exact Int.
     mask := [Bool]{}
-    index := 0
-    loop index < arity {
-        // An index/count operand crosses the kernel as the native i64 word.
-        &mask.push(index == 0 || !ir_byte_buffer_native_int_operand(method))
-        index += 1
-    }
+    loop _ in 0..<arity -> &mask.push(true)
     ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", arity, mask, Val(Effect.Mem))
-}
-
-// ByteBuffer methods whose operand is an index or count the kernel takes as
-// the native `i64` word (by value, narrowed from the exact Int).
-fn ir_byte_buffer_native_int_operand(method: String) -> Bool Never! {
-    method == "get" || method == "seek" || method == "read_bytes" || method == "read_string"
 }

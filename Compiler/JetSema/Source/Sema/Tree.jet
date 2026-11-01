@@ -168,7 +168,7 @@ struct TMapPatternEntry {
 }
 
 // Logical key identity ignores source spelling and resolved constant aliases.
-fn tir_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Never! {
+fn tree_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Never! {
     if key.kind == {
         .IntLit(value, _) -> Val("int:{value}")
         .StrLit(value) -> Val("text:{value}")
@@ -297,7 +297,6 @@ enum TExprKind {
     Drop(value: TExpr)
     Close(value: TExpr)
     Move(value: TExpr)
-    AmbientInput(prompt: TExpr?)
     RequireStop(kind: TRequireKind, location: TPanicLoc, always_stops: Bool)
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
     CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
@@ -330,14 +329,13 @@ enum TExprKind {
     ListSpread(parts: [TListSpreadPart])
     MapLit(entries: [TMapEntry])
     PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
-    // #4318: `fact` is the sema decision behind the copy; MIR keeps it on Copy.
+    // #4318: `fact` is the sema decision behind the copy; IR keeps it on Copy.
     Clone(value: TExpr, fact: CopyFact)
     ExplicitCopy(value: TExpr)
     MaterializeView(value: TExpr)
     StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
     BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr])
     IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
-    ResultHandler(subject: TExpr, ok_pattern: TPattern, ok_body: [TStmt], ok_value: TExpr, err_pattern: TPattern, err_body: [TStmt], err_value: TExpr, terminal: TExpr)
     RawOf(value: TExpr)
     DistinctRaw(value: TExpr)
     Present(value: TExpr)
@@ -379,7 +377,7 @@ struct TExpr {
 // Gives `value` a type other than the one its checked source node has (a
 // coercion or wrapper retyping a checked node): the node leaves its source
 // id and takes a function-local one of its own when it is flattened.
-fn tir_expr_retype(value: &TExpr, ty: Type) Never! {
+fn tree_expr_retype(value: &TExpr, ty: Type) Never! {
     value.ty = ty
     value.id = AST_NODE_GENERATED
 }
@@ -430,6 +428,9 @@ enum THostCall {
     // checked literal path or glob, relative to the source file being
     // compiled. The compiler reads and records it; it never runs at runtime.
     ComptimeInput(builtin: String, path: String)
+    // `name.cache()` on a memoized function: its result store's `MemoStats`
+    // record, with the written bound ("128", "none").
+    MemoStats(function: DeclID, bound: String)
 }
 
 enum TCoreClosureKind {
@@ -505,8 +506,6 @@ enum THandleOp {
     RealtimeReceipt
     RealtimeCancel
     RealtimeIsCancelled
-    HistoryRNGNextU64
-    HistoryRNGBelow
     GameSceneNew
     GameReplayRecord
     GameBackendHeadless
@@ -609,6 +608,7 @@ enum THandleOp {
     ProcessChildMethod(method: String)
     TerminalSessionResize
     ProcessStdinWrite
+    ProcessStdinWriteText
     ProcessStdinClose
     ProcessStdinWriteAll
     ProcessStdoutRead
@@ -634,7 +634,7 @@ enum THandleOp {
     ChannelClose
     SenderSend
     HTTPRouterRegister(verb: HTTPRouteMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
-    MathMethod(type_name: String, method: String, reduce_op: String?)
+    MathMethod(type_name: String, method: String)
     ReactiveGet
     ReactiveSet
     ReactiveEffectMethod
@@ -642,7 +642,6 @@ enum THandleOp {
     LayoutMethod(method: String)
     LoadableMethod(method: String)
     CivilTimeMethod(kind: String, method: String)
-    EmailMethod(method: String)
     HTTPClientMethod(kind: String, method: String)
     HTTPServerMethod(kind: String, method: String)
     DynField
@@ -683,15 +682,8 @@ enum THandleOp {
     PathNormalize
     PathIsWithin
     PathToString
-    PathWriteAtomic
     PathWalk
     UIBackendMethod(method: String)
-    AppMethod(method: String, args_len: Int)
-    ServiceRuntimeSend
-    ServiceRuntimeRetry
-    ServiceRuntimeDeadLetter
-    ServiceRuntimeRetain
-    ServiceRuntimeCommit
     PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
     ReaderOver(owned: Bool)
     ReaderReadU8
@@ -818,34 +810,34 @@ enum TPlace {
     Expr(value: TExpr)
 }
 
-fn tir_each_pattern_child(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    tir_each_pattern_shape_child(pattern.shape, visit)
+fn tree_each_pattern_child(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    tree_each_pattern_shape_child(pattern.shape, visit)
 }
 
-fn tir_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if shape == {
         .Variant(_, slots, _, _) | .List(slots, _, _) -> {
             loop slot in slots {
-                tir_each_pattern_slot_child(slot, visit)
+                tree_each_pattern_slot_child(slot, visit)
             }
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
-            if inner == .Val(nested) -> tir_each_pattern_shape_child(nested.shape, visit)
+            if inner == .Val(nested) -> tree_each_pattern_shape_child(nested.shape, visit)
         }
         .Map(entries, _, _) -> loop entry in entries {
             visit(entry.key)
-            tir_each_pattern_slot_child(entry.slot, visit)
+            tree_each_pattern_slot_child(entry.slot, visit)
         }
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
-                tir_each_pattern_shape_child(alternative, visit)
+                tree_each_pattern_shape_child(alternative, visit)
             }
         }
         .Struct(fields, _) -> {
             loop field in fields {
                 if field == {
                     .Value(_, value, _) -> visit(value)
-                    .Nested(_, inner, _) -> tir_each_pattern_shape_child(inner.shape, visit)
+                    .Nested(_, inner, _) -> tree_each_pattern_shape_child(inner.shape, visit)
                     else -> {}
                 }
             }
@@ -854,49 +846,49 @@ fn tir_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.All
     }
 }
 
-fn tir_each_pattern_slot_child(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_pattern_slot_child(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if slot == {
         .Value(value) -> visit(value)
-        .Nested(inner) -> tir_each_pattern_shape_child(inner.shape, visit)
+        .Nested(inner) -> tree_each_pattern_shape_child(inner.shape, visit)
         else -> {}
     }
 }
 
-fn tir_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if condition == {
         .Plain(value) -> visit(value)
         .And(left, right) -> {
-            tir_each_if_cond_child(left, visit)
-            tir_each_if_cond_child(right, visit)
+            tree_each_if_cond_child(left, visit)
+            tree_each_if_cond_child(right, visit)
         }
         .IfLet(pattern, subj) -> {
-            tir_each_pattern_child(pattern, visit)
+            tree_each_pattern_child(pattern, visit)
             visit(subj)
         }
     }
 }
 
-fn tir_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if lambda.executable == {
         .Expr(value) -> visit(value)
         .Block(body) -> {
             loop statement in body {
-                tir_each_stmt_child(statement, visit)
+                tree_each_stmt_child(statement, visit)
             }
         }
     }
 }
 
-fn tir_each_stmt_list_child(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_stmt_list_child(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop statement in statements {
-        tir_each_stmt_child(statement, visit)
+        tree_each_stmt_child(statement, visit)
     }
 }
 
-fn tir_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop arm in arms {
-        tir_each_pattern_child(arm.pattern, visit)
-        tir_each_stmt_list_child(arm.body, visit)
+        tree_each_pattern_child(arm.pattern, visit)
+        tree_each_stmt_list_child(arm.body, visit)
     }
 }
 
@@ -904,21 +896,21 @@ fn tir_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem
 // exactly one `if`, the shape sema gives every N-arm decision table) is
 // followed by direct recursion over read parameters, one frame per arm:
 // each link is read in place, never copied.
-fn tir_each_else_child(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_else_child(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if else_body == .Val(statements) {
         loop statement in statements {
             if statement == .If(condition, then_body, nested_else, _, _) {
-                tir_each_if_cond_child(condition, visit)
-                tir_each_stmt_list_child(then_body, visit)
-                tir_each_else_child(nested_else, visit)
+                tree_each_if_cond_child(condition, visit)
+                tree_each_stmt_list_child(then_body, visit)
+                tree_each_else_child(nested_else, visit)
             } else {
-                tir_each_stmt_child(statement, visit)
+                tree_each_stmt_child(statement, visit)
             }
         }
     }
 }
 
-fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if statement == {
         .Contract(contract) -> {
             visit(contract.condition)
@@ -929,7 +921,7 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
                 visit(contract.condition)
                 visit(contract.message)
             }
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
             loop contract in post {
                 visit(contract.condition)
                 visit(contract.message)
@@ -938,9 +930,9 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
         }
         .Let(_, _, init, _, _, _) -> visit(init)
         .RefutableBind(pattern, init, fallback, _) -> {
-            tir_each_pattern_child(pattern, visit)
+            tree_each_pattern_child(pattern, visit)
             visit(init)
-            tir_each_stmt_list_child(fallback, visit)
+            tree_each_stmt_list_child(fallback, visit)
         }
         .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> visit(init)
         .Assign(place, _, value, _, _) -> {
@@ -956,108 +948,108 @@ fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, T
         .ExprStmt(value, _) -> visit(value)
         .TaskGroup(_, limit, body, _) -> {
             if limit == Val(nested) -> visit(nested)
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
         .DeferClose(close, _, _) -> visit(close)
         .If(condition, then_body, else_body, _, _) -> {
-            tir_each_if_cond_child(condition, visit)
-            tir_each_stmt_list_child(then_body, visit)
-            tir_each_else_child(else_body, visit)
+            tree_each_if_cond_child(condition, visit)
+            tree_each_stmt_list_child(then_body, visit)
+            tree_each_else_child(else_body, visit)
         }
-        .Loop(_, body, _) -> tir_each_stmt_list_child(body, visit)
+        .Loop(_, body, _) -> tree_each_stmt_list_child(body, visit)
         .While(_, condition, body, _) -> {
             visit(condition)
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            tir_each_stmt_child(init, visit)
+            tree_each_stmt_child(init, visit)
             visit(condition)
             if step == Val(nested) {
-                tir_each_stmt_child(nested, visit)
+                tree_each_stmt_child(nested, visit)
             }
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
             visit(start)
             visit(end)
             if step == Val(nested) -> visit(nested)
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
         .Range(_, _, source, start, end, step, _, _, body, _) -> {
             if source == Val(nested_source) -> visit(nested_source)
             visit(start)
             visit(end)
             if step == Val(nested_step) -> visit(nested_step)
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
         .BreakValue(_, value, _) -> visit(value)
         .Match(subject, arms, _, _) -> {
             visit(subject)
-            tir_each_match_arm_child(arms, visit)
+            tree_each_match_arm_child(arms, visit)
         }
         .EnumMatch(scrutinee, arms, else_body, _, _) -> {
             visit(scrutinee)
-            tir_each_match_arm_child(arms, visit)
+            tree_each_match_arm_child(arms, visit)
             if else_body == Val(nested) {
-                tir_each_stmt_list_child(nested, visit)
+                tree_each_stmt_list_child(nested, visit)
             }
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
             visit(subject)
             loop arm in arms {
-                tir_each_stmt_list_child(arm.body, visit)
+                tree_each_stmt_list_child(arm.body, visit)
             }
-            tir_each_stmt_list_child(else_body, visit)
+            tree_each_stmt_list_child(else_body, visit)
         }
         .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
             visit(source)
             visit(collection)
             if step == Val(nested) -> visit(nested)
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> tir_each_stmt_list_child(body, visit)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> tree_each_stmt_list_child(body, visit)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             visit(subject)
             loop arm in arms {
                 visit(arm.condition)
-                tir_each_stmt_list_child(arm.body, visit)
+                tree_each_stmt_list_child(arm.body, visit)
             }
             if else_body == Val(nested) {
-                tir_each_stmt_list_child(nested, visit)
+                tree_each_stmt_list_child(nested, visit)
             }
         }
-        .Unsafe(_, body) -> tir_each_stmt_list_child(body, visit)
-        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> tir_each_stmt_list_child(body, visit)
-        .Reactive(executable, _) -> tir_each_lambda_child(executable, visit)
-        .Layout(_, _, body, _) -> tir_each_stmt_list_child(body, visit)
+        .Unsafe(_, body) -> tree_each_stmt_list_child(body, visit)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> tree_each_stmt_list_child(body, visit)
+        .Reactive(executable, _) -> tree_each_lambda_child(executable, visit)
+        .Layout(_, _, body, _) -> tree_each_stmt_list_child(body, visit)
         .ContextBlock(guards, body, _) -> {
             loop guard in guards -> visit(guard.value)
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
         .ScopeMember(kind, body, _) -> {
             if kind == {
                 .Timeout(duration) -> visit(duration)
                 else -> {}
             }
-            tir_each_stmt_list_child(body, visit)
+            tree_each_stmt_list_child(body, visit)
         }
-        .Transact(_, _, _, body, _) -> tir_each_stmt_list_child(body, visit)
+        .Transact(_, _, _, body, _) -> tree_each_stmt_list_child(body, visit)
         .GCEdit(_, _, _, _, index_temp, edited, _) -> {
             if index_temp == Val(nested) -> visit(nested)
-            tir_each_stmt_child(edited, visit)
+            tree_each_stmt_child(edited, visit)
         }
         else -> {}
     }
 }
 
-fn tir_each_place_child(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_place_child(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if place == {
         .Expr(value) -> visit(value)
         else -> {}
     }
 }
 
-fn tir_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if requirement == {
         .Require(condition, message) -> {
             visit(condition)
@@ -1071,7 +1063,7 @@ fn tir_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Allo
     }
 }
 
-fn tir_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if fallback == {
         .Value(value) -> visit(value)
         .Return(value) -> {
@@ -1082,7 +1074,7 @@ fn tir_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Allo
     }
 }
 
-fn tir_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     loop part in parts {
         if part == {
             .Element(value) | .Spread(value) -> visit(value)
@@ -1090,7 +1082,7 @@ fn tir_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.A
     }
 }
 
-fn tir_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if call == {
         .Method(receiver, _, args) -> {
             visit(receiver)
@@ -1104,36 +1096,36 @@ fn tir_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.R
     }
 }
 
-fn tir_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .Spawn(group, _, _, executable) -> {
             if group == Val(group_value) -> visit(group_value)
-            tir_each_lambda_child(executable, visit)
+            tree_each_lambda_child(executable, visit)
         }
         .Realtime(rate, frames, executable) -> {
             visit(rate)
             visit(frames)
-            tir_each_lambda_child(executable, visit)
+            tree_each_lambda_child(executable, visit)
         }
         .UITextInputOnDrop(state, ime, executable) -> {
             visit(state)
             visit(ime)
-            tir_each_lambda_child(executable, visit)
+            tree_each_lambda_child(executable, visit)
         }
-        .Guard(executable) -> tir_each_lambda_child(executable, visit)
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> tir_each_lambda_child(executable, visit)
-        .OnCommit(_, executable) | .OnRollback(_, executable) -> tir_each_lambda_child(executable, visit)
+        .Guard(executable) -> tree_each_lambda_child(executable, visit)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> tree_each_lambda_child(executable, visit)
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> tree_each_lambda_child(executable, visit)
         .UIButtonOnClick(label, shortcut, accessible_label, executable) -> {
             visit(label)
             visit(shortcut)
             visit(accessible_label)
-            tir_each_lambda_child(executable, visit)
+            tree_each_lambda_child(executable, visit)
         }
     }
 
 }
 
-fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if expression.kind == {
         .StrLit(parts) -> loop part in parts {
             if part == {
@@ -1141,7 +1133,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
                 else -> {}
             }
         }
-        .InlineBlock(body) -> tir_each_stmt_list_child(body, visit)
+        .InlineBlock(body) -> tree_each_stmt_list_child(body, visit)
         .Call(_, _, args) -> loop argument in args -> visit(argument.value)
         .IndirectCall(callee, _, args, _) -> {
             visit(callee)
@@ -1158,10 +1150,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         }
         .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> visit(value)
         .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> visit(value)
-        .AmbientInput(prompt) -> {
-            if prompt == Val(prompt_value) -> visit(prompt_value)
-        }
-        .RequireStop(kind, _, _) -> tir_each_require_child(kind, visit)
+        .RequireStop(kind, _, _) -> tree_each_require_child(kind, visit)
         .Binary(_, _, _, lhs, rhs) -> {
             visit(lhs)
             visit(rhs)
@@ -1202,9 +1191,9 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(inner)
             if note == Val(note_value) -> visit(note_value)
         }
-        .Lambda(value) -> tir_each_lambda_child(value, visit)
+        .Lambda(value) -> tree_each_lambda_child(value, visit)
         .Borrow(place, _) -> visit(place)
-        .RawAddressOf(place) -> tir_each_place_child(place, visit)
+        .RawAddressOf(place) -> tree_each_place_child(place, visit)
         .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) -> visit(value)
         .LayoutCompare(_, lhs, rhs) -> {
             visit(lhs)
@@ -1214,16 +1203,16 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         .SharedGuardWait(guard, condition, predicate) -> {
             visit(guard)
             visit(condition)
-            tir_each_lambda_child(predicate, visit)
+            tree_each_lambda_child(predicate, visit)
         }
         .CoreCall(_, args, _, _, _, _) -> loop value in args -> visit(value)
-        .HostCall(call) -> tir_each_host_call_child(call, visit)
+        .HostCall(call) -> tree_each_host_call_child(call, visit)
         .JSONLit(_, argument, _) -> {
             if argument == Val(argument_value) -> visit(argument_value)
         }
         .AllocNew(_, args) -> loop argument in args -> visit(argument.value)
         .ListLit(values) -> loop value in values -> visit(value)
-        .ListSpread(parts) -> tir_each_list_spread_child(parts, visit)
+        .ListSpread(parts) -> tree_each_list_spread_child(parts, visit)
         .PoolSlot(pool, id, _, _, _, _) -> {
             visit(pool)
             visit(id)
@@ -1235,25 +1224,15 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             loop value in args -> visit(value)
         }
         .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
-            tir_each_if_cond_child(cond, visit)
-            tir_each_stmt_list_child(then_body, visit)
+            tree_each_if_cond_child(cond, visit)
+            tree_each_stmt_list_child(then_body, visit)
             visit(then_value)
-            tir_each_stmt_list_child(else_body, visit)
+            tree_each_stmt_list_child(else_body, visit)
             visit(else_value)
-        }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            visit(subject)
-            tir_each_pattern_child(ok_pattern, visit)
-            tir_each_stmt_list_child(ok_body, visit)
-            visit(ok_value)
-            tir_each_pattern_child(err_pattern, visit)
-            tir_each_stmt_list_child(err_body, visit)
-            visit(err_value)
-            visit(terminal)
         }
         .OrFallback(value, fallback, _) -> {
             visit(value)
-            tir_each_or_fallback_child(fallback, visit)
+            tree_each_or_fallback_child(fallback, visit)
         }
         .OptField(base, _, _) -> visit(base)
         .OptMethodCall(base, _, call, _) -> {
@@ -1262,7 +1241,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
         }
         .PatternMatches(subject, pattern) -> {
             visit(subject)
-            tir_each_pattern_child(pattern, visit)
+            tree_each_pattern_child(pattern, visit)
         }
         .ClosureMethod(receiver, _, args) -> {
             visit(receiver)
@@ -1281,7 +1260,7 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(receiver)
             loop value in args -> visit(value)
         }
-        .CoreClosureCall(kind) -> tir_each_core_closure_child(kind, visit)
+        .CoreClosureCall(kind) -> tree_each_core_closure_child(kind, visit)
         .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> visit(tasks)
         .SelectRecv(builder, channel) -> {
             visit(builder)
@@ -1292,16 +1271,16 @@ fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, 
             visit(duration)
             if value == Val(nested) -> visit(nested)
         }
-        .FnValue(kind) -> tir_each_fn_value_child(kind, visit)
+        .FnValue(kind) -> tree_each_fn_value_child(kind, visit)
         else -> {}
     }
 }
 
-fn tir_each_fn_value_child(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn tree_each_fn_value_child(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if kind == {
         .NamedFn(_, lambda) -> {
             if lambda == Val(lambda_value) {
-                tir_each_lambda_child(lambda_value, visit)
+                tree_each_lambda_child(lambda_value, visit)
             }
         }
         .Policy(_, policy_args, _, _, _, callee) -> {

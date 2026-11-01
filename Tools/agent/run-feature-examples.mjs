@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Focused native feature-example runner. Keep warnings separate from failures.
 import {
+  accessSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -9,8 +11,8 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -20,6 +22,7 @@ const JET = process.env.JET;
 const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR
   ?? (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
+const KNOWN_FAILING_LEDGER = join(ROOT, "Tools/testkit/known-failing.tsv");
 
 export function usage() {
   return [
@@ -101,8 +104,15 @@ export function collectFeatureExamples(featuresDir = FEATURES) {
 // `jet emit --<tier> <example>`, checked after the example's run passes.
 export const EMIT_TIERS = ["ast", "mir", "lir"];
 
-function readExpected(stem) {
-  const outPath = join(EXPECTED, `${stem}.out`);
+// The example's goldens. A case whose only run step asserts
+// `stdout: = FILE` compares stdout with that file instead of `<stem>.out`,
+// as testkit Golden.jet does for an explicit stdout assertion. One that
+// asserts `stdout: one-of FILE FILE… # reason` accepts any of those exact
+// snapshots (`alternatives`, the first also as `out`), as testkit
+// `kit_steps_one_of` does; a missing snapshot is null and matches nothing.
+function readExpected(stem, caseText) {
+  const stdoutFile = caseStdoutFile(caseText);
+  const outPath = stdoutFile === null ? join(EXPECTED, `${stem}.out`) : join(EXPECTED, dirname(stem), stdoutFile);
   const errPath = join(EXPECTED, `${stem}.err.out`);
   const stderrPath = join(EXPECTED, `${stem}.stderr.out`);
   const emit = {};
@@ -110,36 +120,140 @@ function readExpected(stem) {
     const path = join(EXPECTED, `${stem}.${tier}.out`);
     emit[tier] = existsSync(path) ? readFileSync(path, "utf8") : null;
   }
+  const alternatives = caseStdoutAlternatives(caseText)?.map((file) => {
+    const path = join(EXPECTED, dirname(stem), file);
+    return existsSync(path) ? readFileSync(path, "utf8") : null;
+  }) ?? null;
   return {
-    out: existsSync(outPath) ? readFileSync(outPath, "utf8") : null,
+    out: alternatives !== null ? alternatives[0] : existsSync(outPath) ? readFileSync(outPath, "utf8") : null,
+    alternatives,
     err: existsSync(errPath) ? readFileSync(errPath, "utf8") : null,
     stderrOut: existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : null,
     emit,
   };
 }
 
+// The last `stdout:` line of a case's only run step (the step
+// caseInvocation reads) that `pattern` matches, as its match, or null.
+function runStepStdoutMatch(caseText, pattern) {
+  if (caseText === null) return null;
+  let runSteps = 0;
+  let inRunStep = false;
+  let found = null;
+  for (const raw of caseText.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("step:")) {
+      const words = line.slice("step:".length).trim().split(/\s+/u);
+      inRunStep = !(words.length === 1 && words[0] === "build");
+      if (inRunStep) runSteps += 1;
+      continue;
+    }
+    const match = inRunStep ? pattern.exec(line) : null;
+    if (match) found = match;
+  }
+  return runSteps === 1 ? found : null;
+}
+
+// The `FILE` of a `stdout: = FILE` assertion on a case's only run step, or
+// null.
+export function caseStdoutFile(caseText) {
+  return runStepStdoutMatch(caseText, /^stdout:\s*=\s*([^"\s]\S*)$/u)?.[1] ?? null;
+}
+
+// The snapshot files of a `stdout: one-of FILE FILE… # reason` assertion on a
+// case's only run step, or null. Testkit refuses a one-of without a reason
+// or with fewer than two snapshots, so neither names alternatives here.
+export function caseStdoutAlternatives(caseText) {
+  const match = runStepStdoutMatch(caseText, /^stdout:\s*one-of\s+([^#]*?)\s*#\s*\S/u);
+  if (match === null) return null;
+  const files = match[1].split(/\s+/u).filter((file) => file !== "");
+  return files.length >= 2 ? files : null;
+}
+
 // The run flags and program arguments of an example's `<stem>.case`, as
 // testkit Golden.jet's direct tier runs it. A case whose only run step is
-// `step: jet run [FLAGS...] <file>` supplies those flags; one whose only run
-// step (after any `step: build`) is `step: built [ARGS...]` supplies the
-// program arguments. Without a case, or for any other case, neither.
+// `step: jet run [FLAGS...] <file>` supplies those flags and runs as written
+// (`step`); one whose only run step (after any `step: build`) is
+// `step: built [ARGS...]` supplies the program arguments. Without a case, or
+// for any other case, neither.
 export function caseInvocation(entry, caseText) {
-  const none = { flags: [], args: [] };
+  const none = { flags: [], args: [], step: false };
   if (caseText === null) return none;
   const steps = caseText.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("step:"))
     .map((line) => line.slice("step:".length).trim().split(/\s+/u))
     .filter((words) => !(words.length === 1 && words[0] === "build"));
   if (steps.length !== 1) return none;
   const words = steps[0];
-  if (words[0] === "built") return { flags: [], args: words.slice(1) };
+  if (words[0] === "built") return { flags: [], args: words.slice(1), step: false };
   if (words.length < 3 || words[0] !== "jet" || words[1] !== "run" || words.at(-1) !== basename(entry.path)) return none;
-  return { flags: words.slice(2, -1), args: [] };
+  return { flags: words.slice(2, -1), args: [], step: true };
 }
 
-// The run tier's argv: `jet run [FLAGS...] <example> [-- ARGS...]`.
+// The run tier's argv: `jet run [FLAGS...] <example> [-- ARGS...]`. A case's
+// own `jet run` step names the file as it spells it, from the example's
+// directory (runCwd), so a diagnostic that echoes the path matches testkit.
 export function runArgs(entry, caseText) {
-  const { flags, args } = caseInvocation(entry, caseText);
-  return ["run", ...flags, entry.shown, ...(args.length ? ["--", ...args] : [])];
+  const { flags, args, step } = caseInvocation(entry, caseText);
+  return ["run", ...flags, step ? basename(entry.path) : entry.shown, ...(args.length ? ["--", ...args] : [])];
+}
+
+// The run tier's working directory: the staged project root (or the
+// repository root), and for a case's own `jet run` step the example's
+// directory under it, where testkit Golden.jet runs that step.
+export function runCwd(entry, caseText, stagedCwd) {
+  const root = stagedCwd ?? ROOT;
+  return caseInvocation(entry, caseText).step ? join(root, dirname(entry.shown)) : root;
+}
+
+// `run: none` in a case: the example serves until stopped (testkit Golden.jet
+// only compiles it). Its run passes once its output is the expected `.out`,
+// and the process group is stopped there (`until`). Without an expected
+// stream skipReason already skips it.
+export function caseRunsNone(caseText) {
+  return caseText !== null && caseText.split("\n").some((line) => line.trim() === "run: none");
+}
+
+// The fixed TCP port a `.case` header `host-port: N` declares, or null.
+export function caseHostPort(caseText) {
+  if (caseText === null) return null;
+  for (const line of caseText.split("\n")) {
+    const match = /^host-port:\s*(\d+)$/u.exec(line.trim());
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+// testkit run.jet `kit_steps_host_port_path`: one host-wide flock per port.
+export function hostPortLockPath(port) {
+  return `/tmp/jet-host-port-${port}.lock`;
+}
+
+// Takes the flock testkit's `kit_steps_host_port_lock` takes, waiting at most
+// `waitSec`. util-linux flock(1) holds it while `cat` reads the open stdin
+// pipe; the returned release closes that pipe, and so does this process dying.
+export function holdHostPort(port, waitSec) {
+  return new Promise((resolveHold, rejectHold) => {
+    const holder = spawn("flock", ["-w", String(waitSec), hostPortLockPath(port), "sh", "-c", "echo held; exec cat"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stderr = "";
+    holder.stdin.on("error", () => {});
+    holder.stderr.on("data", (chunk) => { stderr += chunk; });
+    holder.stdout.once("data", () => {
+      resolveHold(() => new Promise((released) => {
+        holder.once("close", () => released());
+        holder.stdin.end();
+      }));
+    });
+    holder.on("error", (error) => rejectHold(new Error(`host port ${port} lock: ${error.message}`)));
+    holder.on("close", (code) => rejectHold(new Error(`host port ${port} lock: flock exit ${code}${stderr ? ` ${stderr.trim()}` : ""}`)));
+  });
+}
+
+export function untilExpected(caseText, expected) {
+  if (!caseRunsNone(caseText) || expected.out === null) return null;
+  const want = normalize(expected.out);
+  return (stdout) => normalize(stdout) === want;
 }
 
 // The build tier's argv: `jet build [FLAGS...] <example>`; the built binary
@@ -189,11 +303,70 @@ function sourceHasTarget(entry, target) {
   return new RegExp(`^\\s*#(?:\\[)?Target\\(${target}\\)`, "mu").test(readFileSync(entry.path, "utf8"));
 }
 
-export function skipReason(entry, expected) {
+// A case's `requires:` lines name host capabilities, which testkit
+// `kit_exec_requires` checks before any step: when one is missing the
+// golden is SKIP-HOST, so the census skips it too instead of failing on the
+// host. The capability forms are `tool:a|b` (any alternative on PATH),
+// `gtk4` (pkg-config knows gtk4) and `os:X` (host family `unix` or
+// `windows`; `!` negates, `|` separates choices). Other forms (`env:`,
+// probes) select a run mode rather than a host capability, and the census
+// still runs the example in its default mode.
+// Returns the first unmet requirement, or null when the host meets them all.
+export function unmetRequirement(caseText, host = defaultHost()) {
+  if (caseText === null) return null;
+  for (const line of caseText.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("requires:")) continue;
+    const requirement = trimmed.slice("requires:".length).trim();
+    if (!capabilityMet(requirement, host)) return requirement;
+  }
+  return null;
+}
+
+function capabilityMet(requirement, host) {
+  if (requirement.startsWith("tool:")) return requirement.slice("tool:".length).split("|").some((name) => name !== "" && host.hasTool(name));
+  if (requirement === "gtk4") return host.hasGtk4();
+  if (requirement.startsWith("os:")) return hostMatches(host.family, requirement.slice("os:".length));
+  return true;
+}
+
+// testkit StepsRequirements.jet `kit_steps_host_matches`.
+function hostMatches(actual, choices) {
+  const negative = choices.startsWith("!");
+  const names = negative ? choices.slice(1) : choices;
+  return names.split("|").includes(actual) !== negative;
+}
+
+function defaultHost() {
+  return {
+    family: process.platform === "win32" ? "windows" : "unix",
+    hasTool: onPath,
+    hasGtk4: () => spawnSync("pkg-config", ["--exists", "gtk4"], { stdio: "ignore" }).status === 0,
+  };
+}
+
+function onPath(name) {
+  const extensions = process.platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+    if (directory === "") continue;
+    for (const extension of extensions) {
+      try {
+        accessSync(join(directory, name + extension), constants.X_OK);
+        return true;
+      } catch {
+        // not in this directory
+      }
+    }
+  }
+  return false;
+}
+
+export function skipReason(entry, expected, caseText, host = defaultHost()) {
   if (nativeRunIsWebTarget(entry)) return "web-targeted native run";
   if (expected.out === null && expected.err === null) return "no native golden";
-  if (entry.stem.includes("polyglot_") && expected.out === null && expected.err === null) return "needs foreign binder";
   if (sourceHasTarget(entry, "Wasm") || sourceHasTarget(entry, "Browser")) return "web-targeted native run";
+  const unmet = unmetRequirement(caseText, host);
+  if (unmet !== null) return `requires ${unmet}`;
   return null;
 }
 
@@ -224,11 +397,6 @@ export function warningOnlyStderr(stderr) {
 
 function normalize(text) {
   return text.replaceAll("\r\n", "\n").replace(/\n+$/u, "");
-}
-
-function gtkLoaderUnavailable(stderr) {
-  return /gtk|libgtk|cannot open shared object|failed to load/u.test(stderr)
-    && /not found|unavailable|could not load|cannot open/u.test(stderr);
 }
 
 function copyFixtureState(source, destination) {
@@ -316,7 +484,7 @@ function builtArtifact(entryPath, stageRoot) {
 // wrote with the run tier's stdin, arguments and working directory. A
 // failed build is the verdict's run (its compile-time diagnostics).
 async function runBuilt(entry, caseText, staged, programCwd, options) {
-  const built = await runJet(buildArgs(entry, caseText), { ...options, cwd: staged.cwd, stdin: null });
+  const built = await runJet(buildArgs(entry, caseText), { ...options, cwd: staged.cwd, stdin: null, until: null });
   if (built.timedOut || built.code !== 0) return built;
   const artifact = builtArtifact(join(staged.cwd, entry.shown), staged.cwd);
   if (!existsSync(artifact)) {
@@ -372,7 +540,15 @@ export function runProcess(command, args, options) {
       child.stderr.destroy();
       resolveRun(result);
     };
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      // A `run: none` example serves until stopped: it is done once its
+      // output is the expected output.
+      if (options.until && options.until(stdout)) {
+        killGroup();
+        finish({ code: 0, stdout, stderr, timedOut, timeoutSec, stopped: true });
+      }
+    });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     // A process killed in uninterruptible sleep (a whole-system sync, say)
     // exits only when that call returns, so a timeout does not wait for it.
@@ -396,11 +572,8 @@ export function runProcess(command, args, options) {
   });
 }
 
-export function classifyRun(entry, run, expected, tier = "run") {
+export function classifyRun(run, expected, tier = "run") {
   if (run.timedOut) return { status: "timeout", detail: `timeout ${run.timeoutSec}s` };
-  if (entry.stem === "ui/ui_native_linux" && run.code !== 0 && gtkLoaderUnavailable(run.stderr)) {
-    return { status: "skipped", detail: "gtk4 runtime loader unavailable" };
-  }
   if (expected.err !== null) {
     if (!EXPECTED_FAIL_EXITS.has(run.code)) return { status: "failed", detail: `exit ${run.code} (expected 70 or 1)`, stderr: run.stderr };
     const stderr = tier === "build" ? asRunCommand(run.stderr) : run.stderr;
@@ -415,13 +588,62 @@ export function classifyRun(entry, run, expected, tier = "run") {
   }
   const actual = normalize(run.stdout);
   if (expected.out === null) return { status: "failed", detail: "missing expected output" };
-  if (actual !== normalize(expected.out)) {
+  if (!(expected.alternatives ?? [expected.out]).some((text) => text !== null && actual === normalize(text))) {
     return { status: "no-match", detail: "stdout", expected: expected.out, actual };
   }
   if (expected.stderrOut !== null && normalize(run.stderr) !== normalize(expected.stderrOut)) {
     return { status: "no-match", detail: "stderr", expected: expected.stderrOut, actual: run.stderr };
   }
   return { status: "passed", detail: "" };
+}
+
+// The rows of the central known-failing ledger (Tools/testkit/known-failing.tsv),
+// read as testkit Cases.jet `kit_known_ledger` reads them: tab-separated
+// `ID card reason`, blank, `#` and malformed lines ignored.
+export function parseKnownLedger(text) {
+  const rows = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const fields = line.split("\t");
+    if (fields.length !== 3) continue;
+    rows.push({ id: fields[0], annotation: `${fields[1]} ${fields[2]}` });
+  }
+  return rows;
+}
+
+function readKnownLedger() {
+  return existsSync(KNOWN_FAILING_LEDGER) ? parseKnownLedger(readFileSync(KNOWN_FAILING_LEDGER, "utf8")) : [];
+}
+
+// The annotation owning an example's failure, as testkit
+// `kit_cases_known_failure` finds it: a `# KNOWN-FAILING ` header in the
+// example's `.case` wins, else the ledger row whose ID names the example path
+// itself, a file example without `.jet`, or a project example's directory.
+// Null when nothing owns it.
+export function knownFailingAnnotation(shown, caseText, ledger) {
+  const prefix = "# KNOWN-FAILING ";
+  for (const raw of (caseText ?? "").split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith(prefix)) return line.slice(prefix.length).trim();
+  }
+  const row = ledger.find(({ id }) => shown === id || shown === `${id}.jet` || shown === `${id}/run.jet`);
+  return row ? row.annotation : null;
+}
+
+// testkit `kit_cases_known_verdict`: an annotation owns a failed or
+// mismatched run (never a timeout or a skip) as known-failing, and a passing
+// run under an annotation is an unexpected pass, a failure until the stale
+// row is removed.
+export function applyKnownFailing(result, annotation) {
+  if (annotation === null) return result;
+  if (result.status === "failed" || result.status === "no-match") {
+    return { ...result, status: "known-failing", detail: `${annotation}: ${result.status}${result.detail ? ` ${result.detail}` : ""}` };
+  }
+  if (result.status === "passed") {
+    return { ...result, status: "unexpected-pass", detail: `${annotation}: remove stale known-failing annotation` };
+  }
+  return result;
 }
 
 async function mapLimit(items, limit, fn) {
@@ -439,7 +661,7 @@ async function mapLimit(items, limit, fn) {
 }
 
 function summarize(results) {
-  const counts = { passed: 0, failed: 0, "no-match": 0, timeout: 0, skipped: 0 };
+  const counts = { passed: 0, failed: 0, "no-match": 0, timeout: 0, skipped: 0, "known-failing": 0, "unexpected-pass": 0 };
   for (const result of results) counts[result.status] += 1;
   return counts;
 }
@@ -461,6 +683,37 @@ function isWithin(parent, child) {
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 }
 
+async function runExample(entry, caseText, expected, slot, scratch, options) {
+  const runOptions = {
+    store: join(scratch, "store", String(slot)),
+    scratch,
+    timeoutMs: options.timeoutSec * 1000,
+    stdin: readStdin(entry.stem),
+    until: untilExpected(caseText, expected),
+  };
+  if (options.tier === "build") {
+    const project = stageFeatureProject(entry, scratch, slot);
+    const staged = project ?? stageExampleDirectory(entry, scratch, slot);
+    try {
+      const run = await runBuilt(entry, caseText, staged, project ? project.cwd : ROOT, runOptions);
+      return { stem: entry.stem, shown: entry.shown, ...classifyRun(run, expected, "build"), stderr: run.stderr, stdout: run.stdout };
+    } finally {
+      rmSync(staged.cwd, { recursive: true, force: true });
+    }
+  }
+  const staged = stageFeatureProject(entry, scratch, slot);
+  const run = await runJet(runArgs(entry, caseText), { ...runOptions, cwd: runCwd(entry, caseText, staged?.cwd) });
+  const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(run, expected), stderr: run.stderr, stdout: run.stdout };
+  if (result.status !== "passed") return result;
+  for (const emitTier of EMIT_TIERS) {
+    if (expected.emit[emitTier] === null) continue;
+    const emitted = await runJet(["emit", `--${emitTier}`, entry.shown], { ...runOptions, cwd: staged?.cwd, stdin: null, until: null });
+    const verdict = classifyEmit(emitTier, emitted, expected.emit[emitTier]);
+    if (verdict) return { stem: entry.stem, shown: entry.shown, ...verdict, stderr: emitted.stderr, stdout: emitted.stdout };
+  }
+  return result;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) { console.log(usage()); return; }
@@ -480,51 +733,40 @@ async function main() {
   const scratch = join(scratchBase, `feature-examples-${process.pid}`);
   mkdirSync(scratch, { recursive: true });
   try {
-    const results = await mapLimit(entries, options.jobs, async (entry, slot) => {
-      const expected = readExpected(entry.stem);
-      const skipped = skipReason(entry, expected);
-      if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
+    const ledger = readKnownLedger();
+    const results = (await mapLimit(entries, options.jobs, async (entry, slot) => {
       const caseText = readCase(entry.stem);
-      const runOptions = {
-        store: join(scratch, "store", String(slot)),
-        scratch,
-        timeoutMs: options.timeoutSec * 1000,
-        stdin: readStdin(entry.stem),
-      };
-      if (options.tier === "build") {
-        const project = stageFeatureProject(entry, scratch, slot);
-        const staged = project ?? stageExampleDirectory(entry, scratch, slot);
-        try {
-          const run = await runBuilt(entry, caseText, staged, project ? project.cwd : ROOT, runOptions);
-          return { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected, "build"), stderr: run.stderr, stdout: run.stdout };
-        } finally {
-          rmSync(staged.cwd, { recursive: true, force: true });
-        }
+      const expected = readExpected(entry.stem, caseText);
+      const skipped = skipReason(entry, expected, caseText);
+      if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
+      // A case that binds a fixed host port runs while holding that port's
+      // host-wide lock, as testkit does, so concurrent runs take turns.
+      const port = caseHostPort(caseText);
+      if (port === null) return runExample(entry, caseText, expected, slot, scratch, options);
+      let release;
+      try {
+        release = await holdHostPort(port, options.timeoutSec);
+      } catch (error) {
+        return { stem: entry.stem, shown: entry.shown, status: "failed", detail: error.message };
       }
-      const staged = stageFeatureProject(entry, scratch, slot);
-      const run = await runJet(runArgs(entry, caseText), { ...runOptions, cwd: staged?.cwd });
-      const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
-      if (result.status !== "passed") return result;
-      for (const emitTier of EMIT_TIERS) {
-        if (expected.emit[emitTier] === null) continue;
-        const emitted = await runJet(["emit", `--${emitTier}`, entry.shown], { ...runOptions, cwd: staged?.cwd, stdin: null });
-        const verdict = classifyEmit(emitTier, emitted, expected.emit[emitTier]);
-        if (verdict) return { stem: entry.stem, shown: entry.shown, ...verdict, stderr: emitted.stderr, stdout: emitted.stdout };
+      try {
+        return await runExample(entry, caseText, expected, slot, scratch, options);
+      } finally {
+        await release();
       }
-      return result;
-    });
+    })).map((result) => applyKnownFailing(result, knownFailingAnnotation(result.shown, readCase(result.stem), ledger)));
     const counts = summarize(results);
     if (options.json) {
       console.log(JSON.stringify({ tier: options.tier, counts, results }, null, 2));
     } else {
       for (const result of results) console.log(`${result.status.padEnd(8)} ${result.shown}${result.detail ? `  ${result.detail}` : ""}`);
-      console.log(`summary: ${results.length} examples  passed ${counts.passed}  failed ${counts.failed}  no-match ${counts["no-match"]}  timeout ${counts.timeout}  skipped ${counts.skipped}`);
+      console.log(`summary: ${results.length} examples  passed ${counts.passed}  failed ${counts.failed}  no-match ${counts["no-match"]}  timeout ${counts.timeout}  skipped ${counts.skipped}  known-failing ${counts["known-failing"]}  unexpected-pass ${counts["unexpected-pass"]}`);
       for (const result of results.filter((r) => r.status === "failed" || r.status === "no-match")) {
         if (result.status === "failed" && result.stderr) console.log(result.stderr.trimEnd().split("\n").slice(0, 8).join("\n"));
         if (result.status === "no-match") console.log(diff(result.expected ?? "", result.actual ?? ""));
       }
     }
-    process.exitCode = counts.failed || counts["no-match"] || counts.timeout ? 1 : 0;
+    process.exitCode = counts.failed || counts["no-match"] || counts.timeout || counts["unexpected-pass"] ? 1 : 0;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

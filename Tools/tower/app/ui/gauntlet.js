@@ -1,11 +1,11 @@
-const VERDICTS = new Set(['win', 'parity', 'loss', 'unmeasured']);
+const VERDICTS = new Set(['win', 'loss', 'unmeasured']);
 const TIERS = ['aot', 'run', 'dev', 'cold', 'warm'];
 const PEER_ORDER = [
   'rust', 'c', 'zig', 'go', 'python', 'js',
   'java', 'kotlin', 'swift', 'typescript', 'ruby', 'php', 'lua',
 ];
 const UNMEASURED = 'unmeasured';
-const GAUNTLET_STATES = new Set(['win', 'parity', 'loss', 'unmeasured', 'n/a']);
+const GAUNTLET_STATES = new Set(['win', 'loss', 'unmeasured', 'n/a']);
 const AOT_PEERS = new Set(['rust', 'c', 'zig', 'go']);
 const DYNAMIC_PEERS = new Set(['python', 'js']);
 // Old receipts retain their original rail identity; the chart groups languages.
@@ -26,20 +26,20 @@ function peerName(peer) {
   return peer?.peer ?? peer?.language ?? peer?.name ?? null;
 }
 
-function tierStatus(item, peer) {
+function tierStatus(item) {
   if (!item) return UNMEASURED;
   if (item.status === 'not_applicable') return 'n/a';
   if (item.status && !['measured', 'ok'].includes(item.status)) return UNMEASURED;
-  if (finite(item.ratio)) return ratioVerdict(item.ratio, peer);
+  if (finite(item.ratio)) return ratioVerdict(item.ratio);
   return verdict(item.verdict) ?? UNMEASURED;
 }
 
-function selectTier(tiers, names, peer, includeMissing = false) {
-  const rank = { unmeasured: 0, loss: 1, parity: 2, win: 3, 'n/a': 4 };
+function selectTier(tiers, names, includeMissing = false) {
+  const rank = { unmeasured: 0, loss: 1, win: 2, 'n/a': 3 };
   const candidates = names.map((name, index) => {
     const item = isObject(tiers[name]) ? tiers[name] : null;
     if (!item && !includeMissing) return null;
-    return { name, index, item: item ?? {}, state: tierStatus(item, peer) };
+    return { name, index, item: item ?? {}, state: tierStatus(item) };
   }).filter(Boolean);
   candidates.sort((left, right) => (rank[left.state] ?? 0) - (rank[right.state] ?? 0) || left.index - right.index);
   return candidates[0] ?? null;
@@ -53,7 +53,7 @@ function metricValue(peer, metric, requiredTiers = null) {
   const names = required.length
     ? [...new Set(required)]
     : [...TIERS.filter((name) => declared.includes(name)), ...declared.filter((name) => !TIERS.includes(name))];
-  const selected = selectTier(tiers, names, peerName(peer), required.length > 0);
+  const selected = selectTier(tiers, names, required.length > 0);
   if (selected) return { tier: selected.name, values: selected.item, comparison };
   if (finite(comparison.ratio) || comparison.status === 'measured') {
     return { tier: null, values: comparison, comparison };
@@ -61,13 +61,9 @@ function metricValue(peer, metric, requiredTiers = null) {
   return { tier: null, values: {}, comparison };
 }
 
-function ratioVerdict(ratio, peer) {
+// Every peer, Rust included, shares one comparator: Jet/peer below 1 wins.
+function ratioVerdict(ratio) {
   if (!finite(ratio)) return UNMEASURED;
-  if (String(peer ?? '').replace(/-expert$/, '') === 'rust') {
-    if (ratio < 1) return 'win';
-    if (ratio <= 1.05) return 'parity';
-    return 'loss';
-  }
   return ratio < 1 ? 'win' : 'loss';
 }
 
@@ -76,7 +72,6 @@ function reduce(values) {
   if (!comparable.length) return 'n/a';
   if (comparable.some((value) => value === UNMEASURED || !VERDICTS.has(value))) return UNMEASURED;
   if (comparable.includes('loss')) return 'loss';
-  if (comparable.includes('parity')) return 'parity';
   return 'win';
 }
 
@@ -92,7 +87,7 @@ function peerMetricVerdict(peer, metric, requiredTiers = null) {
     if (comparison.status === 'not_applicable' || comparison.applicability === 'not_applicable') return 'n/a';
     return verdict(comparison.verdict) ?? verdict(peer?.metric_verdicts?.[metric]) ?? verdict(peer?.verdict) ?? UNMEASURED;
   }
-  const values = names.map((tier) => tierStatus(tiers[tier], peerName(peer)));
+  const values = names.map((tier) => tierStatus(tiers[tier]));
   return reduce(values);
 }
 
@@ -118,7 +113,7 @@ function rowPeer(cell, peerNameValue, records) {
   const detail = { cell, peer, records, peer_name: peerNameValue, metric, tier: selected.tier, values, verdict: state, requiredTiers };
   const samples = requiredTiers?.map((tier) => {
     const item = object(selected.comparison.tiers?.[tier]);
-    const state = peer.applicable === false ? 'n/a' : tierStatus(selected.comparison.tiers?.[tier], peerNameValue);
+    const state = peer.applicable === false ? 'n/a' : tierStatus(selected.comparison.tiers?.[tier]);
     return { tier, values: item, verdict: state, ratio: state === 'unmeasured' || state === 'n/a' ? null : item.ratio,
       detail: { ...detail, tier, values: item, verdict: state } };
   });
@@ -137,12 +132,12 @@ function axisPeer(axis, peerNameValue) {
   const peer = object(axis?.comparisons?.[peerNameValue]);
   const phases = ['cold', 'warm'].map((phase) => ({ phase, value: object(peer[phase]) }));
   const phaseValues = Object.fromEntries(phases.map(({ phase, value }) => [phase, value]));
-  const selectedTier = selectTier(phaseValues, ['cold', 'warm'], peerNameValue, true);
+  const selectedTier = selectTier(phaseValues, ['cold', 'warm'], true);
   const selected = selectedTier
     ? { phase: selectedTier.name, value: selectedTier.item }
     : phases[0];
   const values = selected.value;
-  const phaseVerdicts = phases.map(({ value }) => tierStatus(value, peerNameValue));
+  const phaseVerdicts = phases.map(({ value }) => tierStatus(value));
   const hasComparison = Object.keys(peer).length > 0;
   const state = hasComparison ? reduce(phaseVerdicts) : 'n/a';
   return {
@@ -241,7 +236,7 @@ export function projectGauntletMatrix(status) {
   const columns = groups.flatMap((group) => group.columns);
   const axisColumns = sortPeers(axisRows.flatMap((row) => row.peerNames));
   const rows = [...cells, ...axisRows];
-  const summary = { win: 0, parity: 0, loss: 0, unmeasured: 0 };
+  const summary = { win: 0, loss: 0, unmeasured: 0 };
   for (const row of rows) if (row.verdict in summary) summary[row.verdict]++;
   return { columns, groups, axisColumns, rows, cellRows: cells, axisRows, summary };
 }

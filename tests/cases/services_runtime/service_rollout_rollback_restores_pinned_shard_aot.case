@@ -1,5 +1,6 @@
-# tests/services_runtime.rs::service_rollout_rollback_restores_pinned_shard_aot: the original's literal expectations; Jet does not meet them yet (ref build failed, Tools/testkit/known-failing.tsv).
+# tests/services_runtime.rs::service_rollout_rollback_restores_pinned_shard_aot: the original's literal expectations.
 fixture: service_rollout_rollback_restores_pinned_shard_aot/input
-step: jet run run.jet
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet run --allow=FS.Read,FS.Write run.jet
 exit: 0 # tests/services_runtime.rs:1800 assert_eq!
 stdout: = "handoff:2\nrolled:1\nmessage:queued\n" # tests/services_runtime.rs:1801 assert_eq!

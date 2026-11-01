@@ -2,7 +2,7 @@
 // no link following, and readdir's EOF/error termination convention.
 // Result<List<List<U8>>, IOError>: return tag, data/length/error out words.
 fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
-    kind :: rt_text_byte(entry + I64{18})
+    kind :: rt_text_byte(wrapping(entry + I64{18}))
     directory := kind == I64{4}
     if (kind == I64{0}) {
         probe := I64{0}
@@ -16,7 +16,7 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
                 status = os_syscall_i64(I64{5}, probe, stat, I64{0}, I64{0}, I64{0}, I64{0})
                 _ := os_syscall_i64(I64{3}, probe, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
-            directory = status >= I64{0} && (rt_text_word(stat + I64{24})).bit_and(I64{61440}) == I64{16384}
+            directory = status >= I64{0} && (rt_text_word(wrapping(stat + I64{24}))).bit_and(I64{61440}) == I64{16384}
             jet_rt_free(stat, I64{144}, I64{8})
         }
     }
@@ -24,7 +24,7 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
     host_u8_put(data, I64{0}, if directory -> I64{1} else -> I64{0})
     at := I64{0}
     loop at < length {
-        host_u8_put(data, at + I64{1}, rt_text_byte(entry + I64{19} + at))
+        host_u8_put(data, at + I64{1}, rt_text_byte(wrapping(wrapping(entry + I64{19}) + at)))
         at += I64{1}
     }
     data
@@ -51,12 +51,12 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
         if (got <= I64{0}) -> break
         at := I64{0}
         loop at < got {
-            entry :: scratch + at
-            record_length :: (rt_text_word(entry + I64{16})).bit_and(I64{65535})
+            entry :: wrapping(scratch + at)
+            record_length :: (rt_text_word(wrapping(entry + I64{16}))).bit_and(I64{65535})
             bytes := I64{0}
-            loop rt_text_byte(entry + I64{19} + bytes) != (I64{0}) -> bytes += I64{1}
-            dot :: bytes == I64{1} && rt_text_byte(entry + I64{19}) == I64{46}
-            parent :: bytes == I64{2} && rt_text_byte(entry + I64{19}) == I64{46} && rt_text_byte(entry + I64{20}) == I64{46}
+            loop rt_text_byte(wrapping(wrapping(entry + I64{19}) + bytes)) != (I64{0}) -> bytes += I64{1}
+            dot :: bytes == I64{1} && rt_text_byte(wrapping(entry + I64{19})) == I64{46}
+            parent :: bytes == I64{2} && rt_text_byte(wrapping(entry + I64{19})) == I64{46} && rt_text_byte(wrapping(entry + I64{20})) == I64{46}
             if !dot && !parent {
                 if (count == capacity) {
                     next_capacity :: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
@@ -67,10 +67,10 @@ fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
                     capacity = next_capacity
                 }
                 row :: fs_directory_row(fd, entry, bytes)
-                header :: data + count * I64{24}
+                header :: wrapping(data + count * I64{24})
                 rt_text_store(header, bytes + I64{1})
-                rt_text_store(header + I64{8}, bytes + I64{1})
-                rt_text_store(header + I64{16}, row)
+                rt_text_store(wrapping(header + I64{8}), bytes + I64{1})
+                rt_text_store(wrapping(header + I64{16}), row)
                 count += I64{1}
             }
             at += record_length

@@ -1,6 +1,20 @@
 // Registry.rs trust/cache acceptance. Pure naming/wire/identity proof is not
 // the native proof: original refresh, root trust and offline closures stay
 // executable and gated by #3593/#3595/#3597/#4409/#4262 (env mutation #4427).
+use jet_pkg_model.[PublicationRegistryConfig]
+use jetpack_foundation.[foundation_hardened_git_command, foundation_open_directory_authority]
+use jetpack_publication.[
+    publication_ensure_index_clone, publication_ensure_local_index_clone,
+    publication_registry_cache_component, publication_registry_cache_lock_name,
+    publication_registry_clone_stage_name, publication_registry_origin_matches,
+    publication_registry_root_key_is_hex, publication_registry_trust_path,
+    publication_registry_unique_suffix,
+    publication_ensure_registry_root_key, publication_read_registry_root_key,
+    publication_registry_clone_arguments,
+]
+use core.files as files
+use core.sys as sys
+
 #Test("registry trust root key accepts exactly 32 hex bytes") {
     assert(publication_registry_root_key_is_hex("0123456789abcdef0123456789ABCDEF0123456789abcdef0123456789ABCDEF"))
     loop key in ([String]{"", "abc", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0", "g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", " 123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "é123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"}) {
@@ -65,7 +79,7 @@ fn publication_trust_cache_test_restore_env(name: String, previous: String?) -[E
     }
 }
 fn publication_trust_cache_test_git(args: [String], cwd: String) -[Env, Exec, Time.Wait]> {
-    output :: provider_hardened_git_command().args_extend(args).cwd(cwd).run() ?? panic("real git process")
+    output :: foundation_hardened_git_command().args_extend(args).cwd(cwd).run() ?? panic("real git process")
     assert(output.success)
 }
 // Original tests/pkg.rs:8033-8080; no have_git skip or fake process closure.

@@ -14,9 +14,9 @@ append: src/nested/input "one\n"
 step: jetpack services up --no-color
 when os-name linux: env: PATH={work}/bin:{env:PATH}
 when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
-await: file .jet/services/fixture/data/restart-count lines >= 1 timeout 5s every 50ms
+await: file .jet/services/fixture/data/restart-count lines >= 1 timeout 5s every 50ms # original waits for at least one restart line
 write: src/nested/input services_watch_restarts_after_nested_file_change.changed
-await: file .jet/services/fixture/data/restart-count lines >= 2 timeout 5s every 50ms
+await: file .jet/services/fixture/data/restart-count lines >= 2 timeout 5s every 50ms # original waits for a second restart line
 step: jetpack services health --no-color
 when os-name linux: env: PATH={work}/bin:{env:PATH}
 when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state

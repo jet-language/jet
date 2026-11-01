@@ -1,0 +1,11 @@
+# AGENTS.md I2 (#6065): a failure linking the generated code is a compiler
+# fault with a `native.link` census row and exit 101, never E2104/E2105.
+# The C provider's archive is empty (no symbol index), so the link stops.
+fixture: fixtures/link_failure
+step: jet build c_module_import.jet
+exit: 101
+stderr: ~ "internal compiler error: the Jet backend failed on `c_module_import.jet`: 1 compiler fault:" # one report counts every row
+stderr: ~ "native.link link:" # the row names the link pass
+stderr: ~ "libanswer.a: the archive has no symbol index" # the linker's own message stays in the row
+stderr: !~ "E2104" # a link failure is never a user diagnostic
+stderr: !~ "E2105" # nor an operating-system failure

@@ -10,7 +10,7 @@ const tier = (ratio, verdict = null) => ({
 
 function fixture() {
   return {
-    summary: { win: 1, parity: 0, loss: 1, unmeasured: 1 },
+    summary: { win: 1, loss: 1, unmeasured: 1 },
     cells: [
       {
         id: 'text.kernel', domain: 'text', entry: 'wordfreq', mode: 'batch',
@@ -39,12 +39,12 @@ test('groups compiled and dynamic peers using their assigned execution samples',
   assert.deepEqual(matrix.axisColumns, ['bun', 'nodemon', 'vite']);
   assert.deepEqual(matrix.rows.map((row) => row.id), ['text.kernel', 'empty.cell', 'axis:live_reload']);
   const text = matrix.rows.find((row) => row.id === 'text.kernel');
-  assert.equal(text.peers.rust.verdict, 'parity');
+  assert.equal(text.peers.rust.verdict, 'loss');
   assert.equal(text.peers.rust.ratio, 1.02);
   assert.equal(text.peers.python.verdict, 'win');
   assert.equal(text.peers.python.detail.verdict, 'win');
   assert.deepEqual(text.peers.python.samples.map(({ tier, ratio }) => [tier, ratio]), [['run', 0.71], ['dev', 0.8]]);
-  assert.equal(text.verdict, 'parity');
+  assert.equal(text.verdict, 'loss');
   assert.equal(text.peers.vite, undefined);
   const axis = matrix.axisRows[0];
   assert.equal(axis.mode, 'live_reload');
@@ -74,11 +74,25 @@ test('does not reuse a historical aggregate when the assigned tier has no measur
     cells: [{
       id: 'unmeasured.cell',
       primary_metric: 'runtime_wall_seconds',
-      peers: [{ peer: 'rust', verdict: 'parity', metric_comparisons: {} }],
+      peers: [{ peer: 'rust', verdict: 'win', metric_comparisons: {} }],
     }],
   });
   assert.equal(matrix.rows[0].peers.rust.verdict, 'unmeasured');
   assert.equal(matrix.rows[0].peers.rust.ratio, null);
+});
+
+test('Rust is judged like every peer: Jet/Rust 1.00 and 1.05 are losses', () => {
+  for (const ratio of [1, 1.05]) {
+    const matrix = projectGauntletMatrix({
+      cells: [{
+        id: 'rust.boundary', domain: 'rust', mode: 'batch', primary_metric: 'runtime_wall_seconds',
+        peers: [{ peer: 'rust', required_tiers: ['aot'], metric_comparisons: { runtime_wall_seconds: { tiers: { aot: tier(ratio) } } } }],
+      }],
+    });
+    assert.equal(matrix.rows[0].peers.rust.verdict, 'loss', `Jet/Rust ${ratio} must lose`);
+    assert.equal(matrix.rows[0].verdict, 'loss');
+    assert.equal(matrix.summary.loss, 1);
+  }
 });
 
 test('a compiled-peer run loss cannot replace its AOT score', () => {

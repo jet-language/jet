@@ -62,6 +62,12 @@ fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIPars
         theme.error("no image `{name}`", cli_declared_images(declared_plan), "declare `module image.<name> {{ … }}`, or build an existing image.")
         return EXIT_USAGE
     }
+    // U14: disk images ride the gated jetos installer tier; `jet image`
+    // builds only `.Oci` containers (Rust add_remove_push_image.rs).
+    if image.kind != ImageKind.OCI {
+        theme.error("`{name}` is a `.Iso` disk image, not a container", "U14: `.Iso`/`.Qcow`/`.Raw` disk images ride the jetos installer tier, which is gated (Phase D, owner greenlight required) — `jet image` only builds `.Oci` containers today.", "build an `.Oci` image instead, or track the jetos realization tier for disk images.")
+        return EXIT_USAGE
+    }
     // An image names its environment explicitly; never silently project the
     // beginner-default `dev` environment when the record says `env.full`.
     plan := declared_plan

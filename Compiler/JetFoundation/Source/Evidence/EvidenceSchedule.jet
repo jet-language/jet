@@ -45,14 +45,11 @@ fn evidence_schedule_bool(value: Dyn, what: String) -> Bool EvidenceCodecError! 
 
 fn evidence_schedule_unsigned(value: Dyn, what: String) -> Int EvidenceCodecError! {
     text :: if value == {
-        .Int(number) -> {
-            if number < 0 -> return Err(evidence_codec_error("expected {what} unsigned integer"))
-            number.to_string()
-        }
         .Text(text) -> text
         else -> {
-            return Err(evidence_codec_error("expected {what} unsigned integer"))
-
+            number :: foundation_json_integer(value) ?? return Err(evidence_codec_error("expected {what} unsigned integer"))
+            if number < 0 -> return Err(evidence_codec_error("expected {what} unsigned integer"))
+            number.to_string()
         }
     }
     bytes :: text.bytes()

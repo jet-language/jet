@@ -1,0 +1,13 @@
+# Port of tests/cffi.rs:838 foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved.
+# The JS binding cache carries the canonical JS descriptor stamp (pkg_binder_descriptor(ForeignLanguage.JS).stamp()).
+fixture: foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0 # active js import accepted
+step: jet check swift_alias.jet
+exit: 1
+stderr: ^= "Error [E1002]" # planned foreign roots are reserved
+stderr: ~ "`swift` is reserved for first-party or foreign packages" # tests/cffi.rs rendered reservation text
+step: jet check swift_list.jet
+exit: 1
+stderr: ^= "Error [E1002]" # planned foreign member lists are reserved

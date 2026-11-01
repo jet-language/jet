@@ -1,4 +1,5 @@
-// D-TESTING1: corpus, fixture, and golden helpers all read explicit paths.
+// D-TESTING1: corpus, fixture, and golden helpers all read explicit paths,
+// here relative to the example's own folder (the directory it runs from).
 package {
     name: "testing_projection"
     authority: { allow: [Env, FS.Read, FS.Write, IO] }
@@ -7,9 +8,10 @@ package {
 use core.testing as testing
 
 fn run() {
-    corpus :: testing.corpus("Examples/features/io")
-    fixture :: testing.fixture("Examples/features/expected/io/db.out")
-    golden :: testing.golden("Examples/features/expected/io/testing_projection.out", "corpus:{corpus.len()}\nfixture:{fixture.len()}\ngolden:true\n")
+    corpus :: testing.corpus("env_unicode")
+    fixture :: testing.fixture("env_unicode/run.jet")
+    // The corpus reads files in path order, so its first entry is the manifest.
+    golden :: testing.golden("env_unicode/package.jet", corpus[0])
     print("corpus:{corpus.len()}")
     print("fixture:{fixture.len()}")
     print("golden:{golden}")

@@ -1,11 +1,18 @@
 use core.files as s6_retirement_reviewed_files
 use corpus_manifest.policy_split_whitespace
-use jet_lexer.[lex, Token, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL, TOKEN_KW_IT, TOKEN_SELF, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_PLUS_PLUS, TOKEN_MINUS_MINUS, TOKEN_GT, TOKEN_SHR, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_STAR, TOKEN_KW_FN, TOKEN_BANG, TOKEN_QUESTION, TOKEN_HASH, TOKEN_UNIFIED_ARROW, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_EOF]
+use jet_parser.[parse_generated_source]
+use jet_foundation.[DIAGNOSTIC_ERROR]
+use jet_lexer.[lex, lex_generated, Token, TokenTables, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL, TOKEN_KW_IT, TOKEN_SELF, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_PLUS_PLUS, TOKEN_MINUS_MINUS, TOKEN_GT, TOKEN_SHR, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_STAR, TOKEN_KW_FN, TOKEN_BANG, TOKEN_QUESTION, TOKEN_HASH, TOKEN_UNIFIED_ARROW, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_EOF]
 
 // Failure-surface source law: walk boundaries, fenced and embedded fragments.
 // Token facts use the compiler lexer, never a text substitute.
 struct S6RetirementReviewedFragment { first_line: Int source: String }
 struct S6RetirementReviewedHit { line: Int spelling: String }
+// A `?` or `!` the token pass proposes, with its byte span and the end offsets
+// of its neighbour tokens for the canonical rewrites (`after` is -1 unless a
+// name follows: only an error type takes a moved `!`);
+// `after_value` marks a `?` right after a call, an index or a literal.
+struct S6RetirementReviewedCandidate { line: Int spelling: String question: Bool after_value: Bool start: Int end: Int before: Int after: Int }
 struct S6RetirementReviewedFence { marker: Int length: Int rest: String }
 
 fn s6_retirement_reviewed_slice(text: String, start: Int, end: Int) -> String {
@@ -51,13 +58,15 @@ fn s6_retirement_reviewed_contains_word(text: String, word: String) -> Bool {
     false
 }
 
-fn s6_retirement_reviewed_collect(tokens: [Token], out: &[Token]) {
+// String literal facts live in the lexer's token tables: an interpolation's
+// tokens are part of its literal row, with spans in source coordinates.
+fn s6_retirement_reviewed_collect(tables: TokenTables, tokens: [Token], out: &[Token]) {
     loop token in tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
         &out.push(token)
-        if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
-            loop part in token.payload.string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> s6_retirement_reviewed_collect(part.tokens, &out)
+        if (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING) && token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> s6_retirement_reviewed_collect(tables, part.tokens, &out)
             }
         }
     }
@@ -76,34 +85,38 @@ fn s6_retirement_reviewed_expression_end(token: Token) -> Bool {
     kinds.contains(token.kind)
 }
 
-fn s6_retirement_reviewed_type_name(token: Token) -> Bool {
-    if token.kind != TOKEN_IDENT || token.payload.text.bytes().len() == 0 -> return false
-    first :: Int.from_u8(token.payload.text.bytes()[0])
+// An identifier's first source byte classifies it; the token span is in source coordinates.
+fn s6_retirement_reviewed_first_byte(source: String, token: Token) -> Int? {
+    if token.kind != TOKEN_IDENT || token.span.end <= token.span.start -> return None
+    Val(Int.from_u8(source.bytes()[token.span.start]))
+}
+
+fn s6_retirement_reviewed_type_name(source: String, token: Token) -> Bool {
+    first :: s6_retirement_reviewed_first_byte(source, token) ?? return false
     first >= 65 && first <= 90
 }
 
-fn s6_retirement_reviewed_lower_name(token: Token) -> Bool {
-    if token.kind != TOKEN_IDENT || token.payload.text.bytes().len() == 0 -> return false
-    first :: Int.from_u8(token.payload.text.bytes()[0])
+fn s6_retirement_reviewed_lower_name(source: String, token: Token) -> Bool {
+    first :: s6_retirement_reviewed_first_byte(source, token) ?? return false
     (first >= 97 && first <= 122) || first == 95
 }
 
-fn s6_retirement_reviewed_result_arm(tokens: [Token], index: Int) -> Bool {
+fn s6_retirement_reviewed_result_arm(source: String, tokens: [Token], index: Int) -> Bool {
     if index < 1 || index + 2 >= tokens.len() -> return false
-    s6_retirement_reviewed_lower_name(tokens[index - 1]) && s6_retirement_reviewed_lower_name(tokens[index + 1]) && tokens[index + 2].kind == TOKEN_UNIFIED_ARROW
+    s6_retirement_reviewed_lower_name(source, tokens[index - 1]) && s6_retirement_reviewed_lower_name(source, tokens[index + 1]) && tokens[index + 2].kind == TOKEN_UNIFIED_ARROW
 }
 
-fn s6_retirement_reviewed_infix(tokens: [Token], index: Int) -> Bool {
+fn s6_retirement_reviewed_infix(source: String, tokens: [Token], index: Int) -> Bool {
     if index < 1 || index + 1 >= tokens.len() -> return false
     previous :: tokens[index - 1]
     following :: tokens[index + 1]
     if !s6_retirement_reviewed_type_atom(previous) || !(s6_retirement_reviewed_type_atom(following) || following.kind == TOKEN_LPAREN) -> return false
-    if s6_retirement_reviewed_result_arm(tokens, index) -> return false
-    s6_retirement_reviewed_type_name(previous) || s6_retirement_reviewed_type_name(following)
+    if s6_retirement_reviewed_result_arm(source, tokens, index) -> return false
+    s6_retirement_reviewed_type_name(source, previous) || s6_retirement_reviewed_type_name(source, following)
 }
 
-fn s6_retirement_reviewed_type_prefix(token: Token) -> Bool {
-    s6_retirement_reviewed_type_name(token) || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_STAR || token.kind == TOKEN_KW_FN
+fn s6_retirement_reviewed_type_prefix(source: String, token: Token) -> Bool {
+    s6_retirement_reviewed_type_name(source, token) || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_STAR || token.kind == TOKEN_KW_FN
 }
 
 fn s6_retirement_reviewed_line(source: String, offset: Int) -> Int {
@@ -115,14 +128,21 @@ fn s6_retirement_reviewed_line(source: String, offset: Int) -> Int {
     line
 }
 
-fn s6_retirement_reviewed_hits(source: String) -> [S6RetirementReviewedHit] {
+fn s6_retirement_reviewed_value_end(token: Token) -> Bool {
+    token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING || token.kind == TOKEN_INT || token.kind == TOKEN_FLOAT || token.kind == TOKEN_UNIT_NUMBER || token.kind == TOKEN_CHAR || token.kind == TOKEN_TRUE || token.kind == TOKEN_FALSE || token.kind == TOKEN_NULL
+}
+
+// The token pass proposes candidates by position: a `?` or `!` after an
+// expression end or in a contract position.
+fn s6_retirement_reviewed_candidates(source: String) -> [S6RetirementReviewedCandidate] {
     lexed :: lex(source.bytes())
     tokens := [Token]{}
-    s6_retirement_reviewed_collect(lexed.tokens, &tokens)
+    s6_retirement_reviewed_collect(lexed.tables, lexed.tokens, &tokens)
     &tokens.sort_by(token -> token.span.start)
-    hits := [S6RetirementReviewedHit]{}
+    candidates := [S6RetirementReviewedCandidate]{}
     loop index in 0..<tokens.len() {
         token :: tokens[index]
+        proposed := ""
         if token.kind == TOKEN_BANG {
             marker_negation :: index >= 2 && tokens[index - 2].kind == TOKEN_HASH
             canonical_prefix := false
@@ -130,27 +150,164 @@ fn s6_retirement_reviewed_hits(source: String) -> [S6RetirementReviewedHit] {
                 following :: tokens[index + 1]
                 canonical_prefix = token.span.end == following.span.start && (following.kind == TOKEN_IDENT || following.kind == TOKEN_LPAREN || following.kind == TOKEN_LBRACKET || following.kind == TOKEN_STAR || following.kind == TOKEN_KW_FN)
             }
-            if marker_negation || canonical_prefix || s6_retirement_reviewed_result_arm(tokens, index) -> next
-            if index > 0 && s6_retirement_reviewed_contract_position(tokens[index - 1]) -> &hits.push(S6RetirementReviewedHit{line: s6_retirement_reviewed_line(source, token.span.start), spelling: "retired failure contract"})
+            if marker_negation || canonical_prefix || s6_retirement_reviewed_result_arm(source, tokens, index) -> next
+            if index > 0 && s6_retirement_reviewed_contract_position(tokens[index - 1]) -> proposed = "retired failure contract"
         } else if token.kind == TOKEN_QUESTION {
             contextual :: index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LPAREN
-            handler :: index + 2 < tokens.len() && s6_retirement_reviewed_lower_name(tokens[index + 1]) && tokens[index + 2].kind == TOKEN_UNIFIED_ARROW
-            optional_prefix :: index + 1 < tokens.len() && s6_retirement_reviewed_type_prefix(tokens[index + 1]) && token.span.end == tokens[index + 1].span.start
+            handler :: index + 2 < tokens.len() && s6_retirement_reviewed_lower_name(source, tokens[index + 1]) && tokens[index + 2].kind == TOKEN_UNIFIED_ARROW
+            optional_prefix :: index + 1 < tokens.len() && s6_retirement_reviewed_type_prefix(source, tokens[index + 1]) && token.span.end == tokens[index + 1].span.start
             expression_end :: index > 0 && s6_retirement_reviewed_expression_end(tokens[index - 1])
             if contextual || handler || optional_prefix -> next
-            if s6_retirement_reviewed_infix(tokens, index) || expression_end -> &hits.push(S6RetirementReviewedHit{line: s6_retirement_reviewed_line(source, token.span.start), spelling: "retired failure propagation/type"})
+            if s6_retirement_reviewed_infix(source, tokens, index) || expression_end -> proposed = "retired failure propagation/type"
         }
+        if proposed == "" -> next
+        before :: if index > 0 -> tokens[index - 1].span.end else -> -1
+        after :: if index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT -> tokens[index + 1].span.end else -> -1
+        &candidates.push(S6RetirementReviewedCandidate{line: s6_retirement_reviewed_line(source, token.span.start), spelling: proposed, question: token.kind == TOKEN_QUESTION, after_value: index > 0 && s6_retirement_reviewed_value_end(tokens[index - 1]), start: token.span.start, end: token.span.end, before: before, after: after})
+    }
+    candidates
+}
+
+fn s6_retirement_reviewed_parses(source: String) -> Bool {
+    if lex_generated(source.bytes()).diagnostics.len() > 0 -> return false
+    parsed :: parse_generated_source(source.bytes())
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return false
+    }
+    true
+}
+
+// Documentation quotes types (`Int?`) and contracts (`-> Int IOError!`) on
+// their own, so a snippet gets a parse as statements, as a type, as a
+// signature tail and as a signature.
+fn s6_retirement_reviewed_snippet_current(source: String) -> Bool {
+    shapes :: [String]{source, "fn probe() {{\n{source}\n}}", "alias Probe :: {source}", "fn probe() {source} {{}}", "fn probe() -> {source} {{}}", "{source} {{}}"}
+    loop shape in shapes {
+        if s6_retirement_reviewed_parses(shape) -> return true
+    }
+    false
+}
+
+// Embedded string fragments keep their escapes; the unescaped text is the Jet
+// a JSON or source string actually carries.
+fn s6_retirement_reviewed_unescape(source: String) -> String {
+    bytes :: source.bytes()
+    out := [U8]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        byte :: bytes[cursor]
+        if Int.from_u8(byte) == 92 && cursor + 1 < bytes.len() {
+            escaped :: Int.from_u8(bytes[cursor + 1])
+            if escaped == 110 -> &out.push(U8{10})
+            else if escaped == 116 -> &out.push(U8{9})
+            else if escaped == 34 || escaped == 92 || escaped == 39 -> &out.push(bytes[cursor + 1])
+            else {
+                &out.push(byte)
+                &out.push(bytes[cursor + 1])
+            }
+            cursor += 2
+            next
+        }
+        &out.push(byte)
+        cursor += 1
+    }
+    String.from_bytes(out) ?? source.copy()
+}
+
+// A fragment is current Jet when the parser accepts the whole of it, as a file
+// (inline package header stripped), in a snippet shape, or unescaped.
+fn s6_retirement_reviewed_current(source: String) -> Bool {
+    lexed :: lex_generated(source.bytes())
+    if s6_retirement_reviewed_parses(policy_strip_inline_package(source, lexed.tokens)) -> return true
+    if s6_retirement_reviewed_snippet_current(source) -> return true
+    if !source.contains("\\") -> return false
+    unescaped :: s6_retirement_reviewed_unescape(source)
+    s6_retirement_reviewed_parses(unescaped) || s6_retirement_reviewed_snippet_current(unescaped)
+}
+
+// One line of a fragment the parser rejects as a whole: the line is current
+// when it parses as a snippet or as the line of a construct that spans lines:
+// a signature or block head, a statement opening a block, a parameter, a
+// field, a variant, or the closing line of a multi-line signature.
+fn s6_retirement_reviewed_line_current(line: String) -> Bool {
+    if s6_retirement_reviewed_snippet_current(line) -> return true
+    shapes :: [String]{"{line}\n}}", "fn probe() {{\n{line}\n}}\n}}", "fn probe({line}) {{}}", "fn probe({line}\n}}", "struct Probe {{ {line} }}", "enum Probe {{ {line} }}"}
+    loop shape in shapes {
+        if s6_retirement_reviewed_parses(shape) -> return true
+    }
+    false
+}
+
+// The canonical rewrites of a candidate on its line: drop it (propagation
+// `read()?` after a call, an index or a literal; a bare `!`; a name such as
+// `Apply? [y/N]` is prose or a type, never a propagation the parser can confirm), move a `!` behind the following token (`T ! E` to `T E!`), and
+// for a `?` between two tokens, attach it to the left one and fail with the
+// right one (`T ? E` to `T? E!`).
+fn s6_retirement_reviewed_rewrites_current(bytes: [U8], from: Int, to: Int, candidate: S6RetirementReviewedCandidate) -> Bool {
+    head :: s6_retirement_reviewed_slice_bytes(bytes, from, candidate.start)
+    tail :: s6_retirement_reviewed_slice_bytes(bytes, candidate.end, to)
+    rewrites := [String]{}
+    if !candidate.question || candidate.after_value -> &rewrites.push("{head}{tail}")
+    if candidate.after >= candidate.end && candidate.after <= to {
+        between :: s6_retirement_reviewed_slice_bytes(bytes, candidate.end, candidate.after)
+        rest :: s6_retirement_reviewed_slice_bytes(bytes, candidate.after, to)
+        &rewrites.push("{head}{between}!{rest}")
+        if candidate.question && candidate.before >= from && candidate.before <= candidate.start {
+            left :: s6_retirement_reviewed_slice_bytes(bytes, from, candidate.before)
+            gap :: s6_retirement_reviewed_slice_bytes(bytes, candidate.before, candidate.start)
+            &rewrites.push("{left}?{gap}{between}!{rest}")
+        }
+    }
+    loop rewrite in rewrites {
+        if s6_retirement_reviewed_line_current(rewrite.trim().copy()) -> return true
+    }
+    false
+}
+
+// The parser is the grammar authority. The token pass reads `?` and `!` by
+// position and cannot tell `-> Int?` or `-> Int IOError!` from retired
+// propagation, because the Jet lexer emits a separate QUESTION or BANG token
+// after a type name. A candidate is a retired failure spelling when the parser
+// rejects its line in every shape and accepts the line once the candidate takes
+// its canonical rewrite. So an accepted fragment has no hit, an unrelated error
+// elsewhere in a file leaves its current lines alone, and prose, URLs and
+// regular expressions that merely hold a `?` or `!` are not Jet.
+fn s6_retirement_reviewed_hits(source: String) -> [S6RetirementReviewedHit] {
+    candidates :: s6_retirement_reviewed_candidates(source)
+    if candidates.len() == 0 || s6_retirement_reviewed_current(source) -> return [S6RetirementReviewedHit]{}
+    bytes :: source.bytes()
+    hits := [S6RetirementReviewedHit]{}
+    rejected := [Int: Bool]{}
+    loop candidate in candidates {
+        from := candidate.start
+        loop from > 0 && Int.from_u8(bytes[from - 1]) != 10 -> from -= 1
+        to := candidate.end
+        loop to < bytes.len() && Int.from_u8(bytes[to]) != 10 -> to += 1
+        line_rejected :: rejected.get(from) ?? !s6_retirement_reviewed_line_current(s6_retirement_reviewed_slice_bytes(bytes, from, to).trim().copy())
+        rejected[from] = line_rejected
+        if line_rejected && s6_retirement_reviewed_rewrites_current(bytes, from, to, candidate) -> &hits.push(S6RetirementReviewedHit{line: candidate.line, spelling: candidate.spelling})
     }
     hits
 }
 
 fn s6_retirement_reviewed_detector_law() {
-    current :: "fn maybe() -> Int? {{ None }}\nfn typed() -> Int IOError! {{ 1 }}\nfn union() -> Int (DbError | TimeoutError)! {{ 1 }}\nfn unit() IOError! {{}}\nstruct Holder {{ value: !IOError }}\nfn context() -> Int IOError! {{ read()?(\"loading\") }}\nfn handled() -> Int IOError! {{ value ? ok -> ok ! failure -> 0 }}\nif !ready -> print(\"ready\")\n"
+    // `value: !IOError` left the current list: the parser rejects it (E0003).
+    current :: "fn maybe() -> Int? {{ None }}\nfn typed() -> Int IOError! {{ 1 }}\nfn union() -> Int (DbError | TimeoutError)! {{ 1 }}\nfn unit() IOError! {{}}\nfn context() -> Int IOError! {{ read()?(\"loading\") }}\nfn handled() -> Int IOError! {{ value ? ok -> ok ! failure -> 0 }}\nif !ready -> print(\"ready\")\n"
     assert_eq(s6_retirement_reviewed_hits(current).len(), 0)
+    snippets :: [String]{"Int?", "[String]?", "-> Int IOError!", "Int (DbError | TimeoutError)!", "fn first(flag: Bool) -> Int?", "empty :: Int?{{None}}", "Apply? [y/N]", "/reconnect?cursor=<sequence>", "{{2,5}}?", "fn exact() -> Decimal Never! {{ math.decimal(\\\"1.20\\\") }}"}
+    loop snippet in snippets -> assert(s6_retirement_reviewed_hits(snippet).len() == 0, "current failure syntax misread: {snippet}")
+    // The Rust samples also spelled signatures without `->` (`fn f() Int E!`);
+    // the parser rejects that form itself (D-SIG-AFTER1), so each sample here
+    // carries a current signature around the one retired failure spelling.
+    // The Rust `null?` sample is gone: the parser accepts `x :: null?`, so it
+    // is not a spelling the parser authority can confirm.
     retired :: [String]{
-        "fn suffix() Int Error!\n", "fn infix_bang() Int ! Error -> 1\n", "fn infix_question() Int ? Error -> 1\n", "fn suffix_option() Int? -> None\n", "fn bare() ! {{}}\n", "alias bare :: !\n", "fn propagated() Int Error! -> read()?\n", "fn literal_propagation() Bool -> true?\n", "fn string_propagation() String -> \"value\"?\n", "fn null_propagation() Null -> null?\n"
+        "fn infix_bang() -> Int ! Error {{ 1 }}\n", "fn infix_question() -> Int ? Error {{ 1 }}\n", "fn bare() ! {{}}\n", "fn propagated() -> Int {{ read()? }}\n", "fn literal_propagation() -> Bool {{ true? }}\n", "fn string_propagation() -> String {{ \"value\"? }}\n", "fn run() {{ x :: read()? }}\n", "T ! E", "if load(path)? == {{"
     }
     loop source in retired -> assert(s6_retirement_reviewed_hits(source).len() > 0, "retired failure syntax missed: {source}")
+    // An unrelated parse error leaves current lines current and retired lines retired.
+    assert_eq(s6_retirement_reviewed_hits("fn ok() -> Int? {{ None }}\nfn broken( {{\n").len(), 0)
+    assert(s6_retirement_reviewed_hits("fn ok() -> Int? {{ None }}\nfn bad() {{ x :: read()? }}\nfn broken( {{\n").len() == 1, "a retired line beside an unrelated parse error is missed")
 }
 
 fn s6_retirement_reviewed_fence(line: String) -> S6RetirementReviewedFence? {
@@ -206,8 +363,10 @@ fn s6_retirement_reviewed_looks_jet(source: String) -> Bool {
 }
 
 fn s6_retirement_reviewed_find(text: String, needle: String, from: Int) -> Int {
-    raw :: text.bytes()
-    wanted :: needle.bytes()
+    s6_retirement_reviewed_find_bytes(text.bytes(), needle.bytes(), from)
+}
+
+fn s6_retirement_reviewed_find_bytes(raw: [U8], wanted: [U8], from: Int) -> Int {
     loop start in from..<(raw.len() - wanted.len() + 1) {
         matches := true
         loop at in 0..<wanted.len() {
@@ -218,25 +377,37 @@ fn s6_retirement_reviewed_find(text: String, needle: String, from: Int) -> Int {
     -1
 }
 
+fn s6_retirement_reviewed_slice_bytes(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes(bytes[start..<end].copy()) ?? panic("source boundary")
+}
+
+// One pass over the bytes: slices and line numbers reuse the scan position, so
+// a large data file costs linear time rather than one full rescan per string.
 fn s6_retirement_reviewed_embedded(text: String) -> [S6RetirementReviewedFragment] {
     bytes :: text.bytes()
     fragments := [S6RetirementReviewedFragment]{}
     cursor := 0
+    line := 1
+    line_cursor := 0
     loop cursor < bytes.len() {
+        loop line_cursor < cursor {
+            if Int.from_u8(bytes[line_cursor]) == 10 -> line += 1
+            line_cursor += 1
+        }
         if Int.from_u8(bytes[cursor]) == 114 {
             quote := cursor + 1
             loop quote < bytes.len() && Int.from_u8(bytes[quote]) == 35 -> quote += 1
             if quote < bytes.len() && Int.from_u8(bytes[quote]) == 34 {
-                hashes :: s6_retirement_reviewed_slice(text, cursor + 1, quote)
+                hashes :: s6_retirement_reviewed_slice_bytes(bytes, cursor + 1, quote)
                 close :: "\"{hashes}"
                 start :: quote + 1
-                end :: s6_retirement_reviewed_find(text, close, start)
+                end :: s6_retirement_reviewed_find_bytes(bytes, close.bytes(), start)
                 if end < 0 {
                     cursor += 1
                     next
                 }
-                source :: s6_retirement_reviewed_slice(text, start, end)
-                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: s6_retirement_reviewed_line(text, cursor), source: source})
+                source :: s6_retirement_reviewed_slice_bytes(bytes, start, end)
+                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: line, source: source})
                 cursor = end + close.bytes().len()
                 next
             }
@@ -250,8 +421,8 @@ fn s6_retirement_reviewed_embedded(text: String) -> [S6RetirementReviewedFragmen
                 else -> end += 1
             }
             if end < bytes.len() {
-                source :: s6_retirement_reviewed_slice(text, start, end)
-                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: s6_retirement_reviewed_line(text, cursor), source: source})
+                source :: s6_retirement_reviewed_slice_bytes(bytes, start, end)
+                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: line, source: source})
                 cursor = end + 1
                 next
             }
@@ -322,8 +493,10 @@ fn s6_retirement_reviewed_failure_skip(path: String) -> Bool {
     false
 }
 
+// `tests/cases/fmt/` holds the formatter fixtures that the Rust law allowlisted
+// as `tests/fmt.rs`: they feed retired forms to the formatter fixes.
 fn s6_retirement_reviewed_allowlisted(path: String) -> Bool {
-    path == "Docs/spec/syntax-decisions.md" || path == "Docs/spec/contributing/agent-engineering.md" || path == "Docs/spec/reference/prior-art.md" || path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") || path.starts_with("Docs/research/") || path.starts_with("Tools/agent-eval/domain-foundations/") || path.starts_with("tests/ui/") || path.starts_with("tests/fuzz/") || path == "tests/guards/syntax_reconciliation.jet" || path == "Tools/notebook-test/acceptance.mjs" || path == "Compiler/Prelude/Diagnostics.jet" || path == "crates/jet-parser/src/Parser/mod.rs" || path == "tests/fmt.rs"
+    path == "Docs/spec/syntax-decisions.md" || path == "Docs/spec/contributing/agent-engineering.md" || path == "Docs/spec/reference/prior-art.md" || path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") || path.starts_with("Docs/research/") || path.starts_with("Tools/agent-eval/domain-foundations/") || path.starts_with("tests/ui/") || path.starts_with("tests/fuzz/") || path == "tests/guards/syntax_reconciliation.jet" || path == "Tools/notebook-test/acceptance.mjs" || path == "Compiler/Prelude/Diagnostics.jet" || path.starts_with("tests/cases/fmt/")
 }
 
 fn s6_retirement_reviewed_scan_file(path: String, offenders: &[String]) {
@@ -351,7 +524,9 @@ fn s6_retirement_reviewed_walk(path: String, offenders: &[String]) {
 
 fn s6_retirement_reviewed_surface_law() {
     offenders := [String]{}
-    roots :: [String]{"crates", "Examples", "tests", "Source", "corelib", "Docs", "Tools"}
+    // The live tree: the Rust law walked crates, Source and corelib, which the
+    // compiler, Core and Jetpack trees replaced.
+    roots :: [String]{"Compiler", "Core", "Jetpack", "Examples", "tests", "Docs", "Tools"}
     loop root in roots -> s6_retirement_reviewed_walk(root, &offenders)
     entries :: s6_retirement_reviewed_files.list_dir(".") ?? [s6_retirement_reviewed_files.DirEntry]{}
     loop entry in entries {
@@ -360,7 +535,7 @@ fn s6_retirement_reviewed_surface_law() {
         if kind.is_file -> s6_retirement_reviewed_scan_file(entry.name, &offenders)
     }
     if s6_retirement_reviewed_files.is_file("README.md") -> s6_retirement_reviewed_scan_file("README.md", &offenders)
-    assert_eq(offenders.len(), 0, "retired failure syntax escaped the diagnostic/history allowlist: {offenders}")
+    assert(offenders.len() == 0, "retired failure syntax escaped the diagnostic/history allowlist: {offenders}")
 }
 
 #Test("retirement walk skips outputs and nested worktrees but keeps live source visible") {
@@ -369,6 +544,8 @@ fn s6_retirement_reviewed_surface_law() {
 #Test("failure syntax detector accepts current forms only") {
     s6_retirement_reviewed_detector_law()
 }
+// Known failing: #6221 (retired `?` propagation in Compiler/JetDevserver and
+// Compiler/JetDebug, JetLSP Lsp.jet:279, and two docs).
 #Test("failure surface has no active retired spelling") {
     s6_retirement_reviewed_surface_law()
 }

@@ -11,7 +11,13 @@ fn cli_lock_test_lock(package: String, version: String, trust: String) -> LockFi
         "unverified-mapping" -> "unverified"
         else -> ""
     }
-    text :: "version = 1\n\n[[package]]\nname = \"{package}\"\nversion = \"{version}\"\nsource = {{ nix = \"{package}@nixpkgs\", output = \"\" }}\nfingerprint = \"fp\"\ndependencies = []\noutput-hash = \"hash\"\nplatform = \"x86_64-linux\"\ncatalog-tier = \"{tier}\"\ncatalog-trust = \"{catalog_trust}\"\nprovenance = \"\"\n"
+    // A Nix package carries its portable closure record (Lock/Parse.jet
+    // `pkg_lock_validate_package_nix`): the source output, `nix-output`, and
+    // the envelope `output-hash` are one CAS digest; `nix-system` is the
+    // envelope platform.
+    output :: "sha256-{"1".repeat(64)}"
+    closure :: "nix-channel = \"nixpkgs-unstable\"\nnix-revision = \"{"a".repeat(40)}\"\nnix-system = \"x86_64-linux\"\nnix-index-authority = \"{"b".repeat(64)}\"\nnix-derivation = \"{"c".repeat(64)}\"\nnix-output = \"{output}\"\nnix-nar-hash = \"sha256:{"d".repeat(64)}\"\nnix-size = 42\nnix-compression = \"zstd\"\nnix-references = []\nnix-upstream-proof = \"sha256-{"e".repeat(64)}\"\nnix-cache-key = \"{"f".repeat(64)}\"\nnix-project-cas-bundle = \"sha256-{"0".repeat(64)}\"\n"
+    text :: "version = 1\n\n[[package]]\nname = \"{package}\"\nversion = \"{version}\"\nsource = {{ nix = \"{package}@nixpkgs\", output = \"{output}\" }}\nfingerprint = \"fp\"\ndependencies = []\noutput-hash = \"{output}\"\nplatform = \"x86_64-linux\"\ncatalog-tier = \"{tier}\"\ncatalog-trust = \"{catalog_trust}\"\nprovenance = \"\"\n{closure}"
     pkg_lock_parse(text) ?? panic("test lock")
 }
 

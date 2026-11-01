@@ -21,14 +21,20 @@ fn s6_ratchet_contains_word(text: String, word: String) -> Bool {
     }
 }
 
+// Docs/audits, Docs/proposals and Docs/research keep dated evidence: agents
+// may move it intact but never rewrite it, so no guard demands edits there.
+// Every guard that exempts history uses this one definition.
+fn guards_dated_evidence(path: String) -> Bool {
+    path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") || path.starts_with("Docs/research/")
+}
+
 // History, generated snapshots and the bridge's frozen Rust foundation copy
 // record retired spellings as they were.
 fn s6_ratchet_history(path: String) -> Bool {
     path == "Docs/spec/syntax-decisions.md" ||
     path == "Docs/spec/contributing/agent-engineering.md" ||
     path == "Docs/spec/reference/prior-art.md" ||
-    path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") ||
-    path.starts_with("Docs/research/") || path.starts_with("Tools/agent-eval/domain-foundations/") ||
+    guards_dated_evidence(path) || path.starts_with("Tools/agent-eval/domain-foundations/") ||
     path.starts_with("Docs/site/dist/") ||
     path.starts_with("Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-foundation/")
 }

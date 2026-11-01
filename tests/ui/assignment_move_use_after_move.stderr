@@ -1,0 +1,13 @@
+Error [E0121]: `evens` was consumed by the assignment, so it can't be used here
+  --> tests/ui/assignment_move_use_after_move.jet:8:12
+    |
+  8 |     print(^evens.to_list())
+    |            ^^^^^
+  --> tests/ui/assignment_move_use_after_move.jet:6:12
+    |
+  6 |     kept = evens
+    |            ^^^^^ `evens` moved to the assignment here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `evens` after the move, or give the assignment a copy with `evens.copy()` where it moved.
+ Note: `evens` is one-pass — materialize it first with `evens.to_list()`, or create a fresh source for the second drive
+More: jet-lang.dev/e/E0121

@@ -8,20 +8,17 @@ use core.files as files
 
 fn run() {
     input :: files.open("{work}/jsonl_bad/input.data") ?? panic("open")
-    reader :: jsonl.reader(^input) ?? panic("reader")
+    reader := jsonl.reader(^input) ?? panic("reader")
     loop {
-        result :: reader.next()
-        if result == {
-            .Ok(maybe) -> {
-                if maybe == None {
-                    print("eof-missed")
-                    break
-                }
+        if &reader.next() == {
+            .Val(_) -> {}
+            .None -> {
+                print("eof-missed")
+                break
             }
             .Err(first) -> {
-                again :: reader.next()
-                if again == {
-                    .Ok(_) -> { print("not-latched") }
+                if &reader.next() == {
+                    .Val(_) | .None -> { print("not-latched") }
                     .Err(second) -> {
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                     }

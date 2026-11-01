@@ -28,7 +28,12 @@ fn ir_precise_type_key(type_name: String) -> String Never! {
 }
 
 fn ir_precise_source_helper(owner: String, operation: String) -> String? Never! {
-    if owner == "Int" && operation == "abs" -> return Val("abs")
+    if operation == "abs" {
+        if owner == "Int" -> return Val("abs")
+        if owner == "Float" -> return Val("fabs")
+        if owner == "F32" -> return Val("__abs_f32")
+        if owner == "I64" -> return Val("__abs_i64")
+    }
     if owner == "Fraction" {
         return if operation == {
             "new" -> Val("__fraction_new")

@@ -367,7 +367,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
                 }
                 .Silent -> {}
             }
-            RefOutcome.Realized{entry: entry, state: parts.source_state, line: line, lease: parts.lease}
+            RefOutcome.Realized{entry: entry, state: parts.source_state, line: line, lease: ^parts.lease}
         }
         .Err(error) -> {
             cli_stop_spinner(^spinner)
@@ -395,7 +395,7 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
 
 // The verified recorded reuse, else one Store realization of the ref.
 fn cli_reuse_or_realize(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, table: SourceTable, ^recorded: VerifiedRealization?) -> VerifiedRealization RealizeError! {
-    if recorded == .Val(reused) -> return Ok(reused)
+    if recorded == .Val(reused) -> return Ok(^reused)
     store_realize_verified(&verification, roots, ctx, RealizeRequest.Package{spec: spec, table: table})
 }
 
@@ -481,7 +481,7 @@ fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots: Ha
             }
             theme.ok("{theme.bold(entry.name)} {parts.source_state.label()}")
             theme.detail(theme.gray(entry.out))
-            Val((entry: entry, state: parts.source_state, lease: parts.lease))
+            Val((entry: entry, state: parts.source_state, lease: ^parts.lease))
         }
         .Err(error) -> {
             if error == {

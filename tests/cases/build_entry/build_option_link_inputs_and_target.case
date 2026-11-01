@@ -2,9 +2,9 @@
 # executables and is refused for a command that writes none; `libs` and
 # `link_args` add native link inputs (`link_args` takes only `-L<dir>`,
 # `-l<name>` and `.a` archives) and are a `link_override` gate that
-# `policy: { link_override: .Forbid }` refuses (E3415); `os` other than linux
-# and any `min_os` are refused, since the native backend writes Linux x86-64
-# ELF images only.
+# `policy: { link_override: .Forbid }` refuses (E3415); `os: web` is the web
+# build only `jet build` writes, any other `os` than linux and any `min_os`
+# are refused, since the native backend writes Linux x86-64 ELF images only.
 fixture: fixtures/build_link
 artifact: app
 env: NO_COLOR=1
@@ -55,14 +55,18 @@ cwd: open
 exit: 2
 stderr: ~ "Error [E2104]" # a run writes no executable to place
 stderr: ~ "`--output-dir=out` places the executables `jet build` writes, and `jet run` writes none" # the refused flag is named
-step: jet build --os=web app.jet
+step: jet build --os=windows app.jet
 cwd: open
 exit: 2
-stderr: ~ "asks for a web image, and the native backend writes Linux x86-64 ELF images only" # the flag's os is refused
-step: jet build --profile=web app.jet
+stderr: ~ "asks for a windows image, and the native backend writes Linux x86-64 ELF images only" # the flag's os is refused
+step: jet run --os=web app.jet
 cwd: open
 exit: 2
-stderr: ~ "`os: web` in profile `web` of package.jet asks for a web image" # the profile field is the site
+stderr: ~ "`--os=web` asks for a web build, and `jet run` runs Linux x86-64 ELF images only" # only jet build writes a web build
+step: jet run --profile=web app.jet
+cwd: open
+exit: 2
+stderr: ~ "`os: web` in profile `web` of package.jet asks for a web build" # the profile field is the site
 step: jet build --min-os=10.15 app.jet
 cwd: open
 exit: 2

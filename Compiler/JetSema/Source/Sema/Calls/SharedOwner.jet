@@ -42,7 +42,7 @@ fn sema_call_shared_owner_host_value(receiver_value: TExpr, method: String, args
         else -> type_name(receiver_value.ty)
     }
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
+    value := sema_tree_node(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -100,7 +100,7 @@ fn sema_call_shared_owner_capture(receiver: Expr, receiver_value: TExpr, inner: 
     if callback.kind == .Lambda(lambda) && (lambda.effects.maximal || lambda.effects.solved.len() > 0) {
         &diagnostics.push(sema_error("E3401", expr_span(args[0].expr), "`Shared.capture` calls the impure function `capture projection`", "`capture projection` is impure, but `Shared.capture` declares `-[]>`", "remove the call from `Shared.capture`, or drop the `-[]>` bound from `Shared.capture` so its effects are inferred"))
     }
-    tir_expr_retype(&callback, Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
+    tree_expr_retype(&callback, Type.Fn{params: [Type]{inner}, ret: Val(projected), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
     sema_call_shared_owner_host_value(receiver_value, "capture", [TExpr]{callback}, sema_call_shared_owner_snapshot_type(inner, projected), span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
@@ -124,6 +124,7 @@ fn sema_call_shared_owner_try_replace(receiver: Expr, receiver_value: TExpr, inn
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     replacement_checked :: sema_check_expression(updated_args[1].expr, Val(inner), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_shared_cycle_check_replace(inner, updated_args[1].expr, expr_span(updated_args[1].expr), environment, program, &scopes, state, &diagnostics)
     replacement :: sema_expr_expected(replacement_checked, Val(inner), environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params :: [SemaCallParam]{sema_call_shared_owner_param("snapshot", AccessConvention.Move, snapshot.ty), sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
     ownership := sema_ownership_check_method_call(&state, "Shared.try_replace", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
@@ -306,10 +307,10 @@ fn sema_call_cell_guard_map(receiver: Expr, receiver_value: TExpr, editable: Boo
     }
     callback :: sema_call_cell_closure("map", inner, args[0], editable, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     path :: projection ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, "map", scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     projected :: sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
     result :: sema_call_cell_guard_type(editable, projected)
-    value := sema_tir_node(result, TExprKind.HostCall{call: THostCall.CellGuardProject{receiver: receiver_value, paths: [[String]]{path}, result_type: result, editable: editable, edit_paths_disjoint: false}}, span)
+    value := sema_tree_node(result, TExprKind.HostCall{call: THostCall.CellGuardProject{receiver: receiver_value, paths: [[String]]{path}, result_type: result, editable: editable, edit_paths_disjoint: false}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -339,11 +340,11 @@ fn sema_call_cell_guard_split(receiver: Expr, receiver_value: TExpr, editable: B
     first_callback :: first ?? return SemaMethodSpecialCheck{handled: true, value: None}
     second_callback :: second ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, "split", scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     first_guard :: sema_call_cell_guard_type(editable, sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"})
     second_guard :: sema_call_cell_guard_type(editable, sema_call_signature_return(second_callback.ty) ?? Type.Named{name: "Unit"})
     result :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}}}
-    value := sema_tir_node(result, TExprKind.HostCall{call: THostCall.CellGuardProject{receiver: receiver_value, paths: paths, result_type: result, editable: editable, edit_paths_disjoint: editable}}, span)
+    value := sema_tree_node(result, TExprKind.HostCall{call: THostCall.CellGuardProject{receiver: receiver_value, paths: paths, result_type: result, editable: editable, edit_paths_disjoint: editable}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 

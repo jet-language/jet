@@ -1,0 +1,27 @@
+// core-conformance: core.web.push
+use core.web as web
+use core.reactive.loadable.[Loadable]
+
+#Error
+enum ReadError {
+    Offline
+}
+
+fn reading(sensor: String) -> Int ReadError! {
+    if sensor == "" -> return Err(ReadError.Offline)
+    sensor.len()
+}
+
+fn shown(state: Loadable<Int, ReadError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(_) -> "failed"
+        else -> "pending"
+    }
+}
+
+fn run() {
+    binding :: web.subscribe(reading, "cpu")
+    web.push(reading, "cpu", value: 7)
+    print(shown(web.state(binding)))
+}

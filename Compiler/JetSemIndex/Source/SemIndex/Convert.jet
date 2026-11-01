@@ -9,7 +9,7 @@ use jet_foundation.[
     NamedType,
     ViewProvenance,
     ViewProvenanceMap,
-    failure_contract_effective_type,
+    failure_contract_shown_return,
     type_name,
 ]
 use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
@@ -228,7 +228,7 @@ fn semindex_convert_kind(kind: SymKind) -> SemIndexSymbolKind Never! {
                 &contract.push(SemIndexCallContractEntry{label: param_contract[index].label, zone: zone, variadic: index < param_variadic.len() && param_variadic[index]})
             }
             ret :: if failure_contract == {
-                .Checked(failure) -> Val(type_name(failure_contract_effective_type(failure)))
+                .Checked(failure) -> failure_contract_shown_return(failure).map((ty) -> type_name(ty))
                 .Unavailable(_) -> if return_type == {
                     .Val(ty) -> Val(type_name(ty))
                     .None -> None

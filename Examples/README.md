@@ -24,6 +24,16 @@ node Tools/agent/run-feature-examples.mjs
 binary (same stdin, arguments and working directory); a compile-time
 diagnostic is compared with its command word spelled `jet run`.
 
+Both runners read the central known-failing ledger
+(`Tools/testkit/known-failing.tsv`) and a `# KNOWN-FAILING` header in an
+example's `.case` the same way. An owned failure reports `known-failing`
+(testkit `KNOWN-FAILING`); an owned example that passes reports
+`unexpected-pass` and fails the run until its row is removed.
+
+An example that binds a fixed TCP port declares `host-port: N` in its `.case`;
+both runners hold that port's host-wide lock while it runs, so concurrent runs
+on one host take turns instead of failing to bind.
+
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 

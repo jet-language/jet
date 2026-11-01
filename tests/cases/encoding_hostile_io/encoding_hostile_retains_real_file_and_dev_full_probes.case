@@ -5,7 +5,7 @@ requires: os-name:linux
 fixture: encoding_hostile_retains_real_file_and_dev_full_probes.fixture
 env: NO_COLOR=1
 write: program/main.jet program/source.template
-step: jet build program/main.jet
+step: jet build --allow=FS.Read,FS.Write program/main.jet
 exit: 0
 step base: built
 cwd: .
@@ -13,7 +13,7 @@ exit: 0
 stderr: empty
 stdout: = encoding_hostile_retains_real_file_and_dev_full_probes.stdout.expected
 write: program/main.jet program/source.template
-step: jet build program/main.jet
+step: jet build --allow=FS.Read,FS.Write program/main.jet
 exit: 0
 step host: built
 env: JET_ENC_HOSTILE_IO=1

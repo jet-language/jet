@@ -168,10 +168,14 @@ fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
     TIntegerBounds{lo: value, hi: value}
 }
 
+// A binder (or a read of one): `ty` is its checked type in its function's
+// own terms (a generic function's type parameters unbound). Lowering reads
+// a binder's slot type from `ty`; it never takes it from the initializer.
 struct TLocal {
     name: String
     symbol_id: SymbolID?{None}
     span: Span
+    ty: Type
     generated: Bool
     deref: Bool
     address_lifetime: TAddressLifetime?
@@ -193,22 +197,22 @@ struct TLocal {
     place_borrow: Bool{false}
 }
 
-fn checked_user_local(name: String, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+fn checked_user_local(name: String, span: Span, ty: Type) -> TLocal Never! {
+    TLocal{name: name, span: span, ty: ty, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
-fn checked_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
-    local := checked_user_local(name, span)
+fn checked_symbol_local(name: String, span: Span, symbol_id: SymbolID, ty: Type) -> TLocal Never! {
+    local := checked_user_local(name, span, ty)
     local.symbol_id = Val(symbol_id)
     local
 }
 
-fn checked_generated_local(name: String, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+fn checked_generated_local(name: String, span: Span, ty: Type) -> TLocal Never! {
+    TLocal{name: name, span: span, ty: ty, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
 fn checked_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
-    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+    TLocal{name: name, span: span, ty: ty.copy(), generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
 }
 
 enum TBinaryOp {
@@ -440,6 +444,7 @@ enum TClosureOp {
     TryFilter
     Each
     EachMut
+    TryEach
     EachMap
     MapAny
     MapAll
@@ -771,6 +776,8 @@ enum TTryConvert {
     DefaultErr
     Typed(fn_name: String, source: Type, target: Type)
     WidenUnion(enum_name: String, tag: String)
+    // A union error whose every member is a member of the enclosing union.
+    RewidenUnion(enum_name: String)
 }
 
 enum TFailureCarrier {

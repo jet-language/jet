@@ -8,13 +8,13 @@ env: NO_COLOR=1
 step: mkfifo {work}/upload.fifo
 exit: 0
 write: peer/main.jet peer/source.template
-step: jet build peer/main.jet
+step: jet build --allow=FS.Write,Net peer/main.jet
 exit: 0
 spawn peer: built
 await: file addr.txt timeout 30s
 capture: addr = text file addr.txt
 write: writer/main.jet writer/source.template
-step: jet build writer/main.jet
+step: jet build --allow=Exec writer/main.jet
 exit: 0
 spawn writer: built
 write: main.jet main.template

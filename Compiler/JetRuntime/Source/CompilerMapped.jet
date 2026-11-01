@@ -4,7 +4,7 @@
 // read-only mapped pointer32, length40, reserved48. The registry lease is held
 // until AFTER unmap/unlock/close. Empty maps hold the same descriptor and lease.
 compiler_mapped_root := I64{0}
-// runtime-init: 4
+// runtime-init: 4 when compiler_mapped_root
 #Export(c) fn jet_rt_compiler_mapped_init() {
     if (compiler_mapped_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{16}, I64{8})
@@ -14,25 +14,25 @@ compiler_mapped_root := I64{0}
 fn compiler_mapped_key(path: I64) -> I64 {
     at := I64{0}
     loop at < rt_text_len(path) {
-        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) -> return jet_rt_string_clone(path)
+        if (rt_text_byte(wrapping(rt_text_data(path) + at)) == I64{0}) -> return jet_rt_string_clone(path)
         at += I64{1}
     }
     // Failed canonicalize falls back to the ORIGINAL spelling (not absolute or
     // lexical normalization), exactly as Authority.rs's PathBuf fallback does.
     name :: fd_c_path(path)
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    bytes :: jet_process_path_canonicalize_raw(name, scratch, scratch + I64{8}, scratch + I64{16})
+    bytes :: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
     fd_c_path_drop(name, path)
     result :: if (bytes == I64{0}) -> jet_rt_string_clone(path) else -> rt_text_lossy(bytes, rt_text_word(scratch))
-    if (bytes != I64{0}) -> jet_rt_free(bytes, rt_text_word(scratch + I64{8}), I64{1})
+    if (bytes != I64{0}) -> jet_rt_free(bytes, rt_text_word(wrapping(scratch + I64{8})), I64{1})
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
 // Registry Node24: next0, owned key8, live count16. Only the root lock reads it.
 fn compiler_mapped_find(key: I64) -> I64 {
-    node := rt_text_word(compiler_mapped_root + I64{8})
+    node := rt_text_word(wrapping(compiler_mapped_root + I64{8}))
     loop node != (I64{0}) {
-        if jet_rt_string_eq(rt_text_word(node + I64{8}), key) -> return node
+        if jet_rt_string_eq(rt_text_word(wrapping(node + I64{8})), key) -> return node
         node = rt_text_word(node)
     }
     I64{0}
@@ -43,12 +43,12 @@ fn compiler_mapped_register(key: I64) {
     node := compiler_mapped_find(key)
     if (node == I64{0}) {
         node = jet_rt_alloc(I64{24}, I64{8})
-        rt_text_store(node, rt_text_word(root + I64{8}))
-        rt_text_store(node + I64{8}, jet_rt_string_clone(key))
-        rt_text_store(node + I64{16}, I64{0})
-        rt_text_store(root + I64{8}, node)
+        rt_text_store(node, rt_text_word(wrapping(root + I64{8})))
+        rt_text_store(wrapping(node + I64{8}), jet_rt_string_clone(key))
+        rt_text_store(wrapping(node + I64{16}), I64{0})
+        rt_text_store(wrapping(root + I64{8}), node)
     }
-    rt_text_store(node + I64{16}, rt_text_word(node + I64{16}) + I64{1})
+    rt_text_store(wrapping(node + I64{16}), rt_text_word(wrapping(node + I64{16})) + I64{1})
     sync_mutex_unlock(root)
 }
 fn compiler_mapped_unregister(key: I64) {
@@ -57,11 +57,11 @@ fn compiler_mapped_unregister(key: I64) {
     link := root + I64{8}
     loop rt_text_word(link) != (I64{0}) {
         node :: rt_text_word(link)
-        if jet_rt_string_eq(rt_text_word(node + I64{8}), key) {
-            count :: rt_text_word(node + I64{16})
-            if (count > I64{1}) { rt_text_store(node + I64{16}, count - I64{1}) } else {
+        if jet_rt_string_eq(rt_text_word(wrapping(node + I64{8})), key) {
+            count :: rt_text_word(wrapping(node + I64{16}))
+            if (count > I64{1}) { rt_text_store(wrapping(node + I64{16}), count - I64{1}) } else {
                 rt_text_store(link, rt_text_word(node))
-                jet_rt_string_drop(rt_text_word(node + I64{8}))
+                jet_rt_string_drop(rt_text_word(wrapping(node + I64{8})))
                 jet_rt_free(node, I64{24}, I64{8})
             }
             break
@@ -84,16 +84,16 @@ fn compiler_mapped_unregister(key: I64) {
 #Export(c) fn jet_std_files_map(path: I64, output: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{160}, I64{8})
-    errno :: scratch + I64{128}
+    errno :: wrapping(scratch + I64{128})
     file :: jet_fd_open_raw(path, I64{1}, I64{0}, errno)
     if (file == I64{0}) {
-        code :: rt_text_word(errno + I64{8})
+        code :: rt_text_word(wrapping(errno + I64{8}))
         jet_rt_free(scratch, I64{160}, I64{8})
         return compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
     }
     jet_fd_stat_raw(file, scratch, errno)
-    failure := if (rt_text_word(errno) == I64{0}) -> I64{0} else -> -rt_text_word(errno + I64{8})
-    length :: rt_text_word(scratch + I64{56})
+    failure := if (rt_text_word(errno) == I64{0}) -> I64{0} else -> -rt_text_word(wrapping(errno + I64{8}))
+    length :: rt_text_word(wrapping(scratch + I64{56}))
     if (failure == I64{0} && length < I64{0}) {
         jet_fd_drop_raw(file)
         jet_rt_free(scratch, I64{160}, I64{8})
@@ -102,7 +102,7 @@ fn compiler_mapped_unregister(key: I64) {
     locked := false
     if (failure == I64{0}) {
         jet_fd_lock_raw(file, I64{5}, errno)
-        failure = if (rt_text_word(errno) == I64{0}) -> I64{0} else -> -rt_text_word(errno + I64{8})
+        failure = if (rt_text_word(errno) == I64{0}) -> I64{0} else -> -rt_text_word(wrapping(errno + I64{8}))
         locked = failure == I64{0}
     }
     pointer := I64{1}
@@ -126,12 +126,12 @@ fn compiler_mapped_unregister(key: I64) {
     compiler_mapped_register(key)
     map :: jet_rt_alloc(I64{56}, I64{8})
     rt_text_store(map, I64{0})
-    rt_text_store(map + I64{8}, file)
-    rt_text_store(map + I64{16}, jet_rt_string_clone(path))
-    rt_text_store(map + I64{24}, key)
-    rt_text_store(map + I64{32}, pointer)
-    rt_text_store(map + I64{40}, length)
-    rt_text_store(map + I64{48}, I64{0})
+    rt_text_store(wrapping(map + I64{8}), file)
+    rt_text_store(wrapping(map + I64{16}), jet_rt_string_clone(path))
+    rt_text_store(wrapping(map + I64{24}), key)
+    rt_text_store(wrapping(map + I64{32}), pointer)
+    rt_text_store(wrapping(map + I64{40}), length)
+    rt_text_store(wrapping(map + I64{48}), I64{0})
     jet_rt_free(scratch, I64{160}, I64{8})
     rt_text_store(output, map)
     I64{1}
@@ -139,18 +139,18 @@ fn compiler_mapped_unregister(key: I64) {
 #Export(c) fn jet_rt_handle_drop_jet_mapped_file(map: I64) {
     if (map == I64{0}) -> return
     // MappedFile is affine; borrowed byte views keep its checked owner alive.
-    file :: rt_text_word(map + I64{8})
-    length :: rt_text_word(map + I64{40})
-    if (length != I64{0}) -> _ := host_call(I64{11}, rt_text_word(map + I64{32}), length, I64{0})
+    file :: rt_text_word(wrapping(map + I64{8}))
+    length :: rt_text_word(wrapping(map + I64{40}))
+    if (length != I64{0}) -> _ := host_call(I64{11}, rt_text_word(wrapping(map + I64{32})), length, I64{0})
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     jet_fd_lock_raw(file, I64{8}, scratch)
     jet_rt_free(scratch, I64{32}, I64{8})
     jet_fd_drop_raw(file)
-    compiler_mapped_unregister(rt_text_word(map + I64{24}))
-    jet_rt_string_drop(rt_text_word(map + I64{16}))
-    jet_rt_string_drop(rt_text_word(map + I64{24}))
+    compiler_mapped_unregister(rt_text_word(wrapping(map + I64{24})))
+    jet_rt_string_drop(rt_text_word(wrapping(map + I64{16})))
+    jet_rt_string_drop(rt_text_word(wrapping(map + I64{24})))
     jet_rt_free(map, I64{56}, I64{8})
 }
-#Export(c) fn jet_std_fs_map_len(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(map + I64{40})) }
-#Export(c) fn jet_std_fs_map_is_empty(map: I64) -> Bool { rt_text_word(map + I64{40}) == I64{0} }
-#Export(c) fn jet_rt_record_get_jet_mapped_file_path(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(map + I64{16})) }
+#Export(c) fn jet_std_fs_map_len(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40}))) }
+#Export(c) fn jet_std_fs_map_is_empty(map: I64) -> Bool { rt_text_word(wrapping(map + I64{40})) == I64{0} }
+#Export(c) fn jet_rt_record_get_jet_mapped_file_path(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(map + I64{16}))) }

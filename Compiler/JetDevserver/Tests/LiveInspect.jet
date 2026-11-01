@@ -1,4 +1,4 @@
-use jet_devserver.LiveInspect.[LiveRuntimeWindow, read, render, runtime_window, snapshot_path]
+use jet_devserver.LiveInspect.[LiveRuntimeWindow, decode_raw_snapshot, read, render, runtime_window, snapshot_path]
 use std.fs as fs
 use core.sys.target.[selected_family]
 
@@ -20,6 +20,37 @@ use core.sys.target.[selected_family]
     assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":-1,\"cpu_ns\":null,\"exit\":true}}")).is_err())
     assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":-1,\"exit\":true}}")).is_err())
     assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"exit\":true}}")).is_err())
+}
+// The runtime's raw record decodes into the jet.live.v1 view the canvas reads.
+#Test("raw_records_decode_into_the_live_view") {
+    words :: (out: &[U8], values: [U64]) -> { loop value in values -> out.extend_from_slice(value.to_le_bytes()) }
+    text :: (out: &[U8], value: String) -> {
+        out.extend_from_slice(U64{value.len()}.to_le_bytes())
+        out.extend_from_slice(value.as_bytes())
+    }
+    bytes := [U8]{}
+    words(&bytes, [3550338754064696650, 1, 42, 1, 7, 20_000_000_000, 3, 100, 1, 1, 2, 64, 1, 0])
+    loop value in ["session", "app.jet", "build-1", "rev-1", "world\n1"] -> text(&bytes, value)
+    words(&bytes, [1, 1, 2, 3, 0, 2, 0, 0, 0, U64.MAX])
+    text(&bytes, "channel send")
+    words(&bytes, [2, 1, 0, 0, 0, 0, 1, 0, 0])
+    words(&bytes, [0])
+    snapshot :: decode_raw_snapshot(bytes.copy(), .None).unwrap()
+    assert_eq(runtime_window(snapshot).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: true }))
+    rendered :: render(snapshot)
+    assert(rendered.contains("world=world 1"))
+    assert(rendered.contains("task 2     parent 3     blocked  wait=channel send"))
+    assert(rendered.contains("effects: compute=0 waiting=1 channel=1 time=0 io=0"))
+    assert(rendered.contains("channel 0     depth 0/∞"))
+    assert(rendered.contains("(no runtime event observations)"))
+    bound :: decode_raw_snapshot(bytes.copy(), .Val("42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0")).unwrap()
+    assert(bound.contains("\"start_id\":\"1234\""))
+    assert_eq(runtime_window(bound).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .Val(40_000_000), exit: true }))
+    assert(decode_raw_snapshot(bytes.copy(), .Val("42 (app) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 2001 0")).unwrap_err().contains("does not belong"))
+    trailing := bytes.copy()
+    trailing.push(0)
+    assert(decode_raw_snapshot(trailing, .None).unwrap_err().contains("trailing bytes"))
+    assert(decode_raw_snapshot(bytes[0..bytes.len() - 1].to_vec(), .None).unwrap_err().contains("truncated"))
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:947
 #Test("reader_rejects_symlinks_and_open_permissions") {

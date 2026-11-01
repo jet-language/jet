@@ -2,6 +2,7 @@
 // Uses Wave-0774's published canonical JetDevserver EditorHost ABI.
 // No local host/request/error/response replicas and no raw-JSON host calls.
 use core.encoding.[Dyn]
+use jet_foundation.[foundation_json_integer]
 use jet_devserver.[
     EditorHost, EditorHostError, EditorHostTransport, EditorHostResponse, EditorSessionIdentity,
     EditorCommand, EditorWorkbenchOpenRequest, EditorReconnectRequest,
@@ -159,7 +160,7 @@ fn lsp_editor_optional_string_alias(object: Dyn, keys: [String]) -> String? Edit
 }
 fn lsp_editor_required_u64(object: Dyn, key: String) -> U64 EditorHostError! {
     if lsp_editor_object_get(object, key) == .Val(value) {
-        if value == .Int(number) {
+        if foundation_json_integer(value) == .Val(number) {
             if number >= 0 -> return Ok(U64.from_int(number) ?? panic("nonnegative DataTree Int fits u64"))
         }
     }
@@ -168,7 +169,7 @@ fn lsp_editor_required_u64(object: Dyn, key: String) -> U64 EditorHostError! {
 fn lsp_editor_optional_u64(object: Dyn, key: String) -> U64? EditorHostError! {
     value :: lsp_editor_object_get(object, key) ?? return Ok(None)
     if value == .Null -> return Ok(None)
-    if value == .Int(number) {
+    if foundation_json_integer(value) == .Val(number) {
         if number >= 0 -> return Ok(Val(U64.from_int(number) ?? panic("nonnegative DataTree Int fits u64")))
     }
     Err(EditorHostError.InvalidRequest("editor host field `{key}` must be a nonnegative integer or null"))

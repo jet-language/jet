@@ -27,7 +27,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     assert_eq(store_required_child_pipe(Val(41), "unused") ?? panic("present pipe"), 41)
     messages :: [String]{"piped lease keeper stdin", "piped lease keeper stdout"}
     loop message in messages {
-        if store_required_child_pipe(None, message) == {
+        if store_required_child_pipe(Int?{None}, message) == {
             .Ok(_) -> panic("a missing pipe must fail")
             .Err(error) -> {
                 assert(error == .Other(_))
@@ -123,10 +123,10 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     ingested :: store_ingest_tree(&verification, roots, request) ?? panic("retry ingest")
     ingested_entry :: ingested.entry
     assert(store_find_by_reference(&verification, roots, "path:late-ingest") == Val((ingested_entry)))
-    hit :: store_find_verified_by_reference(&verification, roots, "path:late-ingest", store_test_expectation(ingested.entry.out)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, "path:late-ingest", store_test_expectation(ingested.entry.out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("retry must publish one verified cache hit")
     assert_eq(verified.entry, ingested.entry)
-    verified.lease.release()
+    ^verified.lease.release()
     store_test_drop_roots(roots)
 }
 
@@ -189,7 +189,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
         StoreError.Unsupported("unsupported object"),
         StoreError.Interrupted("interrupted ingest"),
         StoreError.Other("other failure"),
-        StoreError.LifecycleConflict(expected: None, current: None),
+        StoreError.LifecycleConflict{expected: None, current: None},
     }) {
         uplift :: store_ingest_store_error(error)
         if uplift == {
@@ -213,7 +213,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     files.write(files.join(source, "stable"), "stable") ?? panic("fixture stable")
     request :: store_test_ingest_request("child-race", "path:child-race", source, [String]{}, "")
     fired := false
-    hook :: (copied: String) -> {
+    hook :: (copied: String) -[FS]> {
         if copied == replaced && !fired {
             fired = true
             files.rename(replacement, replaced) ?? panic("replace after copy")
@@ -231,10 +231,10 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     files.write(replaced, "first") ?? panic("restore first")
     ingested :: store_ingest_tree(&verification, roots, request) ?? panic("retry ingest")
     assert_eq(store_list_checked(&verification, roots) ?? panic("listing"), [StoreEntry]{ingested.entry})
-    hit :: store_find_verified_by_reference(&verification, roots, "path:child-race", store_test_expectation(ingested.entry.out)) ?? panic("lookup")
+    hit :: store_find_verified_by_reference(&verification, roots, "path:child-race", store_test_expectation(ingested.entry.out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("retry must publish one verified cache hit")
     assert_eq(verified.entry, ingested.entry)
-    verified.lease.release()
+    ^verified.lease.release()
     store_test_drop_roots(roots)
 }
 

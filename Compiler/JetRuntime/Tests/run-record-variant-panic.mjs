@@ -61,7 +61,7 @@ const range = literal('trap_msg_native_index_range');
 const rootModes = [
     ['root-overflow-export', golden(overflow)], ['root-divide-export', golden(literal('trap_msg_divide_zero'))],
     ['root-int-range', golden(range)],
-    ['root-mode-3', golden("the list has 1 items, so position 1 doesn't exist")],
+    ['root-mode-3', golden("the list has 1 item, so position 1 doesn't exist")],
     ['root-mode-4', golden("the list has 9223372036854775807 items, so position -9223372036854775808 doesn't exist")],
     ['root-mode-32', golden("the list has -9223372036854775808 items, so position 9223372036854775807 doesn't exist")],
     ['root-mode-26', golden("the list has 0 items, so position 0 doesn't exist")],

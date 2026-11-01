@@ -2,8 +2,8 @@
 // engine reused from origin/port/compiler@3aab69fde; every tier calls this API.
 use core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
 use core.encoding as encoding
-use core.files.[FileReader]
-use core.prelude.[min_int, max_int]
+use core.files.[FileReader, FileWriter]
+use core.prelude.[min, max]
 use core.mem as mem
 use __core_encoding_stream as stream
 use __core_encoding_xml_engine as engine
@@ -178,12 +178,14 @@ struct XMLReader {
                 }
             }
             if candidate == .Val(event) {
-                slot :: mem.__type_size<Dyn>()
-                prospective :: (event.raw_bytes.len() + event.bom.len()) * slot
+                // Lexical raw_bytes / BOM project to Array<Int> Dyn slots.
+                // Charge that projection before building so a hostile token
+                // fails closed without retaining the projected tree.
+                prospective :: (event.raw_bytes.len() + event.bom.len()) * dyn_heap_cost()
                 if !self.allocation.charge(prospective) -> return &self.fail(heap_error(self.total))
                 value :: engine.stream_event_value(event)
                 full :: value_heap_cost(value)
-                extra :: max_int(full - prospective, 0)
+                extra :: max(full - prospective, 0)
                 if !self.allocation.charge(extra) {
                     self.allocation.release(prospective)
                     return &self.fail(heap_error(self.total))
@@ -194,7 +196,7 @@ struct XMLReader {
             if self.eof -> return None
             read_bytes := self.limits.buffer_bytes
             if self.limits.max_total_bytes == .Val(maximum) {
-                read_bytes = min_int(read_bytes, max_int(maximum - self.total, 0) + 1)
+                read_bytes = min(read_bytes, max(maximum - self.total, 0) + 1)
             }
             bytes := [U8]{}
             if !stream.reserve(self.allocation, &bytes, read_bytes) -> return &self.fail(heap_error(self.total))
@@ -227,7 +229,7 @@ struct XMLReader {
     }
 }
 
-fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader EncodingError! {
+fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLParseOptions{XMLParseOptions.safe()}) -> XMLReader EncodingError! {
     stream.validate_limits(limits) ?? {
         error := err
         error.format = .XML
@@ -237,11 +239,92 @@ fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{XMLPa
     }
     options := kernel.parse_options(xml)
     options.limits.validate() ?? return Err(stream_error(err))
-    options.limits.max_depth = min_int(options.limits.max_depth, limits.max_depth)
-    options.limits.max_entity_depth = min_int(min_int(options.limits.max_entity_depth, limits.max_expansion_depth), options.limits.max_depth)
-    options.limits.max_entity_replacement_bytes = min_int(min_int(options.limits.max_entity_replacement_bytes, limits.max_expansion_bytes), options.limits.max_text_bytes)
+    options.limits.max_depth = min(options.limits.max_depth, limits.max_depth)
+    options.limits.max_entity_depth = min(options.limits.max_entity_depth, limits.max_expansion_depth, options.limits.max_depth)
+    options.limits.max_entity_replacement_bytes = min(options.limits.max_entity_replacement_bytes, limits.max_expansion_bytes, options.limits.max_text_bytes)
     scanner :: engine.StreamScanner.new(limits.max_item_bytes, options) ?? return Err(stream_error(err))
     XMLReader{input: input, limits: limits, scanner: scanner, terminal: None, total: 0, eof: false, allocation: stream.budget(limits)}
+}
+
+/// Bounded XML event output. The source stream renderer validates each event
+/// and the rendered bytes go to the buffered file writer; the first error
+/// latches and every later call returns it.
+struct XMLWriter {
+    output: FileWriter
+    limits: EncodingLimits
+    renderer: engine.StreamWriter
+    terminal: EncodingError?
+    total: Int
+    finished: Bool
+    allocation: stream.AllocationBudget
+
+    fn fail(&self, error: EncodingError) EncodingError! {
+        self.terminal = Val(error.copy())
+        Err(error)
+    }
+
+    fn write(&self, event: Dyn) EncodingError! -[IO]> {
+        if self.terminal == .Val(error) -> return Err(error.copy())
+        if self.finished -> return &self.fail(writer_error(.State, self.total, "write called after finish"))
+        bytes :: &self.renderer.write(event) ?? {
+            // The engine marks lifecycle-order faults with a `[state] ` reason prefix.
+            error := stream_error(err)
+            error.byte_offset = self.total
+            if error.reason.starts_with("[state] ") {
+                error.kind = .State
+                error.reason = error.reason.slice(8, error.reason.len())
+            }
+            return &self.fail(error)
+        }
+        if !self.allocation.charge(bytes.len()) -> return &self.fail(heap_error(self.total))
+        if bytes.len() > self.limits.max_item_bytes {
+            self.allocation.release(bytes.len())
+            return &self.fail(writer_error(.Limit, self.total, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        }
+        next_total :: self.total + bytes.len()
+        if self.limits.max_total_bytes == .Val(maximum) {
+            if next_total > maximum {
+                self.allocation.release(bytes.len())
+                return &self.fail(writer_error(.Limit, self.total, "max_total_bytes {maximum} exceeded"))
+            }
+        }
+        window :: bytes[0..<bytes.len()]
+        encoding.__write_bytes(&self.output, window) ?? {
+            self.allocation.release(bytes.len())
+            return &self.fail(io_error(self.total, err))
+        }
+        self.allocation.release(bytes.len())
+        self.total = next_total
+    }
+
+    fn flush(&self) EncodingError! -[IO]> {
+        if self.terminal == .Val(error) -> return Err(error.copy())
+        encoding.__flush(&self.output) ?? return &self.fail(io_error(self.total, err))
+    }
+
+    fn finish(&self) EncodingError! -[IO]> {
+        if self.terminal == .Val(error) -> return Err(error.copy())
+        if self.finished -> return
+        if !self.renderer.is_finished() -> return &self.fail(writer_error(.State, self.total, "finish requires document_end"))
+        &self.flush() ?? return Err(err)
+        self.finished = true
+    }
+}
+
+fn writer(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, xml: XMLRenderOptions{XMLRenderOptions.safe()}) -> XMLWriter EncodingError! {
+    stream.validate_limits(limits) ?? {
+        error := err
+        error.format = .XML
+        error.line = None
+        error.column = None
+        return Err(error)
+    }
+    renderer :: engine.StreamWriter.new(kernel.render_encoding(xml.encoding), kernel.lexical_policy(xml.lexical))
+    XMLWriter{output: output, limits: limits, renderer: renderer, terminal: None, total: 0, finished: false, allocation: stream.budget(limits)}
+}
+
+fn writer_error(kind: EncodingErrorKind, offset: Int, reason: String) -> EncodingError Never! {
+    EncodingError{format: .XML, kind: kind, byte_offset: offset, line: None, column: None, path: "", reason: reason, cause: None}
 }
 
 fn stream_error(error: engine.XMLFault) -> EncodingError Never! {
@@ -265,17 +348,23 @@ fn io_error(offset: Int, cause: EncodingCause) -> EncodingError Never! {
         path: "", reason: "file IO failed", cause: Val(cause)}
 }
 
+// A Dyn slot is a pointer to a box of its tag word and widest payload, a List
+// header, so every projected Dyn owns both the slot and the box.
+fn dyn_heap_cost() -> Int Never! {
+    mem.__type_size<Dyn>() + mem.__type_size<Int>() + mem.__type_size<[Dyn]>()
+}
+
 fn value_heap_cost(value: Dyn) -> Int Never! {
     if value == {
         .Text(body) -> body.count_bytes()
         .Array(items) -> {
-            cost := items.len() * mem.__type_size<Dyn>()
+            cost := items.len() * dyn_heap_cost()
             loop item in items -> cost += value_heap_cost(item)
             cost
         }
         .Object(_) -> {
             entries :: stream.object_entries(value)
-            cost := entries.len() * mem.__type_size<(key: String, value: Dyn)>()
+            cost := entries.len() * (mem.__type_size<(key: String, value: Dyn)>() + dyn_heap_cost() - mem.__type_size<Dyn>())
             loop entry in entries -> cost += entry.key.count_bytes() + value_heap_cost(entry.value)
             cost
         }

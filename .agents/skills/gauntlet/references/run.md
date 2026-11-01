@@ -10,13 +10,12 @@ Use this playbook only for Run mode. Read
 2. Compare paired real programs in the same run. Compute each matched-cell and
    metric ratio independently. Never compare against a previous run's numbers.
 3. Apply the global performance law to every matched cell and metric:
-   - A Jet ratio `<1.00` against each peer is a strict win.
-   - Every non-Rust peer requires `<1.00`; a ratio `>=1.00` is a loss.
-   - Rust alone permits parity at `<=1.05`. The `1.05` ceiling rejects
-     measurement noise; it is not a target or win. A Rust ratio `>1.05` is a
-     loss.
+   - Every peer, Rust included, requires a Jet ratio `<1.00`; a ratio `>=1.00`
+     is a loss. No peer has a tolerance band.
+   - Beating every peer is the floor. The target is the machine's ceiling: code
+     as good as the best hand-written assembly for the workload.
    - Unmeasured, invalid, missing, or wrong-output data is a failure. It is not
-     a win, parity, or exclusion.
+     a win or an exclusion.
 4. List every matrix cell with no entry as **uncovered territory**. Unmeasured
    is not winning.
 
@@ -35,11 +34,10 @@ friction may be acceptable when labeled. Advisory rows never gate a result.
 Write one table-led scoreboard under `Docs/audits/` through the
 project-approved non-serve CLI. Honor the requested format; use HTML only when
 the owner explicitly asks for HTML or an interactive page. Show matrix cells
-× metrics with observed wins, parity, losses, and failures. Put losses and
+× metrics with observed wins, losses, and failures. Put losses and
 failures first, but
 do not invent a loss: a zero-loss report is valid when the required coverage is
-complete and every result is valid. Show each peer-specific ceiling and separate
-strict wins from Rust-only measurement-noise parity.
+complete and every result is valid. Show the `<1.00` ceiling for every peer.
 
 Include the beat table: where Jet wins categorically, what mechanism creates the
 win, and what a peer would have to break to match it. Mark shipped versus

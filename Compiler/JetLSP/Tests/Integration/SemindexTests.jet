@@ -326,7 +326,7 @@ use std.process.[Command]
     root :: env.temp_dir().join("jet_semantic_imports_{process.id()}")
     _ :: fs.remove_dir_all(root)
     fs.create_dir_all(root).unwrap()
-    fs.write(root.join("library.jet"), "pub fn score(name: String) -> Int {{ return 1 }}\n").unwrap()
+    fs.write(root.join("library.jet"), "fn score(name: String) -> Int {{ return 1 }}\n").unwrap()
     main :: root.join("main.jet")
     fs.write(main, "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() {{ print(imported_score(\"Ada\")) }}\n").unwrap()
     symbols :: open_symbols(main).expect("import symbols")
@@ -355,8 +355,8 @@ use std.process.[Command]
 
 // Rust: tests/semindex.rs:814
 #Test("semindex_identity_stable_across_reorder") {
-    a :: "\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
-    b :: "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    pub fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+    a :: "\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
+    b :: "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
     path :: temp_fixture("identity_reorder.jet", a)
     before :: open(path).expect("first fixture indexes")
     fs.write(path, b).expect("rewrite semindex fixture")
@@ -511,7 +511,7 @@ use std.process.[Command]
 
 // Rust: tests/semindex.rs:1226
 #Test("semindex_projects_inline_module_inferred_effects") {
-    path :: temp_fixture("inline_inferred_effect_signature.jet", "module inner {{ pub fn announce() {{ print(\"hello\") }} }}\nfn run() {{ inner.announce() }}\n")
+    path :: temp_fixture("inline_inferred_effect_signature.jet", "module inner {{ fn announce() {{ print(\"hello\") }} }}\nfn run() {{ inner.announce() }}\n")
     symbols :: open_symbols(path).expect("inline inferred effects index")
     announce :: symbols.lookup("announce")
     assert_eq(announce.len(), 1)

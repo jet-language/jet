@@ -1,0 +1,24 @@
+# crypto.sha256 takes `[U8] | String` (#5960 C2). "hello" hashed as a String
+# and as its UTF-8 [U8] give the same digest on every tier; the expected hex is
+# the FIPS 180-4 SHA-256 of the UTF-8 bytes (coreutils sha256sum).
+fixture: fixtures/crypto_sha256_text_hashes_utf8_bytes
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = crypto_sha256_text_hashes_utf8_bytes.out
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = crypto_sha256_text_hashes_utf8_bytes.out
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = crypto_sha256_text_hashes_utf8_bytes.out
+stderr: empty
+step: jet build --optimize=full main.jet
+exit: 0
+step aot2: built
+exit: 0
+stdout: = crypto_sha256_text_hashes_utf8_bytes.out

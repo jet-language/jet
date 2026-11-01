@@ -1,8 +1,8 @@
 # Compiler speed: one build path
 
-Jet has one compiler meaning and one native build path. Until native in-memory
-O0 lands, `jet run` and `jet dev` build through it and execute the result
-(D-EXEC2=A); the release profile produces an optimized artifact. This page is
+Jet has one compiler meaning and one native build path. `jet run` and `jet dev`
+compile at O0 through it and run the linked image from memory, without writing
+an executable (D-EXEC2=A); the release profile produces an optimized artifact. This page is
 for compiler contributors and users reasoning
 about build/run trade-offs. The executable perf schema and gate are in
 [`Tools/perf/ci-perf-check.sh`](../../../Tools/perf/ci-perf-check.sh), with
@@ -118,10 +118,20 @@ measured deltas, not projections from older or differently configured runs.
 ## Performance gate and dated evidence
 
 The repository gate compares each matched cell and metric independently. Every
-non-Rust peer requires Jet/peer below `1.00`; Rust permits parity only at a
-Jet/Rust ratio of `1.05` or lower, which is a noise band rather than a win.
+peer, Rust included, requires Jet/peer below `1.00`; no peer has a tolerance
+band.
 Missing, wrong, unavailable, uncovered, mismatched, or inconclusive evidence
 cannot be averaged away.
+
+The build system has its own required peer: Nix, in the `build_system` axis of
+`Tools/gauntlet/measurement-manifest.json` (harness
+`Tools/gauntlet/harness/build-system.mjs`). Both build the same medium project.
+Jet builds it as a package with a `fn build` program, and Nix builds it as a
+flake. The five paired cells are configuration evaluation (`jet check` of
+`@build.jet` against `nix eval`), no-op rebuild, one-file incremental rebuild,
+a cold build while a populated cache or substituter holds the result, and a
+hermetic build from scratch. Evaluation, no-op and incremental each need
+Jet/Nix at or below `0.25`; the other two need it below `1.00`.
 
 A dated receipt is historical evidence, not a live status claim:
 [`performance-receipt.md`](../../audits/performance-receipt.md). The scripts

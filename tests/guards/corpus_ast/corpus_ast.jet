@@ -2,10 +2,11 @@
 // This package requires compiler packages with their Tests/ trees excluded.
 use jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
 use jet_foundation.[CORE_MODULE_EXPORTS]
-use jet_parser.parse_source
+use jet_parser.[parse_source, jfmt_stmt_span]
 use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
+use jet_pkg_model.[PackageFacts]
 use core.files as policy_ast_files
-use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
+use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, PolicyInventory, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_discover_manifest_files, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
 
 POLICY_TASK_INTERNAL_PREFIX :: comptime { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
 POLICY_TASK_INTERNAL_RECEIVER :: comptime { "{POLICY_TASK_INTERNAL_PREFIX}jet.task" }
@@ -29,7 +30,7 @@ fn policy_parse_program(source_label: String, source: String) -> Program PolicyE
 fn policy_strip_inline_package(source: String, tokens: [Token]) -> String {
     first := 0
     loop first < tokens.len() && (tokens[first].kind == TOKEN_LINE_COMMENT || tokens[first].kind == TOKEN_BLOCK_COMMENT) -> first += 1
-    if first == tokens.len() || tokens[first].kind != TOKEN_IDENT || tokens[first].payload.text != "package" -> return source.copy()
+    if first == tokens.len() || tokens[first].kind != TOKEN_IDENT || policy_slice_bytes(source, tokens[first].span.start, tokens[first].span.end) != "package" -> return source.copy()
     opener := first + 1
     loop opener < tokens.len() && tokens[opener].kind != TOKEN_LBRACE -> opener += 1
     if opener == tokens.len() -> return source.copy()
@@ -51,14 +52,16 @@ fn policy_ast_test_compiler_dependency() {
 }
 #Test("corpus policy compiler AST dependency") { policy_ast_test_compiler_dependency() }
 
-fn policy_without_parens(expression: Expr) -> View<Expr> from expression {
+fn policy_without_parens(expression: Expr) -> Expr {
     current := expression
-    loop true {
-        if current == {
-            .Paren(inner, _) -> current = inner
-            else -> return current
+    loop {
+        if current == .Paren(inner, _, _) {
+            current = inner
+        } else {
+            break
         }
     }
+    current
 }
 fn policy_site(kind: String, span: Span) -> String {
     "{kind}@{span.start}..{span.end}"
@@ -73,57 +76,60 @@ enum PolicyWalkNode {
 fn policy_push_body(stack: &[PolicyWalkNode], body: [Stmt]) {
     index := body.len()
     loop index > 0 { index -= 1
-        &stack.push(PolicyWalkNode.Statement(body[index]))
+        &stack.push(PolicyWalkNode.Statement{value: body[index]})
     }
 }
 fn policy_push_args(stack: &[PolicyWalkNode], args: [CallArg]) {
     index := args.len()
     loop index > 0 { index -= 1
-        &stack.push(PolicyWalkNode.Expression(args[index].expr))
+        &stack.push(PolicyWalkNode.Expression{value: args[index].expr})
     }
 }
-fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+// `visited` receives every expression in walk preorder. Callers loop over the
+// list instead of passing a visitor: a lambda that captures a list it pushes to
+// consumes that list (E0121), so accumulating callers could not use it after.
+fn policy_walk(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
     loop stack.len() > 0 {
         node :: &stack.pop() ?? panic("corpus walk node")
         if node == {
             .Statement(statement) -> {
                 if statement == {
                     .Expr(value) | .DeferClose(value, _) | .BreakValue(value, _) |
-                    .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> &stack.push(PolicyWalkNode.Expression(value))
+                    .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> &stack.push(PolicyWalkNode.Expression{value: value})
                     .Val(binding) -> {
                         if binding.pattern == .Val(.Refutable(pattern, fallback, _, _)) {
-                            &stack.push(PolicyWalkNode.Fallback(fallback))
-                            &stack.push(PolicyWalkNode.MatchPattern(pattern))
+                            &stack.push(PolicyWalkNode.Fallback{value: fallback})
+                            &stack.push(PolicyWalkNode.MatchPattern{value: pattern})
                         }
-                        &stack.push(PolicyWalkNode.Expression(binding.init))
+                        &stack.push(PolicyWalkNode.Expression{value: binding.init})
                     }
                     .Assign(target, _, _, value) -> {
-                        &stack.push(PolicyWalkNode.Expression(value))
+                        &stack.push(PolicyWalkNode.Expression{value: value})
                         if target == {
                             .Index(base, index, _, _) -> {
-                                &stack.push(PolicyWalkNode.Expression(index))
-                                &stack.push(PolicyWalkNode.Expression(base))
+                                &stack.push(PolicyWalkNode.Expression{value: index})
+                                &stack.push(PolicyWalkNode.Expression{value: base})
                             }
-                            .Field(base, _, _) -> &stack.push(PolicyWalkNode.Expression(base))
+                            .Field(base, _, _) -> &stack.push(PolicyWalkNode.Expression{value: base})
                             else -> {}
                         }
                     }
-                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner)) }
+                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner}) }
                     .While(condition, body, _, _, _) -> {
                         policy_push_body(&stack, body)
-                        &stack.push(PolicyWalkNode.Expression(condition))
+                        &stack.push(PolicyWalkNode.Expression{value: condition})
                     }
                     .For(_, _, _, kind, body, _, _, _, _) -> {
                         policy_push_body(&stack, body)
                         if kind == {
                             .Range(start, end, step, _) -> {
-                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
-                                &stack.push(PolicyWalkNode.Expression(end))
-                                &stack.push(PolicyWalkNode.Expression(start))
+                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                                &stack.push(PolicyWalkNode.Expression{value: end})
+                                &stack.push(PolicyWalkNode.Expression{value: start})
                             }
                             .In(collection, step) -> {
-                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
-                                &stack.push(PolicyWalkNode.Expression(collection))
+                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                                &stack.push(PolicyWalkNode.Expression{value: collection})
                             }
                         }
                     }
@@ -132,9 +138,9 @@ fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
                         index := arms.len()
                         loop index > 0 { index -= 1
                             policy_push_body(&stack, arms[index].body)
-                            &stack.push(PolicyWalkNode.Expression(arms[index].cond))
+                            &stack.push(PolicyWalkNode.Expression{value: arms[index].cond})
                         }
-                        &stack.push(PolicyWalkNode.Expression(subject))
+                        &stack.push(PolicyWalkNode.Expression{value: subject})
                     }
                     .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) |
                     .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) |
@@ -142,153 +148,153 @@ fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
                     .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> policy_push_body(&stack, body)
                     .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
                         policy_push_body(&stack, body)
-                        if reason == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                        if reason == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .CountedLoop(init, condition, step, body, _, _, _) -> {
                         policy_push_body(&stack, body)
-                        if step == .Val(value) -> &stack.push(PolicyWalkNode.Statement(value))
-                        &stack.push(PolicyWalkNode.Expression(condition))
-                        &stack.push(PolicyWalkNode.Expression(init.init))
+                        if step == .Val(value) -> &stack.push(PolicyWalkNode.Statement{value: value})
+                        &stack.push(PolicyWalkNode.Expression{value: condition})
+                        &stack.push(PolicyWalkNode.Expression{value: init.init})
                     }
                     .TaskGroup(_, _, limit, body, _) -> {
                         policy_push_body(&stack, body)
-                        if limit == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                        if limit == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .ContextBlock(fields, body, _) -> {
                         policy_push_body(&stack, body)
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                            &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
                     .AssumeDet(_, reason, body, _) -> {
                         policy_push_body(&stack, body)
-                        &stack.push(PolicyWalkNode.Expression(reason))
+                        &stack.push(PolicyWalkNode.Expression{value: reason})
                     }
                     .ComptimeIf(condition, _, then_body, other, _, _) -> {
                         if other == .Val(body) -> policy_push_body(&stack, body)
                         policy_push_body(&stack, then_body)
-                        &stack.push(PolicyWalkNode.Expression(condition))
+                        &stack.push(PolicyWalkNode.Expression{value: condition})
                     }
                     .ScopeMember(_, _, args, _, body, _, _, _) -> {
                         policy_push_body(&stack, body)
                         index := args.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression(args[index]))
+                            &stack.push(PolicyWalkNode.Expression{value: args[index]})
                         }
                     }
                     else -> {}
                 }
             }
             .Expression(expression) -> {
-                visitor(expression)
+                &visited.push(expression)
                 if expression == {
-                    .Str(parts, _) -> {
+                    .Str(parts, _, _) -> {
                         index := parts.len()
                         loop index > 0 { index -= 1
-                            if parts[index] == .Interp(value, _) -> &stack.push(PolicyWalkNode.Expression(value))
+                            if parts[index] == .Interp(value, _) -> &stack.push(PolicyWalkNode.Expression{value: value})
                         }
                     }
-                    .ListLit(values, _) | .CompareChain(values, _, _, _) -> {
+                    .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> {
                         index := values.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression(values[index]))
+                            &stack.push(PolicyWalkNode.Expression{value: values[index]})
                         }
                     }
-                    .MemberSpread(value, _, _) | .Spread(value, _) | .Deref(value, _) |
-                    .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) |
-                    .OptField(value, _, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) |
-                    .Paren(value, _) | .Unary(_, value, _) | .Tainted(value, _, _) |
-                    .PtrFromAddr(_, _, _, value, _) -> &stack.push(PolicyWalkNode.Expression(value))
-                    .Try(value, _, _, note) -> {
-                        if note == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner))
-                        &stack.push(PolicyWalkNode.Expression(value))
+                    .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Deref(value, _, _) |
+                    .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) | .Field(value, _, _, _) |
+                    .OptField(value, _, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) |
+                    .Paren(value, _, _) | .Unary(_, value, _, _) | .Tainted(value, _, _, _) |
+                    .PtrFromAddr(_, _, _, value, _, _) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                    .Try(value, _, _, note, _) -> {
+                        if note == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner})
+                        &stack.push(PolicyWalkNode.Expression{value: value})
                     }
-                    .MapLit(entries, _) -> {
+                    .MapLit(entries, _, _) -> {
                         index := entries.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression(entries[index].value))
-                            &stack.push(PolicyWalkNode.Expression(entries[index].key))
+                            &stack.push(PolicyWalkNode.Expression{value: entries[index].value})
+                            &stack.push(PolicyWalkNode.Expression{value: entries[index].key})
                         }
                     }
-                    .Index(base, index, _, _) | .Binary(_, base, index, _) |
-                    .Range(base, index, _, _) -> {
-                        &stack.push(PolicyWalkNode.Expression(index))
-                        &stack.push(PolicyWalkNode.Expression(base))
+                    .Index(base, index, _, _, _) | .Binary(_, base, index, _, _) |
+                    .Range(base, index, _, _, _) -> {
+                        &stack.push(PolicyWalkNode.Expression{value: index})
+                        &stack.push(PolicyWalkNode.Expression{value: base})
                     }
-                    .Slice(base, start, end, range, _) -> {
-                        if range == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
-                        &stack.push(PolicyWalkNode.Expression(end))
-                        &stack.push(PolicyWalkNode.Expression(start))
-                        &stack.push(PolicyWalkNode.Expression(base))
+                    .Slice(base, start, end, range, _, _) -> {
+                        if range == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                        &stack.push(PolicyWalkNode.Expression{value: end})
+                        &stack.push(PolicyWalkNode.Expression{value: start})
+                        &stack.push(PolicyWalkNode.Expression{value: base})
                     }
-                    .Call(call) -> policy_push_args(&stack, call.args)
-                    .MethodCall(receiver, _, _, _, _, args) |
-                    .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+                    .Call(call, _) -> policy_push_args(&stack, call.args)
+                    .MethodCall(receiver, _, _, _, _, args, _) |
+                    .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
                         policy_push_args(&stack, args)
-                        &stack.push(PolicyWalkNode.Expression(receiver))
+                        &stack.push(PolicyWalkNode.Expression{value: receiver})
                     }
-                    .StructLit(_, _, _, _, fields, _, _) -> {
+                    .StructLit(_, _, _, _, fields, _, _, _) -> {
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                            &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
-                    .TupleLit(fields, _, _) -> {
+                    .TupleLit(fields, _, _, _) -> {
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                            &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
-                    .TypedLit(_, body, _) -> {
+                    .TypedLit(_, body, _, _) -> {
                         if body == {
                             .Fields(fields) -> {
                                 index := fields.len()
                                 loop index > 0 { index -= 1
-                                    &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                                    &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                                 }
                             }
                             .Elements(values) -> {
                                 index := values.len()
                                 loop index > 0 { index -= 1
-                                    &stack.push(PolicyWalkNode.Expression(values[index]))
+                                    &stack.push(PolicyWalkNode.Expression{value: values[index]})
                                 }
                             }
                             .Entries(entries) -> {
                                 index := entries.len()
                                 loop index > 0 { index -= 1
-                                    &stack.push(PolicyWalkNode.Expression(entries[index].value))
-                                    &stack.push(PolicyWalkNode.Expression(entries[index].key))
+                                    &stack.push(PolicyWalkNode.Expression{value: entries[index].value})
+                                    &stack.push(PolicyWalkNode.Expression{value: entries[index].key})
                                 }
                             }
-                            .Value(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                            .Value(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
                             else -> {}
                         }
                     }
-                    .EnumLit(_, _, _, args, _, _) -> {
+                    .EnumLit(_, _, _, args, _, _, _) -> {
                         index := args.len()
                         loop index > 0 { index -= 1
-                            if args[index] == { .Positional(value) | .Named(_, value) -> &stack.push(PolicyWalkNode.Expression(value)) }
+                            if args[index] == { .Positional(value) | .Named(_, value) -> &stack.push(PolicyWalkNode.Expression{value: value}) }
                         }
                     }
-                    .PatternTest(subject, pattern, _) -> {
-                        &stack.push(PolicyWalkNode.MatchPattern(pattern))
-                        &stack.push(PolicyWalkNode.Expression(subject))
+                    .PatternTest(subject, pattern, _, _) -> {
+                        &stack.push(PolicyWalkNode.MatchPattern{value: pattern})
+                        &stack.push(PolicyWalkNode.Expression{value: subject})
                     }
-                    .OrFallback(value, fallback, _, _) -> {
-                        &stack.push(PolicyWalkNode.Fallback(fallback))
-                        &stack.push(PolicyWalkNode.Expression(value))
+                    .OrFallback(value, fallback, _, _, _) -> {
+                        &stack.push(PolicyWalkNode.Fallback{value: fallback})
+                        &stack.push(PolicyWalkNode.Expression{value: value})
                     }
-                    .If(condition, then_body, then_value, else_body, else_value, _) -> {
-                        &stack.push(PolicyWalkNode.Expression(else_value))
+                    .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
+                        &stack.push(PolicyWalkNode.Expression{value: else_value})
                         policy_push_body(&stack, else_body)
-                        &stack.push(PolicyWalkNode.Expression(then_value))
+                        &stack.push(PolicyWalkNode.Expression{value: then_value})
                         policy_push_body(&stack, then_body)
-                        &stack.push(PolicyWalkNode.Expression(condition))
+                        &stack.push(PolicyWalkNode.Expression{value: condition})
                     }
-                    .Lambda(lambda) -> {
+                    .Lambda(lambda, _) -> {
                         if lambda.body == {
-                            .Expr(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                            .Expr(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
                             .Block(body) -> policy_push_body(&stack, body)
                         }
                     }
@@ -300,13 +306,13 @@ fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
                     .Or(alternatives, _) -> {
                         index := alternatives.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.MatchPattern(alternatives[index]))
+                            &stack.push(PolicyWalkNode.MatchPattern{value: alternatives[index]})
                         }
                     }
-                    .Struct(fields, _, _) -> {
+                    .Struct(fields, _, _, _) -> {
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            if fields[index] == .Value(_, _, value) -> &stack.push(PolicyWalkNode.Expression(value))
+                            if fields[index] == .Value(_, _, value) -> &stack.push(PolicyWalkNode.Expression{value: value})
                         }
                     }
                     else -> {}
@@ -314,12 +320,12 @@ fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
             }
             .Fallback(fallback) -> {
                 if fallback == {
-                    .Value(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                    .Value(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
                     .Block(body, value, _) -> {
-                        if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner))
+                        if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner})
                         policy_push_body(&stack, body)
                     }
-                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner)) }
+                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner}) }
                     .Panic(_, args) -> policy_push_args(&stack, args)
                     else -> {}
                 }
@@ -327,26 +333,39 @@ fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
         }
     }
 }
-fn policy_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+fn policy_body_expressions(body: [Stmt]) -> [Expr] {
     stack := [PolicyWalkNode]{}
     policy_push_body(&stack, body)
-    policy_walk(&stack, visitor)
+    visited := [Expr]{}
+    policy_walk(&stack, &visited)
+    visited
 }
-fn policy_visit_expression(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    stack := [PolicyWalkNode]{PolicyWalkNode.Expression(expression)}
-    policy_walk(&stack, visitor)
-}
-fn policy_visit_program(program: Program, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    policy_visit_body(program.script_body, visitor)
+fn policy_program_expressions(program: Program) -> [Expr] {
+    visited := policy_body_expressions(program.script_body)
     loop item in program.items {
         if item == {
-            .Func(function) -> policy_visit_body(function.body, visitor)
+            .Func(function) -> { loop expression in policy_body_expressions(function.body) -> &visited.push(expression) }
             .Struct(structure) -> {
-                loop method in structure.methods -> policy_visit_body(method.body, visitor)
+                loop method in structure.methods {
+                    loop expression in policy_body_expressions(method.body) -> &visited.push(expression)
+                }
             }
             else -> {}
         }
     }
+    visited
+}
+fn policy_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop expression in policy_body_expressions(body) -> visitor(expression)
+}
+fn policy_visit_expression(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    stack := [PolicyWalkNode]{PolicyWalkNode.Expression{value: expression}}
+    visited := [Expr]{}
+    policy_walk(&stack, &visited)
+    loop child in visited -> visitor(child)
+}
+fn policy_visit_program(program: Program, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop expression in policy_program_expressions(program) -> visitor(expression)
 }
 fn policy_module_aliases(program: Program) -> [String: String] {
     aliases := [String: String]{}
@@ -361,13 +380,13 @@ fn policy_module_aliases(program: Program) -> [String: String] {
     aliases
 }
 fn policy_receiver_is(expression: Expr, expected: String, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .Ident(name, _) {
+    if policy_without_parens(expression) == .Ident(name, _, _) {
         return name == expected || (aliases.get(name) ?? "") == ("core.{expected}")
     }
     false
 }
 fn policy_ident_is(expression: Expr, expected: String) -> Bool {
-    if policy_without_parens(expression) == .Ident(name, _) -> return name == expected
+    if policy_without_parens(expression) == .Ident(name, _, _) -> return name == expected
     false
 }
 fn policy_named_type(ty: Type, expected: String) -> Bool {
@@ -380,34 +399,34 @@ fn policy_named_type(ty: Type, expected: String) -> Bool {
     }
 }
 fn policy_literal_string(expression: Expr, expected: String) -> Bool {
-    if policy_without_parens(expression) == .Str(parts, _) {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> return text == expected
     }
     false
 }
 fn policy_is_process_input(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
         return (method == "argv" || method == "args") && policy_receiver_is(receiver, "process", aliases)
     }
     false
 }
 fn policy_is_process_argv(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
         return method == "argv" && policy_receiver_is(receiver, "process", aliases)
     }
     false
 }
 fn policy_is_process_argv_view(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
-        if method == "skip" && args.len() > 0 && policy_without_parens(args[0].expr) == .Int(value, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method == "skip" && args.len() > 0 && policy_without_parens(args[0].expr) == .Int(value, _, _, _, _) {
             return value == 1 && policy_is_process_argv(receiver, aliases)
         }
     }
     false
 }
 fn policy_is_legacy_digest_call(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
-        if method == "sha256_bytes" && policy_without_parens(receiver) == .Ident(name, _) -> return (aliases.get(name) ?? "") == "core.crypto"
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
+        if method == "sha256_bytes" && policy_without_parens(receiver) == .Ident(name, _, _) -> return (aliases.get(name) ?? "") == "core.crypto"
     }
     false
 }
@@ -417,8 +436,8 @@ fn policy_duration_method(method: String) -> Bool {
 }
 fn policy_nonnegative_numeric_literal(expression: Expr) -> Bool {
     if policy_without_parens(expression) == {
-        .Int(value, _, _, _) -> return value >= 0 && value < 9223372036854775807
-        .Float(value, _, _, _) -> return value.is_finite() && value >= 0.0 && value < 9223372036854775808.0
+        .Int(value, _, _, _, _) -> return value >= 0 && value < 9223372036854775807
+        .Float(value, _, _, _, _) -> return value.is_finite() && value >= 0.0 && value < 9223372036854775808.0
         else -> return false
     }
 }
@@ -426,26 +445,26 @@ fn policy_constant_expression(expression: Expr) -> Bool {
     constant := true
     policy_visit_expression(expression, (child) -> {
         if policy_without_parens(child) == {
-            .Str(parts, _) -> {
+            .Str(parts, _, _) -> {
                 loop part in parts { if part == .Interp(_, _) -> constant = false }
             }
-            .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) |
-            .UnitLit(_, _, _, _, _, _) | .ListLit(_, _) | .TupleLit(_, _, _) |
-            .MapLit(_, _) | .Unary(_, _, _) | .Binary(_, _, _, _) -> {}
+            .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) |
+            .UnitLit(_, _, _, _, _, _, _) | .ListLit(_, _, _) | .TupleLit(_, _, _, _) |
+            .MapLit(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) -> {}
             else -> constant = false
         }
     })
     constant
 }
 fn policy_is_constant_duration(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
         return policy_receiver_is(receiver, "Duration", aliases) && policy_duration_method(method) &&
             args.len() > 0 && policy_nonnegative_numeric_literal(args[0].expr) && policy_constant_expression(args[0].expr)
     }
     false
 }
 fn policy_plain_fixed_projection(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .Str(parts, _) {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Interp(_, format) {
             if format == .Fixed(_) -> return true
         }
@@ -453,14 +472,14 @@ fn policy_plain_fixed_projection(expression: Expr) -> Bool {
     false
 }
 fn policy_is_redundant_fixed_cleanup(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
         return method == "replace" && args.len() == 2 && policy_literal_string(args[0].expr, ",") &&
             policy_literal_string(args[1].expr, "") && policy_plain_fixed_projection(receiver)
     }
     false
 }
 fn policy_is_unit_projection(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
         return (args.len() == 0 && method == "raw") || method == "in"
     }
     false
@@ -469,15 +488,15 @@ fn policy_direct_scalar(expression: Expr) -> Bool {
     current := expression
     loop true {
         if policy_without_parens(current) == {
-            .Int(_, _, _, _) | .Float(_, _, _, _) | .Ident(_, _) -> return true
-            .Unary(op, inner, _) -> {
+            .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Ident(_, _, _) -> return true
+            .Unary(op, inner, _, _) -> {
                 if op != UnOp.Neg -> return false
                 if policy_without_parens(inner) == {
-                    .Int(_, _, _, _) | .Float(_, _, _, _) -> return true
+                    .Int(_, _, _, _, _) | .Float(_, _, _, _, _) -> return true
                     else -> return false
                 }
             }
-            .MethodCall(receiver, method, _, _, _, args) -> {
+            .MethodCall(receiver, method, _, _, _, args, _) -> {
                 if method != "from_int" || args.len() != 1 || !policy_ident_is(receiver, "Float") -> return false
                 current = args[0].expr
             }
@@ -486,10 +505,10 @@ fn policy_direct_scalar(expression: Expr) -> Bool {
     }
 }
 fn policy_is_unit_scalar_rewrap(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
         constructor :: method.starts_with("from_") || (policy_receiver_is(receiver, "Duration", aliases) && policy_duration_method(method))
         if !constructor || args.len() != 1 -> return false
-        if policy_without_parens(args[0].expr) == .Binary(operator, left, right, _) {
+        if policy_without_parens(args[0].expr) == .Binary(operator, left, right, _, _) {
             return (operator == BinOp.Mul || operator == BinOp.Div) &&
                 ((policy_is_unit_projection(left) && policy_direct_scalar(right)) ||
                 (operator == BinOp.Mul && policy_direct_scalar(left) && policy_is_unit_projection(right)))
@@ -504,20 +523,26 @@ fn policy_readonly_file_args(module_name: String, method: String, args: [jet_fou
     if !policy_module_is_files(module_name, aliases) -> return false
     if method != "read" && method != "read_bytes" && method != "read_at" && method != "read_link" && method != "stat" && method != "list_dir" -> return false
     loop argument in args {
-        if argument.convention == AccessConvention.Read && policy_without_parens(argument.expr) == .Copy(_, _) -> return true
+        if argument.convention == AccessConvention.Read && policy_is_copy_call(policy_without_parens(argument.expr)) -> return true
     }
+    false
+}
+// D-COPY-WORD1=A: this corpus policy runs on parsed source, where `x.copy()`
+// is an ordinary zero-argument method call (sema makes it the copy).
+fn policy_is_copy_call(expression: Expr) -> Bool {
+    if expression == .MethodCall(_, method, _, _, type_args, args, _) -> return method == "copy" && args.is_empty() && type_args.is_empty()
     false
 }
 fn policy_is_readonly_copy(expression: Expr, aliases: [String: String]) -> Bool {
     if policy_without_parens(expression) == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             parts :: call.name.split(".").to_list()
             if parts.len() < 2 -> return false
             method :: parts[parts.len() - 1]
             module_name :: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
             return policy_readonly_file_args(module_name, method, call.args, aliases)
         }
-        .MethodCall(receiver, method, _, _, _, args) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
             return policy_receiver_is(receiver, "files", aliases) && policy_readonly_file_args("files", method, args, aliases)
         }
         else -> return false
@@ -530,26 +555,26 @@ fn policy_io_module(module_name: String, aliases: [String: String]) -> Bool {
 }
 fn policy_is_io_call(expression: Expr, aliases: [String: String]) -> Bool {
     if policy_without_parens(expression) == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             parts :: call.name.split(".").to_list()
             if parts.len() < 2 -> return false
             leaf :: parts[parts.len() - 1]
             return policy_io_module(policy_slice_bytes(call.name, 0, call.name.bytes().len() - leaf.bytes().len() - 1), aliases)
         }
-        .MethodCall(receiver, _, _, _, _, _) -> return policy_receiver_is(receiver, "files", aliases) || policy_receiver_is(receiver, "io", aliases) || policy_receiver_is(receiver, "env", aliases)
+        .MethodCall(receiver, _, _, _, _, _, _) -> return policy_receiver_is(receiver, "files", aliases) || policy_receiver_is(receiver, "io", aliases) || policy_receiver_is(receiver, "env", aliases)
         else -> return false
     }
 }
 fn policy_err_constructor(expression: Expr) -> Bool {
     if policy_without_parens(expression) == {
-        .Call(call) -> return call.name == "Err"
-        .EnumLit(_, variant, _, _, _, _) -> return variant == "Err"
-        .Err(_, _) -> return true
+        .Call(call, _) -> return call.name == "Err"
+        .EnumLit(_, variant, _, _, _, _, _) -> return variant == "Err"
+        .Err(_, _, _) -> return true
         else -> return false
     }
 }
 fn policy_is_identity_fallback(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .OrFallback(value, fallback, _, _) {
+    if policy_without_parens(expression) == .OrFallback(value, fallback, _, _, _) {
         if fallback == .Return(error, _) {
             if !policy_is_io_call(value, aliases) -> return false
             if error == {
@@ -561,7 +586,7 @@ fn policy_is_identity_fallback(expression: Expr, aliases: [String: String]) -> B
     false
 }
 fn policy_is_http_request_value(expression: Expr, program: Program) -> Bool {
-    if policy_without_parens(expression) == .Ident(name, _) {
+    if policy_without_parens(expression) == .Ident(name, _, _) {
         loop item in program.items {
             if item == .Func(function) {
                 loop parameter in function.params {
@@ -573,25 +598,25 @@ fn policy_is_http_request_value(expression: Expr, program: Program) -> Bool {
     false
 }
 fn policy_is_http_ceremony(expression: Expr, program: Program) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
         return method == "body" && args.len() > 0 && policy_is_http_request_value(receiver, program)
     }
     false
 }
 fn policy_is_http_message_text(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args) {
-        if method == "text" && args.len() > 0 && policy_without_parens(receiver) == .MethodCall(_, inner_method, _, _, _, _) -> return inner_method == "body"
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method == "text" && args.len() > 0 && policy_without_parens(receiver) == .MethodCall(_, inner_method, _, _, _, _, _) -> return inner_method == "body"
     }
     false
 }
 fn policy_is_raw_delimited_split(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
         return method == "split" && args.len() > 0 && policy_literal_string(args[0].expr, "\t")
     }
     false
 }
 fn policy_is_build_command_literal(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .Str(parts, _) {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
         loop part in parts { if part == .Lit(text) && text.contains("jet build") -> return true }
     }
     false
@@ -599,23 +624,25 @@ fn policy_is_build_command_literal(expression: Expr) -> Bool {
 fn policy_is_hand_json_wire(expression: Expr) -> Bool {
     interpolated := false
     object_shape := false
-    if policy_without_parens(expression) == .Str(parts, _) {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
         loop part in parts {
             if part == {
                 .Interp(_, _) -> interpolated = true
                 .Lit(text) -> { if text.contains("{{") && text.contains(":") -> object_shape = true }
+                else -> {}
             }
         }
     }
     interpolated && object_shape
 }
 fn policy_is_string_prefix_containment(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
-        if method == "starts_with" && args.len() > 0 && policy_without_parens(args[0].expr) == .Str(parts, _) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
+        if method == "starts_with" && args.len() > 0 && policy_without_parens(args[0].expr) == .Str(parts, _, _) {
             loop part in parts {
                 if part == {
                     .Interp(_, _) -> return true
                     .Lit(text) -> { if text.len() > 1 && text.ends_with("/") -> return true }
+                    else -> {}
                 }
             }
         }
@@ -623,34 +650,34 @@ fn policy_is_string_prefix_containment(expression: Expr) -> Bool {
     false
 }
 fn policy_is_url_query_reparse(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
         return method == "split" && args.len() > 0 && (policy_literal_string(args[0].expr, "&") || policy_literal_string(args[0].expr, "="))
     }
     false
 }
 fn policy_is_named_list_equality(expression: Expr) -> Bool {
     if policy_without_parens(expression) == {
-        .Call(call) -> return call.name == "same_strings"
-        .MethodCall(_, method, _, _, _, _) -> return method == "same_strings"
+        .Call(call, _) -> return call.name == "same_strings"
+        .MethodCall(_, method, _, _, _, _, _) -> return method == "same_strings"
         else -> return false
     }
 }
 fn policy_is_non_idempotent_directory(expression: Expr, aliases: [String: String]) -> Bool {
     if policy_without_parens(expression) == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             parts :: call.name.split(".").to_list()
             if parts.len() < 2 -> return false
             method :: parts[parts.len() - 1]
             module_name :: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
             return method == "create_dir" && policy_module_is_files(module_name, aliases)
         }
-        .MethodCall(receiver, method, _, _, _, _) -> return method == "create_dir" && policy_receiver_is(receiver, "files", aliases)
+        .MethodCall(receiver, method, _, _, _, _, _) -> return method == "create_dir" && policy_receiver_is(receiver, "files", aliases)
         else -> return false
     }
 }
 
 fn policy_ascii_literal(expression: Expr) -> Int? {
-    if policy_without_parens(expression) == .Str(parts, _) {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
         if parts.len() != 1 -> return None
         if parts[0] == .Lit(text) {
             bytes :: text.bytes()
@@ -665,13 +692,13 @@ fn policy_is_ascii_replacement_chain(expression: Expr) -> Bool {
     lower := 0
     upper := 0
     loop true {
-        if policy_without_parens(current) == .MethodCall(receiver, method, _, _, _, args) {
+        if policy_without_parens(current) == .MethodCall(receiver, method, _, _, _, args, _) {
             if method != "replace" || args.len() != 2 -> break
             first :: policy_ascii_literal(args[0].expr) ?? break
             second :: policy_ascii_literal(args[1].expr) ?? break
             count += 1
-            if first >= 65 && first <= 90 && second == first + 32 -> lower |= 1 << (first - 65)
-            if first >= 97 && first <= 122 && second == first - 32 -> upper |= 1 << (first - 97)
+            if first >= 65 && first <= 90 && second == first + 32 -> lower = lower.bit_or(1 << (first - 65))
+            if first >= 97 && first <= 122 && second == first - 32 -> upper = upper.bit_or(1 << (first - 97))
             current = receiver
         } else {
             break
@@ -692,15 +719,15 @@ fn policy_effect_for_module(module_name: String, aliases: [String: String]) -> S
 }
 fn policy_expression_effect(expression: Expr, aliases: [String: String]) -> String? {
     if policy_without_parens(expression) == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             if call.name == "print" || call.name == "println" || call.name == "eprint" || call.name == "eprintln" -> return Val("IO")
             parts :: call.name.split(".").to_list()
             if parts.len() < 2 -> return None
             leaf :: parts[parts.len() - 1]
             return policy_effect_for_module(policy_slice_bytes(call.name, 0, call.name.bytes().len() - leaf.bytes().len() - 1), aliases)
         }
-        .MethodCall(receiver, _, _, _, _, _) -> {
-            if policy_without_parens(receiver) == .Ident(name, _) -> return policy_effect_for_module(name, aliases)
+        .MethodCall(receiver, _, _, _, _, _, _) -> {
+            if policy_without_parens(receiver) == .Ident(name, _, _) -> return policy_effect_for_module(name, aliases)
             return None
         }
         else -> return None
@@ -710,11 +737,11 @@ fn policy_redundant_effect_row(function: Func, aliases: [String: String]) -> Boo
     declared :: function.declared_effects ?? return false
     if declared.len() == 0 -> return false
     inferred := [String]{}
-    policy_visit_body(function.body, (expression) -> {
+    loop expression in policy_body_expressions(function.body) {
         if policy_expression_effect(expression, aliases) == .Val(effect_name) {
             if !inferred.contains(effect_name) -> &inferred.push(effect_name)
         }
-    })
+    }
     if inferred.len() == 0 || inferred.len() != declared.len() -> return false
     loop entry in declared {
         found := false
@@ -727,16 +754,16 @@ fn policy_is_task_expression(expression: Expr, only_all: Bool) -> Bool {
     current := expression
     loop true {
         if policy_without_parens(current) == {
-            .Call(call) -> {
+            .Call(call, _) -> {
                 if call.name == "task.all" || call.name == POLICY_TASK_INTERNAL_ALL -> return true
                 return !only_all && (call.name == "task.race" || call.name == "task.any" || call.name == POLICY_TASK_INTERNAL_RACE || call.name == POLICY_TASK_INTERNAL_ANY)
             }
-            .MethodCall(receiver, method, _, _, _, _) -> {
+            .MethodCall(receiver, method, _, _, _, _, _) -> {
                 if !policy_ident_is(receiver, "task") && !policy_ident_is(receiver, POLICY_TASK_INTERNAL_RECEIVER) -> return false
                 if method == "all" || method == POLICY_TASK_INTERNAL_ALL -> return true
                 return !only_all && (method == "race" || method == "any" || method == POLICY_TASK_INTERNAL_RACE || method == POLICY_TASK_INTERNAL_ANY)
             }
-            .OrFallback(value, _, _, _) -> current = value
+            .OrFallback(value, _, _, _, _) -> current = value
             else -> return false
         }
     }
@@ -757,11 +784,11 @@ fn policy_constant_bool_body(body: [Stmt]) -> Bool {
     if body.len() != 1 -> return false
     if body[0] == {
         .Expr(expression) -> {
-            if policy_without_parens(expression) == .Bool(_, _) -> return true
+            if policy_without_parens(expression) == .Bool(_, _, _) -> return true
         }
         .Return(value, _) -> {
             if value == .Val(expression) {
-                if policy_without_parens(expression) == .Bool(_, _) -> return true
+                if policy_without_parens(expression) == .Bool(_, _, _) -> return true
             }
         }
         else -> {}
@@ -774,14 +801,16 @@ fn policy_compares_parameter_pair(function: Func) -> Bool {
     right_name :: function.params[1].name
     found := false
     policy_visit_body(function.body, (expression) -> {
-        if policy_without_parens(expression) == .Binary(operator, left, right, _) {
+        if policy_without_parens(expression) == .Binary(operator, left, right, _, _) {
             if operator == BinOp.Eq && ((policy_ident_is(left, left_name) && policy_ident_is(right, right_name)) || (policy_ident_is(left, right_name) && policy_ident_is(right, left_name))) -> found = true
         }
     })
     found
 }
 fn policy_named_tower_truthiness(path: String, name: String) -> Bool {
-    if path != "dogfood/tower/run.jet" -> return false
+    // Tower moved from dogfood/tower to Tools/tower; the Rust final still named
+    // the retired path, so its own `javascript_truthy` assertion could not hold.
+    if path != "Tools/tower/run.jet" -> return false
     name == "javascript_truthy" || name == "javascript_truthy_null" || name == "javascript_truthy_bool" ||
     name == "javascript_truthy_int" || name == "javascript_truthy_float" || name == "javascript_truthy_text" ||
     name == "javascript_truthy_array" || name == "javascript_truthy_object"
@@ -821,7 +850,7 @@ fn policy_response_decoder(function: Func) -> Bool {
 fn policy_ordinary_envelope_decoder(function: Func) -> Bool {
     found := false
     policy_visit_body(function.body, (expression) -> {
-        if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args) {
+        if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
             if method == "field" && args.len() > 0 && policy_literal_string(args[0].expr, "ok") -> found = true
         }
     })
@@ -886,7 +915,7 @@ enum PolicyPendingBody {
 fn policy_indexes_sequence(init: Binding, body: [Stmt]) -> Bool {
     found := false
     policy_visit_body(body, (expression) -> {
-        if policy_without_parens(expression) == .Index(_, index, _, _) {
+        if policy_without_parens(expression) == .Index(_, index, _, _, _) {
             if policy_ident_is(index, init.name) -> found = true
         }
     })
@@ -895,7 +924,7 @@ fn policy_indexes_sequence(init: Binding, body: [Stmt]) -> Bool {
 fn policy_counter_increment(statement: Stmt, counter: String) -> Bool {
     if statement == .Assign(target, op, _, value) {
         if target == .Local(name, _) && name == counter && op == .Val(selected_op) && selected_op == BinOp.Add {
-            if policy_without_parens(value) == .Int(number, _, _, _) -> return number == 1
+            if policy_without_parens(value) == .Int(number, _, _, _, _) -> return number == 1
         }
     }
     false
@@ -913,14 +942,14 @@ fn policy_manual_counter_body(counter: String, body: [Stmt]) -> Bool {
     increments == 1 && used
 }
 fn policy_is_file_walk(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
         return method == "walk" && policy_receiver_is(receiver, "files", aliases)
     }
     false
 }
 fn policy_negative_directory_filter(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .Unary(op, inner, _) {
-        if op == UnOp.Not && policy_without_parens(inner) == .Field(_, member, _) -> return member == "is_dir"
+    if policy_without_parens(expression) == .Unary(op, inner, _, _) {
+        if op == UnOp.Not && policy_without_parens(inner) == .Field(_, member, _, _) -> return member == "is_dir"
     }
     false
 }
@@ -960,12 +989,12 @@ fn policy_collect_statement(statement: Stmt, aliases: [String: String], facts: &
                 if policy_is_task_statement(child, true) -> has_all = true
             }
             &facts.task_groups.push(PolicySpanFact{span: span, matches: combinators == 1 && !has_all})
-            &pending.push(PolicyPendingBody.Body(nested))
+            &pending.push(PolicyPendingBody.Body{body: nested})
         }
         .CountedLoop(init, _, step, nested, span, _, _) -> {
             &facts.counted_loops.push(PolicySpanFact{span: span, matches: policy_indexes_sequence(init, nested)})
-            &pending.push(PolicyPendingBody.Body(nested))
-            if step == .Val(child) -> &pending.push(PolicyPendingBody.Single(child))
+            &pending.push(PolicyPendingBody.Body{body: nested})
+            if step == .Val(child) -> &pending.push(PolicyPendingBody.Single{statement: child})
         }
         .While(_, nested, _, _, _) | .For(_, _, _, _, nested, _, _, _, _) |
         .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) |
@@ -973,24 +1002,24 @@ fn policy_collect_statement(statement: Stmt, aliases: [String: String], facts: &
         .Region(_, _, nested, _) | .Policy(_, nested, _) | .Layout(_, _, nested, _) |
         .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) |
         .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) |
-        .Transact(_, _, nested, _, _) | .ScopeMember(_, _, _, _, nested, _, _, _) -> &pending.push(PolicyPendingBody.Body(nested))
+        .Transact(_, _, nested, _, _) | .ScopeMember(_, _, _, _, nested, _, _, _) -> &pending.push(PolicyPendingBody.Body{body: nested})
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
-            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body(other))
+            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body{body: other})
             index := arms.len()
             loop index > 0 {
                 index -= 1
-                &pending.push(PolicyPendingBody.Body(arms[index].body))
+                &pending.push(PolicyPendingBody.Body{body: arms[index].body})
             }
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body(other))
-            &pending.push(PolicyPendingBody.Body(then_body))
+            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body{body: other})
+            &pending.push(PolicyPendingBody.Body{body: then_body})
         }
         else -> {}
     }
 }
 fn policy_collect_body_facts(root: [Stmt], aliases: [String: String], facts: &PolicyStatementFacts) {
-    pending := [PolicyPendingBody]{PolicyPendingBody.Body(root)}
+    pending := [PolicyPendingBody]{PolicyPendingBody.Body{body: root}}
     loop pending.len() > 0 {
         selected :: &pending.pop() ?? panic("pending statement body")
         if selected == {
@@ -1002,7 +1031,7 @@ fn policy_collect_body_facts(root: [Stmt], aliases: [String: String], facts: &Po
                 if body.len() > 1 {
                     loop index in 0..<body.len() - 1 {
                         if body[index] == .Val(binding) && binding.mutable {
-                            if policy_without_parens(binding.init) == .Int(number, _, _, _) && number == 0 {
+                            if policy_without_parens(binding.init) == .Int(number, _, _, _, _) && number == 0 {
                                 if body[index + 1] == .For(_, _, _, kind, nested, span, _, _, _) {
                                     if kind == .In(_, _) && policy_manual_counter_body(binding.name, nested) -> &facts.manual_counter_loops.push(span)
                                 }
@@ -1033,7 +1062,7 @@ fn policy_statement_facts(program: Program, aliases: [String: String]) -> Policy
     facts
 }
 fn policy_anchored_literal(expression: Expr) -> Bool {
-    if policy_without_parens(expression) == .Str(parts, _) {
+    if policy_without_parens(expression) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> return text.starts_with("^") && text.ends_with("$")
     }
     false
@@ -1044,17 +1073,19 @@ fn policy_body_anchored_regex_capture(body: [Stmt], aliases: [String: String]) -
     captured := false
     policy_visit_body(body, (expression) -> {
         if policy_without_parens(expression) == {
-            .StructLit(name, _, _, _, fields, _, _) -> {
+            .StructLit(name, _, _, _, fields, _, _, _) -> {
                 if name == "Regex" && fields.len() > 0 && policy_anchored_literal(fields[0].value) -> anchored = true
             }
-            .TypedLit(_, literal, _) -> {
+            .TypedLit(_, literal, _, _) -> {
                 if literal == .Value(value) && policy_anchored_literal(value) -> anchored = true
             }
-            .Call(call) -> { if call.name == "re.match" -> matched = true }
-            .MethodCall(receiver, method, _, _, _, _) -> {
+            .Call(call, _) -> { if call.name == "re.match" -> matched = true }
+            .MethodCall(receiver, method, _, _, _, _, _) -> {
                 if method == "group" -> captured = true
-                if method == "match" && policy_without_parens(receiver) == .Ident(name, _) {
-                    if (aliases.get(name) ?? "") == "core.regex" -> matched = true
+                // The Rust check matched a dotted `re.match` call; the Jet parser
+                // spells `re.match(...)` as a method call on the `re` identifier.
+                if method == "match" && policy_without_parens(receiver) == .Ident(name, _, _) {
+                    if name == "re" || (aliases.get(name) ?? "") == "core.regex" -> matched = true
                 }
             }
             else -> {}
@@ -1093,8 +1124,8 @@ fn policy_cli_scalar(ty: Type) -> Bool {
 }
 fn policy_cli_default(expression: Expr) -> Bool {
     if policy_without_parens(expression) == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) -> return true
-        .Str(parts, _) -> {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) -> return true
+        .Str(parts, _, _) -> {
             if parts.len() == 1 && parts[0] == .Lit(_) -> return true
             return false
         }
@@ -1174,7 +1205,7 @@ fn policy_has_args_builder(program: Program) -> Bool {
     specification := false
     parsed := false
     policy_visit_program(program, (expression) -> {
-        if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _) {
+        if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
             if method == "spec" && policy_receiver_is(receiver, "args", aliases) -> specification = true
             if method == "parse" || method == "parse_or_exit" -> parsed = true
         }
@@ -1198,16 +1229,16 @@ fn policy_marker_expression(marker: Marker, index: Int) -> Expr? {
     None
 }
 fn policy_validate_lint_allows(path: String, row: PolicySourceRow, program: Program) PolicyError! {
-    if row.role != "canonical-teaching" && row.role != "expert-lesson" -> return Ok(Unit{})
+    if row.role != "canonical-teaching" && row.role != "expert-lesson" -> return Ok()
     loop application in program.rule_facts {
         marker :: application.marker
         if marker.name != "allow" -> next
         first :: policy_marker_expression(marker, 0) ?? next
-        if first == .Ident(rule, _) {
+        if first == .Ident(rule, _, _) {
             if !policy_guidance_lint(rule) -> next
             explained := false
             if policy_marker_expression(marker, 1) == .Val(reason) {
-                if reason == .Str(parts, _) && parts.len() > 0 {
+                if reason == .Str(parts, _, _) && parts.len() > 0 {
                     explained = true
                     loop part in parts {
                         if part == {
@@ -1220,11 +1251,11 @@ fn policy_validate_lint_allows(path: String, row: PolicySourceRow, program: Prog
             if !explained -> return Err(PolicyError{message: "file={path}; rule={rule}; site={marker.span.start}..{marker.span.end}; why=maintained #allow needs a reason at its source site; replacement=write #allow({rule}, \"why this lint does not apply\")"})
         }
     }
-    Ok(Unit{})
+    Ok()
 }
 
 fn policy_semantic_role(role: String) -> Bool {
-    role == "canonical-teaching" || role == "expert-lesson"
+    role == "canonical-teaching" || role == "expert-lesson" || role == "generated-output"
 }
 fn policy_applies(manifest: PolicyManifest, path: String, row: PolicySourceRow, rule: String) -> Bool {
     if !policy_semantic_role(row.role) -> return false
@@ -1262,7 +1293,7 @@ fn policy_evaluate_program(manifest: PolicyManifest, path: String, row: PolicySo
     }
     enabled := [Bool]{}
     loop rule in rules -> &enabled.push(policy_applies(manifest, path, row, rule))
-    policy_visit_program(program, (expression) -> {
+    loop expression in policy_program_expressions(program) {
         span :: expr_span(expression)
         if policy_is_process_input(expression, aliases) -> &argv_sites.push(span)
         loop index in 0..<rules.len() {
@@ -1290,17 +1321,12 @@ fn policy_evaluate_program(manifest: PolicyManifest, path: String, row: PolicySo
             }
             if matches -> &violations.push(policy_occurrence(path, rule, kinds[index], span))
         }
-    })
+    }
     if policy_applies(manifest, path, row, "raw-cli-process-boundary") && argv_sites.len() > 1 {
         loop index in 1..<argv_sites.len() -> &violations.push(policy_occurrence(path, "raw-cli-process-boundary", "call:process.argv", argv_sites[index]))
     }
-    if policy_applies(manifest, path, row, "entry-implicit") {
-        loop item in program.items {
-            if item == .Func(function) && function.name == "run" {
-                &violations.push(policy_occurrence(path, "entry-implicit", "fn:run", function.span))
-                break
-            }
-        }
+    if policy_applies(manifest, path, row, "entry-explicit") {
+        loop statement in program.script_body -> &violations.push(policy_occurrence(path, "entry-explicit", "stmt:top-level", jfmt_stmt_span(statement)))
     }
     if policy_applies(manifest, path, row, "codable-structural") {
         loop item in program.items {
@@ -1323,7 +1349,7 @@ fn policy_evaluate_program(manifest: PolicyManifest, path: String, row: PolicySo
             if fact.matches -> &violations.push(policy_occurrence(path, "indexed-sequence", "loop:counted-sequence", fact.span))
         }
     }
-    if policy_applies(manifest, path, row, "datatree-domain-policy") {
+    if policy_applies(manifest, path, row, "dyn-domain-policy") {
         loop violation in policy_data_tree_violations(path, program) -> &violations.push(violation)
     }
     if policy_applies(manifest, path, row, "walk-files-filter") && facts.file_walks.len() > 0 -> &violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
@@ -1434,8 +1460,29 @@ fn policy_proof_matches(proof: String, gate: String) -> Bool {
     (gate == "workload" && (proof == "compiled-workload-gate" || proof == "workload-gate"))
 }
 
+// Rust `is_declared_package_config_dir`: a `config/` candidate leaves the
+// corpus only when its sibling `package.jet` parses (uncomposed) and names it
+// under `configs:`; an unparsable manifest or undeclared directory stays.
+fn policy_declared_config(root: String, candidate: String) -> Bool {
+    package_root :: policy_slice_bytes(candidate, 0, candidate.bytes().len() - "/config".bytes().len())
+    manifest_path :: policy_join(root, "{package_root}/package.jet")
+    source :: policy_ast_files.read(manifest_path) ?? return false
+    facts :: PackageFacts.parse_uncomposed(source, manifest_path) ?? return false
+    loop config in facts.configs {
+        if config == "config" || config.starts_with("config/") -> return true
+    }
+    false
+}
+fn policy_ast_inventory(manifest: PolicyManifest, root: String) -> PolicyInventory PolicyError! {
+    discovery :: policy_discover_manifest_files(manifest, root)
+    declared := [String]{}
+    loop candidate in discovery.config_candidates {
+        if policy_declared_config(root, candidate) -> &declared.push(candidate)
+    }
+    policy_inventory(manifest, root, discovery, declared)
+}
 fn policy_check_fixture_inventory(manifest: PolicyManifest, root: String) PolicyError! {
-    inventory :: policy_inventory(manifest, root)
+    inventory :: policy_ast_inventory(manifest, root)
     errors := [String]{}
     loop entry in inventory.files {
         expected :: if {
@@ -1459,7 +1506,7 @@ fn policy_check_fixture_inventory(manifest: PolicyManifest, root: String) Policy
         }
     }
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
-    Ok(Unit{})
+    Ok()
 }
 fn policy_read_source(root: String, path: String) -> String PolicyError! {
     full :: policy_join(root, path)
@@ -1467,7 +1514,7 @@ fn policy_read_source(root: String, path: String) -> String PolicyError! {
 }
 fn policy_check_cli_recipe_inventory(manifest: PolicyManifest, root: String) PolicyError! {
     policy_check_fixture_inventory(manifest, root)
-    inventory :: policy_inventory(manifest, root)
+    inventory :: policy_ast_inventory(manifest, root)
     errors := [String]{}
     checked := false
     loop entry in inventory.files {
@@ -1498,18 +1545,25 @@ fn policy_check_cli_recipe_inventory(manifest: PolicyManifest, root: String) Pol
     }
     if !checked -> &errors.push("manifest has no checked CLI recipe profiles")
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
-    Ok(Unit{})
+    Ok()
 }
 fn policy_check_gate(manifest: PolicyManifest, root: String, gate: String) PolicyError! {
     policy_check_cli_recipe_inventory(manifest, root)
-    inventory :: policy_inventory(manifest, root)
+    inventory :: policy_ast_inventory(manifest, root)
     violations := [PolicyOccurrence]{}
+    // Collect-all: a source the parser rejects is reported with the rest, not
+    // as the first failure that hides every later file.
+    rejected := [String]{}
     loop entry in inventory.files {
         row :: policy_source_row(manifest, entry.path) ?? next
         if row.role == "generated-output" || !policy_proof_matches(row.proof, gate) || !policy_semantic_role(row.role) -> next
         if entry.path == "package.jet" || entry.path.ends_with("/package.jet") -> next
         source :: policy_read_source(root, entry.path)
-        loop violation in policy_evaluate_source(manifest, entry.path, source) -> &violations.push(violation)
+        found :: policy_evaluate_source(manifest, entry.path, source) ?? {
+            &rejected.push(err.message)
+            next
+        }
+        loop violation in found -> &violations.push(violation)
     }
     if gate == "all" || gate == "bindgen" {
         loop artifact in manifest.artifacts {
@@ -1524,22 +1578,31 @@ fn policy_check_gate(manifest: PolicyManifest, root: String, gate: String) Polic
             }
         }
     }
-    if violations.len() > 0 -> return Err(PolicyError{message: policy_occurrence_messages(violations)})
-    Ok(Unit{})
+    if violations.len() > 0 || rejected.len() > 0 {
+        messages := rejected.copy()
+        if violations.len() > 0 -> &messages.push(policy_occurrence_messages(violations))
+        return Err(PolicyError{message: messages.join("\n")})
+    }
+    Ok()
 }
 
 // Gates are deduplicated across callers, not weakened to a classification check.
-#Test("corpus policy golden gate") { policy_check_gate(policy_manifest(), ".", "golden") }
-#Test("corpus policy fixture gate") { policy_check_gate(policy_manifest(), ".", "fixture") }
-#Test("corpus policy bindgen gate") { policy_check_gate(policy_manifest(), ".", "bindgen") }
-#Test("corpus policy workload gate") { policy_check_gate(policy_manifest(), ".", "workload") }
-#Test("corpus policy dev-corpus gate") { policy_check_gate(policy_manifest(), ".", "dev-corpus") }
-#Test("corpus policy conformance gate") { policy_check_gate(policy_manifest(), ".", "conformance") }
-#Test("corpus policy package gate") { policy_check_gate(policy_manifest(), ".", "package") }
-#Test("corpus policy suite gate") { policy_check_gate(policy_manifest(), ".", "suite") }
-#Test("corpus policy site gate") { policy_check_gate(policy_manifest(), ".", "site") }
-#Test("corpus policy docs gate") { policy_check_gate(policy_manifest(), ".", "docs") }
-#Test("corpus policy dogfood gate") { policy_check_gate(policy_manifest(), ".", "dogfood") }
+// Known failing: #6249 (the parser rejects `reactive.effect(...)` in
+// Examples/features/ui/reactive.jet; golden and dev-corpus both scan it).
+#Test("corpus policy golden gate") { policy_check_gate(policy_manifest(), ".", "golden") ?? panic("{err.message}") }
+#Test("corpus policy fixture gate") { policy_check_gate(policy_manifest(), ".", "fixture") ?? panic("{err.message}") }
+#Test("corpus policy bindgen gate") { policy_check_gate(policy_manifest(), ".", "bindgen") ?? panic("{err.message}") }
+#Test("corpus policy workload gate") { policy_check_gate(policy_manifest(), ".", "workload") ?? panic("{err.message}") }
+// Known failing: #6249 (Examples/features/ui/reactive.jet does not parse).
+#Test("corpus policy dev-corpus gate") { policy_check_gate(policy_manifest(), ".", "dev-corpus") ?? panic("{err.message}") }
+#Test("corpus policy conformance gate") { policy_check_gate(policy_manifest(), ".", "conformance") ?? panic("{err.message}") }
+#Test("corpus policy package gate") { policy_check_gate(policy_manifest(), ".", "package") ?? panic("{err.message}") }
+#Test("corpus policy suite gate") { policy_check_gate(policy_manifest(), ".", "suite") ?? panic("{err.message}") }
+#Test("corpus policy site gate") { policy_check_gate(policy_manifest(), ".", "site") ?? panic("{err.message}") }
+#Test("corpus policy docs gate") { policy_check_gate(policy_manifest(), ".", "docs") ?? panic("{err.message}") }
+// Known failing: #6220 (366 Jetpack sites break the dogfood json, path-containment
+// and directory-setup rules; Jetpack grew while the Rust gate was not running).
+#Test("corpus policy dogfood gate") { policy_check_gate(policy_manifest(), ".", "dogfood") ?? panic("{err.message}") }
 
 fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
     loop violation in violations { if violation.rule == rule -> return true }
@@ -1553,9 +1616,9 @@ fn policy_ast_test_semantic_shapes() PolicyError! {
     loop violation in positive -> assert_eq(violation.file, path)
     literal :: policy_evaluate_source(manifest, path, "fn run() {{ print(\"process.argv()\") }}")
     assert(!policy_has_rule(literal, "raw-cli-fixed-shape"))
-    Ok(Unit{})
+    Ok()
 }
-#Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() }
+#Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() ?? panic("{err.message}") }
 fn policy_ast_test_cli_boundaries() PolicyError! {
     manifest :: policy_manifest()
     path :: "Examples/features/basics/first_hour.jet"
@@ -1565,9 +1628,9 @@ fn policy_ast_test_cli_boundaries() PolicyError! {
     assert(policy_has_rule(repeated, "raw-cli-process-boundary"))
     single :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv() }}")
     assert(!policy_has_rule(single, "raw-cli-process-boundary"))
-    Ok(Unit{})
+    Ok()
 }
-#Test("cli_boundary_rules_cover_builder_views_and_repeated_process_reads") { policy_ast_test_cli_boundaries() }
+#Test("cli_boundary_rules_cover_builder_views_and_repeated_process_reads") { policy_ast_test_cli_boundaries() ?? panic("{err.message}") }
 fn policy_ast_test_allow_source_reason() PolicyError! {
     manifest :: policy_manifest()
     error := ""
@@ -1577,69 +1640,69 @@ fn policy_ast_test_allow_source_reason() PolicyError! {
     }
     assert(error.contains("reason at its source site"), error)
     policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
-    Ok(Unit{})
+    Ok()
 }
-#Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() }
+#Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() ?? panic("{err.message}") }
 fn policy_ast_test_response_decoder() PolicyError! {
     manifest :: policy_manifest()
-    violations :: policy_evaluate_generated(manifest, "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn run() {{}}")
+    violations :: policy_evaluate_generated(manifest, "producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet", "fn run() {{}}")
     assert_eq(violations.len(), 1)
     assert_eq(violations[0].rule, "bindgen-one-decoder")
     assert(policy_occurrence_messages(violations).contains("replacement="))
-    no_response :: policy_evaluate_generated(manifest, "producer:crates/jet-pkg-model/src/CBind.rs#render_jet", "fn run() {{}}")
+    no_response :: policy_evaluate_generated(manifest, "producer:Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet#pkg_cbind_generate", "fn run() {{}}")
     assert(no_response.is_empty())
-    Ok(Unit{})
+    Ok()
 }
-#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") { policy_ast_test_response_decoder() }
+#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") { policy_ast_test_response_decoder() ?? panic("{err.message}") }
 fn policy_ast_test_binding_renderers() PolicyError! {
     manifest :: policy_manifest()
     count := 0
     loop producer in manifest.producers {
-        if !producer.selector.contains("Bind.rs#render_jet") || producer.protocol == "no-response-protocol" -> next
+        if !producer.selector.contains("/Foreign/Binders/") || producer.protocol == "no-response-protocol" -> next
         count += 1
         violations :: policy_evaluate_generated(manifest, producer.selector, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
         assert(violations.is_empty(), "{producer.selector} did not accept one shared response decoder: {policy_occurrence_messages(violations)}")
     }
     assert_eq(count, 7)
-    Ok(Unit{})
+    Ok()
 }
-#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") { policy_ast_test_binding_renderers() }
+#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") { policy_ast_test_binding_renderers() ?? panic("{err.message}") }
 fn policy_ast_test_canonical_decoder_symbol() PolicyError! {
-    violations :: policy_evaluate_generated(policy_manifest(), "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_other(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
+    violations :: policy_evaluate_generated(policy_manifest(), "producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet", "fn decode_other(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
     assert_eq(violations.len(), 1)
     assert_eq(violations[0].rule, "bindgen-one-decoder")
-    Ok(Unit{})
+    Ok()
 }
-#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") { policy_ast_test_canonical_decoder_symbol() }
+#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") { policy_ast_test_canonical_decoder_symbol() ?? panic("{err.message}") }
 fn policy_ast_test_protocol_override() PolicyError! {
     manifest :: policy_manifest()
-    producer :: "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet"
+    producer :: "producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"
     raw :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{ return Ok(json.parse(raw)) }}")
     assert(raw.is_empty(), "raw JSON override is distinct: {policy_occurrence_messages(raw)}")
     ordinary :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{\n    response :: json.parse(raw)\n    ok :: response.field(\"ok\")\n    return Ok(response)\n}}")
     assert(policy_has_rule(ordinary, "generated-protocol-override"))
-    Ok(Unit{})
+    Ok()
 }
-#Test("generated_protocol_override_requires_a_distinct_envelope_shape") { policy_ast_test_protocol_override() }
+#Test("generated_protocol_override_requires_a_distinct_envelope_shape") { policy_ast_test_protocol_override() ?? panic("{err.message}") }
 
 struct PolicyShapeCase { path: String, source: String, rule: String, present: Bool }
 fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
     manifest :: policy_manifest()
     loop example in cases {
         violations :: policy_evaluate_source(manifest, example.path, example.source)
-        assert_eq(policy_has_rule(violations, example.rule), example.present, "{example.path}: {example.rule}: {policy_occurrence_messages(violations)}")
+        assert(policy_has_rule(violations, example.rule) == example.present, "{example.path}: {example.rule}: {policy_occurrence_messages(violations)}")
     }
-    Ok(Unit{})
+    Ok()
 }
 fn policy_ast_test_reintroduced_ceremony() PolicyError! {
     cases :: [PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/basics/hello.jet", source: "fn run() {{ print(\"hello\") }}", rule: "entry-implicit", present: true},
+        PolicyShapeCase{path: "Examples/features/basics/hello.jet", source: "print(\"hello\")", rule: "entry-explicit", present: true},
         PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/features/basics/first_hour.jet", rule: "first-hour-doc-recipe", present: true},
         PolicyShapeCase{path: "Examples/features/types/typed_literal_forms.jet", source: "fn run() {{ print(\"jet build Examples/features/types/typed_literal_forms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
         PolicyShapeCase{path: "Examples/features/serde/reintroduced.jet", source: "#Codable\nstruct Sample {{\n    value: Int\n}}\nfn run() {{}}", rule: "codable-structural", present: true},
         PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run() {{\n    delay :: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
         PolicyShapeCase{path: "Examples/features/basics/reintroduced_effect.jet", source: "use core.files as fs\nfn run() -[FS, IO]> {{\n    path :: \"input.txt\"\n    text :: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(~path)\n}}", rule: "readonly-copy", present: true},
+        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
         PolicyShapeCase{path: "Examples/features/io/reintroduced.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
         PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "fn run() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
         PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "fn run() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
@@ -1662,33 +1725,37 @@ fn policy_ast_test_reintroduced_ceremony() PolicyError! {
         assert(rendered.contains("why="), rendered)
         assert(rendered.contains("replacement="), rendered)
     }
-    Ok(Unit{})
+    Ok()
 }
-#Test("card_2375_rules_reject_each_reintroduced_ceremony") { policy_ast_test_reintroduced_ceremony() }
+#Test("card_2375_rules_reject_each_reintroduced_ceremony") { policy_ast_test_reintroduced_ceremony() ?? panic("{err.message}") }
 fn policy_ast_test_walk_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: true},
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn walk() {{\n    entries :: fs.walk(root)\n}}\nfn filter(entry: Entry) {{\n    if !entry.is_dir -> print(entry.path)\n}}", rule: "walk-files-filter", present: false},
         PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if entry.is_dir -> print(entry.relative) else -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: false},
     })
-    Ok(Unit{})
+    Ok()
 }
-#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() }
+#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() ?? panic("{err.message}") }
 fn policy_ast_test_crypto_module() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "fn run() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
     })
-    Ok(Unit{})
+    Ok()
 }
-#Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() }
+#Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() ?? panic("{err.message}") }
 fn policy_ast_test_migration_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run() {{ delay :: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
         PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run(seconds: Float) {{ delay :: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
         PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "fn run() {{ value :: Meter.from_float(source.raw() * 2) }}", rule: "unit-scalar-rewrap", present: true},
-        PolicyShapeCase{path: "Examples/features/types/unit_family.jet", source: "fn subtotal(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
+        // The Rust case named Examples/features/types/unit_family.jet. Its scope row
+        // is retired: Currency is nominal (D-QUAL3, D-DIST1), `Usd * Int` is E0127,
+        // so the example's rewrap is the language's own conversion. The shape keeps
+        // its proof under the time examples' scope.
+        PolicyShapeCase{path: "Examples/features/time/reintroduced.jet", source: "fn subtotal(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
         PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "fn run() {{ value :: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn run() {{ print(\"{{value:Fixed(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: true},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn run() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
@@ -1703,9 +1770,9 @@ fn policy_ast_test_migration_shapes() PolicyError! {
     lower :: policy_planted_ascii_ladder()
     violations :: policy_evaluate_source(policy_manifest(), "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", "fn run() {{ value :: {lower} }}")
     assert(policy_has_rule(violations, "dogfood-ascii"))
-    Ok(Unit{})
+    Ok()
 }
-#Test("semantic_migration_rules_match_only_their_structural_shapes") { policy_ast_test_migration_shapes() }
+#Test("semantic_migration_rules_match_only_their_structural_shapes") { policy_ast_test_migration_shapes() ?? panic("{err.message}") }
 fn policy_ast_test_dogfood_and_workload_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
         PolicyShapeCase{path: "tests/agent_workloads/adapters/incident_report.jet", source: "fn run() {{ rows :: input.split(\"\\t\") }}", rule: "delimited-reader-config", present: true},
@@ -1720,16 +1787,19 @@ fn policy_ast_test_dogfood_and_workload_shapes() PolicyError! {
         PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn handle(req: HTTPRequest) -> HTTPResponse {{ return req.response() }}", rule: "http-unused-request", present: false},
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "fn run() {{ allowed :: candidate.starts_with(\"root/\") }}", rule: "dogfood-path-containment", present: true},
         PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "fn run() {{ allowed :: candidate == root }}", rule: "dogfood-path-containment", present: false},
-        PolicyShapeCase{path: "Jetpack/CLI/Source/Entry/Main.jet", source: "fn run() {{ wire :: \"{{{{\\\"key\\\": {{value}}}}}}\" }}", rule: "dogfood-json", present: true},
-        PolicyShapeCase{path: "Jetpack/CLI/Source/Entry/Main.jet", source: "fn run() {{ wire :: json.to_string(value) }}", rule: "dogfood-json", present: false},
+        // The Rust final still evaluated these at Jetpack/CLI/Source/Entry/Main.jet,
+        // which D-JPK-DISPATCH1=B (ee56d70d95) made a raw-protocol source that no
+        // semantic rule reaches; any root:Jetpack dogfood source carries the scope.
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "fn run() {{ wire :: \"{{{{\\\"key\\\": {{value}}}}}}\" }}", rule: "dogfood-json", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "fn run() {{ wire :: json.to_string(value) }}", rule: "dogfood-json", present: false},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn run() {{ fields :: query.split(\"&\") }}", rule: "dogfood-url-query", present: true},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn run() {{ fields :: url.query() }}", rule: "dogfood-url-query", present: false},
         PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "fn run() {{ same_strings(left, right) }}", rule: "dogfood-list-equality", present: true},
         PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "fn run() {{ left == right }}", rule: "dogfood-list-equality", present: false},
     })
-    Ok(Unit{})
+    Ok()
 }
-#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") { policy_ast_test_dogfood_and_workload_shapes() }
+#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") { policy_ast_test_dogfood_and_workload_shapes() ?? panic("{err.message}") }
 fn policy_ast_test_fixture_roles() PolicyError! {
     manifest :: policy_manifest()
     policy_check_fixture_inventory(manifest, ".")
@@ -1737,13 +1807,36 @@ fn policy_ast_test_fixture_roles() PolicyError! {
     assert(fixture.is_empty(), "negative fixtures are role-gated")
     builder :: policy_evaluate_source(manifest, "Jetpack/CLI/Source/Entry/Main.jet", "fn run() {{\n    args.spec()\n    process.argv()\n}}")
     loop violation in builder -> assert(violation.rule != "raw-cli-fixed-shape" && violation.rule != "raw-cli-builder-shape")
-    Ok(Unit{})
+    Ok()
 }
-#Test("fixture_roles_and_approved_builder_boundary_are_explicit") { policy_ast_test_fixture_roles() }
+#Test("fixture_roles_and_approved_builder_boundary_are_explicit") { policy_ast_test_fixture_roles() ?? panic("{err.message}") }
+// corpus_policy.rs:106-134. The engine entry is the raw process protocol, not a typed CLI entry.
+fn policy_ast_test_engine_entry_protocol() PolicyError! {
+    manifest :: policy_manifest()
+    found := false
+    loop row in manifest.sources {
+        if row.selector == "file:Jetpack/CLI/Source/Entry/Main.jet" {
+            found = true
+            assert_eq(row.role, "raw-protocol")
+            assert_eq(row.profile, "protocol")
+            assert_eq(row.decision, "D-JPK-DISPATCH1=B")
+        }
+    }
+    assert(found, "engine protocol source is inventoried")
+    source :: policy_ast_files.read("Jetpack/CLI/Source/Entry/Main.jet") ?? panic("read the engine entry: {err}")
+    program :: policy_parse_program("Jetpack/CLI/Source/Entry/Main.jet", source)
+    assert(!policy_has_typed_cli_entry(program), "the engine entry must not grow a typed CLI entry")
+    symbols :: [String]{"cli_jetpack_main", "ENGINE_PROTOCOL_FLAG", "COMPILER_VERSION", "EXTENSION_HOST_SUBCOMMAND", "BUILD_PLUGIN_HOST_SUBCOMMAND", "cli_run"}
+    loop symbol in symbols {
+        assert(source.contains(symbol), "engine protocol lost {symbol}")
+    }
+    Ok()
+}
+#Test("jetpack_engine_entry_is_the_ratified_raw_process_protocol") { policy_ast_test_engine_entry_protocol() ?? panic("{err.message}") }
 fn policy_ast_test_cli_recipe_inventory() PolicyError! {
     manifest :: policy_manifest()
     policy_check_cli_recipe_inventory(manifest, ".")
-    typed_selectors :: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet", "file:Jetpack/CLI/Source/Entry/Main.jet"}
+    typed_selectors :: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet"}
     loop selector in typed_selectors {
         found := false
         loop row in manifest.sources {
@@ -1759,20 +1852,20 @@ fn policy_ast_test_cli_recipe_inventory() PolicyError! {
         expected :: if selector.contains("args_spec.jet") || selector.contains("args_audit.jet") -> "builder-cli" else -> "raw-cli"
         loop row in manifest.sources {
             if row.selector == selector { found = true
-                assert_eq(row.profile, expected, "CLI boundary drifted: {selector}")
+                assert(row.profile == expected, "CLI boundary drifted: {selector}")
             }
         }
         assert(found, "missing CLI recipe source row: {selector}")
     }
-    starter_selectors :: [String]{"producer:Source/CmdCompile.rs#run_new.native_run_src", "producer:crates/jet-pkg-model/src/Package/Convert.rs#new_template"}
+    starter_selectors :: [String]{"producer:Compiler/JetCli/Source/Cli/Host.jet#jet_cli_new_run_source.native", "producer:Jetpack/PackageModel/Source/Manifest/Convert.jet#pkg_new_template"}
     loop selector in starter_selectors {
         found := false
         loop producer in manifest.producers { if producer.selector == selector -> found = true }
         assert(found, "missing CLI starter producer row: {selector}")
     }
-    Ok(Unit{})
+    Ok()
 }
-#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") { policy_ast_test_cli_recipe_inventory() }
+#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") { policy_ast_test_cli_recipe_inventory() ?? panic("{err.message}") }
 
 // corelib_parts/system.rs:1027-1041. Use the compiler's built module registry,
 // not Core/ directory names: unregistered files are not necessarily modules.
@@ -1816,7 +1909,7 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         PolicyPlantedPair{rule: "raw-cli-builder-shape", kind: "call:process.argv.skip", rejected: "fn run() {{ process.argv().skip(1) }}", clean: "fn run() {{ process.args() }}"},
         PolicyPlantedPair{rule: "duration-constant-safe", kind: "call:Duration.constructor", rejected: "fn run() {{ Duration.hours(2) }}", clean: "fn run(hours: Int) {{ Duration.hours(hours) }}"},
         PolicyPlantedPair{rule: "unit-scalar-rewrap", kind: "call:unit-rewrap", rejected: "fn run() {{ Meter.from_float(value.raw() * 2) }}", clean: "fn run() {{ value * 2 }}"},
-        PolicyPlantedPair{rule: "readonly-copy", kind: "call:readonly-copy", rejected: "use core.files as fs\nfn run() {{ fs.read(~path) }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "readonly-copy", kind: "call:readonly-copy", rejected: "use core.files as fs\nfn run() {{ fs.read(path.copy()) }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
         PolicyPlantedPair{rule: "error-identity", kind: "expr:error-propagation", rejected: "use core.files as fs\nfn run() {{ fs.read(path) ?? return Err(\"read\") }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
         PolicyPlantedPair{rule: "http-wrapper-json", kind: "call:http-wrapper", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
         PolicyPlantedPair{rule: "http-message-text", kind: "call:response.text", rejected: "fn run() {{ response.body().text(100) }}", clean: "fn run() {{ response.text() }}"},
@@ -1830,7 +1923,7 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         PolicyPlantedPair{rule: "dogfood-directory-setup", kind: "call:fs.create_dir", rejected: "use core.files as files\nfn run() {{ files.create_dir(\"dir\") }}", clean: "use core.files as files\nfn run() {{ files.create_dir_all(\"dir\") }}"},
         PolicyPlantedPair{rule: "crypto-naming-fact", kind: "call:crypto.sha256_bytes", rejected: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(bytes) }}", clean: "use core.crypto as crypto\nfn run() {{ crypto.sha256(bytes).hex() }}"},
         PolicyPlantedPair{rule: "raw-cli-process-boundary", kind: "call:process.argv", rejected: "fn run() {{\n    first :: process.argv()\n    second :: process.argv()\n}}", clean: "fn run() {{ process.argv() }}"},
-        PolicyPlantedPair{rule: "entry-implicit", kind: "fn:run", rejected: "fn run() {{ print(\"hello\") }}", clean: "print(\"hello\")"},
+        PolicyPlantedPair{rule: "entry-explicit", kind: "stmt:top-level", rejected: "print(\"hello\")", clean: "fn run() {{ print(\"hello\") }}"},
         PolicyPlantedPair{rule: "codable-structural", kind: "type:Record", rejected: "#Codable\nstruct Record {{ value: Int }}", clean: "struct Record {{ value: Int }}"},
         PolicyPlantedPair{rule: "effect-row-inference", kind: "fn:run", rejected: "fn run() -[IO]> {{ print(\"hello\") }}", clean: "fn run() {{ print(\"hello\") }}"},
         PolicyPlantedPair{rule: "task-one-child", kind: "stmt:task.group", rejected: "fn run() {{ task.group g {{ task.race {{1, 2}} }} }}", clean: "fn run() {{ task.race {{1, 2}} }}"},
@@ -1849,14 +1942,73 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         path :: if pair.rule == "first-hour-doc-recipe" -> "Examples/features/types/typed_literal_forms.jet" else -> "planted/{pair.rule}.jet"
         manifest := PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
         bad :: policy_evaluate_source(manifest, path, pair.rejected)
-        assert_eq(bad.len(), 1, "{pair.rule}: exactly one planted violation")
+        assert(bad.len() == 1, "{pair.rule}: exactly one planted violation")
         assert_eq(bad[0].file, path)
         assert_eq(bad[0].rule, pair.rule)
         assert(bad[0].site.starts_with("{pair.kind}@"), "stable semantic site: {bad[0].site}")
         assert_eq(policy_occurrence_messages(bad), policy_violation(path, pair.rule, bad[0].site))
         good :: policy_evaluate_source(manifest, path, pair.clean)
-        assert_eq(good, [PolicyOccurrence]{}, "{pair.rule}: clean AST shape")
+        assert(good.len() == 0, "{pair.rule}: clean AST shape")
     }
-    Ok(Unit{})
+    Ok()
 }
-#Test("corpus executable AST rules planted violation and clean pairs") { policy_ast_test_planted_rule_pairs() }
+#Test("corpus executable AST rules planted violation and clean pairs") { policy_ast_test_planted_rule_pairs() ?? panic("{err.message}") }
+
+// D-ENTRY-SCRIPT1=C: every loose top-level statement in a scoped source is one
+// `entry-explicit` occurrence; explicit `fn run` and declaration-only files pass.
+fn policy_ast_test_explicit_entry() PolicyError! {
+    manifest :: policy_manifest()
+    // The Rust original also named Examples/learn/entry_law.jet; Examples/learn left the corpus with `jet learn` (09473f1db5).
+    paths :: [String]{"Examples/features/types/entry_law.jet", "tests/agent_workloads/llm_digest/first_program.jet"}
+    accepted :: [String]{"fn run() {{ print(\"hello\") }}", "VALUE :: 1\nfn helper() -> Int {{ VALUE }}\nfn run() {{ print(helper()) }}", "fn helper() -> Int {{ 1 }}"}
+    rejected :: [String]{"print(\"hello\")", "print(\"before\")\nfn run() {{ print(\"inside\") }}\nprint(\"after\")"}
+    loop path in paths {
+        loop source in accepted {
+            violations :: policy_evaluate_source(manifest, path, source)
+            assert(!policy_has_rule(violations, "entry-explicit"), "explicit execution and declaration-only files must be accepted: {path}: {policy_occurrence_messages(violations)}")
+        }
+        loop (index, source) in rejected {
+            violations :: policy_evaluate_source(manifest, path, source)
+            entries := 0
+            loop violation in violations {
+                if violation.rule != "entry-explicit" -> next
+                entries += 1
+                assert(violation.site.starts_with("stmt:top-level@"), "loose execution site: {violation.site}")
+            }
+            assert(entries == index + 1, "loose execution: {path}: expected {index + 1}, found {entries}")
+        }
+    }
+    loop exception in manifest.exceptions -> assert(exception.rule != "entry-explicit", "entry-explicit has no occurrence exceptions")
+    Ok()
+}
+#Test("explicit_entry_rule_matches_ordinary_file_execution") { policy_ast_test_explicit_entry() ?? panic("{err.message}") }
+// corpus_policy.rs `inventory_is_manifest_scoped`; it lives with the package
+// parser because inventory needs the declared-config exclusion.
+fn policy_ast_test_manifest_scoped_inventory() PolicyError! {
+    inventory :: policy_ast_inventory(policy_manifest(), ".")
+    first_hour := false
+    scratch := false
+    loop entry in inventory.files {
+        if entry.path == "Docs/spec/guides/first-hour.md" -> first_hour = true
+        if entry.path == "scratch-parser-call.jet" -> scratch = true
+    }
+    assert(first_hour, "exact documentation source is inventoried")
+    assert(inventory.provenance.len() == inventory.artifacts.len(), "every artifact must retain producer provenance")
+    assert(!scratch, "sources outside manifest roots are excluded")
+    Ok()
+}
+#Test("inventory_is_manifest_scoped") { policy_ast_test_manifest_scoped_inventory() ?? panic("{err.message}") }
+// Rust `is_declared_package_config_dir`: only a `config/` its sibling
+// `package.jet` declares under `configs:` leaves the corpus.
+fn policy_ast_test_declared_config_exclusion() PolicyError! {
+    manifest :: policy_manifest()
+    declared :: "Examples/features/tooling/compiler_api_package/config"
+    discovery :: policy_discover_manifest_files(manifest, ".")
+    assert(discovery.config_candidates.contains(declared), "the package config directory is a discovery candidate")
+    assert(policy_declared_config(".", declared), "compiler_api_package declares configs: [\"config/release.jet\"]")
+    assert(!policy_declared_config(".", "Examples/features/tooling/missing_package/config"), "a config directory without a parsable package.jet stays in the corpus")
+    inventory :: policy_ast_inventory(manifest, ".")
+    loop entry in inventory.files -> assert(!entry.path.starts_with("{declared}/"), "declared package config left in the corpus: {entry.path}")
+    Ok()
+}
+#Test("declared_package_config_dirs_leave_the_corpus") { policy_ast_test_declared_config_exclusion() ?? panic("{err.message}") }

@@ -1,7 +1,26 @@
 // core-conformance: core.web.subscribe
 use core.web as web
+use core.reactive.loadable.[Loadable]
+
+#Error
+enum ReadError {
+    Offline
+}
+
+fn reading(sensor: String) -> Int ReadError! {
+    if sensor == "" -> return Err(ReadError.Offline)
+    sensor.len()
+}
+
+fn shown(state: Loadable<Int, ReadError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(_) -> "failed"
+        else -> "pending"
+    }
+}
 
 fn run() {
-    query :: web.subscribe("metrics")
-    print(web.live_show(query).contains("footprint=ext:metrics"))
+    binding :: web.subscribe(reading, "cpu")
+    print(shown(web.state(binding)))
 }

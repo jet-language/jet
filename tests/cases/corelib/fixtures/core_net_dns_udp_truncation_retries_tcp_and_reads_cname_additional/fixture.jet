@@ -73,13 +73,13 @@ fn fixture_cname(query: [U8]) -> [U8] {
 }
 fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
     peer :: net.socket_addr(packet.host, packet.port) ?? panic("peer")
-    net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")
+    (net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")).drop("the fixture reply needs no sent byte count")
 }
 
-fn fixture_read_exact(stream: net.TCPStream, n: Int) -> [U8] {
+fn fixture_read_exact(stream: &net.TCPStream, n: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < n {
-        chunk :: net.tcp_read_bytes(stream, n - out.len()) ?? panic("read exact")
+        chunk :: net.tcp_read_bytes(&stream, n - out.len()) ?? panic("read exact")
         assert(chunk.len() != 0, "unexpected EOF reading DNS TCP frame")
         fixture_copy(&out, chunk, 0, chunk.len())
     }
@@ -94,15 +94,15 @@ fn fixture_read_exact(stream: net.TCPStream, n: Int) -> [U8] {
     server :: task {
         packet :: net.udp_recv_from(socket, 512) ?? panic("receive UDP")
         fixture_send(socket, packet, fixture_truncated(packet.data))
-        stream :: net.tcp_accept(tcp) ?? panic("TCP accept")
-        prefix :: fixture_read_exact(stream, 2)
+        stream := net.tcp_accept(tcp) ?? panic("TCP accept")
+        prefix :: fixture_read_exact(&stream, 2)
         n :: Int.from_u8(prefix[0]) * 256 + Int.from_u8(prefix[1])
-        query :: fixture_read_exact(stream, n)
+        query :: fixture_read_exact(&stream, n)
         response :: fixture_cname(query)
         frame := [U8]{}
         fixture_u16(&frame, response.len())
         fixture_copy(&frame, response, 0, response.len())
-        net.tcp_write_all_bytes(stream, frame) ?? panic("TCP response")
+        net.tcp_write_all_bytes(&stream, frame) ?? panic("TCP response")
     }
     fixture_build(address)
     observed :: fixture_run()

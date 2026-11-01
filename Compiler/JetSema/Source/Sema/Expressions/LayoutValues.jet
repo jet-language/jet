@@ -1,5 +1,5 @@
-// Axis-aware layout producers and generic Measurement<T> accessors.
-// Layout statement bodies remain owned by Statements.jet.
+// Axis-aware layout producers, the `name :: Layout{ … }` statement and
+// generic Measurement<T> accessors.
 use jet_foundation.[
     AccessConvention,
     BinOp,
@@ -10,9 +10,15 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
+    Stmt,
+    Symbol,
     SymbolID,
+    SymbolKind,
     TFailureCarrier,
     Type,
+    checked_symbol_local,
+    expr_span,
+    symbol_id,
     type_identity_equal,
     type_name,
     core_source_owns_type,
@@ -82,7 +88,7 @@ fn sema_expression_layout_binop_result(op: BinOp, left: Type, right: Type) -> Se
 
 fn sema_expression_layout_literal(value: TExpr) -> TExpr Never! {
     if value.ty == Type.Int || value.ty == Type.Float || value.ty == .InlineRange(_, _, _) {
-        return sema_tir_node(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
+        return sema_tree_node(Type.Named{name: "LengthVar"}, TExprKind.LayoutLiteral{value: value}, value.span)
     }
     value.copy()
 }
@@ -108,7 +114,7 @@ fn sema_expr_check_layout_binary(op: BinOp, left: TExpr, right: TExpr, span: Spa
     result_type :: result.result_type ?? return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     lowered_left :: sema_expression_layout_literal(left)
     lowered_right :: sema_expression_layout_literal(right)
-    value :: if op == BinOp.Add || op == BinOp.Sub -> sema_tir_node(result_type, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tir_node(result_type, TExprKind.LayoutCompare{op: sema_expr_tir_binary_op(op), lhs: lowered_left, rhs: lowered_right}, span)
+    value :: if op == BinOp.Add || op == BinOp.Sub -> sema_tree_node(result_type, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tree_node(result_type, TExprKind.LayoutCompare{op: sema_expr_tree_binary_op(op), lhs: lowered_left, rhs: lowered_right}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaExpressionLayoutBinaryCheck{handled: true, value: checked}
 }
@@ -209,9 +215,116 @@ fn sema_call_try_layout_method(receiver: Expr, receiver_value: TExpr, method: St
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> valid = false
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value :: sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
+    value :: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
     if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// `name :: Layout{ … }` (Rust Stmt::Layout, D-LAYOUT-CTOR1): `name` is a
+// fresh layout handle in the enclosing scope, and every element of the body
+// (the parser rewrote its `box.anchor` reads to `name.h` / `name.v` calls)
+// is a Constraint, which registers with the handle as it is built (E2933
+// otherwise).
+fn sema_stmt_check_layout(name: String, name_span: Span, body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], output: &[TStmt]) -> Bool {
+    layout_ty :: Type.Named{name: "Layout"}
+    owner :: sema_scope_local_owner_key(scopes)
+    id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
+    symbol :: Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: name_span, ty: Val(layout_ty), visibility: 0}
+    if !sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, None, false) {
+        &diagnostics.push(sema_already_defined(name, name_span))
+        return false
+    }
+    sema_ownership_declare_binding(&state, symbol, false)
+    complete := true
+    checked := [TStmt]{}
+    seen := [String]{}
+    loop statement in body {
+        if statement == .Expr(expr) {
+            value :: sema_check_expression(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+                complete = false
+                next
+            }
+            if value.ty != (Type.Named{name: "Constraint"}) {
+                &diagnostics.push(sema_error("E2933", expr_span(expr), "This element inside `{name} :: Layout.{{ … }}` doesn't produce a constraint (found `{type_name(value.ty)}`)", "Every element inside a `Layout.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated", "Write a comparison, e.g. `label.width >= 80.0`"))
+                complete = false
+                next
+            }
+            if sema_layout_element_key(expr) == .Val(key) {
+                if seen.contains(key) {
+                    &diagnostics.push(sema_lint("E2934", expr_span(expr), "This constraint repeats one already written in this `Layout{{ … }}` body", "An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover", "Remove the duplicate line, or change it if a different constraint was meant"))
+                } else {
+                    &seen.push(key)
+                }
+            }
+            &checked.push(TStmt.ExprStmt{value: value, span: expr_span(expr)})
+        }
+    }
+    if !complete -> return false
+    &output.push(TStmt.Layout{handle: checked_symbol_local(name, name_span, id, layout_ty), label: name, body: checked, span: span})
+    true
+}
+
+// The spelling of a layout element with spans and node ids left out, for
+// the duplicate-constraint lint (E2934): equal keys are one constraint.
+fn sema_layout_element_key(expr: Expr) -> String? {
+    if expr == {
+        .Ident(name, _, _) -> return Val(name)
+        .Int(value, _, _, _, _) -> return Val("{value}")
+        .Float(value, _, _, _, _) -> return Val("{value}")
+        .Paren(value, _, _) -> return sema_layout_element_key(value)
+        .Binary(op, left, right, _, _) -> {
+            lhs :: sema_layout_element_key(left) ?? return None
+            rhs :: sema_layout_element_key(right) ?? return None
+            return Val("({lhs} {sema_expr_binary_name(op)} {rhs})")
+        }
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            base :: sema_layout_element_key(receiver) ?? return None
+            key := "{base}.{method}("
+            loop argument in args {
+                item :: sema_layout_element_key(argument.expr) ?? return None
+                key = "{key}{item},"
+            }
+            return Val("{key})")
+        }
+        .Str(parts, _, _) -> {
+            text := ""
+            loop part in parts {
+                if part == .Lit(piece) {
+                    text = "{text}{piece}"
+                } else {
+                    return None
+                }
+            }
+            return Val("\"{text}\"")
+        }
+        .TypedLit(head, body, _, _) -> {
+            ty :: head ?? return None
+            if body == {
+                .Value(value) -> {
+                    item :: sema_layout_element_key(value) ?? return None
+                    return Val("{type_name(ty)}{{{item}}}")
+                }
+                .Elements(elements) -> {
+                    if elements.len() != 1 -> return None
+                    item :: sema_layout_element_key(elements[0]) ?? return None
+                    return Val("{type_name(ty)}{{{item}}}")
+                }
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+
+// `a.width == 200.0` inside a layout: the bare fractional literal compared
+// against a layout value is a Float length (Rust lowered the comparison's
+// literal side as an f64), not the default Decimal; arithmetic (`+ 8.0`)
+// keeps the Decimal default and its E0133.
+fn sema_expr_layout_compare_literal(op: BinOp, lhs: Type, right: Expr) -> Bool Never! {
+    if op != BinOp.Ge && op != BinOp.Le && op != BinOp.Eq -> return false
+    if !sema_expr_decimal_literal_operand(right, false) -> return false
+    if lhs == .Named(name) -> return sema_expression_layout_is_axis_type(name)
+    false
 }
 
 fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
@@ -226,8 +339,7 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
     if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) -> return None
     nominal_row :: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
     if nominal_row == .Val(row) {
-        owner :: graph.modules[row.module_index].nominals[row.row]
-        if owner.symbol.module_name != "core.units" || owner.symbol.name != "Measurement" -> return None
+        if graph.modules[row.module_index].module_name != "core.units" || graph.modules[row.module_index].nominals[row.row].symbol.name != "Measurement" -> return None
     }
     if nominal_row == None && name != "Measurement" && !core_source_owns_type(name) -> return None
     if resolved == {
@@ -240,6 +352,11 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
     None
 }
 
+fn sema_expression_is_float_measurement(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    inner :: sema_expression_measurement_inner(ty, environment, program) ?? return false
+    inner == Type.Float
+}
+
 fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
     source_identity :: sema_call_core_module_identity(environment, program, "core.units") ?? return None
     if program.registration_graph == .Val(graph) {
@@ -249,7 +366,7 @@ fn sema_expression_measurement_source_call(function: String, values: [TExpr], re
     arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
     type_args :: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
-    return Val(sema_tir_node(result_type, TExprKind.Call{callee: callee_id, type_args: type_args, args: arguments}, span))
+    return Val(sema_tree_node(result_type, TExprKind.Call{callee: callee_id, type_args: type_args, args: arguments}, span))
     }
     None
 }

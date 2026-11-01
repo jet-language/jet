@@ -36,8 +36,10 @@ use jet_foundation.[
     Variant,
     VariantField,
     VariantPayload,
+    type_identity,
     type_identity_equal,
     type_name,
+    sema_casing_acronym_name,
     sema_casing_pascal_words,
 ]
 
@@ -565,17 +567,61 @@ fn sema_failure_union_infer(graph: &SemaRegistrationGraph, modules: [SemaGraphMo
 // is projected too: its reused body, like every body checked before the
 // solve, is reconciled (sema_failure_reconcile_infallible), its callers keep
 // the carrier they were checked against, and every finalization undoes the
-// projection on `trail` before a later comptime run reads the graph. Returns
-// the projected keys. Every replaced row is recorded on `trail`.
+// projection on `trail` before a later comptime run reads the graph. An
+// inherent method is projected onto its registered row, and its checked body
+// is reconciled like a function's. Returns the projected keys. Every replaced
+// row is recorded on `trail`.
 fn sema_failure_project_infallible(graph: &SemaRegistrationGraph, solved: [String], trail: &SemaGraphTrail) -> [String] {
     projections := [SemaFailureProjection]{}
+    methods := [String]{}
     loop key in solved {
         row :: sema_registration_callable_row(graph, key) ?? next
-        if row == .Function(module_index, index) {
-            contract :: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[index].declaration), err: Type.Named{name: "Never"}}
-            &projections.push(SemaFailureProjection{key: key, module_index: module_index, row: index, return_type: contract})
+        if row == {
+            .Function(module_index, index) -> {
+                contract :: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[index].declaration), err: Type.Named{name: "Never"}}
+                &projections.push(SemaFailureProjection{key: key, module_index: module_index, row: index, return_type: contract})
+            }
+            .Foreign(_, _) -> {}
+            else -> {
+                loop site in sema_failure_method_rows(graph, row) -> sema_failure_project_method_site(&graph, site, &trail)
+                &methods.push(key)
+            }
         }
     }
     sema_failure_project_returns(&graph, projections, &trail)
-    loop projection in projections -> projection.key
+    projected := loop projection in projections -> projection.key
+    loop key in methods -> &projected.push(key)
+    projected
+}
+
+// Projects one registered row of an infallible method (sema_failure_method_rows).
+fn sema_failure_project_method_site(graph: &SemaRegistrationGraph, site: SemaRegistrationCallableRow, trail: &SemaGraphTrail) {
+    if site == {
+        .NominalMethod(module_index, owner, index) -> {
+            projected :: sema_failure_infallible_method_row(graph.modules[module_index].nominals[owner].methods[index], graph.modules[module_index])
+            &trail.entries.push(SemaGraphUndo.NominalMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].nominals[owner].methods[index]})
+            graph.modules[module_index].nominals[owner].methods[index] = ^projected
+        }
+        .ImplMethod(module_index, owner, index) -> {
+            projected :: sema_failure_infallible_method_row(graph.modules[module_index].impls[owner].methods[index], graph.modules[module_index])
+            &trail.entries.push(SemaGraphUndo.ImplMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].impls[owner].methods[index]})
+            graph.modules[module_index].impls[owner].methods[index] = ^projected
+        }
+        else -> {}
+    }
+}
+
+// `method`'s registered row with the span-less `T Never!` return: its
+// declaration, signature, symbol type and identity.
+fn sema_failure_infallible_method_row(method: SemaRegistrationFunction, module_row: SemaRegistrationModule) -> SemaRegistrationFunction {
+    // copy: the projected row is new; the old row stays on the trail.
+    updated := method.copy()
+    updated.declaration.return_type = Val(Type.Result{ok: sema_failure_union_success(method.declaration), err: Type.Named{name: "Never"}})
+    updated.declaration.return_type_span = None
+    signature :: sema_registration_function_signature(updated.declaration, method.raw_protocol_return, method.symbol.id, module_row.source_file, module_row.source_origin, module_row.source_segments)
+    updated.symbol.ty = Val(signature)
+    updated.identity = type_identity(signature)
+    updated.identity_key = sema_registration_function_identity_key(module_row.module_identity, method.symbol.owner ?? "", signature)
+    updated.signature = signature
+    updated
 }

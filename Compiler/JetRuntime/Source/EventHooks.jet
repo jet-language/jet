@@ -1,0 +1,216 @@
+// Synchronous hooks over the Event listener cells. One meaning with the Rust
+// reference crates/jet-codegen/src/Prelude/CoreLib/JetStd/
+// ReactiveEventWatch.rs: JetHook :1628-1717, JetDecisionHook :1782-1882.
+// Single-thread shared cells, as Events.jet.
+//
+// HookBox32: refs0 core8 fallback16 meta24
+//   A Hook<T, R> or DecisionHook<T, E> handle. Its clones share the box (Rust
+//   clones share the listener Rc; a Hook clone's fallback is an equal value).
+//   core is an EventCore holding the listeners. A Hook owns its fallback R
+//   slot under its copied descriptor meta; a DecisionHook keeps 0 in both.
+
+fn hook_new(fallback: I64, meta: I64) -> I64 {
+    hook :: jet_rt_alloc(I64{32}, I64{8})
+    event_store(hook, I64{1})
+    event_store(wrapping(hook + I64{8}), event_core_new(I64{0}))
+    event_store(wrapping(hook + I64{16}), fallback)
+    event_store(wrapping(hook + I64{24}), meta)
+    hook
+}
+
+// A copy of the value at `source` written to `target` (a descriptor without
+// a clone helper copies the bytes).
+fn hook_value_clone(source: I64, target: I64, meta: I64) {
+    if (event_word(wrapping(meta + I64{8})) == I64{0}) {
+        coll_copy(source, target, coll_payload(meta))
+        return
+    }
+    coll_slot_clone(source, target, meta)
+}
+
+// JetHook::new :1643-1648: the hook takes over the moved fallback's bytes.
+#Export(c) fn jet_hook_new(fallback: I64, meta: I64) -> I64 {
+    owned :: coll_meta_copy(meta)
+    slot :: coll_slot_new(owned)
+    coll_copy(fallback, slot, coll_payload(owned))
+    hook_new(slot, owned)
+}
+
+// JetDecisionHook::new :1788-1794 borrows its policy; FirstCancelElseTransform
+// is the sole ordinal.
+#Export(c) fn jet_decision_hook_new(_policy: I64) -> I64 {
+    hook_new(I64{0}, I64{0})
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_hook(hook: I64) -> I64 {
+    event_store(hook, event_word(hook) + I64{1})
+    hook
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_hook(hook: I64) {
+    if (hook == I64{0}) -> return
+    refs :: event_word(hook) - I64{1}
+    event_store(hook, refs)
+    if (refs != I64{0}) -> return
+    jet_rt_handle_drop_jet_event(event_word(wrapping(hook + I64{8})))
+    meta :: event_word(wrapping(hook + I64{24}))
+    if (meta != I64{0}) {
+        coll_slot_free(event_word(wrapping(hook + I64{16})), meta)
+        coll_meta_drop(meta)
+    }
+    jet_rt_free(hook, I64{32}, I64{8})
+}
+
+// on / once / on_priority (JetHook::add :1669-1692, JetDecisionHook::add
+// :1814-1830): the Event registration over the hook's listener cell.
+#Export(c) fn jet_hook_listen(hook: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
+    jet_event_listen(event_word(wrapping(hook + I64{8})), scope, priority, once, env, invoke, release)
+}
+
+#Export(c) fn jet_hook_listener_count(hook: I64) -> I64 {
+    jet_event_listener_count(event_word(wrapping(hook + I64{8})))
+}
+
+// JetHook::trace :1726-1728: `hook listeners={n}`.
+#Export(c) fn jet_hook_trace(hook: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("hook listeners="))
+    rt_text_push_number(text, event_active_listeners(event_word(wrapping(hook + I64{8}))))
+    jet_rt_string_builder_finish(text)
+}
+
+// JetHook::run :1694-1717: with no active listener the result is the moved
+// `fallback`; otherwise it starts as a copy of the hook's own fallback and
+// each due listener's result replaces it. `payload` is lent to every
+// handler; the result is written to `out`. A stop ends the run with no
+// result written (the caller leaves by its stop edge). The run holds its own
+// count on the box: a handler that drops the last Hook handle leaves it
+// alive until the run releases it.
+#Export(c) fn jet_hook_run(hook: I64, payload: I64, fallback: I64, out: I64) {
+    event_store(hook, event_word(hook) + I64{1})
+    core :: event_word(wrapping(hook + I64{8}))
+    meta :: event_word(wrapping(hook + I64{24}))
+    size :: coll_payload(meta)
+    snapshot :: event_snapshot(core)
+    count :: event_snapshot_count(snapshot)
+    if (count == I64{0}) {
+        coll_copy(fallback, out, size)
+    } else {
+        hook_value_clone(event_word(wrapping(hook + I64{16})), out, meta)
+        coll_slot_drop(fallback, meta)
+    }
+    scratch :: coll_slot_new(meta)
+    stopped := false
+    at := I64{0}
+    loop at < count {
+        listener :: event_snapshot_get(snapshot, at)
+        if !stopped && event_listener_take_turn(listener) {
+            event_listener_call(listener, payload, scratch)
+            if (jet_rt_session_propagate() != I64{0}) {
+                stopped = true
+            } else {
+                coll_slot_drop(out, meta)
+                coll_copy(scratch, out, size)
+            }
+        }
+        event_listener_release(listener)
+        at += I64{1}
+    }
+    jet_rt_free(scratch, coll_size(meta), I64{8})
+    event_snapshot_free(snapshot)
+    event_prune_listeners(core)
+    if stopped -> coll_slot_drop(out, meta)
+    jet_rt_handle_drop_jet_hook(hook)
+}
+
+// The lowering's layout words for a DecisionHook<T, E> run (BuildEvents.jet
+// ir_decision_hook_run): descriptors of T, E and HookDecision<T, E>, the
+// decision variant indices with their payload offsets, and the HookOutcome
+// box bytes with its variant indices and payload offsets.
+DECISION_T_META :: I64{0}
+DECISION_E_META :: I64{8}
+DECISION_META :: I64{16}
+DECISION_TRANSFORM :: I64{24}
+DECISION_TRANSFORM_AT :: I64{32}
+DECISION_CANCEL :: I64{40}
+DECISION_FAIL :: I64{48}
+DECISION_FAIL_AT :: I64{56}
+OUTCOME_BYTES :: I64{64}
+OUTCOME_CONTINUE :: I64{72}
+OUTCOME_CONTINUE_AT :: I64{80}
+OUTCOME_CANCEL :: I64{88}
+OUTCOME_FAIL :: I64{96}
+OUTCOME_FAIL_AT :: I64{104}
+
+// JetDecisionHook::run :1832-1882 under FirstCancelElseTransform: each due
+// handler sees the current value (first a copy of `payload`, which is lent);
+// Continue keeps it, Transform replaces it, Cancel and Fail end the run. The
+// HookOutcome box is built in the lowering's enum layout: Continue moves the
+// current value in, Fail the failure. A stop ends the run with no outcome.
+#Export(c) fn jet_decision_hook_run(hook: I64, payload: I64, layout: I64) -> I64 {
+    event_store(hook, event_word(hook) + I64{1})
+    core :: event_word(wrapping(hook + I64{8}))
+    t_meta :: event_word(wrapping(layout + DECISION_T_META))
+    e_meta :: event_word(wrapping(layout + DECISION_E_META))
+    d_meta :: event_word(wrapping(layout + DECISION_META))
+    current :: coll_slot_new(t_meta)
+    hook_value_clone(payload, current, t_meta)
+    decision :: coll_slot_new(d_meta)
+    failure := I64{0}
+    outcome := event_word(wrapping(layout + OUTCOME_CONTINUE))
+    stopped := false
+    snapshot :: event_snapshot(core)
+    count :: event_snapshot_count(snapshot)
+    at := I64{0}
+    loop at < count {
+        listener :: event_snapshot_get(snapshot, at)
+        due :: !stopped && outcome == event_word(wrapping(layout + OUTCOME_CONTINUE))
+        if due && event_listener_take_turn(listener) {
+            event_listener_call(listener, current, decision)
+            if (jet_rt_session_propagate() != I64{0}) {
+                stopped = true
+            } else {
+                boxed :: event_word(decision)
+                decision_tag :: event_word(boxed)
+                if (decision_tag == event_word(wrapping(layout + DECISION_TRANSFORM))) {
+                    coll_slot_drop(current, t_meta)
+                    hook_value_clone(wrapping(boxed + event_word(wrapping(layout + DECISION_TRANSFORM_AT))), current, t_meta)
+                } else if (decision_tag == event_word(wrapping(layout + DECISION_CANCEL))) {
+                    outcome = event_word(wrapping(layout + OUTCOME_CANCEL))
+                } else if (decision_tag == event_word(wrapping(layout + DECISION_FAIL))) {
+                    failure = coll_slot_new(e_meta)
+                    hook_value_clone(wrapping(boxed + event_word(wrapping(layout + DECISION_FAIL_AT))), failure, e_meta)
+                    outcome = event_word(wrapping(layout + OUTCOME_FAIL))
+                }
+                coll_slot_drop(decision, d_meta)
+            }
+        }
+        event_listener_release(listener)
+        at += I64{1}
+    }
+    event_snapshot_free(snapshot)
+    event_prune_listeners(core)
+    jet_rt_free(decision, coll_size(d_meta), I64{8})
+    result := I64{0}
+    if stopped {
+        coll_slot_free(current, t_meta)
+        if (failure != I64{0}) -> coll_slot_free(failure, e_meta)
+    } else {
+        bytes :: event_word(wrapping(layout + OUTCOME_BYTES))
+        result = jet_rt_alloc(bytes, I64{8})
+        coll_zero(result, bytes)
+        event_store(result, outcome)
+        if (outcome == event_word(wrapping(layout + OUTCOME_CONTINUE))) {
+            coll_copy(current, wrapping(result + event_word(wrapping(layout + OUTCOME_CONTINUE_AT))), coll_payload(t_meta))
+            jet_rt_free(current, coll_size(t_meta), I64{8})
+        } else {
+            coll_slot_free(current, t_meta)
+        }
+        if (failure != I64{0}) {
+            coll_copy(failure, wrapping(result + event_word(wrapping(layout + OUTCOME_FAIL_AT))), coll_payload(e_meta))
+            jet_rt_free(failure, coll_size(e_meta), I64{8})
+        }
+    }
+    jet_rt_handle_drop_jet_hook(hook)
+    result
+}

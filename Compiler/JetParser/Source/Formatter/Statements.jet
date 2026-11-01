@@ -689,13 +689,21 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
         .Assign(target, op, _, value) -> {
             jfmt_fmt_lvalue(&f, target)
             if op == .Val(compound) {
-                jfmt_write(&f, " ")
-                jfmt_write(&f, jfmt_compound_spell(compound))
+                // An operator with no compound form assigns its method call.
+                if jfmt_bin_op_method(compound) == .Val(method) {
+                    jfmt_write(&f, " = ")
+                    jfmt_fmt_lvalue(&f, target)
+                    jfmt_write(&f, ".{method}(")
+                    jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
+                    jfmt_write(&f, ")")
+                } else {
+                    jfmt_write(&f, " {jfmt_compound_spell(compound)} ")
+                    jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
+                }
             } else {
-                jfmt_write(&f, " =")
+                jfmt_write(&f, " = ")
+                jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
             }
-            jfmt_write(&f, " ")
-            jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
         }
         .Return(expr, _) -> {
             jfmt_write(&f, "return")
@@ -1139,7 +1147,7 @@ fn jfmt_fmt_guard_dispatch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
 }
 
 // The parser stores a readiness head in a private one-field
-// tuple so the existing arm IR can carry it through sema/TIR. That carrier is
+// tuple so the existing arm IR can carry it through sema and IR lowering. That carrier is
 // not user syntax; always print its canonical arm-table spelling instead of
 // leaking the tuple or its sentinel field.
 fn jfmt_fmt_readiness_head(f: &JetFmt, cond: Expr) -> Bool {

@@ -464,9 +464,9 @@ fn compute_rename(db: SymbolDB, tokens: [Token], path: String, offset: USize, ne
 // Rust: Source/LSP/Features.rs:2853
 struct RefactorAction { title: String, kind: String, edits: [TextEdit] }
 // Rust: Source/LSP/Features.rs:2859
-fn compute_refactor_actions(db: SymbolDB, tokens: [Token], diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, import_sources: [String: String], excluded_import_paths: Set<String>, requested: Span) -> [RefactorAction] {
+fn compute_refactor_actions(db: SymbolDB, tokens: [Token], diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, excluded_import_paths: Set<String>, requested: Span) -> [RefactorAction] {
     actions := adjacent_subject_dispatch_actions(diagnostics, requested)
-    &actions.extend(import_actions(db, diagnostics, src, path, workspace_root, import_sources, excluded_import_paths, requested))
+    &actions.extend(import_actions(db, diagnostics, src, path, workspace_root, excluded_import_paths, requested))
     selected :: trim_span(src, requested) ?? {
         &actions.extend(inline_actions(db, tokens, src, path, requested))
         return ^actions
@@ -500,7 +500,7 @@ fn adjacent_subject_dispatch_actions(diagnostics: [Diagnostic], requested: Span)
     }).collect()
 }
 // Rust: Source/LSP/Features.rs:2953
-fn import_actions(db: SymbolDB, diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, import_sources: [String: String], excluded_import_paths: Set<String>, requested: Span) -> [RefactorAction] {
+fn import_actions(db: SymbolDB, diagnostics: [Diagnostic], src: String, path: String, workspace_root: String?, excluded_import_paths: Set<String>, requested: Span) -> [RefactorAction] {
     out := [RefactorAction]{}
     seen := Set[String]{}
     loop diagnostic in diagnostics.iter().filter((diagnostic) -> { diagnostic.code == "E0102" || diagnostic.code == "E0107" }) {
@@ -510,7 +510,7 @@ fn import_actions(db: SymbolDB, diagnostics: [Diagnostic], src: String, path: St
             source_path :: module_file_path(path, workspace_root, symbol.module_path).map((path) -> { path.to_string_lossy() })
             source_path != Val(path) && !source_path.is_some_and((candidate) -> { excluded_import_paths.contains(candidate) }) &&
                 !excluded_import_paths.contains(symbol.module_path) && symbol.provenance.is_source() &&
-                source_symbol_is_exported(symbol, import_sources) &&
+                source_symbol_is_exported(db, symbol) &&
                 !(symbol.kind == .Local || symbol.kind == .Parameter || symbol.kind == .Member)
         }).filter_map((symbol) -> { use_statement_for_module(path, workspace_root, symbol.module_path) }).collect()
         modules.sort()
@@ -598,12 +598,10 @@ fn initializer_refs_are_stable(db: SymbolDB, path: String, span: Span) -> Bool {
         })
     })
 }
-// Rust: Source/LSP/Features.rs:3226
-fn source_symbol_is_exported(symbol: jet_semindex.SemanticSymbol, sources: [String: String]) -> Bool {
+// #6341: Sema's checked visibility decides, never the declaration's spelling.
+fn source_symbol_is_exported(db: SymbolDB, symbol: jet_semindex.SemanticSymbol) -> Bool {
     span :: symbol.span ?? return false
-    source :: sources.get(symbol.module_path) ?? return false
-    start :: line_start(source, span.start)
-    source.get(start..<span.start).is_some_and((prefix) -> { prefix.split_whitespace().any((word) -> { word == "pub" || word.starts_with("pub(") }) })
+    db.declaration_visibility(symbol.module_path, span) == .Val(.Public)
 }
 // Rust: Source/LSP/Features.rs:3244
 fn exact_expr(db: SymbolDB, path: String, selected: Span) -> jet_semindex.StructuralNode? {
