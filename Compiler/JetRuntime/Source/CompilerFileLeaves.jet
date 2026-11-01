@@ -27,20 +27,16 @@
                 fd_put(reader, I64{56}, I64{0})
                 fd_put(reader, I64{48}, filled)
             }
-            end := position
-            found := false
-            loop end < filled {
-                byte :: rt_text_byte(wrapping(buffer + end))
-                end += I64{1}
-                if (byte == I64{10}) {
-                    found = true
-                    break
-                }
-            }
+            newline :: rt_text_find_byte(buffer, filled, I64{10}, position, false)
+            found :: newline >= I64{0}
+            end :: if found -> newline + I64{1} else -> filled
             count :: end - position
             required :: used + count
             if (required > capacity) {
+                // A line found whole in the buffer gets exactly its bytes,
+                // which compiler_fs_bytes_take hands on without a copy.
                 grown := if (capacity == I64{0}) -> I64{128} else -> capacity
+                if (capacity == I64{0} && found) { grown = count }
                 loop grown < required -> grown *= I64{2}
                 next_bytes :: jet_rt_alloc(grown, I64{8})
                 if (used != I64{0}) -> rt_text_bytes_copy(next_bytes, bytes, used)
