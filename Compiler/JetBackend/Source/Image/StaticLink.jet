@@ -39,7 +39,10 @@
 //    of the directly linked objects (none without `debug_info`), a `.symtab`
 //    and section headers. A split link (x64_link_executable_split) writes
 //    them to a side debug file instead and gives the image a build-id note,
-//    the one section its own headers name.
+//    the one section its own headers name. When nothing reads the unwind
+//    tables at run time (no unwinder is linked; link_eh_unloaded), a split
+//    link moves them from the read-only segment to the side file as
+//    `.debug_frame` (link_debug_frame).
 //
 // Inputs are read in place. Section headers and local symbols are not copied
 // into tables (a runtime codegen unit has ~63k sections): they are read from
@@ -234,6 +237,9 @@ struct LinkContext {
     tls_align: Int
     eh_start: Int
     eh_size: Int
+    // The unwind tables leave the loaded image for the side debug file, as
+    // `.debug_frame` (link_eh_unloaded, link_debug_frame).
+    eh_debug: Bool
     // The address of the first loaded byte (the ELF header).
     base: Int
     errors: [String]
@@ -253,7 +259,7 @@ fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
         ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
         ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
         got: [Int:Int]{}, got_keys: [Int]{}, rel_base: [Int]{}, rel_slot: [Int]{}, got_start: 0, tls_start: 0, tls_end: 0, tls_align: 1,
-        eh_start: 0, eh_size: 0, base: base, errors: [String]{},
+        eh_start: 0, eh_size: 0, eh_debug: false, base: base, errors: [String]{},
     }
 }
 
@@ -1744,9 +1750,11 @@ fn link_layout(c: &LinkContext, note: Bool) -> LinkLayout Never! {
 }
 
 // Place the kept unwind records at the first 8-aligned address from `addr`,
-// then the zero terminator; returns the end of the tables.
+// then the zero terminator; returns the end of the tables. Tables bound for
+// the side debug file (`eh_debug`) are placed from address 0 and take no
+// room in the image: the end is `addr`.
 fn link_place_eh(c: &LinkContext, addr: Int) -> Int Never! {
-    eh_start :: link_align(addr, 8)
+    eh_start :: if c.eh_debug -> 0 else -> link_align(addr, 8)
     c.eh_start = eh_start
     eh := 0
     loop piece in 0..<c.ep_sec.len() {
@@ -1755,6 +1763,7 @@ fn link_place_eh(c: &LinkContext, addr: Int) -> Int Never! {
         eh += c.ep_len[piece]
     }
     c.eh_size = eh + 4
+    if c.eh_debug -> return addr
     eh_start + eh + 4
 }
 
@@ -2032,6 +2041,194 @@ fn link_emit_eh(c: &LinkContext, out: &[U8]) Never! {
     &c.errors.extend(errors)
 }
 
+// What `.debug_frame` keeps of an `.eh_frame` CIE (link_eh_cie): the
+// offsets, from the record's length field, of its code and data alignment
+// (`fields` to `ra_at`), its return address column (`ra_at`, value `ra`) and
+// its initial instructions; whether its FDEs carry augmentation data (`z`);
+// the encoding of their pc_begin and pc_range (DW_EH_PE_*).
+struct LinkEhCie {
+    fields: Int
+    ra_at: Int
+    ra: Int
+    instructions: Int
+    z: Bool
+    encoding: Int
+}
+
+// The CIE record at `at` in `bytes`, when `.debug_frame` can say what it
+// says: version 1 or 3, augmentation "" or "zR", its FDE addresses absolute
+// or pc-relative, 4 bytes (signed or not) or 8 unsigned. Any other
+// augmentation (a personality, LSDA pointers, a signal frame) has no
+// `.debug_frame` form.
+fn link_eh_cie(bytes: [U8], at: Int) -> LinkEhCie? Never! {
+    end :: at + 4 + link_debug_le(bytes, at, 4)
+    if end > bytes.len() || at + 12 > end -> return None
+    version :: Int.from_u8(bytes[at + 8])
+    if version != 1 && version != 3 -> return None
+    z :: Int.from_u8(bytes[at + 9]) == 0x7a
+    if z && (Int.from_u8(bytes[at + 10]) != 0x52 || Int.from_u8(bytes[at + 11]) != 0) -> return None
+    if !z && Int.from_u8(bytes[at + 9]) != 0 -> return None
+    fields :: if z -> at + 12 else -> at + 10
+    // Code alignment (uleb), data alignment (sleb), return address column
+    // (a byte in version 1, else a uleb).
+    ra_at :: link_debug_leb_end(bytes, link_debug_leb_end(bytes, fields))
+    if ra_at >= end -> return None
+    fields_end := ra_at + 1
+    ra := Int.from_u8(bytes[ra_at])
+    if version != 1 {
+        fields_end = ra_at
+        ra = link_debug_uleb(bytes, &fields_end)
+    }
+    encoding := 0
+    instructions := fields_end
+    if z {
+        // The augmentation data: one byte, R's FDE pointer encoding.
+        if fields_end + 2 > end || Int.from_u8(bytes[fields_end]) != 1 -> return None
+        encoding = Int.from_u8(bytes[fields_end + 1])
+        instructions = fields_end + 2
+    }
+    // The application: absolute (0x00) or pc-relative (0x10), not indirect.
+    if instructions > end || (encoding.bit_and(0xe0)) != 0 -> return None
+    format :: encoding.bit_and(0x0f)
+    if format != 0 && format != 3 && format != 4 && format != 0x0b -> return None
+    Val(LinkEhCie{fields: fields - at, ra_at: ra_at - at, ra: ra, instructions: instructions - at, z: z, encoding: encoding})
+}
+
+// The `encoding`-coded address (link_eh_cie's: absolute or pc-relative, 4
+// bytes signed or not, or 8 unsigned) at `at` in `bytes`, whose first byte is
+// at address 0; with `relative` false the pc-relative bit is ignored (an
+// FDE's pc_range). Advances `at` past it.
+fn link_eh_address(bytes: [U8], at: &Int, encoding: Int, relative: Bool) -> Int Never! {
+    format :: encoding.bit_and(0x0f)
+    width :: if format == 3 || format == 0x0b -> 4 else -> 8
+    value := link_debug_le(bytes, at, width)
+    if format == 0x0b && value >= 0x80000000 -> value -= 0x100000000
+    if relative && (encoding.bit_and(0x70)) == 0x10 -> value += at
+    at += width
+    value
+}
+
+// Pad the record that starts at `start` in `out` with DW_CFA_nop to a
+// multiple of `size` bytes and write its length.
+fn link_frame_finish(out: &[U8], start: Int, size: Int) Never! {
+    pad :: (size - (out.len() - start) % size) % size
+    loop _ in 0..<pad -> &out.push(U8{0})
+    link_put32(&out, start, out.len() - start - 4)
+}
+
+// One record of the `.eh_frame` link_emit_eh writes at address 0: its CIE's
+// offset (the record's own for a CIE) and, for an FDE, its pc_begin and
+// pc_range and the offset of its instructions.
+struct LinkEhRecord {
+    at: Int
+    end: Int
+    cie_at: Int
+    begin: Int
+    range: Int
+    instructions: Int
+}
+
+// The kept unwind records as `.debug_frame` (DWARF 5 section 6.4.1), for the
+// side debug file when nothing reads them at run time (link_eh_unloaded): the
+// `.eh_frame` link_emit_eh writes, at address 0, as version 4 records. A CIE
+// gets id 0xffffffff, no augmentation and the address size: 4 bytes when
+// every FDE's range ends below 4 GiB (a static image's do), else 8. An FDE
+// names its CIE by section offset and carries its pc_begin and pc_range at
+// that size, without augmentation data. Instructions are copied; each record
+// is padded to the address size.
+fn link_debug_frame(c: &LinkContext) -> [U8] Never! {
+    eh := [U8]{}
+    link_emit_eh(&c, &eh)
+    cies := [Int:LinkEhCie]{}
+    records := [LinkEhRecord]{}
+    wide := false
+    at := 0
+    loop at + 4 <= eh.len() {
+        length :: link_debug_le(eh, at, 4)
+        if length == 0 -> break
+        end :: at + 4 + length
+        id :: link_debug_le(eh, at + 4, 4)
+        if id == 0 {
+            cie :: link_eh_cie(eh, at) ?? {
+                link_error(&c, "an unwind CIE has no .debug_frame form")
+                return [U8]{}
+            }
+            &cies.add(at, cie).drop("record offsets are unique")
+            &records.push(LinkEhRecord{at: at, end: end, cie_at: at, begin: 0, range: 0, instructions: 0})
+        } else {
+            cie_at :: at + 4 - id
+            cie :: cies.get(cie_at) ?? {
+                link_error(&c, "an unwind FDE names no CIE before it")
+                return [U8]{}
+            }
+            p := at + 8
+            begin :: link_eh_address(eh, &p, cie.encoding, true)
+            range :: link_eh_address(eh, &p, cie.encoding, false)
+            if cie.z {
+                data :: link_debug_uleb(eh, &p)
+                p += data
+            }
+            if begin < 0 || range < 0 || begin + range > 0xffffffff -> wide = true
+            &records.push(LinkEhRecord{at: at, end: end, cie_at: cie_at, begin: begin, range: range, instructions: p})
+        }
+        at = end
+    }
+    size :: if wide -> 8 else -> 4
+    out := [U8]{}
+    cie_out := [Int:Int]{}
+    loop record in records {
+        start :: out.len()
+        elf64_u32(&out, 0)
+        if record.cie_at == record.at {
+            cie :: cies.get(record.at) ?? {
+                link_error(&c, "an unwind CIE has no .debug_frame form")
+                return [U8]{}
+            }
+            elf64_u32(&out, 0xffffffff)
+            // Version 4, augmentation "", address size, segment selector size 0.
+            &out.push(U8{4})
+            &out.push(U8{0})
+            &out.push(U8{size})
+            &out.push(U8{0})
+            &out.extend(eh[record.at + cie.fields..<record.at + cie.ra_at])
+            dwarf_uleb(&out, cie.ra)
+            &out.extend(eh[record.at + cie.instructions..<record.end])
+            &cie_out.add(record.at, start).drop("record offsets are unique")
+        } else {
+            elf64_u32(&out, cie_out.get(record.cie_at) ?? 0)
+            if wide {
+                elf64_u64(&out, record.begin)
+                elf64_u64(&out, record.range)
+            } else {
+                elf64_u32(&out, record.begin)
+                elf64_u32(&out, record.range)
+            }
+            &out.extend(eh[record.instructions..<record.end])
+        }
+        link_frame_finish(&out, start, size)
+    }
+    out
+}
+
+// Whether the unwind tables can leave the loaded image for the side debug
+// file as `.debug_frame`: no unwinder is linked (libgcc's
+// `_Unwind_Find_FDE` and `__register_frame_info`, the only readers of the
+// loaded tables; without them `__jet_eh_startup` returns at once, so
+// `__EH_FRAME_BEGIN__` names nothing anyone reads), and every kept CIE has a
+// `.debug_frame` form (link_eh_cie). Jet's own fault report walks frame
+// pointers, so only debuggers and profilers read the tables, and they read
+// `.debug_frame` from the side debug file.
+fn link_eh_unloaded(c: LinkContext) -> Bool Never! {
+    if link_defined_name(c, "_Unwind_Find_FDE") || link_defined_name(c, "__register_frame_info") -> return false
+    loop piece in 0..<c.ep_sec.len() {
+        if c.ep_cie[piece] >= 0 || !c.ep_keep[piece] -> next
+        obj :: c.ep_obj[piece].copy()
+        start :: link_sec_offset(c, obj, c.ep_sec[piece]) + c.ep_start[piece]
+        _ := link_eh_cie(c.bufs[c.obj_buffer[obj]], start) ?? return false
+    }
+    true
+}
+
 // Pad `out` to `offset` with `fill` (0xcc, `int3`, between code sections).
 // A long pad (a page gap) appends one doubled run of `fill` and a prefix of
 // it: a few block copies, not a push per byte.
@@ -2103,8 +2300,10 @@ fn link_file_classes() -> [Int] Never! {
 fn link_write_contents(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int, pieces: &LinkPieces) Never! {
     loop class in link_file_classes() {
         if class == LINK_EH {
-            link_pad_to(&out, c.eh_start - origin, 0)
-            link_emit_eh(&c, &out)
+            if !c.eh_debug {
+                link_pad_to(&out, c.eh_start - origin, 0)
+                link_emit_eh(&c, &out)
+            }
             next
         }
         loop row in l.order[class] {
@@ -2395,7 +2594,7 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
     flags :: [Int]{2, 2, 6, 0x403, 0x403, 3, 3, 3, 3, 3, 3}
     loop class in 0..<LINK_CLASSES {
         extent := link_class_extent(c, l, class)
-        if class == LINK_EH -> extent = [Int]{c.eh_start, c.eh_start + c.eh_size}
+        if class == LINK_EH && !c.eh_debug -> extent = [Int]{c.eh_start, c.eh_start + c.eh_size}
         // .bss also holds the common symbols, through the end of memory.
         if class == LINK_BSS {
             extent = if l.has_rw -> [Int]{l.bss_start, l.mem_end} else -> [Int]{0, 0}
@@ -2414,6 +2613,13 @@ fn link_write_sections(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkDe
         start :: out.len()
         &out.extend(sections[group])
         &headers.push(LinkSectionHeader{name: name, kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: sections[group].len(), link: 0, info: 0, align: 1, entry_size: 0})
+    }
+    if c.eh_debug {
+        frame :: link_debug_frame(&c)
+        elf64_pad(&out, 4)
+        start :: out.len()
+        &out.extend(frame)
+        &headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame.len(), link: 0, info: 0, align: 4, entry_size: 0})
     }
 
     // Symbols: every named local function and object of a loaded section,
@@ -2745,6 +2951,11 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     loop name in link_linker_names() -> &linker_names.add(name, true).drop("names are unique")
     link_collect(&c, entries, linker_names)
     if c.errors.len() > 0 -> return link_resident_failure(^c.errors)
+    // A split link moves the unwind tables to the side debug file when
+    // nothing reads them at run time. An image that keeps its debug tail
+    // keeps `.eh_frame` loaded: there the move would add the whole table to
+    // the file and save only the pages it alone filled.
+    c.eh_debug = request == .None && split && link_eh_unloaded(c)
     layout :: link_layout(&c, split)
     if request != .None {
         if layout.text_start <= 0 || layout.text_end < layout.text_start || layout.mem_end > 9223372036854775807 -> return link_resident_failure(^[String]{"resident executable layout is outside the native address range"})

@@ -3908,11 +3908,15 @@ the location table, the symbol table and the section headers to a side file,
 `<image>.debug` beside the image, and files the same bytes in the package's
 symbol store as
 `.jet/symbols/.build-id/<first two hex digits>/<rest>.debug`. The image keeps
-its loaded segments, `.eh_frame` and a GNU build-id note under one `PT_NOTE`
-header, with section headers naming only that note; the build id hashes both
-files, so debuggers and profilers given the store (`gdb`'s
-`debug-file-directory`, `perf`'s build-id lookup) find the side file. A crash
-report of the image prints addresses, as under `false`.
+its loaded segments and a GNU build-id note under one `PT_NOTE` header, with
+section headers naming only that note; the build id hashes both files, so
+debuggers and profilers given the store (`gdb`'s
+`debug-file-directory`, `perf`'s build-id lookup) find the side file. An
+image that links no unwinder (no code of it unwinds the stack; a crash report
+walks frame pointers) moves its call frame information to the side file too,
+as `.debug_frame`, so its loaded segments hold no `.eh_frame`; with an
+unwinder `.eh_frame` stays loaded. A crash report of the image prints
+addresses, as under `false`.
 `jet run`, `jet dev` and `jet test` keep the debug info in the image under
 `split`, as under `true`, so their crash reports name functions and lines.
 `backtrace: full` stays legal with `split`. A user who wants the debug info

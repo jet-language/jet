@@ -4,7 +4,9 @@
 # report prints addresses; `small: true` keeps inlining to the O1 limits.
 # `debug_info: split` (the stock `release` profile's) has `jet build` write
 # the debug info to `<image>.debug` and the package's `.jet/symbols` store;
-# `jet run` keeps it in the image.
+# `jet run` keeps it in the image. A split image that links no unwinder moves
+# its call frame information to the side file too, as `.debug_frame`, instead
+# of a loaded `.eh_frame`.
 fixture: fixtures/build_debug_info
 env: NO_COLOR=1
 step: jet run main.jet
@@ -28,6 +30,7 @@ cwd: open
 exit: 0
 rename: open/.jet/build/main open/.jet/build/main_debug
 capture: debug_size = size file open/.jet/build/main_debug
+file: open/.jet/build/main_debug ~ ".eh_frame" # an image with its debug info keeps the loaded unwind table
 step: jet build --debug-info=false main.jet
 cwd: open
 exit: 0
@@ -42,6 +45,8 @@ exit: 0
 file: open/.jet/build/main size < {cap:debug_size}
 file: open/.jet/build/main.debug is-file # the side file beside the image
 file: open/.jet/symbols/.build-id is-dir # and its copy in the symbol store
+file: open/.jet/build/main.debug ~ ".debug_frame" # the side file holds the frame information
+file: open/.jet/build/main.debug !~ ".eh_frame" # and the image loads no unwind table
 step: {work}/open/.jet/build/main
 exit: 70
 stdout: = "depth: 3\n"
