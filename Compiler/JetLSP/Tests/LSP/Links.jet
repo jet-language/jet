@@ -23,3 +23,22 @@
 #Test("reasoning lenses do not manufacture records for an empty semantic index") {
     assert_eq(lsp_reasoning_code_lenses("file:///main.jet", "/main.jet", "fn run() {{}}", SymbolDB.new()), [String]{})
 }
+
+fn lsp_links_test_json(line: Int, start: Int, end: Int, target: OSPath) -> String Never! {
+    range :: LSPRange{start: LSPPos{line: line, character: start}, end: LSPPos{line: line, character: end}}
+    "{{\"range\":{lsp_range_json(range)},\"target\":{foundation_json_quote(lsp_path_to_uri(lsp_env_path.display(target)))}}}"
+}
+
+#Test("document links follow use block rows and alias rows") {
+    scratch :: lsp_env_test_scratch("links-use-block")
+    app :: lsp_env_test_child(scratch, "app")
+    lsp_env_files.create_dir_all(app) ?? panic("create link target dir")
+    store :: lsp_env_test_child(app, "store.jet")
+    cart :: lsp_env_test_child(app, "cart.jet")
+    lsp_env_files.write(store, "fn run() {{}}\n".bytes()) ?? panic("write store target")
+    lsp_env_files.write(cart, "fn run() {{}}\n".bytes()) ?? panic("write cart target")
+    src :: "use {{\n    app.store\n    // rows may carry comments\n\n    c :: app.cart\n}}\nuse s :: app.store\nfn run() {{}}\n"
+    links :: lsp_document_links_for(lsp_env_test_child(scratch, "main.jet"), Val(scratch), src, scratch)
+    assert_eq(links, [String]{lsp_links_test_json(1, 4, 13, store), lsp_links_test_json(4, 9, 17, cart), lsp_links_test_json(6, 9, 18, store)})
+    lsp_env_files.remove_dir_all(scratch) ?? panic("clean document link scratch")
+}

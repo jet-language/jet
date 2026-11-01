@@ -34,6 +34,7 @@ use jet_foundation.[
     core_bare_source_module,
     core_module_export,
     core_module_has_member,
+    core_module_has_type,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
     source_file_id,
@@ -3669,6 +3670,107 @@ fn jet_driver_core_runtime_member_imports(program: &Program, core_sources: [JetD
     program.imports = rewritten
 }
 
+// #6542: `alias :: owner.x` binds whatever the path names. When the path names
+// no module and its owner declares the member `x`, the row is that member, as
+// `use owner.[x as alias]` is. The owner can be a Core module, an inline module
+// of this file, or the file that a body-less `module owner` of this file
+// declares. Any other path stays a module import and keeps its own error.
+fn jet_driver_member_imports(program: &Program, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) {
+    if jet_driver_member_rows(program.imports, program.items, program.items, request, source_units, unit) == .Val(rows) -> program.imports = rows
+    loop index in 0..<program.items.len() {
+        if program.items[index] == .CodeModule(code_module) && code_module.body == .Val(body) {
+            rows :: jet_driver_member_rows(code_module.imports, body, program.items, request, source_units, unit) ?? next
+            module_value := code_module.copy()
+            module_value.imports = rows
+            program.items[index] = Item.CodeModule{value: module_value}
+        }
+    }
+}
+
+// `imports` with each member row read as a member list, or None when no row
+// names a member. `scope` holds the items of the importing module body and
+// `outer` the file's top-level items.
+fn jet_driver_member_rows(imports: [ImportDecl], scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> [ImportDecl]? {
+    rows := [ImportDecl]{}
+    changed := false
+    loop declaration in imports {
+        if jet_driver_member_import(declaration, scope, outer, request, source_units, unit) == .Val(member) {
+            &rows.push(member)
+            changed = true
+        } else {
+            &rows.push(declaration.copy())
+        }
+    }
+    if !changed -> return None
+    Val(rows)
+}
+
+fn jet_driver_member_import(declaration: ImportDecl, scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> ImportDecl? {
+    if declaration.kind == .Module(name, span) {
+        parts :: name.split(".").to_list()
+        if parts.len() < 2 -> return None
+        member :: parts[parts.len() - 1]
+        owner :: name.slice(0, name.count_bytes() - member.count_bytes() - 1)
+        names_member := false
+        if parts[0] == "core" {
+            if parts.len() == 2 || jet_driver_core_module_named(request.core_sources, name) || jet_driver_core_private_unit(name, span) != None -> return None
+            names_member = core_module_has_member(owner, member) || core_module_has_type(owner, member)
+        } else if parts.len() == 2 {
+            names_member = jet_driver_inline_module_declares(scope, owner, member) || jet_driver_inline_module_declares(outer, owner, member) || jet_driver_file_module_declares(outer, owner, member, request, source_units, unit)
+        }
+        if !names_member -> return None
+        owner_span :: Span{start: span.start, end: span.start + owner.count_bytes()}
+        member_span :: Span{start: owner_span.end + 1, end: span.end}
+        local :: if declaration.alias != member -> String?{Val(declaration.alias)} else -> String?{None}
+        local_span :: if local == None -> member_span else -> declaration.alias_span
+        return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: owner, module_alias_span: owner_span, items: [ImportedItem]{ImportedItem{original: member, alias: local}}, items_span: member_span, span: declaration.span}, alias: owner, alias_span: owner_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None})
+    }
+    None
+}
+
+// Whether `module_name` is a Core module: a public export row or a source row.
+fn jet_driver_core_module_named(core_sources: [JetDriverCoreSource], module_name: String) -> Bool Never! {
+    if core_module_export(module_name) != None -> return true
+    loop row in core_sources {
+        if row.module_name == module_name -> return true
+    }
+    false
+}
+
+// Whether `items` hold the inline module `owner` that declares `member`.
+fn jet_driver_inline_module_declares(items: [Item], owner: String, member: String) -> Bool Never! {
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == owner && code_module.body == .Val(body) {
+            loop named in jet_driver_namespace_item_names(body) {
+                if named.name == member -> return true
+            }
+            loop nested in body {
+                if nested == .CodeModule(inner) && inner.name == member -> return true
+            }
+        }
+    }
+    false
+}
+
+// Whether `items` hold a body-less `module owner` whose file declares `member`
+// at its top level. That file is parsed here only for this question; the
+// loader still parses and loads it through the `module owner` declaration.
+fn jet_driver_file_module_declares(items: [Item], owner: String, member: String, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> Bool {
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == owner && code_module.body == None {
+            unresolved := [Diagnostic]{}
+            target :: jet_driver_code_module_file(source_units, unit, owner, code_module.name_span, &unresolved) ?? return false
+            text :: jet_driver_source_unit_text(request, source_units[target]) ?? return false
+            parsed :: jet_driver_parse_user_unit(text, false)
+            loop named in jet_driver_namespace_item_names(parsed.parsed.program.items) {
+                if named.name == member -> return true
+            }
+            return false
+        }
+    }
+    false
+}
+
 // The runtime unit row a source file is when it sits at that unit's
 // `Core/<area>/runtime/<unit>.jet` path and is byte-identical to the embedded
 // unit (Rust `core_runtime_entry`). Only that exact text earns Core-source
@@ -4216,7 +4318,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         demand :: ^parsed_unit.demand
         parse_result := ^parsed_unit.parsed
         // Runtime member imports consult shared rows only on the load thread.
-        if importer_core -> jet_driver_core_runtime_member_imports(&parse_result.program, request.core_sources)
+        if importer_core -> jet_driver_core_runtime_member_imports(&parse_result.program, request.core_sources) else -> jet_driver_member_imports(&parse_result.program, request, source_units, unit)
         parse_diagnostic_start :: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> &diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {

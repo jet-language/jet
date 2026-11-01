@@ -7696,6 +7696,19 @@ fn sema_runtime_ceiling_import_modules(declaration: ImportDecl) -> [String] Neve
     names
 }
 
+// The local name an import gives `module_name`: the declaration alias, or
+// the alias of the member row that names that module.
+fn sema_runtime_ceiling_import_alias(declaration: ImportDecl, module_name: String) -> String Never! {
+    if declaration.kind == .Unqualified(module_alias, _, items, _, _) {
+        loop item in items {
+            if "{module_alias}.{item.original}" != module_name -> next
+            if item.alias == .Val(alias) -> return alias.copy()
+            return item.original.copy()
+        }
+    }
+    declaration.alias.copy()
+}
+
 // How a written usage reaches its Core helper: the ambient `input()` helper,
 // an import of the helper's module, or the prelude itself.
 fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> String Never! {
@@ -7704,7 +7717,7 @@ fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> St
     if parts.len() > 1 {
         loop declaration in imports {
             loop module_name in sema_runtime_ceiling_import_modules(declaration) {
-                if module_name == parts[0] -> return "`use {module_name} as {declaration.alias}` → `{usage}`"
+                if module_name == parts[0] -> return "`use {sema_runtime_ceiling_import_alias(declaration, module_name)} :: {module_name}` → `{usage}`"
             }
         }
     }

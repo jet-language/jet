@@ -861,16 +861,14 @@ fn parser_parse_program(state: &JetParserState) -> Program {
             }
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
-                if declaration.import == {
-                    .Val(value) -> &program.imports.push(value)
-                    .None -> {
-                        if declaration.item == {
-                            .Val(value) -> &program.items.push(value)
-                            .None -> {
-                                if !declaration.handled {
-                                    parser_add_error_here(&state, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")
-                                    parser_recover_statement(&state)
-                                }
+                loop import in declaration.imports -> &program.imports.push(import)
+                if declaration.imports.len() == 0 {
+                    if declaration.item == {
+                        .Val(value) -> &program.items.push(value)
+                        .None -> {
+                            if !declaration.handled {
+                                parser_add_error_here(&state, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")
+                                parser_recover_statement(&state)
                             }
                         }
                     }

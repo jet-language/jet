@@ -2130,15 +2130,44 @@ Jet has two import forms: a quoted path names a file, and an unquoted name
 names a module.
 
 ```jet
-use "scoring";
-use util as text;
-use core.files;
+use "scoring"
+use text :: util
+use core.files
 ```
 
 A quoted path is relative to the directory of the file containing the `use`.
 The `.jet` suffix is implicit. A path cannot escape its project with `..`.
-The last path segment supplies the default namespace; `as` gives either form
-an explicit alias (S16).
+The last path segment supplies the default namespace; `alias :: path` gives
+either form an explicit alias (S16). The older `use path as alias` spelling
+means the same.
+
+Two or more imports are written as one `use { … }` block with one row per
+line, and `pub use { … }` re-exports every row (#6542). A row is any import:
+a module path, `path#version`, a member list `path.[a, b]`, a quoted file,
+each optionally after `alias ::`. A file may hold several blocks, and an
+inline module body takes its own. `jet fmt` writes a lone import on one line
+and two or more as a block, with re-exports in a separate `pub use { … }`
+block.
+
+```jet
+use {
+    "scoring"
+    text :: util
+    core.files
+    biggest :: numeric.max
+    core.math.[min]
+}
+```
+
+`alias :: path` binds `alias` to whatever `path` names. A path that names a
+module (a Core, local, package or foreign language module) is that module
+import, exactly as `use path as alias` is. A path `owner.name` that names no
+module, under an owner that declares the member `name` (a Core module, an
+inline module of the file, or the file a body-less `module owner` of the file
+declares), binds that member, as `use owner.[name as alias]` does; any other
+path keeps its module error. A row takes one alias, so
+`alias ::` with `as` or with a member list is an error, and an empty block is
+an error.
 
 An unquoted module name is resolved by recursively searching from the project
 root for `name.jet` and for `name/run.jet`; `core` is a compiler-provided
