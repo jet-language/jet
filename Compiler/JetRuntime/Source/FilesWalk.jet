@@ -32,7 +32,9 @@ walk_root := I64{0}
     root :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(root, I64{24})
     sync_store(wrapping(root + I64{8}), I64{1})
-    walk_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        walk_root = root
+    }
 }
 
 // The live context for `key`, retained for one operation and locked; 0 after

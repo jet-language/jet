@@ -15,16 +15,14 @@ STORE_LEASE_HANDOFF_UNSUPPORTED :: "running a command over a verified cache leas
 
 // The first descriptor number a lease pins handles at; below it are the
 // standard streams and the descriptors Core itself hands to children.
-store_lease_next_slot := 64
+STORE_LEASE_NEXT_SLOT :: shared ProcessSequence{next: 64}
 
 // Rust `SEQ`: the per-process lease sequence used in lease names.
-store_lease_sequence := 0
+STORE_LEASE_SEQUENCE :: shared ProcessSequence{next: 0}
 
 // The next unused child descriptor slot.
 fn store_lease_allocate_slot() -> Int Never! {
-    slot :: store_lease_next_slot
-    store_lease_next_slot = slot + 1
-    slot
+    process_sequence_take(STORE_LEASE_NEXT_SLOT)
 }
 
 // The descriptor-view path of a pinned slot.

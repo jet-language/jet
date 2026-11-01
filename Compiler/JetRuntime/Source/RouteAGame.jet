@@ -44,14 +44,20 @@ fn raylib_canvas_side(value: I64) -> I64 {
     height :: raylib_canvas_side(ui_carrier_word(wrapping(window + UI_RAYLIB_WINDOW_HEIGHT)))
     if (width == raylib_canvas_width && height == raylib_canvas_height) -> return
     if (raylib_canvas_pixels != I64{0}) -> jet_rt_free(raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4}, I64{1})
-    raylib_canvas_pixels = I64{0}
+    #Unsafe("the raylib canvas belongs to the one thread that drives the window") {
+        raylib_canvas_pixels = I64{0}
+    }
     bytes :: width * height * I64{4}
     if (bytes != I64{0}) {
-        raylib_canvas_pixels = jet_rt_alloc(bytes, I64{1})
+        #Unsafe("the raylib canvas belongs to the one thread that drives the window") {
+            raylib_canvas_pixels = jet_rt_alloc(bytes, I64{1})
+        }
         coll_zero(raylib_canvas_pixels, bytes)
     }
-    raylib_canvas_width = width
-    raylib_canvas_height = height
+    #Unsafe("the raylib canvas belongs to the one thread that drives the window") {
+        raylib_canvas_width = width
+        raylib_canvas_height = height
+    }
 }
 
 // Both sides fit 16 bits, so one word carries width << 16 | height.
@@ -385,9 +391,11 @@ fn raylib_push_static(builder: I64, text: I64) { rt_text_append(builder, rt_text
 // takes its GPU memory with it; a later begin_drawing allocates afresh.
 #Export(c) fn jet_raylib_close_window(_window: I64) {
     if (raylib_canvas_pixels != I64{0}) -> jet_rt_free(raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4}, I64{1})
-    raylib_canvas_pixels = I64{0}
-    raylib_canvas_width = I64{0}
-    raylib_canvas_height = I64{0}
+    #Unsafe("the raylib canvas belongs to the one thread that drives the window") {
+        raylib_canvas_pixels = I64{0}
+        raylib_canvas_width = I64{0}
+        raylib_canvas_height = I64{0}
+    }
     at := I64{0}
     loop at < raylib_texture_count {
         entry :: wrapping(raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES)
@@ -395,9 +403,11 @@ fn raylib_push_static(builder: I64, text: I64) { rt_text_append(builder, rt_text
         at += I64{1}
     }
     if (raylib_textures != I64{0}) -> jet_rt_free(raylib_textures, raylib_texture_capacity * RAYLIB_TEXTURE_ENTRY_BYTES, I64{8})
-    raylib_textures = I64{0}
-    raylib_texture_count = I64{0}
-    raylib_texture_capacity = I64{0}
+    #Unsafe("the raylib textures belong to the one thread that drives the window") {
+        raylib_textures = I64{0}
+        raylib_texture_count = I64{0}
+        raylib_texture_capacity = I64{0}
+    }
 }
 #Export(c) fn jet_raylib_set_target_fps(fps: I64) { _ := raylib_words(fps, I64{0}, I64{0}, I64{0}) }
 #Export(c) fn jet_raylib_key_down(_name: I64) -> Bool { false }
@@ -451,19 +461,25 @@ raylib_texture_last_id := I64{0}
             coll_copy(raylib_textures, grown, raylib_texture_count * RAYLIB_TEXTURE_ENTRY_BYTES)
             jet_rt_free(raylib_textures, raylib_texture_capacity * RAYLIB_TEXTURE_ENTRY_BYTES, I64{8})
         }
-        raylib_textures = grown
-        raylib_texture_capacity = capacity
+        #Unsafe("the raylib textures belong to the one thread that drives the window") {
+            raylib_textures = grown
+            raylib_texture_capacity = capacity
+        }
     }
     pixels :: jet_rt_alloc(length, I64{1})
     rt_text_bytes_copy(pixels, data, length)
-    raylib_texture_last_id += I64{1}
+    #Unsafe("the raylib textures belong to the one thread that drives the window") {
+        raylib_texture_last_id += I64{1}
+    }
     id :: raylib_texture_last_id
     entry :: wrapping(raylib_textures + raylib_texture_count * RAYLIB_TEXTURE_ENTRY_BYTES)
     ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_ID), id)
     ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_WIDTH), columns)
     ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_HEIGHT), rows)
     ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_PIXELS), pixels)
-    raylib_texture_count += I64{1}
+    #Unsafe("the raylib textures belong to the one thread that drives the window") {
+        raylib_texture_count += I64{1}
+    }
     ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE_PRESENT), I64{1})
     ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE), id.bit_or(columns << I64{32}))
     ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE_SECOND), rows.bit_or(I64{1} << I64{32}))

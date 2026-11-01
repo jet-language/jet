@@ -18,7 +18,9 @@ fn rt_fault_allocation_drop_address() -> I64 {
     trap_store(closure, I64{1})
     trap_store(wrapping(closure + I64{8}), rt_fault_allocation_drop_address())
     trap_store(wrapping(closure + I64{16}), I64{0})
-    fault_allocation_key = jet_rt_tls_key_new(closure)
+    #Unsafe("runtime-init runs before any other thread exists") {
+        fault_allocation_key = jet_rt_tls_key_new(closure)
+    }
 }
 
 #Export(c) fn jet_rt_fault_allocation_drop(_closure: I64, state: I64) -> I64 {

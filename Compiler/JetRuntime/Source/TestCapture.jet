@@ -28,8 +28,10 @@ fn rt_test_capture_print_address() -> I64 {
         trap_store(wrapping(closure + I64{8}), rt_test_capture_abort_address())
         trap_store(wrapping(closure + I64{16}), I64{0})
         host_print_capture_install(rt_test_capture_print_address())
-        test_scope_stop_code = rt_test_scope_record_stop_address()
-        test_stack_key = thread_tls_key_new_locked(closure, I64{0})
+        #Unsafe("written under the TLS registry mutex") {
+            test_scope_stop_code = rt_test_scope_record_stop_address()
+            test_stack_key = thread_tls_key_new_locked(closure, I64{0})
+        }
     }
     sync_mutex_unlock(thread_tls_registry)
 }

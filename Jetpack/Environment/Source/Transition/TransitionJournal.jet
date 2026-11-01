@@ -13,7 +13,7 @@ TRANSITION_READ_CHUNK :: 65536
 TRANSITION_LEGACY_PREFIX :: "legacy-role-fold-"
 
 // Rust TEMP_COUNTER: the per-process sequence in staged temporary names.
-env_transition_temp_counter := 1
+ENV_TRANSITION_TEMP_COUNTER :: shared ProcessSequence{next: 1}
 
 // One file a transition moves between two exact states. None is absent.
 struct TransitionFileChange {
@@ -202,8 +202,7 @@ fn env_transition_write_atomic(path: String, bytes: [U8]) EnvironmentError! -[FS
     parent :: files.dirname(path)
     if parent == "" -> return Err(env_transition_error("{path} has no parent"))
     name :: files.basename(path)
-    counter :: env_transition_temp_counter
-    env_transition_temp_counter = counter + 1
+    counter :: process_sequence_take(ENV_TRANSITION_TEMP_COUNTER)
     temp :: files.join(parent, ".{name}.jet-transition-{sys.pid()}-{counter}")
     if env_transition_stage(temp, bytes) == {
         .Err(error) -> {

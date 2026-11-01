@@ -23,7 +23,9 @@ host_env_capture_code := I64{0}
 
 // runtime-init: 4 when host_env_rows,host_env_length,logical_env_root
 #Export(c) fn jet_rt_host_env_init() {
-    host_env_capture_code = rt_host_env_capture_address()
+    #Unsafe("runtime-init runs before any other thread exists") {
+        host_env_capture_code = rt_host_env_capture_address()
+    }
 }
 
 fn rt_host_env_capture_address() -> I64 {
@@ -57,20 +59,36 @@ fn host_environment_split(bytes: I64) -> I64 {
         }
         return
     }
-    host_argv = argv
-    host_envp = envp
+    #Unsafe("host argument registration is single-threaded and precedes user code") {
+        host_argv = argv
+        host_envp = envp
+    }
+    // The environment is walked once: the capture, when linked, also refuses
+    // a JET_CHECKED_ALLOC=1 request this build can't serve (Alloc.jet
+    // alloc_check_refuse_requested).
     capture :: host_env_capture_code
-    if (capture != I64{0}) -> _ := coll_call1(capture, envp)
-    host_argc = count
+    if (capture != I64{0}) {
+        _ := coll_call1(capture, envp)
+    } else {
+        alloc_check_refuse_requested(envp)
+    }
+    #Unsafe("host argument registration is single-threaded and precedes user code") {
+        host_argc = count
+    }
 }
 
 // Copies the startup environment `envp` into the owned index host_env_rows /
 // host_env_length and creates the logical environment its first use seeds.
+// Its counting walk also refuses a JET_CHECKED_ALLOC=1 request a build
+// without the checked heap can't serve (Alloc.jet alloc_check_refuse_entry).
 #Export(c) fn jet_rt_host_env_capture(envp: I64) -> I64 {
     raw_count := I64{0}
-    #Unsafe("startup lends the immutable, null-terminated envp pointer array") {
+    #Unsafe("startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries") {
         if (envp != I64{0}) {
-            loop os_load_i64(wrapping(envp + raw_count * I64{8})) != (I64{0}) {
+            loop {
+                entry :: os_load_i64(wrapping(envp + raw_count * I64{8}))
+                if (entry == I64{0}) { break }
+                if (os_load_u8(entry) == I64{74}) -> alloc_check_refuse_entry(entry)
                 raw_count = wrapping(raw_count + I64{1})
             }
         }
@@ -114,8 +132,10 @@ fn host_environment_split(bytes: I64) -> I64 {
             index = wrapping(index + I64{1})
         }
     }
-    host_env_rows = rows
-    host_env_length = valid
+    #Unsafe("the environment snapshot is taken by single-threaded host registration, before user code") {
+        host_env_rows = rows
+        host_env_length = valid
+    }
     logical_environment_startup()
     I64{0}
 }

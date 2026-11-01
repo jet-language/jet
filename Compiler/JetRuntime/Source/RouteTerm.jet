@@ -243,7 +243,11 @@ term_mode_key := I64{0}
 fn term_mode_saved_key() -> I64 {
     if (term_mode_key == I64{0}) {
         host_lock()
-        if (term_mode_key == I64{0}) -> term_mode_key = jet_rt_tls_key_new(I64{0})
+        if (term_mode_key == I64{0}) {
+            #Unsafe("written under the host lock") {
+                term_mode_key = jet_rt_tls_key_new(I64{0})
+            }
+        }
         host_unlock()
     }
     term_mode_key

@@ -4585,8 +4585,17 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     if sema_ownership_reject_frozen_write(state, Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, "be assigned", name_span, scopes, &diagnostics) -> return None
     // Rust `is_global_mutable_binding`: a module-level `name := …` is the one
     // module-level write target; it writes the binding's runtime storage cell.
-    if binding.symbol.kind == SymbolKind.Constant && sema_stmt_module_storage_binding(environment, program, binding.symbol.id) {
-        return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // A function writes it only when it is `#Persist` or inside `#Unsafe`
+    // (D-MODULE-WRITE1=A): every task sees module state, and two plain
+    // writes at once can lose one.
+    if binding.symbol.kind == SymbolKind.Constant {
+        if sema_stmt_module_storage_binding(environment, program, binding.symbol.id) == .Val(persists) {
+            if !persists && context.unsafe_depth == 0 {
+                &diagnostics.push(sema_error("E0111", name_span, "`{name}` is module state, so a function can't change it directly", "every task sees module state, and two plain writes at once can lose one", "keep it in a `shared` holder (`{name} :: shared Count{{value: 0}}`, written `{name}.value += 1`) or mark it `#Persist`; code that needs a raw word writes it inside `#Unsafe(\"reason\") {{ … }}`"))
+                return None
+            }
+            return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
     }
     if !binding.mutable && !sema_stmt_binding_is_write_window(state, binding.symbol.id.key) {
         diagnostic := sema_error("E0111", name_span, "`{name}` was made with `::`, so it can't change", "only `:=` bindings and parameters marked with the write-access marker `&` can be changed", "declare it with `{name} := ...` instead")
@@ -4667,22 +4676,27 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
 }
 
 // Rust `is_global_mutable_binding`: this module's own `name := …` binding that
-// is not prepared while building. A checker on the registration graph has no
-// local declarations (sema_scope_environment for a graph module), so the
-// binding is read from the module's registered constant rows.
-fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool Never! {
+// is not prepared while building, with whether it is `#Persist`; None for
+// any other binding. A checker on the registration graph has no local
+// declarations (sema_scope_environment for a graph module), so the binding is
+// read from the module's registered constant rows.
+fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Bool? Never! {
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].symbol_id.key != id.key -> next
-        if environment.declarations[declaration_index].item == .Const(definition) -> return definition.mutable && !definition.is_comptime
-        return false
+        if environment.declarations[declaration_index].item == .Const(definition) {
+            if definition.mutable && !definition.is_comptime -> return Val(definition.is_persist)
+        }
+        return None
     }
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_scope_caller_index(environment, graph) ?? return false
+        module_index :: sema_scope_caller_index(environment, graph) ?? return None
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
-            if graph.modules[module_index].constants[constant_index].symbol.id.key == id.key -> return graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime
+            if graph.modules[module_index].constants[constant_index].symbol.id.key != id.key -> next
+            if graph.modules[module_index].constants[constant_index].declaration.mutable && !graph.modules[module_index].constants[constant_index].declaration.is_comptime -> return Val(graph.modules[module_index].constants[constant_index].declaration.is_persist)
+            return None
         }
     }
-    false
+    None
 }
 
 // Rust `Stmt::Assign` on a module-level mutable binding: the value checks

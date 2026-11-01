@@ -213,7 +213,11 @@ fn host_stdout_flush_fault() {
 // state, else 0: a program that never runs a test prints straight through.
 host_print_capture_code := I64{0}
 
-fn host_print_capture_install(code: I64) { host_print_capture_code = code }
+fn host_print_capture_install(code: I64) {
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        host_print_capture_code = code
+    }
+}
 
 #Export(c) fn jet_term_write_stdout_line(value: I64, flush: U8) {
     capture :: host_print_capture_code

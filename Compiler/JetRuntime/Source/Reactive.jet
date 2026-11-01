@@ -33,7 +33,9 @@ fn reactive_store(address: I64, value: I64) { trap_store(address, value) }
 // runtime-init: 3 when reactive_thread_key
 #Export(c) fn jet_rt_reactive_init() {
     if (reactive_thread_key != I64{0}) -> return
-    reactive_thread_key = jet_rt_tls_key_new(I64{0})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        reactive_thread_key = jet_rt_tls_key_new(I64{0})
+    }
 }
 
 fn reactive_thread() -> I64 {
@@ -71,7 +73,9 @@ fn reactive_observer_new(env: I64, invoke: I64, release: I64) -> I64 {
     reactive_store(observer, I64{1})
     reactive_store(wrapping(observer + I64{8}), I64{1})
     reactive_store(wrapping(observer + I64{16}), reactive_next_observer)
-    reactive_next_observer = reactive_next_observer + I64{1}
+    #Unsafe("the observer id is a label nothing reads back; a racing creator can only repeat a label") {
+        reactive_next_observer = reactive_next_observer + I64{1}
+    }
     reactive_store(wrapping(observer + I64{24}), I64{1})
     reactive_store(wrapping(observer + I64{40}), env)
     reactive_store(wrapping(observer + I64{48}), invoke)

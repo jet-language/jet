@@ -15,12 +15,16 @@ observe_channels_code := I64{0}
 // runtime-init: 4 when observe_root,observe_task_key
 #Export(c) fn jet_rt_observe_init() {
     if (observe_root != I64{0}) -> return
-    observe_root = jet_rt_alloc(I64{128}, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        observe_root = jet_rt_alloc(I64{128}, I64{8})
+    }
     thread_zero(observe_root, I64{128})
     sync_store(wrapping(observe_root + I64{8}), I64{2})
     sync_store(wrapping(observe_root + I64{16}), I64{1})
     sync_store(wrapping(observe_root + I64{80}), I64{1})
-    observe_task_key = jet_rt_tls_key_new(I64{0})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        observe_task_key = jet_rt_tls_key_new(I64{0})
+    }
 }
 
 fn observe_current_task() -> I64 {
@@ -140,7 +144,9 @@ fn rt_observe_parked_tasks_report_address() -> I64 {
 observe_task_linked := I64{0}
 
 #Export(c) fn jet_rt_observe_task_register(control: I64, site: I64, label: I64) -> I64 {
-    observe_task_linked = I64{1}
+    #Unsafe("an idempotent flag: every writer stores the same 1") {
+        observe_task_linked = I64{1}
+    }
     observe_exit_report_install()
     parent :: observe_current_task()
     id :: sync_add(wrapping(observe_root + I64{8}), I64{1})
@@ -443,7 +449,11 @@ fn observe_cancel_live_tasks() {
 }
 
 #Export(c) fn jet_rt_observe_channel_new(bounded: I64, capacity: I64) -> I64 {
-    if (observe_channels_code == I64{0}) -> observe_channels_code = rt_observe_raw_channels_address()
+    if (observe_channels_code == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            observe_channels_code = rt_observe_raw_channels_address()
+        }
+    }
     id :: sync_add(wrapping(observe_root + I64{16}), I64{1})
     node :: jet_rt_alloc(I64{64}, I64{8})
     thread_zero(node, I64{64})

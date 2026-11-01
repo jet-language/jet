@@ -41,7 +41,9 @@ env_overlay_root := I64{0}
         encoding_store(wrapping(root + index * I64{8}), I64{0})
         index += I64{1}
     }
-    env_overlay_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        env_overlay_root = root
+    }
 }
 
 fn env_overlay_equal(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {

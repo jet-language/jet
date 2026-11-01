@@ -105,7 +105,11 @@ codec_text_cells_key := I64{0}
 
 // runtime-init: 3 when codec_text_cells_key
 #Export(c) fn jet_rt_codec_text_cells_init() {
-    if (codec_text_cells_key == I64{0}) -> codec_text_cells_key = jet_rt_tls_key_new(I64{0})
+    if (codec_text_cells_key == I64{0}) {
+        #Unsafe("runtime-init runs before any other thread exists") {
+            codec_text_cells_key = jet_rt_tls_key_new(I64{0})
+        }
+    }
 }
 
 // jet_decode_text_cells: enter returns the previous state, which leave

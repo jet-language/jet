@@ -66,7 +66,10 @@
 // allocation cost are unchanged. Free skips lookup while tracked count is zero.
 //
 // Checked mode (alloc_class_limit, the "Checked mode" section below) is
-// chosen once here, from the process environment, before the first allocation.
+// chosen once, from the process environment, before the first allocation:
+// by jet_rt_alloc_check_init, which only a checked build keeps. Any other
+// build reads no environment here; startup refuses the request
+// (alloc_check_refuse_requested).
 //
 // The runtime object puts jet_rt_alloc_init in .init_array, so initialization
 // precedes all user code in both programs and entryless libraries. There is no
@@ -77,8 +80,9 @@ alloc_root := I64{0}
 // (JET_CHECKED_ALLOC=1 at start, see alloc_check_requested) sets it to 0, so
 // every allocation and free takes the direct-mapping branch, which then hands
 // it to the checked heap: off, checked mode adds no branch to the class path,
-// only this word's load. Written only by jet_rt_alloc_init, before any
-// allocation.
+// only this word's load. Written only by alloc_check_start, from
+// jet_rt_alloc_check_init after it installed the checked heap's code words,
+// before any allocation: a 0 limit means the checked heap is installed.
 ALLOC_CLASS_LIMIT :: I64{4096}
 alloc_class_limit := I64{4096}
 
@@ -190,27 +194,35 @@ fn alloc_unmap(address: I64, bytes: I64) {
     }
     // mmap is zero-filled: the locks, every free-list head, every live total
     // and the large cache start at zero.
-    alloc_root = alloc_map(I64{4096}, I64{4096})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        alloc_root = alloc_map(I64{4096}, I64{4096})
+    }
     // The 32 arenas: 32 * 216 bytes in one zero-filled mapping.
     table :: alloc_map(I64{8192}, I64{8192})
     #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
         os_store_i64(wrapping(alloc_root + I64{208}), table)
     }
-    if alloc_check_requested() { alloc_check_start() }
     // The initializing thread has no TCB yet; point its GS at the zero word
     // so thread_base() reads 0 instead of faulting on the kernel's GS base 0.
     thread_set_base(thread_detached_base())
 }
 
-// Installs the checked heap in a program built with JET_CHECKED_ALLOC=1.
-// It shares jet_rt_alloc_init's priority, so it runs before any hook or
-// code that allocates, in either order with it.
+// Installs the checked heap in a program built with JET_CHECKED_ALLOC=1 and
+// turns checked mode on when the variable asks for it. It shares
+// jet_rt_alloc_init's priority, so it runs before any hook or code that
+// allocates, in either order with it: it initializes the state page first
+// (jet_rt_alloc_init is idempotent), which alloc_check_requested and
+// alloc_check_start use.
 // runtime-init: 0 when alloc_check_linked
 #Export(c) fn jet_rt_alloc_check_init() {
-    alloc_check_take_code = rt_alloc_check_take_address()
-    alloc_check_give_code = rt_alloc_check_give_address()
-    alloc_check_sweep_code = rt_alloc_check_sweep_address()
-    alloc_check_linked = I64{1}
+    #Unsafe("runtime-init runs before any other thread exists") {
+        alloc_check_take_code = rt_alloc_check_take_address()
+        alloc_check_give_code = rt_alloc_check_give_address()
+        alloc_check_sweep_code = rt_alloc_check_sweep_address()
+        alloc_check_linked = I64{1}
+    }
+    jet_rt_alloc_init()
+    if alloc_check_requested() { alloc_check_start() }
 }
 
 // A checked build's entry calls this first (JetIR ir_checked_alloc_link):
@@ -234,10 +246,45 @@ fn rt_alloc_check_sweep_address() -> I64 {
 
 // JET_CHECKED_ALLOC=1 asked for checking at start, but this program was built
 // without the checked heap: it stops with status 70 before user code rather
-// than run unchecked (D-SIZE-PAYUSE1 A). jet_rt_main tests this before the
-// entry; an allocation by an earlier hook tests it too.
-fn alloc_check_require() {
-    if (alloc_class_limit != I64{0} || alloc_check_take_code != I64{0}) -> return
+// than run unchecked. Startup (HostStartup.jet jet_rt_host_arguments), which
+// a program's main and an entryless host run before any runtime entry,
+// tests the startup environment `envp` (the null-terminated pointer array
+// startup lends) here, or in the walk jet_rt_host_env_capture already makes
+// when the program links it, so the array is walked once. Only the pointers
+// are walked: an entry whose first byte is not 'J' costs one compare
+// (alloc_check_refuse_entry compares the rest). A checked build decided at
+// jet_rt_alloc_check_init and never refuses: its hook set
+// alloc_check_take_code. That word, not alloc_check_linked, is the test,
+// since reading alloc_check_linked here would keep the hook, and so the
+// checked heap, in every program.
+fn alloc_check_refuse_requested(envp: I64) {
+    if (alloc_check_take_code != I64{0} || envp == I64{0}) -> return
+    at := envp
+    #Unsafe("startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries") {
+        loop {
+            entry :: os_load_i64(at)
+            if (entry == I64{0}) -> return
+            if (os_load_u8(entry) == I64{74}) -> alloc_check_refuse_entry(entry)
+            at = wrapping(at + I64{8})
+        }
+    }
+}
+
+// Refuses (alloc_check_refuse_requested) when the startup entry `entry`,
+// whose first byte is 'J', is exactly JET_CHECKED_ALLOC=1 in a build without
+// the checked heap. Bytes are compared up to the first difference, so none
+// past the entry's NUL is read.
+fn alloc_check_refuse_entry(entry: I64) {
+    if (alloc_check_take_code != I64{0}) -> return
+    pattern :: rt_text_data(rt_static_text("JET_CHECKED_ALLOC=1"))
+    index := I64{1}
+    #Unsafe("startup lends the NUL-terminated entry; pattern is a static text's 19 bytes, read below index 19") {
+        loop index < (I64{19}) {
+            if (os_load_u8(wrapping(entry + index)) != os_load_u8(wrapping(pattern + index))) -> return
+            index = wrapping(index + I64{1})
+        }
+        if (os_load_u8(wrapping(entry + I64{19})) != I64{0}) -> return
+    }
     alloc_check_say(rt_static_text("jet checked allocator (JET_CHECKED_ALLOC=1): this program was built without the checked allocator; build it again with JET_CHECKED_ALLOC=1 set\n"))
     trap_defect_exit(I64{70})
 }
@@ -580,7 +627,9 @@ alloc_cache_linked := I64{0}
 // Refill this thread's cache row with up to 32 blocks of one slab of the
 // stack band's arena. False only when no slab can be mapped.
 fn alloc_cache_refill(row: I64, slot: I64) -> Bool {
-    alloc_cache_linked = I64{1}
+    #Unsafe("an idempotent flag: every writer stores the same 1") {
+        alloc_cache_linked = I64{1}
+    }
     root :: alloc_arena()
     alloc_lock(root)
     taken :: alloc_slab_take(root, alloc_head(root, slot), slot, row, I64{32})
@@ -741,10 +790,9 @@ fn alloc_large(size: I64, align: I64) -> I64 {
 fn alloc_try_validated(size: I64, align: I64) -> I64 {
     slot :: alloc_class(size, align, alloc_class_limit)
     if (slot == I64{0}) {
-        if (alloc_class_limit == I64{0}) {
-            alloc_check_require()
-            return coll_call2(alloc_check_take_code, size, align)
-        }
+        // A 0 limit is set only once the checked heap is installed
+        // (alloc_check_start, from jet_rt_alloc_check_init).
+        if (alloc_class_limit == I64{0}) -> return coll_call2(alloc_check_take_code, size, align)
         pointer :: alloc_large(size, align)
         alloc_count_init(pointer, align)
         return pointer
@@ -1120,8 +1168,9 @@ fn alloc_try(size: I64, align: I64) -> I64 {
 fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
     slot :: alloc_class(size, align, alloc_class_limit)
     if (slot == I64{0}) {
+        // A 0 limit is set only once the checked heap is installed
+        // (alloc_check_start, from jet_rt_alloc_check_init).
         if (alloc_class_limit == I64{0}) {
-            alloc_check_require()
             _ := coll_call3(alloc_check_give_code, pointer, size, align)
             return
         }
@@ -1179,8 +1228,8 @@ fn alloc_arena_give(pointer: I64) {
 // reaches the direct-mapping branch, which alone tests for checked mode.
 // The checked heap (jet_rt_alloc_check_take, _give, _sweep) is linked only
 // into a program built with the variable set (alloc_check_linked above); a
-// program built without it stops at start when the variable asks for
-// checking (alloc_check_require).
+// program built without it stops at startup capture when the variable asks
+// for checking (alloc_check_refuse_requested).
 // A checked payload p of (size, align) lives inside one ordinary heap block
 // q of (prefix + size + 8, max(align, 8)), p = q + prefix, where the prefix
 // is 200 bytes rounded up to align:
@@ -1215,11 +1264,13 @@ ALLOC_CHECK_POISON :: I64{-2314885530818453537}
 ALLOC_CHECK_SLOTS :: I64{4096}
 ALLOC_CHECK_BUDGET :: I64{67108864}
 
-// Whether the environment holds exactly JET_CHECKED_ALLOC=1. Initialization
-// runs before any allocation and before the startup environment exists, so
-// this reads /proc/self/environ through the state page's unused tail (path
-// and pattern words at 1024 and 1048, a 2016-byte buffer at 2048), cleared
-// again afterwards. Without /proc the mode stays off.
+// Whether the environment holds exactly JET_CHECKED_ALLOC=1, for a checked
+// build's jet_rt_alloc_check_init. It runs before any allocation and before
+// the startup environment is captured, and is an init-array hook a C host's
+// libc may call without the startup arguments, so it reads
+// /proc/self/environ through the state page's unused tail (path and pattern
+// words at 1024 and 1048, a 2016-byte buffer at 2048), cleared again
+// afterwards. Without /proc the mode stays off.
 fn alloc_check_requested() -> Bool {
     path :: wrapping(alloc_root + I64{1024})
     pattern :: wrapping(alloc_root + I64{1048})
@@ -1303,7 +1354,9 @@ fn alloc_check_start() {
         }
         os_store_i64(wrapping(alloc_root + I64{24}), ring)
     }
-    alloc_class_limit = I64{0}
+    #Unsafe("checked-heap start runs during runtime-init, before any other thread exists") {
+        alloc_class_limit = I64{0}
+    }
 }
 
 fn alloc_check_prefix(align: I64) -> I64 Never! {

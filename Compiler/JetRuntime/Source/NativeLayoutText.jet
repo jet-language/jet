@@ -59,7 +59,9 @@ fn layout_literals_init() {
     layout_put(wrapping(root + I64{408}), I64{2322295501768712562})
     layout_put(wrapping(root + I64{416}), I64{8236})
     layout_put(wrapping(root + I64{424}), I64{46})
-    layout_literal_root = root
+    #Unsafe("runtime-init (jet_rt_layout_init) runs before any other thread exists") {
+        layout_literal_root = root
+    }
 }
 fn layout_append_literal(target: I64, kind: I64) {
     entry :: wrapping(layout_literal_root + kind * I64{16})

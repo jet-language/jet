@@ -1,0 +1,16 @@
+// A per-process counter that hands every caller a distinct number, even when
+// tasks call at once. Module state that functions change is a `shared` holder
+// (D-MODULE-WRITE1=A); Jetpack's temporary and scratch names pair the number
+// with the process id.
+struct ProcessSequence {
+    next: Int
+}
+
+// The holder's current number; the holder moves on to the next one under the
+// same edit guard, so two callers never get the same number.
+fn process_sequence_take(sequence: Shared<ProcessSequence>) -> Int Never! {
+    permit :: sequence.guard_edit()
+    taken :: permit.value.next
+    permit.value.next = taken + 1
+    taken
+}

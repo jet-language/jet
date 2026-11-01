@@ -170,7 +170,9 @@ fn thread_unregister_tcb(tcb: I64) {
 #Export(c) fn jet_rt_thread_init() {
     // Runtime-object .init_array priority follows allocator and host init.
     if (thread_tls_registry == I64{0}) {
-        thread_tls_registry = jet_rt_alloc(I64{88}, I64{8})
+        #Unsafe("runtime-init runs before any other thread exists") {
+            thread_tls_registry = jet_rt_alloc(I64{88}, I64{8})
+        }
         thread_zero(thread_tls_registry, I64{88})
     }
     jet_rt_thread_attach()

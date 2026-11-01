@@ -7,7 +7,7 @@
 // supported.
 
 // Per-process nonce that keeps concurrent scratch directories distinct.
-provider_build_scratch_sequence := 0
+PROVIDER_BUILD_SCRATCH_SEQUENCE :: shared ProcessSequence{next: 0}
 
 struct CoreProvider {
     // Local `path:` sources are already present and need no download.
@@ -260,8 +260,7 @@ struct CargoBuildScratch {
                 files.create_dir_all(root) ?? return Err(CargoBuildError.Failed("could not create build scratch root: {err}"))
             }
         }
-        nonce :: provider_build_scratch_sequence
-        provider_build_scratch_sequence += 1
+        nonce :: process_sequence_take(PROVIDER_BUILD_SCRATCH_SEQUENCE)
         pid :: sys.pid()
         path :: files.join(root, "{key}-{pid}-{nonce}")
         if files.stat(path) == {

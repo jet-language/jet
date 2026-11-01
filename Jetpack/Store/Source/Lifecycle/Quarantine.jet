@@ -80,8 +80,7 @@ fn store_quarantine_move_objects(verification: &StoreVerification, roots: Hangar
         if present == None -> next
         &permissions.make_writable(object.path, hangar)
         store_remove_seal(&verification, object.path, hangar)
-        sequence :: store_gc_quarantine_sequence
-        store_gc_quarantine_sequence += 1
+        sequence :: process_sequence_take(STORE_GC_QUARANTINE_SEQUENCE)
         destination :: files.join(quarantine, "gc-{object.id}-{object.reason}-{store_now_secs()}-{sequence}")
         files.rename(object.path, destination)
         &permissions.renamed(object.path, destination)

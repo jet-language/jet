@@ -807,15 +807,23 @@ fn ui_text_words_output(base: I64, out_data: I64) -> I64 {
 // ---- buttons and click slots ------------------------------------------------
 
 // jet_ui_register_click: ids from 1; each slot keeps its handler (env,
-// invoke, release) for the process, as the reference's registry does.
+// invoke, release) for the process, as the reference's registry does. A
+// button may be built on any task, so registration runs under the host lock.
 ui_click_slots := I64{0}
 fn ui_register_click(env: I64, invoke: I64, release: I64) -> I64 {
-    if (ui_click_slots == I64{0}) -> ui_click_slots = ui_words_scratch(I64{1})
+    host_lock()
+    if (ui_click_slots == I64{0}) {
+        #Unsafe("written under the host lock") {
+            ui_click_slots = ui_words_scratch(I64{1})
+        }
+    }
     base :: ui_click_slots
     event_words_push(base, env)
     event_words_push(base, invoke)
     event_words_push(base, release)
-    ui_carrier_word(base) / I64{3}
+    id :: ui_carrier_word(base) / I64{3}
+    host_unlock()
+    id
 }
 fn ui_button_node(label: I64) -> I64 {
     node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})

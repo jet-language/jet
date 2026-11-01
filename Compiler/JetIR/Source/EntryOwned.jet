@@ -11,12 +11,12 @@
 // gets the same result from a stop without the root. The runtime writes
 // the same report straight to fd 2, after the same stdout flush, and exits
 // with the same code (JetRuntime Trap.jet, report domain 0). The fatal
-// signal reports and the JET_CHECKED_ALLOC refusal are the same too. Such a
-// program keeps no stop point, so its module is built as the runtime
-// library's is (IRModule.stop_points false). It runs under a main of its
-// own (JetBackend Image/Object.jet x64_object_main): host startup, then
-// jet_rt_main_owned_start (the checked-heap refusal and the fault
-// handlers), the entry, the stdout flush and status 0. The decision reads
+// signal reports and the JET_CHECKED_ALLOC refusal (at host startup) are
+// the same too. Such a program keeps no stop point, so its module is built
+// as the runtime library's is (IRModule.stop_points false). It runs under a
+// main of its own (JetBackend Image/Object.jet x64_object_main): host
+// startup, then jet_rt_main_owned_start (the fault handlers), the entry,
+// the stdout flush and status 0. The decision reads
 // only the built module, so every tier that builds the executable from it
 // makes the same one.
 
