@@ -1641,9 +1641,10 @@ fn next_search_pos(text: [U8], start: Int, end: Int, hi: Int) -> Int Never! {
 /// match returns before the VM is built, and a first match whose program
 /// and text fit BACKTRACK_CELLS comes from `backtrack` instead; while no
 /// thread is live, the start skips to the next place the required prefix
-/// occurs.
+/// occurs. A pattern of literal scalars alone needs no VM (`literal_runs`).
 fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
     out := [Run]{}
+    if !anchored && !full && literal_only(re) -> return literal_runs(re, text, capture, stop_on_match, limit)
     // `exists` asks the DFA before it falls back to a stop_on_match scan.
     verdict :: if stop_on_match -> -1 else -> dfa_verdict(re, text, anchored, full)
     if verdict == 0 -> return out
@@ -1706,6 +1707,68 @@ fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_o
         &vm.step(re, text, decode_at(text, pos), next_pos, capture)
         pos = next_pos
     }
+}
+
+/// Whether the program is literal scalars alone (no class, repeat, group,
+/// or assertion) that match case-sensitively: then every match is an
+/// occurrence of `prefix`, the pattern's UTF-8, and nothing else.
+fn literal_only(re: Regex) -> Bool Never! {
+    if re.flags.ignore_case || re.prefix.len() == 0 -> return false
+    loop op in re.ops {
+        if op != OP_LIT && op != OP_MATCH -> return false
+    }
+    true
+}
+
+/// The scan of a `literal_only` pattern: the occurrences of its bytes, left
+/// to right, each search resuming at the previous match's end. A valid
+/// UTF-8 needle occurs in valid UTF-8 text only at scalar boundaries, so
+/// these are the runs the VM would report, with the same captures. A needle
+/// of two bytes or more in a text of LITERAL_SKIP_TEXT bytes or more is
+/// searched with `find_skipping`.
+fn literal_runs(re: Regex, text: [U8], capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
+    out := [Run]{}
+    n :: re.prefix.len()
+    skip :: n >= 2 && text.len() >= LITERAL_SKIP_TEXT
+    shift := [Int]{}
+    if skip {
+        shift = filled(256, n)
+        loop k in 0..<n - 1 -> shift[Int.from_u8(re.prefix[k])] = n - 1 - k
+    }
+    found := if skip -> find_skipping(text, re.prefix, shift, 0) else -> find_bytes(text, re.prefix, 0)
+    loop found >= 0 {
+        end :: found + n
+        caps :: if capture && !stop_on_match -> [Int]{found, end} else -> [Int]{}
+        &out.push(Run{start: found, end: end, caps: caps})
+        if stop_on_match || (limit >= 0 && out.len() >= limit) -> return out
+        found = if skip -> find_skipping(text, re.prefix, shift, end) else -> find_bytes(text, re.prefix, end)
+    }
+    out
+}
+
+// Below this many bytes of text, building the skip table costs more than
+// the bytes it lets the search pass over.
+LITERAL_SKIP_TEXT :: 1024
+
+/// The first offset at or after `from` where `needle` (two bytes or more)
+/// occurs in `text`, or -1, by Horspool's skip: a window whose last byte is
+/// `b` moves on by `shift[b]`, the distance from b's last place in the needle
+/// before its final byte to the needle's end (the needle's length when b is
+/// not there), so no window it passes over can hold the needle.
+fn find_skipping(text: [U8], needle: [U8], shift: [Int], from: Int) -> Int Never! {
+    n :: needle.len()
+    last :: needle[n - 1]
+    at := from
+    loop at <= text.len() - n {
+        b :: text[at + n - 1]
+        if b == last {
+            k := 0
+            loop k < n - 1 && text[at + k] == needle[k] -> k = k + 1
+            if k == n - 1 -> return at
+        }
+        at = at + shift[Int.from_u8(b)]
+    }
+    -1
 }
 
 // The most (instruction, position) pairs `backtrack` takes on: its visited
