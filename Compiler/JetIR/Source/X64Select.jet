@@ -438,19 +438,33 @@ fn ir_x64_home_xmm(al: IRX64Allocation, slot: Int, scratch: Int) -> Int Never! {
     scratch
 }
 
+// Whether a call from instruction `at` keeps xmm slot `slot`: a call
+// instruction reads its arguments before and writes its result after the
+// call itself; within any other instruction every slot whose range holds
+// it is kept.
+fn ir_x64_keeps_xmm(f: IRFunction, al: IRX64Allocation, at: Int, slot: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op == .Call || op == .CallRuntime || op == .CallIndirect -> return al.starts[slot] < at && al.ends[slot] > at
+    al.starts[slot] <= at && al.ends[slot] >= at
+}
+
+// Whether a call from instruction e.at keeps any xmm slot.
+fn ir_x64_keeps_xmms(e: IRX64Emitter, f: IRFunction, al: IRX64Allocation) -> Bool Never! {
+    if e.at < 0 -> return false
+    loop slot in al.xmm_slots {
+        if ir_x64_keeps_xmm(f, al, e.at, slot) -> return true
+    }
+    false
+}
+
 // Before (`out`) or after a call from instruction e.at, stores to their
-// homes or loads back the Float slots in xmm registers that live across it,
-// which the C ABI lets the callee clobber. A call instruction reads its
-// arguments before and writes its result after the call itself; within any
-// other instruction every slot whose range holds it is kept.
+// homes or loads back the Float slots in xmm registers that live across it
+// (ir_x64_keeps_xmm), which the C ABI lets the callee clobber.
 fn ir_x64_keep_xmms(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: Bool) Never! {
     at :: e.at
     if at < 0 -> return
-    op :: f.op[at]
-    call :: op == .Call || op == .CallRuntime || op == .CallIndirect
     loop slot in al.xmm_slots {
-        live :: if call -> al.starts[slot] < at && al.ends[slot] > at else -> al.starts[slot] <= at && al.ends[slot] >= at
-        if !live -> next
+        if !ir_x64_keeps_xmm(f, al, at, slot) -> next
         if out {
             x64_float_store(&e.code, false, X64_RBP, al.homes[slot], al.xmms[slot])
         } else {
@@ -778,6 +792,12 @@ fn ir_x64_stop_texts() -> [String] Never! {
 // else by the stop `exit` with no result written, where its caller's stop
 // check takes the stop on (Build.jet ir_stop_check).
 fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, exit: Int) Never! {
+    // The shared calls of the numeric stops (.Stop): offset, path, text
+    // and edge of each.
+    tails := [Int]{}
+    tail_paths := [Int]{}
+    tail_texts := [Int]{}
+    tail_targets := [Int]{}
     loop cold in e.colds {
         e.at = cold.at
         here :: e.code.len()
@@ -853,15 +873,36 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 ir_x64_jump_to(&e, cold.resume)
             }
             .Stop -> {
+                // Of the stops of one path, text and edge whose calls keep
+                // no xmm register, only the first lays out the call: the
+                // later ones load their line, the one argument that differs,
+                // and jump in after the first's.
                 path :: tables.texts.get(cold.symbol) ?? -1
-                ir_x64_lea_data(&e, X64_RDI, path)
-                x64_mov_ri(&e.code, X64_RSI, tables.lengths[path])
-                x64_mov_ri(&e.code, X64_RDX, cold.line)
-                ir_x64_lea_data(&e, X64_RCX, cold.text)
-                x64_mov_ri(&e.code, X64_R8, tables.lengths[cold.text])
-                ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}, false)
                 target :: ir_x64_stop_target(e, cold, exit)
-                ir_x64_stop_resume(&e, m, target)
+                x64_mov_ri(&e.code, X64_RDX, cold.line)
+                shared := -1
+                keeps :: ir_x64_keeps_xmms(e, f, al)
+                if !keeps {
+                    loop (k, tail) in tails {
+                        if tail_paths[k] == path && tail_texts[k] == cold.text && tail_targets[k] == target -> shared = tail
+                    }
+                }
+                if shared >= 0 {
+                    ir_x64_jump_to(&e, shared)
+                } else {
+                    if !keeps {
+                        &tails.push(e.code.len())
+                        &tail_paths.push(path)
+                        &tail_texts.push(cold.text)
+                        &tail_targets.push(target)
+                    }
+                    ir_x64_lea_data(&e, X64_RDI, path)
+                    x64_mov_ri(&e.code, X64_RSI, tables.lengths[path])
+                    ir_x64_lea_data(&e, X64_RCX, cold.text)
+                    x64_mov_ri(&e.code, X64_R8, tables.lengths[cold.text])
+                    ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}, false)
+                    ir_x64_stop_resume(&e, m, target)
+                }
             }
             .ShiftStop -> {
                 path :: tables.texts.get(cold.symbol) ?? -1

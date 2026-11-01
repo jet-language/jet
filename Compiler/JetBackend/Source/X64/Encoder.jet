@@ -133,9 +133,15 @@ fn x64_mov_rr(code: &[U8], dst: Int, src: Int) Never! {
     x64_modrm_reg(&code, src, dst)
 }
 
-// mov dst, imm: sign-extended imm32 (REX.W C7 /0) or the 64-bit movabs (REX.W B8+r).
+// mov dst, imm: a value in 0..<2^32 as the zero-extending mov r32, imm32
+// (B8+r, REX.B for r8-r15), another sign-extended imm32 as REX.W C7 /0, and
+// the rest as the 64-bit movabs (REX.W B8+r). No form touches the flags.
 fn x64_mov_ri(code: &[U8], dst: Int, value: Int) Never! {
-    if x64_fits_i32(value) {
+    if value >= 0 && value <= 4294967295 {
+        if dst >= 8 -> x64_byte(&code, 0x41)
+        x64_byte(&code, 0xb8 + ((dst).bit_and(7)))
+        x64_u32(&code, value)
+    } else if x64_fits_i32(value) {
         x64_rex(&code, true, 0, dst)
         x64_byte(&code, 0xc7)
         x64_modrm_reg(&code, 0, dst)
