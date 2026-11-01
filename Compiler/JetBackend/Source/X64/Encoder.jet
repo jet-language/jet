@@ -557,14 +557,26 @@ enum X64FloatOp { Add Sub Mul Div Sqrt }
 // addsd/subsd/mulsd/divsd/sqrtsd dst, src (F2 0F 58|5C|59|5E|51 /r), or with
 // `single` addss/subss/mulss/divss/sqrtss (F3 0F 58|5C|59|5E|51 /r).
 fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
-    opcode :: if op == {
+    x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, x64_float_opcode(op), dst, src)
+}
+
+// The same with the source operand at [base + disp].
+fn x64_float_op_mem(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, base: Int, disp: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if dst >= 8 || base >= 8 -> x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, x64_float_opcode(op))
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+fn x64_float_opcode(op: X64FloatOp) -> Int Never! {
+    if op == {
         .Add -> 0x58
         .Sub -> 0x5c
         .Mul -> 0x59
         .Div -> 0x5e
         .Sqrt -> 0x51
     }
-    x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, opcode, dst, src)
 }
 
 // ucomisd left, right (66 0F 2E /r): ZF, PF and CF all set when unordered.

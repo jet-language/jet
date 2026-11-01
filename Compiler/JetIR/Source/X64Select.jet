@@ -82,6 +82,7 @@ use jet_backend.[
     x64_fits_i32,
     x64_float_load,
     x64_float_op,
+    x64_float_op_mem,
     x64_float_store,
     x64_idiv,
     x64_imul_rr,
@@ -434,7 +435,7 @@ fn ir_x64_home_xmm(al: IRX64Allocation, slot: Int, scratch: Int) -> Int Never! {
 }
 
 // Before (`out`) or after a call from instruction e.at, stores to their
-// homes or loads back the Float slots in xmm8-xmm15 that live across it,
+// homes or loads back the Float slots in xmm registers that live across it,
 // which the C ABI lets the callee clobber. A call instruction reads its
 // arguments before and writes its result after the call itself; within any
 // other instruction every slot whose range holds it is kept.
@@ -1893,9 +1894,9 @@ fn ir_x64_float_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     if op == .Rem {
         return ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: if single -> "fmodf" else -> "fmod"}, -1, [Int]{f.a[at], f.b[at]}, 0, 2, dst, 0)
     }
-    left :: ir_x64_use_xmm(&e, m, f, al, f.a[at], 0)
-    right :: ir_x64_use_xmm(&e, m, f, al, f.b[at], 1)
     if ir_x64_is_compare(op) {
+        left :: ir_x64_use_xmm(&e, m, f, al, f.a[at], 0)
+        right :: ir_x64_use_xmm(&e, m, f, al, f.b[at], 1)
         // Lt/Le compare the mirrored operands so every ordered test is
         // above/above-or-equal, which an unordered result (CF set) fails.
         if op == .Lt || op == .Le {
@@ -1921,16 +1922,24 @@ fn ir_x64_float_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
         return ir_x64_store(&e, m, f, al, dst, X64_RAX)
     }
     // In dst's own register unless that is the right operand's (floor
-    // division computes in xmm0, floor's argument and result).
+    // division computes in xmm0, floor's argument and result). A left
+    // operand in its home loads straight there, a right one is read from
+    // its home.
+    if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .FloorDiv -> return ir_x64_fail(&e, f, at, "no Float form")
     target := ir_x64_home_xmm(al, dst, 0)
-    if op == .FloorDiv || (target == right && f.a[at] != f.b[at]) -> target = 0
-    if target != left -> x64_movaps(&e.code, target, left)
-    if op == {
-        .Add -> x64_float_op(&e.code, X64FloatOp.Add, single, target, right)
-        .Sub -> x64_float_op(&e.code, X64FloatOp.Sub, single, target, right)
-        .Mul -> x64_float_op(&e.code, X64FloatOp.Mul, single, target, right)
-        .Div | .FloorDiv -> x64_float_op(&e.code, X64FloatOp.Div, single, target, right)
-        else -> return ir_x64_fail(&e, f, at, "no Float form")
+    held :: al.xmms[f.b[at]]
+    if op == .FloorDiv || (target == held && f.a[at] != f.b[at]) -> target = 0
+    ir_x64_load_xmm(&e, m, f, al, f.a[at], target)
+    float_op :: if op == {
+        .Add -> X64FloatOp.Add
+        .Sub -> X64FloatOp.Sub
+        .Mul -> X64FloatOp.Mul
+        else -> X64FloatOp.Div
+    }
+    if {
+        held >= 0 -> x64_float_op(&e.code, float_op, single, target, held)
+        f.a[at] == f.b[at] -> x64_float_op(&e.code, float_op, single, target, target)
+        else -> x64_float_op_mem(&e.code, float_op, single, target, X64_RBP, al.homes[f.b[at]])
     }
     if op == .FloorDiv -> ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: if single -> "floorf" else -> "floor"}, false)
     ir_x64_store_xmm(&e, m, f, al, dst, target)
@@ -3318,25 +3327,25 @@ fn ir_x64_compile_function(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64F
 // Scheduler.jet scheduler_control_current); an unattached thread's GS names
 // a zero word (Thread.jet thread_base). With no stop it returns 0 from the
 // first zero word; with one, jet_rt_session_propagate's delivered status as
-// a Bool (zero while a cleanup or shield masks it). It keeps xmm8-xmm15
+// a Bool (zero while a cleanup or shield masks it). It keeps xmm2-xmm15
 // across that call, so a call of it keeps the Float slots in them in place
 // (ir_x64_call_out):
 //   mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
 //   test rax, rax; jz done; mov rax, [rax + 32]; test rax, rax; jz done;
-//   sub rsp, 136; movups [rsp + 16k], xmm(8 + k) for k in 0..<8;
-//   call jet_rt_session_propagate; movups xmm(8 + k), [rsp + 16k];
-//   add rsp, 136; test rax, rax; setne al; movzx eax, al; done: ret
+//   sub rsp, 232; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
+//   call jet_rt_session_propagate; movups xmm(2 + k), [rsp + 16k];
+//   add rsp, 232; test rax, rax; setne al; movzx eax, al; done: ret
 fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     code := [U8]{}
     sites := ir_x64_stop_quiet(&code)
-    // The eight xmm registers below an 8-byte pad keep rsp 16-byte aligned
-    // at the call.
-    frame :: 8 + 16 * 8
+    // The fourteen xmm registers below an 8-byte pad keep rsp 16-byte
+    // aligned at the call.
+    frame :: 8 + 16 * 14
     x64_alu_ri(&code, X64Alu.Sub, X64_RSP, frame)
     framed :: code.len()
-    loop index in 0..<8 -> x64_vector_store(&code, X64_RSP, 16 * index, 8 + index)
+    loop index in 0..<14 -> x64_vector_store(&code, X64_RSP, 16 * index, 2 + index)
     status_at :: x64_call_rel32(&code)
-    loop index in 0..<8 -> x64_vector_load(&code, 8 + index, X64_RSP, 16 * index)
+    loop index in 0..<14 -> x64_vector_load(&code, 2 + index, X64_RSP, 16 * index)
     x64_alu_ri(&code, X64Alu.Add, X64_RSP, frame)
     restored :: code.len()
     x64_test_rr(&code, X64_RAX, X64_RAX)
@@ -3872,4 +3881,12 @@ fn ir_x64_test_leaf(source: String, names: [String], returns: Bool) -> IRAsmLeaf
             assert(found)
         }
     }
+}
+
+// A Float operand in its frame home is read there: subsd xmm10,
+// [rbp - 280] is F2, REX.R, 0F 5C, ModRM 10 010 101 and the disp32.
+#Test("A Float operation reads its right operand from a frame home") {
+    code := [U8]{}
+    x64_float_op_mem(&code, X64FloatOp.Sub, false, 10, X64_RBP, -280)
+    assert_eq(code, [U8]{242, 68, 15, 92, 149, 232, 254, 255, 255})
 }
