@@ -1049,15 +1049,12 @@ fn civil_rfc_time(value: String) -> (time: LocalTime, leap: Bool) TimeError! {
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 60 || (parts.second == 60 && (parts.hour != 23 || parts.minute != 59)) -> return Err(TimeError{reason: "time out of range: {value}"})
     Ok((time: civil_time(parts.hour, parts.minute, parts.second, parts.nanos), leap: parts.second == 60))
 }
-// The value of the `count` ASCII digits at `at`, or -1 when one is not a digit.
-fn civil_fixed_digits(raw: [U8], at: Int, count: Int) -> Int Never! {
-    value := 0
-    loop i in at..<at + count {
-        byte :: raw[i]
-        if byte < (U8{48}) || byte > (U8{57}) -> return -1
-        value = value * 10 + Int.from_u8(byte) - 48
-    }
-    value
+// The value of the two ASCII digits at `at`, or -1 when one is not a digit.
+fn civil_two_digits(raw: [U8], at: Int) -> Int Never! {
+    high :: raw[at]
+    low :: raw[at + 1]
+    if high < (U8{48}) || high > (U8{57}) || low < (U8{48}) || low > (U8{57}) -> return -1
+    Int.from_u8(high) * 10 + Int.from_u8(low) - 528
 }
 // `YYYY-MM-DDTHH:MM:SS[.F{1,9}](Z|±HH:MM)` with every field in range and no
 // leap second, read from one byte copy. That is exactly the set of values
@@ -1068,13 +1065,16 @@ fn civil_rfc3339_fixed(value: String) -> DateTime? Never! {
     raw :: value.bytes()
     n :: raw.len()
     if n < 20 || raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[10] != (U8{84}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return None
-    year :: civil_fixed_digits(raw, 0, 4)
-    month :: civil_fixed_digits(raw, 5, 2)
-    day :: civil_fixed_digits(raw, 8, 2)
-    hour :: civil_fixed_digits(raw, 11, 2)
-    minute :: civil_fixed_digits(raw, 14, 2)
-    second :: civil_fixed_digits(raw, 17, 2)
-    if year < 0 || month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 -> return None
+    century :: civil_two_digits(raw, 0)
+    year_low :: civil_two_digits(raw, 2)
+    month :: civil_two_digits(raw, 5)
+    day :: civil_two_digits(raw, 8)
+    hour :: civil_two_digits(raw, 11)
+    minute :: civil_two_digits(raw, 14)
+    second :: civil_two_digits(raw, 17)
+    if century < 0 || year_low < 0 -> return None
+    year :: century * 100 + year_low
+    if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 -> return None
     at := 19
     nanos := 0
     if raw[at] == (U8{46}) {
@@ -1096,17 +1096,21 @@ fn civil_rfc3339_fixed(value: String) -> DateTime? Never! {
     if n - at == 1 && raw[at] == (U8{90}) {
         offset = 0
     } else if n - at == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
-        offset_hour :: civil_fixed_digits(raw, at + 1, 2)
-        offset_minute :: civil_fixed_digits(raw, at + 4, 2)
+        offset_hour :: civil_two_digits(raw, at + 1)
+        offset_minute :: civil_two_digits(raw, at + 4)
         if offset_hour < 0 || offset_hour > 23 || offset_minute < 0 || offset_minute > 59 -> return None
         offset = offset_hour * 3600 + offset_minute * 60
         if raw[at] == (U8{45}) -> offset = -offset
     } else {
         return None
     }
-    t :: civil_time(hour, minute, second, nanos)
-    seconds :: saturating_sub_ns(civil_utc(new(year, month, day), t), offset)
-    Val(civil_timestamp(seconds, t.nanos, false))
+    // Every field is in range here, so new and civil_time would clamp
+    // nothing, and the nanos are below 10^9, so civil_timestamp's floor is 0.
+    // A year of at most 9999 keeps the seconds below 4 * 10^11 in magnitude:
+    // inside time_int_near, so civil_utc's civil_i64, saturating_sub_ns and
+    // civil_timestamp's civil_i64 return their operands unchanged.
+    seconds :: (civil_day(LocalDate{date_y: year, date_m: month, date_d: day}) - 719162) * 86400 + hour * 3600 + minute * 60 + second - offset
+    Val(DateTime{secs: seconds, nanos: nanos, leap_second: false})
 }
 fn parse_rfc3339(value: String) -> DateTime TimeError! {
     if civil_rfc3339_fixed(value) == .Val(fixed) -> return Ok(fixed)
