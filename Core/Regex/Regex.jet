@@ -22,7 +22,9 @@ package {
 // `?`, lazy) count. Compile also derives search accelerators that never
 // change the answer: a DFA over ASCII bytes that decides whether a match
 // exists (is_match, full_match), and literals every match contains or
-// starts with, which let the scan skip text no match can touch.
+// starts with, which let the scan skip text no match can touch. A first
+// match in a short text comes from a bounded backtracker over the same
+// program instead, which visits each (instruction, position) pair once.
 // - captures numbered by their `(`, `(?:…)`, `(?<name>…)`/`(?P<name>…)`,
 //   `*` `+` `?` `{n}` `{n,}` `{n,m}` (counts up to MAX_REPEAT), each with a
 //   lazy `?` form, `.`, `^`, `$` and `\z` (end of text), `\A`, `\b`/`\B`
@@ -1636,8 +1638,10 @@ fn next_search_pos(text: [U8], start: Int, end: Int, hi: Int) -> Int Never! {
 /// non-overlap boundary. `anchored` starts only at 0; `full` also requires
 /// the match to end at the text's end. Collects at most `limit` runs (all
 /// when `limit` < 0). Text where the DFA or the needle rules out every
-/// match returns before the VM is built; while no thread is live, the
-/// start skips to the next place the required prefix occurs.
+/// match returns before the VM is built, and a first match whose program
+/// and text fit BACKTRACK_CELLS comes from `backtrack` instead; while no
+/// thread is live, the start skips to the next place the required prefix
+/// occurs.
 fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
     out := [Run]{}
     // `exists` asks the DFA before it falls back to a stop_on_match scan.
@@ -1645,6 +1649,7 @@ fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_o
     if verdict == 0 -> return out
     if verdict < 0 && re.needle.len() > 0 && find_bytes(text, re.needle, 0) < 0 -> return out
     hi :: text.len()
+    if limit == 1 && re.ops.len() * (hi + 1) <= BACKTRACK_CELLS -> return backtrack(re, text, anchored || re.anchored_start, full, capture)
     vm := new_vm(re.ops.len(), hi, full)
     pos := 0
     has_last := false
@@ -1701,6 +1706,107 @@ fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_o
         &vm.step(re, text, decode_at(text, pos), next_pos, capture)
         pos = next_pos
     }
+}
+
+// The most (instruction, position) pairs `backtrack` takes on: its visited
+// set holds one bit per pair, so this bounds what a call allocates.
+BACKTRACK_CELLS :: 32768
+
+/// The first match as the scan reports it, by a bounded backtracker (RE2's
+/// BitState): from each start in turn it walks the program depth first,
+/// Split's `xs` before its `ys`, so the first Match it reaches is the
+/// highest-priority thread's. An instruction reached once at a position is
+/// never run there again: whatever followed it then failed, from any start,
+/// as a later arrival would. So each (instruction, position) pair runs at
+/// most once per call, the same linear bound as the thread VM, with no
+/// thread rows to move at each scalar. `single` starts only at 0.
+fn backtrack(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool) -> [Run] Never! {
+    hi :: text.len()
+    visited := filled((re.ops.len() * (hi + 1) + 31) >> 5, 0)
+    caps := if capture -> filled((re.groups + 1) * 2, -1) else -> [Int]{}
+    jobs := [Int]{}
+    pos := 0
+    loop {
+        if re.prefix.len() > 0 && !single {
+            pos = find_bytes(text, re.prefix, pos)
+            if pos < 0 -> break
+        }
+        end :: backtrack_from(re, text, pos, full, capture, &visited, &jobs, &caps)
+        if end >= 0 {
+            if capture {
+                caps[0] = pos
+                caps[1] = end
+            }
+            return [Run]{Run{start: pos, end: end, caps: caps}}
+        }
+        if single || pos >= hi -> break
+        pos = pos + lead_width(text[pos])
+    }
+    [Run]{}
+}
+
+/// One depth-first walk from `start`: where the first Match reached ends,
+/// or -1. `jobs` holds pairs: a branch still to try (pc, position), or a
+/// capture slot to restore (-slot - 1, its earlier position), so `caps` is
+/// back to all -1 when the walk fails.
+fn backtrack_from(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool, visited: &[Int], jobs: &[Int], caps: &[Int]) -> Int Never! {
+    hi :: text.len()
+    width :: hi + 1
+    pc := re.start
+    pos := start
+    loop {
+        loop {
+            cell :: pc * width + pos
+            word :: visited[cell >> 5]
+            bit :: 1 << cell.bit_and(31)
+            if word.bit_and(bit) != 0 -> break
+            visited[cell >> 5] = word.bit_or(bit)
+            op :: re.ops[pc]
+            if op == OP_SPLIT {
+                push_pair(&jobs, re.ys[pc], pos)
+                pc = re.xs[pc]
+                next
+            }
+            if op == OP_SAVE {
+                slot :: re.args[pc]
+                if capture && slot >= 0 {
+                    push_pair(&jobs, -slot - 1, caps[slot])
+                    caps[slot] = pos
+                }
+                pc = re.xs[pc]
+                next
+            }
+            if op == OP_ASSERT {
+                if !assert_holds(re, text, re.args[pc], pos, hi) -> break
+                pc = re.xs[pc]
+                next
+            }
+            if op == OP_MATCH {
+                if full && pos != hi -> break
+                return pos
+            }
+            if pos >= hi -> break
+            if !consumes(re, pc, decode_at(text, pos)) -> break
+            pos = pos + lead_width(text[pos])
+            pc = re.xs[pc]
+        }
+        // Undo the captures past the latest open branch, then take it.
+        loop {
+            b :: &jobs.pop() ?? return -1
+            a :: &jobs.pop() ?? return -1
+            if a >= 0 {
+                pc = a
+                pos = b
+                break
+            }
+            caps[-a - 1] = b
+        }
+    }
+}
+
+fn push_pair(jobs: &[Int], a: Int, b: Int) Never! {
+    &jobs.push(a)
+    &jobs.push(b)
 }
 
 fn consumes(re: Regex, pc: Int, cp: Int) -> Bool Never! {
@@ -1905,13 +2011,9 @@ fn char_count(raw: [U8], from: Int, to: Int) -> Int Never! {
 }
 
 fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
-    out := [U8]{}
-    i := start
-    loop {
-        if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
-        i = i + 1
-    }
+    stop :: if end < raw.len() -> end else -> raw.len()
+    if start >= stop -> return ""
+    String.from_bytes(raw.slice(start, stop)) ?? ""
 }
 
 fn is_group_name_char(n: Int) -> Bool Never! {
