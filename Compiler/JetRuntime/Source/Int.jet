@@ -883,13 +883,27 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
         }
         return if negative -> -small else -> small
     }
-    node :: int_new((len - at) /% I64{9} + I64{1})
-    loop at < len {
-        digit :: trap_byte(wrapping(ptr + at)) - I64{48}
-        if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
-        int_scale(node, I64{10}, digit)
-        at += I64{1}
+    // Limbs are base 1e9, so each takes the next nine digits from the right
+    // as they are: one pass over the digits, with no repeated rescaling.
+    count :: (len - at + I64{8}) /% I64{9}
+    node :: int_new(count)
+    end := len
+    index := I64{0}
+    loop index < count {
+        start :: if (end - I64{9} > at) -> end - I64{9} else -> at
+        limb := I64{0}
+        cursor := start
+        loop cursor < end {
+            digit :: trap_byte(wrapping(ptr + cursor)) - I64{48}
+            if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
+            limb = limb * I64{10} + digit
+            cursor += I64{1}
+        }
+        int_set(node, index, limb)
+        end = start
+        index += I64{1}
     }
+    int_store(wrapping(node + I64{32}), count)
     if negative -> int_store(wrapping(node + I64{16}), I64{1})
     int_pack(node)
 }

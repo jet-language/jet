@@ -2709,6 +2709,15 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         }
         .ConstBigInt -> {
             if f.a[at] < 0 || f.a[at] >= m.names.len() -> return ir_x64_fail(&e, f, at, "name {f.a[at]} is not interned")
+            // A static exact Int (X64Module.jet ir_x64_static_int) is the
+            // word its data row holds.
+            word :: tables.ints.get(m.names[f.a[at]]) ?? -1
+            if word >= 0 {
+                reg :: ir_x64_home_reg(m, f, al, dst, X64_RAX)
+                ir_x64_lea_data(&e, reg, word)
+                x64_load(&e.code, reg, reg, 0)
+                return ir_x64_store(&e, m, f, al, dst, reg)
+            }
             text :: tables.texts.get(m.names[f.a[at]]) ?? -1
             ir_x64_helper(&e, m, f, al, "jet_rt_int_from_static", [IRX64Arg]{IRX64Arg.Data{id: text}, IRX64Arg.Imm{value: tables.lengths[text]}}, dst)
         }
@@ -4205,4 +4214,41 @@ fn ir_x64_test_leaf(source: String, names: [String], returns: Bool) -> IRAsmLeaf
         if reg == X64_R8 -> held = true
     }
     assert(held)
+}
+
+// A big-integer constant is data: its base-1e9 limbs, least significant
+// first, a carrier with its sign and limb count, and the word naming it
+// with bit 62 set. One in the inline range stays a runtime parse.
+#Test("A big-integer constant is a static exact Int") {
+    m := ir_module_new()
+    int_row :: ir_type_row(&m, Type.Int) ?? panic("no Int row")
+    f := ir_function_new("big", "test:big.jet::big", "", "big.jet", 1)
+    f.result = int_row
+    texts :: [String]{"-123456789012345678901234567890", "4611686018427387904", "4611686018427387903", "-4611686018427387904", "-4611686018427387905"}
+    loop text in texts {
+        slot :: ir_slot(&f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&f, IROp.ConstBigInt, slot, ir_intern_name(&m, text), -1, -1, 1)
+    }
+    &m.functions.push(f)
+    tables :: ir_x64_tables(m)
+    assert(tables.ints.get("4611686018427387903") == None)
+    assert(tables.ints.get("-4611686018427387904") == None)
+    assert(tables.ints.get("4611686018427387904") != None)
+    assert(tables.ints.get("-4611686018427387905") != None)
+    word :: tables.ints.get("-123456789012345678901234567890") ?? panic("no static Int")
+    assert_eq(tables.data[word].relocs.len(), 1)
+    assert_eq(tables.data[word].relocs[0].addend, 4611686018427387904)
+    carrier :: tables.data[tables.data[word].relocs[0].target.value]
+    assert_eq(carrier.bytes.len(), 48)
+    assert_eq(carrier.bytes[16], U8{1})
+    assert_eq(carrier.bytes[32], U8{4})
+    assert_eq(carrier.relocs[0].offset, 24)
+    limbs :: tables.data[carrier.relocs[0].target.value].bytes
+    expected :: [Int]{234567890, 345678901, 456789012, 123}
+    assert_eq(limbs.len(), 16)
+    loop (index, limb) in expected {
+        value := 0
+        loop k in 0..<4 -> value = value.bit_or(Int.from_u8(limbs[4 * index + k]) << (8 * k))
+        assert_eq(value, limb)
+    }
 }
