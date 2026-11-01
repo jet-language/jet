@@ -1,8 +1,9 @@
 // The IR builder's parallel List methods: para_map, para_filter,
 // para_partition and para_fold. The runtime's joined range scheduler
-// (jet_rt_native_para_walk) calls a helper over 64-item ranges; the helper
-// reads its inputs through a frame env the caller lends until every worker
-// has joined, and writes disjoint output slots.
+// (jet_rt_native_para_walk) calls a helper over 64-item ranges (a para_map
+// with `limit: n` over shorter ones, so n workers share the items); the
+// helper reads its inputs through a frame env the caller lends until every
+// worker has joined, and writes disjoint output slots.
 
 use jet_foundation.[Span, Type, TClosureOp, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
 
