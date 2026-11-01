@@ -17,13 +17,15 @@
 // runs its own loop over the same elements. On a decline the leaf has
 // written no memory and changed nothing the caller sees.
 //
-// SSE2 (every x86-64 has it). Two xmm registers hold four lane sums, each
+// SSE2 (every x86-64 has it). Four xmm registers hold eight lane sums, each
 // biased by 2^62: a lane is inline exactly when its biased word's sign bit
 // is clear. Adding an inline element to an inline lane cannot wrap 64 bits,
 // so the sign bits ORed into xmm2 after every step catch the first lane
 // that leaves the inline range. Each element gets the same test (element +
-// 2^62, sign bit). The last up to three elements go one at a time, and the
-// four lanes fold into the total with an inline test after each add.
+// 2^62, sign bit). A step takes eight elements; its sign bits meet in xmm4
+// as a tree, so one por a step carries into xmm2 and no chain of them
+// limits the loop. The last up to seven elements go one at a time, and the
+// eight lanes fold into the total with an inline test after each add.
 // Only caller-saved registers are written (rax, rcx, rsi, rdi, r8-r11 and
 // xmm0-xmm7), rsp is untouched, and the code falls through its last byte.
 
@@ -50,48 +52,62 @@ fn x64_int_sum_code() -> [U8] Never! {
     x64_shift_ri(&code, X64Shift.Shl, X64_RSI, 3)
     x64_alu_rr(&code, X64Alu.Add, X64_RDI, X64_RSI)
     x64_mov_ri(&code, X64_R10, X64_INT_SUM_BIAS)
-    // xmm3 the bias in both lanes, xmm0 and xmm1 four biased zero lanes,
-    // xmm2 the sign bits seen.
+    // xmm3 the bias in both lanes, xmm0, xmm1, xmm6 and xmm7 eight biased
+    // zero lanes, xmm2 the sign bits seen.
     x64_movq_to_xmm(&code, false, 3, X64_R10)
     x64_sse(&code, 0x66, false, 0x6c, 3, 3)
     x64_sse(&code, 0x66, false, 0x6f, 0, 3)
     x64_sse(&code, 0x66, false, 0x6f, 1, 3)
+    x64_sse(&code, 0x66, false, 0x6f, 6, 3)
+    x64_sse(&code, 0x66, false, 0x6f, 7, 3)
     x64_sse(&code, 0x66, false, 0xef, 2, 2)
-    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 4)
+    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 8)
     to_tail :: x64_jcc_rel32(&code, X64Cond.L)
     body :: code.len()
+    // Elements 0-3: paddq lane, element; paddq element, bias; por.
     x64_vector_load(&code, 4, X64_RDI, 0)
     x64_vector_load(&code, 5, X64_RDI, 16)
-    // paddq lane, element; por seen, lane.
     x64_sse(&code, 0x66, false, 0xd4, 0, 4)
     x64_sse(&code, 0x66, false, 0xd4, 1, 5)
-    x64_sse(&code, 0x66, false, 0xeb, 2, 0)
-    x64_sse(&code, 0x66, false, 0xeb, 2, 1)
-    // paddq element, bias; por seen, element.
     x64_sse(&code, 0x66, false, 0xd4, 4, 3)
     x64_sse(&code, 0x66, false, 0xd4, 5, 3)
+    x64_sse(&code, 0x66, false, 0xeb, 4, 5)
+    // Elements 4-7, through xmm5.
+    x64_vector_load(&code, 5, X64_RDI, 32)
+    x64_sse(&code, 0x66, false, 0xd4, 6, 5)
+    x64_sse(&code, 0x66, false, 0xd4, 5, 3)
+    x64_sse(&code, 0x66, false, 0xeb, 4, 5)
+    x64_vector_load(&code, 5, X64_RDI, 48)
+    x64_sse(&code, 0x66, false, 0xd4, 7, 5)
+    x64_sse(&code, 0x66, false, 0xd4, 5, 3)
+    x64_sse(&code, 0x66, false, 0xeb, 4, 5)
+    // The lanes' sign bits: (xmm0 | xmm1) | (xmm6 | xmm7), then one por
+    // into xmm2.
+    x64_sse(&code, 0x66, false, 0x6f, 5, 0)
+    x64_sse(&code, 0x66, false, 0xeb, 5, 1)
+    x64_sse(&code, 0x66, false, 0xeb, 4, 6)
+    x64_sse(&code, 0x66, false, 0xeb, 4, 7)
+    x64_sse(&code, 0x66, false, 0xeb, 4, 5)
     x64_sse(&code, 0x66, false, 0xeb, 2, 4)
-    x64_sse(&code, 0x66, false, 0xeb, 2, 5)
-    x64_alu_ri(&code, X64Alu.Add, X64_RDI, 32)
-    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 4)
+    x64_alu_ri(&code, X64Alu.Add, X64_RDI, 64)
+    x64_alu_ri(&code, X64Alu.Sub, X64_R9, 8)
     again :: x64_jcc_rel32(&code, X64Cond.GE)
     x64_patch_rel32(&code, again, body)
     tail :: code.len()
     x64_patch_rel32(&code, to_tail, tail)
-    x64_alu_ri(&code, X64Alu.Add, X64_R9, 4)
+    x64_alu_ri(&code, X64Alu.Add, X64_R9, 8)
     // movmskpd r8d, xmm2: any sign bit seen declines.
     x64_sse(&code, 0x66, false, 0x50, X64_R8, 2)
     x64_test_rr(&code, X64_R8, X64_R8)
     &declines.push(x64_jcc_rel32(&code, X64Cond.NE))
-    // The four lanes, unbiased, into the total.
-    x64_int_sum_fold(&code, 0, &declines)
-    x64_sse(&code, 0x66, false, 0x70, 0, 0)
-    x64_byte(&code, 0xee)
-    x64_int_sum_fold(&code, 0, &declines)
-    x64_int_sum_fold(&code, 1, &declines)
-    x64_sse(&code, 0x66, false, 0x70, 1, 1)
-    x64_byte(&code, 0xee)
-    x64_int_sum_fold(&code, 1, &declines)
+    // The eight lanes, unbiased, into the total.
+    lanes :: [Int]{0, 1, 6, 7}
+    loop lane in lanes {
+        x64_int_sum_fold(&code, lane, &declines)
+        x64_sse(&code, 0x66, false, 0x70, lane, lane)
+        x64_byte(&code, 0xee)
+        x64_int_sum_fold(&code, lane, &declines)
+    }
     // The last elements, one at a time.
     x64_test_rr(&code, X64_R9, X64_R9)
     to_done :: x64_jcc_rel32(&code, X64Cond.E)
