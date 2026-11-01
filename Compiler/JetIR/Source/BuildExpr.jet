@@ -4246,13 +4246,46 @@ fn ir_pair_find(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, entry_row:
     index
 }
 
+// The capture cells of a binary pattern's parts, -1 for a part without one:
+// a named bit field captures into its own zeroed frame cell at its packed
+// width, a named rest into a cell for the List header box the runtime
+// writes. `pending` gets one row per cell.
+fn ir_binary_pattern_cells(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TBinaryPatternPart], pending: &[IRPending], cells: &[Int], span: Span) -> Int Never! {
+    loop part in parts {
+        cell := -1
+        if part == {
+            .Literal(_) -> {}
+            .Bits(name, _, _, ty, _) -> {
+                if name != "" && name != "_" {
+                    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+                    if m.types[row].kind != .Word -> return ir_fail_slot(&b, span, "binary bit capture of {ir_type_name(ty)}")
+                    cell = ir_out_slot(&m, &b, 1)
+                    slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, name))
+                    &pending.push(IRPending{name: name, slot: slot, subject: cell, offset: 0})
+                }
+            }
+            .Rest(name, ty, _) -> {
+                if name != "" && name != "_" {
+                    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+                    cell = ir_out_slot(&m, &b, 1)
+                    slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, name))
+                    // The runtime writes a List header box; the binding is
+                    // the List it holds.
+                    &pending.push(IRPending{name: name, slot: slot, subject: cell, offset: 0, boxed: true})
+                }
+            }
+        }
+        &cells.push(cell)
+    }
+    0
+}
+
 // The 64-byte descriptor rows of a binary pattern's parts, one per part
 // [tag, a, b, width, destination, storage, scratch, scratch], read by
-// `jet_rt_binary_pattern_match` and `jet_rt_reader_take_pattern`. A bit field
-// captures into its own zeroed frame cell at its packed width; the rest
-// capture receives a List header box. Only a match writes them; `pending`
-// gets one row per named capture.
-fn ir_binary_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TBinaryPatternPart], pending: &[IRPending], span: Span) -> Int Never! {
+// `jet_rt_binary_pattern_match` and `jet_rt_reader_take_pattern`, with the
+// parts' `cells` (ir_binary_pattern_cells) as destinations. Only a match
+// writes them.
+fn ir_binary_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TBinaryPatternPart], cells: [Int]) -> Int Never! {
     pointer :: ir_pointer_row(&m)
     rows :: ir_out_slot(&m, &b, 8 * parts.len())
     loop (index, part) in parts {
@@ -4262,7 +4295,7 @@ fn ir_binary_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TBi
         c := -1
         width := 8
         storage := 5
-        destination := -1
+        destination :: cells[index]
         if part == {
             .Literal(value) -> {
                 selector = 16
@@ -4274,31 +4307,20 @@ fn ir_binary_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TBi
                 a = address
                 c = ir_word_const(&m, &b, value.len())
             }
-            .Bits(name, bits, big_endian, ty, _) -> {
+            .Bits(_, bits, big_endian, ty, _) -> {
                 a = ir_word_const(&m, &b, bits)
                 c = ir_word_const(&m, &b, if big_endian -> 0 else -> 1)
-                if name != "" && name != "_" {
-                    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-                    if m.types[row].kind != .Word -> return ir_fail_slot(&b, span, "binary bit capture of {ir_type_name(ty)}")
-                    stored :: m.types[row].bits
+                if destination >= 0 {
+                    stored :: m.types[ir_value_type(&m, p, ty) ?? 0].bits
                     width = if stored <= 8 -> 1 else if stored <= 16 -> 2 else if stored <= 32 -> 4 else -> 8
                     storage = 0
-                    destination = ir_out_slot(&m, &b, 1)
-                    slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, name))
-                    &pending.push(IRPending{name: name, slot: slot, subject: destination, offset: 0})
                 }
             }
-            .Rest(name, ty, _) -> {
+            .Rest(_, _, _) -> {
                 selector = 18
-                if name != "" && name != "_" {
-                    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+                if destination >= 0 {
                     width = 1
                     storage = 6
-                    destination = ir_out_slot(&m, &b, 1)
-                    slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, name))
-                    // The runtime writes a List header box; the binding is
-                    // the List it holds.
-                    &pending.push(IRPending{name: name, slot: slot, subject: destination, offset: 0, boxed: true})
                 }
             }
         }
@@ -4316,6 +4338,116 @@ fn ir_binary_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TBi
     rows
 }
 
+// The bytes a Reader take of `parts` spans when it can match inline (each
+// part a literal or a whole-byte field of at most 64 bits whose capture holds
+// it), else -1: a rest or a field off byte boundaries goes to the runtime.
+fn ir_take_inline_bytes(m: &IRModule, p: IRProgram, parts: [TBinaryPatternPart]) -> Int Never! {
+    total := 0
+    loop part in parts {
+        if part == {
+            .Literal(value) -> total += value.len()
+            .Bits(name, bits, _, ty, _) -> {
+                if bits <= 0 || bits > 64 || bits % 8 != 0 -> return -1
+                if name != "" && name != "_" {
+                    row :: ir_value_type(&m, p, ty) ?? return -1
+                    if m.types[row].kind != .Word || m.types[row].bits < bits -> return -1
+                }
+                total += bits /% 8
+            }
+            .Rest(_, _, _) -> return -1
+        }
+    }
+    total
+}
+
+// The inline match of a Reader take whose parts span `total` bytes
+// (ir_take_inline_bytes) at the handle's position: with that many bytes left
+// and every literal equal, the fields load straight into their `cells`, the
+// position advances and `selector` becomes 1. Any miss leaves `selector` 0
+// and writes nothing, for the runtime to report.
+fn ir_take_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: Int, parts: [TBinaryPatternPart], cells: [Int], total: Int, selector: Int) Never! {
+    word :: ir_word_row(&m)
+    // The Reader's resident buffer: data, length, and the position at 24
+    // (JetRuntime Scan.jet jet_rt_reader_take_pattern).
+    data :: ir_load_word(&m, &b, handle, 0)
+    length :: ir_load_word(&m, &b, handle, 8)
+    position :: ir_load_word(&m, &b, handle, 24)
+    left :: ir_word_op(&m, &b, IROp.Sub, length, position)
+    span_word :: ir_word_const(&m, &b, total)
+    room :: ir_bool_op(&m, &b, IROp.Ge, left, span_word)
+    ir_open_if(&b.f, room, b.line)
+    base :: ir_word_op(&m, &b, IROp.Add, data, position)
+    // Literals compare in 4-, 2- and 1-byte little-endian chunks.
+    equal :: ir_temp(&m, &b, word)
+    one :: ir_word_const(&m, &b, 1)
+    ir_emit(&b.f, IROp.Copy, equal, one, -1, -1, b.line)
+    offset := 0
+    loop part in parts {
+        if part == {
+            .Literal(value) -> {
+                at := 0
+                loop at < value.len() {
+                    size :: if value.len() - at >= 4 -> 4 else if value.len() - at >= 2 -> 2 else -> 1
+                    row :: ir_type_row(&m, Type.IntN{signed: false, bits: 8 * size}) ?? 0
+                    expected := 0
+                    loop k in 0..<size -> expected = expected.bit_or(Int.from_u8(value[at + k]) << (8 * k))
+                    loaded :: ir_load_at(&m, &b, base, offset + at, row)
+                    constant :: ir_int_constant(&m, &b, row, expected)
+                    differs :: ir_bool_op(&m, &b, IROp.Ne, loaded, constant)
+                    ir_open_if(&b.f, differs, b.line)
+                    zero :: ir_word_const(&m, &b, 0)
+                    ir_emit(&b.f, IROp.Copy, equal, zero, -1, -1, b.line)
+                    ir_end(&b.f, b.line)
+                    at += size
+                }
+                offset += value.len()
+            }
+            .Bits(_, bits, _, _, _) -> offset += bits /% 8
+            .Rest(_, _, _) -> {}
+        }
+    }
+    none :: ir_word_const(&m, &b, 0)
+    matched :: ir_bool_op(&m, &b, IROp.Ne, equal, none)
+    ir_open_if(&b.f, matched, b.line)
+    offset = 0
+    loop (index, part) in parts {
+        if part == {
+            .Literal(value) -> offset += value.len()
+            .Bits(_, bits, big_endian, ty, _) -> {
+                bytes :: bits /% 8
+                if cells[index] >= 0 {
+                    row :: ir_value_type(&m, p, ty) ?? 0
+                    value := -1
+                    if (!big_endian || bytes == 1) && m.types[row].bits == bits {
+                        value = ir_load_at(&m, &b, base, offset, row)
+                    } else {
+                        // Byte by byte into a word, first byte highest
+                        // when big-endian; the bits then fit the capture.
+                        byte_row :: ir_type_row(&m, Type.IntN{signed: false, bits: 8}) ?? 0
+                        gathered := ir_word_const(&m, &b, 0)
+                        loop k in 0..<bytes {
+                            byte :: ir_load_at(&m, &b, base, offset + k, byte_row)
+                            widened :: ir_copy_word(&m, &b, byte, word)
+                            shift :: ir_word_const(&m, &b, 8 * (if big_endian -> bytes - 1 - k else -> k))
+                            placed :: ir_word_op(&m, &b, IROp.Shl, widened, shift)
+                            gathered = ir_word_op(&m, &b, IROp.BitOr, gathered, placed)
+                        }
+                        value = ir_copy_word(&m, &b, gathered, row)
+                    }
+                    ir_emit(&b.f, IROp.Store, -1, cells[index], 0, value, b.line)
+                }
+                offset += bytes
+            }
+            .Rest(_, _, _) -> {}
+        }
+    }
+    advanced :: ir_word_op(&m, &b, IROp.Add, position, span_word)
+    ir_emit(&b.f, IROp.Store, -1, handle, 24, advanced, b.line)
+    ir_emit(&b.f, IROp.Copy, selector, one, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+}
+
 // The Bool test of a binary pattern on the `[U8]` `subject`: the names bind
 // from their capture cells.
 fn ir_binary_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, parts: [TBinaryPatternPart], span: Span) -> Int Never! {
@@ -4323,8 +4455,10 @@ fn ir_binary_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: In
     if m.types[element].kind != .Word || m.types[element].bits != 8 || m.types[element].signed -> return ir_fail_slot(&b, span, "binary pattern on a non-[U8] subject")
     word :: ir_word_row(&m)
     pending := [IRPending]{}
-    rows :: ir_binary_pattern_rows(&m, p, &b, parts, &pending, span)
+    cells := [Int]{}
+    _ := ir_binary_pattern_cells(&m, p, &b, parts, &pending, &cells, span)
     if ir_failed(b) -> return -1
+    rows :: ir_binary_pattern_rows(&m, p, &b, parts, cells)
     data :: ir_list_data(&m, &b, subject)
     length :: ir_list_length(&m, &b, subject)
     stride :: ir_word_const(&m, &b, 1)
@@ -4339,8 +4473,9 @@ fn ir_binary_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: In
 // `cursor.take_pattern("…")` / `reader.take_pattern([U8]{…})`: the runtime
 // matches the parts at the handle's position, writes the captures to their
 // cells and advances the position on a match, else writes its "pattern did
-// not match" message to `error`. The Ok payload is the captures' tuple in
-// canonical field order (Unit with none).
+// not match" message to `error`. A Reader take of whole-byte parts first
+// matches inline (ir_take_inline) and calls the runtime only on a miss. The
+// Ok payload is the captures' tuple in canonical field order (Unit with none).
 fn ir_take_pattern(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, binary: Bool, text_parts: [StrMatchPart], binary_parts: [BinMatchPart], canonical: [TCanonicalField], span: Span) -> Int Never! {
     ok_ty := Type.Named{name: "Unit"}
     if ir_untag(ty) == {
@@ -4351,12 +4486,36 @@ fn ir_take_pattern(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     if ir_failed(b) || handle < 0 -> return -1
     pending := [IRPending]{}
     count :: text_parts.len() + binary_parts.len()
-    rows :: if binary -> ir_binary_pattern_rows(&m, p, &b, ir_take_binary_parts(binary_parts), &pending, span) else -> ir_text_pattern_rows(&m, p, &b, ir_take_text_parts(text_parts), &pending, span)
-    if ir_failed(b) -> return -1
     word :: ir_word_row(&m)
     error :: ir_out_slot(&m, &b, 1)
     count_word :: ir_word_const(&m, &b, count)
-    selector :: ir_runtime(&m, &b, if binary -> "jet_rt_reader_take_pattern" else -> "jet_rt_cursor_take_pattern", [Int]{handle, rows, count_word, error}, word)
+    selector := -1
+    if binary {
+        parts :: ir_take_binary_parts(binary_parts)
+        cells := [Int]{}
+        _ := ir_binary_pattern_cells(&m, p, &b, parts, &pending, &cells, span)
+        if ir_failed(b) -> return -1
+        total :: ir_take_inline_bytes(&m, p, parts)
+        if total >= 0 {
+            selector = ir_temp(&m, &b, word)
+            unmatched :: ir_word_const(&m, &b, 0)
+            ir_emit(&b.f, IROp.Copy, selector, unmatched, -1, -1, b.line)
+            ir_take_inline(&m, p, &b, handle, parts, cells, total, selector)
+            missed :: ir_bool_op(&m, &b, IROp.Eq, selector, unmatched)
+            ir_open_if(&b.f, missed, b.line)
+            rows :: ir_binary_pattern_rows(&m, p, &b, parts, cells)
+            scanned :: ir_runtime(&m, &b, "jet_rt_reader_take_pattern", [Int]{handle, rows, count_word, error}, word)
+            ir_emit(&b.f, IROp.Copy, selector, scanned, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        } else {
+            rows :: ir_binary_pattern_rows(&m, p, &b, parts, cells)
+            selector = ir_runtime(&m, &b, "jet_rt_reader_take_pattern", [Int]{handle, rows, count_word, error}, word)
+        }
+    } else {
+        rows :: ir_text_pattern_rows(&m, p, &b, ir_take_text_parts(text_parts), &pending, span)
+        if ir_failed(b) -> return -1
+        selector = ir_runtime(&m, &b, "jet_rt_cursor_take_pattern", [Int]{handle, rows, count_word, error}, word)
+    }
     boxed :: ir_result_box(&m, p, &b, ty, true, -1)
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, selector, b.line)
     zero :: ir_word_const(&m, &b, 0)
