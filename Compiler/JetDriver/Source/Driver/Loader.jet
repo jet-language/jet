@@ -59,6 +59,7 @@ use jet_lexer.[
     TOKEN_LBRACKET,
     TOKEN_LINE_COMMENT,
     TOKEN_LPAREN,
+    TOKEN_LT,
     TOKEN_RAW_STRING,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
@@ -3208,6 +3209,10 @@ struct JetDriverCoreIdentifierDemand {
     // A `#UnitFamily` declaration: its explicit conversions lower to their
     // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
     unit_family: Bool{false}
+    // A generic `.decode<T>()` call or a `FieldError` use: Dyn decode and
+    // `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
+    // (BuildDyn.jet ir_dyn_decode, ir_decode_under), so core.encoding loads.
+    codec_decode: Bool{false}
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core as core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (fixed_sigs.rs:5488 hmac_sha256,
@@ -3247,6 +3252,8 @@ struct JetDriverCoreDemandNames {
     pattern_matches_name: Int
     pattern_match_name: Int
     unit_family_name: Int
+    decode_name: Int
+    field_error_name: Int
     bare: [Int]
     bare_alias: [Int]
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
@@ -3288,7 +3295,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
             if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3310,6 +3317,8 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
         if tokens[index].kind == TOKEN_IDENT {
             name :: name_index(tokens[index].decoded)
             if name == names.or_err_name -> demand.option_or_err = true
+            if name == names.field_error_name -> demand.codec_decode = true
+            if name == names.decode_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LT -> demand.codec_decode = true
             // Loading a potential source owner is syntactic; Sema alone
             // decides whether this receiver is the canonical primitive Int.
             if name == names.abs_name {
@@ -3422,6 +3431,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.math_abs_receiver -> demand.math_abs_receiver = true
         if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
+        if output.codec_decode -> demand.codec_decode = true
         if output.unit_family -> demand.unit_family = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
@@ -4381,6 +4391,15 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             if !bare_modules.contains("core.text.fmt") -> &bare_modules.push("core.text.fmt")
             fmt_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.text.fmt", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if fmt_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
+        if demand.codec_decode {
+            encoding_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.encoding", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            if encoding_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     &pending.push(index)
