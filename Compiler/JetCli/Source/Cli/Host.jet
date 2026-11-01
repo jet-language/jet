@@ -79,6 +79,7 @@ use jet_foundation.[
     build_options_link_override,
     CtValue,
     Diagnostic,
+    DiagnosticOrigin,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     GateEntry,
@@ -1411,6 +1412,14 @@ fn jet_cli_run_problems(file: String, source: String, diagnostics: [Diagnostic],
     jet_cli_reports_status_json("diagnostics", jet_cli_errors(diagnostics).len() == 0, jet_cli_report_base(file), file, source, diagnostics)
 }
 
+// A refused `jet run` names each file by its full path, not the root-relative
+// display `jet check` uses, so the report reads the same from any directory.
+fn jet_cli_full_path_origins(diagnostics: &[Diagnostic]) Never! {
+    loop index in 0..<diagnostics.len() {
+        if diagnostics[index].origin == .Val(origin) -> diagnostics[index].origin = Val(DiagnosticOrigin{display: origin.path, path: origin.path, source: origin.source, revision: origin.revision})
+    }
+}
+
 // `jet run <file>`'s build, as `jet build` does: problems with an error stop
 // it, and so does the application authority check; `run` hides advisory
 // lints unless `--verbose`, and `json` reports what it shows as JSON
@@ -1420,7 +1429,9 @@ fn jet_cli_run_build(file: String, source: String, color: Bool, options: BuildOp
     errors :: jet_cli_errors(result.diagnostics)
     if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
     if errors.len() > 0 {
-        return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+        presented := jet_cli_present_shown(result, snapshot, verbose)
+        if !json -> jet_cli_full_path_origins(&presented)
+        return JetCLIBuilt.Failed{output: JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, presented, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     }
     if jet_cli_authority_check(file, source, color, json, "run", invocation, result) == .Val(refusal) -> return JetCLIBuilt.Failed{output: refusal}
     if verbose -> jet_cli_write_verbose_lints(file, source, color, json, jet_cli_present_shown(result, snapshot, true))

@@ -3664,6 +3664,33 @@ fn sema_registration_core_private_qualified(graph: SemaRegistrationGraph, module
     None
 }
 
+// The `alias.child` path when `alias.child.…` reaches into a `priv module`
+// `child` that the module imported as `alias` declares: only that module
+// (and, for `priv(package)`, its package) may name what it holds.
+fn sema_registration_private_module_path(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String? {
+    qualified :: name.split_once(".") ?? return None
+    nested :: qualified.after.split_once(".") ?? return None
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    loop import in graph.modules[module_index].imports {
+        if import.declaration.alias != qualified.before || sema_registration_file_import_taken_over(graph.modules[module_index], import) -> next
+        target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? return None
+        if target_index == module_index -> return None
+        loop declaration in graph.modules[target_index].declarations {
+            if declaration == .CodeModule(definition) {
+                if definition.name != nested.before || definition.body == None || definition.is_pub -> next
+                if definition.is_package_pub && graph.modules[target_index].package_identity == graph.modules[module_index].package_identity -> return None
+                return Val("{qualified.before}.{nested.before}")
+            }
+        }
+        return None
+    }
+    None
+}
+
+fn sema_registration_private_module_error(path: String, span: Span) -> Diagnostic {
+    sema_error("E0605", span, "`{path}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use what `{path}` holds from inside its enclosing module, or remove `priv` from the module")
+}
+
 fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: String, requester_package: String, seen: [String]) -> SemaRegistrationExport? {
     if module_index < 0 || module_index >= graph.modules.len() -> return None
     key :: "{module_index}:{name}"
@@ -3851,7 +3878,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                 resolved :: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package, [String]{})
                 if resolved == {
                     .Val(export) -> {
-                        duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_owner(graph, module_index, local))
+                        duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_conflict(graph, module_index, local, item.original, export.source_module_identity))
                         if {
                             duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                             else -> {
@@ -3922,8 +3949,9 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
 // and the imports registered before the package names (`import_count` of
 // them), as Rust consults `namespace_owner` last. A name one of those already
 // binds stays theirs. A declaration of a package name is refused (E0105), and
-// so is an imported item of a package function's name; a module alias or an
-// imported type shadows the package name, as in Rust.
+// so is an imported item of a package function's name unless it imports that
+// very function; a module alias or an imported type shadows the package name,
+// as in Rust.
 fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_index: Int, import_count: Int) {
     if graph.modules[module_index].namespace_slot < 0 -> return
     loop position in 0..<graph.modules[module_index].symbols.len() {
@@ -3936,7 +3964,9 @@ fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_
         loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
             if graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind == .Import -> next
             local :: graph.modules[module_index].imports[import_index].bindings[binding_index].local
-            if !sema_registration_namespace_function_owner(graph, module_index, local) -> next
+            original :: graph.modules[module_index].imports[import_index].bindings[binding_index].original
+            source :: graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity
+            if !sema_registration_namespace_function_conflict(graph, module_index, local, original, source) -> next
             span :: graph.modules[module_index].imports[import_index].declaration.span
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", span))
         }
@@ -3948,6 +3978,17 @@ fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_
 fn sema_registration_namespace_function_owner(graph: SemaRegistrationGraph, module_index: Int, name: String) -> Bool Never! {
     owner :: sema_registration_namespace_owner(graph, module_index, name) ?? return false
     graph.modules[owner.module_index].symbols[owner.row].kind == .Function
+}
+
+// Whether importing `original` from `source_module_identity` as `local`
+// collides with a package function another member declares. The import that
+// names the very declaration the package already binds under that name
+// (`use mathlib.clamp` beside the `clamp` of mathlib.jet, `pub use
+// wrap.wrap`) binds nothing new, so it is no collision.
+fn sema_registration_namespace_function_conflict(graph: SemaRegistrationGraph, module_index: Int, local: String, original: String, source_module_identity: String) -> Bool Never! {
+    owner :: sema_registration_namespace_owner(graph, module_index, local) ?? return false
+    if graph.modules[owner.module_index].symbols[owner.row].kind != .Function -> return false
+    original != local || graph.modules[owner.module_index].module_identity != source_module_identity
 }
 
 fn sema_registration_module_has_nominal_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {

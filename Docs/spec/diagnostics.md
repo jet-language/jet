@@ -24,16 +24,13 @@ renumber one. Lexer, parser, and semantic checks raise the row that owns the
 violated rule; the CLI, LSP, machine reports, web pages, and backends project
 those rows rather than defining a second message or exposing raw backend text.
 
-Retired marker spellings retain their `$retired` replacement in
-`Prelude/Markers.jet`. Parser recovery must teach that same replacement and
-must not reinterpret a retired foreign import as a binding-generator module.
 Known declaration heads such as `#Import module c.<lib>` are parsed as items
 before unresolved library marker heads are retained as file-level rule facts.
 
 Lexical recovery does not end diagnostic collection: the retained token stream
-is parsed so parser-owned teaching (including retired operators) accompanies
-lexer errors. Failed embedded-Core parses keep the Core source identity and
-text through loader-error conversion, just as successful parses do.
+is parsed so parser-owned teaching accompanies lexer errors. Failed
+embedded-Core parses keep the Core source identity and text through
+loader-error conversion, just as successful parses do.
 
 ## Plain-words rubric
 

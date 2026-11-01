@@ -11,7 +11,7 @@ stdin: null
 exit: any # original predicate: status not asserted
 stderr.replace("\r", ""): = error_report_pipe.txt # original transcript.replace('\r', "")
 stderr: !~ "\u001b" # original pipe output has no escape bytes
-stderr: ~ "Examples/features/errors/error_context.jet:7" # original contains predicate
+stderr: ~ "context (error_context.jet:7): reading raw config" # the report names the frame's file, kept with its context lines (owner answer q07mphiy 2026-11-01)
 stderr.strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line # original compares SGR-stripped first line
 step ansi: script -qfec "stty rows 24 cols 80; exec {jet} run --quiet Examples/features/errors/error_context.jet" /dev/null
 unset: NO_COLOR

@@ -1,8 +1,8 @@
-Error [E0114]: This block promises to produce Int !Never, but its final statement produces no value
+Error [E0114]: When `value >= 0` is false, `digit` reaches the end without a value
   --> total_guard_missing_value.jet:2:5
     |
   2 |     if value >= 0 -> return value
     |     ^^
- Why: A value-expected block must end with one unadorned expression; statements and semicolon-terminated expressions yield unit
- Fix: Move the expression to the final line without `;`, or add an explicit `return ...` for an early exit
+ Why: A block that promises Int Never! must end with a value of that type, or leave through `return` on every path
+ Fix: Add a last line that produces Int Never! for that case, or turn the last guard into an `else`
 More: jet-lang.dev/e/E0114

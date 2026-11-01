@@ -38,20 +38,20 @@ json: file .jet/lock toml $.package[?name = "mylib"][0].locked.rev = "{cap:revis
 step: jet build --locked run.jet
 exit: 0
 copy: .jet/lock base.lock
-capture: hostile_lock = text file.replace("file://{work}/mylib.git", "file://{work}/other.git") base.lock
-write: .jet/lock lock-mutation.template
+capture: hostile_url_lock = text file.replace("file://{work}/mylib.git", "file://{work}/other.git") base.lock
+write: .jet/lock = "{cap:hostile_url_lock}"
 step: jet build --locked run.jet
 exit: nonzero
 stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 stderr: = identity.expected
-capture: hostile_lock = text file.replace("source = { git = \"file://{work}/mylib.git\", rev = \"{cap:revision}\" }", "source = { git = \"file://{work}/mylib.git\", tag = \"hostile-selector\" }") base.lock
-write: .jet/lock lock-mutation.template
+capture: hostile_selector_lock = text file.replace("source = { git = \"file://{work}/mylib.git\", rev = \"{cap:revision}\" }", "source = { git = \"file://{work}/mylib.git\", tag = \"hostile-selector\" }") base.lock
+write: .jet/lock = "{cap:hostile_selector_lock}"
 step: jet build --locked run.jet
 exit: nonzero
 stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate
 stderr: = identity.expected
-capture: hostile_lock = text file.replace("locked = { rev = \"{cap:revision}\"", "locked = { rev = \"0000000000000000000000000000000000000000\"") base.lock
-write: .jet/lock lock-mutation.template
+capture: hostile_rev_lock = text file.replace("locked = { rev = \"{cap:revision}\"", "locked = { rev = \"0000000000000000000000000000000000000000\"") base.lock
+write: .jet/lock = "{cap:hostile_rev_lock}"
 step: jet build --locked run.jet
 exit: nonzero
 stderr.after_first("Error ["): ^= "E1204]" # original first_diag_code predicate

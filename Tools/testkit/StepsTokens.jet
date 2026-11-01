@@ -18,6 +18,19 @@ fn kit_steps_dll_suffix() -> String {
     ".so"
 }
 
+fn kit_steps_exe_suffix() -> String {
+    if sys.family() == "windows" -> return ".exe"
+    ""
+}
+
+// The host-dependent file-name suffix tokens: `{sys:dll-suffix}` and `{sys:exe-suffix}`.
+fn kit_steps_sys_expand(text: String) -> String {
+    expanded := text
+    if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    if expanded.contains("{{sys:exe-suffix}}") -> expanded = expanded.replace("{{sys:exe-suffix}}", kit_steps_exe_suffix())
+    expanded
+}
+
 // Exact Layout.rs:709-719 host_triple table. Unknown pairs retain its fallback.
 fn kit_steps_host_triple() -> String {
     arch :: kit_steps_host_arch()
@@ -42,7 +55,7 @@ fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepSta
             else -> {}
         }
     }
-    if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    expanded = kit_steps_sys_expand(expanded)
     loop pending in state.children {
         expanded = expanded.replace("{{pid:{pending.label}}}", "{pending.child.id()}")
     }

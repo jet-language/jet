@@ -1024,8 +1024,10 @@ of its stop edges cleans up anything a process exit could observe. Each edge
 only writes and frees memory (its drops' routines too), enters and leaves a
 cleanup scope, or returns. Every runtime route it calls must also behave the
 same with no process root. Those routes include exact `Int` arithmetic, except
-shifts. It then runs under a main of its own with no stop points and
-no cleanup scopes. A stop writes the same
+shifts, and the generated `#CLI` parser's (argument reads, `Int` parsing,
+refusals on stderr and `process.exit`). It then runs under a main of its own
+with no stop points and no cleanup scopes, and its `process.exit` publishes no
+stop. A stop writes the same
 report and exits with the same code as under the root. Any other program
 gets `process root:` and the first function, route or stop edge that needs
 the root.

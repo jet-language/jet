@@ -610,7 +610,9 @@ fn run() {
 }
 ```
 
-Whole-file and metadata functions:
+Whole-file and metadata functions. `read`, `read_bytes`, `write`,
+`write_bytes`, `append_all`, `map`, `read_at`, `write_at`, `write_atomic` and
+`fsync` take their `path` as a `String` or a `Path`:
 
 | API | Result | Description |
 | --- | --- | --- |

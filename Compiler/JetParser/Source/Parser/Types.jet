@@ -176,9 +176,28 @@ fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedTyp
     span :: parser_cover(error_type.span, bang.span)
     if bare_union {
         text :: parser_tokens_text(state, first_index, end_index)
-        parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only its last member as the error contract", "the `!` mark follows one type, so a union of error types is grouped for the mark to cover every member", "write `({text})!`", "({text})!")
+        marked :: parser_tokens_text(state, parser_contract_last_member(state, first_index), end_index)
+        parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only `{marked}` as the error contract.", "The `!` mark follows one type, so a union of error types is grouped for the mark to cover every member.", "Write `({text})!`.", "({text})!")
     }
     ParsedType{ty: error_type.ty, span: ^span}
+}
+
+// The token where the last member of a bare `A | B` union starts: the one
+// member its `!` actually marks.
+fn parser_contract_last_member(state: JetParserState, first: Int) -> Int Never! {
+    start := first
+    index := first
+    loop {
+        index = parser_scan_contract_member(state, index)
+        if index < 0 -> return start
+        pipe :: parser_next_code_index(state, index)
+        if pipe < 0 || state.tokens[pipe].kind != TOKEN_PIPE -> return start
+        member :: parser_next_code_index(state, pipe + 1)
+        if member < 0 -> return start
+        start = member
+        index = member
+    }
+    start
 }
 
 fn parser_type_starts(kind: Int) -> Bool Never! {

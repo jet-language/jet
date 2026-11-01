@@ -103,10 +103,20 @@ fn sema_effect_builtin_leaf_diagnostic(name: String, span: Span) -> Diagnostic? 
 
 fn sema_effect_leaf_unknown_diagnostic(name: String, root: String, member: String, members: [String], span: Span) -> Diagnostic {
     suggestion := String?{None}
-    if sema_taint_closest(member, members) == .Val(closest) -> suggestion = Val("{root}.{closest}")
+    closest_member := String?{None}
+    if sema_taint_closest(member, members) == .Val(closest) {
+        suggestion = Val("{root}.{closest}")
+        closest_member = Val(closest)
+    }
     fix :: if suggestion == .Val(candidate) -> "did you mean `{candidate}`?" else -> "declare it with `effect {name}`, or use a declared leaf"
     diagnostic := sema_error("E0750", span, "`{name}` isn't a declared effect", "the `{root}` root has declared leaves, so every leaf under it must resolve to one declared name", fix)
-    if suggestion == .Val(candidate) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
+    if suggestion == .Val(candidate) {
+        // A span over the leaf alone takes the leaf; a span over the written
+        // path takes the whole suggested path.
+        new_text := candidate
+        if span.end - span.start == member.len() && closest_member == .Val(leaf) -> new_text = leaf
+        diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: new_text})
+    }
     diagnostic_with_rights(^diagnostic, "vocabulary", [String]{name}, [String]{}, None)
 }
 

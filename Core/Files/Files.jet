@@ -717,9 +717,10 @@ fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
     Ok()
 }
 
-fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
-    file_fault("FS.Read", .Read, path)
-    core.files.__read_bytes_os(path)
+fn read_bytes(path: String | Path) -[FS.Read]> [U8] IOError! {
+    source :: path_text(path)
+    file_fault("FS.Read", .Read, source)
+    core.files.__read_bytes_os(source)
 }
 
 
@@ -744,10 +745,11 @@ fn write(path: String | Path, text: String) IOError! -[FS.Write]> {
 }
 
 
-fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
-    file_writer_refusal(path)
-    file_fault("FS.Write", .Write, path)
-    core.files.__write_bytes_os(path, bytes)
+fn write_bytes(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_writer_refusal(target)
+    file_fault("FS.Write", .Write, target)
+    core.files.__write_bytes_os(target, bytes)
 }
 
 
@@ -812,16 +814,18 @@ fn write_atomic(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
 }
 
 
-fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
-    file_fault("FS.Read", .Read, path)
-    core.files.__read_at_os(path, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
+fn read_at(path: String | Path, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
+    source :: path_text(path)
+    file_fault("FS.Read", .Read, source)
+    core.files.__read_at_os(source, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
 }
 
 
-fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
-    file_writer_refusal(path)
-    file_fault("FS.Write", .Write, path)
-    core.files.__write_at_os(path, if offset < 0 -> 0 else -> offset, bytes)
+fn write_at(path: String | Path, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_writer_refusal(target)
+    file_fault("FS.Write", .Write, target)
+    core.files.__write_at_os(target, if offset < 0 -> 0 else -> offset, bytes)
 }
 
 
@@ -1255,9 +1259,10 @@ fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
 }
 
 
-fn read_link(path: String) -[FS.Read]> String IOError! {
-    file_fault("FS.Read", .Read, path)
-    core.files.__read_link_os(path)
+fn read_link(path: String | Path) -[FS.Read]> String IOError! {
+    source :: path_text(path)
+    file_fault("FS.Read", .Read, source)
+    core.files.__read_link_os(source)
 }
 
 

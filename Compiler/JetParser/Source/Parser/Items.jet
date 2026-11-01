@@ -2,6 +2,7 @@
 // Rust parser or semantic compiler is involved.
 use jet_foundation.[
     AccessConvention,
+    AppliedRuleApplication,
     CLICommandBinding,
     CallLabel,
     ConstAttr,
@@ -40,6 +41,7 @@ use jet_foundation.[
     PatSlot,
     Pattern,
     PrepParam,
+    RuleSite,
     RustConstKind,
     Span,
     StateDecl,
@@ -73,6 +75,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     expr_span,
     diagnostic_with_edit,
+    marker_registered,
 ]
 use jet_lexer.[
     TOKEN_AMP,
@@ -881,6 +884,12 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
     if parser_current_kind(&state) == TOKEN_HASH {
         marker :: parser_parse_marker(&state)
         root = marker.name == "Root"
+        // An unregistered name applies to the parameter site, where sema
+        // reports it from the shared applied-rule vocabulary (E0927).
+        if !marker_registered(marker.name) {
+            span :: marker.span
+            &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(span), site: Val(RuleSite.Parameter)})
+        }
     }
     convention := AccessConvention.Read
     access_kind :: parser_current_kind(&state)
@@ -1878,6 +1887,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     parser_apply_struct_type_markers(&value, modifiers.markers)
     value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
     value.layout_span = parser_layout_marker_span(modifiers.markers, modifiers.grouped_markers, value.layout)
+    value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(modifiers.markers) else -> None
     if parser_current_kind(&state) != TOKEN_LBRACE {
         parser_add_error_here(&state, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
         return value

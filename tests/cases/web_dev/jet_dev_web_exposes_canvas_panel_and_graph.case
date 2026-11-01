@@ -7,7 +7,7 @@ stderr: null
 recv app line until ^= "Canvas: " timeout 60s # original waits for the dev server readiness line
 capture: canvas = text stdout.strip_prefix_lines("Canvas: ").line(0)
 capture: port = text stdout.strip_prefix_lines("Canvas: ").line(0).split("://",1).split("/",0).after_last(":")
-cap:port: is-u32
+cap:port: is-u32 # the listener URL ends in a numeric port
 json: cap:port doc $ <= 65535
 stdout: line ^= "App preview: " # original wait_for_ports requires both listeners
 step: jet test claims

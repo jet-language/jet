@@ -76,6 +76,42 @@ fn cases_test_advanced(root: String, name: String, source: String) -> KitOutcome
     files.remove_all(root) ?? panic("remove JSON count scratch")
 }
 
+#Test("JSON != against a step label passes when the selected values differ and fails when they match") {
+    root :: cases_test_root("advanced-json-unequal")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "one.txt"), "{{\"id\":1}}\n")
+    kit_exec_write(files.join(directory, "two.txt"), "{{\"id\":2}}\n")
+    changed :: "step before: cat\nstdin: one.txt\nstep: cat\nstdin: two.txt\njson: stdout doc $.id != before\n"
+    assert_eq(cases_test_advanced(root, "changed", changed).verdict.status, "PASS")
+    same :: "step before: cat\nstdin: one.txt\nstep: cat\nstdin: one.txt\njson: stdout doc $.id != before\n"
+    assert_eq(cases_test_advanced(root, "same", same).verdict.status, "FAIL")
+    literal :: "step: cat\nstdin: one.txt\njson: stdout doc $.id != 2\n"
+    assert_eq(cases_test_advanced(root, "literal", literal).verdict.status, "PASS")
+    unknown :: "step: cat\nstdin: one.txt\njson: stdout doc $.id != missing\n"
+    assert_eq(cases_test_advanced(root, "unknown", unknown).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove JSON unequal scratch")
+}
+
+#Test("a capture whose subject is a loop capture needs no step of its own") {
+    root :: cases_test_root("advanced-capture-subject")
+    source :: "write: list.txt = \"left right\\n\"\nfor line file list.txt as r\ncapture: first = text cap:r.split(\" \", 0)\ncap:first: = \"left\"\nend for\n"
+    assert_eq(cases_test_advanced(root, "subject", source).verdict.status, "PASS")
+    stream :: "capture: first = text stdout\n"
+    assert_eq(cases_test_advanced(root, "stream", stream).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove capture subject scratch")
+}
+
+#Test("a JSON literal may name a reserved free port") {
+    plan :: kit_steps_parse_case("step: printf %s {{free-port:web}}\ncapture: served = text stdout\njson: cap:served doc $ = {{free-port:web}}\n")
+    assert_eq(plan.error, "")
+}
+
+#Test("the executable suffix token expands per host and keeps file paths inside work") {
+    assert(kit_steps_relative_path(".jet/build/run{{sys:exe-suffix}}"))
+    assert_eq(kit_steps_sys_expand("run{{sys:exe-suffix}}"), "run{kit_steps_exe_suffix()}")
+    assert_eq(kit_steps_parse_case("step: printf x\nfile: .jet/build/run{{sys:exe-suffix}} absent\n").error, "")
+}
+
 #Test("capture scalar and line tails expand into argv env paths stdin and write templates") {
     root :: cases_test_root("advanced-capture")
     directory :: files.join(root, "tests/cases/group")

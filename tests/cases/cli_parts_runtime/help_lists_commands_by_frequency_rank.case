@@ -13,7 +13,7 @@ stdout: before "  jet run " "  jet bind " # original predicate
 stdout: before "  jet check " "  jet registry " # original predicate
 stdout: before "  jet check " "  jet db " # original predicate
 stdout: before "  jet check " "  jet bind " # original predicate
-stdout: before "  jet new " "  jet registry " # original predicate
+stdout: before "  jet registry " "  jet new " # registry ranks 16 and new 18 in CLICommands.jet frequency_rank; help output kept (owner answer q07mphiy 2026-11-01)
 stdout: before "  jet new " "  jet db " # original predicate
 stdout: before "  jet new " "  jet bind " # original predicate
 stdout: before "  jet test " "  jet registry " # original predicate
@@ -29,4 +29,5 @@ env: NO_COLOR=1
 exit: 0
 stdout.after_first("\nBuild & Run\n").until_blank.strip_prefix_lines("  jet ").first_words: lines >= 3 # the palette lists each category in `jet help` order
 stdout.after_first("\nBuild & Run\n").until_blank.strip_prefix_lines("  jet ").first_words: has-line "run" # the palette lists each category in `jet help` order
-stdout.after_first("\nBuild & Run\n").until_blank.strip_prefix_lines("  jet ").first_words: in-order-of {cap:help_words} # the palette lists each category in `jet help` order
+capture: build_run_words = text stdout.after_first("\nBuild & Run\n").until_blank.strip_prefix_lines("  jet ").first_words
+cap:help_words: in-order-of {cap:build_run_words} # the palette lists each category in `jet help` order: its Build & Run words appear in the help's order

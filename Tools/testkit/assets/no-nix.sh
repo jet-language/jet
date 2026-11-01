@@ -81,20 +81,32 @@ runtime_roots=$(
     for helper in "$unshare" "$mount" "$umount" "$shell" "$mkdir" "$ldd" "$readlink" "$sort" "$ln" "$true_binary"; do store_roots "$helper"; done
 )
 runtime_roots=$(printf '%s\n' "$runtime_roots" | "$sort" -u)
+# The Nix loader runs the staged Nix helpers and any dynamic ELF subject. A
+# static subject (the Jet-built `jet` and `jetpack` are static) names none, so
+# the helpers are searched after the subjects.
 find_loader() {
     remaining=$subject_count
     while [ "$remaining" -gt 0 ]; do
-        for token in $("$ldd" "$1"); do
+        for token in $("$ldd" "$1" 2>/dev/null); do
             case "$token" in */ld-linux*.so*) printf '%s\n' "$token"; return;; esac
         done
         shift 2
         remaining=$((remaining - 1))
     done
+    for helper in "$mount_real" "$umount_real" "$shell"; do
+        for token in $("$ldd" "$helper" 2>/dev/null); do
+            case "$token" in */ld-linux*.so*) printf '%s\n' "$token"; return;; esac
+        done
+    done
     return 1
 }
-loader=$(find_loader "$@")
-exec 9<"$loader"
-loader=/proc/self/fd/9
+loader=$(find_loader "$@") || loader=
+if [ -n "$loader" ]; then
+    exec 9<"$loader"
+    loader=/proc/self/fd/9
+fi
+subject_dynamic=
+if "$ldd" "$subject_real" >/dev/null 2>&1; then subject_dynamic=x; fi
 stage_path() {
     case "$1" in
         /nix/store/*) printf '%s/store/%s\n' "$runtime_stage" "${1#/nix/store/}";;
@@ -103,7 +115,8 @@ stage_path() {
 }
 library_path=
 run() {
-    if [ -n "$library_path" ]; then "$loader" --library-path "$library_path" "$@"
+    if [ -z "$loader" ]; then "$@"
+    elif [ -n "$library_path" ]; then "$loader" --library-path "$library_path" "$@"
     else "$loader" "$@"; fi
 }
 "$mkdir" -p /nix "$host_nix" "$runtime_stage/store" "$runtime_stage/usr/bin"
@@ -160,7 +173,7 @@ if [ "$subject_path_set" = x ]; then export PATH="$subject_path"; else unset PAT
 subject_format=$1
 shift 2
 subject=$(stage_path "$subject_real")
-if [ "$subject_format" = elf ]; then
+if [ "$subject_format" = elf ] && [ -n "$subject_dynamic" ] && [ -n "$loader" ]; then
     if [ -n "$library_path" ]; then exec "$loader" --library-path "$library_path" "$subject" "$@"
     else exec "$loader" "$subject" "$@"; fi
 fi

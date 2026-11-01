@@ -272,7 +272,9 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     symbol :: sema_scope_binding_symbol(environment, scopes, nearest)
     if symbol.kind != SymbolKind.Function {
         ty :: symbol.ty ?? {
-            &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+            // A binding whose type was already lost to a reported error is
+            // poisoned: calling it adds no second report.
+            if diagnostics.len() == 0 -> &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
             return None
         }
         &diagnostics.push(sema_call_not_callable_value(name, ty, environment, span))

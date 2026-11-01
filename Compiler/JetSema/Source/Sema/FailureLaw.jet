@@ -550,6 +550,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         .Named(name) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type."))
+            sema_check_private_module_type(name, span, environment, program, &diagnostics)
             // Compiler-owned IO enum/record rows have no public annotation origin.
             // Reuse the Core-only literal origin gate; user declarations stay E0119.
             unresolved := (name == "IOOperation" || name == "IOContext") && !sema_module_is_core_source(environment.module_identity)
@@ -611,6 +612,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         }
         .Apply(name, args) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            sema_check_private_module_type(name, span, environment, program, &diagnostics)
             if sema_failure_written_name_unknown(name, generic_names, environment, program) -> sema_unknown_generic_type_name(name, span, &diagnostics)
             sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, &diagnostics)
             loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, &diagnostics)
@@ -622,6 +624,17 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         }
         .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, program, &diagnostics)
         else -> {}
+    }
+}
+
+// E0605 for a written type `alias.child.Name` that reaches into a `priv
+// module` of the imported module `alias`.
+fn sema_check_private_module_type(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if !name.contains(".") || name.contains("::") -> return
+    if program.registration_graph == .Val(graph) {
+        caller :: sema_scope_caller_row(environment, graph)
+        if caller < 0 -> return
+        if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) -> &diagnostics.push(sema_registration_private_module_error(path, span))
     }
 }
 

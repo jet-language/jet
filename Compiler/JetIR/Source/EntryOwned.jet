@@ -32,12 +32,27 @@ use jet_foundation.[name_rows_value]
 // no stop is ever pending). jet_rt_process_entry_return only marks the end
 // of a rooted process, so an owned main drops its calls. Int shifts are not
 // here: jet_int_shl/shr read the scheduler on every call.
+//
+// The generated CLI parser's routes (#6328 S2) are root-free too: the
+// arguments (HostStartup.jet: the owned main captures them first, as
+// jet_rt_main's startup does), the Int parse, the fixed-width check (its
+// stop is int_stop's), the overflow stop (Trap.jet: the panic message's
+// path), the UTF-8 decode and its error's drop, the terminal probes, the
+// raw stdio write (Core term's stdio_write and eprint: the same buffered
+// stdout and stdout-then-fd-2 writes with or without a root), the journey
+// origin and the test-fault probe (Jet TLS, a fault schedule only a test
+// arms), the session status (0 with no stop pending, and with no root none
+// ever is) and process.exit (with no root, HostProcess.jet runs the exit
+// handlers, flushes and exits at once; under the root the same steps run
+// after the stop edges, which an owned main's do nothing observable on).
 IR_ROOT_FREE_ROUTES :: comptime { [String]{
     "jet_char_len",
+    "jet_fault_should_fail",
     "jet_int_add",
     "jet_int_bit_and",
     "jet_int_bit_or",
     "jet_int_bit_xor",
+    "jet_int_checked_fixed",
     "jet_int_compare",
     "jet_int_div",
     "jet_int_div_euclid",
@@ -46,12 +61,16 @@ IR_ROOT_FREE_ROUTES :: comptime { [String]{
     "jet_int_mul",
     "jet_int_owned_from_i64",
     "jet_int_owned_to_i64",
+    "jet_int_parse",
     "jet_int_pow",
     "jet_int_rem",
     "jet_int_rem_euclid",
     "jet_int_sub",
+    "jet_journey_origin",
     "jet_journey_reset",
     "jet_rt_alloc",
+    "jet_rt_alloc_8",
+    "jet_rt_block_inherit_zero",
     "jet_rt_block_release",
     "jet_rt_block_retain",
     "jet_rt_block_unique",
@@ -64,6 +83,8 @@ IR_ROOT_FREE_ROUTES :: comptime { [String]{
     "jet_rt_fixed_shift_stop",
     "jet_rt_float_to_string",
     "jet_rt_free",
+    "jet_rt_free_8",
+    "jet_rt_handle_drop_utf8_error",
     "jet_rt_i64_to_string",
     "jet_rt_int_clone",
     "jet_rt_int_drop",
@@ -72,8 +93,10 @@ IR_ROOT_FREE_ROUTES :: comptime { [String]{
     "jet_rt_mem_move",
     "jet_rt_numeric_stop",
     "jet_rt_panic_message",
+    "jet_rt_panic_overflow",
     "jet_rt_process_entry_return",
     "jet_rt_require_stop",
+    "jet_rt_session_propagate",
     "jet_rt_string_append",
     "jet_rt_string_builder_finish",
     "jet_rt_string_builder_new",
@@ -82,9 +105,17 @@ IR_ROOT_FREE_ROUTES :: comptime { [String]{
     "jet_rt_string_clear",
     "jet_rt_string_clone",
     "jet_rt_string_drop",
+    "jet_rt_string_eq",
     "jet_rt_string_from_static",
     "jet_rt_u64_to_string",
     "jet_rt_unreachable",
+    "jet_std_io_args",
+    "jet_std_process_exit",
+    "jet_string_bytes",
+    "jet_string_from_bytes",
+    "jet_term_stderr_is_terminal",
+    "jet_term_stdio_write_raw",
+    "jet_term_stdout_is_terminal",
     "jet_term_write_stdout_line",
 } }
 
@@ -96,6 +127,8 @@ IR_ENTRY_QUIET_ROUTES :: comptime { [String]{
     "jet_rt_cleanup_enter",
     "jet_rt_cleanup_leave",
     "jet_rt_free",
+    "jet_rt_free_8",
+    "jet_rt_handle_drop_utf8_error",
     "jet_rt_int_drop",
     "jet_rt_string_drop",
 } }
@@ -224,10 +257,13 @@ fn ir_entry_quiet_functions(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 }
 
 // The root-free routes that read the calling thread's block (JetRuntime
-// Thread.jet) even when nothing allocated: the journey's Jet TLS. The
-// runtime attaches a thread exactly when the program links the allocator's
-// cached front doors or Jet TLS (jet_rt_thread_init's guards), and this
-// route needs neither, so a main that calls it attaches its thread itself.
+// Thread.jet) even when nothing allocated: the journey's and the fault
+// schedule's Jet TLS, and the task control word process.exit and the
+// session status read (Scheduler.jet scheduler_control_current: 0 on an
+// attached thread with no root). The runtime attaches a thread exactly
+// when the program links the allocator's cached front doors or Jet TLS
+// (jet_rt_thread_init's guards), and these routes need neither, so a main
+// that calls one attaches its thread itself.
 // Every other root-free route reads a thread block only behind the
 // allocator or the report probe (Scheduler.jet scheduler_report_base),
 // both of which take an unattached thread. The cleanup scopes don't stay:
@@ -236,24 +272,49 @@ fn ir_entry_quiet_functions(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 // jet_rt_cleanup_enter/leave), so an owned main drops their calls and links
 // none of the deadline delivery behind the shield's leave.
 IR_OWNED_ATTACH_ROUTES :: comptime { [String]{
+    "jet_fault_should_fail",
+    "jet_journey_origin",
     "jet_journey_reset",
+    "jet_rt_session_propagate",
+    "jet_std_process_exit",
+} }
+
+// The root-free routes besides print that may write stdout (through its
+// buffer, HostStdio.jet host_stdout_write). A main that calls one keeps
+// print's buffered writer, so their lines stay in program order.
+IR_OWNED_STDOUT_ROUTES :: comptime { [String]{
+    "jet_term_stdio_write_raw",
 } }
 
 // Decides the main of the program `m` (built by ir_build_program) and
 // returns why it keeps the process root, or "" when it owns its main: then
 // every stop point, every jet_rt_process_entry_return call and every cleanup
 // scope goes, the module has no stop points and `owned_main` is set, and
-// `owned_attach` when it calls an IR_OWNED_ATTACH_ROUTES route. Its print
-// calls jet_term_write_stdout_line_direct: no other route it may call
-// writes stdout and it runs no test capture, so its lines need no buffer.
+// `owned_attach` when it calls an IR_OWNED_ATTACH_ROUTES route. Its
+// process.exit calls jet_std_process_exit_owned, which publishes no stop
+// (there is no root to take one). Unless it calls an IR_OWNED_STDOUT_ROUTES
+// route, its print calls jet_term_write_stdout_line_direct: no other route
+// it may call writes stdout and it runs no test capture, so its lines need
+// no buffer.
 fn ir_entry_own(m: &IRModule) -> String Never! {
     need :: ir_entry_root_need(m)
     if need != "" -> return need
     poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     entry_return :: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
-    print :: name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
+    buffered := false
+    loop route in IR_OWNED_STDOUT_ROUTES {
+        row :: name_rows_value(m.name_rows, route) ?? -1
+        if row >= 0 && ir_entry_calls(m, row) -> buffered = true
+    }
+    print :: if buffered -> -1 else -> name_rows_value(m.name_rows, "jet_term_write_stdout_line") ?? -1
     direct :: if print >= 0 -> ir_intern_name(&m, "jet_term_write_stdout_line_direct") else -> -1
+    exit :: name_rows_value(m.name_rows, "jet_std_process_exit") ?? -1
+    exit_owned :: if exit >= 0 -> ir_intern_name(&m, "jet_std_process_exit_owned") else -> -1
+    redirect := [Int]{}
+    loop _ in 0..<m.names.len() -> &redirect.push(-1)
+    if print >= 0 -> redirect[print] = direct
+    if exit >= 0 -> redirect[exit] = exit_owned
     cleanup :: IRCleanupRoutes{enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -1, leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -1}
     attach := [Bool]{}
     loop _ in 0..<m.names.len() -> &attach.push(false)
@@ -261,9 +322,10 @@ fn ir_entry_own(m: &IRModule) -> String Never! {
         row :: name_rows_value(m.name_rows, route) ?? -1
         if row >= 0 -> attach[row] = true
     }
+    if exit >= 0 -> attach[exit_owned] = true
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
-        ir_entry_own_strip(&m.functions[id], poll, trap, entry_return, print, direct, cleanup)
+        ir_entry_own_strip(&m.functions[id], poll, trap, entry_return, redirect, cleanup)
         loop (at, op) in m.functions[id].op {
             if op == .CallRuntime && attach[m.functions[id].a[at]] -> m.owned_attach = true
         }
@@ -271,6 +333,17 @@ fn ir_entry_own(m: &IRModule) -> String Never! {
     m.stop_points = false
     m.owned_main = true
     ""
+}
+
+// Whether a function of `m` calls the runtime route of name row `row`.
+fn ir_entry_calls(m: IRModule, row: Int) -> Bool Never! {
+    loop f in m.functions {
+        if f.asm != None -> next
+        loop (at, op) in f.op {
+            if op == .CallRuntime && f.a[at] == row -> return true
+        }
+    }
+    false
 }
 
 // The name rows of jet_rt_cleanup_enter and jet_rt_cleanup_leave (-1: not
@@ -283,8 +356,9 @@ struct IRCleanupRoutes {
 // Removes the stop points of `f` (each poll with its stop edge), its
 // jet_rt_process_entry_return calls (`entry_return`, a name row) and its
 // cleanup scopes (an enter's saved word becomes the 0 it returns with no
-// control), and points its print calls (`print`) at `direct`.
-fn ir_entry_own_strip(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, print: Int, direct: Int, cleanup: IRCleanupRoutes) Never! {
+// control), and points each runtime call whose name row `redirect` maps
+// (-1: none) at the owned main's route.
+fn ir_entry_own_strip(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
     removed := false
     at := 0
     loop at < f.op.len() {
@@ -296,8 +370,8 @@ fn ir_entry_own_strip(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, p
             f.a[at] = 0
             f.b[at] = -1
             f.c[at] = -1
-        } else if f.op[at] == .CallRuntime && f.a[at] == print {
-            f.a[at] = direct
+        } else if f.op[at] == .CallRuntime && f.a[at] < redirect.len() && redirect[f.a[at]] >= 0 {
+            f.a[at] = redirect[f.a[at]]
         } else if f.op[at] == .Call && f.a[at] >= 0 && (f.a[at] == poll || f.a[at] == trap) {
             end :: f.c[at + 1]
             loop k in at..<(end + 1) -> ir_opt_kill(&f, k)

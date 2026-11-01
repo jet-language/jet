@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0170 — Jet diagnostic</title>
-<meta name="description" content="A `Dyn` value is not a condition">
+<meta name="description" content="This range counts the wrong way for its written ends">
 <meta property="og:title" content="E0170 — Jet diagnostic">
-<meta property="og:description" content="A `Dyn` value is not a condition">
+<meta property="og:description" content="This range counts the wrong way for its written ends">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,52 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0170</h1>
-<p>A `Dyn` value is not a condition</p>
+<p>This range counts the wrong way for its written ends</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A `Dyn` value is not a condition</p>
+<p class="diag-copy what" data-registry-field="what">This range counts the wrong way for its written ends</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Dyn has no implicit truthiness</p>
+<p class="diag-copy why" data-registry-field="why">A range without a step counts up, and a step that moves away from the end runs the loop zero times</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `if d.decode&lt;Bool&gt;() ?? false -&gt; …`</p>
+<p class="diag-copy fix" data-registry-field="fix">Add the minus step (`10..1, -1`), flip the step&#39;s sign, or write the smaller end first</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0170</code>: <code>tests/ui/dyn_condition.stderr</code>.</p>
-<pre class="diag">Error [E0170]: A `Dyn` value is not a condition
-  --&gt; dyn_condition.jet:5:12
+<p>First UI snapshot mentioning <code>E0170</code>: <code>tests/ui/range_backward_written.stderr</code>.</p>
+<pre class="diag">Error [E0170]: This range counts down from 10 to 1 but has no step
+  --&gt; range_backward_written.jet:3:15
     |
-  5 |     if row.active -&gt; print(&quot;active&quot;)
-    |            ^^^^^^
- Why: Dyn has no implicit truthiness
- Fix: Write `if d.decode&lt;Bool&gt;() ?? false -&gt; …`
+  3 |     loop i in 10..1 { print(i) }
+    |               ^^^^^
+ Why: A range without a step counts up, so `10..1` would run zero times
+ Fix: Add the minus step: `10..1, -1`
+More: jet-lang.dev/e/E0170
+
+Error [E0170]: This range counts up from 0 to 10 but its step -1 counts down
+  --&gt; range_backward_written.jet:4:22
+    |
+  4 |     loop j in 0..10, -1 { print(j) }
+    |                      ^^
+ Why: A negative step moves away from 10, so the loop would run zero times
+ Fix: Make the step positive: `0..10, 1`
+More: jet-lang.dev/e/E0170
+
+Error [E0170]: This range counts down from 10 to 0 but its step 2 counts up
+  --&gt; range_backward_written.jet:5:22
+    |
+  5 |     loop k in 10..0, 2 { print(k) }
+    |                      ^
+ Why: A positive step moves away from 0, so the loop would run zero times
+ Fix: Make the step negative: `10..0, -2`
+More: jet-lang.dev/e/E0170
+
+Error [E0170]: This range counts down from 5 to 2 and holds no numbers
+  --&gt; range_backward_written.jet:6:15
+    |
+  6 |     window :: 5..&lt;2
+    |               ^^^^^
+ Why: A range value always counts up from its start, so a bigger start leaves it empty
+ Fix: Write the smaller end first, `2..&lt;5`; count down in a loop with `5..&lt;2, -1`
 More: jet-lang.dev/e/E0170
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -24,6 +24,19 @@ fn net_udp_deadline(value: I64, save: I64) {
         sync_store(wrapping(save + I64{8}), jet_ctx_deadline_ms())
     } else { net_route_deadline_push(milliseconds, save) }
 }
+// Pushes one operation's deadline into `save`: the explicit `deadline:`
+// argument when the call gives one, else the socket's timeout. A negative
+// explicit deadline fails the operation as invalid input, as `ready` does.
+fn net_udp_deadline_enter(value: I64, explicit: Bool, deadline: I64, operation: I64, save: I64, error: I64) -> Bool {
+    if !explicit {
+        net_udp_deadline(value, save)
+        return true
+    }
+    milliseconds :: net_deadline_millis(deadline)
+    if !net_tcp_timeout_valid(milliseconds, operation, error) -> return false
+    net_route_deadline_push(milliseconds, save)
+    true
+}
 fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: I64) -> Bool {
     remaining :: if jet_ctx_deadline_present() -> jet_deadline_remaining_ms() else -> I64{-1}
     if (jet_ctx_deadline_present() && remaining <= I64{0}) {
@@ -128,11 +141,14 @@ fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: 
     net_put(output, I64{0}, result)
     I64{1}
 }
-fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, error: I64) -> I64 {
+fn net_udp_send(value: I64, data: I64, length: I64, address: I64, explicit: Bool, deadline: I64, output: I64, error: I64) -> I64 {
     operation :: rt_static_text("udp send")
     if !net_udp_open(value, operation, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_udp_deadline(value, wrapping(scratch + I64{32}))
+    if !net_udp_deadline_enter(value, explicit, deadline, operation, wrapping(scratch + I64{32}), error) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return I64{0}
+    }
     result := I64{0}
     loop {
         written :: jet_socket_send_to_raw(jet_udp_socket_fd_raw(value), data, length, address, scratch)
@@ -168,18 +184,23 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
     result
 }
 #Export(c) fn jet_net_udp_send_bytes_to(value: I64, data: I64, length: I64, address: I64, output: I64, error: I64) -> I64 {
-    net_udp_send(value, data, length, address, output, error)
+    net_udp_send(value, data, length, address, false, I64{0}, output, error)
+}
+// UdpSocket::send_to(bytes, address, deadline:): one datagram under the
+// explicit deadline instead of the socket's timeout.
+#Export(c) fn jet_net_udp_send_bytes_to_deadline(value: I64, data: I64, length: I64, address: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    net_udp_send(value, data, length, address, true, deadline, output, error)
 }
 #Export(c) fn jet_net_udp_send_to(value: I64, text: I64, address: I64, output: I64, error: I64) -> I64 {
     length :: rt_text_len(text)
-    if (RT_HOST_U8_STRIDE == I64{1}) -> return net_udp_send(value, rt_text_data(text), length, address, output, error)
+    if (RT_HOST_U8_STRIDE == I64{1}) -> return net_udp_send(value, rt_text_data(text), length, address, false, I64{0}, output, error)
     bytes :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
     loop at < length {
         host_u8_put(bytes, at, rt_text_byte(wrapping(rt_text_data(text) + at)))
         at += I64{1}
     }
-    result :: net_udp_send(value, bytes, length, address, output, error)
+    result :: net_udp_send(value, bytes, length, address, false, I64{0}, output, error)
     jet_rt_free(bytes, length * RT_HOST_U8_STRIDE, I64{8})
     result
 }

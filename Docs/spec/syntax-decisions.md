@@ -4485,7 +4485,7 @@ running: `Int` mixed with `Float` gives `Float`, `/` always gives `Float`, and
 any other mismatch stops naming both kinds. `==`/`!=` compare contents and keep
 `Int` and `Float` distinct; `< <= > >=` mix numbers, compare `Text` and `Bytes`
 in order and `DateTime` by instant, and stop on other kinds. A `Dyn` is never a
-condition (E0170). Its own members are `get`, `has`, `keys`, `remove`, `len`,
+condition (E0173). Its own members are `get`, `has`, `keys`, `remove`, `len`,
 `decode`, `to_text`, `field`, `at`, `int`, `float`, `text`, `bool`,
 `equal_unordered`, and `encode`; a field with one of those names is reached
 with `row["len"]` (E0171). Printing shows a value's `to_text()` and containers

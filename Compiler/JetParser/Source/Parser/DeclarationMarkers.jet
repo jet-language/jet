@@ -289,6 +289,17 @@ fn parser_layout_marker_span(markers: [Marker], grouped: Bool, layout: StructLay
     None
 }
 
+// The written byte value of a struct's `align(N)` / `align(target, N)`
+// layout argument, where an unusable alignment is reported.
+fn parser_layout_alignment_span(markers: [Marker]) -> Span? {
+    marker :: loop candidate in markers {
+        if candidate.name == "Layout" -> break candidate
+    } ?? return None
+    value :: parser_marker_expression(marker, 1) ?? return None
+    call :: parser_layout_align_call(value) ?? return None
+    Val(expr_span(call.args[call.args.len() - 1].expr))
+}
+
 // Rust `BoundRuleArguments::parameter_for_source`: the parameter each written
 // argument binds, positional ones first and labeled ones by name. A bare
 // identifier naming one of `flags` (`#Meta(category: "Movement", tunable)`)

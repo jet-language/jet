@@ -80,11 +80,13 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEn
 
 // A type name that resolves to nothing. `alias.Name` through a Core module
 // alias, naming a declaration that module doesn't export, is the E0609 its
-// `use core.X.[Name]` import gets; anything else is an unknown name.
+// `use core.X.[Name]` import gets; `alias.child.Name` into a `priv module`
+// of the imported module is E0605; anything else is an unknown name.
 fn sema_expression_unknown_type(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     if program.registration_graph == .Val(graph) {
         caller :: sema_scope_caller_row(environment, graph)
         if caller >= 0 && name.split_once(".") == .Val(qualified) {
+            if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) -> return sema_registration_private_module_error(path, span)
             if sema_registration_core_private_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) == .Val(module_name) -> return sema_registration_core_private_error(qualified.after, module_name, span)
         }
     }
@@ -641,6 +643,12 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     missing := [String]{}
     loop (index, field) in struct_def.fields {
         if supplied[index] || field.computed != None -> next
+        // An omitted `priv` field is still written, by its default or not at
+        // all, so only the type's own module may build the value.
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, environment, program) {
+            &diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
+            return None
+        }
         default_value :: field.default ?? {
             &missing.push(field.name)
             next
