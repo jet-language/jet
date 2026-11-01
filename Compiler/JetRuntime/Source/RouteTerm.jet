@@ -73,39 +73,129 @@ fn term_read_line(value: I64) -> I64 {
     }
 }
 
-// core.term.__stdin_line: Ok(None) at end of input, Ok(Some(line)) with every
-// trailing LF and CR removed (the line's bytes, no copy: the length shrinks in
-// place), or jet_std::io_error_at(Read, "stdin"): errno through its IOError
-// arm, invalid UTF-8 (InvalidData) as Other.
-#Export(c) fn jet_stdin_line_raw(some: I64, line: I64, error: I64) -> I64 {
+// One line of stdin for core.term.__stdin_line and the stdin line loop: its
+// text with every trailing LF and CR removed, 0 at end of input, or -1 with
+// jet_std::io_error_at(Read, "stdin") in `error`: errno through its IOError
+// arm, invalid UTF-8 (InvalidData) as Other. A line already whole in the
+// stdin buffer is found and checked for ASCII in one pass (stdin_line_scan),
+// validated as UTF-8 only when it is not ASCII, and copied out once at its
+// final length, under the stdin lock (elided while one thread runs, Sync.jet
+// sync_sole_enter); one that spans a refill is built a run at a time
+// (term_read_line). The lock is released between the two before any byte of
+// the line is taken.
+fn stdin_line_take(error: I64) -> I64 {
+    sole :: sync_sole_enter(terminal_input_root)
+    buffered :: term_input_buffered()
+    if (buffered > I64{0}) {
+        start :: term_input_next()
+        scan :: stdin_line_scan(start, buffered)
+        run :: if (scan < I64{0}) -> wrapping(I64{0} - scan) else -> scan
+        if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) {
+            end :: stdin_line_end(start, run)
+            invalid :: if (scan < I64{0}) -> text_bytes_utf8_error(start, end) else -> I64{0}
+            line :: if (invalid == I64{0}) -> rt_text_copy(start, end) else -> I64{0}
+            term_input_consume(run)
+            sync_sole_exit(terminal_input_root, sole)
+            if (invalid != I64{0}) {
+                jet_rt_string_drop(invalid)
+                return stdin_utf8_error(error)
+            }
+            return line
+        }
+    }
+    sync_sole_exit(terminal_input_root, sole)
     value :: jet_rt_string_builder_new()
     code :: term_read_line(value)
     if (code != I64{0}) {
         jet_rt_string_drop(value)
-        return compiler_fs_errno(HOST_IO_OP_READ, rt_static_text("stdin"), code, error)
+        _ := compiler_fs_errno(HOST_IO_OP_READ, rt_static_text("stdin"), code, error)
+        return I64{-1}
     }
     invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
     if (invalid != I64{0}) {
         jet_rt_string_drop(invalid)
         jet_rt_string_drop(value)
-        return compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_static_text("stdin"), I64{0}, jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8")), error)
+        return stdin_utf8_error(error)
     }
     if (rt_text_len(value) == I64{0}) {
         jet_rt_string_drop(value)
-        rt_text_store(some, I64{0})
-        return I64{1}
+        return I64{0}
     }
-    end := rt_text_len(value)
-    data :: rt_text_data(value)
+    rt_text_store(wrapping(value + I64{8}), stdin_line_end(rt_text_data(value), rt_text_len(value)))
+    value
+}
+
+// The length of the `count` bytes at `data` without their trailing LFs and CRs.
+fn stdin_line_end(data: I64, count: I64) -> I64 {
+    end := count
     loop {
         if (end == I64{0}) { break }
         last :: rt_text_byte(wrapping(data + end - I64{1}))
         if (last != I64{10} && last != I64{13}) { break }
         end = wrapping(end - I64{1})
     }
-    rt_text_store(wrapping(value + I64{8}), end)
+    end
+}
+
+// The length of the `count` (> 0) bytes at `start` through their first LF, or
+// `count` when they hold none (rt_line_run), negated when a byte before that
+// LF has its high bit set (the line is not ASCII). Eight bytes a step: the
+// SWAR zero-byte test of the word xor 0x0A..0A finds an LF, and the words
+// before it are or-ed together for their high bits.
+fn stdin_line_scan(start: I64, count: I64) -> I64 {
+    at := I64{0}
+    seen := I64{0}
+    words :: count - count % I64{8}
+    loop at < words {
+        raw :: rt_text_word(wrapping(start + at))
+        word :: raw.bit_xor(I64{723401728380766730})
+        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) -> break
+        seen = seen.bit_or(raw)
+        at = wrapping(at + I64{8})
+    }
+    loop at < count {
+        byte :: rt_text_byte(wrapping(start + at))
+        at = wrapping(at + I64{1})
+        if (byte == I64{10}) -> break
+        seen = seen.bit_or(byte)
+    }
+    if (seen.bit_and(I64{-9187201950435737472}) != I64{0}) -> return wrapping(I64{0} - at)
+    at
+}
+
+fn stdin_utf8_error(error: I64) -> I64 {
+    _ := compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_static_text("stdin"), I64{0}, jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8")), error)
+    I64{-1}
+}
+
+// core.term.__stdin_line: Ok(None) at end of input, Ok(Some(line)), or the
+// stdin IOError (stdin_line_take).
+#Export(c) fn jet_stdin_line_raw(some: I64, line: I64, error: I64) -> I64 {
+    value :: stdin_line_take(error)
+    if (value < I64{0}) -> return I64{0}
+    if (value == I64{0}) {
+        rt_text_store(some, I64{0})
+        return I64{1}
+    }
     rt_text_store(some, I64{1})
     rt_text_store(line, value)
+    I64{1}
+}
+
+// `loop line in stdin().lines()` (JetIR BuildLazy ir_line_next_body): Core
+// StdinHandle.read_line (Core/Term/Term.jet) without its Result and Option
+// boxes. The "IO.Read" fault checkpoint, then one line (stdin_line_take):
+// 1 with the line moved into `output`, 0 at end of input, 2 with the IOError
+// read_line would return in `error`.
+#Export(c) fn jet_stdin_lines_next(output: I64, error: I64) -> I64 {
+    if jet_fault_should_fail(rt_static_text("IO.Read")) {
+        _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(rt_static_text("stdin")), jet_rt_string_clone(rt_static_text("fault injected: IO.Read")), error)
+        return I64{2}
+    }
+    value :: stdin_line_take(error)
+    if (value < I64{0}) -> return I64{2}
+    if (value == I64{0}) -> return I64{0}
+    rt_text_store(output, value)
     I64{1}
 }
 

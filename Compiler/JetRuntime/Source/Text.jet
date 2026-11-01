@@ -38,19 +38,35 @@ fn rt_text_data(value: I64) -> I64 { rt_text_word(value) }
 
 fn rt_text_len(value: I64) -> I64 { rt_text_word(wrapping(value + I64{8})) }
 
-// Whole machine words first (x86 permits unaligned word access), then the
-// byte tail: a string copy is one load/store pair per 8 bytes, not per byte.
-// The ranges never overlap (callers copy into a fresh or grown buffer).
+// Four machine words a step, then single words (x86 permits unaligned word
+// access), then the byte tail: a string copy is one load/store pair per 8
+// bytes, not per byte, and the loop's own count and branch are paid once per
+// 32 bytes. The ranges never overlap (callers copy into a fresh or grown
+// buffer).
 fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
     at := I64{0}
+    blocks :: len - len % I64{32}
+    loop at < blocks {
+        from :: wrapping(source + at)
+        to :: wrapping(target + at)
+        first :: rt_text_word(from)
+        second :: rt_text_word(wrapping(from + I64{8}))
+        third :: rt_text_word(wrapping(from + I64{16}))
+        fourth :: rt_text_word(wrapping(from + I64{24}))
+        rt_text_store(to, first)
+        rt_text_store(wrapping(to + I64{8}), second)
+        rt_text_store(wrapping(to + I64{16}), third)
+        rt_text_store(wrapping(to + I64{24}), fourth)
+        at = wrapping(at + I64{32})
+    }
     words :: len - len % I64{8}
     loop at < words {
         rt_text_store(wrapping(target + at), rt_text_word(wrapping(source + at)))
-        at += I64{8}
+        at = wrapping(at + I64{8})
     }
     loop at < len {
         rt_text_put(wrapping(target + at), rt_text_byte(wrapping(source + at)))
-        at += I64{1}
+        at = wrapping(at + I64{1})
     }
 }
 

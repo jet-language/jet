@@ -100,11 +100,23 @@ fn thread_register_tcb(tid: I64, tcb: I64) {
     // Even an allocation failure must not let a trap read inherited GS.
     thread_set_base(thread_detached_base())
     tid :: thread_tid()
+    thread_sole_check(tid)
     tcb :: thread_new_tcb(tid)
     sync_mutex_lock(thread_tls_registry)
     thread_register_tcb(tid, tcb)
     sync_mutex_unlock(thread_tls_registry)
     thread_set_base(tcb)
+}
+
+// A thread other than the process's main one is about to run Jet code: lock
+// elision ends (Sync.jet sync_sole_end).
+fn thread_sole_check(tid: I64) {
+    if (sync_sole == I64{0}) -> return
+    pid := I64{0}
+    #Unsafe("getpid retains no memory") {
+        pid = os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    if (tid != pid) -> sync_sole_end()
 }
 
 // Host callers MUST pair explicit attach with detach before thread exit.
@@ -115,6 +127,7 @@ fn thread_register_tcb(tid: I64, tcb: I64) {
     // Explicit host attach and repeated attach use only live registry records.
     // Linux gettid is the lookup key; a copied/stale GS base is irrelevant.
     tid :: thread_tid()
+    thread_sole_check(tid)
     sync_mutex_lock(thread_tls_registry)
     live :: wrapping(thread_tls_registry + I64{64})
     count :: sync_load(live)
@@ -390,6 +403,7 @@ THREAD_STACK_FLOOR :: I64{1048576}
 // is retried at half the size, down to THREAD_STACK_FLOOR, so a thread still
 // starts in a process that has address space left for a smaller stack.
 fn thread_spawn(entry: I64, argument: I64) -> I64 {
+    sync_sole_end()
     storage :: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(storage, I64{72})
     attr :: storage + I64{8}
@@ -434,6 +448,7 @@ fn thread_detach(handle: I64) -> I64 { thread_pthread_detach(handle) }
 // transfer the control to the scheduler reaper, which performs this same join
 // and munmap; a child never unmaps the stack it is still executing on.
 fn thread_clone_fixture(entry: I64, argument: I64) -> I64 {
+    sync_sole_end()
     bytes :: I64{201330688}
     mapping := I64{0}
     #Unsafe("fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS") {

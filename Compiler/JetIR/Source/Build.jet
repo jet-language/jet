@@ -133,6 +133,11 @@ struct IRBuilder {
     lambdas: [String:Int]
     // Building a stop edge (ir_stop_return): its cleanup checks for no stop.
     stopping: Bool{false}
+    // A body the runtime calls for a status word and trusts without a stop
+    // check of its own (a line source's next: IterSources.jet
+    // iter_source_pull): its stop edges return -1, the stopped status, not
+    // whatever the last call left in the result register.
+    stop_status: Bool{false}
     // The open `.expect_fail` regions (innermost last) whose catch a stop
     // edge tries first (ir_stop_catches).
     catches: [IRCatchFrame]{[IRCatchFrame]{}}
@@ -2152,7 +2157,7 @@ fn ir_stop_poll(m: &IRModule, key: String) -> Int Never! {
 // dropped, whose rollback hooks run, as ir_tx_unwind does; then every owned
 // variable's close and drop), inside one runtime cleanup scope, then a
 // return with no result written (no caller reads it: its own stop check
-// comes first).
+// comes first), or -1 from a stop_status body.
 fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
     if ir_stop_cleans(b) {
         b.stopping = true
@@ -2191,6 +2196,11 @@ fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
         ir_set_own_states(&b, states)
         _ :: ir_runtime(&m, &b, "jet_rt_cleanup_leave", [Int]{saved}, -1)
         b.stopping = false
+    }
+    if b.stop_status {
+        stopped :: ir_word_const(&m, &b, -1)
+        ir_emit(&b.f, IROp.Return, -1, stopped, -1, -1, b.line)
+        return
     }
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
 }
