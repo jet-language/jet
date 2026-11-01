@@ -218,3 +218,15 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq(kit_execute_jobs(0, 100, 16, slot /% 2), 1)
     assert_eq(kit_execute_jobs(0, 0, 16, 0), 1)
 }
+
+#Test("the pool's memory is the room under the cgroup caps, not the whole host") {
+    assert_eq(kit_exec_cgroup_path("0::/user.slice/jetslot-A-1.scope\n"), "/user.slice/jetslot-A-1.scope")
+    assert_eq(kit_exec_cgroup_path("1:name=x:/y\n"), "")
+    assert_eq(kit_exec_cgroup_value("max\n"), 0)
+    assert_eq(kit_exec_cgroup_value("17179869184\n"), 17179869184)
+    assert_eq(kit_exec_room(40, 0, 5), 40)
+    assert_eq(kit_exec_room(40, 16, 4), 12)
+    assert_eq(kit_exec_room(10, 16, 4), 10)
+    assert_eq(kit_exec_room(0, 16, 4), 12)
+    assert_eq(kit_exec_room(40, 16, 20), 1)
+}

@@ -288,10 +288,45 @@ fn kit_exec_kib_field(text: String, field: String) -> Int {
     0
 }
 
-// Memory the host can still hand out (MemAvailable), in bytes; 0 when unknown.
+// Memory this process may still claim, in bytes; 0 when unknown. That is the host's
+// MemAvailable, lowered to the room left under every memory.high and memory.max on the
+// cgroup path this process runs in: a build-slot scope caps its suites far below the host,
+// and a pool sized from the host alone overruns the cap and drives the machine into swap.
 fn kit_exec_available_memory() -> Int {
     meminfo :: files.read("/proc/meminfo") ?? return 0
-    kit_exec_kib_field(meminfo, "MemAvailable:")
+    available := kit_exec_kib_field(meminfo, "MemAvailable:")
+    membership :: files.read("/proc/self/cgroup") ?? return available
+    prefix := ""
+    loop part in kit_exec_cgroup_path(membership).split("/") {
+        if part == "" -> next
+        prefix = "{prefix}/{part}"
+        dir :: "/sys/fs/cgroup{prefix}"
+        current :: kit_exec_cgroup_value(files.read("{dir}/memory.current") ?? "")
+        available = kit_exec_room(available, kit_exec_cgroup_value(files.read("{dir}/memory.high") ?? ""), current)
+        available = kit_exec_room(available, kit_exec_cgroup_value(files.read("{dir}/memory.max") ?? ""), current)
+    }
+    available
+}
+
+// The unified-hierarchy path in a /proc/self/cgroup listing (its `0::` row), or "".
+fn kit_exec_cgroup_path(membership: String) -> String {
+    loop line in membership.split("\n") {
+        if line.starts_with("0::") -> return line.slice(3, line.len()).trim().copy()
+    }
+    ""
+}
+
+// A cgroup memory file's byte count; 0 for `max`, an empty read or anything unreadable.
+fn kit_exec_cgroup_value(text: String) -> Int { Int.parse(text.trim().copy()) ?? 0 }
+
+// `available` lowered to the room under `limit` once `current` is in use. A 0 limit is no
+// limit and a 0 `available` is unknown; a full cgroup leaves one byte, so the pool runs one.
+fn kit_exec_room(available: Int, limit: Int, current: Int) -> Int {
+    if limit <= 0 -> return available
+    room := limit - current
+    if room < 1 -> room = 1
+    if available <= 0 || room < available -> return room
+    available
 }
 
 fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {

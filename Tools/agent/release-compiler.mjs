@@ -2,7 +2,7 @@
 // release-compiler.mjs: the release gate of the a0_NNN compiler train.
 //
 //   node Tools/agent/release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N]
-//        [--shards N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]
+//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
 // ~/.local/share/jet-seeds, or $JET_SEEDS). The tool runs every check and
@@ -32,7 +32,11 @@
 // release (Docs/spec/contributing/bootstrap.md). Fail: SEEDS is unchanged; the evidence stays
 // in the work directory. The tool never repoints `current`, merges, tags, pushes or
 // publishes. One release run at a time (a lock in the work root); the run takes one
-// build-slot.sh slot. --filter narrows the suites for dry runs of the tool itself: such a
+// build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
+// testkit shard gets --jobs entries at once (default: the slot's SLOT_MEMORY_MAX, 16G when
+// unset, split at 2 GiB per entry across the shards), because a kit left to size itself
+// reads the host's MemAvailable and every shard would claim all of it. --filter narrows
+// the suites for dry runs of the tool itself: such a
 // run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
 //
 // Environment: JET_SEEDS, JET_RELEASE_WORK (default ~/.cache/jet-dev/release),
@@ -57,14 +61,23 @@ const STACK = ['prlimit', '--core=0', '--stack=1073741824:1073741824', '--'];
 const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x86_64-unknown-linux-musl-1.2.5/lib';
 // norust.sh, inline: drop every PATH directory holding cargo, rustc or rustup, refuse if one stays reachable.
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
-const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
+const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
+// Memory one running testkit entry may claim (Tools/testkit/run.jet kit_job_memory).
+const KIT_JOB_GIB = 2;
+
+// Entries each shard runs at once: --jobs, else the slot's memory cap split across shards.
+export function shardJobs(options, slotMemory = process.env.SLOT_MEMORY_MAX) {
+    if (options.jobs > 0) return options.jobs;
+    const gib = Number.parseInt(slotMemory ?? '', 10) > 0 ? Number.parseInt(slotMemory, 10) : 16;
+    return Math.max(1, Math.floor(gib / KIT_JOB_GIB / options.shards));
+}
 
 // ---- pure helpers (release-compiler.test.mjs) ----
 
 export function parseArgs(argv) {
-    const options = { commit: '', summary: '', dispositions: '', minGains: 10, shards: 4, timeout: 0, filter: '', seeds: '', work: '', errors: [] };
+    const options = { commit: '', summary: '', dispositions: '', minGains: 10, shards: 4, jobs: 0, timeout: 0, filter: '', seeds: '', work: '', errors: [] };
     const values = new Map([['--summary', 'summary'], ['--dispositions', 'dispositions'], ['--filter', 'filter'], ['--seeds', 'seeds'], ['--work', 'work']]);
-    const counts = new Map([['--min-gains', 'minGains'], ['--shards', 'shards'], ['--timeout', 'timeout']]);
+    const counts = new Map([['--min-gains', 'minGains'], ['--shards', 'shards'], ['--jobs', 'jobs'], ['--timeout', 'timeout']]);
     for (let i = 0; i < argv.length; i++) {
         const flag = argv[i];
         if (values.has(flag) || counts.has(flag)) {
@@ -477,6 +490,7 @@ async function suiteRun(ctx, side, suite, extra = []) {
         mkdirSync(scratch, { recursive: true });
         const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.kit, suite, '--jet', compiler.jet, '--scratch', scratch, '--results', join(ctx.work, 'kit', `${tag}.json`)];
         if (!retry) argv.push('--shard', `${index}/${shards}`);
+        argv.push('--jobs', String(retry ? shardJobs({ ...ctx.options, shards: 1 }) : shardJobs(ctx.options)));
         if (ctx.options.filter && !retry) argv.push('--filter', ctx.options.filter);
         if (ctx.options.timeout) argv.push('--timeout', String(ctx.options.timeout));
         if (compiler.jetpack) argv.push('--jetpack', compiler.jetpack);
