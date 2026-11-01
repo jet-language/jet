@@ -516,28 +516,58 @@ fn ir_opt_fused_def(f: IRFunction, at: Int) -> Int Never! {
 // leaves the If itself (skipping `r = c2`) keeps the Bool. Returns the
 // rewrites.
 //
-// One pass over the function. A rewrite changes the reads and writes of its
+// A pass over the function. A rewrite changes the reads and writes of its
 // own r, c1, t and n and of the Bools it adds, and moves B, X and Y whole
 // (Br depths aside). Only an earlier short circuit's r can be its c1 (of
 // `(a && b) && c`), and the rewrites one at a time, first to last, never
 // look back before the Copy they rewrote; so every short circuit those
-// rewrites reach stood in the function as it came. They are all found on
-// its facts and nesting, and the function is rebuilt once, each short
-// circuit where the walk reaches its Copy. The walk meets them in the order
-// the one-at-a-time rewrites did, gives each its Bools in that order, and
+// rewrites reach stood in the function as it came, but one a rewrite
+// exposes: when c2 is `r = not r2` and r2 is the short circuit ending right
+// before it (`a && !(b && c)`), the rewrite leaves r one write and puts the
+// test of r right after that Not, so the short circuit r2 closes now has
+// its negated branch. The first pass finds the short circuits on the
+// function's facts and nesting and rebuilds it once, each short circuit
+// where the walk reaches its Copy. The walk meets them in the order the
+// one-at-a-time rewrites did, gives each its Bools in that order, and
 // shifts a moved Br by every range it leaves, outermost first: the rows are
-// the ones those rewrites made.
+// the ones those rewrites made. Each later pass takes just the short
+// circuits the one before exposed, until it exposes none.
 fn ir_opt_short_circuits(f: &IRFunction, report: &IROptReport) -> Int Never! {
+    exposed := [Int]{}
+    total := ir_opt_short_pass(&f, &report, &exposed, true)
+    loop exposed.len() > 0 {
+        found :: ir_opt_short_pass(&f, &report, &exposed, false)
+        if found == 0 -> break
+        total += found
+    }
+    total
+}
+
+// One pass of ir_opt_short_circuits: every short circuit on `first`, else
+// those whose negated branch tests an r in `exposed`. `exposed` comes back
+// as the r of each rewritten short circuit whose c2 is a Not of the short
+// circuit ending right before it.
+fn ir_opt_short_pass(f: &IRFunction, report: &IROptReport, exposed: &[Int], first: Bool) -> Int Never! {
     count :: f.op.len()
     facts :: ir_opt_facts(f)
     nesting :: ir_opt_nesting(f)
+    wanted := [Bool]{}
+    if !first {
+        loop _ in 0..<f.slot_kind.len() -> &wanted.push(false)
+        loop slot in exposed -> wanted[slot] = true
+    }
+    &exposed.clear()
     seeds := [Int]{}
     loop _ in 0..<count -> &seeds.push(-1)
     found := 0
     loop at in 1..<count {
         if f.op[at] == .If && ir_opt_short_circuit_at(f, facts, nesting, at) {
+            end :: nesting.end[at]
+            if !first && (f.op[end + 1] != .Not || !wanted[f.dst[end + 1]]) -> next
             seeds[ir_opt_short_circuit_copy(f, at)] = at
             found += 1
+            last :: end - 1
+            if f.op[last] == .Not && f.op[last - 1] == .End -> &exposed.push(f.dst[last])
         }
     }
     if found == 0 -> return 0
@@ -759,7 +789,7 @@ fn ir_opt_short_circuit_rewrite(rows: &OptRows, f: &IRFunction, plan: OptShortPl
         ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
         ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
     } else if !is_or {
-        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_short_blocks(&rows, 1, c1, line)
         ir_opt_row(&rows, IROp.If, -1, c1, -1, -1, line)
         ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
         if yes_from == yes_to {
@@ -775,7 +805,7 @@ fn ir_opt_short_circuit_rewrite(rows: &OptRows, f: &IRFunction, plan: OptShortPl
         ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
     } else if no_from == no_to {
         skip :: ir_opt_bool_temp(&f, r)
-        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_short_blocks(&rows, 1, c1, line)
         ir_opt_row(&rows, IROp.If, -1, t, -1, -1, line)
         ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
         ir_opt_row(&rows, IROp.Not, skip, r, -1, -1, line)
@@ -784,8 +814,7 @@ fn ir_opt_short_circuit_rewrite(rows: &OptRows, f: &IRFunction, plan: OptShortPl
         ir_opt_short_moved(&rows, &f, plan, &levels, yes_from, yes_to, 0)
         ir_opt_row(&rows, IROp.End, -1, -1, -1, -1, line)
     } else {
-        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
-        ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+        ir_opt_short_blocks(&rows, 2, c1, line)
         ir_opt_row(&rows, IROp.BrIf, -1, c1, 0, -1, line)
         ir_opt_short_moved(&rows, &f, plan, &levels, at + 1, end, 1)
         ir_opt_row(&rows, IROp.BrIf, -1, r, 0, -1, line)
@@ -798,11 +827,43 @@ fn ir_opt_short_circuit_rewrite(rows: &OptRows, f: &IRFunction, plan: OptShortPl
     close + 1
 }
 
+// `count` Block openers onto `rows`, placed before the comparison that
+// writes `c1` (and the `not c1` after it) when those are the last rows: the
+// branch on c1 then follows its comparison directly, so the comparison's
+// flags feed the branch (X64Select ir_x64_fusable). A Block opener runs
+// nothing, so the rows it now encloses run as before.
+fn ir_opt_short_blocks(rows: &OptRows, count: Int, c1: Int, line: Int) Never! {
+    total :: rows.op.len()
+    tail := total
+    if tail > 0 && rows.op[tail - 1] == .Not && rows.a[tail - 1] == c1 -> tail -= 1
+    if tail > 0 && ir_opt_is_compare(rows.op[tail - 1]) && rows.dst[tail - 1] == c1 {
+        tail -= 1
+    } else {
+        tail = total
+    }
+    moved := OptRows{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    loop k in tail..<total -> ir_opt_row(&moved, rows.op[k], rows.dst[k], rows.a[k], rows.b[k], rows.c[k], rows.line[k])
+    loop _ in tail..<total {
+        _ := &rows.op.pop()
+        _ := &rows.dst.pop()
+        _ := &rows.a.pop()
+        _ := &rows.b.pop()
+        _ := &rows.c.pop()
+        _ := &rows.line.pop()
+    }
+    loop _ in 0..<count -> ir_opt_row(&rows, IROp.Block, -1, -1, -1, -1, line)
+    loop k in 0..<moved.op.len() -> ir_opt_row(&rows, moved.op[k], moved.dst[k], moved.a[k], moved.b[k], moved.c[k], moved.line[k])
+}
+
 // ---------------------------------------------------------------------------
 // Copy propagation: `x = move/copy y` where x is written only there and y
 // is a parameter or written once before it, and the Move/Copy reaches every
 // read of x: the reads of x read y, and the Move/Copy goes. A Copy of a
-// value with a drop is a clone and stays.
+// value with a drop is a clone and stays. A y written more than once
+// qualifies when x's one read is the instruction right after the
+// Move/Copy: nothing runs between them, so y still holds the value there
+// (the `r2 = r` an outer short circuit leaves between an inner one's End
+// and the branch on it).
 
 fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
     count :: f.slot_type.len()
@@ -820,8 +881,10 @@ fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROpt
         if f.slot_type[x] != f.slot_type[y] -> next
         if op == .Copy && m.types[f.slot_type[y]].drop != "" -> next
         // y keeps the value it had at the Move for as long as x is read.
-        if y >= f.param_count && ir_opt_reaching_def(f, facts, y, at) < 0 -> next
-        if y < f.param_count && facts.defs[y] != 1 -> next
+        if !ir_opt_propagate_adjacent(m, f, facts, at, x, y) {
+            if y >= f.param_count && ir_opt_reaching_def(f, facts, y, at) < 0 -> next
+            if y < f.param_count && facts.defs[y] != 1 -> next
+        }
         replace[x] = y
         killed[at] = true
         any = true
@@ -860,6 +923,17 @@ fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROpt
     }
     report.copies_coalesced += changed
     changed
+}
+
+// Whether `x = move/copy y` at `at` has x's only read in instruction
+// `at + 1`, y is written more than once (so no Move/Copy of this sweep
+// replaces y itself) and its type has no drop.
+fn ir_opt_propagate_adjacent(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, x: Int, y: Int) -> Bool Never! {
+    if facts.uses[x] != 1 || facts.defs[y] == 1 || at + 1 >= f.op.len() -> return false
+    if m.types[f.slot_type[y]].drop != "" -> return false
+    reads := [Int]{}
+    ir_x64_reads_into(f, at + 1, &reads)
+    reads.contains(x)
 }
 
 // Rewrites the slots instruction `at` reads through `replace` (-1: kept).
