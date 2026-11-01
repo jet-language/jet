@@ -919,7 +919,18 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
                 return ir_list_try_reserve(&m, p, &b, ty, subject, element, one, -1, value, span)
             }
             .Clear -> {
+                // The buffer is the receiver's own (ir_make_unique above):
+                // its elements end here and the buffer stays for refilling.
+                // A write window's elements stay its owner's.
                 zero :: ir_word_const(&m, &b, 0)
+                if m.types[element].drop != "" {
+                    capacity :: ir_load_word(&m, &b, subject, 8)
+                    below :: ir_word_const(&m, &b, -1)
+                    owner :: ir_bool_op(&m, &b, IROp.Lt, below, capacity)
+                    ir_open_if(&b.f, owner, b.line)
+                    ir_list_drop_items(&m, &b, subject, element)
+                    ir_end(&b.f, b.line)
+                }
                 ir_emit(&b.f, IROp.Store, -1, subject, 0, zero, b.line)
                 return -1
             }
