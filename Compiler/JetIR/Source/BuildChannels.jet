@@ -135,7 +135,7 @@ fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
                 // The runtime answers its generic Option box (ir_option_unbox).
                 pointer_row :: ir_pointer_row(&m)
                 boxed :: ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, pointer_row)
-                result = ir_option_unbox(&m, &b, boxed, row)
+                result = ir_option_unbox(&m, p, &b, boxed, row)
             } else {
                 result = ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, row)
             }

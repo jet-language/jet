@@ -36,7 +36,7 @@ fn ir_lazy_storage(p: IRProgram, ty: Type) -> Type Never! {
     ty.copy()
 }
 
-// The high kind-word bit of an inline Int? Option descriptor (kind 7).
+// The high kind-word bit of an inline Option descriptor (kind 7).
 IR_LAZY_INLINE_OPTION :: 4294967296
 
 // The descriptor kind word the runtime dispatches show, equality and ordering
@@ -416,7 +416,7 @@ fn ir_lazy_meta(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span)
     ir_emit(&b.f, IROp.StackAddress, descriptor, 72, 8, -1, b.line)
     stride :: ir_list_stride(m, row)
     has_drop :: m.types[row].drop != ""
-    // An inline Int? carrier is no box: the runtime's iter_unbox reads its
+    // An inline Option carrier is no box: the runtime's iter_unbox reads its
     // word (JetRuntime Iter.jet ITER_INLINE_OPTION).
     kind :: ir_lazy_kind(&m, p, ty) + (if ir_option_inline(m, row) -> IR_LAZY_INLINE_OPTION else -> 0)
     zero :: ir_word_const(&m, &b, 0)
@@ -899,7 +899,7 @@ fn ir_lazy_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: 
         // The runtime answers its generic Option box (ir_option_unbox).
         box_row :: ir_pointer_row(&m)
         boxed :: ir_lazy_runtime(&m, &b, runtime, call_args, box_row, handle)
-        out = ir_option_unbox(&m, &b, boxed, result_row)
+        out = ir_option_unbox(&m, p, &b, boxed, result_row)
     } else {
         out = ir_lazy_runtime(&m, &b, runtime, call_args, result_row, handle)
     }
@@ -1037,7 +1037,7 @@ fn ir_lazy_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, checked_ty:
         // The runtime answers its generic Option box (ir_option_unbox).
         box_row :: ir_pointer_row(&m)
         boxed :: ir_lazy_runtime(&m, &b, runtime, call_args, box_row, source)
-        out = ir_option_unbox(&m, &b, boxed, result_row)
+        out = ir_option_unbox(&m, p, &b, boxed, result_row)
     } else {
         out = ir_lazy_runtime(&m, &b, runtime, call_args, result_row, source)
     }
@@ -1074,8 +1074,8 @@ fn ir_lazy_search(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, re
     if !position -> ir_emit(&b.f, IROp.Const, decided, if all -> 1 else -> 0, -1, -1, b.line)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
-    // An Int item's slot is no Option box: the item is dropped and the
-    // runtime's 8-byte block freed.
+    // An inline Option item's slot is no Option box: the item is dropped and
+    // the runtime's 8-byte block freed.
     word_slot :: ir_option_inline(m, slot_row)
     pull_row :: if word_slot -> ir_pointer_row(&m) else -> slot_row
     pulled :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{source}, pull_row)
@@ -1153,7 +1153,7 @@ fn ir_lazy_next(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
     pointer_row :: ir_pointer_row(&m)
     pulled :: ir_runtime(&m, &b, "jet_rt_native_iter_next", [Int]{handle}, pointer_row)
     ir_release(&m, &b, handle)
-    ir_option_unbox(&m, &b, pulled, row)
+    ir_option_unbox(&m, p, &b, pulled, row)
 }
 
 // `loop x in iter` / `loop (i, x) in iter`: the runtime cursor takes the Iter

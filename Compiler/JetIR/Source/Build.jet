@@ -84,7 +84,7 @@ struct IRBuilder {
     subjects: [Int]
     // Pattern bindings of the condition being built, bound when its If opens.
     pending: [IRPending]
-    // The address a write window's inline Int? subject was read from, by
+    // The address a write window's inline Option subject was read from, by
     // the subject slot (BuildExpr.jet ir_borrow): its payload binds there.
     windows: [Int:Int]{[Int:Int]{}}
     // The allocator storage an allocator view was read from, by the view
@@ -1483,7 +1483,8 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
             next
         }
         if row.window && ir_option_inline(m, subject_row) {
-            // An inline Int?'s payload is its word: the name binds the
+            // An inline Option's payload is its word (zero-extended, so a
+            // payload store of its own width keeps it): the name binds the
             // word's storage at the window's place.
             address :: b.windows.get(row.subject) ?? -1
             if address < 0 {
@@ -2583,16 +2584,19 @@ fn ir_result_rebox(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: In
     boxed
 }
 
-// An Option of an Int (or a type laid out as one) is one word, not a box
-// (BuildTypes.jet ir_value_type_laid): the Int's own word when present,
-// IR_OPTION_INT_NONE when absent. That word is never an Int: an inline Int
-// lies in [-2^62, 2^62 - 1], and a big Int is 2^62 | the address of its
-// node (JetRuntime Int.jet int_tag), a heap or data address and never null.
-// Its drop and clone are the Int's; the runtime's pass the niche by.
+// An Option of an Int (or a type laid out as one), or of a scalar with no
+// drop whose words stay below 2^62 (a Bool, a Char, an unsigned word of up to
+// 62 bits, a payload-free enum), is one word, not a box (BuildTypes.jet
+// ir_value_type_laid): the payload's own word when present,
+// IR_OPTION_INT_NONE when absent. That word is never a payload: an inline Int
+// lies in [-2^62, 2^62 - 1], a big Int is 2^62 | the address of its node
+// (JetRuntime Int.jet int_tag), a heap or data address and never null, and a
+// scalar's word is zero-extended below 2^62. An Int payload's drop and clone
+// are the Int's (the runtime's pass the niche by); a scalar's has neither.
 IR_OPTION_INT_NONE :: 4611686018427387904
 
 fn ir_option_inline(m: IRModule, row: Int) -> Bool Never! {
-    m.types[row].kind == .Word && m.types[row].clone == "jet_rt_int_clone"
+    m.types[row].option_word
 }
 
 // The word of an absent Option of row `row`: null for a box.
@@ -2666,15 +2670,20 @@ fn ir_option_set(m: &IRModule, b: &IRBuilder, result: Int, made: Int) Never! {
 }
 
 // The inline Option of row `row` a runtime result `boxed` stands for: the
-// runtime's generic Option is a fresh 8-byte block owning the Int (null
-// when absent). The Int moves out and the block is freed.
-fn ir_option_unbox(m: &IRModule, b: &IRBuilder, boxed: Int, row: Int) -> Int Never! {
+// runtime's generic Option is a fresh 8-byte block owning the payload (null
+// when absent). The payload moves out and the block is freed. A scalar is
+// read at its own width: the block's other bytes are not its.
+fn ir_option_unbox(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, row: Int) -> Int Never! {
     out :: ir_fresh_temp(&m, &b, row)
     ir_option_none(&m, &b, out)
+    item_row := row
+    if m.types[row].drop == "" && ir_untag(m.types[row].ty) == .Option(inner) {
+        item_row = ir_value_type(&m, p, inner) ?? row
+    }
     zero :: ir_word_const(&m, &b, 0)
     present :: ir_bool_op(&m, &b, IROp.Ne, boxed, zero)
     ir_open_if(&b.f, present, b.line)
-    item :: ir_load_at(&m, &b, boxed, 0, row)
+    item :: ir_load_at(&m, &b, boxed, 0, item_row)
     ir_emit(&b.f, IROp.Move, out, item, -1, -1, b.line)
     eight :: ir_word_const(&m, &b, 8)
     ir_free(&m, &b, boxed, eight)

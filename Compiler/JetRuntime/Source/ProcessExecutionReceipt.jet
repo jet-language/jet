@@ -313,7 +313,7 @@ fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: 
     fd_put(receipt, I64{112}, outputs)
     fd_put(receipt, I64{120}, if (bound || fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{128}, jet_int_owned_from_i64(pid))
-    fd_put(receipt, I64{136}, if timed_out -> { process_raw_box(PROCESS_RESOURCE_WALL_TIME) } else -> { I64{0} })
+    fd_put(receipt, I64{136}, if timed_out -> { PROCESS_RESOURCE_WALL_TIME } else -> { INT_OPTION_NONE })
     receipt
 }
 // String::from_utf8 is strict in both Rust collection lanes. The scanner's

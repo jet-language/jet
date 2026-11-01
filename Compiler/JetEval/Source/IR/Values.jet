@@ -110,7 +110,7 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
             return Val(TComptimeValue.String{value: text})
         }
         .Word -> {
-            // An inline Int?: the niche word is None, any other its Int.
+            // An inline Option: the niche word is None, any other its payload's.
             if checked == .Option(inner) && ir_option_inline(m, row) {
                 if word == IR_OPTION_INT_NONE -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
                 inner_row :: ir_value_type(&m, p, inner) ?? return jet_eval_ir_transport_fail(&s, checked)

@@ -243,7 +243,7 @@ fn jet_eval_ir_host_store(types: &IRModule, p: IRProgram, s: &JetEvalIRState, va
             if value == .String(text) -> return jet_eval_ir_store_text(&s, text)
         }
         .Word -> {
-            // An inline Int?: None is the niche word, Some its Int's word.
+            // An inline Option: None is the niche word, Some its payload's word.
             if checked == .Option(inner) && ir_option_inline(types, row) {
                 if value == .Failed(_) -> return Val(IR_OPTION_INT_NONE)
                 payload :: if value == .Present(present) -> present else -> value

@@ -756,7 +756,7 @@ fn ir_map_insert_body(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
     entry :: ir_element_address(&m, &a, entries, index, shape.stride)
     old := -1
     if option_row >= 0 && ir_option_inline(m, option_row) {
-        // The old value moves out into the inline Int?.
+        // The old value moves out into the inline Option.
         replaced :: ir_load_at(&m, &a, entry, shape.value.offset, shape.value.ty)
         old = ir_temp(&m, &a, option_row)
         ir_emit(&a.f, IROp.Move, old, replaced, -1, -1, a.line)

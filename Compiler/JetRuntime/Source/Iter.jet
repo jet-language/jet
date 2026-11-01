@@ -10,7 +10,8 @@
 // jet_rt_native_iter_drop name none of them.
 
 // The high kind-word bit of an Option descriptor (kind 7) whose value is an
-// inline Int? word, not a box (JetIR IR_LAZY_INLINE_OPTION).
+// inline word, not a box (JetIR IR_LAZY_INLINE_OPTION): an Int?'s Int or a
+// scalar's zero-extended word, INT_OPTION_NONE when absent.
 ITER_INLINE_OPTION :: I64{4294967296}
 
 fn iter_meta(iter: I64) -> I64 { trap_word(wrapping(iter + I64{8})) }
@@ -950,8 +951,8 @@ fn iter_release_callback(node: I64) {
 
 // Unbox one initialized failure carrier into target (an Ok/present payload)
 // or error (an Err payload). Returns 1=success, 0=failure. An Option whose
-// kind word carries ITER_INLINE_OPTION is an inline Int? (JetIR
-// ir_lazy_meta): the word is the Int, INT_OPTION_NONE its None.
+// kind word carries ITER_INLINE_OPTION is one inline word (JetIR
+// ir_lazy_meta): the word is the payload's, INT_OPTION_NONE its None.
 fn iter_unbox(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool {
     raw :: trap_word(carrier_slot)
     kind :: trap_word(wrapping(carrier + I64{48}))

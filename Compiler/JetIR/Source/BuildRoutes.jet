@@ -4192,8 +4192,8 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 &lowered.push(slot)
             }
             .Option(some) -> {
-                // An Option crosses as its own borrowed word: an Option<Int>
-                // its inline word (IR_OPTION_INT_NONE when absent), an Option
+                // An Option crosses as its own borrowed word: an inline Option
+                // its word (IR_OPTION_INT_NONE when absent), an Option
                 // of a runtime handle its box (null when absent, the handle
                 // word at 0).
                 inner :: if ir_untag(shown) == .Option(item) -> item else -> { return ir_fail_slot(&b, span, "runtime route {name} Option argument of {shown}") }
@@ -4436,7 +4436,7 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         // The runtime answers its generic Option box (ir_option_unbox).
         pointer_row :: ir_pointer_row(&m)
         boxed :: ir_runtime(&m, &b, export, args, pointer_row)
-        return ir_option_unbox(&m, &b, boxed, row)
+        return ir_option_unbox(&m, p, &b, boxed, row)
     }
     ir_runtime(&m, &b, export, args, row)
 }
