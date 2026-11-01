@@ -456,6 +456,10 @@ async function hostedStage(ctx, gate) {
         copyFileSync(binary, join(work, 'jetpack/jetpack'));
         chmodSync(join(work, 'jetpack/jetpack'), 0o755);
         candidate.jetpack = join(work, 'jetpack/jetpack');
+        // The seed ships jetpack beside jet, and jet looks for its engine beside itself first; give s2 the
+        // same layout so the suites test what ships rather than whatever `jetpack` PATH resolves first.
+        copyFileSync(binary, join(dirname(candidate.jet), 'jetpack'));
+        chmodSync(join(dirname(candidate.jet), 'jetpack'), 0o755);
     }
     for (const dir of bootstrapScratch(worker)) rmSync(dir, { recursive: true, force: true });
     if (ok) return gate.row('jetpack-engine', 'PASS', `check.sh --hosted built jetpack with s2 without Rust (${sha256File(candidate.jetpack).slice(0, 16)}, ${result.wall}s)`);
