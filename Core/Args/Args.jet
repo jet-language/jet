@@ -18,18 +18,10 @@ use core as core
 // the end parse argv for the compiler-generated typed `#CLI` entry.
 fn slice_str(text: String, start: Int, end: Int) -> String {
     raw :: text.bytes()
-    s := start
-    e := end
-    if s < 0 -> s = 0
-    if e > raw.len() -> e = raw.len()
+    s :: if start < 0 -> 0 else -> start
+    e :: if end > raw.len() -> raw.len() else -> end
     if e < s -> return ""
-    out := [U8]{}
-    i := s
-    loop i < e {
-        &out.push(raw[i])
-        i += 1
-    }
-    String.from_bytes(out) ?? ""
+    String.from_bytes(raw.slice(s, e)) ?? ""
 }
 
 fn drop_prefix(text: String, count: Int) -> String {
@@ -787,17 +779,16 @@ fn cli_edit_distance(a: String, b: String) -> Int Never! {
     right :: b.bytes()
     previous := [Int]{}
     loop j in 0..<(right.len() + 1) -> &previous.push(j)
-    loop i in 0..<left.len() {
+    loop (i, x) in left {
         current := [Int]{i + 1}
-        loop j in 0..<right.len() {
-            if left[i] == right[j] {
-                &current.push(previous[j])
-            } else {
-                best := previous[j]
+        loop (j, y) in right {
+            best := previous[j]
+            if x != y {
                 if previous[j + 1] < best -> best = previous[j + 1]
                 if current[j] < best -> best = current[j]
-                &current.push(best + 1)
+                best += 1
             }
+            &current.push(best)
         }
         previous = ^current
     }
@@ -1081,7 +1072,12 @@ fn __cli_long(arg: String) -> Bool Never! { starts(arg, "--") }
 fn __cli_short(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
 fn __cli_rest(text: String, start: Int) -> String Never! { slice_str(text, start, text.bytes().len()) }
 fn __cli_slice(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
-fn __cli_eq(text: String) -> Int Never! { index_of(text, "=") }
+fn __cli_eq(text: String) -> Int Never! {
+    loop (at, byte) in text.bytes() {
+        if byte == (U8{61}) -> return at
+    }
+    -1
+}
 fn __cli_int_refusal(name: String, value: String) -> String Never! {
     "`--{name}` expects an Int, got `{value}`\n\nfix: pass a whole number to `--{name}`"
 }
