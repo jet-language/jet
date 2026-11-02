@@ -1468,19 +1468,23 @@ fn ir_x64_magic(d: Int) -> IRX64Magic Never! {
     IRX64Magic{multiplier: multiplier, add: false, shift: p - 64}
 }
 
-// The divisor of a constant `slot` that divides by a multiply
-// (ir_x64_magic), else 0.
+// The divisor of a constant `slot` that divides by a multiply (ir_x64_magic
+// of its magnitude: 3 <= |d| < 2^62, not a power of two), else 0.
 fn ir_x64_magic_divisor(al: IRX64Allocation, slot: Int) -> Int Never! {
     if slot < 0 || !al.consts[slot] -> return 0
     d :: al.values[slot]
-    if d < 3 || d >= (1 << 62) || ir_x64_power_of_two(al, slot) > 0 -> return 0
+    size :: if d < 0 -> 0 - d else -> d
+    if size < 3 || size >= (1 << 62) || size.bit_and(size - 1) == 0 -> return 0
     d
 }
 
 // rax divided by the constant d (ir_x64_magic_divisor) as idiv leaves it:
 // the truncated quotient in rax, the remainder in rdx, d in rcx. Uses r11.
+// A negative d divides by its magnitude and negates the quotient: the
+// truncated quotient of n by -d is minus that of n by d, the remainder the
+// same.
 fn ir_x64_magic_division(e: &IRX64Emitter, d: Int) Never! {
-    magic :: ir_x64_magic(d)
+    magic :: ir_x64_magic(if d < 0 -> 0 - d else -> d)
     x64_mov_rr(&e.code, X64_R11, X64_RAX)
     x64_mov_ri(&e.code, X64_RCX, magic.multiplier)
     x64_imul_wide(&e.code, X64_RCX)
@@ -1489,6 +1493,7 @@ fn ir_x64_magic_division(e: &IRX64Emitter, d: Int) Never! {
     x64_mov_rr(&e.code, X64_RAX, X64_R11)
     x64_shift_ri(&e.code, X64Shift.Shr, X64_RAX, 63)
     x64_alu_rr(&e.code, X64Alu.Add, X64_RAX, X64_RDX)
+    if d < 0 -> x64_neg(&e.code, X64_RAX)
     x64_mov_ri(&e.code, X64_RCX, d)
     x64_mov_rr(&e.code, X64_RDX, X64_RAX)
     x64_imul_rr(&e.code, X64_RDX, X64_RCX)
@@ -1612,7 +1617,7 @@ fn ir_x64_exact_division(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
         if quotient >= 0 -> return ir_x64_paired_remainder(&e, m, f, al, at, quotient)
     }
     magic :: ir_x64_magic_divisor(al, f.b[at])
-    if magic > 0 {
+    if magic != 0 {
         ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
         ir_x64_operand_test(&e, al, f.a[at], X64_RAX, &sites)
         ir_x64_magic_division(&e, magic)
@@ -1816,7 +1821,7 @@ fn ir_x64_word_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         if quotient >= 0 -> return ir_x64_word_paired_remainder(&e, m, f, al, tables, at, quotient)
     }
     magic :: if division && ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
-    if magic > 0 {
+    if magic != 0 {
         // Neither is the divisor 0 or -1.
         ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
         ir_x64_magic_division(&e, magic)
