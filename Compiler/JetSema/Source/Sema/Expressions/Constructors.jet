@@ -382,6 +382,7 @@ fn sema_expression_struct_field_finish(fact: SemaStructFieldFact, checked: TExpr
     expected_ty :: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
     string_view :: fact.string_view
     if !string_view && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+    if !string_view -> sema_expression_struct_field_view_escape(field_value, scopes, state, &diagnostics)
     // A supported Atomic field checks its scalar initializer against the
     // scalar (`expected_ty`); the Atomic.new carrier is added below.
     compatible :: sema_expr_expected_assignable(expected_ty, checked.ty, environment, program) ?? return None
@@ -395,6 +396,32 @@ fn sema_expression_struct_field_finish(fact: SemaStructFieldFact, checked: TExpr
     reference.boxed = fact.boxed
     initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
+}
+
+// Rust `named_view_has_stable_owner` for a list window stored in a struct
+// field: a named `View`/`ViewMut` over a local would let the struct outlive
+// the storage it reads, so only a window over a parameter (the receiver
+// included) or a module-level value may be stored.
+fn sema_expression_struct_field_view_escape(field_value: Expr, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+    if field_value == .Ident(name, span, _) {
+        index :: sema_scope_resolve_index_at(scopes, name, span) ?? return
+        ty :: scopes.bindings[index].symbol.ty ?? return
+        if scopes.bindings[index].string_view || sema_stmt_string_view_type(ty) -> return
+        window :: if sema_expr_unwrap_tag(ty) == {
+            .Apply(view_name, _) -> view_name == "View" || view_name == "ViewMut"
+            else -> false
+        }
+        if !window -> return
+        key :: scopes.bindings[index].symbol.id.key
+        loop fact in state.views {
+            if !fact.active || fact.carrier_key != key -> next
+            owner_name :: fact.source.root
+            owner :: sema_scope_resolve(scopes, owner_name) ?? return
+            if owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant -> return
+            &diagnostics.push(sema_error("E2305", span, "`{name}` cannot be shared — it does not live long enough to be stored in a struct field", "`{name}` is a view into `{owner_name}`; sharing it outside `{owner_name}`'s scope would let it outlive its owner and point into freed storage", "keep `{name}` inside `{owner_name}`'s scope, or copy what you need before it leaves"))
+            return
+        }
+    }
 }
 
 // The owner's type arguments as far as `bindings` has inferred them; an

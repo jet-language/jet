@@ -2974,12 +2974,17 @@ fn sema_stmt_binding_is_write_window(state: SemaOwnershipState, key: String) -> 
 }
 
 // Rust `place_from_expr` on a range: `xs[a..b]` over a named place (through
-// fields and indexes) is the source of a read window.
+// fields and indexes) is the source of a read window, and so is `xs[band]`
+// when the local `band` holds a range.
 fn sema_stmt_is_bare_range_place(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> Bool {
     if expr == .Slice(_, _, _, _, _, _) -> return sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0
     // `xs[a..b]` parses as an index whose operand is the range.
     if expr == .Index(_, index, _, _, _) {
         if index == .Range(_, _, _, _, _) -> return sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0
+        if index == .Ident(name, span, _) {
+            symbol :: scopes.bindings[sema_scope_resolve_index_at(scopes, name, span) ?? return false].symbol
+            if sema_stmt_for_in_is_range(symbol.ty ?? return false) -> return sema_ownership_places_from_expr_in_state(expr, scopes, &state).len() > 0
+        }
     }
     false
 }
@@ -2991,7 +2996,13 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
     if binding.name == "_" -> return true
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
     if sema_stmt_has_struct_view_source(binding.init) {
-        loop fact in sema_stmt_local_view_facts_for_expr(binding.init, scopes, &state, context) -> &call_facts.push(fact)
+        // A struct that stores a view is a new carrier of its places: it
+        // conflicts with another live view of them as a window would. A
+        // carrier whose open is rejected holds no loan.
+        loop fact in sema_stmt_local_view_facts_for_expr(binding.init, scopes, &state, context) {
+            if fact.places.len() > 0 && !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, binding.init, fact.places, fact.access, scopes, &diagnostics) -> return true
+            &call_facts.push(fact)
+        }
     }
     if call_facts.len() > 0 {
         owner_facts := [SemaOwnershipCallViewFact]{}
@@ -5887,6 +5898,15 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     place :: sema_stmt_check_assignment_place(target, op != None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
         if !sema_has_error_since(diagnostics, place_diagnostics) && context.incomplete_reasons.len() == place_reasons -> sema_check_unsupported(&context, "the assignment place at offset {op_span.start} checked to no place without a report")
         return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 3")
+    }
+    // A stored view field keeps the owner relationship it was constructed
+    // with; assigning it a new view would change that public provenance.
+    if target == .Field(_, view_field, view_field_span) && program.registration_graph == .Val(view_graph) {
+        seen := [String:Bool]{}
+        if sema_check_type_contains_view(view_graph, environment.module_identity, place.ty, &seen) {
+            &diagnostics.push(sema_error("E2305", view_field_span, "view field `{view_field}` cannot be assigned a new source", "a stored view field has one stabilized owner relationship; overwriting it would erase or change that public provenance", "construct a new value with the new view, or keep the original field source unchanged"))
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment view field")
+        }
     }
     // This rule on a field of a local: the type of the place just checked
     // decides the route, so the field expression is checked once.
