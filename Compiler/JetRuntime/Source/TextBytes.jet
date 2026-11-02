@@ -44,7 +44,8 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
                     next
                 }
             } else if (wrapping(data + at).bit_and(I64{4095}) <= I64{4088}) {
-                tail :: rt_text_word(wrapping(data + at)).bit_and(wrapping((I64{1} << (rest * I64{8})) - I64{1}))
+                // rest is 1..7 here, so its low bits are rest.
+                tail :: rt_text_word(wrapping(data + at)).bit_and(wrapping((I64{1} << (rest.bit_and(I64{7}) * I64{8})) - I64{1}))
                 if (tail.bit_and(I64{-9187201950435737472}) == I64{0}) -> return I64{0}
             }
         }

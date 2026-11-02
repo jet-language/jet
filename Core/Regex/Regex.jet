@@ -261,7 +261,11 @@ fn compile_program(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex 
     Ok(re)
 }
 
-fn is_match(pattern: Regex, text: String) -> Bool Never! { exists(pattern, text.bytes(), false, false) }
+fn is_match(pattern: Regex, text: String) -> Bool Never! {
+    word :: literal_text(pattern)
+    if word != "" -> return text.contains(word)
+    exists(pattern, text.bytes(), false, false)
+}
 
 fn full_match(pattern: Regex, text: String) -> Bool Never! { exists(pattern, text.bytes(), true, true) }
 
@@ -282,6 +286,8 @@ fn purge() RegexError! {
 }
 
 fn find(pattern: Regex, text: String) -> String? Never! {
+    word :: literal_text(pattern)
+    if word != "" -> return if text.contains(word) -> Val(word) else -> None
     raw :: text.bytes()
     runs :: scan(pattern, raw, false, false, false, false, 1)
     if runs.len() == 0 -> return None
@@ -303,10 +309,24 @@ fn __string_match(text: String, pattern: String) -> String? RegexError! {
 }
 
 fn find_all(pattern: Regex, text: String) -> [String] Never! {
-    raw :: text.bytes()
     out := [String]{}
+    word :: literal_text(pattern)
+    if word != "" {
+        loop _ in 0..<text.count(word) -> &out.push(word.copy())
+        return out
+    }
+    raw :: text.bytes()
     loop run in scan(pattern, raw, false, false, false, false, -1) -> &out.push(slice(raw, run.start, run.end))
     out
+}
+
+/// A `literal_only` pattern's text, or "" for any other pattern. Every match
+/// of it is that text, and its matches are the text's non-overlapping
+/// occurrences left to right (`literal_runs`), which String's own `contains`
+/// and `count` find with the runtime's substring search.
+fn literal_text(re: Regex) -> String Never! {
+    if !literal_only(re) -> return ""
+    String.from_bytes(re.prefix) ?? ""
 }
 
 fn matches(pattern: Regex, text: String) -> [Match] Never! {
@@ -1180,15 +1200,15 @@ fn find_bytes(text: [U8], needle: [U8], from: Int) -> Int Never! {
 // after a byte, plus whether a search restarts a thread at each position.
 // `match_now` marks a Match reached before the text ends and `match_end`
 // one reached at its end, where `$` also holds. Bytes 0-127 fall into
-// columns that every instruction treats alike. The subset construction runs
+// columns that every instruction treats alike; the scan's table spreads
+// them back to one entry per byte. The subset construction runs
 // once at compile time over at most DFA_MAX_STATES states and a work budget
 // of DFA_WORK_PER_OP steps per instruction, so its cost stays proportional
 // to the program; past either, the pattern has no DFA (`width` 0). A text
 // byte above 127 hands the question to the VM, which reads scalars.
 struct Dfa {
-    class: [Int]
     width: Int
-    next: [Int]
+    next: [I64]
     match_now: [Bool]
     match_end: [Bool]
     dead: [Bool]
@@ -1200,7 +1220,7 @@ DFA_MAX_STATES :: 256
 DFA_WORK_PER_OP :: 400
 
 fn no_dfa() -> Dfa Never! {
-    Dfa{class: [Int]{}, width: 0, next: [Int]{}, match_now: [Bool]{}, match_end: [Bool]{}, dead: [Bool]{}, search: -1, pinned: -1}
+    Dfa{width: 0, next: [I64]{}, match_now: [Bool]{}, match_end: [Bool]{}, dead: [Bool]{}, search: -1, pinned: -1}
 }
 
 /// The subset construction's working set: state `s` holds the consuming
@@ -1408,27 +1428,59 @@ fn build_dfa(re: Regex) -> Dfa Never! {
         &dead.push(builder.los[s] == builder.his[s] && !builder.restarts[s])
         s = s + 1
     }
-    Dfa{class: class, width: width, next: next, match_now: builder.match_now, match_end: builder.match_end, dead: dead, search: search, pinned: pinned}
+    // The scan's table: one row of 256 entries per state, one per byte, so
+    // a step is one load. A byte above 127 has -1. Another entry is the
+    // target's row offset, or `-2 - target` for a target that is dead or
+    // matches now, so the scan checks those flags only on that entry.
+    table := [I64]{}
+    s = 0
+    loop s < builder.restarts.len() {
+        byte = 0
+        loop byte < 128 {
+            to :: next[s * width + class[byte]]
+            if dead[to] || builder.match_now[to] -> &table.push(I64{-2 - to}) else -> &table.push(I64{to * 256})
+            byte = byte + 1
+        }
+        loop _ in 128..<256 -> &table.push(I64{-1})
+        s = s + 1
+    }
+    Dfa{width: width, next: table, match_now: builder.match_now, match_end: builder.match_end, dead: dead, search: search, pinned: pinned}
 }
 
 /// 1 when a match exists in `text`, 0 when none does, -1 when the DFA cannot
 /// tell: the pattern has none, or the text has a byte above 127. `anchored`
-/// pins the match to position 0 and `full` to the text's end.
+/// pins the match to position 0 and `full` to the text's end. A state is
+/// checked for a match or a dead end before each byte it would read; only a
+/// table entry below 0 leads to such a state or to a byte above 127.
 fn dfa_verdict(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Int Never! {
-    if re.dfa.width == 0 -> return -1
+    width :: re.dfa.width
+    if width == 0 -> return -1
     state := re.dfa.search
     if anchored -> state = re.dfa.pinned
     hi :: text.len()
-    i := 0
-    loop i < hi {
+    if hi > 0 {
         if !full && re.dfa.match_now[state] -> return 1
         if re.dfa.dead[state] -> return 0
-        byte :: Int.from_u8(text[i])
-        if byte >= 128 -> return -1
-        state = re.dfa.next[state * re.dfa.width + re.dfa.class[byte]]
-        i = i + 1
     }
-    if re.dfa.match_end[state] -> return 1
+    // I64 rows keep the step free of Int's big-number checks.
+    row := I64{state * 256}
+    i := 0
+    loop i < hi {
+        to :: re.dfa.next[Int{row + I64{text[i]}}]
+        i = i + 1
+        if to >= (I64{0}) {
+            row = to
+        } else {
+            if to == (I64{-1}) -> return -1
+            state = Int{I64{-2} - to}
+            row = I64{state * 256}
+            if i < hi {
+                if !full && re.dfa.match_now[state] -> return 1
+                if re.dfa.dead[state] -> return 0
+            }
+        }
+    }
+    if re.dfa.match_end[Int{row} /% 256] -> return 1
     0
 }
 

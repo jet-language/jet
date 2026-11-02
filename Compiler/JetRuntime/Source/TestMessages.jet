@@ -2,12 +2,8 @@
 // Little-endian UTF-8 stack writes never construct a Rust String or exact Int.
 
 fn test_msg_invalid(fd: I64) {
-    test_write_word(fd, I64{7809644666444607081}, I64{8})
-    test_write_word(fd, I64{2322294380849947936}, I64{8})
-    test_write_word(fd, I64{8367799666904162670}, I64{8})
-    test_write_word(fd, I64{8026370501749535589}, I64{8})
-    test_write_word(fd, I64{7955925896783750258}, I64{8})
-    test_write_word(fd, I64{11426381717878}, I64{6})
+    text :: rt_static_text("internal error: native test record is invalid\n")
+    test_write(fd, rt_text_data(text), rt_text_len(text))
 }
 
 fn test_msg_pass(fd: I64) {
@@ -28,12 +24,8 @@ fn test_msg_expected(fd: I64) {
 }
 
 fn test_msg_unexpected(fd: I64) {
-    test_write_word(fd, I64{6071772934006197845}, I64{8})
-    test_write_word(fd, I64{2329296972263801925}, I64{8})
-    test_write_word(fd, I64{2334402202810282536}, I64{8})
-    test_write_word(fd, I64{7234316346693023845}, I64{8})
-    test_write_word(fd, I64{8367752344953251423}, I64{8})
-    test_write_word(fd, I64{694515058}, I64{4})
+    text :: rt_static_text("UNEXPECTED-PASS (remove expected_fail: true)")
+    test_write(fd, rt_text_data(text), rt_text_len(text))
 }
 
 fn test_msg_passed(fd: I64) {
@@ -66,10 +58,8 @@ fn test_msg_shuffle(fd: I64) {
 }
 
 fn test_msg_json_schema(fd: I64) {
-    test_write_word(fd, I64{7020378893159965307}, I64{8})
-    test_write_word(fd, I64{8371756736249477666}, I64{8})
-    test_write_word(fd, I64{3180158670532277093}, I64{8})
-    test_write_word(fd, I64{249685569314}, I64{5})
+    text :: rt_static_text("{{\"schema\":\"jet.test.v1\",\"ok\":")
+    test_write(fd, rt_text_data(text), rt_text_len(text))
 }
 
 fn test_msg_json_passed(fd: I64) {
@@ -88,15 +78,13 @@ fn test_msg_json_skipped(fd: I64) {
 }
 
 fn test_msg_json_expected(fd: I64) {
-    test_write_word(fd, I64{8386658464824631852}, I64{8})
-    test_write_word(fd, I64{8247617492458300517}, I64{8})
-    test_write_word(fd, I64{975336293}, I64{4})
+    text :: rt_static_text(",\"expectedFailures\":")
+    test_write(fd, rt_text_data(text), rt_text_len(text))
 }
 
 fn test_msg_json_unexpected(fd: I64) {
-    test_write_word(fd, I64{7309474572262515244}, I64{8})
-    test_write_word(fd, I64{8319099934593086563}, I64{8})
-    test_write_word(fd, I64{975336293}, I64{4})
+    text :: rt_static_text(",\"unexpectedPasses\":")
+    test_write(fd, rt_text_data(text), rt_text_len(text))
 }
 
 fn test_msg_json_tests(fd: I64) {
@@ -113,9 +101,8 @@ fn test_msg_json_ok(fd: I64) {
 }
 
 fn test_msg_json_expectation(fd: I64) {
-    test_write_word(fd, I64{8386658464824631852}, I64{8})
-    test_write_word(fd, I64{8247617492458300517}, I64{8})
-    test_write_word(fd, I64{3809893}, I64{3})
+    text :: rt_static_text(",\"expectedFailure\":")
+    test_write(fd, rt_text_data(text), rt_text_len(text))
 }
 
 fn test_msg_json_skip(fd: I64) {
@@ -215,16 +202,11 @@ fn test_scope_msg_expected(builder: I64) {
 }
 
 fn test_scope_msg_region_stop(builder: I64) {
-    rt_text_push_word(builder, I64{7450486642255161460}, I64{8})
-    rt_text_push_word(builder, I64{8295753058167451497}, I64{8})
-    rt_text_push_word(builder, I64{7526756837609205620}, I64{8})
-    rt_text_push_word(builder, I64{32}, I64{1})
+    jet_rt_string_builder_push(builder, rt_static_text("this region to stop with "))
 }
 
 fn test_scope_msg_region_fail(builder: I64) {
-    rt_text_push_word(builder, I64{7450486642255161460}, I64{8})
-    rt_text_push_word(builder, I64{7359004335674388329}, I64{8})
-    rt_text_push_word(builder, I64{7104865}, I64{3})
+    jet_rt_string_builder_push(builder, rt_static_text("this region to fail"))
 }
 
 fn test_scope_msg_stop_code(builder: I64) {
@@ -233,16 +215,11 @@ fn test_scope_msg_stop_code(builder: I64) {
 }
 
 fn test_scope_msg_stop_message(builder: I64) {
-    rt_text_push_word(builder, I64{8583984513765548129}, I64{8})
-    rt_text_push_word(builder, I64{8315172272917933928}, I64{8})
-    rt_text_push_word(builder, I64{7957688057378333043}, I64{8})
-    rt_text_push_word(builder, I64{35680145727860}, I64{6})
+    jet_rt_string_builder_push(builder, rt_static_text("a stop whose message contains "))
 }
 
 fn test_scope_msg_code_message(builder: I64) {
-    rt_text_push_word(builder, I64{7863396495853647648}, I64{8})
-    rt_text_push_word(builder, I64{7142820503700599653}, I64{8})
-    rt_text_push_word(builder, I64{2338334030421061231}, I64{8})
+    jet_rt_string_builder_push(builder, rt_static_text(" whose message contains "))
 }
 
 fn test_scope_msg_passed(builder: I64) {
@@ -259,9 +236,7 @@ fn test_scope_msg_colon(builder: I64) {
 }
 
 fn test_scope_msg_timeout(builder: I64) {
-    rt_text_push_word(builder, I64{4212120672801745268}, I64{8})
-    rt_text_push_word(builder, I64{2336927755148816928}, I64{8})
-    rt_text_push_word(builder, I64{139241418612}, I64{5})
+    jet_rt_string_builder_push(builder, rt_static_text("timeout: region took "))
 }
 
 fn test_scope_msg_timeout_limit(builder: I64) {

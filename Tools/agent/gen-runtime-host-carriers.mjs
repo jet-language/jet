@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { runtimeAbiAtom } from "./runtime-abi-symbols.mjs";
+import { staticText, staticTextWorthy } from "./runtime-static-text.mjs";
 // Host C carriers use the checked Core registry's declaration-order tags.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
@@ -23,6 +24,16 @@ for (const [name, values] of [["io_kind", kinds], ["io_op", operations], ["proce
 }
 // Registered E3001 stops: legacy writes are heap-free; Root owns the captured
 // full report through the same trap_header / trap_footer publication boundary.
+// A message longer than one word is one process-static text, written or
+// pushed in one call; a shorter one stays little-endian word constants.
+function words(message, sink) {
+  const bytes = Buffer.from(message);
+  for (let at = 0; at < bytes.length; at += 8) {
+    const word = Buffer.alloc(8);
+    bytes.copy(word, 0, at, Math.min(at + 8, bytes.length));
+    jet.push(`    ${sink}I64{${word.readBigInt64LE()}}, I64{${Math.min(8, bytes.length - at)}})`);
+  }
+}
 for (const [name, message] of [
   ["host_arguments_refused", "host arguments unavailable; call jet_rt_host_arguments before env or argv access"],
   ["host_environment_index_refused", "startup environment index out of range"],
@@ -31,22 +42,14 @@ for (const [name, message] of [
   ["host_sigpipe_refused", "failed to initialize SIGPIPE handling"],
 ]) {
   jet.push("", `fn ${name}() {`, "    jet_rt_stdout_flush()", "    trap_header(I64{0})");
-  const bytes = Buffer.from(message);
-  for (let at = 0; at < bytes.length; at += 8) {
-    const word = Buffer.alloc(8);
-    bytes.copy(word, 0, at, Math.min(at + 8, bytes.length));
-    jet.push(`    trap_write_word(I64{${word.readBigInt64LE()}}, I64{${Math.min(8, bytes.length - at)}})`);
-  }
+  if (staticTextWorthy(message)) jet.push(`    trap_write_static(${staticText(message)})`);
+  else words(message, "trap_write_word(");
   jet.push("    trap_msg_prelude_end()", "    trap_footer(I64{0})", "}");
 }
 for (const [name, message] of [["host_stdout_name", "stdout"], ["host_stderr_name", "stderr"], ["host_write_zero_text", "failed to write whole buffer"], ["host_resolver_prefix", "failed to lookup address information: "], ["host_resolver_nul", "file name contained an unexpected NUL byte"], ["host_net_wait_kind", "network wait"]]) {
   jet.push("", `fn ${name}() -> I64 {`, "    text :: jet_rt_string_builder_new()");
-  const bytes = Buffer.from(message);
-  for (let at = 0; at < bytes.length; at += 8) {
-    const word = Buffer.alloc(8);
-    bytes.copy(word, 0, at, Math.min(at + 8, bytes.length));
-    jet.push(`    rt_text_push_word(text, I64{${word.readBigInt64LE()}}, I64{${Math.min(8, bytes.length - at)}})`);
-  }
+  if (staticTextWorthy(message)) jet.push(`    jet_rt_string_builder_push(text, ${staticText(message)})`);
+  else words(message, "rt_text_push_word(text, ");
   jet.push("    jet_rt_string_builder_finish(text)", "}");
 }
 for (const kind of kinds.filter((name) => name !== "ResourceLimit")) {

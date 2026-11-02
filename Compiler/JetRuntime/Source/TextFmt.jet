@@ -60,7 +60,7 @@ fn text_fmt_push_big(target: I64, value: I64) {
 fn text_fmt_next_digit(remainder: I64, bits: I64) -> I64 {
     float_big_mul(remainder, I64{10})
     word :: bits /% I64{32}
-    shift :: bits % I64{32}
+    shift :: bits.bit_and(I64{31})
     low :: float_big_limb(remainder, word) >> shift
     high :: if (shift == I64{0}) -> I64{0} else -> float_big_limb(remainder, word + I64{1}) << (I64{32} - shift)
     digit :: (low.bit_or(high)).bit_and(I64{15})
@@ -158,7 +158,10 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
         significand :: (rounded.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
         whole :: if {
             (rounded == I64{0}) -> I64{0}
-            (shift >= I64{0}) -> significand << shift
+            // rounded < 2^63: shift is at most 10.
+            (shift >= I64{0}) -> significand << shift.bit_and(I64{15})
+            // significand < 2^53.
+            (shift < I64{-52}) -> I64{0}
             else -> significand >> (-shift)
         }
         digits :: jet_rt_i64_to_string(whole)

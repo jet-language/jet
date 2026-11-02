@@ -49,10 +49,7 @@ fn numeric_parse_error(text: I64, integer: Bool) -> I64 {
 
 fn numeric_radix_empty() -> I64 {
     result :: rt_text_builder_with_capacity(I64{27})
-    rt_text_push_word(result, I64{2338042651316874857}, I64{8})
-    rt_text_push_word(result, I64{7310503796665508210}, I64{8})
-    rt_text_push_word(result, I64{7882742402838983800}, I64{8})
-    rt_text_push_word(result, I64{7959664}, I64{3})
+    jet_rt_string_builder_push(result, rt_static_text("integer radix text is empty"))
     result
 }
 
@@ -75,24 +72,14 @@ fn numeric_radix(radix: I64, err: I64) -> I64 {
     bound :: if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
     if !int_fits(radix, bound) {
         result :: rt_text_builder_with_capacity(I64{41})
-        rt_text_push_word(result, I64{7946918701727578213}, I64{8})
-        rt_text_push_word(result, I64{7935469422924537972}, I64{8})
-        rt_text_push_word(result, I64{8367816103688172655}, I64{8})
-        rt_text_push_word(result, I64{8532478930838381928}, I64{8})
-        rt_text_push_word(result, I64{4774132488612683877}, I64{8})
-        rt_text_push_word(result, I64{73}, I64{1})
+        jet_rt_string_builder_push(result, rt_static_text("exact Int does not fit the native i64 ABI"))
         sync_store(err, result)
         return I64{0}
     }
     value :: int_word(radix)
     if (value < I64{2} || value > I64{36}) {
         result :: rt_text_builder_with_capacity(I64{64})
-        rt_text_push_word(result, I64{2338042651316874857}, I64{8})
-        rt_text_push_word(result, I64{8461454976435380594}, I64{8})
-        rt_text_push_word(result, I64{7305437165358445683}, I64{8})
-        rt_text_push_word(result, I64{2319952416568866676}, I64{8})
-        rt_text_push_word(result, I64{2318287501403647585}, I64{8})
-        rt_text_push_word(result, I64{544501607}, I64{4})
+        jet_rt_string_builder_push(result, rt_static_text("integer radix must be between 2 and 36, got "))
         rt_text_push_number(result, value)
         sync_store(err, result)
         return I64{0}

@@ -73,6 +73,10 @@ fn trap_write_word(word: I64, count: I64) {
     trap_write_word_raw(word, count)
 }
 
+// A generated report literal's process-static text (rt_static_text): its
+// bytes are in the image, so writing them needs no heap.
+fn trap_write_static(text: I64) { trap_write(rt_text_data(text), rt_text_len(text)) }
+
 // Canonical host-defect rows can write without a GS probe or capture lookup.
 // The allocator's GS failure reaches this from every program, so its
 // arithmetic cannot stop: the count stays in 1..=8 and each shift is constant
@@ -348,15 +352,8 @@ fn trap_process_stop(code: I64, message: I64, message_len: I64) {
 // CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
 // Root rendering stays separate so task publication never prints a report.
 fn trap_native_index_range_stop() {
-    message :: jet_rt_alloc(I64{40}, I64{8})
-    trap_store(message, I64{5269323123273261422})
-    trap_store(wrapping(message + I64{8}), I64{7887324063362741358})
-    trap_store(wrapping(message + I64{16}), I64{7305815396256607845})
-    trap_store(wrapping(message + I64{24}), I64{8391173023733081189})
-    trap_store(wrapping(message + I64{32}), I64{111494907916832})
-    published :: rt_task_panic_publish(message, I64{38}, I64{1})
-    jet_rt_free(message, I64{40}, I64{8})
-    if published -> return
+    message :: trap_msg_native_index_range_text()
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
     trap_native_index_range_root()
 }
 
@@ -370,20 +367,8 @@ fn trap_native_index_range_root() {
 // Registered E3010 overflow: tasks carry the exact root message; the root
 // report stays unchanged even where the seed uses raw Rust arithmetic.
 #Export(c) fn jet_rt_panic_overflow() {
-    message :: jet_rt_alloc(I64{80}, I64{8})
-    trap_store(message, I64{7598242313330583636})
-    trap_store(wrapping(message + I64{8}), I64{2333824980546840692})
-    trap_store(wrapping(message + I64{16}), I64{8606216600190023279})
-    trap_store(wrapping(message + I64{24}), I64{7022836288847093875})
-    trap_store(wrapping(message + I64{32}), I64{8751655654842004844})
-    trap_store(wrapping(message + I64{40}), I64{2334386829960177008})
-    trap_store(wrapping(message + I64{48}), I64{7575182582412961138})
-    trap_store(wrapping(message + I64{56}), I64{7235441220371030131})
-    trap_store(wrapping(message + I64{64}), I64{7021710449270399077})
-    trap_store(wrapping(message + I64{72}), I64{694511470})
-    published :: rt_task_panic_publish(message, I64{76}, I64{1})
-    jet_rt_free(message, I64{80}, I64{8})
-    if published -> return
+    message :: trap_msg_overflow_text()
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
     trap_header(I64{1})
     trap_msg_overflow()
     trap_msg_prelude_end()
@@ -434,15 +419,13 @@ fn trap_native_index_range_root() {
 // String. Reuse the existing decimal formatter, including I64.MIN.
 fn trap_list_bounds_reason(len: I64, index: I64) -> I64 {
     message :: jet_rt_string_builder_new()
-    scratch :: jet_rt_alloc(I64{24}, I64{8})
     trap_build_msg_list_head(message)
-    coll_render_i64(message, scratch, len)
+    rt_text_push_number(message, len)
     trap_build_msg_list_noun(message, len)
     trap_build_msg_list_position(message)
-    coll_render_i64(message, scratch, index)
+    rt_text_push_number(message, index)
     rt_text_push_word(message, I64{8369779874393449504}, I64{8})
     rt_text_push_word(message, I64{128039039558944}, I64{6})
-    jet_rt_free(scratch, I64{24}, I64{8})
     message
 }
 
@@ -514,9 +497,7 @@ fn trap_host_fault(message: I64, length: I64) {
 fn rt_seq_capacity_overflow_stop() {
     trap_defect_prepare()
     jet_rt_stdout_flush()
-    trap_write_word(I64{8751735851445150051}, I64{8})
-    trap_write_word(I64{8028904877209317152}, I64{8})
-    trap_write_word(I64{119}, I64{1})
+    trap_write_static(rt_static_text("capacity overflow"))
     trap_msg_newline()
     trap_defect_exit(I64{101})
 }
@@ -559,14 +540,8 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
 // task-publication path. At root its header + message + prelude_end + footer
 // is byte-identical to jet_panic("<core.prelude>", 0, message).
 fn rt_record_variant_panic() {
-    message :: jet_rt_alloc(I64{33}, I64{8})
-    trap_store(message, I64{8511913738388071794})
-    trap_store(wrapping(message + I64{8}), I64{7575182590666699361})
-    trap_store(wrapping(message + I64{16}), I64{8391735665924334702})
-    trap_store(wrapping(message + I64{24}), I64{7453001576142499616})
-    trap_put(wrapping(message + I64{32}), I64{101})
-    jet_rt_panic_message(message, I64{33})
-    jet_rt_free(message, I64{33}, I64{8})
+    message :: rt_static_text("record variant index out of range")
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
 }
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {

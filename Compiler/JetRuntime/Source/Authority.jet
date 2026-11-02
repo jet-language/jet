@@ -84,16 +84,9 @@ fn authority_narrow_failure(requested: I64) -> I64 {
     if (length > I64{9223372036854775807} - I64{60}) -> rt_text_capacity_stop()
     message :: rt_text_builder_with_capacity(length + I64{60})
     // One exact seed message: E0712: authority cannot narrow to `...` outside its held rights.
-    rt_text_push_word(message, I64{6998657808182227013}, I64{8})
-    rt_text_push_word(message, I64{8751735916104021109}, I64{8})
-    rt_text_push_word(message, I64{2338616626601091872}, I64{8})
-    rt_text_push_word(message, I64{8367819428199555438}, I64{8})
-    rt_text_push_word(message, I64{6299759}, I64{3})
+    jet_rt_string_builder_push(message, rt_static_text("E0712: authority cannot narrow to `"))
     rt_text_append(message, rt_text_data(requested), length)
-    rt_text_push_word(message, I64{7235441220371030112}, I64{8})
-    rt_text_push_word(message, I64{7307126075655004261}, I64{8})
-    rt_text_push_word(message, I64{8388068008561501292}, I64{8})
-    rt_text_push_word(message, I64{115}, I64{1})
+    jet_rt_string_builder_push(message, rt_static_text("` outside its held rights"))
     // NL21: seed raw Rust panic/exit101 is a seed defect. Use the one Jet panic
     // mechanism (task publication, otherwise root report/exit70), not a new stop.
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
