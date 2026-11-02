@@ -1,15 +1,17 @@
 // Claims ported from crates/jetpack/src/Trust.rs #[cfg(test)]. Each claim
 // uses its own scratch directory from `files.tmpdir`.
-use jet_pkg_model.[PackageGateError, RefSource, RefSpec, SourceTable]
-use jet_env_model.[SecretSpec]
-use jetpack_trust.[
-    TrustAuthority, TrustGrant, trust_add_grant, trust_add_pattern, trust_env_definition_hash,
-    trust_flake_definition_hash, trust_gate, trust_gate_build_identity, trust_gate_flake,
-    trust_grant_hash, trust_is_env_trusted, trust_is_trust_sensitive, trust_is_trust_sensitive_ext,
-    trust_is_trusted, trust_list_entries, trust_parse_grant_selector, trust_remove_pattern,
-]
-use jetpack_foundation.[PACKAGE_FILE, TRUST_SCOPE_REPO, TRUST_SCOPE_USER, Theme]
-use core.files as files
+use {
+    jet_pkg_model.[PackageGateError, RefSource, RefSpec, SourceTable]
+    jet_env_model.[SecretSpec]
+    jetpack_trust.[
+        TrustAuthority, TrustGrant, trust_add_grant, trust_add_pattern, trust_env_definition_hash,
+        trust_flake_definition_hash, trust_gate, trust_gate_build_identity, trust_gate_flake,
+        trust_grant_hash, trust_is_env_trusted, trust_is_trust_sensitive, trust_is_trust_sensitive_ext,
+        trust_is_trusted, trust_list_entries, trust_parse_grant_selector, trust_remove_pattern,
+    ]
+    jetpack_foundation.[PACKAGE_FILE, TRUST_SCOPE_REPO, TRUST_SCOPE_USER, Theme]
+    files :: core.files
+}
 
 // The directory outlives this helper, so it is a `tmpdir`: a `temp_dir` would
 // remove it when its `TempDir` drops at return (#6119).

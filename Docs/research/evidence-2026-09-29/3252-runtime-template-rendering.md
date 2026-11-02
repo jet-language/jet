@@ -11,7 +11,7 @@ the runtime-template job relate to the existing text and format owners?
   over `Core/` found no match. grep `(?i)template|catalog|gettext` over
   `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet` found no match.
 - Ran a probe, `~/.cache/jet-dev/scratch/Closer05/t3252/probe.jet`
-  (`use core.text.template as template`, `template.parse_html(...)`), on snapshot14 (result below).
+  (`use template :: core.text.template`, `template.parse_html(...)`), on snapshot14 (result below).
 - Read the owners: `Core/text/html.jet:16-86` (`escape`, `escape_quote`, `attr_escape`,
   `text_escape`, `unescape`, `strip_tags`), `Core/text/fmt.jet` (number/pad/plural helpers),
   `Docs/spec/spec.md:62-89` (compile-time `{expr}` interpolation, the closed selector rail,

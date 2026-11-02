@@ -3,9 +3,11 @@
 // has zero native bodies (#4494/#4409); ProjectParts.scan_with_overlays and
 // should_index are the sole original project indexing policy, unpublished.
 // No String filesystem facade: discovery and membership retain native OSPath.
-use core.files.runtime.kernel_path_components as lsp_workspace_path
-use core.files.host.retained_descriptor as lsp_workspace_fs
-use jet_semindex.[SymbolDB]
+use {
+    lsp_workspace_path :: core.files.runtime.kernel_path_components
+    lsp_workspace_fs :: core.files.host.retained_descriptor
+    jet_semindex.[SymbolDB]
+}
 
 fn lsp_merge_workspace_defs(server: LSPServer, current: LSPDocument, db: &SymbolDB) Never! -[FS, Env]> {
     loop row in lsp_workspace_sources(server, Val(current.path)) {

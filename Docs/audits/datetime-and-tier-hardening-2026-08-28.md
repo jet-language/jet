@@ -31,7 +31,7 @@ turns the two escape routes those defects used into checked contracts.
 | 2 | **Core time types render structurally on default, and release ignores `:Debug`/`:Pretty`** | `print(zone)`: default `Zone(name: Europe/London, offset: 3600)`, release `Europe/London`; `{dt:Debug}`: default correct, release prints bare form | **#2281 P0** |
 | 3 | **No equality/ordering on time types**; E0312 Why-text leaks a literal `?` placeholder | `DateTime == DateTime` → E0312 "field `?` doesn't support `==`"; `<` → E0109 | **#2282 P1** |
 | 4 | **`Duration.in(unit)` is registered but uncallable** — `in` is the reserved loop keyword | `a.in(.Nanoseconds)` → E0003 | **#2283 P2** |
-| 5 | **Datetime default-tier E0956 rows** (used results): `from_unix_ms`, `new`, `parse`, `datetime`, `local_time`; census adds `core.compiler.{lex,parse,check,source_map}`, `core.testing.{corpus,test_suite}` | same programs succeed on `--release` | **#2252 → P0** |
+| 5 | **Datetime default-tier E0956 rows** (used results): `from_unix_ms`, `new`, `parse`, `datetime`, `local_time`; census adds `core.compiler.[lex,parse,check,source_map]`, `core.testing.[corpus,test_suite]` | same programs succeed on `--release` | **#2252 → P0** |
 
 Discarded after verification: the JETDT lane's "`Clock.wait` hangs on release" claim — re-run
 completes in 14s; lane-timeout artifact, not a defect.

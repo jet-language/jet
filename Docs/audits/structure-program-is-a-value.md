@@ -83,7 +83,7 @@ Today the compiler knows a name is dead and says nothing. Probed this run — th
 
 ```jet
 // today: jet check says "ok: no problems"
-use core.files as files      // never used
+use files :: core.files // never used
 
 fn unused_helper() => Int {  // never called
     return 7
@@ -99,7 +99,7 @@ Proposed: each dead name gets one registered verdict — unused import, unused b
 
 ```jet
 // proposed verdicts, spelled with today's ratified escape
-use core.files as files     // warn: import `files` is never used — remove it, or name it `_files`
+use files :: core.files // warn: import `files` is never used — remove it, or name it `_files`
 dead :: 5                   // warn: `dead` is never read — remove it, or name it `_dead`
 fn _unused_helper() ...     // silent: `_` already means "internal / intentionally unreferenced"
 ```
@@ -239,7 +239,7 @@ The same growing program, today and after. A small service that started as a scr
 
 ```jet
 // app/api.jet — today: dead import silent, old API used silently, layering unenforced
-use core.files as files                     // dead since the refactor; nothing will ever say so
+use files :: core.files // dead since the refactor; nothing will ever say so
 
 #Policy(trace("api.config"))                // shipped today (D-CALLPOLICY1=E)
 fn config(req: HTTPRequest) => HTTPResponse {

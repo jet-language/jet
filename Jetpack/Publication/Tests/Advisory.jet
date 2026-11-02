@@ -16,29 +16,31 @@
 // existing Hangar provenance cli_cmd_audit. Reachable engine cases below.
 // Native: #3593/#3597, compiler #4303/#4322/#4414/#4427/#4438,
 // parser #3598 retained. No alternate clock or copied trim workaround.
-use jet_foundation.[Diagnostic]
-use jet_pkg_model.[LockFile, LockSource, LockedPackage, PackagePolicyException]
-use jetpack_publication.[
-    PUBLICATION_ADVISORY_FEED_MAGIC, PUBLICATION_U64_MAX, PublicationAdvisory,
-    PublicationAdvisoryException, PublicationAdvisoryFeed, PublicationAdvisoryPolicy,
-    PublicationAdvisoryReceipt, PublicationAdvisoryTrustRoot, PublicationDiagnosticError,
-    PublicationSemVer, PublicationSeverity, PublicationSourceClass, publication_advisory_affects,
-    publication_advisory_feed_digest, publication_advisory_feed_payload, publication_advisory_feed_text,
-    publication_advisory_key_id, publication_advisory_saturating_add, publication_audit_lockfile,
-    publication_authorize_registry_candidate,
-    publication_authorize_registry_candidate_with_source_exception, publication_e2607,
-    publication_e2609, publication_parse_advisory_feed, publication_parse_advisory_trust,
-    publication_parse_semver, publication_parse_severity, publication_parse_source_class,
-    publication_sign_bytes, publication_verify_advisory_feed,
-    publication_audit_advisory_feed, publication_audit_advisory_feed_with_source_exceptions,
-    publication_e2604, publication_keygen, publication_load_advisory_policy,
-    publication_lock_maturity_diagnostics, publication_sign_advisory_feed, publication_source_class_label,
-]
-use core.crypto as crypto
-use core.encoding.hex as hex
-use core.files as files
-use core.sys as sys
-use core.crypto as publication_advisory_crypto
+use {
+    jet_foundation.[Diagnostic]
+    jet_pkg_model.[LockFile, LockSource, LockedPackage, PackagePolicyException]
+    jetpack_publication.[
+        PUBLICATION_ADVISORY_FEED_MAGIC, PUBLICATION_U64_MAX, PublicationAdvisory,
+        PublicationAdvisoryException, PublicationAdvisoryFeed, PublicationAdvisoryPolicy,
+        PublicationAdvisoryReceipt, PublicationAdvisoryTrustRoot, PublicationDiagnosticError,
+        PublicationSemVer, PublicationSeverity, PublicationSourceClass, publication_advisory_affects,
+        publication_advisory_feed_digest, publication_advisory_feed_payload, publication_advisory_feed_text,
+        publication_advisory_key_id, publication_advisory_saturating_add, publication_audit_lockfile,
+        publication_authorize_registry_candidate,
+        publication_authorize_registry_candidate_with_source_exception, publication_e2607,
+        publication_e2609, publication_parse_advisory_feed, publication_parse_advisory_trust,
+        publication_parse_semver, publication_parse_severity, publication_parse_source_class,
+        publication_sign_bytes, publication_verify_advisory_feed,
+        publication_audit_advisory_feed, publication_audit_advisory_feed_with_source_exceptions,
+        publication_e2604, publication_keygen, publication_load_advisory_policy,
+        publication_lock_maturity_diagnostics, publication_sign_advisory_feed, publication_source_class_label,
+    ]
+    crypto :: core.crypto
+    hex :: core.encoding.hex
+    files :: core.files
+    sys :: core.sys
+    publication_advisory_crypto :: core.crypto
+}
 
 fn publication_advisory_test_version(raw: String) -> PublicationSemVer Never! {
     publication_parse_semver(raw) ?? panic("invalid advisory test version")

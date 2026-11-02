@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {ownedWrapperRuntimeUnit} from './check-core-surface-ledger.mjs';
 
-const importUnit = 'use core.text.runtime.copy as kernel\n';
+const importUnit = 'use kernel :: core.text.runtime.copy\n';
 test('default-public function wrappers expose their runtime provider', () => {
     assert.equal(ownedWrapperRuntimeUnit(importUnit + 'fn copy() -> Int { kernel.copy() }\n', 'core.text', 'copy'), 'core.text.runtime.copy');
 });
@@ -10,7 +10,7 @@ test('current declaration annotations do not hide runtime wrappers', () => {
     assert.equal(ownedWrapperRuntimeUnit(importUnit + '#Unsafe("validated carrier") fn copy() -> Int { kernel.copy() }\n', 'core.text', 'copy'), 'core.text.runtime.copy');
 });
 test('selective member aliases expose the same runtime provider', () => {
-    const source = 'use core.text.runtime.copy.[copy as raw_copy]\nfn copy() -> Int { raw_copy() }\n';
+    const source = 'use raw_copy :: core.text.runtime.copy.copy\nfn copy() -> Int { raw_copy() }\n';
     assert.equal(ownedWrapperRuntimeUnit(source, 'core.text', 'copy'), 'core.text.runtime.copy');
 });
 test('a compiler-owned provider call is not a runtime cutover', () => {

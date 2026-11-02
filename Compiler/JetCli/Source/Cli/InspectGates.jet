@@ -1,14 +1,16 @@
 // Source/CmdGates.rs: load-only ledger consumer. The package/lock writers
 // (GateProjection.jet) read the canonical package facts and lock; the CLI
 // never checks bodies here.
-use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverGateQueryResult, JetDriverSourceQueryModule, JetDriverVerbOutput, jet_driver_gate_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[
-    GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse,
-    gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at,
-    diagnostic_render_all, diagnostic_from_registry, SourceFile,
-    BuildOptionChoice, BuildOptionLayer, BuildOptionsResolved, build_option_flags, build_option_removes_check,
-]
-use jetpack_trust.[TrustRecord]
+use {
+    jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverGateQueryResult, JetDriverSourceQueryModule, JetDriverVerbOutput, jet_driver_gate_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[
+        GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse,
+        gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at,
+        diagnostic_render_all, diagnostic_from_registry, SourceFile,
+        BuildOptionChoice, BuildOptionLayer, BuildOptionsResolved, build_option_flags, build_option_removes_check,
+    ]
+    jetpack_trust.[TrustRecord]
+}
 
 fn jet_cli_gates_entry(args: [String]) -> String? Never! {
     skip := false

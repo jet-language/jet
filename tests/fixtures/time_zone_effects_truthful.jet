@@ -1,8 +1,10 @@
 // Named-zone lookup is civil policy: Env and FS.Read, never ambient Time.
-use core as core
-use core.time as time
-use core.time as tz
-use core.time.[zone, parse_zoned]
+use {
+    core :: core
+    time :: core.time
+    tz :: core.time
+    core.time.[zone, parse_zoned]
+}
 
 fn configured(name: String) -[Env, FS.Read]> Zone TimeError! { time.zone(name) }
 fn parsed(text: String) -[Env, FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(text) }

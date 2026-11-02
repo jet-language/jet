@@ -4,12 +4,14 @@
 // Report/Diagnostic and card #4204 helper propagation; real stdio host loop
 // (L19) calls lsp_flush_dirty before every id-bearing request (Rust197–199).
 // These are dependencies, never successful unavailable providers or callbacks.
-use core.term as lsp_diag_term
-use core.text as lsp_diag_text
-use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult]
-use jet_foundation.[Diagnostic, Span, DIAGNOSTIC_LINT, foundation_json_quote]
-use jetpack_foundation.[ReportPath]
-use core.files.runtime.kernel_path_components as lsp_diag_path
+use {
+    lsp_diag_term :: core.term
+    lsp_diag_text :: core.text
+    jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult]
+    jet_foundation.[Diagnostic, Span, DIAGNOSTIC_LINT, foundation_json_quote]
+    jetpack_foundation.[ReportPath]
+    lsp_diag_path :: core.files.runtime.kernel_path_components
+}
 
 // Rust346–348: one actual Stdout write and flush. Byte count is not Jet's
 // scalar String.len. IO errors propagate before any publication-state commit.

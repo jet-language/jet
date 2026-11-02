@@ -94,7 +94,7 @@ jet_call(m, "on_save", args, &result);         // effects limited to what `api` 
 On the Jet side the extension is ordinary Jet. Its effects show what it may touch:
 
 ```jet
-use editor                                  // the host's API, declared as a Jet trait
+use editor // the host's API, declared as a Jet trait
 
 #On(editor.buffer_saved)
 fn format_on_save(buf: editor.Buffer) -[editor.Edit]> () {

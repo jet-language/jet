@@ -1,13 +1,15 @@
 // Rust: tests/canvas_scenarios.rs:1
 // Stdlib-only browser scenarios for Canvas.
-use std.[fs, env, process, thread]
-use std.net.[TcpListener, TcpStream]
-use std.process.[Child, Command, Stdio]
-use std.sync.[Condvar, Mutex, OnceLock]
-use std.sync.atomic.[AtomicU64, Ordering]
-use std.time.[Duration, Instant]
-use std.io.[BufReader, ErrorKind]
-use jet.SHA256.[sha256_hex]
+use {
+    std.[fs, env, process, thread]
+    std.net.[TcpListener, TcpStream]
+    std.process.[Child, Command, Stdio]
+    std.sync.[Condvar, Mutex, OnceLock]
+    std.sync.atomic.[AtomicU64, Ordering]
+    std.time.[Duration, Instant]
+    std.io.[BufReader, ErrorKind]
+    jet.SHA256.[sha256_hex]
+}
 // GATE #4494: actual native process/thread/synchronization/socket/filesystem providers.
 // GATE #4483: selected-family dispatch for native process-tree cleanup.
 // GATE #4409: artifact cleanup preserves NotFound error-kind distinction.
@@ -74,14 +76,14 @@ CALLBACK_DEMO :: "fn on_start() {{\n    print(\"start\")\n}}\n\nfn helper() -> I
 // Rust: tests/canvas_scenarios.rs:338
 DEBUG_DEMO :: "fn helper() -> Int {{\n    return 1\n}}\n\nfn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn summarize(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{\n        return total\n    }} else {{\n        return total + 1\n    }}\n}}\n\nfn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {{\n    print(limit)\n}}\n\nfn run() {{\n    value := summarize(4)\n    print(value)\n    print(value)\n}}\n"
 // Rust: tests/canvas_scenarios.rs:366
-EVENTS_PANEL_SOURCE :: "use core.event as event\n\nfn dev() {{\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, n -> print(\"clicked {{n}}\"))\n    clicked.once(scope, n -> print(\"once {{n}}\"))\n    print(&clicked.emit(1).summary())\n    scope.cancel()\n}}\n\nfn run() {{\n    dev()\n}}\n"
+EVENTS_PANEL_SOURCE :: "use event :: core.event\n\nfn dev() {{\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, n -> print(\"clicked {{n}}\"))\n    clicked.once(scope, n -> print(\"once {{n}}\"))\n    print(&clicked.emit(1).summary())\n    scope.cancel()\n}}\n\nfn run() {{\n    dev()\n}}\n"
 
 // Rust: tests/canvas_scenarios.rs:382
 struct BigFixtureFacts { file_count: USize, function_count: USize, source_bytes: USize, source_sha256: String }
 // Rust: tests/canvas_scenarios.rs:389
 fn write_big_fixture(dir: OSPath) -> BigFixtureFacts {
     main := String.new()
-    loop module_ref in 0..BIG_MODULE_COUNT -> main.push_str("use \"./part_{module_ref:02}\" as p{module_ref:02}\n")
+    loop module_ref in 0..BIG_MODULE_COUNT -> main.push_str("use p :: \"./part_{module_ref:02}\"{module_ref:02}\n")
     main.push('\n')
     main.push_str("fn run() {{\n")
     loop function in 0..BIG_FUNCTION_COUNT {
@@ -266,7 +268,7 @@ struct CanvasCase {
             fs.write(dir.join("package.jet"), "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: {{\n    cli: .Executable{{ name: \"cli\", entry: run }}\n    service: .Service{{ name: \"service\", entry: serve }}\n    web: .Executable{{ name: \"web\", entry: web }}\n    ui: .Executable{{ name: \"ui\", entry: ui }}\n    game: .Executable{{ name: \"game\", entry: game }}\n    library: .Library{{ name: \"library\", entry: run }}\n    build: .Check{{ name: \"build\", entry: build }}\n}}\ndefaults: {{ run: cli }}\n").expect("write Canvas session matrix package fixture")
             fs.write(dir.join("env.jet"), "module env.dev {{\n    prompt: \"canvas-session-matrix\",\n    services: {{ custom_server: {{ enable: false, ports: [43817], run: [\"node\", \"custom-server.mjs\"], ready: \"custom-server-ready\" }}, canvas_service: {{ enable: true, run: [\"node\", \"--eval\", \"console.log('canvas-service-ready'); setInterval(() -> {{{{}}}}, 1000);\"] }} }},\n}}\n").expect("write Canvas session matrix environment fixture")
             fs.write(dir.join("custom-server.mjs"), "import http from \"node:http\";\nconst server = http.createServer((request, response) -> {{\n    response.setHeader(\"content-type\", \"text/plain\");\n    response.end(request.url === \"/health\" ? \"custom-server-ready\" : \"custom-server\");\n}});\nserver.listen(43817, \"127.0.0.1\", () => console.log(\"custom-server-ready\"));\nprocess.on(\"SIGTERM\", () => server.close(() => process.exit(0)));\n").expect("write Canvas custom server fixture")
-            fs.write(entry, "use core.term as io\n\nfn run() {{ io.print(\"cli\") }}\nfn serve() {{ io.print(\"service\") }}\nfn web() {{ io.print(\"web\") }}\nfn ui() {{ io.print(\"ui\") }}\nfn game() {{ io.print(\"game\") }}\n\nfn build(b: Build) {{\n}}\n").expect("write Canvas session matrix source fixture")
+            fs.write(entry, "use io :: core.term\n\nfn run() {{ io.print(\"cli\") }}\nfn serve() {{ io.print(\"service\") }}\nfn web() {{ io.print(\"web\") }}\nfn ui() {{ io.print(\"ui\") }}\nfn game() {{ io.print(\"game\") }}\n\nfn build(b: Build) {{\n}}\n").expect("write Canvas session matrix source fixture")
             none
         } else {
             if name == "library-panel" || name == "library-panel-events" {

@@ -15,6 +15,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const outDir = process.argv[2];
@@ -43,9 +44,9 @@ function item(path, head) {
 const coreUses = new Set();
 function body(path) {
   const kept = [];
-  for (const line of read(path).split("\n")) {
+  for (const line of unblockUses(read(path)).split("\n")) {
     if (/^use jet_\w+/.test(line)) continue;
-    if (/^use core\./.test(line)) {
+    if (/^use (?:\w+ :: )?core\./.test(line)) {
       coreUses.add(line);
       continue;
     }

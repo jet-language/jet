@@ -1700,7 +1700,7 @@ await app.listen(3000);
 **Current Jet HTTP spelling, source-derived and NOT RUN here.** It uses the existing function-first API. It does not invent a route decorator.
 
 ```jet
-use core.http.server as server
+use server :: core.http.server
 
 fn greeting() String -> "hello"
 fn run() {
@@ -1713,7 +1713,7 @@ fn run() {
 **Current typed form program, condensed for display; not the byte-exact executed input.** This fence preserves the program tokens but collapses the struct and blank lines. The complete 294-byte input is retained in [form-contract.jet](#capture-60bffdc1bacd) and the [input witness bundle](#exact-witnesses). Only those exact bytes match frozen input SHA-256 `72facb9077dbb3168de2278f426ef4ae4df4b48dd19ee03931b829463984772e`.
 
 ```jet
-use core.web as web
+use web :: core.web
 struct Input { name: String }
 fn save(input: Input) String -> "saved {input.name}"
 fn run() {
@@ -2682,7 +2682,7 @@ The complete five-line current-source illustration, exact hash/point and concret
 `D-READ-LOGSITE1` proposes a separate, optional site object in the existing log record. The current call remains:
 
 ```jet
-use core.log as log
+use log :: core.log
 fn run() {
     item :: "row"
     log.info_fields("Saved {item}", [log.field("event", "row.saved")])
@@ -2927,7 +2927,7 @@ This compact transcription combines the tutorial's `block_start` and `output` te
 **Ratified launch, with a proposed typed-construction completion:**
 
 ```jet
-use core.compute as compute
+use compute :: core.compute
 
 #Kernel(.parallel)
 fn add(left: F32, right: F32) F32 -> left + right
@@ -3502,7 +3502,7 @@ print(result.stdout)
 ```
 
 ```jet
-use core.process as process
+use process :: core.process
 
 fn run() {
     target :: "directory with spaces;*.tmp"
@@ -3816,8 +3816,10 @@ The files are copied from `examples/features/modules/imports/`.
 
 ```jet
 // run.jet
-use "scoring"
-use util as text
+use {
+    "scoring"
+    text :: util
+}
 
 fn run() {
     print(scoring.letter(91))
@@ -3975,7 +3977,7 @@ The signature preview is a new product choice. The final closure in section 8 ad
 
 | Category | Exact result within this scope |
 | --- | --- |
-| Syntax | No new module/effect syntax justified. Current `use "scoring"`, `use util as text` and ordinary function calls are enough for the worked change. The analyst's `=`/`::` mistake is not a syntax defect finding |
+| Syntax | No new module/effect syntax justified. Current `use "scoring"`, `use text :: util` and ordinary function calls are enough for the worked change. The analyst's `=`/`::` mistake is not a syntax defect finding |
 | Ergonomics | E0104 identifies expected/actual arity but leaves caller-value choice to the user. A preview can gather the known edits without guessing that choice |
 | Surfaces | Existing `jet inspect` planes, `jet.impact` and `jet.reasoning` avoid a new graph command. Advertised editor commands are not verified feature coverage |
 | APIs, types and methods | Preserve `scoring.letter` declaration identity and checked parameter/result/failure facts. `ReverdictReceipt` is work evidence. `print` callable-view consistency remains worth checking |
@@ -51530,7 +51532,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.encoding.json as json
+use json :: core.encoding.json
 
 #[Codable, DenyUnknownFields]
 struct CountRecord {
@@ -51584,7 +51586,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.encoding.json as json
+use json :: core.encoding.json
 
 #Codable
 #DenyUnknownFields
@@ -51651,7 +51653,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.compute as compute
+use compute :: core.compute
 
 #Kernel(.parallel) fn lane_add(left: Int, right: Int) Int -> left + right
 
@@ -51675,11 +51677,13 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.encoding.json as json
-use core.files as files
-use core.http as http
-use core.archive as archive
-use core.args as args
+use {
+    json :: core.encoding.json
+    files :: core.files
+    http :: core.http
+    archive :: core.archive
+    args :: core.args
+}
 
 fn run() {
     print("corelib-import-control")
@@ -51729,7 +51733,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.encoding.json as json
+use json :: core.encoding.json
 
 #Codable
 struct CountRecord {
@@ -51823,7 +51827,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.compute as compute
+use compute :: core.compute
 
 fn run() {
     plain :: compute.full([1, 1], 2.0) ?? panic("plain")
@@ -51945,7 +51949,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.compute as compute
+use compute :: core.compute
 
 fn run() {
     plain :: compute.full([1, 1], 2.0) ?? panic("plain")
@@ -51983,8 +51987,10 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use "scoring"
-use util as text
+use {
+    "scoring"
+    text :: util
+}
 
 fn run() {
     print(scoring.letter(91))
@@ -52033,8 +52039,10 @@ fn shout(msg: String) String -> "{msg}!"
 **Complete literal input:**
 
 ```jet
-use "scoring"
-use util as text
+use {
+    "scoring"
+    text :: util
+}
 
 fn run() {
     print(scoring.letter(91, 0))
@@ -52143,8 +52151,10 @@ fn letter(value: Int) String -> "other:{value}"
 **Complete literal input:**
 
 ```jet
-use "scoring"
-use util as text
+use {
+    "scoring"
+    text :: util
+}
 
 fn run() {
     print(scoring.letter(91))
@@ -52165,7 +52175,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.web as web
+use web :: core.web
 
 struct Input {
     name: String
@@ -52279,7 +52289,7 @@ fn run() {
 // 67 — scope-exit cleanup via core.mem.scope.guard (D-DEFER1 option B).
 // Guard fires on every exit path — normal return, early return, and `?`
 // propagation. Multiple guards in the same scope drop LIFO.
-use core.mem.scope as scope
+use scope :: core.mem.scope
 
 #Error
 enum Fail {
@@ -52360,7 +52370,7 @@ fn run() {
 **Complete literal input:**
 
 ```jet
-use core.mem.scope as scope
+use scope :: core.mem.scope
 
 fn guarded() {
     _a :: scope.guard(() -> print("close a"))
@@ -60508,7 +60518,7 @@ Captured at UTC: `2026-09-11T21:43:35Z`
         if matches!(method, "call" | "call_int" | "call_bool" | "call_text") {
             self.diags.push(Diagnostic::error(
                 "E1257",
-                format!("`Plugin.{method}` is retired"),
+                format!("`Plugin.[method]` is retired"),
                 "plugin handles expose the frozen named exports of their registered Component interface"
                     .to_string(),
                 "write the plugin's exported method directly, for example `plugin.index(rows)`"
@@ -60551,7 +60561,7 @@ Captured at UTC: `2026-09-11T21:43:35Z`
 Retained prefix only. The closing brace on source line 29 was not captured.
 
 ```jet
-use core.plugin as plugin
+use plugin :: core.plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])
@@ -60583,7 +60593,7 @@ Captured at UTC: `2026-09-11T21:43:35Z`
 ### Lines 4–12
 
 ```jet
-use core.plugin as plugin
+use plugin :: core.plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])

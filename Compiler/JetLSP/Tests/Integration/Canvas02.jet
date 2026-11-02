@@ -1,8 +1,10 @@
 // Private continuation of the Canvas integration suite; shared helpers/constants
 // are the sole declarations in Canvas.jet. No duplicate test filesystem provider.
-use jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, query_json_for_entry, apply_transaction_json, apply_project_transaction_json, source_revision]
-use jet.[format_source]
-use std.[fs, sync, thread, env]
+use {
+    jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, query_json_for_entry, apply_transaction_json, apply_project_transaction_json, source_revision]
+    jet.[format_source]
+    std.[fs, sync, thread, env]
+}
 // GATE #4494: actual native filesystem, Barrier/Arc and thread providers.
 
 // Rust: tests/canvas.rs:1776
@@ -431,7 +433,7 @@ use std.[fs, sync, thread, env]
     entry :: dir.join("main.jet")
     fs.write(entry, "fn helper() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    print(helper())\n}}\n").unwrap()
     other :: dir.join("other.jet")
-    fs.write(other, "use \"./main\" as main\n\nfn use_helper() -> Int {{\n    return main.helper()\n}}\n").unwrap()
+    fs.write(other, "use main :: \"./main\"\n\nfn use_helper() -> Int {{\n    return main.helper()\n}}\n").unwrap()
     unrelated :: dir.join("unrelated.jet")
     fs.write(unrelated, "fn helper() -> Int {{\n    return 99\n}}\n\nfn local() -> Int {{\n    return helper()\n}}\n").unwrap()
     project :: project_json_for_entry(entry)
@@ -508,7 +510,7 @@ use std.[fs, sync, thread, env]
     wired_after :: fs.read_to_string(wired_path).unwrap()
     assert(wired_after.find("limit :: 4").unwrap() < wired_after.find("square(limit)").unwrap(), wired_after)
     assert_eq(format_source(wired_after).unwrap(), wired_after)
-    core_path :: write_fixture("actions_core_insert", "use core.math as math\n\nfn run() {{\n    print(1)\n}}\n")
+    core_path :: write_fixture("actions_core_insert", "use math :: core.math\n\nfn run() {{\n    print(1)\n}}\n")
     core_src :: fs.read_to_string(core_path).unwrap()
     core_revision :: source_revision(core_src)
     core_actions_req :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{core_revision}\"}}"
@@ -528,9 +530,9 @@ use std.[fs, sync, thread, env]
     synth_insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{synth_revision}\",\"graph_id\":\"{synth_run_graph_id}\",\"callee\":\"core.encoding.decode\",\"args\":[\"\\\"canvas\\\"\"]}}"
     synth_out :: apply_transaction_json(synth_path, synth_insert).expect("core insert_call should synthesize import")
     assert(synth_out.contains("\"changed\":true"), synth_out)
-    assert(synth_out.contains("use core.encoding.json as json"), "transaction result should include synthesized Core import: {synth_out}")
+    assert(synth_out.contains("use json :: core.encoding.json"), "transaction result should include synthesized Core import: {synth_out}")
     synth_after :: fs.read_to_string(synth_path).unwrap()
-    assert(synth_after.contains("use core.encoding.json as json"), synth_after)
+    assert(synth_after.contains("use json :: core.encoding.json"), synth_after)
     assert(synth_after.contains("json.decode(\"canvas\") ?? panic(\"canvas\")"), synth_after)
     synth_reproject :: graph_json_for_file(synth_path).expect("synth reproject")
     assert(synth_reproject.contains("\"title\":\".decode\""), "reproject should show inserted Core function node: {synth_reproject}")
@@ -543,7 +545,7 @@ use std.[fs, sync, thread, env]
     fs.write(dir.join(".jet/bindings/js/plotly.jet"), "// jet-ffi-descriptor={descriptor}\nfn println() -> Int {{\n    return 1\n}}\n").unwrap()
     fs.write(dir.join("helper.jet"), "priv module internal {{\n    fn hidden(n: Int) -> Int {{\n        return n\n    }}\n}}\n\nfn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn noisy(n: Int) -[IO]> Int {{\n    print(n)\n    return n\n}}\n").unwrap()
     path :: dir.join("main.jet")
-    src :: "use \"./helper\" as h\nuse js.plotly as plot\n\nfn run() {{\n    print(plot.println())\n    print(h.square(2))\n}}\n"
+    src :: "use h :: \"./helper\"\nuse plot :: js.plotly\n\nfn run() {{\n    print(plot.println())\n    print(h.square(2))\n}}\n"
     fs.write(path, src).unwrap()
     request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(src)}\"}}"
     actions :: query_json_for_file(path, request).expect("actions query")
@@ -592,7 +594,7 @@ use std.[fs, sync, thread, env]
     dir :: temp_dir("actions_nested_import")
     fs.write(dir.join("helper.jet"), "module tools {{\n    fn square(n: Int) -> Int {{\n        return n * n\n    }}\n}}\n").unwrap()
     path :: dir.join("main.jet")
-    src :: "use \"./helper\" as h\n\nfn run(limit: Int) {{\n    print(limit)\n}}\n"
+    src :: "use h :: \"./helper\"\n\nfn run(limit: Int) {{\n    print(limit)\n}}\n"
     fs.write(path, src).unwrap()
     request :: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{source_revision(src)}\"}}"
     actions :: query_json_for_file(path, request).expect("nested actions query")
@@ -616,7 +618,7 @@ use std.[fs, sync, thread, env]
 }
 // Rust: tests/canvas.rs:3327
 #Test("canvas_core_catalog_browses_canonical_core_library_without_write_authority") {
-    path :: write_fixture("core_catalog", "use core.math as m\n\nfn run() {{\n    print(\"core\")\n}}\n")
+    path :: write_fixture("core_catalog", "use m :: core.math\n\nfn run() {{\n    print(\"core\")\n}}\n")
     src :: fs.read_to_string(path).unwrap()
     revision :: source_revision(src)
     query :: "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{revision}\",\"query\":\"\"}}"
@@ -648,7 +650,7 @@ use std.[fs, sync, thread, env]
     insert :: "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{source_revision(source)}\",\"graph_id\":\"{graph_id}\",\"callee\":\"math.abs\",\"args\":[\"1\"]}}"
     apply_transaction_json(path, insert).expect("default alias insert should synthesize Core import")
     after :: fs.read_to_string(path).unwrap()
-    assert(after.contains("use core.math as math"), after)
+    assert(after.contains("use math :: core.math"), after)
     assert(after.contains("math.abs(1)"), after)
     assert_eq(format_source(after).unwrap(), after)
 }

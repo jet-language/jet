@@ -26,68 +26,70 @@
 // `sema_generic_modules_expand`. Module constants are never registered by
 // Rust, so they are dropped. A module that imports Core or a foreign
 // namespace keeps its functions in its body.
-use core.text as unicode
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    BindPattern,
-    Binding,
-    Call,
-    CallArg,
-    CodeModule,
-    ContextField,
-    ContractClause,
-    Diagnostic,
-    EnumDef,
-    EnumLitArg,
-    ErrorConvDef,
-    Expr,
-    ExprField,
-    ExprPair,
-    Field,
-    ForKind,
-    Func,
-    ImplConstValue,
-    ImplDef,
-    ImportDecl,
-    Item,
-    LValue,
-    Lambda,
-    LambdaBody,
-    LambdaParam,
-    Marker,
-    MarkerCallArg,
-    Measure,
-    MeasureRule,
-    sema_casing_pascal_words,
-    NamedSpan,
-    NamedType,
-    OrFallback,
-    Param,
-    Program,
-    Span,
-    Stmt,
-    StrPart,
-    StructDef,
-    SwitchArm,
-    SymbolKind,
-    TraitConstDecl,
-    TraitDef,
-    TraitImplBlock,
-    TraitMethodSig,
-    TupleField,
-    Type,
-    TypeTupleField,
-    TypedLitBody,
-    Variant,
-    VariantField,
-    VariantPayload,
-    measure_kind,
-    measure_literal_value,
-    ast_func,
-    ast_program,
-    ast_struct,
-    type_name,
-]
+use {
+    unicode :: core.text
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        BindPattern,
+        Binding,
+        Call,
+        CallArg,
+        CodeModule,
+        ContextField,
+        ContractClause,
+        Diagnostic,
+        EnumDef,
+        EnumLitArg,
+        ErrorConvDef,
+        Expr,
+        ExprField,
+        ExprPair,
+        Field,
+        ForKind,
+        Func,
+        ImplConstValue,
+        ImplDef,
+        ImportDecl,
+        Item,
+        LValue,
+        Lambda,
+        LambdaBody,
+        LambdaParam,
+        Marker,
+        MarkerCallArg,
+        Measure,
+        MeasureRule,
+        sema_casing_pascal_words,
+        NamedSpan,
+        NamedType,
+        OrFallback,
+        Param,
+        Program,
+        Span,
+        Stmt,
+        StrPart,
+        StructDef,
+        SwitchArm,
+        SymbolKind,
+        TraitConstDecl,
+        TraitDef,
+        TraitImplBlock,
+        TraitMethodSig,
+        TupleField,
+        Type,
+        TypeTupleField,
+        TypedLitBody,
+        Variant,
+        VariantField,
+        VariantPayload,
+        measure_kind,
+        measure_literal_value,
+        ast_func,
+        ast_program,
+        ast_struct,
+        type_name,
+    ]
+}
 
 // A member reached through a `use` inside a module: an inline module member
 // function, or (qualified) a member of a file module imported by this file.
@@ -135,7 +137,7 @@ struct SemaInlineRewrite {
     siblings: [String:Bool]
     // File-level inline modules reachable as `alias.f(...)`.
     modules: [SemaInlineModuleSurface]
-    // `use bank.[f as g]`: local name -> member identity.
+    // `use g :: bank.f`: local name -> member identity.
     imported: [String:SemaInlineFunctionBinding]
     // A module's own `use limits.[MAX]` over a file module alias.
     qualified: [String:SemaInlineTarget]
@@ -1319,7 +1321,7 @@ fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [
 }
 
 // ---------------------------------------------------------------------------
-// `use bank.[f as g]` over an inline module (Rust CheckInner 4).
+// `use g :: bank.f` over an inline module (Rust CheckInner 4).
 
 fn sema_inline_import_target(declaration: ImportDecl, inline_names: [String:Bool]) -> String? Never! {
     if declaration.kind == .Unqualified(module_alias, _, _, _, _) {
@@ -1349,7 +1351,7 @@ fn sema_inline_bind_imports(program: Program, surfaces: [SemaInlineModuleSurface
             loop (item_index, item) in items {
                 local :: sema_registration_import_local(item)
                 if {
-                    seen.get(local) != None -> &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `as alias`"))
+                    seen.get(local) != None -> &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias :: path` row"))
                     members.functions.get(item.original) == None -> &rewrite.diagnostics.push(sema_error("E0611", module_alias_span, "`{item.original}` is not defined in module `{module_alias}`", "check the module body for the item you're importing", "make sure the name is spelled correctly"))
                     else -> {
                         seen[local] = true
@@ -1383,7 +1385,7 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
             loop item in items {
                 local :: sema_registration_import_local(item)
                 if names.get(local) != None {
-                    &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with `as alias`"))
+                    &rewrite.diagnostics.push(sema_error("E0105", declaration.alias_span, "the import name `{local}` is used twice", "each import needs a unique namespace name in this file", "rename one with an `alias :: path` row"))
                     next
                 }
                 names[local] = true

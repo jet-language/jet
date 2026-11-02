@@ -297,7 +297,7 @@ This is foreign adoption, not current Jet-version migration support. See [the fo
 
 ```jet
 // Proposed library API; not implemented in this campaign.
-use core.testing as testing
+use testing :: core.testing
 testing.compare(cases, reference, candidate).assert_equal()
 ```
 

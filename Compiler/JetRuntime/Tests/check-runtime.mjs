@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
@@ -26,11 +27,11 @@ if (!paths.length || new Set(paths).size !== paths.length) throw new Error("empt
 if (test !== null) paths.push(`Compiler/JetRuntime/Tests/Fragments.fixture/${test}Tests.jet`);
 const uses = new Set();
 const bodies = paths.map((path) => {
-  const lines = readFileSync(join(root, path), "utf8").split("\n");
+  const lines = unblockUses(readFileSync(join(root, path), "utf8")).split("\n");
   let importing = false;
   const body = lines.filter((line) => {
     if (line.startsWith("use ")) {
-      if (line.startsWith("use core.")) uses.add(line);
+      if (/^use (?:\w+ :: )?core\./u.test(line)) uses.add(line);
       importing = line.includes("[") && !line.includes("]");
       return false;
     }

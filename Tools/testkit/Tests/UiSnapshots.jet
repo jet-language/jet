@@ -1,6 +1,8 @@
-use core.files as files
-use core.sys as sys
-use core.process as process
+use {
+    files :: core.files
+    sys :: core.sys
+    process :: core.process
+}
 
 fn kit_ui_test_scratch(label: String) -> String {
     root :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-ui-{process.current_pid()}-{label}")
@@ -151,7 +153,7 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
 
 #Test("UI shared staging preserves imported modules and route trees without discovering them") {
     root :: kit_ui_test_scratch("imports")
-    main :: "use \"./modules/helper\" as helper\nfn run() {{ print(helper.value()) }}\n"
+    main :: "use helper :: \"./modules/helper\"\nfn run() {{ print(helper.value()) }}\n"
     helper :: "fn value() -> Int {{ 7 }}\n// @fixture_module\n"
     kit_exec_write(files.join(root, "tests/ui/clean_import.jet"), main)
     kit_exec_write(files.join(root, "tests/ui/clean_import.stderr"), "(no errors)\n")

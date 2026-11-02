@@ -1,64 +1,66 @@
 // Checked struct and enum construction expressions.
-use core.net.url as boundary_url
-use core.regex as boundary_regex
-use core.text as boundary_unicode
-use core.time as boundary_time
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    AccessConvention,
-    ByteTextPart,
-    Call,
-    CallArg,
-    Diagnostic,
-    EnumLitArg,
-    Expr,
-    NodeKind,
-    ExprField,
-    ExprPair,
-    Field,
-    TargetHardwareUse,
-    TypedHeadKind,
-    ParamZone,
-    PlaceAccess,
-    Span,
-    StrFormat,
-    StrPart,
-    Symbol,
-    SymbolKind,
-    TComptimeValue,
-    TFieldRef,
-    Type,
-    TypeParam,
-    TypeTupleField,
-    TypedLitBody,
-    Variant,
-    ast_empty_call_arg_flags,
-    core_enum_payload_variants,
-    core_enum_variant_labels,
-    core_enum_variant_payload,
-    core_enum_variants,
-    core_module_enum_variants,
-    core_module_type_leaf,
-    core_record_literal_fields,
-    core_record_literal_is_core_only,
-    core_source_owns_type,
-    core_identity_is,
-    core_type_modules,
-    expr_span,
-    typed_head_kind_of,
-    typed_head_literal_constructor,
-    symbol_id,
-    type_identity_key,
-    type_name,
-    TLetTy,
-    TLetWrapper,
-    TPatternBindingFact,
-    TPatternPosition,
-    jet_target_layout_atomic_scalar_type,
-    checked_generated_local,
-    TextEdit,
-    diagnostic_with_edit,
-]
+use {
+    boundary_url :: core.net.url
+    boundary_regex :: core.regex
+    boundary_unicode :: core.text
+    boundary_time :: core.time
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        AccessConvention,
+        ByteTextPart,
+        Call,
+        CallArg,
+        Diagnostic,
+        EnumLitArg,
+        Expr,
+        NodeKind,
+        ExprField,
+        ExprPair,
+        Field,
+        TargetHardwareUse,
+        TypedHeadKind,
+        ParamZone,
+        PlaceAccess,
+        Span,
+        StrFormat,
+        StrPart,
+        Symbol,
+        SymbolKind,
+        TComptimeValue,
+        TFieldRef,
+        Type,
+        TypeParam,
+        TypeTupleField,
+        TypedLitBody,
+        Variant,
+        ast_empty_call_arg_flags,
+        core_enum_payload_variants,
+        core_enum_variant_labels,
+        core_enum_variant_payload,
+        core_enum_variants,
+        core_module_enum_variants,
+        core_module_type_leaf,
+        core_record_literal_fields,
+        core_record_literal_is_core_only,
+        core_source_owns_type,
+        core_identity_is,
+        core_type_modules,
+        expr_span,
+        typed_head_kind_of,
+        typed_head_literal_constructor,
+        symbol_id,
+        type_identity_key,
+        type_name,
+        TLetTy,
+        TLetWrapper,
+        TPatternBindingFact,
+        TPatternPosition,
+        jet_target_layout_atomic_scalar_type,
+        checked_generated_local,
+        TextEdit,
+        diagnostic_with_edit,
+    ]
+}
 
 // A type named by a local binding, through a module alias
 // (`types.Kind`), or by the canonical identity a declared type resolves to
@@ -172,10 +174,10 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
     if index == .Val(found) {
         kind :: scopes.bindings[found].symbol.kind
         // A whole-module import binds its alias as an Import symbol
-        // (`use core.encoding as enc` then `enc.EncodingFormat.JSON`).
+        // (`use enc :: core.encoding` then `enc.EncodingFormat.JSON`).
         if kind != SymbolKind.Type && kind != SymbolKind.Module && kind != SymbolKind.Import -> return None
     }
-    // `use core.encoding.[Dyn as Tree]`: an alias of a Core enum carrier
+    // `use Tree :: core.encoding.Dyn`: an alias of a Core enum carrier
     // names that enum, whose variants are read by its Core leaf.
     enum_root :: sema_expression_core_enum_alias(root, &scopes) ?? root
     if sema_expression_names_enum(enum_root, environment, program, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})

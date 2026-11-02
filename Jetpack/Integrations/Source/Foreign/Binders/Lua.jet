@@ -1,19 +1,21 @@
 // In-process Lua binding generator ported from
 // jet_pkg_model::LuaBind. Each session owns one embedded Lua state; values
 // cross as JSON Dyns or as zero-copy table views.
-use jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
-use core.encoding.json as json
-use core.files as files
-use core.time as time
-use core.math as math
-use jet_pkg_model.[
-    BinderHostOS, ForeignBindError, ForeignLanguage, pkg_binder_append_artifact_boundary,
-    pkg_binder_c_escape, pkg_binder_cc_ar_identity, pkg_binder_create_dir_all,
-    pkg_binder_fill_template, pkg_binder_identity_digest, pkg_binder_is_ascii_alpha,
-    pkg_binder_is_ident, pkg_binder_remove_file_quiet, pkg_binder_require_lib_name,
-    pkg_binder_run_reporting_detail, pkg_binder_tool_root, pkg_binder_write, pkg_bridge_tool_path,
-    pkg_bytes_code, pkg_bytes_is_word, pkg_bytes_text,
-]
+use {
+    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+    json :: core.encoding.json
+    files :: core.files
+    time :: core.time
+    math :: core.math
+    jet_pkg_model.[
+        BinderHostOS, ForeignBindError, ForeignLanguage, pkg_binder_append_artifact_boundary,
+        pkg_binder_c_escape, pkg_binder_cc_ar_identity, pkg_binder_create_dir_all,
+        pkg_binder_fill_template, pkg_binder_identity_digest, pkg_binder_is_ascii_alpha,
+        pkg_binder_is_ident, pkg_binder_remove_file_quiet, pkg_binder_require_lib_name,
+        pkg_binder_run_reporting_detail, pkg_binder_tool_root, pkg_binder_write, pkg_bridge_tool_path,
+        pkg_bytes_code, pkg_bytes_is_word, pkg_bytes_text,
+    ]
+}
 
 // A Lua binding also names the directory holding the embeddable runtime.
 struct LuaBindResult {
@@ -108,7 +110,7 @@ fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
         &out.push("    fn {name}_view(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct Session {{ value: Int }}\nstruct TableView {{ session: Int, table: Int }}\n#Error\nenum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    &out.push("}}\nuse abi :: c.{abi}\nuse json :: core.encoding.json\n\nstruct Session {{ value: Int }}\nstruct TableView {{ session: Int, table: Int }}\n#Error\nenum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
     &out.push(pkg_render_lua_decode_status("LuaError"))
     &out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
     &out.push(PKG_LUA_JET_SESSION)

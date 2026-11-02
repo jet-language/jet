@@ -2,9 +2,11 @@
 // Exercise the real registry, renderer and Host callback against its UI snapshot.
 // Usage: jet run Compiler/JetBackend/Tests/TestNativeOutputDiagnostic.jet -- OUT CHECKER_JET
 // Run from the repository root: the Foundation, Host and expected-output sources are read from the working directory.
-use core.files as files
-use core.process as process
-use core.term as term
+use {
+    files :: core.files
+    process :: core.process
+    term :: core.term
+}
 
 fn fail(message: String) -> Never {
     term.eprint(message)
@@ -101,7 +103,7 @@ fn run() {
     helper :: host_report_helper(host)
     parts := blank_repeated_core_uses(sources)
     &parts.push(helper)
-    &parts.push("use core.term as snapshot_term\nfn run() {{\n    output :: snapshot_term.stdout()\n    &output.write(jet_cli_native_test_unrun_check_report()).drop(\"snapshot stdout\")\n}}\n")
+    &parts.push("use snapshot_term :: core.term\nfn run() {{\n    output :: snapshot_term.stdout()\n    &output.write(jet_cli_native_test_unrun_check_report()).drop(\"snapshot stdout\")\n}}\n")
     snapshot :: join_with(parts, "\n\n")
     snapshot_path :: files.join(out.copy(), "snapshot.jet")
     files.write(snapshot_path.copy(), snapshot) ?? fail("cannot write {snapshot_path}: {err}")

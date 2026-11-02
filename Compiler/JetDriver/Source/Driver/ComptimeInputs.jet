@@ -5,17 +5,19 @@
 // same no-follow read, tree-file bound and glob walk as `b.embed` / `b.find`
 // (dispatch.rs `eval_build_time_io`, one implementation of the path law). Each
 // file read is recorded with its SHA-256 for the comptime input lock.
-use jet_foundation.[
-    Diagnostic,
-    BodyExpr,
-    body_node,
-    Span,
-    TComptimeValue,
-    diagnostic_from_registry,
-]
-use jet_eval.[JetEvalComptimeInputAdapter, JetEvalComptimeInputError]
-use jet_build_session.[BuildSessionReply, BuildSessionValue]
-use core.crypto as comptime_inputs_crypto
+use {
+    jet_foundation.[
+        Diagnostic,
+        BodyExpr,
+        body_node,
+        Span,
+        TComptimeValue,
+        diagnostic_from_registry,
+    ]
+    jet_eval.[JetEvalComptimeInputAdapter, JetEvalComptimeInputError]
+    jet_build_session.[BuildSessionReply, BuildSessionValue]
+    comptime_inputs_crypto :: core.crypto
+}
 
 // One locked comptime input: its path relative to the embedding file's
 // directory and the SHA-256 of its bytes.

@@ -1,17 +1,19 @@
 // Assertion-for-assertion ports of reviewed tests/pkg.rs library rows.
 // Original fixture strings and predicates are retained; no reference snapshots.
 // PENDING-SEAM(package-tests): parse receipts do not claim runtime parity.
-use jet_pkg_model.[LockFile, LockedPackage]
-use jetpack_publication.[
-    PublicAPIItem, PublicationAdvisory, PublicationBreakingChange, PublicationBumpKind,
-    PublicationIndexEntry, PublicationPrePublishGate, PublicationSemVer, PublicationSeverity,
-    PublicationVersionConstraint, publication_audit_lockfile, publication_check_conflicts,
-    publication_classify_bump, publication_core_reviewed, publication_diff_public_api,
-    publication_e1218, publication_e2601, publication_e2604, publication_emit_spdx,
-    publication_parse_semver, publication_parse_version_req, publication_select_highest_compatible,
-    publication_semver_display, publication_verify_index_entry,
-    publication_emit_cyclonedx,
-]
+use {
+    jet_pkg_model.[LockFile, LockedPackage]
+    jetpack_publication.[
+        PublicAPIItem, PublicationAdvisory, PublicationBreakingChange, PublicationBumpKind,
+        PublicationIndexEntry, PublicationPrePublishGate, PublicationSemVer, PublicationSeverity,
+        PublicationVersionConstraint, publication_audit_lockfile, publication_check_conflicts,
+        publication_classify_bump, publication_core_reviewed, publication_diff_public_api,
+        publication_e1218, publication_e2601, publication_e2604, publication_emit_spdx,
+        publication_parse_semver, publication_parse_version_req, publication_select_highest_compatible,
+        publication_semver_display, publication_verify_index_entry,
+        publication_emit_cyclonedx,
+    ]
+}
 
 fn publication_pkg_integration_version(raw: String) -> PublicationSemVer Never! {
     publication_parse_semver(raw) ?? panic("invalid original version")

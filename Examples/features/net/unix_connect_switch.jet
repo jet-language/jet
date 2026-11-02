@@ -5,8 +5,10 @@ package {
     authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
 }
 
-use core.net as net
-use core.net.[UnixStream, NetError]
+use {
+    net :: core.net
+    core.net.[UnixStream, NetError]
+}
 
 fn connect(socket: String) -> UnixStream? NetError! {
     if net.unix_connect(socket) == {

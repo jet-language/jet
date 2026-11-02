@@ -7,9 +7,11 @@
 // over the cap are refused before decoding; streams that really expand past
 // 64 MiB (fixed-Huffman and RLE bombs) are exercised on every tier by
 // `cargo test --test archive`, because materializing 64 MiB is too slow here.
-use core.archive as ar
-use core.archive.gzip as gz
-use core.archive.zstd as zs
+use {
+    ar :: core.archive
+    gz :: core.archive.gzip
+    zs :: core.archive.zstd
+}
 
 fn archive_case(label: String, data: [U8]) {
     body :: ar.inflate(data) ?? {

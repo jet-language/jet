@@ -2,21 +2,23 @@
 // controlled; BundleSpec, target layout, plan identity and typed receipt are
 // the canonical Jetpack implementation. These tests do not prove native
 // AppImage/MSIX tools, descriptor safety, or durable ReceiptStore publication.
-use jet_pkg_model.[
-    BundleArtifact, BundleFile, BundleInputFact, BundleInstallability, BundleKind,
-    BundleMaterializerFact, BundleMetadata, BundlePlan, BundleReceipt, BundleSigningFact,
-    BundleTarget, LaunchDescriptor, SigningHook, pkg_sha256_hex,
-]
-use jet_cli.[jet_cli_command_help, jet_cli_front, jet_cli_status_json]
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_integer]
-use core.encoding.json as json
-use core.files.path as bundle_paths
-use jet_cli_commands.[
-    jet_cli_bundle_build, jet_cli_bundle_canonical_status_integer, jet_cli_bundle_error,
-    jet_cli_bundle_error_output, jet_cli_bundle_help, jet_cli_bundle_options_default,
-    jet_cli_bundle_parse_args, jet_cli_bundle_report, jet_cli_bundle_resolve_output,
-    jet_cli_bundle_run_desktop, jet_cli_bundle_status,
-]
+use {
+    jet_pkg_model.[
+        BundleArtifact, BundleFile, BundleInputFact, BundleInstallability, BundleKind,
+        BundleMaterializerFact, BundleMetadata, BundlePlan, BundleReceipt, BundleSigningFact,
+        BundleTarget, LaunchDescriptor, SigningHook, pkg_sha256_hex,
+    ]
+    jet_cli.[jet_cli_command_help, jet_cli_front, jet_cli_status_json]
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_integer]
+    json :: core.encoding.json
+    bundle_paths :: core.files.path
+    jet_cli_commands.[
+        jet_cli_bundle_build, jet_cli_bundle_canonical_status_integer, jet_cli_bundle_error,
+        jet_cli_bundle_error_output, jet_cli_bundle_help, jet_cli_bundle_options_default,
+        jet_cli_bundle_parse_args, jet_cli_bundle_report, jet_cli_bundle_resolve_output,
+        jet_cli_bundle_run_desktop, jet_cli_bundle_status,
+    ]
+}
 
 struct BundleTestTransport {
     events: [String]

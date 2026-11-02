@@ -1,9 +1,11 @@
 // Pure host contracts. Real parser declarations feed the production planner;
 // these tests do not prepare a helper, probe tools, spawn Cargo, or fake a cache.
-use jet_parser.[parse_source]
-use jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
-use core.sys as rust_foreign_test_sys
-use jet_foundation.[sha256_bytes, sha256_hex_bytes]
+use {
+    jet_parser.[parse_source]
+    jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
+    rust_foreign_test_sys :: core.sys
+    jet_foundation.[sha256_bytes, sha256_hex_bytes]
+}
 
 fn cli_rust_foreign_test_plan(name: String) -> JetDriverRustForeignPlan {
     parsed :: parse_source("extern rust \"base64@0.22\" {{ fn {name}(s: String) -> String = \"base64::encode\" }}".bytes())

@@ -6,8 +6,10 @@
 // than guessing a wire layout. COMP-3 is surfaced as Jet Decimal metadata;
 // the callable bridge uses scaled minor units because Decimal is not a C ABI
 // scalar.
-use jetpack_foundation.[foundation_is_reserved_generated_name]
-use core.files as files
+use {
+    jetpack_foundation.[foundation_is_reserved_generated_name]
+    files :: core.files
+}
 
 COBOL_BIND_SCHEMA :: "jet-cobol-bind-v1"
 COBOL_TOOL_ACTION :: "rejected the COBOL binding"
@@ -365,7 +367,7 @@ fn pkg_cobol_render_jet(lib: String, layout: CobolRecordLayout, packed: CobolFie
     out = "{out}}}\n\n"
     record_param :: if input != None -> "record_id: Int, " else -> ""
     record_arg :: if input != None -> "record_id, " else -> ""
-    out = "{out}#Import module c.{abi} {{\n    fn apply_minor({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\nenum CobolError {{ Range ProgramFailed }}\n\n"
+    out = "{out}#Import module c.{abi} {{\n    fn apply_minor({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse abi :: c.{abi}\n\nenum CobolError {{ Range ProgramFailed }}\n\n"
     out = "{out}fn apply_minor({record_param}{packed.name}_minor: Int) -[FFI.Cobol]> Int CobolError! {{\n"
     if packed.kind == {
         .PackedDecimal(digits, _, signed) -> {

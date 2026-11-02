@@ -1,34 +1,36 @@
 // Behavioral ports of CmdFlash.rs. tests/target_machines.rs validates target
 // construction/audits but has no FlashPlan/FlashReceipt oracle or CLI launch.
 // These controlled in-memory fixtures prove policy only, never device flashing.
-use jet_foundation.[
-    CanonicalJSON, CanonicalJSONField, ByteSize, MemoryKind, TargetMachine,
-    TargetProgrammerAdapter, TargetProgrammerFacts, canonical_json_bytes,
-    canonical_json_sha256, jet_target_environment_identity, jet_target_hardware_json,
-    jet_target_json_quote, jet_target_machine_board_sensor_v1, jet_target_machine_errors_debug,
-    jet_target_machine_hosted, jet_target_machine_use_default, jet_target_machine_validate,
-    jet_target_memory_region_new, jet_target_programmer_missing_fact, jet_target_provider_identity,
-    sha256_hex,
-]
-use jet_driver.[jet_driver_target_machine_by_name]
-use jet_cli_commands.[
-    JetCLIFlashAdapter, JetCLIFlashError, JetCLIFlashExecution, JetCLIFlashHost,
-    JetCLIFlashMetadata, JetCLIFlashParse, JetCLIFlashPlan, JetCLIFlashProfile,
-    JetCLIFlashTokenCursor, JetCLIFlashToolDeclaration, jet_cli_flash_adapter_name,
-    jet_cli_flash_adapter_parse, jet_cli_flash_bound_capture, jet_cli_flash_canonical_args,
-    jet_cli_flash_default_image, jet_cli_flash_error, jet_cli_flash_execution_failed,
-    jet_cli_flash_help, jet_cli_flash_json_string_token, jet_cli_flash_non_utf8_error,
-    jet_cli_flash_parse_args, jet_cli_flash_parse_json_string_token,
-    jet_cli_flash_parse_top_level_string_fields, jet_cli_flash_plan_from_machine,
-    jet_cli_flash_plan_from_target_and_image, jet_cli_flash_plan_identity, jet_cli_flash_plan_value,
-    jet_cli_flash_profile_from_machine, jet_cli_flash_profile_select, jet_cli_flash_read_audit,
-    jet_cli_flash_receipt_from_execution, jet_cli_flash_receipt_result_json,
-    jet_cli_flash_receipt_section, jet_cli_flash_receipt_to_json, jet_cli_flash_regular_file,
-    jet_cli_flash_resolve_audit, jet_cli_flash_resolve_tool, jet_cli_flash_safe_openocd_image_name,
-    jet_cli_flash_status_value, jet_cli_flash_tool_argv, jet_cli_flash_tool_from_facts,
-    jet_cli_flash_utf8_lossy, jet_cli_flash_verify_audit,
-]
-use core.files.path as flash_paths
+use {
+    jet_foundation.[
+        CanonicalJSON, CanonicalJSONField, ByteSize, MemoryKind, TargetMachine,
+        TargetProgrammerAdapter, TargetProgrammerFacts, canonical_json_bytes,
+        canonical_json_sha256, jet_target_environment_identity, jet_target_hardware_json,
+        jet_target_json_quote, jet_target_machine_board_sensor_v1, jet_target_machine_errors_debug,
+        jet_target_machine_hosted, jet_target_machine_use_default, jet_target_machine_validate,
+        jet_target_memory_region_new, jet_target_programmer_missing_fact, jet_target_provider_identity,
+        sha256_hex,
+    ]
+    jet_driver.[jet_driver_target_machine_by_name]
+    jet_cli_commands.[
+        JetCLIFlashAdapter, JetCLIFlashError, JetCLIFlashExecution, JetCLIFlashHost,
+        JetCLIFlashMetadata, JetCLIFlashParse, JetCLIFlashPlan, JetCLIFlashProfile,
+        JetCLIFlashTokenCursor, JetCLIFlashToolDeclaration, jet_cli_flash_adapter_name,
+        jet_cli_flash_adapter_parse, jet_cli_flash_bound_capture, jet_cli_flash_canonical_args,
+        jet_cli_flash_default_image, jet_cli_flash_error, jet_cli_flash_execution_failed,
+        jet_cli_flash_help, jet_cli_flash_json_string_token, jet_cli_flash_non_utf8_error,
+        jet_cli_flash_parse_args, jet_cli_flash_parse_json_string_token,
+        jet_cli_flash_parse_top_level_string_fields, jet_cli_flash_plan_from_machine,
+        jet_cli_flash_plan_from_target_and_image, jet_cli_flash_plan_identity, jet_cli_flash_plan_value,
+        jet_cli_flash_profile_from_machine, jet_cli_flash_profile_select, jet_cli_flash_read_audit,
+        jet_cli_flash_receipt_from_execution, jet_cli_flash_receipt_result_json,
+        jet_cli_flash_receipt_section, jet_cli_flash_receipt_to_json, jet_cli_flash_regular_file,
+        jet_cli_flash_resolve_audit, jet_cli_flash_resolve_tool, jet_cli_flash_safe_openocd_image_name,
+        jet_cli_flash_status_value, jet_cli_flash_tool_argv, jet_cli_flash_tool_from_facts,
+        jet_cli_flash_utf8_lossy, jet_cli_flash_verify_audit,
+    ]
+    flash_paths :: core.files.path
+}
 
 fn flash_test_facts(adapter: TargetProgrammerAdapter) -> TargetProgrammerFacts Never! {
     TargetProgrammerFacts{adapter: adapter, executable: "tool", chip: Val("chip"), interface: Val("iface"), config: [String]{"board.cfg"}, speed_khz: Val(1000), reset: true, machine: Val("machine"), cpu: Val("cpu")}

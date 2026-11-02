@@ -357,7 +357,7 @@ The second sentence is part of the law, not a hidden exception: ratified D-PANIC
 
 ```jet
 // Today: two spellings meet in one program
-use core.compiler.lang as lang
+use lang :: core.compiler.lang
 fn f() -[Rand]> Int { … }        // accepted
 #FX(lang.Effect.Random) { … }    // a name the effect list does not have
 fn g() -[Crypto]> Int { … }      // E0119, though lang.Effect.Crypto exists

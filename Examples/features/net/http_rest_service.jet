@@ -4,10 +4,12 @@ package {
     authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
-use core.http.client as http_client
-use core.http.server as http_server
-use core.files as files
-use core.net as net
+use {
+    http_client :: core.http.client
+    http_server :: core.http.server
+    files :: core.files
+    net :: core.net
+}
 
 fn handle_api(name: String, path: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.body().text(64) ?? "invalid body"

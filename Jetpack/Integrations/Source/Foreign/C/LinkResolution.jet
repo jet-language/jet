@@ -4,18 +4,20 @@
 // `<lib>: c@…` dependency in `package.jet`, else `pkg-config <lib>`, else
 // E3201. A declared `c@system` library falls back to the always-linked libc
 // set and then to provisioning from nixpkgs.
-use jet_foundation.[Diagnostic, diagnostic_from_registry]
-use jetpack_foundation.[
-    DEP_PROVIDER_C, PACKAGE_FILE, REF_PROVIDER_AT, SOURCE_ROOT_DIR, SYSTEM_LIB_TARGET,
-]
-use core.files as files
-use core.sys as sys
-use core.process as process
-use jet_pkg_model.[
-    CFFI, ForeignBridgeError, ForeignLanguage, PackageFacts, pkg_ascii_lower, pkg_bridge_error,
-    pkg_bridge_text_lines, pkg_bytes_is_word, pkg_bytes_skip_space, pkg_bytes_space_width,
-    pkg_bytes_text, pkg_extract_inline_package,
-]
+use {
+    jet_foundation.[Diagnostic, diagnostic_from_registry]
+    jetpack_foundation.[
+        DEP_PROVIDER_C, PACKAGE_FILE, REF_PROVIDER_AT, SOURCE_ROOT_DIR, SYSTEM_LIB_TARGET,
+    ]
+    files :: core.files
+    sys :: core.sys
+    process :: core.process
+    jet_pkg_model.[
+        CFFI, ForeignBridgeError, ForeignLanguage, PackageFacts, pkg_ascii_lower, pkg_bridge_error,
+        pkg_bridge_text_lines, pkg_bytes_is_word, pkg_bytes_skip_space, pkg_bytes_space_width,
+        pkg_bytes_text, pkg_extract_inline_package,
+    ]
+}
 
 // `c@nixpkgs:<attr>` selects an explicit nixpkgs attribute.
 CFFI_NIXPKGS_TARGET_PREFIX :: "nixpkgs:"

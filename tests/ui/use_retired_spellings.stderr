@@ -1,0 +1,26 @@
+Error [E0630]: `as` no longer names an import
+  --> tests/ui/use_retired_spellings.jet:4:16
+    |
+  4 | use core.files as fs
+    |                ^^
+ Why: An import's local name comes first, as `alias :: path` (#6542)
+ Fix: Write `fs :: core.files`
+More: jet-lang.dev/e/E0630
+
+Error [E0630]: `as` no longer renames an imported member
+  --> tests/ui/use_retired_spellings.jet:5:20
+    |
+  5 | use core.math.[max as biggest, min]
+    |                    ^^
+ Why: A renamed member is a row of its own, `alias :: owner.member` (#6542)
+ Fix: Write `biggest :: core.math.max` as its own `use` row; `jet fmt` moves it
+More: jet-lang.dev/e/E0630
+
+Error [E0630]: `.{…}` is not an import member list
+  --> tests/ui/use_retired_spellings.jet:6:15
+    |
+  6 | use core.text.{trim}
+    |               ^
+ Why: A member list is written in brackets, as `owner.[a, b]` (#6542)
+ Fix: Write `use core.text.[…]`
+More: jet-lang.dev/e/E0630

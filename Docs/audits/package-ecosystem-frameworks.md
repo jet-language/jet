@@ -6,7 +6,7 @@
 > as the extension contract. D-ECO-RECEIPT2=A fixes one connected record from
 > exact inputs through activation proof and parent generation.
 > D-ECO-DECL1=A fixes every ecosystem entry as an ordinary named typed value
-> using the existing `Type.{ ... }` constructor and stable section-qualified
+> using the existing `Type.[ ... ]` constructor and stable section-qualified
 > references. That source shape is ratified but not executable: #560 owns its
 > source gate and tooling, while D-ECO-ROOTNAME1 still owns the root noun.
 > Remaining ballots decide graph scope, the root noun, source control, and JetOS
@@ -287,7 +287,7 @@ nothing silent:
   beside `fn run()` (D-JPK-TASKRUN1), invoked `jet run <entry> -- <name>`,
   scheduled with `#Every(…)` (D-SCHEDULE1). No new surface needed.
 - **Feature flags / conditional compilation** (cargo features): ratified —
-  `Build.{ features }` in build profiles (D-BUILDPROFILE1) plus comptime
+  `Build.[ features ]` in build profiles (D-BUILDPROFILE1) plus comptime
   `if target.*` for platform conditionals.
 - **Workspace-internal version protocol** (pnpm `workspace:*`): covered —
   members address each other by ratified member refs (D-MONOREF1); shared

@@ -7,9 +7,11 @@ package {
 // #3107: text versus bytes at the file, subprocess and in-memory boundaries.
 // Invalid UTF-8 is never silently replaced: a strict text read fails with a
 // typed `IOError`, a byte read is exact, and every offset names its unit.
-use core.files as files
-use core.process as process
-use core.text as text
+use {
+    files :: core.files
+    process :: core.process
+    text :: core.text
+}
 
 fn run() {
     scratch :: files.temp_dir("jet-text-bytes") ?? panic("temp dir")

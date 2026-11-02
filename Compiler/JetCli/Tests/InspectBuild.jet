@@ -1,24 +1,26 @@
 // Checked declarations, not hand-authored BuildGraph rows, drive the reports.
-use jet_foundation.[DIAGNOSTIC_LINT, diagnostic_from_registry]
-use core.build.[BuildGraphNode, BuildGraphInputDigest]
-use jet_driver.[
-    jet_driver_query_build_nodes, jet_driver_compile, jet_driver_source_query,
-    JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
-    JetDriverAuthorizedSourceSnapshot, JetDriverBuildQueryResult, JetDriverBuildQueryScope,
-    JetDriverCompileMode, JetDriverCompileRequest, JetDriverGeneratedModule,
-    jet_driver_build_plan_json, jet_driver_query_build_plan,
-]
-use jet_cli.[
-    JET_CLI_EXIT_ICE, jet_cli_build_compile_observation, jet_cli_build_duration,
-    jet_cli_build_nodes_host, jet_cli_build_nodes_report, jet_cli_build_query_failure,
-    jet_cli_build_report, jet_cli_driver_request,
-]
-use jet_build_session.[
-    BuildSessionPolicy, BuildSessionValue, build_plan_graph, build_session_call,
-    build_session_finish, build_session_new,
-]
-use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-use core.math as build_math
+use {
+    jet_foundation.[DIAGNOSTIC_LINT, diagnostic_from_registry]
+    core.build.[BuildGraphNode, BuildGraphInputDigest]
+    jet_driver.[
+        jet_driver_query_build_nodes, jet_driver_compile, jet_driver_source_query,
+        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot, JetDriverBuildQueryResult, JetDriverBuildQueryScope,
+        JetDriverCompileMode, JetDriverCompileRequest, JetDriverGeneratedModule,
+        jet_driver_build_plan_json, jet_driver_query_build_plan,
+    ]
+    jet_cli.[
+        JET_CLI_EXIT_ICE, jet_cli_build_compile_observation, jet_cli_build_duration,
+        jet_cli_build_nodes_host, jet_cli_build_nodes_report, jet_cli_build_query_failure,
+        jet_cli_build_report, jet_cli_driver_request,
+    ]
+    jet_build_session.[
+        BuildSessionPolicy, BuildSessionValue, build_plan_graph, build_session_call,
+        build_session_finish, build_session_new,
+    ]
+    jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
+    build_math :: core.math
+}
 fn inspect_build_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
 }

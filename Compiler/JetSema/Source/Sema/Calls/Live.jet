@@ -60,7 +60,7 @@ fn sema_live_member(module_name: String, member: String) -> Bool Never! {
     (module_name == "app" || module_name == "core.web") && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate")
 }
 
-// A live-binding call through a Core module alias (`use core.web as web`).
+// A live-binding call through a Core module alias (`use web :: core.web`).
 fn sema_call_try_live(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_live_member(module_name, member) -> return sema_live_unhandled()
     // A nested module path (`alias.leaf.member`) names another module.

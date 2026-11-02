@@ -1,22 +1,24 @@
 // Rust: crates/jet-devserver/src/WatchService.rs:1
 // Unified typed dependency graph, event waits, deterministic invalidation and transactional replacement.
-use std.fs as fs
-use std.env as env
-use std.collections.[VecDeque]
-// GATE #4494: channels, mutexes, atomics, native threads and blocking event waits.
-use std.sync.[mpsc, Mutex, MutexGuard, Arc]
-use std.sync.atomic.[AtomicBool, Ordering]
-use std.thread as thread
-use std.thread.[JoinHandle]
-use std.ffi.[CString]
-use std.time.[Duration, Instant, SystemTime]
-use jet_driver.Diagnostics.[Diagnostic]
-use jet_driver.Loader as Loader
-use jet_driver.Syntax.[PACKAGE_FILE]
-use jet_foundation.JSON.[foundation_json_escape]
-use jet_foundation.Game.[JetGameChangeKind]
-use jet_foundation.SHA256 as SHA256
-use core.sys.target.[selected_os]
+use {
+    fs :: std.fs
+    env :: std.env
+    std.collections.[VecDeque]
+    // GATE #4494: channels, mutexes, atomics, native threads and blocking event waits.
+    std.sync.[mpsc, Mutex, MutexGuard, Arc]
+    std.sync.atomic.[AtomicBool, Ordering]
+    thread :: std.thread
+    std.thread.[JoinHandle]
+    std.ffi.[CString]
+    std.time.[Duration, Instant, SystemTime]
+    jet_driver.Diagnostics.[Diagnostic]
+    Loader :: jet_driver.Loader
+    jet_driver.Syntax.[PACKAGE_FILE]
+    jet_foundation.JSON.[foundation_json_escape]
+    jet_foundation.Game.[JetGameChangeKind]
+    SHA256 :: jet_foundation.SHA256
+    core.sys.target.[selected_os]
+}
 
 // Rust: crates/jet-devserver/src/WatchService.rs:22
 enum RootKind {
@@ -826,12 +828,14 @@ fn change_kind_name(kind: ChangeKind) -> String { if kind == {
 } }
 // Rust: crates/jet-devserver/src/WatchService.rs:1861
 // Persist remains at the shared runtime-heap owner.
-use jet_foundation.Persist.[PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore]
-use jet_foundation.Persist as Persist
-use jet_pkg_model.[Manifest]
-use jet_foundation.[Diagnostic, foundation_json_escape]
-use jetpack_foundation.[PACKAGE_FILE]
-use core.files.[OSPath]
+use {
+    jet_foundation.Persist.[PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore]
+    Persist :: jet_foundation.Persist
+    jet_pkg_model.[Manifest]
+    jet_foundation.[Diagnostic, foundation_json_escape]
+    jetpack_foundation.[PACKAGE_FILE]
+    core.files.[OSPath]
+}
 // Rust: crates/jet-devserver/src/WatchService.rs:1869
 struct SessionSnapshot {
     generation: U64; artifact_token: String; source_id: String; build_id: String; revision: String; world_id: String; persist: PersistStore

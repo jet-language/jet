@@ -1,15 +1,17 @@
 // Source admission only: no compiler, Cargo, provider or network invocation.
 // End-to-end run/check predicates remain in tests/cases/inline_deps unchanged.
-use jet_driver.[
-    jet_driver_build_source_catalog, jet_driver_package_target_facts, jet_driver_receipt_closure,
-    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-    JetDriverCoreSource, JetDriverScriptDependency,
-]
-use jet_cli.[
-    jet_cli_driver_request, jet_cli_identity_key, jet_cli_script_dependency_authority,
-    jet_cli_script_dependency_roots,
-]
-use core.files as cli_files
+use {
+    jet_driver.[
+        jet_driver_build_source_catalog, jet_driver_package_target_facts, jet_driver_receipt_closure,
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCoreSource, JetDriverScriptDependency,
+    ]
+    jet_cli.[
+        jet_cli_driver_request, jet_cli_identity_key, jet_cli_script_dependency_authority,
+        jet_cli_script_dependency_roots,
+    ]
+    cli_files :: core.files
+}
 
 fn script_deps_test_root(path: String, source: String) -> JetDriverAuthorizedSourceRoot {
     stat :: cli_files.stat(path) ?? panic("script root identity")

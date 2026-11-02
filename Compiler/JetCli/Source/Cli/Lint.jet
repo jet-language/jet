@@ -1,20 +1,22 @@
 // Source/CmdDevTools.rs lint --complexity and the JSON-aware --a11y host.
-use core.time as cli_time
-use jet_driver.[
-    JetDriverVerbOutput,
-    JetDriverCompileMode,
-    jet_driver_parse_user_source,
-    jet_driver_present_diagnostics,
-    jet_driver_report_problems,
-    jet_driver_is_a11y_lint,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-    TCostReport,
-]
-use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all]
-use jet_driver.[JetDriverIceRow, jet_driver_cost_query, jet_driver_ice_record, jet_driver_ice_text]
-use jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, checked_cost_operation, checked_cost_fix]
+use {
+    cli_time :: core.time
+    jet_driver.[
+        JetDriverVerbOutput,
+        JetDriverCompileMode,
+        jet_driver_parse_user_source,
+        jet_driver_present_diagnostics,
+        jet_driver_report_problems,
+        jet_driver_is_a11y_lint,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        TCostReport,
+    ]
+    jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all]
+    jet_driver.[JetDriverIceRow, jet_driver_cost_query, jet_driver_ice_record, jet_driver_ice_text]
+    jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, checked_cost_operation, checked_cost_fix]
+}
 
 fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput {
     rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, diagnostics) else -> jet_driver_report_problems(file, source, diagnostics, color, true)

@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
 import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
+import { unblockUses } from '../../../Tools/agent/compiler-packages.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-crypto-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -28,9 +29,9 @@ if (mode === 'assemble') {
     const imports = new Set();
     const bodies = paths.map(path => {
         let importing = false;
-        const lines = readFileSync(join(root, path), 'utf8').split('\n').filter(line => {
+        const lines = unblockUses(readFileSync(join(root, path), 'utf8')).split('\n').filter(line => {
             if (line.startsWith('use ')) {
-                if (line.startsWith('use core.')) imports.add(line);
+                if (/^use (?:\w+ :: )?core\./u.test(line)) imports.add(line);
                 importing = line.includes('[') && !line.includes(']');
                 return false;
             }

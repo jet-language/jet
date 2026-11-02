@@ -1,13 +1,15 @@
 // Whole-value CBOR parser; policy and allocation accounting stay in Jet.
 // Unit policy helpers retain the same typed CBORError contract as value parses.
-use core.encoding.[Dyn]
-use core.encoding as encoding
-use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
-use __core_encoding_stream as stream
-use core.math as math
-use core.mem as mem
-use core.time as time
-use core.time.[ZonedDateTime]
+use {
+    core.encoding.[Dyn]
+    encoding :: core.encoding
+    core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
+    stream :: __core_encoding_stream
+    math :: core.math
+    mem :: core.mem
+    time :: core.time
+    core.time.[ZonedDateTime]
+}
 // Exact representability, rather than a rounded conversion, selects the RFC
 // preferred float width. Inexact values retain all their original f64 bits.
 fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {

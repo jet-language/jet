@@ -2170,7 +2170,7 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
 fn jfmt_fmt_import_groups(f: &JetFmt, imports: [ImportDecl]) {
     plain := [ImportDecl]{}
     reexports := [ImportDecl]{}
-    loop import in imports {
+    loop import in jfmt_import_rows(imports) {
         if import.is_pub -> &reexports.push(import) else -> &plain.push(import)
     }
     if plain.len() > 0 -> jfmt_fmt_import_group(&f, plain)
@@ -2181,6 +2181,47 @@ fn jfmt_fmt_import_groups(f: &JetFmt, imports: [ImportDecl]) {
         }
         jfmt_fmt_import_group(&f, reexports)
     }
+}
+
+// A renamed member leaves its member list for an `alias :: owner.member` row
+// of its own (#6542); the list keeps the members that are not renamed.
+fn jfmt_import_rows(imports: [ImportDecl]) -> [ImportDecl] Never! {
+    rows := [ImportDecl]{}
+    loop import in imports {
+        if import.kind == .Unqualified(module_alias, module_alias_span, items, items_span, span) {
+            plain := [ImportedItem]{}
+            item_spans := [Span]{}
+            local_spans := [Span]{}
+            renamed := [ImportDecl]{}
+            loop index in 0..<items.len() {
+                item :: items[index]
+                item_span :: if index < import.item_spans.len() -> import.item_spans[index] else -> items_span
+                local_span :: if index < import.local_spans.len() -> import.local_spans[index] else -> item_span
+                if item.alias == .Val(alias) {
+                    &renamed.push(ImportDecl{kind: ImportKind.Module{name: "{module_alias}.{item.original}", span: item_span}, alias: alias, alias_span: local_span, span: import.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: import.is_pub, is_package_pub: import.is_package_pub, inline_version: None})
+                } else {
+                    &plain.push(item)
+                    &item_spans.push(item_span)
+                    &local_spans.push(local_span)
+                }
+            }
+            if renamed.len() == 0 {
+                &rows.push(import)
+                next
+            }
+            if plain.len() > 0 {
+                row := import
+                row.kind = ImportKind.Unqualified{module_alias: module_alias, module_alias_span: module_alias_span, items: plain, items_span: items_span, span: span}
+                row.item_spans = item_spans
+                row.local_spans = local_spans
+                &rows.push(row)
+            }
+            loop row in renamed -> &rows.push(row)
+            next
+        }
+        &rows.push(import)
+    }
+    rows
 }
 
 fn jfmt_fmt_import_group(f: &JetFmt, imports: [ImportDecl]) {
@@ -2254,10 +2295,6 @@ fn jfmt_fmt_import_row(f: &JetFmt, imp: ImportDecl) {
                 item_span :: if index < imp.item_spans.len() -> imp.item_spans[index] else -> local_span
                 jfmt_comma_before(&f, index, multiline, item_span.start)
                 jfmt_write(&f, items[index].original)
-                if items[index].alias == .Val(alias) {
-                    jfmt_write(&f, " as ")
-                    jfmt_write(&f, alias)
-                }
                 jfmt_comma_after(&f, multiline, item_span.end)
             }
             jfmt_comma_end(&f, multiline, source)

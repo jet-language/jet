@@ -1,12 +1,14 @@
 // Runtime loader restoration: installed-unit identity, parse controls, import
 // rewriting and Core-private admission are independent of the linker live set.
-use jet_driver.[
-    JetDriverCoreSource, JetDriverParseJob, JetDriverSourceUnit, jet_driver_core_text,
-    jet_driver_core_runtime_member_imports, jet_driver_core_runtime_row,
-    jet_driver_core_source_unit, jet_driver_core_unit, jet_driver_has_errors, jet_driver_parse_one,
-    jet_driver_runtime_entry_row,
-]
-use jet_foundation.[Diagnostic, SourceFile, Span, compiler_threads_single]
+use {
+    jet_driver.[
+        JetDriverCoreSource, JetDriverParseJob, JetDriverSourceUnit, jet_driver_core_text,
+        jet_driver_core_runtime_member_imports, jet_driver_core_runtime_row,
+        jet_driver_core_source_unit, jet_driver_core_unit, jet_driver_has_errors, jet_driver_parse_one,
+        jet_driver_runtime_entry_row,
+    ]
+    jet_foundation.[Diagnostic, SourceFile, Span, compiler_threads_single]
+}
 
 fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool) -> JetDriverCoreSource Never! {
     JetDriverCoreSource{module_name: module_name, alias: module_name, path: path, owner: "", owned_members: [String]{}, runtime: runtime, text: jet_driver_core_text("fn word() -> Int Never! {{ 7 }}\n")}
@@ -53,7 +55,7 @@ fn jet_driver_runtime_test_row(module_name: String, path: String, runtime: Bool)
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.x"), Val(1))
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets.word"), Val(0))
     assert_eq(jet_driver_core_runtime_row(rows, "core.text.runtime.assets_extra.word"), None)
-    parsed := jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: "use core.text.runtime.assets.x.word as read\nuse core.text.runtime.assets.x\nfn run() {{}}\n"}, compiler_threads_single())
+    parsed := jet_driver_parse_one(JetDriverParseJob.RuntimeEntry{text: "use read :: core.text.runtime.assets.x.word\nuse core.text.runtime.assets.x\nfn run() {{}}\n"}, compiler_threads_single())
     assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
     jet_driver_core_runtime_member_imports(&parsed.parsed.program, rows)
     assert_eq(parsed.parsed.program.imports.len(), 2)

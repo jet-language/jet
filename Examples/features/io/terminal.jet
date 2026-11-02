@@ -1,7 +1,7 @@
 // 86 — terminal direct-input control (D-TERM1, ratified 2026-06-22).
 // `live { … }` enters un-buffered/no-echo mode for its body and guarantees
 // terminal-state restore on every exit path (normal, return, ?, panic) via
-// the D-DEFER1 scope-guard mechanism. `use core.term as term` gives
+// the D-DEFER1 scope-guard mechanism. `use term :: core.term` gives
 // `term.read_key() -> Key` inside or outside a live block.
 //
 // Pattern-tests on Key use the `== Variant(binding)` form.
@@ -17,7 +17,7 @@ package {
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
-use core.term as term
+use term :: core.term
 
 fn describe_key(k: Key) -> String {
     if k == {

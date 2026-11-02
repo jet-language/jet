@@ -137,7 +137,7 @@ What V actually does (vlang/v `doc/docs.md:10403-11157`):
   game logic and the Doom 3 engine. Translated files relax V's rules
   (`@[translated]`: globals, pointer writes without `unsafe`, C conversions).
 
-Jet today: one binder model for every language (`use c.png as png`,
+Jet today: one binder model for every language (`use png :: c.png`,
 `jet bind header.h --pkg … --overlay …`), descriptors with ownership,
 callbacks, async and close-on-`defer` (`Examples/ffi/*`), inline `#FFI(c)`
 gated by `#Unsafe("reason")`, unsupported signatures rejected before emission,

@@ -1,23 +1,25 @@
 // `jet emit`. `--ast` and `--ir` print one EmitTree (EmitTree.jet): text by
 // default, the `emit` status under --json.
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileResult,
-    JetDriverLoweringInputs,
-    JetDriverIceRow,
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USER_ERROR,
-    jet_driver_ice_record,
-    jet_driver_ice_text,
-    jet_driver_checked_declarations,
-    jet_driver_is_a11y_lint,
-    jet_driver_present_diagnostics,
-    jet_driver_report_problems,
-]
-use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
-use jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_checks_stock, ir_function_text]
-use jet_parser.[parse_source]
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileResult,
+        JetDriverLoweringInputs,
+        JetDriverIceRow,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_ice_record,
+        jet_driver_ice_text,
+        jet_driver_checked_declarations,
+        jet_driver_is_a11y_lint,
+        jet_driver_present_diagnostics,
+        jet_driver_report_problems,
+    ]
+    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+    jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_checks_stock, ir_function_text]
+    jet_parser.[parse_source]
+}
 
 fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     if json {

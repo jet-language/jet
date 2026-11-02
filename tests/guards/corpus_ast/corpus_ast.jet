@@ -1,12 +1,14 @@
 // Compiler-AST policy guards are isolated from the filesystem/manifest package.
 // This package requires compiler packages with their Tests/ trees excluded.
-use jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
-use jet_foundation.[CORE_MODULE_EXPORTS]
-use jet_parser.[parse_source, jfmt_stmt_span]
-use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
-use jet_pkg_model.[PackageFacts]
-use core.files as policy_ast_files
-use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, PolicyInventory, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_discover_manifest_files, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
+use {
+    jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
+    jet_foundation.[CORE_MODULE_EXPORTS]
+    jet_parser.[parse_source, jfmt_stmt_span]
+    jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
+    jet_pkg_model.[PackageFacts]
+    policy_ast_files :: core.files
+    corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, PolicyInventory, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_discover_manifest_files, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
+}
 
 POLICY_TASK_INTERNAL_PREFIX :: comptime { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
 POLICY_TASK_INTERNAL_RECEIVER :: comptime { "{POLICY_TASK_INTERNAL_PREFIX}jet.task" }
@@ -1701,9 +1703,9 @@ fn policy_ast_test_reintroduced_ceremony() PolicyError! {
         PolicyShapeCase{path: "Examples/features/types/typed_literal_forms.jet", source: "fn run() {{ print(\"jet build Examples/features/types/typed_literal_forms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
         PolicyShapeCase{path: "Examples/features/serde/reintroduced.jet", source: "#Codable\nstruct Sample {{\n    value: Int\n}}\nfn run() {{}}", rule: "codable-structural", present: true},
         PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run() {{\n    delay :: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
-        PolicyShapeCase{path: "Examples/features/basics/reintroduced_effect.jet", source: "use core.files as fs\nfn run() -[FS, IO]> {{\n    path :: \"input.txt\"\n    text :: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
-        PolicyShapeCase{path: "Examples/features/io/reintroduced.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
+        PolicyShapeCase{path: "Examples/features/basics/reintroduced_effect.jet", source: "use fs :: core.files\nfn run() -[FS, IO]> {{\n    path :: \"input.txt\"\n    text :: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
+        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use fs :: core.files\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
+        PolicyShapeCase{path: "Examples/features/io/reintroduced.jet", source: "use fs :: core.files\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
         PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "fn run() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
         PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "fn run() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
         PolicyShapeCase{path: "tests/agent_workloads/adapters/reintroduced.jet", source: "fn run() {{\n    line_number := 0\n    loop item in items {{\n        line_number += 1\n        seen :: line_number\n    }}\n}}", rule: "indexed-sequence", present: true},
@@ -1730,17 +1732,17 @@ fn policy_ast_test_reintroduced_ceremony() PolicyError! {
 #Test("card_2375_rules_reject_each_reintroduced_ceremony") { policy_ast_test_reintroduced_ceremony() ?? panic("{err.message}") }
 fn policy_ast_test_walk_shapes() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
-        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: true},
-        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn walk() {{\n    entries :: fs.walk(root)\n}}\nfn filter(entry: Entry) {{\n    if !entry.is_dir -> print(entry.path)\n}}", rule: "walk-files-filter", present: false},
-        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if entry.is_dir -> print(entry.relative) else -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use fs :: core.files\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use fs :: core.files\nfn walk() {{\n    entries :: fs.walk(root)\n}}\nfn filter(entry: Entry) {{\n    if !entry.is_dir -> print(entry.path)\n}}", rule: "walk-files-filter", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use fs :: core.files\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if entry.is_dir -> print(entry.relative) else -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: false},
     })
     Ok()
 }
 #Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() ?? panic("{err.message}") }
 fn policy_ast_test_crypto_module() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
+        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use crypto :: core.crypto\nfn run() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
+        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use crypto :: core.crypto\nfn run() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
         PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "fn run() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
     })
     Ok()
@@ -1909,8 +1911,8 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         PolicyPlantedPair{rule: "raw-cli-builder-shape", kind: "call:process.argv.skip", rejected: "fn run() {{ process.argv().skip(1) }}", clean: "fn run() {{ process.args() }}"},
         PolicyPlantedPair{rule: "duration-constant-safe", kind: "call:Duration.constructor", rejected: "fn run() {{ Duration.hours(2) }}", clean: "fn run(hours: Int) {{ Duration.hours(hours) }}"},
         PolicyPlantedPair{rule: "unit-scalar-rewrap", kind: "call:unit-rewrap", rejected: "fn run() {{ Meter.from_float(value.raw() * 2) }}", clean: "fn run() {{ value * 2 }}"},
-        PolicyPlantedPair{rule: "readonly-copy", kind: "call:readonly-copy", rejected: "use core.files as fs\nfn run() {{ fs.read(path.copy()) }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
-        PolicyPlantedPair{rule: "error-identity", kind: "expr:error-propagation", rejected: "use core.files as fs\nfn run() {{ fs.read(path) ?? return Err(\"read\") }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "readonly-copy", kind: "call:readonly-copy", rejected: "use fs :: core.files\nfn run() {{ fs.read(path.copy()) }}", clean: "use fs :: core.files\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "error-identity", kind: "expr:error-propagation", rejected: "use fs :: core.files\nfn run() {{ fs.read(path) ?? return Err(\"read\") }}", clean: "use fs :: core.files\nfn run() {{ fs.read(path) }}"},
         PolicyPlantedPair{rule: "http-wrapper-json", kind: "call:http-wrapper", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
         PolicyPlantedPair{rule: "http-message-text", kind: "call:response.text", rejected: "fn run() {{ response.body().text(100) }}", clean: "fn run() {{ response.text() }}"},
         PolicyPlantedPair{rule: "http-typed-json", kind: "call:request.body", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
@@ -1920,8 +1922,8 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         PolicyPlantedPair{rule: "dogfood-json", kind: "literal:json-wire", rejected: "fn run() {{ \"{{{{\\\"key\\\": {{value}}}}}}\" }}", clean: "fn run() {{ json.to_string(value) }}"},
         PolicyPlantedPair{rule: "dogfood-url-query", kind: "call:url.query.split", rejected: "fn run() {{ query.split(\"&\") }}", clean: "fn run() {{ url.query() }}"},
         PolicyPlantedPair{rule: "dogfood-list-equality", kind: "fn:same_strings", rejected: "fn run() {{ same_strings(left, right) }}", clean: "fn run() {{ left == right }}"},
-        PolicyPlantedPair{rule: "dogfood-directory-setup", kind: "call:fs.create_dir", rejected: "use core.files as files\nfn run() {{ files.create_dir(\"dir\") }}", clean: "use core.files as files\nfn run() {{ files.create_dir_all(\"dir\") }}"},
-        PolicyPlantedPair{rule: "crypto-naming-fact", kind: "call:crypto.sha256_bytes", rejected: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(bytes) }}", clean: "use core.crypto as crypto\nfn run() {{ crypto.sha256(bytes).hex() }}"},
+        PolicyPlantedPair{rule: "dogfood-directory-setup", kind: "call:fs.create_dir", rejected: "use files :: core.files\nfn run() {{ files.create_dir(\"dir\") }}", clean: "use files :: core.files\nfn run() {{ files.create_dir_all(\"dir\") }}"},
+        PolicyPlantedPair{rule: "crypto-naming-fact", kind: "call:crypto.sha256_bytes", rejected: "use crypto :: core.crypto\nfn run() {{ crypto.sha256_bytes(bytes) }}", clean: "use crypto :: core.crypto\nfn run() {{ crypto.sha256(bytes).hex() }}"},
         PolicyPlantedPair{rule: "raw-cli-process-boundary", kind: "call:process.argv", rejected: "fn run() {{\n    first :: process.argv()\n    second :: process.argv()\n}}", clean: "fn run() {{ process.argv() }}"},
         PolicyPlantedPair{rule: "entry-explicit", kind: "stmt:top-level", rejected: "print(\"hello\")", clean: "fn run() {{ print(\"hello\") }}"},
         PolicyPlantedPair{rule: "codable-structural", kind: "type:Record", rejected: "#Codable\nstruct Record {{ value: Int }}", clean: "struct Record {{ value: Int }}"},
@@ -1929,7 +1931,7 @@ fn policy_ast_test_planted_rule_pairs() PolicyError! {
         PolicyPlantedPair{rule: "task-one-child", kind: "stmt:task.group", rejected: "fn run() {{ task.group g {{ task.race {{1, 2}} }} }}", clean: "fn run() {{ task.race {{1, 2}} }}"},
         PolicyPlantedPair{rule: "indexed-sequence", kind: "loop:manual-counter", rejected: "fn run() {{\n    count := 0\n    loop item in items {{\n        count += 1\n        print(count)\n    }}\n}}", clean: "fn run() {{ loop (index, item) in items -> print(index) }}"},
         PolicyPlantedPair{rule: "dyn-domain-policy", kind: "fn:duplicate", rejected: "fn duplicate(left: Dyn, right: Dyn) -> Bool {{ true }}", clean: "fn duplicate(left: Dyn, right: Dyn) -> Bool {{ left.equal_unordered(right) }}"},
-        PolicyPlantedPair{rule: "walk-files-filter", kind: "call:fs.walk", rejected: "use core.files as fs\nfn run() {{ loop entry in fs.walk(root) {{ if !entry.is_dir -> print(entry.path) }} }}", clean: "use core.files as fs\nfn run() {{ loop entry in fs.walk_files(root) -> print(entry.path) }}"},
+        PolicyPlantedPair{rule: "walk-files-filter", kind: "call:fs.walk", rejected: "use fs :: core.files\nfn run() {{ loop entry in fs.walk(root) {{ if !entry.is_dir -> print(entry.path) }} }}", clean: "use fs :: core.files\nfn run() {{ loop entry in fs.walk_files(root) -> print(entry.path) }}"},
         PolicyPlantedPair{rule: "regex-capture-recipe", kind: "recipe:regex-capture", rejected: "fn run() {{ Regex{{\"x\"}} }}", clean: "fn run() {{\n    pattern :: Regex{{\"^x$\"}}\n    matched :: re.match(pattern, value)\n    print(matched.group(1) ?? \"\")\n}}"},
         PolicyPlantedPair{rule: "dogfood-ascii", kind: "call:String.replace", rejected: "fn run() {{ {ladder} }}", clean: "fn run() {{ \"text\".to_ascii_lower() }}"},
         PolicyPlantedPair{rule: "first-hour-doc-recipe", kind: "literal:jet-build", rejected: "fn run() {{ print(\"jet build example.jet\") }}", clean: "fn run() {{ print(\"jet run example.jet\") }}"},

@@ -2,9 +2,11 @@
 // case's OpenSSL `s_server -rev` (it answers each line reversed): the client
 // trusts only the checked-in test CA, and the verified identity, application
 // bytes, close_notify, TLS 1.2 bounds and certificate failures are observable.
-use core.files as files
-use core.net as net
-use core.net.tls as tls
+use {
+    files :: core.files
+    net :: core.net
+    tls :: core.net.tls
+}
 
 fn connect(name: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream NetError! {
     tcp := net.tcp_connect("127.0.0.1:{free-port:tls}") ?? panic("connect")

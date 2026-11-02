@@ -1,26 +1,28 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
-use jet_driver.[
-    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
-    JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
-    jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
-    jet_driver_report_problems, JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
-]
-use jet_foundation.[
-    BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
-    build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
-    diagnostic_render_all,
-]
-use core.build.[BuildGraphNode]
-use core.files as build_files
-use core.math as build_math
-use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-use jet_build_session.[BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_generated, build_plan_selection]
-use jet_pkg_model.[
-    ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
-    pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_sorted_contributions,
-]
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
+        JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
+        jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
+        jet_driver_report_problems, JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
+    ]
+    jet_foundation.[
+        BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile, Span,
+        build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
+        diagnostic_render_all,
+    ]
+    core.build.[BuildGraphNode]
+    build_files :: core.files
+    build_math :: core.math
+    jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
+    jet_build_session.[BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_generated, build_plan_selection]
+    jet_pkg_model.[
+        ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
+        pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_sorted_contributions,
+    ]
+}
 
 fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
     plan :: query.plan ?? {

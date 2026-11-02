@@ -6,21 +6,23 @@
 // record; a trap records itself in the instance and returns, and each
 // caller adds its frame on the way out. Fuel is spent at function entry and
 // at each loop head, and call depth is bounded.
-use jet_foundation.[Type]
-use jet_ir.[
-    IRFunction, IRModule, IROp, IRSlotKind, IR_OVERFLOW_WRAP, ir_args, ir_depth, ir_else, ir_emit, ir_end,
-    ir_hashed_function, ir_open, ir_open_if, ir_slot, ir_type_row, ir_word_row,
-]
-use jet_wasm.[
-    WasmCode, WasmError, WasmFuncType, WASM_BLOCK_EMPTY, WASM_F32, WASM_F64, WASM_I32, WASM_OP_BLOCK, WASM_OP_BR,
-    WASM_OP_BR_IF, WASM_OP_BR_TABLE, WASM_OP_CALL, WASM_OP_CALL_INDIRECT, WASM_OP_DATA_DROP, WASM_OP_DROP,
-    WASM_OP_ELEM_DROP, WASM_OP_ELSE, WASM_OP_END, WASM_OP_F32_CONST, WASM_OP_F64_CONST, WASM_OP_GLOBAL_GET,
-    WASM_OP_GLOBAL_SET, WASM_OP_I32_CONST, WASM_OP_I64_CONST, WASM_OP_IF, WASM_OP_LOCAL_GET, WASM_OP_LOCAL_SET,
-    WASM_OP_LOCAL_TEE, WASM_OP_LOOP, WASM_OP_MEMORY_COPY, WASM_OP_MEMORY_FILL, WASM_OP_MEMORY_GROW,
-    WASM_OP_MEMORY_INIT, WASM_OP_MEMORY_SIZE, WASM_OP_NOP, WASM_OP_REF_FUNC, WASM_OP_REF_IS_NULL, WASM_OP_REF_NULL,
-    WASM_OP_RETURN, WASM_OP_SELECT, WASM_OP_SELECT_T, WASM_OP_TABLE_COPY, WASM_OP_TABLE_FILL, WASM_OP_TABLE_GET,
-    WASM_OP_TABLE_GROW, WASM_OP_TABLE_INIT, WASM_OP_TABLE_SET, WASM_OP_TABLE_SIZE, WASM_OP_UNREACHABLE,
-]
+use {
+    jet_foundation.[Type]
+    jet_ir.[
+        IRFunction, IRModule, IROp, IRSlotKind, IR_OVERFLOW_WRAP, ir_args, ir_depth, ir_else, ir_emit, ir_end,
+        ir_hashed_function, ir_open, ir_open_if, ir_slot, ir_type_row, ir_word_row,
+    ]
+    jet_wasm.[
+        WasmCode, WasmError, WasmFuncType, WASM_BLOCK_EMPTY, WASM_F32, WASM_F64, WASM_I32, WASM_OP_BLOCK, WASM_OP_BR,
+        WASM_OP_BR_IF, WASM_OP_BR_TABLE, WASM_OP_CALL, WASM_OP_CALL_INDIRECT, WASM_OP_DATA_DROP, WASM_OP_DROP,
+        WASM_OP_ELEM_DROP, WASM_OP_ELSE, WASM_OP_END, WASM_OP_F32_CONST, WASM_OP_F64_CONST, WASM_OP_GLOBAL_GET,
+        WASM_OP_GLOBAL_SET, WASM_OP_I32_CONST, WASM_OP_I64_CONST, WASM_OP_IF, WASM_OP_LOCAL_GET, WASM_OP_LOCAL_SET,
+        WASM_OP_LOCAL_TEE, WASM_OP_LOOP, WASM_OP_MEMORY_COPY, WASM_OP_MEMORY_FILL, WASM_OP_MEMORY_GROW,
+        WASM_OP_MEMORY_INIT, WASM_OP_MEMORY_SIZE, WASM_OP_NOP, WASM_OP_REF_FUNC, WASM_OP_REF_IS_NULL, WASM_OP_REF_NULL,
+        WASM_OP_RETURN, WASM_OP_SELECT, WASM_OP_SELECT_T, WASM_OP_TABLE_COPY, WASM_OP_TABLE_FILL, WASM_OP_TABLE_GET,
+        WASM_OP_TABLE_GROW, WASM_OP_TABLE_INIT, WASM_OP_TABLE_SET, WASM_OP_TABLE_SIZE, WASM_OP_UNREACHABLE,
+    ]
+}
 
 // Instance record offsets (PluginHost.jet PG_INST_*).
 PLUG_INST_TRAP :: 0
@@ -517,198 +519,247 @@ fn plug_op(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int) 
     b :: code.b[k]
     rows :: cx.rows
     if cx.dead {
-        if op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF {
-            cx.skip += 1
-        } else if op == WASM_OP_END && cx.skip > 0 {
-            cx.skip -= 1
-        } else if op == WASM_OP_ELSE && cx.skip == 0 {
-            &cx.enter_else()
-        } else if op == WASM_OP_END {
-            &cx.leave()
+        if {
+            op == WASM_OP_BLOCK || op == WASM_OP_LOOP || op == WASM_OP_IF -> {
+                cx.skip += 1
+            }
+            op == WASM_OP_END && cx.skip > 0 -> {
+                cx.skip -= 1
+            }
+            op == WASM_OP_ELSE && cx.skip == 0 -> {
+                &cx.enter_else()
+            }
+            op == WASM_OP_END -> {
+                &cx.leave()
+            }
         }
         return
     }
-    if op == WASM_OP_UNREACHABLE {
-        &cx.trap(PLUG_TRAP_UNREACHABLE)
-        cx.dead = true
-    } else if op == WASM_OP_NOP {
-    } else if op == WASM_OP_BLOCK {
-        &cx.open(PLUG_FRAME_BLOCK, plug_block_sig(scope, a), -1)
-    } else if op == WASM_OP_LOOP {
-        &cx.open(PLUG_FRAME_LOOP, plug_block_sig(scope, a), -1)
-    } else if op == WASM_OP_IF {
-        condition :: &cx.pop()
-        test :: &cx.truth(condition)
-        &cx.open(PLUG_FRAME_IF, plug_block_sig(scope, a), test)
-    } else if op == WASM_OP_ELSE {
-        &cx.enter_else()
-    } else if op == WASM_OP_END {
-        &cx.leave()
-    } else if op == WASM_OP_BR {
-        &cx.branch(a)
-        cx.dead = true
-    } else if op == WASM_OP_BR_IF {
-        condition :: &cx.pop()
-        test :: &cx.truth(condition)
-        _ :: ir_open_if(&cx.f, test, 0)
-        &cx.branch(a)
-        ir_end(&cx.f, 0)
-    } else if op == WASM_OP_BR_TABLE {
-        index :: &cx.pop()
-        loop (n, depth) in code.tables[a] {
-            case :: &cx.konst(rows.i32, n)
-            hit :: &cx.cmp(IROp.Eq, index, case)
-            _ :: ir_open_if(&cx.f, hit, 0)
-            &cx.branch(depth)
+    if {
+        op == WASM_OP_UNREACHABLE -> {
+            &cx.trap(PLUG_TRAP_UNREACHABLE)
+            cx.dead = true
+        }
+        op == WASM_OP_NOP -> {}
+        op == WASM_OP_BLOCK -> {
+            &cx.open(PLUG_FRAME_BLOCK, plug_block_sig(scope, a), -1)
+        }
+        op == WASM_OP_LOOP -> {
+            &cx.open(PLUG_FRAME_LOOP, plug_block_sig(scope, a), -1)
+        }
+        op == WASM_OP_IF -> {
+            condition :: &cx.pop()
+            test :: &cx.truth(condition)
+            &cx.open(PLUG_FRAME_IF, plug_block_sig(scope, a), test)
+        }
+        op == WASM_OP_ELSE -> {
+            &cx.enter_else()
+        }
+        op == WASM_OP_END -> {
+            &cx.leave()
+        }
+        op == WASM_OP_BR -> {
+            &cx.branch(a)
+            cx.dead = true
+        }
+        op == WASM_OP_BR_IF -> {
+            condition :: &cx.pop()
+            test :: &cx.truth(condition)
+            _ :: ir_open_if(&cx.f, test, 0)
+            &cx.branch(a)
             ir_end(&cx.f, 0)
         }
-        &cx.branch(b)
-        cx.dead = true
-    } else if op == WASM_OP_RETURN {
-        &cx.branch(cx.frames.len() - 1)
-        cx.dead = true
-    } else if op == WASM_OP_CALL {
-        ty :: scope.callee_types[a]
-        args :: &cx.pops(ty.params.len())
-        all := [Int]{cx.inst}
-        loop arg in args -> &all.push(arg)
-        row :: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
-        result :: &cx.call(kit.base + scope.funcs[a], all, row)
-        &cx.check(true)
-        if row >= 0 -> &cx.push(result)
-    } else if op == WASM_OP_CALL_INDIRECT {
-        ty :: scope.types[a]
-        index :: &cx.pop()
-        args :: &cx.pops(ty.params.len())
-        table :: &cx.word(scope.tables[b])
-        sig :: &cx.word(scope.type_sigs[a])
-        fid :: &cx.word(cx.fid)
-        at :: &cx.word(cx.at)
-        target :: &cx.rt("jet_plugin_table_fid", [Int]{cx.inst, table, index, sig, fid, at}, rows.word)
-        &cx.check(false)
-        all := [Int]{cx.inst, target}
-        loop arg in args -> &all.push(arg)
-        row :: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
-        result :: &cx.call(kit.dispatch_base + scope.type_sigs[a], all, row)
-        &cx.check(true)
-        if row >= 0 -> &cx.push(result)
-    } else if op == WASM_OP_DROP {
-        _ :: &cx.pop()
-    } else if op == WASM_OP_SELECT || op == WASM_OP_SELECT_T {
-        condition :: &cx.pop()
-        second :: &cx.pop()
-        first :: &cx.pop()
-        test :: &cx.truth(condition)
-        dst :: &cx.temp(cx.f.slot_type[first])
-        _ :: ir_open_if(&cx.f, test, 0)
-        &cx.emit(IROp.Copy, dst, first, -1, -1)
-        ir_else(&cx.f, 0)
-        &cx.emit(IROp.Copy, dst, second, -1, -1)
-        ir_end(&cx.f, 0)
-        &cx.push(dst)
-    } else if op == WASM_OP_LOCAL_GET {
-        local :: cx.locals[a]
-        value :: &cx.copy(cx.f.slot_type[local], local)
-        &cx.push(value)
-    } else if op == WASM_OP_LOCAL_SET {
-        value :: &cx.pop()
-        &cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
-    } else if op == WASM_OP_LOCAL_TEE {
-        value :: &cx.pop()
-        &cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
-        &cx.push(value)
-    } else if op == WASM_OP_GLOBAL_GET {
-        globals :: &cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
-        value :: &cx.load(plug_row(rows, scope.global_types[a]), globals, scope.globals[a] * 8)
-        &cx.push(value)
-    } else if op == WASM_OP_GLOBAL_SET {
-        value :: &cx.pop()
-        globals :: &cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
-        &cx.store(globals, scope.globals[a] * 8, value)
-    } else if op == WASM_OP_TABLE_GET {
-        index :: &cx.pop()
-        table :: &cx.word(scope.tables[a])
-        fid :: &cx.word(cx.fid)
-        at :: &cx.word(cx.at)
-        value :: &cx.rt("jet_plugin_table_get", [Int]{cx.inst, table, index, fid, at}, rows.word)
-        &cx.check(false)
-        &cx.push(value)
-    } else if op == WASM_OP_TABLE_SET {
-        value :: &cx.pop()
-        index :: &cx.pop()
-        table :: &cx.word(scope.tables[a])
-        fid :: &cx.word(cx.fid)
-        at :: &cx.word(cx.at)
-        _ :: &cx.rt("jet_plugin_table_set", [Int]{cx.inst, table, index, value, fid, at}, -1)
-        &cx.check(false)
-    } else if op >= 0x28 && op <= 0x3e {
-        plug_memory_access(&cx, scope, op, b)
-    } else if op == WASM_OP_MEMORY_SIZE {
-        memories :: &cx.load(rows.word, cx.inst, PLUG_INST_MEMORIES)
-        size :: &cx.load(rows.word, memories, scope.memory * 24 + 8)
-        shift :: &cx.word(16)
-        pages :: &cx.op2(IROp.Shr, rows.word, size, shift)
-        value :: &cx.copy(rows.i32, pages)
-        &cx.push(value)
-    } else if op == WASM_OP_MEMORY_GROW {
-        delta :: &cx.pop()
-        memory :: &cx.word(scope.memory)
-        fid :: &cx.word(cx.fid)
-        at :: &cx.word(cx.at)
-        old :: &cx.rt("jet_plugin_memory_grow", [Int]{cx.inst, memory, delta, fid, at}, rows.word)
-        &cx.check(false)
-        value :: &cx.copy(rows.i32, old)
-        &cx.push(value)
-    } else if op == WASM_OP_I32_CONST {
-        value :: &cx.konst(rows.i32, a)
-        &cx.push(value)
-    } else if op == WASM_OP_I64_CONST {
-        value :: &cx.konst(rows.word, a)
-        &cx.push(value)
-    } else if op == WASM_OP_F32_CONST {
-        value :: &cx.konst(rows.f32, a)
-        &cx.push(value)
-    } else if op == WASM_OP_F64_CONST {
-        value :: &cx.konst(rows.f64, a)
-        &cx.push(value)
-    } else if op >= 0x45 && op <= 0x4f {
-        plug_int_compare(&cx, op - 0x45, false)
-    } else if op >= 0x50 && op <= 0x5a {
-        plug_int_compare(&cx, op - 0x50, true)
-    } else if op >= 0x5b && op <= 0x60 {
-        plug_float_compare(&cx, op - 0x5b, true)
-    } else if op >= 0x61 && op <= 0x66 {
-        plug_float_compare(&cx, op - 0x61, false)
-    } else if op >= 0x67 && op <= 0x78 {
-        plug_int_arith(&cx, op - 0x67, false)
-    } else if op >= 0x79 && op <= 0x8a {
-        plug_int_arith(&cx, op - 0x79, true)
-    } else if op >= 0x8b && op <= 0x98 {
-        plug_float_arith(&cx, op - 0x8b, true)
-    } else if op >= 0x99 && op <= 0xa6 {
-        plug_float_arith(&cx, op - 0x99, false)
-    } else if op >= 0xa7 && op <= 0xc4 {
-        plug_convert(&cx, op)
-    } else if op == WASM_OP_REF_NULL {
-        value :: &cx.word(0)
-        &cx.push(value)
-    } else if op == WASM_OP_REF_IS_NULL {
-        value :: &cx.pop()
-        zero :: &cx.word(0)
-        test :: &cx.cmp(IROp.Eq, value, zero)
-        result :: &cx.flag(test)
-        &cx.push(result)
-    } else if op == WASM_OP_REF_FUNC {
-        value :: &cx.word(scope.funcs[a] + 1)
-        &cx.push(value)
-    } else if op >= 0xfc00 && op <= 0xfc07 {
-        n :: op - 0xfc00
-        value :: &cx.pop()
-        plug_trunc(&cx, value, n % 4 < 2, (n % 2) + (if n >= 4 -> 2 else -> 0) + 4)
-    } else if op >= WASM_OP_MEMORY_INIT && op <= WASM_OP_TABLE_FILL {
-        plug_bulk(&cx, scope, op, a, b)
-    } else {
-        return Err(WasmError.new("function {cx.fid}: instruction 0x{op} is not supported by the plugin engine", cx.at))
+        op == WASM_OP_BR_TABLE -> {
+            index :: &cx.pop()
+            loop (n, depth) in code.tables[a] {
+                case :: &cx.konst(rows.i32, n)
+                hit :: &cx.cmp(IROp.Eq, index, case)
+                _ :: ir_open_if(&cx.f, hit, 0)
+                &cx.branch(depth)
+                ir_end(&cx.f, 0)
+            }
+            &cx.branch(b)
+            cx.dead = true
+        }
+        op == WASM_OP_RETURN -> {
+            &cx.branch(cx.frames.len() - 1)
+            cx.dead = true
+        }
+        op == WASM_OP_CALL -> {
+            ty :: scope.callee_types[a]
+            args :: &cx.pops(ty.params.len())
+            all := [Int]{cx.inst}
+            loop arg in args -> &all.push(arg)
+            row :: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
+            result :: &cx.call(kit.base + scope.funcs[a], all, row)
+            &cx.check(true)
+            if row >= 0 -> &cx.push(result)
+        }
+        op == WASM_OP_CALL_INDIRECT -> {
+            ty :: scope.types[a]
+            index :: &cx.pop()
+            args :: &cx.pops(ty.params.len())
+            table :: &cx.word(scope.tables[b])
+            sig :: &cx.word(scope.type_sigs[a])
+            fid :: &cx.word(cx.fid)
+            at :: &cx.word(cx.at)
+            target :: &cx.rt("jet_plugin_table_fid", [Int]{cx.inst, table, index, sig, fid, at}, rows.word)
+            &cx.check(false)
+            all := [Int]{cx.inst, target}
+            loop arg in args -> &all.push(arg)
+            row :: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
+            result :: &cx.call(kit.dispatch_base + scope.type_sigs[a], all, row)
+            &cx.check(true)
+            if row >= 0 -> &cx.push(result)
+        }
+        op == WASM_OP_DROP -> {
+            _ :: &cx.pop()
+        }
+        op == WASM_OP_SELECT || op == WASM_OP_SELECT_T -> {
+            condition :: &cx.pop()
+            second :: &cx.pop()
+            first :: &cx.pop()
+            test :: &cx.truth(condition)
+            dst :: &cx.temp(cx.f.slot_type[first])
+            _ :: ir_open_if(&cx.f, test, 0)
+            &cx.emit(IROp.Copy, dst, first, -1, -1)
+            ir_else(&cx.f, 0)
+            &cx.emit(IROp.Copy, dst, second, -1, -1)
+            ir_end(&cx.f, 0)
+            &cx.push(dst)
+        }
+        op == WASM_OP_LOCAL_GET -> {
+            local :: cx.locals[a]
+            value :: &cx.copy(cx.f.slot_type[local], local)
+            &cx.push(value)
+        }
+        op == WASM_OP_LOCAL_SET -> {
+            value :: &cx.pop()
+            &cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
+        }
+        op == WASM_OP_LOCAL_TEE -> {
+            value :: &cx.pop()
+            &cx.emit(IROp.Copy, cx.locals[a], value, -1, -1)
+            &cx.push(value)
+        }
+        op == WASM_OP_GLOBAL_GET -> {
+            globals :: &cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
+            value :: &cx.load(plug_row(rows, scope.global_types[a]), globals, scope.globals[a] * 8)
+            &cx.push(value)
+        }
+        op == WASM_OP_GLOBAL_SET -> {
+            value :: &cx.pop()
+            globals :: &cx.load(rows.word, cx.inst, PLUG_INST_GLOBALS)
+            &cx.store(globals, scope.globals[a] * 8, value)
+        }
+        op == WASM_OP_TABLE_GET -> {
+            index :: &cx.pop()
+            table :: &cx.word(scope.tables[a])
+            fid :: &cx.word(cx.fid)
+            at :: &cx.word(cx.at)
+            value :: &cx.rt("jet_plugin_table_get", [Int]{cx.inst, table, index, fid, at}, rows.word)
+            &cx.check(false)
+            &cx.push(value)
+        }
+        op == WASM_OP_TABLE_SET -> {
+            value :: &cx.pop()
+            index :: &cx.pop()
+            table :: &cx.word(scope.tables[a])
+            fid :: &cx.word(cx.fid)
+            at :: &cx.word(cx.at)
+            _ :: &cx.rt("jet_plugin_table_set", [Int]{cx.inst, table, index, value, fid, at}, -1)
+            &cx.check(false)
+        }
+        op >= 0x28 && op <= 0x3e -> {
+            plug_memory_access(&cx, scope, op, b)
+        }
+        op == WASM_OP_MEMORY_SIZE -> {
+            memories :: &cx.load(rows.word, cx.inst, PLUG_INST_MEMORIES)
+            size :: &cx.load(rows.word, memories, scope.memory * 24 + 8)
+            shift :: &cx.word(16)
+            pages :: &cx.op2(IROp.Shr, rows.word, size, shift)
+            value :: &cx.copy(rows.i32, pages)
+            &cx.push(value)
+        }
+        op == WASM_OP_MEMORY_GROW -> {
+            delta :: &cx.pop()
+            memory :: &cx.word(scope.memory)
+            fid :: &cx.word(cx.fid)
+            at :: &cx.word(cx.at)
+            old :: &cx.rt("jet_plugin_memory_grow", [Int]{cx.inst, memory, delta, fid, at}, rows.word)
+            &cx.check(false)
+            value :: &cx.copy(rows.i32, old)
+            &cx.push(value)
+        }
+        op == WASM_OP_I32_CONST -> {
+            value :: &cx.konst(rows.i32, a)
+            &cx.push(value)
+        }
+        op == WASM_OP_I64_CONST -> {
+            value :: &cx.konst(rows.word, a)
+            &cx.push(value)
+        }
+        op == WASM_OP_F32_CONST -> {
+            value :: &cx.konst(rows.f32, a)
+            &cx.push(value)
+        }
+        op == WASM_OP_F64_CONST -> {
+            value :: &cx.konst(rows.f64, a)
+            &cx.push(value)
+        }
+        op >= 0x45 && op <= 0x4f -> {
+            plug_int_compare(&cx, op - 0x45, false)
+        }
+        op >= 0x50 && op <= 0x5a -> {
+            plug_int_compare(&cx, op - 0x50, true)
+        }
+        op >= 0x5b && op <= 0x60 -> {
+            plug_float_compare(&cx, op - 0x5b, true)
+        }
+        op >= 0x61 && op <= 0x66 -> {
+            plug_float_compare(&cx, op - 0x61, false)
+        }
+        op >= 0x67 && op <= 0x78 -> {
+            plug_int_arith(&cx, op - 0x67, false)
+        }
+        op >= 0x79 && op <= 0x8a -> {
+            plug_int_arith(&cx, op - 0x79, true)
+        }
+        op >= 0x8b && op <= 0x98 -> {
+            plug_float_arith(&cx, op - 0x8b, true)
+        }
+        op >= 0x99 && op <= 0xa6 -> {
+            plug_float_arith(&cx, op - 0x99, false)
+        }
+        op >= 0xa7 && op <= 0xc4 -> {
+            plug_convert(&cx, op)
+        }
+        op == WASM_OP_REF_NULL -> {
+            value :: &cx.word(0)
+            &cx.push(value)
+        }
+        op == WASM_OP_REF_IS_NULL -> {
+            value :: &cx.pop()
+            zero :: &cx.word(0)
+            test :: &cx.cmp(IROp.Eq, value, zero)
+            result :: &cx.flag(test)
+            &cx.push(result)
+        }
+        op == WASM_OP_REF_FUNC -> {
+            value :: &cx.word(scope.funcs[a] + 1)
+            &cx.push(value)
+        }
+        op >= 0xfc00 && op <= 0xfc07 -> {
+            n :: op - 0xfc00
+            value :: &cx.pop()
+            plug_trunc(&cx, value, n % 4 < 2, (n % 2) + (if n >= 4 -> 2 else -> 0) + 4)
+        }
+        op >= WASM_OP_MEMORY_INIT && op <= WASM_OP_TABLE_FILL -> {
+            plug_bulk(&cx, scope, op, a, b)
+        }
+        else -> {
+            return Err(WasmError.new("function {cx.fid}: instruction 0x{op} is not supported by the plugin engine", cx.at))
+        }
     }
 }
 
@@ -717,31 +768,46 @@ fn plug_memory_access(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Never
     rows :: cx.rows
     narrow := rows.i32
     width := 4
-    if op == 0x29 || op == 0x37 {
-        narrow = rows.word
-        width = 8
-    } else if op == 0x2a || op == 0x38 {
-        narrow = rows.f32
-    } else if op == 0x2b || op == 0x39 {
-        narrow = rows.f64
-        width = 8
-    } else if op == 0x2c || op == 0x30 || op == 0x3a || op == 0x3c {
-        narrow = rows.i8
-        width = 1
-    } else if op == 0x2d || op == 0x31 {
-        narrow = rows.u8
-        width = 1
-    } else if op == 0x2e || op == 0x32 || op == 0x3b || op == 0x3d {
-        narrow = rows.i16
-        width = 2
-    } else if op == 0x2f || op == 0x33 {
-        narrow = rows.u16
-        width = 2
-    } else if op == 0x35 {
-        narrow = rows.u32
+    if {
+        op == 0x29 || op == 0x37 -> {
+            narrow = rows.word
+            width = 8
+        }
+        op == 0x2a || op == 0x38 -> {
+            narrow = rows.f32
+        }
+        op == 0x2b || op == 0x39 -> {
+            narrow = rows.f64
+            width = 8
+        }
+        op == 0x2c || op == 0x30 || op == 0x3a || op == 0x3c -> {
+            narrow = rows.i8
+            width = 1
+        }
+        op == 0x2d || op == 0x31 -> {
+            narrow = rows.u8
+            width = 1
+        }
+        op == 0x2e || op == 0x32 || op == 0x3b || op == 0x3d -> {
+            narrow = rows.i16
+            width = 2
+        }
+        op == 0x2f || op == 0x33 -> {
+            narrow = rows.u16
+            width = 2
+        }
+        op == 0x35 -> {
+            narrow = rows.u32
+        }
     }
     if op <= 0x35 {
-        result :: if op >= 0x30 -> rows.word else if op == 0x2a -> rows.f32 else if op == 0x2b -> rows.f64 else if op == 0x29 -> rows.word else -> rows.i32
+        result :: if {
+            op >= 0x30 -> rows.word
+            op == 0x2a -> rows.f32
+            op == 0x2b -> rows.f64
+            op == 0x29 -> rows.word
+            else -> rows.i32
+        }
         address :: &cx.pop()
         pointer :: &cx.address(scope.memory, address, offset, width)
         value :: &cx.load(narrow, pointer, 0)
@@ -772,7 +838,14 @@ fn plug_int_compare(cx: &PlugCx, index: Int, wide: Bool) Never! {
         left = &cx.unsigned(left, wide)
         right = &cx.unsigned(right, wide)
     }
-    op :: if index == 1 -> IROp.Eq else if index == 2 -> IROp.Ne else if index <= 4 -> IROp.Lt else if index <= 6 -> IROp.Gt else if index <= 8 -> IROp.Le else -> IROp.Ge
+    op :: if {
+        index == 1 -> IROp.Eq
+        index == 2 -> IROp.Ne
+        index <= 4 -> IROp.Lt
+        index <= 6 -> IROp.Gt
+        index <= 8 -> IROp.Le
+        else -> IROp.Ge
+    }
     test :: &cx.cmp(op, left, right)
     result :: &cx.flag(test)
     &cx.push(result)
@@ -787,7 +860,11 @@ fn plug_int_arith(cx: &PlugCx, index: Int, wide: Bool) Never! {
         value :: &cx.pop()
         bits :: if wide -> value else -> &cx.zext(value)
         size :: &cx.word(width)
-        name :: if index == 0 -> "jet_plugin_clz" else if index == 1 -> "jet_plugin_ctz" else -> "jet_plugin_popcnt"
+        name :: if {
+            index == 0 -> "jet_plugin_clz"
+            index == 1 -> "jet_plugin_ctz"
+            else -> "jet_plugin_popcnt"
+        }
         count :: &cx.rt(name, [Int]{bits, size}, cx.rows.word)
         result :: if wide -> count else -> &cx.copy(row, count)
         return &cx.push(result)
@@ -795,51 +872,70 @@ fn plug_int_arith(cx: &PlugCx, index: Int, wide: Bool) Never! {
     right :: &cx.pop()
     left :: &cx.pop()
     result := -1
-    if index == 3 || index == 4 || index == 5 || index == 10 || index == 11 || index == 12 {
-        op :: if index == 3 -> IROp.Add else if index == 4 -> IROp.Sub else if index == 5 -> IROp.Mul else if index == 10 -> IROp.BitAnd else if index == 11 -> IROp.BitOr else -> IROp.BitXor
-        result = &cx.op2(op, row, left, right)
-    } else if index >= 6 && index <= 9 {
-        zero :: &cx.konst(row, 0)
-        by_zero :: &cx.cmp(IROp.Eq, right, zero)
-        &cx.guard(by_zero, PLUG_TRAP_DIVIDE)
-        if index == 6 {
-            minus :: &cx.konst(row, -1)
-            negating :: &cx.cmp(IROp.Eq, right, minus)
-            _ :: ir_open_if(&cx.f, negating, 0)
-            least :: &cx.konst(row, if wide -> 0 - 9223372036854775807 - 1 else -> 0 - 2147483648)
-            overflows :: &cx.cmp(IROp.Eq, left, least)
-            &cx.guard(overflows, PLUG_TRAP_OVERFLOW)
-            ir_end(&cx.f, 0)
-        }
-        op :: if index <= 7 -> IROp.Div else -> IROp.Rem
-        if index % 2 == 0 {
+    if {
+        index == 3 || index == 4 || index == 5 || index == 10 || index == 11 || index == 12 -> {
+            op :: if {
+                index == 3 -> IROp.Add
+                index == 4 -> IROp.Sub
+                index == 5 -> IROp.Mul
+                index == 10 -> IROp.BitAnd
+                index == 11 -> IROp.BitOr
+                else -> IROp.BitXor
+            }
             result = &cx.op2(op, row, left, right)
-        } else {
-            ul :: &cx.unsigned(left, wide)
-            ur :: &cx.unsigned(right, wide)
-            quotient :: &cx.op2(op, urow, ul, ur)
-            result = &cx.signed(quotient, wide)
         }
-    } else {
-        mask :: &cx.konst(row, width - 1)
-        count :: &cx.op2(IROp.BitAnd, row, right, mask)
-        if index == 13 {
-            result = &cx.op2(IROp.Shl, row, left, count)
-        } else if index == 14 {
-            result = &cx.op2(IROp.Shr, row, left, count)
-        } else if index == 15 {
-            ul :: &cx.unsigned(left, wide)
-            shifted :: &cx.op2(IROp.Shr, urow, ul, count)
-            result = &cx.signed(shifted, wide)
-        } else {
-            full :: &cx.konst(row, width)
-            rest :: &cx.op2(IROp.Sub, row, full, count)
-            back :: &cx.op2(IROp.BitAnd, row, rest, mask)
-            ul :: &cx.unsigned(left, wide)
-            first :: &cx.op2(if index == 16 -> IROp.Shl else -> IROp.Shr, urow, ul, count)
-            second :: &cx.op2(if index == 16 -> IROp.Shr else -> IROp.Shl, urow, ul, back)
-            joined :: &cx.op2(IROp.BitOr, urow, first, second)
-            result = &cx.signed(joined, wide)
+        index >= 6 && index <= 9 -> {
+            zero :: &cx.konst(row, 0)
+            by_zero :: &cx.cmp(IROp.Eq, right, zero)
+            &cx.guard(by_zero, PLUG_TRAP_DIVIDE)
+            if index == 6 {
+                minus :: &cx.konst(row, -1)
+                negating :: &cx.cmp(IROp.Eq, right, minus)
+                _ :: ir_open_if(&cx.f, negating, 0)
+                least :: &cx.konst(row, if wide -> 0 - 9223372036854775807 - 1 else -> 0 - 2147483648)
+                overflows :: &cx.cmp(IROp.Eq, left, least)
+                &cx.guard(overflows, PLUG_TRAP_OVERFLOW)
+                ir_end(&cx.f, 0)
+            }
+            op :: if index <= 7 -> IROp.Div else -> IROp.Rem
+            if {
+                index % 2 == 0 -> {
+                    result = &cx.op2(op, row, left, right)
+                }
+                else -> {
+                    ul :: &cx.unsigned(left, wide)
+                    ur :: &cx.unsigned(right, wide)
+                    quotient :: &cx.op2(op, urow, ul, ur)
+                    result = &cx.signed(quotient, wide)
+                }
+            }
+        }
+        else -> {
+            mask :: &cx.konst(row, width - 1)
+            count :: &cx.op2(IROp.BitAnd, row, right, mask)
+            if {
+                index == 13 -> {
+                    result = &cx.op2(IROp.Shl, row, left, count)
+                }
+                index == 14 -> {
+                    result = &cx.op2(IROp.Shr, row, left, count)
+                }
+                index == 15 -> {
+                    ul :: &cx.unsigned(left, wide)
+                    shifted :: &cx.op2(IROp.Shr, urow, ul, count)
+                    result = &cx.signed(shifted, wide)
+                }
+                else -> {
+                    full :: &cx.konst(row, width)
+                    rest :: &cx.op2(IROp.Sub, row, full, count)
+                    back :: &cx.op2(IROp.BitAnd, row, rest, mask)
+                    ul :: &cx.unsigned(left, wide)
+                    first :: &cx.op2(if index == 16 -> IROp.Shl else -> IROp.Shr, urow, ul, count)
+                    second :: &cx.op2(if index == 16 -> IROp.Shr else -> IROp.Shl, urow, ul, back)
+                    joined :: &cx.op2(IROp.BitOr, urow, first, second)
+                    result = &cx.signed(joined, wide)
+                }
+            }
         }
     }
     &cx.push(result)
@@ -853,7 +949,14 @@ fn plug_float_compare(cx: &PlugCx, index: Int, narrow: Bool) Never! {
         left = &cx.promote(left)
         right = &cx.promote(right)
     }
-    op :: if index == 0 -> IROp.Eq else if index == 1 -> IROp.Ne else if index == 2 -> IROp.Lt else if index == 3 -> IROp.Gt else if index == 4 -> IROp.Le else -> IROp.Ge
+    op :: if {
+        index == 0 -> IROp.Eq
+        index == 1 -> IROp.Ne
+        index == 2 -> IROp.Lt
+        index == 3 -> IROp.Gt
+        index == 4 -> IROp.Le
+        else -> IROp.Ge
+    }
     test :: &cx.cmp(op, left, right)
     result :: &cx.flag(test)
     &cx.push(result)
@@ -863,24 +966,47 @@ fn plug_float_compare(cx: &PlugCx, index: Int, narrow: Bool) Never! {
 // copysign by their index in the group.
 fn plug_float_arith(cx: &PlugCx, index: Int, narrow: Bool) Never! {
     result := -1
-    if index <= 6 {
-        value := &cx.pop()
-        if narrow -> value = &cx.promote(value)
-        name :: if index == 0 -> "jet_plugin_f64_abs" else if index == 1 -> "jet_plugin_f64_neg" else if index == 2 -> "jet_std_math_ceil" else if index == 3 -> "jet_std_math_floor" else if index == 4 -> "jet_std_math_trunc" else if index == 5 -> "jet_plugin_f64_nearest" else -> "jet_std_math_sqrt"
-        result = &cx.rt(name, [Int]{value}, cx.rows.f64)
-    } else {
-        right := &cx.pop()
-        left := &cx.pop()
-        if narrow {
-            left = &cx.promote(left)
-            right = &cx.promote(right)
+    if {
+        index <= 6 -> {
+            value := &cx.pop()
+            if narrow -> value = &cx.promote(value)
+            name :: if {
+                index == 0 -> "jet_plugin_f64_abs"
+                index == 1 -> "jet_plugin_f64_neg"
+                index == 2 -> "jet_std_math_ceil"
+                index == 3 -> "jet_std_math_floor"
+                index == 4 -> "jet_std_math_trunc"
+                index == 5 -> "jet_plugin_f64_nearest"
+                else -> "jet_std_math_sqrt"
+            }
+            result = &cx.rt(name, [Int]{value}, cx.rows.f64)
         }
-        if index <= 10 {
-            op :: if index == 7 -> IROp.Add else if index == 8 -> IROp.Sub else if index == 9 -> IROp.Mul else -> IROp.Div
-            result = &cx.op2(op, cx.rows.f64, left, right)
-        } else {
-            name :: if index == 11 -> "jet_plugin_f64_min" else if index == 12 -> "jet_plugin_f64_max" else -> "jet_plugin_f64_copysign"
-            result = &cx.rt(name, [Int]{left, right}, cx.rows.f64)
+        else -> {
+            right := &cx.pop()
+            left := &cx.pop()
+            if narrow {
+                left = &cx.promote(left)
+                right = &cx.promote(right)
+            }
+            if {
+                index <= 10 -> {
+                    op :: if {
+                        index == 7 -> IROp.Add
+                        index == 8 -> IROp.Sub
+                        index == 9 -> IROp.Mul
+                        else -> IROp.Div
+                    }
+                    result = &cx.op2(op, cx.rows.f64, left, right)
+                }
+                else -> {
+                    name :: if {
+                        index == 11 -> "jet_plugin_f64_min"
+                        index == 12 -> "jet_plugin_f64_max"
+                        else -> "jet_plugin_f64_copysign"
+                    }
+                    result = &cx.rt(name, [Int]{left, right}, cx.rows.f64)
+                }
+            }
         }
     }
     if narrow -> result = &cx.demote(result)
@@ -913,36 +1039,52 @@ fn plug_convert(cx: &PlugCx, op: Int) Never! {
         return plug_trunc(&cx, value, n < 2, (n % 2) + 2)
     }
     result := -1
-    if op == 0xa7 {
-        result = &cx.narrow32(value)
-    } else if op == 0xac {
-        result = &cx.copy(rows.word, value)
-    } else if op == 0xad {
-        result = &cx.zext(value)
-    } else if (op >= 0xb2 && op <= 0xb5) || (op >= 0xb7 && op <= 0xba) {
-        n :: if op <= 0xb5 -> op - 0xb2 else -> op - 0xb7
-        wide := value
-        if n == 1 -> wide = &cx.zext(value)
-        widened :: if n == 3 -> &cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> &cx.convert(rows.f64, wide)
-        result = if op <= 0xb5 -> &cx.demote(widened) else -> widened
-    } else if op == 0xb6 {
-        result = &cx.demote(value)
-    } else if op == 0xbb {
-        result = &cx.promote(value)
-    } else if op == 0xbc {
-        result = &cx.reinterpret(value, rows.i32)
-    } else if op == 0xbd {
-        result = &cx.reinterpret(value, rows.word)
-    } else if op == 0xbe {
-        result = &cx.reinterpret(value, rows.f32)
-    } else if op == 0xbf {
-        result = &cx.reinterpret(value, rows.f64)
-    } else {
-        // extend8_s … extend32_s: the i32 forms (0xc0, 0xc1) and the i64 forms.
-        bits :: if op == 0xc0 || op == 0xc2 -> 8 else if op == 0xc1 || op == 0xc3 -> 16 else -> 32
-        word :: if op <= 0xc1 -> &cx.copy(rows.word, value) else -> value
-        extended :: &cx.sext(word, bits)
-        result = if op <= 0xc1 -> &cx.copy(rows.i32, extended) else -> extended
+    if {
+        op == 0xa7 -> {
+            result = &cx.narrow32(value)
+        }
+        op == 0xac -> {
+            result = &cx.copy(rows.word, value)
+        }
+        op == 0xad -> {
+            result = &cx.zext(value)
+        }
+        (op >= 0xb2 && op <= 0xb5) || (op >= 0xb7 && op <= 0xba) -> {
+            n :: if op <= 0xb5 -> op - 0xb2 else -> op - 0xb7
+            wide := value
+            if n == 1 -> wide = &cx.zext(value)
+            widened :: if n == 3 -> &cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> &cx.convert(rows.f64, wide)
+            result = if op <= 0xb5 -> &cx.demote(widened) else -> widened
+        }
+        op == 0xb6 -> {
+            result = &cx.demote(value)
+        }
+        op == 0xbb -> {
+            result = &cx.promote(value)
+        }
+        op == 0xbc -> {
+            result = &cx.reinterpret(value, rows.i32)
+        }
+        op == 0xbd -> {
+            result = &cx.reinterpret(value, rows.word)
+        }
+        op == 0xbe -> {
+            result = &cx.reinterpret(value, rows.f32)
+        }
+        op == 0xbf -> {
+            result = &cx.reinterpret(value, rows.f64)
+        }
+        else -> {
+            // extend8_s … extend32_s: the i32 forms (0xc0, 0xc1) and the i64 forms.
+            bits :: if {
+                op == 0xc0 || op == 0xc2 -> 8
+                op == 0xc1 || op == 0xc3 -> 16
+                else -> 32
+            }
+            word :: if op <= 0xc1 -> &cx.copy(rows.word, value) else -> value
+            extended :: &cx.sext(word, bits)
+            result = if op <= 0xc1 -> &cx.copy(rows.i32, extended) else -> extended
+        }
     }
     &cx.push(result)
 }
@@ -980,27 +1122,34 @@ fn plug_bulk(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
     count :: &cx.pop()
     second :: &cx.pop()
     first :: &cx.pop()
-    if op == WASM_OP_MEMORY_INIT {
-        memory :: &cx.word(scope.memory)
-        segment :: &cx.word(scope.data_base + a)
-        _ :: &cx.rt("jet_plugin_memory_init", [Int]{cx.inst, memory, segment, first, second, count, fid, at}, -1)
-    } else if op == WASM_OP_MEMORY_COPY {
-        memory :: &cx.word(scope.memory)
-        _ :: &cx.rt("jet_plugin_memory_copy", [Int]{cx.inst, memory, memory, first, second, count, fid, at}, -1)
-    } else if op == WASM_OP_MEMORY_FILL {
-        memory :: &cx.word(scope.memory)
-        _ :: &cx.rt("jet_plugin_memory_fill", [Int]{cx.inst, memory, first, second, count, fid, at}, -1)
-    } else if op == WASM_OP_TABLE_INIT {
-        table :: &cx.word(scope.tables[b])
-        segment :: &cx.word(scope.elem_base + a)
-        _ :: &cx.rt("jet_plugin_table_init", [Int]{cx.inst, table, segment, first, second, count, fid, at}, -1)
-    } else if op == WASM_OP_TABLE_COPY {
-        target :: &cx.word(scope.tables[a])
-        source :: &cx.word(scope.tables[b])
-        _ :: &cx.rt("jet_plugin_table_copy", [Int]{cx.inst, target, source, first, second, count, fid, at}, -1)
-    } else {
-        table :: &cx.word(scope.tables[a])
-        _ :: &cx.rt("jet_plugin_table_fill", [Int]{cx.inst, table, first, second, count, fid, at}, -1)
+    if {
+        op == WASM_OP_MEMORY_INIT -> {
+            memory :: &cx.word(scope.memory)
+            segment :: &cx.word(scope.data_base + a)
+            _ :: &cx.rt("jet_plugin_memory_init", [Int]{cx.inst, memory, segment, first, second, count, fid, at}, -1)
+        }
+        op == WASM_OP_MEMORY_COPY -> {
+            memory :: &cx.word(scope.memory)
+            _ :: &cx.rt("jet_plugin_memory_copy", [Int]{cx.inst, memory, memory, first, second, count, fid, at}, -1)
+        }
+        op == WASM_OP_MEMORY_FILL -> {
+            memory :: &cx.word(scope.memory)
+            _ :: &cx.rt("jet_plugin_memory_fill", [Int]{cx.inst, memory, first, second, count, fid, at}, -1)
+        }
+        op == WASM_OP_TABLE_INIT -> {
+            table :: &cx.word(scope.tables[b])
+            segment :: &cx.word(scope.elem_base + a)
+            _ :: &cx.rt("jet_plugin_table_init", [Int]{cx.inst, table, segment, first, second, count, fid, at}, -1)
+        }
+        op == WASM_OP_TABLE_COPY -> {
+            target :: &cx.word(scope.tables[a])
+            source :: &cx.word(scope.tables[b])
+            _ :: &cx.rt("jet_plugin_table_copy", [Int]{cx.inst, target, source, first, second, count, fid, at}, -1)
+        }
+        else -> {
+            table :: &cx.word(scope.tables[a])
+            _ :: &cx.rt("jet_plugin_table_fill", [Int]{cx.inst, table, first, second, count, fid, at}, -1)
+        }
     }
     &cx.check(false)
 }
@@ -1034,7 +1183,11 @@ fn plug_thunk(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
     result :: &cx.call(kit.base + fid, all, row)
     &cx.check(false)
     if row >= 0 {
-        stored :: if row == rows.f32 -> &cx.promote(result) else if row == rows.i32 -> &cx.copy(rows.word, result) else -> result
+        stored :: if {
+            row == rows.f32 -> &cx.promote(result)
+            row == rows.i32 -> &cx.copy(rows.word, result)
+            else -> result
+        }
         &cx.store(area, 0, stored)
     }
     &cx.ret_dummy()
@@ -1086,18 +1239,29 @@ fn plug_import_stub(kit: PlugKit, fid: Int, import: Int, ty: WasmFuncType) -> IR
     &cx.emit(IROp.StackAddress, area, 8 * (params.len() + 1), 8, -1)
     loop (k, slot) in params {
         kind :: cx.f.slot_type[slot]
-        stored :: if kind == rows.f32 -> &cx.promote(slot) else if kind == rows.i32 -> &cx.copy(rows.word, slot) else -> slot
+        stored :: if {
+            kind == rows.f32 -> &cx.promote(slot)
+            kind == rows.i32 -> &cx.copy(rows.word, slot)
+            else -> slot
+        }
         &cx.store(area, k * 8, stored)
     }
     index :: &cx.word(import)
     count :: &cx.word(params.len())
     raw :: &cx.rt("jet_plugin_host_import", [Int]{cx.inst, index, area, count}, rows.word)
     &cx.check(false)
-    if row < 0 {
-        &cx.emit(IROp.Return, -1, -1, -1, -1)
-    } else {
-        result :: if row == rows.i32 -> &cx.narrow32(raw) else if row == rows.word -> raw else -> &cx.reinterpret(raw, row)
-        &cx.emit(IROp.Return, -1, result, -1, -1)
+    if {
+        row < 0 -> {
+            &cx.emit(IROp.Return, -1, -1, -1, -1)
+        }
+        else -> {
+            result :: if {
+                row == rows.i32 -> &cx.narrow32(raw)
+                row == rows.word -> raw
+                else -> &cx.reinterpret(raw, row)
+            }
+            &cx.emit(IROp.Return, -1, result, -1, -1)
+        }
     }
     ^cx.f
 }

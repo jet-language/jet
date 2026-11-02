@@ -17,18 +17,20 @@
 // slots, the most recently used. A compile that read a comptime input
 // (`embed_file`, `embed_bytes`, `find`) keeps nothing: those files lie
 // outside the snapshot, so the record would not name them.
-use core.crypto as script_crypto
-use core.files as cli_files
-use core.sys as cli_sys
-use jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverComptimeInputLog,
-    JetDriverComptimeInputRecord,
-    JetDriverVerbOutput,
-    schema_cache_dir,
-]
-use jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
+use {
+    script_crypto :: core.crypto
+    cli_files :: core.files
+    cli_sys :: core.sys
+    jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverComptimeInputLog,
+        JetDriverComptimeInputRecord,
+        JetDriverVerbOutput,
+        schema_cache_dir,
+    ]
+    jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
+}
 
 // Names the kept-program records; a new layout is a new name.
 JET_CLI_SCRIPT_RECORD :: "jet.script-run/v3"

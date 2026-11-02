@@ -1,13 +1,15 @@
 // Source-owned evaluation for compile-time reflection metadata predicates.
 // Metadata values are the canonical Comptime reflection structs; no native
 // Builtins callback participates in this route.
-use jet_foundation.[
-    TComptimeField,
-    TComptimeValue,
-]
-use jet_sema.[
-    sema_comptime_reflection_has_marker,
-]
+use {
+    jet_foundation.[
+        TComptimeField,
+        TComptimeValue,
+    ]
+    jet_sema.[
+        sema_comptime_reflection_has_marker,
+    ]
+}
 
 fn jet_eval_reflection_metadata_supported(owner: String, method: String) -> Bool Never! {
     if owner == "TypeInfo" -> return method == "has_marker" || method == "implements" || method == "has_method"

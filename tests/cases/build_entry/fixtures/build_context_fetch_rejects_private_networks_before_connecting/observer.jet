@@ -2,9 +2,11 @@
 // A 1s nonblocking accept/yield window is equivalent to accept(deadline:1s):
 // ANY accepted connection = true; expiration OR ANY other error = false.
 // TestLead1 approved this exact Boolean equivalence; no deadline-zero shortcut.
-use core.net as net
-use core.files as files
-use core.process as process
+use {
+    net :: core.net
+    files :: core.files
+    process :: core.process
+}
 fn run() {
     args :: process.argv().skip(1).to_list()
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")

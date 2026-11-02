@@ -1,19 +1,21 @@
-use std.fs as fs // GATE #4494: retained filesystem metadata and canonicalization.
-use jet_driver.Diagnostics.[Diagnostic, Severity]
-use jet_driver.SHA256 as SHA256
-use jet_driver.Syntax as Syntax
-use jet_driver.Package as Package
-use jet_env_model.Authority.[AuthorityResolver, AuthorityError]
-use jet_env_model.WorkspacePlan.[WorkspaceSource, WorkspaceSourceRole]
-use jet_env_model.WorkspaceFile.[WorkspacePlan, WorkspaceSnapshot]
-use jet_devserver.Canvas.GraphProjection.[project_checked, Projection]
-use jet_devserver.Canvas.ProjectTransactions.[diagnostic_json, rel_path]
-use jet_devserver.Canvas.SourceModel.[source_revision]
-use jet_devserver.Canvas.ValidationJson.[json_optional_str, json_str]
-use jet_foundation.[Diagnostic]
-use jet_pkg_model.[AuthorityError, AuthorityResolver, WorkspacePlan, WorkspaceSource]
-use jet_env_model.[WorkspaceSnapshot]
-use core.files.[OSPath]
+use {
+    fs :: std.fs // GATE #4494: retained filesystem metadata and canonicalization.
+    jet_driver.Diagnostics.[Diagnostic, Severity]
+    SHA256 :: jet_driver.SHA256
+    Syntax :: jet_driver.Syntax
+    Package :: jet_driver.Package
+    jet_env_model.Authority.[AuthorityResolver, AuthorityError]
+    jet_env_model.WorkspacePlan.[WorkspaceSource, WorkspaceSourceRole]
+    jet_env_model.WorkspaceFile.[WorkspacePlan, WorkspaceSnapshot]
+    jet_devserver.Canvas.GraphProjection.[project_checked, Projection]
+    jet_devserver.Canvas.ProjectTransactions.[diagnostic_json, rel_path]
+    jet_devserver.Canvas.SourceModel.[source_revision]
+    jet_devserver.Canvas.ValidationJson.[json_optional_str, json_str]
+    jet_foundation.[Diagnostic]
+    jet_pkg_model.[AuthorityError, AuthorityResolver, WorkspacePlan, WorkspaceSource]
+    jet_env_model.[WorkspaceSnapshot]
+    core.files.[OSPath]
+}
 
 // Rust: crates/jet-devserver/src/Canvas/project_scan.rs:13
 fn project_file(path: OSPath) -> Projection Err! [Diagnostic] { project_file_with_runtime(path, .None) }

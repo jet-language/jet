@@ -4,22 +4,24 @@
 // checks are Source/CmdCodemod/Transaction.rs's, run before the held
 // transaction (SourceTransaction.jet) publishes anything. Every refusal is one
 // E2105 report after whatever the plan already printed.
-use core.files as cli_files
-use core.encoding.hex as codemod_hex
-use jet_driver.[
-    JetDriverCompileMode,
-    JetDriverDocModule,
-    JetDriverKeepGoing,
-    JetDriverVerbOutput,
-    jet_driver_apply_edits,
-    jet_driver_compile_keep_going,
-    jet_driver_present_diagnostics,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USER_ERROR,
-]
-use jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_json_quote, name_mangle]
-use jet_lexer.[lex, lex_generated, TOKEN_IDENT]
-use jet_parser.[parse_generated_source]
+use {
+    cli_files :: core.files
+    codemod_hex :: core.encoding.hex
+    jet_driver.[
+        JetDriverCompileMode,
+        JetDriverDocModule,
+        JetDriverKeepGoing,
+        JetDriverVerbOutput,
+        jet_driver_apply_edits,
+        jet_driver_compile_keep_going,
+        jet_driver_present_diagnostics,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+    ]
+    jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_json_quote, name_mangle]
+    jet_lexer.[lex, lex_generated, TOKEN_IDENT]
+    jet_parser.[parse_generated_source]
+}
 
 // One invocation's output so far: stdout lines, the stderr warning printed
 // before a refusal, and compiler output to emit verbatim instead of a report.

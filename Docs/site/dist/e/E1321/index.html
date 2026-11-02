@@ -36,24 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a ratified kind and fields, point `entry:` at one visible safe function with the role&#39;s exact signature, or select one of the listed Executables explicitly.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E1321</code>: <code>tests/ui/error_conversions/missing_typed_conversion_reports_e2404.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E1321</code>: <code>tests/ui/cli_entry_param_not_cli.stderr</code>.</p>
 <pre class="diag">Error [E1321]: Output entry `run` has the wrong callable contract
-  --&gt; tests/ui/error_conversions/missing_typed_conversion_reports_e2404.jet:11:1
+  --&gt; tests/ui/cli_entry_param_not_cli.jet:1:1
     |
- 11 | fn run() -&gt; Int TargetErr! {
-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: An Executable takes zero or one typed CLI parameter and returns `()` or `() ?`
- Fix: Declare the entry as `fn run()` or `fn run() ()?`
+  1 | fn run(x: Int) {
+    | ^^^^^^^^^^^^^^^^
+ Why: An Executable takes zero or one typed CLI parameter and declares no return type, or only a unit error contract such as `IOError!`
+ Fix: Declare the entry as `fn run()` or `fn run() IOError!`
 More: jet-lang.dev/e/E1321
-
-Error [E2404]: `read` fails with `SourceErr`, which can&#39;t propagate into `TargetErr` here
-  --&gt; missing_typed_conversion_reports_e2404.jet:12:14
-    |
- 12 |     value :: read()
-    |              ^^^^
- Why: `read` is defined at `missing_typed_conversion_reports_e2404.jet:7:4` with effective failure contract `explicit !SourceErr`; the caller&#39;s `explicit !TargetErr` contract has no route from `SourceErr` to `TargetErr`
- Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -&gt; TargetErr { … }`; otherwise handle `read` locally with `??`
-More: jet-lang.dev/e/E2404
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

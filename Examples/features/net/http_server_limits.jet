@@ -4,8 +4,10 @@ package {
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
-use core.http.server as http_server
-use core.net as net
+use {
+    http_server :: core.http.server
+    net :: core.net
+}
 
 fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")

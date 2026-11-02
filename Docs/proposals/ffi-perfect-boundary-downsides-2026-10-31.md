@@ -698,7 +698,7 @@ can make system calls directly. This is inherent; the wall is `.Wasm` or `.Proce
 
 **Beginner.**
 
-- Writes `use c.sqlite3 as sql` or `use "raylib.h" as rl` and calls functions.
+- Writes `use sql :: c.sqlite3` or `use rl :: "raylib.h"` and calls functions.
 - Sees Jet errors with codes and fixes, never a foreign toolchain message (I2).
 - Never writes `#Unsafe` for a library that has a header or a pack.
 - Never chooses a placement unless a library is untrusted.

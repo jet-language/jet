@@ -5,9 +5,11 @@ package {
     name: "http_server_date"
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
-use core.http.client as http
-use core.http.server as server
-use core.net as net
+use {
+    http :: core.http.client
+    server :: core.http.server
+    net :: core.net
+}
 
 fn handle_root(_req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "welcome"))

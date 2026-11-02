@@ -1,8 +1,10 @@
 // Assemble with the production compiler sources and this replacement `run`.
-use jet_sema.[
-    SemaOriginFact, sema_effect_memory_fact, sema_fact_local_origin, sema_origin_optional_int,
-]
-use jet_foundation.[TComptimeField, TComptimeReport, TComptimeValue, Type]
+use {
+    jet_sema.[
+        SemaOriginFact, sema_effect_memory_fact, sema_fact_local_origin, sema_origin_optional_int,
+    ]
+    jet_foundation.[TComptimeField, TComptimeReport, TComptimeValue, Type]
+}
 
 #Test("checked_projection_fixtures") {
     if sema_fact_local_origin(None) != (TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Named{name: "OriginInfo"}}}}) -> panic("an untracked local must not fabricate origin")

@@ -1,12 +1,14 @@
 // Assemble with the production compiler/CLI sources, replacing its run entry.
 // Integrator supplies a disk-backed JET_CLI_FMT_TEST_ROOT, not a provider mock.
-use core.files as cli_files
-use core.sys as cli_sys
-use core.process as cli_process
-use jet_cli.[
-    JetCLIStatusField, JetCLIStatusValue, jet_cli_external_fmt_diff, jet_cli_external_fmt_finish,
-    jet_cli_external_fmt_status, jet_cli_status_field, jet_cli_status_object, jet_cli_status_text,
-]
+use {
+    cli_files :: core.files
+    cli_sys :: core.sys
+    cli_process :: core.process
+    jet_cli.[
+        JetCLIStatusField, JetCLIStatusValue, jet_cli_external_fmt_diff, jet_cli_external_fmt_finish,
+        jet_cli_external_fmt_status, jet_cli_status_field, jet_cli_status_object, jet_cli_status_text,
+    ]
+}
 
 fn external_format_require(ok: Bool, label: String) Never! {
     if !ok -> panic("external formatter continuation: {label}")

@@ -1,10 +1,12 @@
 // Canonical diagnostic edit grades, deferred rounds and edition migrations.
-use jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
-use jet_cli.[
-    JetCLIFix, JetCLISemDefinitionFact, jet_cli_fix_apply_non_overlapping,
-    jet_cli_fix_inline_authority, jet_cli_fix_inline_insertion, jet_cli_safe_fixes,
-    jet_cli_semantic_rename_ops,
-]
+use {
+    jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
+    jet_cli.[
+        JetCLIFix, JetCLISemDefinitionFact, jet_cli_fix_apply_non_overlapping,
+        jet_cli_fix_inline_authority, jet_cli_fix_inline_insertion, jet_cli_safe_fixes,
+        jet_cli_semantic_rename_ops,
+    ]
+}
 
 fn cli_fix_fixture_edit(start: Int, end: Int, text: String, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> JetCLIFix Never! {
     JetCLIFix{title: "fixture edit", edit: TextEdit{span: Span{start: start, end: end}, new_text: text}, applicability: applicability, safety: safety}

@@ -4,29 +4,31 @@
 // `info`, `outdated`, and `reserved`. `command` is the normalized command
 // word (`inspect` for `inspect env`, which keeps its group word); `None`
 // leaves the command to the caller's E2104 refusal.
-use core.files as cli_files
-use core.process as cli_process
-use core.sys as cli_sys
-use jet_driver.[
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-]
-use jet_foundation.[
-    CORE_MODULE_EXPORTS,
-    DIAGNOSTIC_ERROR,
-    Diagnostic,
-    DiagnosticRegistryFix,
-    MARKER_SOURCE,
-    TAppliedRule,
-    diagnostic_registry_rows,
-    diagnostic_render_all,
-    marker_source_read,
-]
-use jet_pkg_model.[WorkspaceDeclarationCache]
-use jetpack_foundation.[CONFIG_FILE, ENV_FILE]
-use jet_env_model.[envmodel_evaluate_env]
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_sys :: core.sys
+    jet_driver.[
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+    ]
+    jet_foundation.[
+        CORE_MODULE_EXPORTS,
+        DIAGNOSTIC_ERROR,
+        Diagnostic,
+        DiagnosticRegistryFix,
+        MARKER_SOURCE,
+        TAppliedRule,
+        diagnostic_registry_rows,
+        diagnostic_render_all,
+        marker_source_read,
+    ]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+    jetpack_foundation.[CONFIG_FILE, ENV_FILE]
+    jet_env_model.[envmodel_evaluate_env]
+}
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.

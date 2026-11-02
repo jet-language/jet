@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Provide the type argument explicitly or add enough context to infer it.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0904</code>: <code>tests/ui/generic_constructor_ambiguous.stderr</code>.</p>
-<pre class="diag">Error [E0904]: `Empty.new` needs its generic receiver type here
-  --&gt; tests/ui/generic_constructor_ambiguous.jet:18:19
+<p>First UI snapshot mentioning <code>E0904</code>: <code>tests/ui/generic_bound_type_union.stderr</code>.</p>
+<pre class="diag">Error [E0904]: `Int | Float` is a set of types, not a trait, so it cannot bound `T`
+  --&gt; tests/ui/generic_bound_type_union.jet:6:11
     |
- 18 |     item :: Empty.new()
-    |                   ^^^
- Why: Constructor inputs and the surrounding expected type must determine one concrete receiver type
- Fix: Write the full receiver, such as `Empty&lt;T&gt;.new(...)`
-More: jet-lang.dev/e/E0904
-
-Error [E0904]: `Same.new` needs its generic receiver type here
-  --&gt; tests/ui/generic_constructor_ambiguous.jet:19:22
-    |
- 19 |     conflict :: Same.new(1, &quot;two&quot;)
-    |                      ^^^
- Why: Constructor inputs and the surrounding expected type must determine one concrete receiver type
- Fix: Write the full receiver, such as `Same&lt;T&gt;.new(...)`
+  6 |     print(twice(2))
+    |           ^^^^^
+ Why: A generic bound names traits that every type argument must implement; a union of types is a value type, not a bound
+ Fix: Use the union `Int | Float` as the parameter type and match on it, or bound `T` by a trait such as `Comparable`
 More: jet-lang.dev/e/E0904
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

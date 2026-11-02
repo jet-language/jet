@@ -5,30 +5,32 @@
 // authority), then built and run as one program by a private child `jet`
 // (`__jet_repl_run_stdin`, Executor.rs) that replays the earlier statements
 // and prints the values this turn shows behind a per-session marker.
-use core.files as repl_files
-use core.process as repl_process
-use core.sys as repl_sys
-use core.term as repl_term
-use core.time as repl_time
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileMode,
-    JetDriverCompileResult,
-    JetDriverLoweringInputs,
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-    jet_driver_present_diagnostics,
-]
-use jet_foundation.[
-    AccessConvention, BuildOptions, CallArg, Diagnostic, Expr, Item, Stmt, Type, build_options_stock, diagnostic_from_registry,
-    diagnostic_render_all, diagnostic_theme_accent, diagnostic_theme_bold, diagnostic_theme_dim, diagnostic_theme_paint,
-    type_name, type_unqualified_nominals,
-]
-use jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex]
-use jet_parser.[parse_source]
-use jet_repl.[ReplInput, ReplInputParse, repl_classify, repl_reanchor]
+use {
+    repl_files :: core.files
+    repl_process :: core.process
+    repl_sys :: core.sys
+    repl_term :: core.term
+    repl_time :: core.time
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverLoweringInputs,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_present_diagnostics,
+    ]
+    jet_foundation.[
+        AccessConvention, BuildOptions, CallArg, Diagnostic, Expr, Item, Stmt, Type, build_options_stock, diagnostic_from_registry,
+        diagnostic_render_all, diagnostic_theme_accent, diagnostic_theme_bold, diagnostic_theme_dim, diagnostic_theme_paint,
+        type_name, type_unqualified_nominals,
+    ]
+    jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_KW_FN, lex]
+    jet_parser.[parse_source]
+    jet_repl.[ReplInput, ReplInputParse, repl_classify, repl_reanchor]
+}
 
 // The private verb a REPL turn's child `jet` runs; never in help, completions
 // or docs.

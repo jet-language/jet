@@ -1,8 +1,10 @@
 // Secure live transport adapted from LiveInspect.rs and CLIServices1's
 // LiveCapture.jet. Retain the descriptor throughout the bounded read.
-use core.time as live_time
-use core.files as cli_files
-use core.sys as cli_sys
+use {
+    live_time :: core.time
+    cli_files :: core.files
+    cli_sys :: core.sys
+}
 
 fn jet_cli_live_process_stat(pid: Int) -[FS, Time.Wait]> String JetCLIReadError! {
     if !cli_files.is_dir("/proc/{pid}") -> return Err(jet_cli_read_error("process {pid} is no longer running"))

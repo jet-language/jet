@@ -1,136 +1,138 @@
 // Declaration grammar. AST nodes are assembled directly from Jet tokens; no
 // Rust parser or semantic compiler is involved.
-use jet_foundation.[
-    AccessConvention,
-    AppliedRuleApplication,
-    CLICommandBinding,
-    CallLabel,
-    ConstAttr,
-    ContractClause,
-    ConstDef,
-    CtValue,
-    DeriveBodyItem,
-    DeriveDef,
-    EffectDecl,
-    EffectRowEntry,
-    EnumDef,
-    EnumGroup,
-    ErrorConvDef,
-    Expr,
-    Field,
-    Func,
-    ImplConstValue,
-    ImplDef,
-    ImportDecl,
-    ImportKind,
-    ImportedItem,
-    InlineForeign,
-    InlineVersion,
-    Item,
-    KernelMarker,
-    KernelMode,
-    Marker,
-    MarkerCallArg,
-    NamedSpan,
-    NamedType,
-    OperatorMarker,
-    Param,
-    ParamZone,
-    PolicyDeclaration,
-    PolicyScope,
-    PatSlot,
-    Pattern,
-    PrepParam,
-    RuleSite,
-    RustConstKind,
-    Span,
-    StateDecl,
-    StateTransition,
-    Stmt,
-    StructDef,
-    TagDef,
-    TextEdit,
-    TraitConstDecl,
-    TraitDef,
-    TraitMethodSig,
-    TraitImplBlock,
-    Type,
-    TypeAliasDef,
-    TypeParam,
-    UserPolicyDecl,
-    Variant,
-    VariantField,
-    VariantPayload,
-    ViewProvenance,
-    ViewProvenanceEntry,
-    ViewProvenanceMap,
-    ViewSource,
-    ViewSourcePath,
-    ViewSourceProjection,
-    WebPartitionMarker,
-    ast_const,
-    ast_enum,
-    ast_func,
-    ast_struct,
-    diagnostic_from_registry,
-    expr_span,
-    diagnostic_with_edit,
-    marker_registered,
-]
-use jet_lexer.[
-    TOKEN_AMP,
-    TOKEN_BANG,
-    TOKEN_CARET,
-    TOKEN_COLON,
-    TOKEN_COLON_COLON,
-    TOKEN_COLON_EQ,
-    TOKEN_COMMA,
-    TOKEN_DOT,
-    TOKEN_DOT_DOT,
-    TOKEN_DOT_DOT_DOT,
-    TOKEN_EOF,
-    TOKEN_EQ,
-    TOKEN_FLOAT,
-    TOKEN_GT,
-    TOKEN_HASH,
-    TOKEN_IDENT,
-    TOKEN_INT,
-    TOKEN_KW_COPY,
-    TOKEN_KW_DERIVE,
-    TOKEN_KW_COMPTIME,
-    TOKEN_KW_EFFECT,
-    TOKEN_KW_ENUM,
-    TOKEN_KW_EXTERN,
-    TOKEN_KW_FN,
-    TOKEN_KW_IMPL,
-    TOKEN_KW_MODULE,
-    TOKEN_KW_MOVE,
-    TOKEN_KW_MUTATE,
-    TOKEN_KW_PRIV,
-    TOKEN_KW_PUB,
-    TOKEN_KW_STRUCT,
-    TOKEN_KW_TAG,
-    TOKEN_KW_TRAIT,
-    TOKEN_KW_USE,
-    TOKEN_LBRACE,
-    TOKEN_LBRACKET,
-    TOKEN_LPAREN,
-    TOKEN_LT,
-    TOKEN_MINUS,
-    TOKEN_PIPE,
-    TOKEN_RAW_STRING,
-    TOKEN_RBRACE,
-    TOKEN_RBRACKET,
-    TOKEN_RPAREN,
-    TOKEN_SELF,
-    TOKEN_SEMI,
-    TOKEN_SLASH,
-    TOKEN_STAR,
-    TOKEN_STRING,
-    TOKEN_TILDE_TILDE,
-    TOKEN_UNIFIED_ARROW,
-    Token,
-]
+use {
+    jet_foundation.[
+        AccessConvention,
+        AppliedRuleApplication,
+        CLICommandBinding,
+        CallLabel,
+        ConstAttr,
+        ContractClause,
+        ConstDef,
+        CtValue,
+        DeriveBodyItem,
+        DeriveDef,
+        EffectDecl,
+        EffectRowEntry,
+        EnumDef,
+        EnumGroup,
+        ErrorConvDef,
+        Expr,
+        Field,
+        Func,
+        ImplConstValue,
+        ImplDef,
+        ImportDecl,
+        ImportKind,
+        ImportedItem,
+        InlineForeign,
+        InlineVersion,
+        Item,
+        KernelMarker,
+        KernelMode,
+        Marker,
+        MarkerCallArg,
+        NamedSpan,
+        NamedType,
+        OperatorMarker,
+        Param,
+        ParamZone,
+        PolicyDeclaration,
+        PolicyScope,
+        PatSlot,
+        Pattern,
+        PrepParam,
+        RuleSite,
+        RustConstKind,
+        Span,
+        StateDecl,
+        StateTransition,
+        Stmt,
+        StructDef,
+        TagDef,
+        TextEdit,
+        TraitConstDecl,
+        TraitDef,
+        TraitMethodSig,
+        TraitImplBlock,
+        Type,
+        TypeAliasDef,
+        TypeParam,
+        UserPolicyDecl,
+        Variant,
+        VariantField,
+        VariantPayload,
+        ViewProvenance,
+        ViewProvenanceEntry,
+        ViewProvenanceMap,
+        ViewSource,
+        ViewSourcePath,
+        ViewSourceProjection,
+        WebPartitionMarker,
+        ast_const,
+        ast_enum,
+        ast_func,
+        ast_struct,
+        diagnostic_from_registry,
+        expr_span,
+        diagnostic_with_edit,
+        marker_registered,
+    ]
+    jet_lexer.[
+        TOKEN_AMP,
+        TOKEN_BANG,
+        TOKEN_CARET,
+        TOKEN_COLON,
+        TOKEN_COLON_COLON,
+        TOKEN_COLON_EQ,
+        TOKEN_COMMA,
+        TOKEN_DOT,
+        TOKEN_DOT_DOT,
+        TOKEN_DOT_DOT_DOT,
+        TOKEN_EOF,
+        TOKEN_EQ,
+        TOKEN_FLOAT,
+        TOKEN_GT,
+        TOKEN_HASH,
+        TOKEN_IDENT,
+        TOKEN_INT,
+        TOKEN_KW_COPY,
+        TOKEN_KW_DERIVE,
+        TOKEN_KW_COMPTIME,
+        TOKEN_KW_EFFECT,
+        TOKEN_KW_ENUM,
+        TOKEN_KW_EXTERN,
+        TOKEN_KW_FN,
+        TOKEN_KW_IMPL,
+        TOKEN_KW_MODULE,
+        TOKEN_KW_MOVE,
+        TOKEN_KW_MUTATE,
+        TOKEN_KW_PRIV,
+        TOKEN_KW_PUB,
+        TOKEN_KW_STRUCT,
+        TOKEN_KW_TAG,
+        TOKEN_KW_TRAIT,
+        TOKEN_KW_USE,
+        TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_MINUS,
+        TOKEN_PIPE,
+        TOKEN_RAW_STRING,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
+        TOKEN_RPAREN,
+        TOKEN_SELF,
+        TOKEN_SEMI,
+        TOKEN_SLASH,
+        TOKEN_STAR,
+        TOKEN_STRING,
+        TOKEN_TILDE_TILDE,
+        TOKEN_UNIFIED_ARROW,
+        Token,
+    ]
+}
 
 struct ParsedItemOrImport {
     item: Item?
@@ -527,7 +529,7 @@ fn parser_marker_first_expr(marker: Marker) -> Expr? {
 
 // `use ROW` or a `use { … }` block with one ROW per line (#6542). A row is
 // a module path, a member list, or a "file" path, any of them after an
-// `alias ::`: `alias :: path` means what `use path as alias` means. `pub`
+// `alias ::`: `alias :: path` means what `use alias :: path` means. `pub`
 // before `use` re-exports every row.
 fn parser_parse_import(state: &JetParserState, is_pub: Bool) -> [ImportDecl] {
     keyword :: parser_bump(&state)
@@ -570,17 +572,17 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         path :: parser_bump(&state)
         alias := parser_path_basename(parser_value(state, path))
-        alias_span := start
+        alias_span := path.span
         if named == .Val(name) {
             alias = parser_value(state, name)
             alias_span = name.span
         }
         if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-            word :: parser_bump(&state)
-            alias_token :: parser_expect_name(&state, "after `as` in an import")
-            if named != None -> parser_import_second_alias(&state, word.span, alias)
-            alias = parser_value(state, alias_token)
-            alias_span = alias_token.span
+            alias_token :: parser_retired_import_as(&state, path.span.start, named != None)
+            if named == None {
+                alias = parser_value(state, alias_token)
+                alias_span = alias_token.span
+            }
         }
         parser_finish_statement(&state)
         end := path.span
@@ -603,10 +605,14 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
     module_span := parser_cover(first.span, last_span)
     if parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
-        if parser_current_kind(&state) == TOKEN_LBRACKET {
+        if parser_current_kind(&state) == TOKEN_LBRACKET || parser_current_kind(&state) == TOKEN_LBRACE {
             if named == .Val(name) {
                 named_text :: parser_value(state, name)
                 parser_add_error(&state, name.span, "a member list takes no `{named_text} ::` alias", "`alias :: path` names one module or item, and a member list names several", "drop `{named_text} ::`, or write one `alias :: {path}.member` row per member")
+            }
+            if parser_current_kind(&state) == TOKEN_LBRACE {
+                brace :: parser_current(&state).span
+                parser_add_error_code(&state, "E0630", brace, "`.{{…}}` is not an import member list", "a member list is written in brackets, as `owner.[a, b]` (#6542)", "write `use {path}.[…]`")
             }
             return parser_parse_import_member_list(&state, start, path, module_span)
         }
@@ -617,26 +623,13 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
             end := parser_lookahead(&state, -1).span
             return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start, span: parser_cover(start, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
         }
-        if parser_current_kind(&state) == TOKEN_LBRACE {
-            open :: parser_bump(&state)
-            brace_depth := 1
-            loop brace_depth > 0 && parser_current_kind(&state) != TOKEN_EOF {
-                kind := parser_current_kind(&state)
-                if kind == TOKEN_LBRACE -> brace_depth += 1
-                if kind == TOKEN_RBRACE -> brace_depth -= 1
-                parser_bump(&state)
-            }
-            parser_add_error(&state, open.span, "brace import groups are not supported", "`use {path}.{{…}}` is the retired grouped-import spelling", "write `use {path}.[item, other as local]`")
-            parser_finish_statement(&state)
-            end := parser_lookahead(&state, -1).span
-            return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start, span: parser_cover(start, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
-        }
         suffix :: parser_current(&state)
         parser_add_error(&state, suffix.span, "expected an import member suffix after `.`", "a trailing import dot starts a member list or wildcard suffix", "write `.[member]` after the module path")
     }
     alias := parser_value(state, parts[parts.len() - 1])
-    alias_span := first.span
-    if parts.len() > 1 -> alias_span = start
+    // An import without `alias ::` takes its local name from the path's last
+    // segment, so that segment is where the name is written.
+    alias_span := parts[parts.len() - 1].span
     inline_version := InlineVersion?{None}
     if parts.len() == 1 && parser_current_kind(&state) == TOKEN_HASH {
         inline_version = Val(parser_parse_inline_version(&state))
@@ -648,12 +641,12 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
         explicit_alias = true
     }
     if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-        word :: parser_bump(&state)
-        alias_token :: parser_expect_name(&state, "after `as` in an import")
-        if named != None -> parser_import_second_alias(&state, word.span, alias)
-        alias = parser_value(state, alias_token)
-        alias_span = alias_token.span
-        explicit_alias = true
+        alias_token :: parser_retired_import_as(&state, first.span.start, named != None)
+        if named == None {
+            alias = parser_value(state, alias_token)
+            alias_span = alias_token.span
+            explicit_alias = true
+        }
     }
     parser_finish_statement(&state)
     end := last_span
@@ -666,21 +659,37 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
     ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: alias, alias_span: alias_span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: inline_version}
 }
 
-// `alias :: path as other`: a row has one alias.
-fn parser_import_second_alias(state: &JetParserState, span: Span, alias: String) {
-    parser_add_error(&state, span, "this import already has the alias `{alias}`", "`{alias} :: path` names the import, so `as` would name it twice", "delete `as` and the name after it")
+// `path as alias` is the retired import alias (#6542): E0630 teaches
+// `alias :: path`, and the row keeps the alias so `jet fmt` rewrites it. A
+// row that already has an `alias ::` keeps that one.
+fn parser_retired_import_as(state: &JetParserState, path_start: Int, named: Bool) -> Token {
+    path_end :: parser_lookahead(&state, -1).span.end
+    word :: parser_bump(&state)
+    alias_token :: parser_expect_name(&state, "after `as` in an import")
+    local :: parser_value(state, alias_token)
+    if named {
+        edit :: TextEdit{span: Span{start: path_end, end: alias_token.span.end}, new_text: ""}
+        parser_add_error_code_edit(&state, "E0630", word.span, "`as {local}` names an import that already has an alias", "`alias :: path` is the one import alias; `as` is retired (#6542)", "delete `as {local}`", edit)
+        return alias_token
+    }
+    path :: parser_source_slice(state, path_start, path_end)
+    edit :: TextEdit{span: Span{start: path_start, end: alias_token.span.end}, new_text: "{local} :: {path}"}
+    parser_add_error_code_edit(&state, "E0630", word.span, "`as` no longer names an import", "an import's local name comes first, as `alias :: path` (#6542)", "write `{local} :: {path}`", edit)
+    alias_token
 }
 
 fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_alias: String, module_alias_span: Span) -> ImportDecl {
     open :: parser_bump(&state)
+    // `.{…}` was reported (E0630) and reads like `.[…]`.
+    close_kind :: if open.kind == TOKEN_LBRACE -> TOKEN_RBRACE else -> TOKEN_RBRACKET
     items := [ImportedItem]{}
     item_spans := [Span]{}
     local_spans := [Span]{}
     next_kind := parser_current_kind(&state)
-    if next_kind == TOKEN_RBRACKET || next_kind == TOKEN_EOF {
+    if next_kind == close_kind || next_kind == TOKEN_EOF {
         parser_add_error(&state, open.span, "an import member list cannot be empty", "the `.[…]` form must name at least one member", "write `use {module_alias}.[member]`")
     }
-    loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
+    loop parser_current_kind(&state) != close_kind && parser_current_kind(&state) != TOKEN_EOF {
         first :: parser_expect_name(&state, "inside an import member list")
         name := parser_value(state, first)
         item_end := first.span
@@ -694,9 +703,11 @@ fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_a
         }
         alias := String?{None}
         if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-            parser_bump(&state)
+            word :: parser_bump(&state)
             local :: parser_expect_name(&state, "after `as` in an imported member")
-            alias = Val(parser_value(state, local))
+            local_name :: parser_value(state, local)
+            parser_add_error_code(&state, "E0630", word.span, "`as` no longer renames an imported member", "a renamed member is a row of its own, `alias :: owner.member` (#6542)", "write `{local_name} :: {module_alias}.{name}` as its own `use` row; `jet fmt` moves it")
+            alias = Val(local_name)
             local_span = local.span
         }
         &items.push(ImportedItem{original: name, alias: alias})
@@ -705,7 +716,7 @@ fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_a
         if parser_current_kind(&state) != TOKEN_COMMA -> break
         parser_bump(&state)
     }
-    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after imported members")
+    close :: if close_kind == TOKEN_RBRACE -> parser_expect(&state, TOKEN_RBRACE, "`}}` after imported members") else -> parser_expect(&state, TOKEN_RBRACKET, "`]` after imported members")
     items_span := parser_cover(open.span, close.span)
     parser_finish_statement(&state)
     end := parser_lookahead(&state, -1).span

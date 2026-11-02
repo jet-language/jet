@@ -19,10 +19,12 @@
 // link of the pack at the same base with every export kept and a stub
 // `main` after the runtime: they may differ only in the ELF and program
 // headers and at the image's `main` places.
-use jet_backend.[x64_link_executable, x64_link_runtime_image, x64_link_runtime_pack, x64_link_with_runtime_image]
-use core.files as files
-use core.process as process
-use core.time as time
+use {
+    jet_backend.[x64_link_executable, x64_link_runtime_image, x64_link_runtime_pack, x64_link_with_runtime_image]
+    files :: core.files
+    process :: core.process
+    time :: core.time
+}
 
 fn lr_status(args: [String]) -> Int {
     mode :: if args.len() > 0 && args[0].starts_with("--") -> args[0] else -> ""

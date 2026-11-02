@@ -1,13 +1,15 @@
-use jet_devserver.Canvas.SourceModel.[write_source_if_unchanged, replace_source_if_unchanged_locked, SourceWriteError, open_target, open_parent, open_file_at, read_opened_file, O_RDONLY]
-use std.fs as fs // GATE #4494
-use std.os.unix.fs.[symlink]
-use std.sync.atomic.[AtomicU64, Ordering]
-use std.env.[temp_dir]
-use std.process.[id]
-use core.sys.target.[selected_os] // GATE #4483
-use core.files.[OSPath]
-use std.io.[Error, ErrorKind]
-use std.fmt.[format]
+use {
+    jet_devserver.Canvas.SourceModel.[write_source_if_unchanged, replace_source_if_unchanged_locked, SourceWriteError, open_target, open_parent, open_file_at, read_opened_file, O_RDONLY]
+    fs :: std.fs // GATE #4494
+    std.os.unix.fs.[symlink]
+    std.sync.atomic.[AtomicU64, Ordering]
+    std.env.[temp_dir]
+    std.process.[id]
+    core.sys.target.[selected_os] // GATE #4483
+    core.files.[OSPath]
+    std.io.[Error, ErrorKind]
+    std.fmt.[format]
+}
 
 // Rust: crates/jet-devserver/src/Canvas/source_model.rs:511
 fn test_replace_after_final_symlink_swap(path: OSPath, outside: OSPath, candidate: [U8]) Err! {

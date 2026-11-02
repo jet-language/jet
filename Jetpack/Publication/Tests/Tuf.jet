@@ -4,24 +4,26 @@
 // (Jetpack/Provider/Tests/RegistryCliComposition.jet).
 // Pure wire tests are not composed/native acceptance. Providers #3593/#3598,
 // crypto entropy #3597 and complete publication/fetch composition #4262 gate it.
-use jetpack_publication.[
-    PUBLICATION_TUF_MAX_LOG_BYTES, PUBLICATION_TUF_MAX_METADATA_BYTES, PublicationCheckpoint,
-    PublicationIndexEntry, PublicationLogRecord, PublicationMetadataFileSnapshot,
-    publication_core_reviewed, publication_sign_bytes, publication_tuf_append_line,
-    publication_tuf_atomic_write, publication_tuf_check_accepted_checkpoint,
-    publication_tuf_checkpoint_unsigned, publication_tuf_empty_log_root, publication_tuf_invalid,
-    publication_tuf_log_record_unsigned, publication_tuf_log_text, publication_tuf_metadata_diagnostic,
-    publication_tuf_next_log_record, publication_tuf_parse_checkpoint, publication_tuf_parse_log,
-    publication_tuf_parse_sparse_metadata, publication_tuf_read_bounded,
-    publication_tuf_restore_snapshots, publication_tuf_sequence, publication_tuf_snapshot_file,
-    publication_tuf_sparse_unsigned, publication_tuf_validate_entries, publication_tuf_validate_log,
-    publication_tuf_validate_referrers, publication_tuf_verify_payload,
-    publication_tuf_with_checkpoint_lock,
-]
-use core.files as files
-use core.sys as sys
-use core.crypto as publication_tuf_crypto
-use core.encoding.hex as publication_tuf_hex
+use {
+    jetpack_publication.[
+        PUBLICATION_TUF_MAX_LOG_BYTES, PUBLICATION_TUF_MAX_METADATA_BYTES, PublicationCheckpoint,
+        PublicationIndexEntry, PublicationLogRecord, PublicationMetadataFileSnapshot,
+        publication_core_reviewed, publication_sign_bytes, publication_tuf_append_line,
+        publication_tuf_atomic_write, publication_tuf_check_accepted_checkpoint,
+        publication_tuf_checkpoint_unsigned, publication_tuf_empty_log_root, publication_tuf_invalid,
+        publication_tuf_log_record_unsigned, publication_tuf_log_text, publication_tuf_metadata_diagnostic,
+        publication_tuf_next_log_record, publication_tuf_parse_checkpoint, publication_tuf_parse_log,
+        publication_tuf_parse_sparse_metadata, publication_tuf_read_bounded,
+        publication_tuf_restore_snapshots, publication_tuf_sequence, publication_tuf_snapshot_file,
+        publication_tuf_sparse_unsigned, publication_tuf_validate_entries, publication_tuf_validate_log,
+        publication_tuf_validate_referrers, publication_tuf_verify_payload,
+        publication_tuf_with_checkpoint_lock,
+    ]
+    files :: core.files
+    sys :: core.sys
+    publication_tuf_crypto :: core.crypto
+    publication_tuf_hex :: core.encoding.hex
+}
 
 fn publication_tuf_test_entry(name: String, version: String, yanked: Bool) -> PublicationIndexEntry Never! {
     PublicationIndexEntry{name: name, version: version, content_hash: "sha256-tree", fingerprint: "sha256-fp", yanked: yanked, tier: .Core, gate_status: publication_core_reviewed(), public_key: "", signature: ""}

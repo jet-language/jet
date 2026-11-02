@@ -147,7 +147,7 @@ function adaptCli(source, mode, args) {
   const ret = runHead[1];
   let out = source.replace(struct[0], struct[0].replace(/^#CLI\s+/, ''));
   out = out.replace(runHead[0], `fn olevel_body(args: Args)${ret}{`);
-  out = `${argv ? 'use core.process as olevel_process\n' : ''}${out.endsWith('\n') ? out : `${out}\n`}\n` +
+  out = `${argv ? 'use olevel_process :: core.process\n' : ''}${out.endsWith('\n') ? out : `${out}\n`}\n` +
     `fn run()${ret}{\n${argv ? '    olevel_argv :: olevel_process.argv()\n' : ''}    olevel_body(Args{${values.join(', ')}})\n}\n`;
   return { source: out, adapted: mode };
 }

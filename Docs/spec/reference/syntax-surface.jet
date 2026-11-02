@@ -471,12 +471,14 @@ fn first_number() {
 // ============================================================================
 // `use "path"` = file; `use name` = module (S16). Core stdlib is `core.*` (S51).
 
-use "./lib"                          // file path imports namespace lib
-use "grades/scoring" as g            // file path, aliased
-use core.files as fs                 // core submodule (S51)
-use core.encoding.json as json       // unified encoding library (D-ENC1)
-use core.tasks as tasks              // see async/tasks below
-use core.regex as re                  // std-only linear regex (D-REGEXENGINE1)
+use {
+    "./lib" // file path imports namespace lib
+    g :: "grades/scoring" // file path, aliased
+    fs :: core.files // core submodule (S51)
+    json :: core.encoding.json // unified encoding library (D-ENC1)
+    tasks :: core.tasks // see async/tasks below
+    re :: core.regex // std-only linear regex (D-REGEXENGINE1)
+}
 
 // Inline module; its items are public unless it is a `priv module` (S18, D-VIS-MODULE1).
 module math {
@@ -657,9 +659,12 @@ extern rust "base64@0.22" {
     fn b64encode(s: String) String  = "base64::encode"
 }
 
-// C FFI: auto-generated bindings, consumed with `use c.<lib> as alias` or
-// `use c.[lib1 as alias, lib2]` (S59).
-use c.[raylib as rl, sqlite3]
+// C FFI: auto-generated bindings, consumed with `use alias :: c.<lib>` or
+// `use c.[lib1, lib2]` (S59).
+use {
+    c.[sqlite3]
+    rl :: c.raylib
+}
 fn c_ffi() {
     rl.init_window(800, 600, "pong")
 }

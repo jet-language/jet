@@ -1,11 +1,13 @@
-use Compiler.JetRepl.Tests.Integration.Repl.[run_repl_process, spawn_repl_process, wait_for_history_dir, run_raw_multiline_pty, run_transcript_file, run_transcript_file_strict, run_transcript_file_strict_with_flags]
-use jet.REPL.[run_transcript, run_transcript_with_flags]
-use std.[fs, env, process, thread]
-use std.io.[Write]
-use std.process.[Command, Stdio]
-use std.os.unix.fs.[symlink, PermissionsExt]
-use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
-use core.sys.target.[selected_family, selected_os]
+use {
+    Compiler.JetRepl.Tests.Integration.Repl.[run_repl_process, spawn_repl_process, wait_for_history_dir, run_raw_multiline_pty, run_transcript_file, run_transcript_file_strict, run_transcript_file_strict_with_flags]
+    jet.REPL.[run_transcript, run_transcript_with_flags]
+    std.[fs, env, process, thread]
+    std.io.[Write]
+    std.process.[Command, Stdio]
+    std.os.unix.fs.[symlink, PermissionsExt]
+    std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+    core.sys.target.[selected_family, selected_os]
+}
 // GATE #4494: real subprocess/PTY/thread/retained-filesystem behavior.
 // GATE #4483: cfg(unix)/cfg(linux) use selected target facts.
 
@@ -426,7 +428,7 @@ use core.sys.target.[selected_family, selected_os]
 }
 // Rust: tests/repl.rs:967
 #Test("repl_net_runtime_call_still_requires_authority") {
-    out :: run_transcript(["use core.net as net", "net.tcp_connect(\"127.0.0.1:1\")"], none)
+    out :: run_transcript(["use net :: core.net", "net.tcp_connect(\"127.0.0.1:1\")"], none)
     assert(out.contains("ok"), "core.net import should be accepted: {out}")
     assert(out.contains("E1803"), "live socket call must require authority: {out}")
 }
@@ -528,29 +530,29 @@ use core.sys.target.[selected_family, selected_os]
 }
 // Rust: tests/repl.rs:1225
 #Test("repl_use_import_accepted") {
-    out :: run_transcript(["use core.math as math"], none)
+    out :: run_transcript(["use math :: core.math"], none)
     assert(out.contains("ok"), "import should be accepted, got: {out}")
     assert(!out.contains("E0003"), "import must not be a statement error, got: {out}")
 }
 // Rust: tests/repl.rs:1242
 #Test("repl_use_import_resolves_alias_in_later_input") {
-    out :: run_transcript(["use core.math as math", "r :: math.sqrt(16.0)"], none)
+    out :: run_transcript(["use math :: core.math", "r :: math.sqrt(16.0)"], none)
     assert(!out.contains("E0107") && !out.contains("nothing named `math`"), "carried import should resolve the alias, got: {out}")
 }
 // Rust: tests/repl.rs:1254
 #Test("repl_use_import_persists_across_unrelated_input") {
-    out :: run_transcript(["use core.math as math", "x :: 1", "r :: math.sqrt(9.0)"], none)
+    out :: run_transcript(["use math :: core.math", "x :: 1", "r :: math.sqrt(9.0)"], none)
     assert(!out.contains("E0107") && !out.contains("nothing named `math`"), "import should persist across inputs, got: {out}")
 }
 // Rust: tests/repl.rs:1270
 #Test("repl_use_unknown_core_module_rejected") {
-    out :: run_transcript(["use core.bogus as b"], none)
+    out :: run_transcript(["use b :: core.bogus"], none)
     assert(out.contains("E1001"), "unknown core module should error, got: {out}")
     assert(!out.contains("ok"), "bad import must not be accepted, got: {out}")
 }
 // Rust: tests/repl.rs:1286
 #Test("repl_use_repl_incompatible_module_hard_rejected") {
-    out :: run_transcript(["use core.http.client as http"], none)
+    out :: run_transcript(["use http :: core.http.client"], none)
     assert(out.contains("E1802"), "core.http.client should hard-reject, got: {out}")
 }
 // Rust: tests/repl.rs:1297
@@ -565,24 +567,24 @@ use core.sys.target.[selected_family, selected_os]
 }
 // Rust: tests/repl.rs:1314
 #Test("repl_use_core_fs_import_accepted") {
-    out :: run_transcript(["use core.files as fs"], none)
+    out :: run_transcript(["use fs :: core.files"], none)
     assert(out.contains("ok"), "core.files import should work, got: {out}")
     assert(!out.contains("E1802"), "got: {out}")
 }
 // Rust: tests/repl.rs:1325
 #Test("repl_reset_clears_imports") {
-    out :: run_transcript(["use core.math as math", ":reset", "r :: math.sqrt(4.0)"], none)
+    out :: run_transcript(["use math :: core.math", ":reset", "r :: math.sqrt(4.0)"], none)
     assert(out.contains("session reset"), "got: {out}")
     assert(out.contains("error"), "after reset the alias must not resolve, got: {out}")
 }
 // Rust: tests/repl.rs:1342
 #Test("repl_core_math_sqrt_inline") {
-    out :: run_transcript(["use core.math as math", "math.sqrt(16.0)"], none)
+    out :: run_transcript(["use math :: core.math", "math.sqrt(16.0)"], none)
     assert(out.contains("ok") && out.contains("4") && !out.contains("E0956"), "math.sqrt(16.0) should produce 4 inline, got: {out}")
 }
 // Rust: tests/repl.rs:1355
 #Test("repl_core_math_multiple_calls") {
-    out :: run_transcript(["use core.math as math", "math.floor(3.7)", "math.ceil(2.1)", "math.abs(-5)"], none)
+    out :: run_transcript(["use math :: core.math", "math.floor(3.7)", "math.ceil(2.1)", "math.abs(-5)"], none)
     assert(out.contains("3"), "floor(3.7) should be 3, got: {out}")
     assert(out.contains("3"), "ceil(2.1) should be 3, got: {out}")
     assert(out.contains("5"), "abs(-5) should be 5, got: {out}")
@@ -596,17 +598,17 @@ use core.sys.target.[selected_family, selected_os]
 }
 // Rust: tests/repl.rs:1381
 #Test("repl_core_math_pow_inline") {
-    out :: run_transcript(["use core.math as math", "math.pow(2.0, 10.0)"], none)
+    out :: run_transcript(["use math :: core.math", "math.pow(2.0, 10.0)"], none)
     assert(out.contains("1024") && !out.contains("E0956"), "math.pow(2.0, 10.0) should produce 1024 inline, got: {out}")
 }
 // Rust: tests/repl.rs:1393
 #Test("repl_core_result_stored_in_binding") {
-    out :: run_transcript(["use core.math as math", "r :: math.sqrt(9.0)", "r"], none)
+    out :: run_transcript(["use math :: core.math", "r :: math.sqrt(9.0)", "r"], none)
     assert(out.contains("3") && !out.contains("E0956"), "binding from math.sqrt should work, got: {out}")
 }
 // Rust: tests/repl.rs:1405
 #Test("repl_core_loadable_constructors_and_methods_exact") {
-    out :: run_transcript(["use core.reactive.loadable as loadable", "loadable.idle()", "loadable.loading()", "loadable.loaded(7)", "loadable.failed(\"offline\")", "loadable.loading().loaded()", "loadable.idle().is_idle()", "loadable.loading().is_loading()", "ready :: loadable.loaded(7)", "ready.is_loaded()", "offline :: loadable.failed(\"offline\")", "offline.is_failed()", "ready.loaded() ?? 0", "ready.or_else(0)"], none)
+    out :: run_transcript(["use loadable :: core.reactive.loadable", "loadable.idle()", "loadable.loading()", "loadable.loaded(7)", "loadable.failed(\"offline\")", "loadable.loading().loaded()", "loadable.idle().is_idle()", "loadable.loading().is_loading()", "ready :: loadable.loaded(7)", "ready.is_loaded()", "offline :: loadable.failed(\"offline\")", "offline.is_failed()", "ready.loaded() ?? 0", "ready.or_else(0)"], none)
     trimmed := out.trim() // #4303
     assert_eq(trimmed, "ok\nIdle : Loadable\nLoading : Loadable\nLoaded(7) : Loadable\nFailed(offline) : Loadable\nnull : Option\ntrue : Bool\ntrue : Bool\ntrue : Bool\ntrue : Bool\n7 : Int\n7 : Int")
 }
@@ -636,19 +638,19 @@ use core.sys.target.[selected_family, selected_os]
 }
 // Rust: tests/repl.rs:1517
 #Test("repl_core_io_eprint_inline") {
-    out :: run_transcript_with_flags(["use core.term as io", "io.eprint(\"repl-err\")"], none, [], ["io"])
+    out :: run_transcript_with_flags(["use io :: core.term", "io.eprint(\"repl-err\")"], none, [], ["io"])
     assert(out.contains("ok") && out.contains("repl-err"), "io.eprint should run inline, got: {out}")
     assert(!out.contains("E3410") && !out.contains("E0956"), "got: {out}")
 }
 // Rust: tests/repl.rs:1533
 #Test("repl_core_io_print_keeps_variadic_lines_inline") {
-    out :: run_transcript_with_flags(["use core.term as io", "io.print(\"repl-one\", \"repl-two\")"], none, [], ["io"])
+    out :: run_transcript_with_flags(["use io :: core.term", "io.print(\"repl-one\", \"repl-two\")"], none, [], ["io"])
     assert(out.contains("repl-one") && out.contains("repl-two"), "io.print should preserve every argument in the transcript, got: {out}")
     assert(!out.contains("E1803") && !out.contains("E3410") && !out.contains("E0956"), "got: {out}")
 }
 // Rust: tests/repl.rs:1552
 #Test("repl_deny_rand_blocks_draw_and_mutating_shuffle") {
-    out :: run_transcript_with_flags(["use core.math.random as random", "xs := [1, 2, 3]", "#FX(authority: Rand) {{ random.int(1, 10) }}", "#FX(authority: Rand) {{ random.shuffle(&xs) }}", "xs"], none, ["rand"], ["rand"])
+    out :: run_transcript_with_flags(["use random :: core.math.random", "xs := [1, 2, 3]", "#FX(authority: Rand) {{ random.int(1, 10) }}", "#FX(authority: Rand) {{ random.shuffle(&xs) }}", "xs"], none, ["rand"], ["rand"])
     assert(out.matches("E1803").count() >= 2 && out.contains("Rand.Draw"), "ambient random calls escaped deny policy: {out}")
     assert(out.contains("[1, 2, 3]"), "denied shuffle mutated its binding: {out}")
 }
@@ -664,7 +666,7 @@ use core.sys.target.[selected_family, selected_os]
 }
 // Rust: tests/repl.rs:1597
 #Test("repl_core_regex_is_match_inline") {
-    out :: run_transcript(["use core.regex as re", "re.is_match(.{{\"\\d+\"}}, \"order 42\")"], none)
+    out :: run_transcript(["use re :: core.regex", "re.is_match(.{{\"\\d+\"}}, \"order 42\")"], none)
     assert(out.contains("true") && !out.contains("E0956"), "regex.is_match should work inline, got: {out}")
 }
 // Rust: tests/repl.rs:1611
@@ -673,18 +675,18 @@ use core.sys.target.[selected_family, selected_os]
     fs.create_dir_all(root).expect("create fixture root")
     fs.write(root.join("payload.txt"), "repl-fs-payload").expect("write fixture")
     read_expr :: "#FX(authority: FS, IO) {{ io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }}"
-    out :: run_transcript_with_flags(["use core.files as fs", "use core.term as io", read_expr], root.to_str(), ["fs", "io"], [])
+    out :: run_transcript_with_flags(["use fs :: core.files", "use io :: core.term", read_expr], root.to_str(), ["fs", "io"], [])
     _ :: fs.remove_dir_all(root).ok()
     assert(out.contains("repl-fs-payload") && !out.contains("E1802"), "fs.read should work in REPL, got: {out}")
 }
 // Rust: tests/repl.rs:1634
 #Test("repl_core_process_run_is_authorized_and_captured") {
-    out :: run_transcript_with_flags(["use core.process as process", "use core.term as io", "#FX(authority: Exec, IO) {{ io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }}"], none, ["exec"], ["io"])
+    out :: run_transcript_with_flags(["use process :: core.process", "use io :: core.term", "#FX(authority: Exec, IO) {{ io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }}"], none, ["exec"], ["io"])
     assert(out.contains("repl-process-ok") && !out.contains("E1803"), "authorized process.run should capture output, got: {out}")
 }
 // Rust: tests/repl.rs:1648
 #Test("repl_process_boundary_uses_the_passed_authority_value") {
-    out :: run_transcript_with_flags(["use core.process as process", "#FX(authority: Exec, IO) {{\n    restricted :: authority.without(\"Exec\")\n    process.run([\"printf\", \"should-not-run\"], restricted)\n}}"], none, ["exec"], [])
+    out :: run_transcript_with_flags(["use process :: core.process", "#FX(authority: Exec, IO) {{\n    restricted :: authority.without(\"Exec\")\n    process.run([\"printf\", \"should-not-run\"], restricted)\n}}"], none, ["exec"], [])
     assert(out.contains("E1803"), "the narrowed boundary value was ignored: {out}")
 }
 // Rust: tests/repl.rs:1698
@@ -692,7 +694,7 @@ use core.sys.target.[selected_family, selected_os]
     if selected_os() != "linux" -> return
     root :: env.temp_dir().join("jet_repl_interrupt_{process.id()}")
     fs.create_dir_all(root).unwrap()
-    shell :: "\n{{\n  sleep 0.2\n  printf 'use core.process as process\\r'\n  sleep 0.2\n  printf '#FX(authority: Exec) {{ process.run([\"sh\", \"-c\", \"trap '\\''printf done > child-exited.txt; exit 130'\\'' INT; printf $$ > child.pid; while :; do :; done\"]) ?? panic(\"run failed\") }}\\r'\n  sleep 0.8\n  printf '\\003'\n  sleep 0.5\n  printf '40 + 2\\r'\n  sleep 0.3\n  printf ':quit\\r'\n}} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\" --allow-exec' /dev/null\n"
+    shell :: "\n{{\n  sleep 0.2\n  printf 'use process :: core.process\\r'\n  sleep 0.2\n  printf '#FX(authority: Exec) {{ process.run([\"sh\", \"-c\", \"trap '\\''printf done > child-exited.txt; exit 130'\\'' INT; printf $$ > child.pid; while :; do :; done\"]) ?? panic(\"run failed\") }}\\r'\n  sleep 0.8\n  printf '\\003'\n  sleep 0.5\n  printf '40 + 2\\r'\n  sleep 0.3\n  printf ':quit\\r'\n}} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\" --allow-exec' /dev/null\n"
     output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_ROOT", root).output().unwrap()
     transcript :: String.from_utf8_lossy(output.stdout)
     assert(output.status.success(), "PTY interrupt session failed: {transcript}")

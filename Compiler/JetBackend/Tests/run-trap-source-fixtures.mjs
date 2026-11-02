@@ -37,7 +37,7 @@ if (mode === 'assemble') {
     if (!c.native) source = source.replace('fn run()', '#Export(c) fn run()');
     if (c.cleanupPanic) source = source.replace('fn close(^self) { print("close {self.name}") }', 'fn close(^self) {\n    print("close {self.name}")\n    if self.name == "second" -> panic("close stop")\n}');
     if (c.cleanupCancel) {
-      source = 'use core.tasks as tasks\n' + source.replace('fn run()', 'fn scoped()').replace('fn close(^self) { print("close {self.name}") }', 'fn close(^self) {\n    print("close {self.name}")\n    tasks.yield_now()\n}')
+      source = 'use tasks :: core.tasks\n' + source.replace('fn run()', 'fn scoped()').replace('fn close(^self) { print("close {self.name}") }', 'fn close(^self) {\n    print("close {self.name}")\n    tasks.yield_now()\n}')
         + '\nfn run() {\n    scoped()\n    tasks.yield_now()\n    panic("cancellation was not delivered")\n}\n';
     }
     writeFileSync(join(unit, 'Source/Fixture.jet'), source);

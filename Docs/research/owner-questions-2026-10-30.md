@@ -864,7 +864,7 @@ are under the lane's `probes/zig/`.
 
 | Zig | Jet today | Probe result | Verdict |
 |---|---|---|---|
-| `@import` | `use core.math as math`, `use "file.jet"` | works (z08) | Equal |
+| `@import` | `use math :: core.math`, `use "file.jet"` | works (z08) | Equal |
 | `@embedFile` | `embed_file("path")`, `embed_bytes`, `find("glob")`, each hashed into `.jet/lock` | `TEXT :: comptime { embed_file(…) }` works (z20) | Jet is stronger: inputs are recorded |
 | `@cImport` | the C import model in the FFI spec section; Zig is moving it to the build system too | not probed | Same direction as Zig 0.16 |
 | `@sizeOf`, `@alignOf`, `@typeName` | `T.$layout.size`, `T.$layout.alignment`, `T.$name` inside `comptime { }` | prints `8`, `8`, `P` (z03b) | Equal |

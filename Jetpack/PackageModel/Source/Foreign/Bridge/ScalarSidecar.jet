@@ -6,9 +6,11 @@
 // the content-addressed archive cache, and the provenance rules below. The
 // worker owns transport and language exceptions; the bridge only marshals
 // scalars and turns every non-OK response into a checked error code.
-use core.files as files
-use core.sys as sys
-use core.process as process
+use {
+    files :: core.files
+    sys :: core.sys
+    process :: core.process
+}
 
 
 FOREIGN_SCALAR_BRIDGE_SCHEMA :: "jet-ffi-scalar-sidecar-v1"
@@ -220,7 +222,7 @@ fn pkg_bridge_render_scalar_jet(abi: String, descriptor: BinderDescriptor, funct
         out = "{out}    fn {function.name}({params}) {result} = \"{abi}_{function.name}\"\n"
     }
     out = "{out}    fn take_error() -> Int = \"{abi}_take_error\"\n}}\n"
-    out = "{out}use c.{abi} as abi\n\n"
+    out = "{out}use abi :: c.{abi}\n\n"
     loop function in functions {
         params :: pkg_bridge_scalar_jet_params(function)
         result :: function.result.jet_name() ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(function.result)))

@@ -1,6 +1,8 @@
-use core.files as files
-use core.sys as sys
-use core.text.parse as parse
+use {
+    files :: core.files
+    sys :: core.sys
+    parse :: core.text.parse
+}
 
 fn s4_agent_adapter_has_all(adapter: String, needles: [String]) {
     source :: files.read("tests/agent_workloads/adapters/{adapter}") ?? panic("read {adapter}")
@@ -20,13 +22,13 @@ fn s4_agent_adapter_has_all(adapter: String, needles: [String]) {
 // Port of tests/agent_workloads.rs:2046-2093; no production path checks retired.
 #Test("structured_data_database_http_jet_adapters_use_production_paths") {
     s4_agent_adapter_has_all("structured_data.jet", [String]{
-        "use core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string",
+        "json :: core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string",
     })
     s4_agent_adapter_has_all("database_access.jet", [String]{
-        "use core.db", "db.open_memory()", "db.migrate", "scoped.execute(", "scoped.query_one(", "scoped.close()",
+        "db :: core.db", "db.open_memory()", "db.migrate", "scoped.execute(", "scoped.query_one(", "scoped.close()",
     })
     s4_agent_adapter_has_all("http_api.jet", [String]{
-        "use core.http.client", "use core.http.server", "net.tcp_listen(",
+        "http_client :: core.http.client", "http_server :: core.http.server", "net.tcp_listen(",
         "http_server.serve_once_listener", "http_client.request(", "request.send()",
     })
 }

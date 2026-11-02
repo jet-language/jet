@@ -9,22 +9,24 @@
 // A case payload (E1120), a number outside the backing type (E1121) and a
 // number two cases share (E1122) are refused; a case number is an integer
 // literal (E0035), so the checks see every number.
-use jet_foundation.[
-    Diagnostic,
-    EnumDef,
-    Expr,
-    Func,
-    Item,
-    Marker,
-    UnOp,
-    expr_span,
-    jet_layout_integer_backing_max,
-    jet_layout_integer_backing_min,
-    jet_target_layout_enum_backing,
-]
-use jet_parser.[
-    parse_source,
-]
+use {
+    jet_foundation.[
+        Diagnostic,
+        EnumDef,
+        Expr,
+        Func,
+        Item,
+        Marker,
+        UnOp,
+        expr_span,
+        jet_layout_integer_backing_max,
+        jet_layout_integer_backing_min,
+        jet_target_layout_enum_backing,
+    ]
+    jet_parser.[
+        parse_source,
+    ]
+}
 
 fn sema_enum_numbers_expand(items: &[Item], diagnostics: &[Diagnostic]) {
     loop index in 0..<items.len() {

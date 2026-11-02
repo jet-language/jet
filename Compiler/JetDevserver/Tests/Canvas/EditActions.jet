@@ -2,7 +2,7 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
 #Test("canvas_core_imports_preserve_module_alias_and_ignore_comments") {
-    imports :: core_imports("// use core.fake as fake\nuse core.io as output // alias\nuse core.math\nfn run() -> {{}}\n")
+    imports :: core_imports("// use fake :: core.fake\nuse output :: core.io // alias\nuse core.math\nfn run() -> {{}}\n")
     assert(imports.len() == 2)
     assert(imports[0].module_ref == "core.io")
     assert(imports[0].alias == "output")
@@ -13,7 +13,7 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
 #Test("canvas_core_prefix_selects_longest_existing_import") {
-    src :: "use core as base\nuse core.io as output\nuse core.io.file as files\n"
+    src :: "use base :: core\nuse output :: core.io\nuse files :: core.io.file\n"
     assert(imported_core_prefix(src, "core.io.file") == "files")
     assert(imported_core_prefix(src, "core.io.file.read") == "files.read")
     assert(imported_core_prefix(src, "core.io.net") == "output.net")
@@ -23,14 +23,14 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1207
 #Test("canvas_core_import_insertion_preserves_header_and_use_block") {
     header :: "// heading\n\n"
-    imports :: "use core.math as math\nuse core.io as io\n"
+    imports :: "use math :: core.math\nuse io :: core.io\n"
     (point, joined) :: core_import_insert_point("{header}{imports}\nfn run() -> {{}}\n")
     assert(point == header.len() + imports.len())
     assert(joined)
     (point, joined) :: core_import_insert_point("{header}fn run() -> {{}}\n")
     assert(point == header.len())
     assert(!joined)
-    (point, joined) :: core_import_insert_point("fn run() -> {{}}\nuse core.io as io\n")
+    (point, joined) :: core_import_insert_point("fn run() -> {{}}\nuse io :: core.io\n")
     assert(point == 0)
     assert(!joined)
 }

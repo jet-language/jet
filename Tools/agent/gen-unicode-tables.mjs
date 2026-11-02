@@ -699,7 +699,7 @@ coreOutputs.push([`${assetRoot}/manifest.json`, JSON.stringify({
 }, null, 2) + "\n"]);
 const stringModules = assets.filter(a => /^UNICODE_(LOWER|UPPER|WHITE_SPACE|CASED|CASE_IGNORABLE)/.test(a.symbol));
 function declarations(list) {
-  return list.map(a => `use core.text.runtime.assets.${a.module} as text_${a.module}`).join("\n");
+  return list.map(a => `    text_${a.module} :: core.text.runtime.assets.${a.module}`).join("\n");
 }
 // String asset modules are attached to their canonical kernel, not normalization.
 const stringPath = "Core/Text/Runtime/KernelUnicodeString.jet";
@@ -709,7 +709,7 @@ const end = "// END GENERATED STRING ASSETS";
 const start = stringSource.indexOf(begin);
 const stop = stringSource.indexOf(end, start);
 if (start < 0 || stop < start) throw new Error("string asset markers missing");
-coreOutputs.push([stringPath, stringSource.slice(0, start) + `${begin}\n${declarations(stringModules)}\n${end}` + stringSource.slice(stop + end.length)]);
+coreOutputs.push([stringPath, stringSource.slice(0, start) + `${begin}\n${declarations(stringModules)}\n    ${end}` + stringSource.slice(stop + end.length)]);
 for (const [rel, text] of coreOutputs) {
   if (checkOnly) {
     if (readFileSync(rel, "utf8") !== text) throw new Error(`${rel} is stale`);

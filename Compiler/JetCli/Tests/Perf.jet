@@ -1,13 +1,15 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
-use jet_cli.[
-    JetCLILiveChannel, JetCLILiveEvent, JetCLILiveRuntime, JetCLILiveSnapshot, JetCLILiveTask,
-    JetCLILiveValue, JetCLIPerfObservation, jet_cli_perf_browser_decode, jet_cli_perf_capture_bytes,
-    jet_cli_perf_capture_source, jet_cli_perf_live_from, jet_cli_perf_source,
-    jet_cli_perf_source_position, jet_cli_perf_source_profile,
-]
-use jet_foundation.[TraceHardware, TraceToolchain, sha256_hex, verify_jettrace]
-use core.encoding.hex as perf_hex
+use {
+    jet_cli.[
+        JetCLILiveChannel, JetCLILiveEvent, JetCLILiveRuntime, JetCLILiveSnapshot, JetCLILiveTask,
+        JetCLILiveValue, JetCLIPerfObservation, jet_cli_perf_browser_decode, jet_cli_perf_capture_bytes,
+        jet_cli_perf_capture_source, jet_cli_perf_live_from, jet_cli_perf_source,
+        jet_cli_perf_source_position, jet_cli_perf_source_profile,
+    ]
+    jet_foundation.[TraceHardware, TraceToolchain, sha256_hex, verify_jettrace]
+    perf_hex :: core.encoding.hex
+}
 
 // A decoded, process-bound live snapshot (LiveSnapshot.jet's codec is
 // witnessed by Tests/LiveInspect.jet).

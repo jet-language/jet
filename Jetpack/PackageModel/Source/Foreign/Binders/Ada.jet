@@ -3,7 +3,7 @@
 // with `Convention => C`; constrained subtypes become range checks in the
 // generated Jet wrapper, and a pthread-once C bridge elaborates the GNAT
 // runtime before the first call.
-use core.files as files
+use files :: core.files
 
 
 ADA_BIND_SCHEMA :: "jet-ada-bind-v1"
@@ -230,7 +230,7 @@ fn pkg_ada_render_jet(lib: String, routines: [AdaRoutine]) -> String Never! {
     loop routine in routines {
         out = "{out}    fn {routine.name}{pkg_ada_params_jet(routine.params)} -> {routine.result.jet()} = \"{abi}_{routine.name}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\n\nenum AdaError {{ Constraint }}\n\n"
+    out = "{out}}}\nuse abi :: c.{abi}\n\nenum AdaError {{ Constraint }}\n\n"
     loop routine in routines {
         out = "{out}fn {routine.name}{pkg_ada_params_jet(routine.params)} -[FFI.Ada]> {routine.result.jet()} AdaError! {{\n"
         loop param in routine.params {

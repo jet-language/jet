@@ -9,10 +9,12 @@
 // where its `.jet/cache/api` snapshot also lives (jet_driver_plugin_facts):
 // the program loads the same path from its working directory, so it runs
 // from that root.
-use core.files as plug_files
-use jet_foundation.[name_rows_set]
-use jet_ir.[IRModule, IROp, IRSlotKind, IR_PLUGIN_GUEST_PREFIX, ir_end, ir_function_new, ir_intern_bytes, ir_intern_name, ir_open_if, ir_slot, ir_word_row]
-use jet_wasm.[WasmError, WasmFuncType, WASM_EXTERN_FUNC, WASM_FUNCREF, WASM_OP_REF_FUNC, wasm_load_component]
+use {
+    plug_files :: core.files
+    jet_foundation.[name_rows_set]
+    jet_ir.[IRModule, IROp, IRSlotKind, IR_PLUGIN_GUEST_PREFIX, ir_end, ir_function_new, ir_intern_bytes, ir_intern_name, ir_open_if, ir_slot, ir_word_row]
+    jet_wasm.[WasmError, WasmFuncType, WASM_EXTERN_FUNC, WASM_FUNCREF, WASM_OP_REF_FUNC, wasm_load_component]
+}
 
 fn jet_plugin_link(m: &IRModule, root: String) Never! -[FS]> {
     count :: m.functions.len()

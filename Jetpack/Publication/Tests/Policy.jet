@@ -1,22 +1,24 @@
 // SPDX-only proofs use the canonical ByteText helpers, not a trim copy.
-use jet_pkg_model.[LockSource, PackagePolicy, PackagePolicyException, PolicySourceMap, pkg_lock_write]
-use jetpack_publication.[
-    PUBLICATION_U64_MAX, PublicationAdvisory, PublicationAdvisoryFeed, PublicationDiagnosticError,
-    PublicationGateState, PublicationIndexEntry, PublicationNamePolicyDecision,
-    PublicationNamePolicyFinding, PublicationPackagePolicyError, PublicationPackagePolicyReceipt,
-    publication_active_source_exception_at, publication_advisory_feed_payload,
-    publication_advisory_feed_text, publication_advisory_gate_status, publication_advisory_now,
-    publication_advisory_trust_path, publication_authorize_package_candidate,
-    publication_blocked_reasons, publication_community_gate_error, publication_community_gate_status,
-    publication_community_open, publication_community_with_name, publication_matching_source_rule,
-    publication_package_policy_diagnostic, publication_package_policy_edge_diagnostic,
-    publication_parse_advisory_feed, publication_parse_spdx_expression, publication_pattern_matches,
-    publication_policy_fingerprint, publication_policy_fingerprint_text,
-    publication_policy_receipt_summary, publication_sign_bytes, publication_validate_spdx_license,
-]
-use core.files as files
-use core.sys as sys
-use core.crypto as publication_advisory_crypto
+use {
+    jet_pkg_model.[LockSource, PackagePolicy, PackagePolicyException, PolicySourceMap, pkg_lock_write]
+    jetpack_publication.[
+        PUBLICATION_U64_MAX, PublicationAdvisory, PublicationAdvisoryFeed, PublicationDiagnosticError,
+        PublicationGateState, PublicationIndexEntry, PublicationNamePolicyDecision,
+        PublicationNamePolicyFinding, PublicationPackagePolicyError, PublicationPackagePolicyReceipt,
+        publication_active_source_exception_at, publication_advisory_feed_payload,
+        publication_advisory_feed_text, publication_advisory_gate_status, publication_advisory_now,
+        publication_advisory_trust_path, publication_authorize_package_candidate,
+        publication_blocked_reasons, publication_community_gate_error, publication_community_gate_status,
+        publication_community_open, publication_community_with_name, publication_matching_source_rule,
+        publication_package_policy_diagnostic, publication_package_policy_edge_diagnostic,
+        publication_parse_advisory_feed, publication_parse_spdx_expression, publication_pattern_matches,
+        publication_policy_fingerprint, publication_policy_fingerprint_text,
+        publication_policy_receipt_summary, publication_sign_bytes, publication_validate_spdx_license,
+    ]
+    files :: core.files
+    sys :: core.sys
+    publication_advisory_crypto :: core.crypto
+}
 
 fn publication_policy_test_ids(raw: String) -> [String] Never! {
     if publication_parse_spdx_expression(raw) == {

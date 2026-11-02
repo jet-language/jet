@@ -1,8 +1,10 @@
-use jet_devserver.Canvas.GraphProjection.[constructor_type, event_call_span, event_constructor_kind, event_method_kind, event_module_aliases, matching_call_close]
-use jet_semindex.[SourceSpan]
+use {
+    jet_devserver.Canvas.GraphProjection.[constructor_type, event_call_span, event_constructor_kind, event_method_kind, event_module_aliases, matching_call_close]
+    jet_semindex.[SourceSpan]
+}
 // Behavioral control for Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1365-1435
 #Test("event_aliases_are_deduplicated_and_constructor_receiver_is_required") {
-    src := "use core.event as events\nuse core.event as events // duplicate\nuse core.tasks as tasks\nevents.new<Int>()\n"
+    src := "use events :: core.event\nuse events :: core.event // duplicate\nuse tasks :: core.tasks\nevents.new<Int>()\n"
     aliases := event_module_aliases(src)
     assert_eq(aliases, ["events"])
     start := src.find("new<Int>").unwrap()

@@ -1,10 +1,12 @@
 // CmdCompile.rs run_fmt/run_fmt_stdin: atomic preflight and both output channels.
 // The formatter and source migration helpers remain the existing Host.jet ones.
-use core.files as cli_files
-use core.term as cli_term
-use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-use jet_parser.[jet_format_unified_diff]
-use jet_foundation.[Diagnostic, diagnostic_render_all]
+use {
+    cli_files :: core.files
+    cli_term :: core.term
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_parser.[jet_format_unified_diff]
+    jet_foundation.[Diagnostic, diagnostic_render_all]
+}
 
 fn jet_cli_format_diagnostics(path: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
     jet_cli_reports_status_json("fmt", false, jet_cli_report_base(path), path, source, diagnostics)

@@ -7677,7 +7677,7 @@ fn sema_comptime_runtime_ceiling_diagnostic(subject: String, needed: RuntimeLaye
     sema_error_optional("E1006", span, "`{subject}` needs `runtime: {needed_name}`", "this package declares `runtime: {ceiling_name}` in `package.jet`, which caps imports at the `{ceiling_name}` runtime profile; `{subject}` needs `{needed_name}`; import chain: {chain}", "remove the import or helper use, raise the ceiling to `runtime: {needed_name}` in `package.jet`, or use a `{ceiling_name}` runtime alternative")
 }
 
-// The Core modules one import declaration names: `use core.files as fs`
+// The Core modules one import declaration names: `use fs :: core.files`
 // parses as member `files` of `core`; `use core.mem.[...]` names its module.
 fn sema_runtime_ceiling_import_modules(declaration: ImportDecl) -> [String] Never! {
     names := [String]{}

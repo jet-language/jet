@@ -25,11 +25,11 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const BATTERIES = {
-  json: { use: "use core.encoding.json as m", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)" },
-  regex: { use: "use core.regex as m", call: "m.escape(\"4.2\")" },
-  time: { use: "use core.time as m", call: "m.datetime(2024, 3, 1, 12, 34, 56)" },
-  data: { use: "use core.data as m", call: "m.sum([40.0, 2.0])" },
-  http: { use: "use core.http as m", call: "m.status_ok()" },
+  json: { use: "use m :: core.encoding.json", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)" },
+  regex: { use: "use m :: core.regex", call: "m.escape(\"4.2\")" },
+  time: { use: "use m :: core.time", call: "m.datetime(2024, 3, 1, 12, 34, 56)" },
+  data: { use: "use m :: core.data", call: "m.sum([40.0, 2.0])" },
+  http: { use: "use m :: core.http", call: "m.status_ok()" },
 };
 
 function parseArgs(argv) {

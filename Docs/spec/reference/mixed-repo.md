@@ -64,11 +64,11 @@ The bind command is selected by the foreign source surface:
 
 | Host surface | Bind command | Jet import | Boundary |
 | --- | --- | --- | --- |
-| C | `jet inspect bind counter.h --pkg counter` | `use "counter.h" as counter` | checked C ABI |
-| C++ | `jet inspect bind cpp counter.hpp --target <triple> --clang <absolute-clang++> --ar <absolute-ar> --pkg counter --namespace acme -I . -L . -l counter_impl -l pthread` | `use cpp.counter as cpp` | clang-generated C++ shim |
-| JVM | `JAVA_HOME=<jdk> jet inspect bind java Counter.java --pkg counter` | `use java.counter as counter` | embedded JNI bridge |
-| JavaScript | `jet inspect bind js ops.d.ts --runtime ops.mjs --pkg ops` | `use js.ops as ops` | supervised Node scalar sidecar |
-| Python | `jet inspect bind py ops.py --pkg ops` | `use py.ops as ops` | supervised CPython scalar sidecar |
+| C | `jet inspect bind counter.h --pkg counter` | `use counter :: "counter.h"` | checked C ABI |
+| C++ | `jet inspect bind cpp counter.hpp --target <triple> --clang <absolute-clang++> --ar <absolute-ar> --pkg counter --namespace acme -I . -L . -l counter_impl -l pthread` | `use cpp :: cpp.counter` | clang-generated C++ shim |
+| JVM | `JAVA_HOME=<jdk> jet inspect bind java Counter.java --pkg counter` | `use counter :: java.counter` | embedded JNI bridge |
+| JavaScript | `jet inspect bind js ops.d.ts --runtime ops.mjs --pkg ops` | `use ops :: js.ops` | supervised Node scalar sidecar |
+| Python | `jet inspect bind py ops.py --pkg ops` | `use ops :: py.ops` | supervised CPython scalar sidecar |
 
 For C, declare local implementation and thread-library inputs in the package:
 

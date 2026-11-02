@@ -4,49 +4,51 @@
 // terminators. Comments are preserved from the source and re-attached by span.
 // Rust `impl Fmt` methods are free `jfmt_<name>(f: &JetFmt, …)` functions;
 // Expressions.jet, Statements.jet and Items.jet hold the other Rust modules.
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    BinOp,
-    Diagnostic,
-    DIAGNOSTIC_ERROR,
-    DIAGNOSTIC_LINT,
-    Expr,
-    FencedStatement,
-    Func,
-    Item,
-    Marker,
-    PolicyDeclaration,
-    Program,
-    Span,
-    Stmt,
-    SwitchArm,
-    TextEdit,
-    Type,
-    WebBucket,
-    expr_span,
-    name_start,
-    type_name,
-]
-use jet_lexer.[
-    TOKEN_BLOCK_COMMENT,
-    TOKEN_COMMA,
-    TOKEN_EOF,
-    TOKEN_GT,
-    TOKEN_LBRACE,
-    TOKEN_LBRACKET,
-    TOKEN_LINE_COMMENT,
-    TOKEN_LPAREN,
-    TOKEN_LT,
-    TOKEN_MINUS,
-    TOKEN_RBRACE,
-    TOKEN_RBRACKET,
-    TOKEN_RPAREN,
-    TOKEN_SEMI,
-    TOKEN_SHR,
-    TOKEN_UNIFIED_ARROW,
-    Token,
-    lex,
-]
+use {
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        BinOp,
+        Diagnostic,
+        DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
+        Expr,
+        FencedStatement,
+        Func,
+        Item,
+        Marker,
+        PolicyDeclaration,
+        Program,
+        Span,
+        Stmt,
+        SwitchArm,
+        TextEdit,
+        Type,
+        WebBucket,
+        expr_span,
+        name_start,
+        type_name,
+    ]
+    jet_lexer.[
+        TOKEN_BLOCK_COMMENT,
+        TOKEN_COMMA,
+        TOKEN_EOF,
+        TOKEN_GT,
+        TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LINE_COMMENT,
+        TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_MINUS,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
+        TOKEN_RPAREN,
+        TOKEN_SEMI,
+        TOKEN_SHR,
+        TOKEN_UNIFIED_ARROW,
+        Token,
+        lex,
+    ]
+}
 
 JFMT_INDENT :: 4
 // The width floor (gate d) for keeping a body on one line.
@@ -1452,7 +1454,7 @@ fn jfmt_sort_edits_by_start(edits: [TextEdit]) -> [TextEdit] Never! {
 // Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
 fn jfmt_is_teaching_parse_diag(code: String) -> Bool Never! {
     if code == {
-        "E0031" | "E0034" | "E0048" | "E0049" | "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0999" | "E0412" | "E0413" | "E0414" | "E0415" | "E0417" | "E0418" -> true
+        "E0031" | "E0034" | "E0048" | "E0049" | "E0080" | "E0082" | "E0154" | "E0986" | "E0992" | "E0994" | "E0366" | "E0367" | "E0372" | "E0373" | "E0379" | "E0386" | "E0999" | "E0412" | "E0413" | "E0414" | "E0415" | "E0417" | "E0418" | "E0630" -> true
         else -> false
     }
 }

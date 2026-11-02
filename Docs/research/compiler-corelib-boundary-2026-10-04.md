@@ -649,7 +649,7 @@ The options differ only in where hardware knowledge lives.
   copies, and the body elsewhere.
 - **Beginner path.** Nothing changes; list sums get faster when Core learns a
   chip.
-- **Expert path.** `use core.arch.x86 as x86` and
+- **Expert path.** `use x86 :: core.arch.x86` and
   `prep if $build.cpu.has(.AVX512F)` exactly as D-CPU-DISPATCH1 shows. Rows
   are generated from vendor tables.
 - **Edge cases.**

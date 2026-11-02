@@ -2,11 +2,13 @@
 // assertions already owned by CallableFacts/Facts/Build/Codec are reused below,
 // not replaced with hand-built checked records. These tests are source-only;
 // no registration into the package list or proof is implied by this file.
-use jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, sha256_hex]
-use jet_pkg_model.[WorkspaceDeclarationCache]
-use core.files as semindex_open_files
-use core.process as semindex_open_process
-use core.sys as semindex_open_sys
+use {
+    jet_foundation.[Diagnostic, DIAGNOSTIC_ERROR, sha256_hex]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+    semindex_open_files :: core.files
+    semindex_open_process :: core.process
+    semindex_open_sys :: core.sys
+}
 
 fn semindex_open_test_root(label: String) -[FS, Env]> String Never! {
     root :: semindex_open_files.join(semindex_open_sys.temp_dir(), "jet-semindex-{label}-{semindex_open_process.current_pid()}")
@@ -219,7 +221,7 @@ fn semindex_open_test_checked_reference_index(index: SemIndex) {
 // authorized sources/overlays once and call the public opening seam before
 // registering these assertions. They are not fake preconstructed snapshots.
 fn semindex_open_test_symbol_free_input_fixture(root: String) -[FS]> {
-    semindex_open_test_write(root, "main.jet", "use \"./empty_a\" as a\nuse \"./empty_b\" as b\nfn run() {{}}\n")
+    semindex_open_test_write(root, "main.jet", "use a :: \"./empty_a\"\nuse b :: \"./empty_b\"\nfn run() {{}}\n")
     semindex_open_test_write(root, "empty_a.jet", "// intentionally no definitions\n")
     semindex_open_test_write(root, "empty_b.jet", "// another read-only symbol-free input\n")
 }
@@ -246,7 +248,7 @@ fn semindex_open_test_structural_fixture(root: String) -[FS]> {
     semindex_open_test_write(candidate, "library.jet", "fn value() -> Int {{ return 7 }}\n")
 }
 fn semindex_open_test_structural_candidate_source() -> String Never! {
-    "use \"./library\" as api\nfn run() {{ value :: api.value() }}\n"
+    "use api :: \"./library\"\nfn run() {{ value :: api.value() }}\n"
 }
 fn semindex_open_test_structural_import(index: SemIndex, library_path: String) Never! {
     found := false

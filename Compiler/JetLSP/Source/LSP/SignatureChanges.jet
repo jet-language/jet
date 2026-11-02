@@ -2,11 +2,13 @@
 // handler that treats an unavailable staged check as successful. Feature-owned
 // SignatureChangeEdit/preview remain canonical (0737). Native map key equality
 // is #4499; Driver sealed snapshot/retained bytes and Core replacement are gates.
-use core.encoding.[Dyn]
-use jet_foundation.[foundation_json_quote]
-use jet_driver.[JetDriverCompilerCheckResult, JetDriverCompilerQueries]
-use core.files.runtime.kernel_path_components as lsp_signature_path
-use jet_devserver.[number]
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[foundation_json_quote]
+    jet_driver.[JetDriverCompilerCheckResult, JetDriverCompilerQueries]
+    lsp_signature_path :: core.files.runtime.kernel_path_components
+    jet_devserver.[number]
+}
 
 fn lsp_signature_change_response(server: LSPServer, params: Dyn, id: Dyn) -> String {
     usage :: "jet.changeSignature expects arguments [uri, identity, {{name, type, values}}]"

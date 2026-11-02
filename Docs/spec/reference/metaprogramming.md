@@ -106,7 +106,7 @@ compile-time expression. A compile-time ambient read needs both the source
 gate and the command-line grant:
 
 ```jet
-use core.files as fs
+use fs :: core.files
 
 fn run() {
     comptime {
@@ -197,7 +197,7 @@ fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/features/
 shows the runtime floor:
 
 ```jet
-use core.reflect as reflect
+use reflect :: core.reflect
 
 struct Point {
     x: Int(0..10)

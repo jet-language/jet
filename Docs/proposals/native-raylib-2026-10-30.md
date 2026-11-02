@@ -7,8 +7,7 @@ generates, as a showcase of that binder. Section 6 lists the open ballots.
 Tower owns the card plan.
 
 Package name (owner answer 2026-11-01): Jet's own library is the package
-`raylib`, imported as `ray`. With today's imports that is `use raylib as ray`;
-with the Go-style import blocks of #6542 it is `use ray :: raylib`. Below,
+`raylib`, imported as `ray`: `use ray :: raylib` (#6542). Below,
 `ray` names that library as code refers to it. The C binding in the first row
 of section 1 therefore needs another package name; the owner has not given one.
 
@@ -100,7 +99,7 @@ using the software path, so they stay exact everywhere.
 (card 5086 asks for 1:1). D-RAY-API1 asks the owner to ratify this shape.
 
 ```jet
-use raylib as ray
+use ray :: raylib
 
 win :: ray.init_window(800, 450, "demo")?
 loop frame in win.frames() {

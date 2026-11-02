@@ -132,7 +132,7 @@ battery against rustls and OpenSSL test vectors. Server TLS is an explicit
 named option on `core.http.server`:
 
 ```text
-use core.http.server as server
+use server :: core.http.server
 
 fn run() {
     cert := "server.crt"

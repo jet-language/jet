@@ -225,7 +225,7 @@ Today (real; codes from lane C probes on `tests/ui/effect_out_of_set.jet` and `t
 authority: { holds: { allow: [FS, Time] } }
 
 // run.jet
-use core.http as http
+use http :: core.http
 fn fetch(url: String) String -[FS]> { return http.get(url).body().text(1024) }   // E0740: `fetch` uses the effect `Net`, which its signature doesn't allow
 fn run() {
     #FX(FS) { fetch("https://x") }                                                // E0712: this `#FX` region uses the effect `Net`, which it has no authority for
@@ -329,8 +329,10 @@ Look at how much already exists. A struct is Codable by default (D-META-AUTO1), 
 Today (real; verified on every tier, verification block `shapes`; `#Env` per `markers.rs:78-79`, `#CLI` per `examples/features/cli/typed_entry_args.jet:15`):
 
 ```jet
-use core.encoding.json as json
-use core.sys as env
+use {
+    json :: core.encoding.json
+    env :: core.sys
+}
 
 #CLI
 struct Config {
@@ -350,8 +352,10 @@ fn run(args: Config) [FieldError]! {            // CLI owned by the parameter ty
 Proposed (**illustrative**, ballot D-SHAPE-PROJECT1 option A; the struct is unchanged):
 
 ```jet
-use core.args as args
-use core.sys as env
+use {
+    args :: core.args
+    env :: core.sys
+}
 
 #CLI
 struct Config {
@@ -565,7 +569,7 @@ Every user-typeable form is ratified (I7). The unclaimed space is the audit's jo
 | `!` suffix | `T !E` failure contract only | reserved: none beyond `!E` |
 | `switch`, `for`, `continue` | teaching aliases; `Stmt::Switch` is a phantom AST node | delete the phantom node (card #2512, no ballot) |
 | `_test.jet` | no convention; `@test.jet` is the role file | stated: no test-file suffix convention |
-| `Type.{…}` | retired; `Type{…}` canonical | unchanged |
+| `Type.[…]` | retired; `Type{…}` canonical | unchanged |
 
 ## The final vision
 
@@ -583,8 +587,10 @@ authority: { holds: { allow: [FS, Time] } }
 
 ```jet
 // run.jet
-use core.files as fs
-use core.encoding.json as json
+use {
+    fs :: core.files
+    json :: core.encoding.json
+}
 
 #CLI
 struct Config {
@@ -627,10 +633,12 @@ Proposed (the source gains one marker on `Order`, one `#PublishedSchema` for the
 
 ```jet
 // run.jet — proposed lines marked
-use core.files as fs
-use core.encoding.json as json
-use core.args as args
-use core.sys as env
+use {
+    fs :: core.files
+    json :: core.encoding.json
+    args :: core.args
+    env :: core.sys
+}
 
 #CLI
 struct Config {

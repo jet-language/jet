@@ -3,13 +3,15 @@
 // CBORWriter::{scalar,accept,write_key,close_array,close_object,write_event,
 // flush_output,finish_output}. Only existing file and allocation leaves cross
 // the host boundary. The old byte-array cbor.jet reader is not this contract.
-use core.encoding.[DataEvent, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
-use core.encoding as encoding
-use core.files.[FileReader, FileWriter]
-use core.mem as mem
-use core.math as math
-use __core_encoding_stream as stream
-use __core_encoding_cbor_parse as parser
+use {
+    core.encoding.[DataEvent, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
+    encoding :: core.encoding
+    core.files.[FileReader, FileWriter]
+    mem :: core.mem
+    math :: core.math
+    stream :: __core_encoding_stream
+    parser :: __core_encoding_cbor_parse
+}
 
 fn error(kind: EncodingErrorKind, offset: Int, path: String, reason: String) -> EncodingError Never! {
     EncodingError{format: .CBOR, kind: kind, byte_offset: offset, line: None, column: None, path: path, reason: reason, cause: None}

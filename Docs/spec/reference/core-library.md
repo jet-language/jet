@@ -199,10 +199,12 @@ their declared spelling; see S66.
 ## Quick start
 
 ```jet
-use core.files as fs
-use core.term as term
-use core.sys as sys
-use core.process as process
+use {
+    fs :: core.files
+    term :: core.term
+    sys :: core.sys
+    process :: core.process
+}
 
 fn run() {
     args :: process.argv()
@@ -234,8 +236,10 @@ Core modules use `use` without quotes. Quoted imports name `.jet` files, not
 compiler-known Core modules:
 
 ```jet
-use core.files as fs
-use core.encoding.json as json
+use {
+    fs :: core.files
+    json :: core.encoding.json
+}
 ```
 
 `use core.files` and `use core.encoding.json` resolve under the `core` root.
@@ -281,7 +285,7 @@ use the same names.
 For example, `#Inline` accepts an imported enum value or a dot literal:
 
 ```jet
-use core.compiler.lang as lang
+use lang :: core.compiler.lang
 
 #Inline(lang.InlineMode.Always)
 fn parse_fast(text: String) -> Int {
@@ -341,7 +345,7 @@ Declared Config files contribute package facts and build identity, not ordinary
 source declarations; a Config binding cannot shadow a package function.
 
 ```jet
-use core.compiler as compiler
+use compiler :: core.compiler
 
 @manifest :: compiler.manifest() ?? panic("manifest")
 @package :: compiler.package() ?? panic("package")
@@ -357,7 +361,7 @@ before library code runs; the returned `Mod` owns its provider handle and
 releases it when dropped.
 
 ```jet
-use core.mod as library
+use library :: core.mod
 
 fn run() {
     library.load(".jet/build/loadable.jetlib", grant: {read: [".jet/build"]}) ?? return
@@ -383,7 +387,7 @@ call propagates a failure from the enclosing function; `??` handles it as a
 fallback, and `?(text)` adds context while preserving propagation:
 
 ```jet
-use core.files as fs
+use fs :: core.files
 
 fn run() {
     text :: fs.read("data.txt")
@@ -596,7 +600,7 @@ working directory and join it to an argument that is already relative. Use a
 `Path` when intentionally composing components.
 
 ```jet
-use core.files as fs
+use fs :: core.files
 
 fn run() {
     path :: "/tmp/notes.txt"
@@ -793,7 +797,7 @@ returned; invalid UTF-8 retains its byte offset and invalid-sequence length.
 Streaming constructors keep memory bounded:
 
 ```jet
-use core.files as files
+use files :: core.files
 
 fn count_lines(path: String) -> Int IOError! {
     reader :: files.open(path)
@@ -854,7 +858,7 @@ are lowercased byte-wise and Punycode-encoded (`xn--`, RFC 3492); no WHATWG
 IDNA mapping is applied.
 
 ```jet
-use core.net.url as url
+use url :: core.net.url
 
 fn run() {
     base :: url.parse("https://example.test/a/./b/../c?x=1") ?? return
@@ -913,7 +917,7 @@ therefore fixes the 48-bit timestamp prefix while the tail still comes from
 the same random provider; the version and variant bits are set in Jet.
 
 ```jet
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 
 fn run() {
     id :: uuid.v4() ?? return
@@ -1203,7 +1207,7 @@ password hashes use nominal carriers for secret-bearing values. Missing entropy
 is an error; the API does not fall back to a weak generator.
 
 ```jet
-use core.crypto as crypto
+use crypto :: core.crypto
 
 fn run() {
     recipient :: crypto.X25519SecretKey.new_random() ?? return
@@ -1352,8 +1356,10 @@ reads key material or private provider metadata and imposes no `Display` bound
 on `T`.
 
 ```jet
-use core.crypto as crypto
-use core.crypto.vault as vault
+use {
+    crypto :: core.crypto
+    vault :: core.crypto.vault
+}
 
 fn provision() -[Secret, IO]> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
@@ -1583,7 +1589,7 @@ argument writes on its own line to stdout or stderr (D-VERDICT-1321-1).
 require `FS` because they access files rather than terminal streams.
 
 ```jet
-use core.term as term
+use term :: core.term
 
 fn run() {
     name :: term.input("your name? ") ?? return
@@ -1641,8 +1647,10 @@ parsing is separate from process execution so tests can pass an explicit
 argument vector.
 
 ```jet
-use core.args as args
-use core.process as process
+use {
+    args :: core.args
+    process :: core.process
+}
 
 fn run() {
     spec :: args.spec()
@@ -1712,7 +1720,7 @@ classifier `inspect`. Runtime reflection is read-only and retains typed field
 values rather than pre-rendering them.
 
 ```jet
-use core.reflect as reflect
+use reflect :: core.reflect
 
 struct Point {
     x: Int
@@ -1767,7 +1775,7 @@ environment block. Child overlays snapshot once, apply sets in order, then
 apply removals; an explicitly empty value is not an absent value.
 
 ```jet
-use core.sys as sys
+use sys :: core.sys
 
 fn run() {
     home :: sys.home_dir()
@@ -1906,7 +1914,7 @@ targets without this descriptor transfer report `Unsupported` rather than
 falling back to a lexical working directory.
 
 ```jet
-use core.process as process
+use process :: core.process
 
 fn run() -[Exec, Time.Wait]> {
     timeout :: Duration.seconds(30) ?? return
@@ -2099,7 +2107,7 @@ their own method namespaces; the source-backed primitive route grants neither
 an `abs` method nor a Core identity to a same-spelled user type.
 
 ```jet
-use core.math as math
+use math :: core.math
 
 fn run() {
     angle := math.PI / 4.0
@@ -2291,7 +2299,7 @@ user-defined dimension system. The module-global scale names are uppercase
 `GRAM`, `SECOND`, `BYTE_UNIT`, `KIBIBYTE`, `MEBIBYTE`, and `GIBIBYTE`).
 
 ```jet
-use core.units as units
+use units :: core.units
 
 fn run() {
     distance := units.meters(12.0)
@@ -2335,7 +2343,7 @@ it retains its 64-bit floating-point projection, while
 `core.math.random.float()` uses an exactly representable 53-bit draw.
 
 ```jet
-use core.math.random as random
+use random :: core.math.random
 
 fn roll_at(rng: &RNG) -> String {
     value := rng.int(1, 6)
@@ -2415,7 +2423,7 @@ replay/backend/frame arguments become native optional references, not references
 to the language's optional-result carrier.
 
 ```jet
-use core.game as game
+use game :: core.game
 
 fn run() {
     scene := game.Scene.new("counter")
@@ -2608,7 +2616,7 @@ The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
 formatting, and text codecs are implemented in `Core/Time/Time.jet` on all
 tiers. `Date` is the prelude's name for `LocalDate`
-(`pub use core.time.[LocalDate as Date]`); `core.time` declares only
+(`pub use Date :: core.time.LocalDate`); `core.time` declares only
 `LocalDate`. Immutable zone tables are plain values,
 copied with their zone, and borrowed reads need no shared-memory guard or
 `Time.Wait` effect. Native seams supply raw clock samples, environment values
@@ -2647,7 +2655,7 @@ with an `unknown IANA time zone` message that points to `JET_TZDB_DIR` or
 `TZDIR` (D-FREESTAND-TIME1).
 
 ```jet
-use core.time as time
+use time :: core.time
 
 fn run() {
     stamp :: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
@@ -3108,7 +3116,7 @@ interactions, terminal/browser/native/export backends, and supported/degraded
 capabilities. The default `show` backend is Browser; Terminal selects text.
 
 ```jet
-use core.data as data
+use data :: core.data
 
 #Codable
 struct Ticket {
@@ -4384,7 +4392,7 @@ adapter is held; it is not part of this source-owned Core integration.
 ### `core.db.sql` — pure SQL grammar and row selection
 
 [`Core/Db/Sql.jet`](../../../Core/Db/Sql.jet) is the canonical public SQL
-kernel. Import it with `use core.db.sql as sql`; the former Core-private
+kernel. Import it with `use sql :: core.db.sql`; the former Core-private
 runtime module has been relocated, without a compatibility module or re-export.
 It carries no database connection or raw-SQL execution authority.
 

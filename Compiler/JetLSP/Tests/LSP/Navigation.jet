@@ -54,7 +54,7 @@
     std.fs.create_dir_all(root).unwrap()
     library :: root.join("library.jet")
     main :: root.join("main.jet")
-    source :: "use \"./library\" as api\nfn run() {{ api.report() }}\n"
+    source :: "use api :: \"./library\"\nfn run() {{ api.report() }}\n"
     std.fs.write(library, "fn report() {{ print(\"library\") }}\n").unwrap()
     std.fs.write(main, source).unwrap()
     shown :: main.to_string_lossy()

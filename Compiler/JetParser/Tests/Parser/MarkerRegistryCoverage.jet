@@ -2,10 +2,12 @@
 // (#6096 marker-registry-coverage). Each active row of the one marker source
 // (Compiler/Prelude/Markers.jet, read as MARKER_SOURCE) is written at one of its
 // own declared sites and driven through the parser, formatter and reflection.
-use jet_foundation.[Diagnostic, MARKER_SOURCE, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, foundation_core_argument_menus, rule_arg_declaration]
-use jet_lexer.[lex, lex_generated]
-use jet_parser.[jet_format_source, parse_generated_source, parse_source]
-use jet_sema.[SemaScopeMembersMarkerRegistry, SemaScopeMembersMarkerRule, sema_comptime_reflection_marker_rule, sema_marker_rules_build_catalog, sema_scope_members_registry_add_applied_catalog, sema_taint_builtin_tag_names]
+use {
+    jet_foundation.[Diagnostic, MARKER_SOURCE, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, foundation_core_argument_menus, rule_arg_declaration]
+    jet_lexer.[lex, lex_generated]
+    jet_parser.[jet_format_source, parse_generated_source, parse_source]
+    jet_sema.[SemaScopeMembersMarkerRegistry, SemaScopeMembersMarkerRule, sema_comptime_reflection_marker_rule, sema_marker_rules_build_catalog, sema_scope_members_registry_add_applied_catalog, sema_taint_builtin_tag_names]
+}
 
 // The applied-rule catalog the checker builds (MarkerModules.jet
 // `sema_marker_module_check`). The effect menu is seeded with the roots the
@@ -75,7 +77,7 @@ fn mrc_spelling(rule: TAppliedRule, menus: [TAppliedRuleArgumentMenu]) -> String
 // puts `marker` at `site`.
 fn mrc_program_at(marker: String, rule: TAppliedRule, site: String) -> String? {
     if site == {
-        "File" -> if marker.starts_with("#NoPrelude") -> return Val("#NoPrelude\nuse core.term as io\nfn run() {{\n    io.print(\"ok\")\n}}\n") else -> return Val("{marker}\nfn run() {{\n    print(\"ok\")\n}}\n")
+        "File" -> if marker.starts_with("#NoPrelude") -> return Val("#NoPrelude\nuse io :: core.term\nfn run() {{\n    io.print(\"ok\")\n}}\n") else -> return Val("{marker}\nfn run() {{\n    print(\"ok\")\n}}\n")
         // The Rust walk wrote `module c.lib`; a dotted user module now needs a
         // declared namespace (E0960), so the smallest module is `module lib`.
         "Module" -> if marker.starts_with("#Bindgen") -> return Val("{marker} module c.coverage.__bindgen__ {{\n}}\n") else -> return Val("{marker} module lib {{\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n")

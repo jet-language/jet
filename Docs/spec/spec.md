@@ -98,7 +98,7 @@ vocabulary](vocabulary.md).
   (D-MARKER-GROUP1=A).
   Markers declared by the current module may be bare; imported markers always
   name their local import alias in PascalCase, acronyms in caps, as in
-  `#Web.Get(...)` through `use core.http.server as web` (D-MARKER-CASE1=A);
+  `#Web.Get(...)` through `use web :: core.http.server` (D-MARKER-CASE1=A);
   a lowercase library part is E0087. Group members bind in the declaring
   module, not in whichever module applies the group. A public group cannot
   publish a private member (D-MARKER-MODULE1=A).
@@ -2130,16 +2130,17 @@ Jet has two import forms: a quoted path names a file, and an unquoted name
 names a module.
 
 ```jet
-use "scoring"
-use text :: util
-use core.files
+use {
+    "scoring"
+    text :: util
+    core.files
+}
 ```
 
 A quoted path is relative to the directory of the file containing the `use`.
 The `.jet` suffix is implicit. A path cannot escape its project with `..`.
 The last path segment supplies the default namespace; `alias :: path` gives
-either form an explicit alias (S16). The older `use path as alias` spelling
-means the same.
+either form an explicit alias (S16).
 
 Two or more imports are written as one `use { … }` block with one row per
 line, and `pub use { … }` re-exports every row (#6542). A row is any import:
@@ -2161,13 +2162,15 @@ use {
 
 `alias :: path` binds `alias` to whatever `path` names. A path that names a
 module (a Core, local, package or foreign language module) is that module
-import, exactly as `use path as alias` is. A path `owner.name` that names no
-module, under an owner that declares the member `name` (a Core module, an
-inline module of the file, or the file a body-less `module owner` of the file
-declares), binds that member, as `use owner.[name as alias]` does; any other
-path keeps its module error. A row takes one alias, so
-`alias ::` with `as` or with a member list is an error, and an empty block is
-an error.
+import. A path `owner.name` that names no module, under an owner that declares
+the member `name` (a Core module, an inline or local module, the file a
+body-less `module owner` declares, a file import's alias, or a package
+dependency), binds that member; any other path keeps its module error. A
+member list names its members unrenamed: a renamed member is its own
+`alias :: owner.name` row. A row takes one alias, so `alias ::` with a member
+list is an error, and an empty block is an error. The retired spellings
+`use path as alias`, `owner.[name as alias]` and `owner.{…}` are E0630, a
+teaching error that `jet fmt` rewrites to the rows above.
 
 An unquoted module name is resolved by recursively searching from the project
 root for `name.jet` and for `name/run.jet`; `core` is a compiler-provided
@@ -2322,7 +2325,7 @@ pub use wrap.wrap
 
 A public declaration that is not re-exported does not become part of the
 parent directory's surface, and neither does the child module itself: when
-`text/module.jet` re-exports only `wrap.[wrap as shout]`, reaching the file
+`text/module.jet` re-exports only `shout :: wrap.wrap`, reaching the file
 from outside, as `text.wrap.wrap("hi")`, reports **E0605**.
 
 A file and the item it re-exports may share a name, as `wrap` does above. The
@@ -2961,8 +2964,8 @@ A project binder mounts a language root and library name as `<language>.<lib>`.
 Generated Jet modules and their provenance live below
 `.jet/bindings/<language>/`; generated Jet is ordinary source and can be
 inspected. Import a whole library or a member list with
-`use <lang>.<lib> as alias` or
-`use <lang>.[lib as alias, other]`. A generated descriptor records the ABI
+`use alias :: <lang>.<lib>` or `use <lang>.[lib, other]`. A generated
+descriptor records the ABI
 contract, ownership/layout rules, callback and error model, effect leaf,
 provider, cache suffix, and capability set. Every generated artifact carries
 the `jet-ffi-descriptor-v1` stamp, and a stale stamp is rejected before a
@@ -3557,7 +3560,7 @@ file is available. Query state and queue transitions are defined by
 
 ### Events and hooks
 
-`use core.event as event` exposes typed compiler-known event values; it does
+`use event :: core.event` exposes typed compiler-known event values; it does
 not add an event declaration syntax. `event.new<T>()` creates an infallible
 synchronous `Event<T>`. `event.scope()` creates an owner for subscriptions;
 `scope.cancel()` is idempotent, unsubscribes every owned listener, and makes
@@ -3598,7 +3601,7 @@ creates a typed fold. Handlers return `HookDecision.Continue`,
 scope, priority, and once rules as events.
 
 ```jet
-use core.event as event
+use event :: core.event
 
 fn run() {
     scope :: event.scope()
@@ -3629,7 +3632,7 @@ An RAII guard restores the terminal on normal return, `?` propagation, and panic
 unwind. The marker itself does not require an import; `term.read_key()` does.
 
 ```jet
-use core.term as term
+use term :: core.term
 
 #Live {
     key :: term.read_key()
@@ -4726,7 +4729,7 @@ A sandbox's WIT world lists the entry file's top-level functions. A host uses a
 typed plugin handle:
 
 ```jet
-use core.plugin as plugin
+use plugin :: core.plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])

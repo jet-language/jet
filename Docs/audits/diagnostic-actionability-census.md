@@ -187,7 +187,7 @@ Each failure includes the registered code, the exact Fix text, and the requireme
 | `E0164` | active | sema | source_edit | true | false |  |  | Write a total update, such as `map[key] = (map.get(key) ?? 0) {op} 1` |
 | `E0165` | active | parse | source_edit | true | false |  |  | Bind the value with `:=`, then write `name {op} value` |
 | `E0166` | active | sema | source_edit | true | false |  |  | Keep one declaration of `{state}` in the struct's `state { … }` section |
-| `E0167` | active | sema | source_edit | true | false |  |  | Rename the state or the member so `Type.State.{state}` is unique |
+| `E0167` | active | sema | source_edit | true | false |  |  | Rename the state or the member so `Type.State.[state]` is unique |
 | `E0168` | active | parse | source_edit | true | false |  |  | Merge the state names into one `state { … }` section |
 | `E0169` | active | sema | source_edit | true | false |  |  | Add at least one state name, or remove the section |
 | `E0201` | active | sema | source_edit | true | false |  |  | Add the move marker `^` at the consuming call site. |
@@ -564,7 +564,7 @@ Each failure includes the registered code, the exact Fix text, and the requireme
 | `E1238` | active | jet | source_edit | true | false |  |  | Realize every named tool, declare every input and authority fact, fix the output/dependency graph, and retry the stage. |
 | `E1239` | active | jet | exact_path | true | false |  |  | Keep one declaration (conventionally in `workspace.jet`) and delete the others. |
 | `E1240` | active | jet | exact_command | true | true | jet build |  | Run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider. |
-| `E1241` | active | jet | exact_command | true | true | jet build |  | The build falls back to the compiler-embedded `core.{ring}`; to ship the staged artifact, realize a toolchain object built for this platform (`jet update jet`). |
+| `E1241` | active | jet | exact_command | true | true | jet build |  | The build falls back to the compiler-embedded `core.[ring]`; to ship the staged artifact, realize a toolchain object built for this platform (`jet update jet`). |
 | `E1242` | active | jet | source_edit | true | false |  |  | Define captured `system.{system}: { … }`, or point the host at an existing captured system. |
 | `E1243` | active | jet | exact_command | true | true | jet push |  | Until the jetos realization tier lands, `jet push` captures and validates fleets without deploying them. |
 | `E1244` | active | jet | source_edit | true | false |  |  | Remove `{field}`; captured fleets use `hosts: { … }`. |

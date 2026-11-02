@@ -102,7 +102,7 @@ signature alone is not a license to reinterpret an opaque value.
 For a package-level loadable artifact, the canonical Jet-side loader is:
 
 ```jet
-use core.mod as library
+use library :: core.mod
 
 loaded :: library.load(
     ".jet/build/loadable.jetlib",

@@ -26,7 +26,7 @@ fn use_test_member(import: ImportDecl) -> String {
     fs :: core.files
     m :: c.math
     helper :: "./helper"
-    core.math.[max, min as smallest]
+    core.math.[max, min]
     pkg
 }
 
@@ -53,13 +53,11 @@ fn run() {}
     assert_eq(use_test_module(use_test_import(program, 5)), "pkg")
 }
 
-#Test("alias rows mean what the as spelling means") {
+#Test("alias rows bind a module, a member path, a file or a package") {
     program :: parser_test_program(`use plot :: js.plotly
 use biggest :: core.math.max
 use h :: "./helper"
 use p :: pkg
-use js.plotly as old_plot
-use "./helper" as old_h
 
 fn run() {}
 `)
@@ -70,9 +68,38 @@ fn run() {}
     assert_eq(use_test_import(program, 2).alias, "h")
     assert_eq(use_test_module(use_test_import(program, 3)), "pkg")
     assert_eq(use_test_import(program, 3).alias, "p")
-    assert_eq(use_test_module(use_test_import(program, 4)), "js.plotly")
-    assert_eq(use_test_import(program, 4).alias, "old_plot")
-    assert_eq(use_test_import(program, 5).alias, "old_h")
+}
+
+#Test("the retired as alias teaches E0630 with an edit to the alias row") {
+    row :: parser_test_diagnostic(parser_test_errors("use core.files as fs\n\nfn run() {{}}\n"), "E0630")
+    assert(row.fix.contains("fs :: core.files"), row.fix)
+    assert_eq((row.edit ?? panic("expected an edit")).new_text, "fs :: core.files")
+    file :: parser_test_diagnostic(parser_test_errors("use \"./helper\" as h\n\nfn run() {{}}\n"), "E0630")
+    assert_eq((file.edit ?? panic("expected an edit")).new_text, "h :: \"./helper\"")
+    versioned :: parser_test_diagnostic(parser_test_errors("use pkg#1.2 as p\n\nfn run() {{}}\n"), "E0630")
+    assert_eq((versioned.edit ?? panic("expected an edit")).new_text, "p :: pkg#1.2")
+    member :: parser_test_diagnostic(parser_test_errors("use core.math.[max as biggest, min]\n\nfn run() {{}}\n"), "E0630")
+    assert(member.fix.contains("biggest :: core.math.max"), member.fix)
+    braces :: parser_test_diagnostic(parser_test_errors("use core.math.{{max, min}}\n\nfn run() {{}}\n"), "E0630")
+    assert(braces.fix.contains("use core.math.[…]"), braces.fix)
+}
+
+#Test("a retired spelling still reads its import") {
+    program :: parser_test_result(`use core.files as fs
+use core.math.{max, min}
+use core.term.[print as say]
+
+fn run() {}
+`).program
+    assert_eq(program.imports.len(), 3)
+    assert_eq(use_test_import(program, 0).alias, "fs")
+    if use_test_import(program, 1).kind == .Unqualified(module_alias, _, items, _, _) {
+        assert_eq(module_alias, "core.math")
+        assert_eq(items.len(), 2)
+    } else {
+        panic("expected a member list")
+    }
+    assert_eq(use_test_member(use_test_import(program, 2)), "core.term.[print as say]")
 }
 
 #Test("several use blocks, a pub block and an inline module block all parse") {
@@ -113,19 +140,19 @@ fn run() {}
 }
 
 #Test("an alias row takes no second alias and no member list") {
-    second :: parser_test_errors("use a :: core.files as b\n\nfn run() {{}}\n")[0]
-    assert(second.what.contains("already has the alias `a`"), second.what)
+    second :: parser_test_diagnostic(parser_test_errors("use a :: core.files as b\n\nfn run() {{}}\n"), "E0630")
+    assert(second.what.contains("already has an alias"), second.what)
     list :: parser_test_errors("use a :: core.math.[max]\n\nfn run() {{}}\n")[0]
     assert(list.what.contains("takes no `a ::` alias"), list.what)
 }
 
 #Test("fmt writes a block for two or more imports and alias rows") {
-    formatted :: parser_test_stable(`use core.files as fs
+    formatted :: parser_test_stable(`use fs :: core.files
 use core.term
-use js.plotly as plot
-use "./helper" as h
-use core.math.[max as biggest]
-pub use core.time as t
+use plot :: js.plotly
+use h :: "./helper"
+use biggest :: core.math.max
+pub use t :: core.time
 pub use core.sys
 
 fn run() {}
@@ -135,7 +162,7 @@ fn run() {}
     core.term
     plot :: js.plotly
     h :: "./helper"
-    core.math.[max as biggest]
+    biggest :: core.math.max
 }
 
 pub use {
@@ -147,10 +174,32 @@ fn run() {}
 `)
 }
 
+#Test("fmt rewrites the retired spellings to alias rows and brackets") {
+    formatted :: parser_test_stable(`use core.files as fs
+use "./helper" as h
+use core.math.[max as biggest, min, abs as magnitude]
+use core.term.{print}
+
+fn run() {}
+`)
+    assert_eq(formatted, `use {
+    fs :: core.files
+    h :: "./helper"
+    core.math.[min]
+    biggest :: core.math.max
+    magnitude :: core.math.abs
+    core.term.[print]
+}
+
+fn run() {}
+`)
+}
+
 #Test("fmt keeps a lone import on one line") {
-    assert_eq(parser_test_stable("use core.files as fs\n\nfn run() {{}}\n"), "use fs :: core.files\n\nfn run() {{}}\n")
+    assert_eq(parser_test_stable("use fs :: core.files\n\nfn run() {{}}\n"), "use fs :: core.files\n\nfn run() {{}}\n")
     assert_eq(parser_test_stable("use core.term\n\nfn run() {{}}\n"), "use core.term\n\nfn run() {{}}\n")
     assert_eq(parser_test_stable("use c.math as m\n\nfn run() {{}}\n"), "use m :: c.math\n\nfn run() {{}}\n")
+    assert_eq(parser_test_stable("use core.math.[max as biggest]\n\nfn run() {{}}\n"), "use biggest :: core.math.max\n\nfn run() {{}}\n")
 }
 
 #Test("fmt writes an inline module's imports as a block") {

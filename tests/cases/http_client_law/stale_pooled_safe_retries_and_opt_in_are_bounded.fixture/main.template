@@ -1,8 +1,10 @@
 // COMPILE-ONLY public protocol companion. Never run without the retained reset readiness seam.
 // The original readiness points are SO_LINGER{1,0}, /proc/self/fd, poll(POLLERR) before each stale send.
 // No sleep or other timing heuristic replaces them. Full original in TestSlice4i/http_client_law.rs.original.rs.
-use core.http.client as http
-use core.http as message
+use {
+    http :: core.http.client
+    message :: core.http
+}
 fn drain(response: HTTPResponse) -> [U8] {
     out := [U8]{}
     loop chunk in response.body().chunks(64) {

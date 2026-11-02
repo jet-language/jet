@@ -156,20 +156,20 @@ def main() -> int:
         )
         source_file = scratch / "source.jet"
         source_file.write_text(
-            "use core.encoding.base64 as builtin_b64\n"
+            "use builtin_b64 :: core.encoding.base64\n"
             "fn encode(data: [U8]) -> String { builtin_b64.encode(data) }\n",
             encoding="utf-8",
         )
         rust_entry = scratch / "rust_builtin.jet"
         rust_entry.write_text(
-            f'''use core.encoding.base64 as b64
+            f'''use b64 :: core.encoding.base64
 '''
             + JET_WORKLOAD.replace("{rounds}", str(args.rounds)),
             encoding="utf-8",
         )
         source_entry = scratch / "jet_source.jet"
         source_entry.write_text(
-            f'''use source as b64
+            f'''use b64 :: source
 '''
             + JET_WORKLOAD.replace("{rounds}", str(args.rounds)),
             encoding="utf-8",

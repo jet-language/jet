@@ -5,8 +5,10 @@
 // std-only generated C bridge owns JNI invocation. The JVM is created lazily
 // in-process. Java objects cross as bounded global-reference handles; Jet can
 // borrow them for calls and consumes them through `close`.
-use core.files as files
-use core.sys as sys
+use {
+    files :: core.files
+    sys :: core.sys
+}
 
 
 // A JVM binding also names the directory holding the embeddable `libjvm`.
@@ -264,7 +266,7 @@ fn pkg_java_render_jet(lib: String, surface: JavaSurface) -> String Never! {
         result :: if method.result == JavaScalar.Void -> "" else -> " {method.result.jet()}"
         &out.push("    fn {method.name}({receiver}{pkg_java_params_jet(method.params)}){result} = \"{abi}_{method.name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\n\nstruct Handle {{ value: Int }}\n#Error\nenum JavaError {{ Exception }}\n\n")
+    &out.push("}}\nuse abi :: c.{abi}\n\nstruct Handle {{ value: Int }}\n#Error\nenum JavaError {{ Exception }}\n\n")
     &out.push("fn new({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value :: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
     &out.push("fn close(^handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\n")
     loop method in surface.methods {

@@ -82,7 +82,7 @@ fn pkg_test_insert_inline_package(source: String) -> String Never! {
 }
 
 #Test("inline package insertion keeps header first and docs attached") {
-    assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse core.files as files\n"), "#!/usr/bin/env jet\n// tool header\npackage {{ name: \"demo\" }}\nuse core.files as files\n")
+    assert_eq(pkg_test_insert_inline_package("#!/usr/bin/env jet\n// tool header\nuse files :: core.files\n"), "#!/usr/bin/env jet\n// tool header\npackage {{ name: \"demo\" }}\nuse files :: core.files\n")
     assert_eq(pkg_test_insert_inline_package("// header\n\n/// Entry.\n/// More.\nfn run() {{}}\n"), "// header\n\npackage {{ name: \"demo\" }}\n/// Entry.\n/// More.\nfn run() {{}}\n")
     assert_eq(pkg_test_insert_inline_package("fn run() {{}}\n"), "package {{ name: \"demo\" }}\nfn run() {{}}\n")
 }

@@ -1,17 +1,19 @@
-use Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, request_lsp, request_lsp_collect, json_string, json_object_field, json_array, json_array_field, json_values_equal, assert_json_values_equal, decode_semantic_tokens, assert_semantic_token]
-use Compiler.JetLSP.Tests.Integration.Lsp02.[run_transcript, TranscriptStep, costly_source, percentile]
-use jet_foundation.Dyn.[Dyn]
-use jet_foundation.JSON.[json_get, json_str, parse_json]
-use std.[fs, env, process]
-use std.process.[Command, Stdio, ChildStdin, ChildStdout]
-use std.time.[Instant, Duration]
-use common.[Scratch]
-use jet.[check_document]
-use jet.Syntax as Syntax
-use jet_foundation.Prelude as CorePrelude
-use jet_foundation.Prelude.[Target]
-use jet.LSP as LSP
-use jet.SHA256.[sha256_hex]
+use {
+    Compiler.JetLSP.Tests.Integration.Lsp.[jet_bin, lock_lsp_process, send_msg, read_msg, request_lsp, request_lsp_collect, json_string, json_object_field, json_array, json_array_field, json_values_equal, assert_json_values_equal, decode_semantic_tokens, assert_semantic_token]
+    Compiler.JetLSP.Tests.Integration.Lsp02.[run_transcript, TranscriptStep, costly_source, percentile]
+    jet_foundation.Dyn.[Dyn]
+    jet_foundation.JSON.[json_get, json_str, parse_json]
+    std.[fs, env, process]
+    std.process.[Command, Stdio, ChildStdin, ChildStdout]
+    std.time.[Instant, Duration]
+    common.[Scratch]
+    jet.[check_document]
+    Syntax :: jet.Syntax
+    CorePrelude :: jet_foundation.Prelude
+    jet_foundation.Prelude.[Target]
+    LSP :: jet.LSP
+    jet.SHA256.[sha256_hex]
+}
 // GATE #4494: actual child processes, pipes, filesystem, clock and process mutex.
 
 // Rust: tests/lsp.rs:3569
@@ -128,7 +130,7 @@ use jet.SHA256.[sha256_hex]
     _guard :: lock_lsp_process()
     root :: Scratch.new("lsp-checked-rename")
     fs.write(root.join("package.jet"), "name: \"rename\"\nversion: \"0.1.0\"\n").unwrap()
-    main :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn shadow(letter: Int) {{ print(letter) }}\n"
+    main :: "use grades :: scoring\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn shadow(letter: Int) {{ print(letter) }}\n"
     scoring :: "fn letter(score: Int) -> String -> \"A\"\n"
     util :: "fn letter(score: Int) -> String -> \"unrelated\"\n"
     sources :: [(_0: "run.jet", _1: main), (_0: "scoring.jet", _1: scoring), (_0: "util.jet", _1: util)]
@@ -337,7 +339,7 @@ use jet.SHA256.[sha256_hex]
     if !jet.exists() -> return
     root :: Scratch.new("lsp-definition-identity-collisions")
     fs.write(root.join("package.jet"), "name: \"definition-collisions\"\nversion: \"0.1.0\"\n").expect("write definition collision package manifest")
-    main_source :: "use scoring as grades\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn local(letter: Int) {{\n    print(letter)\n}}\n"
+    main_source :: "use grades :: scoring\nuse \"util\"\nfn run() {{\n    print(grades.letter(91))\n    print(util.letter(91))\n}}\nfn local(letter: Int) {{\n    print(letter)\n}}\n"
     scoring_source :: "fn letter(score: Int) -> String {{ \"A\" }}\n"
     util_source :: "fn letter(score: Int) -> String {{ \"unrelated\" }}\n"
     fs.write(root.join("run.jet"), main_source).expect("write definition collision root")

@@ -12,35 +12,37 @@
 // back as a `CtValue`. Inside `jet` the environment model evaluates through
 // `comptime_evaluate` below; `jetpack` reaches the same evaluator through
 // `jet __jetpack comptime-evaluate` (JetpackService.jet).
-use core.files as config_files
-use jet_driver.[
-    JetDriverAuthorizedSourceFile,
-    JetDriverAuthorizedSourceRoot,
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileMode,
-    JetDriverCompileResult,
-    JetDriverCoreSource,
-    jet_driver_compile,
-]
-use jet_foundation.[
-    ComptimeEvalError,
-    CtValue,
-    DIAGNOSTIC_ERROR,
-    Expr,
-    Func,
-    JET_CONFIG_VALUE_FILE,
-    JET_CONFIG_VALUE_NAME,
-    JetConfigOutcome,
-    diagnostic_from_registry,
-    jet_config_eval_diagnostic,
-    jet_config_eval_placed,
-    jet_config_plain_literal,
-]
-use jet_parser.[jet_config_program]
-use jet_sema.[
-    SemaComptimeItemKind,
-    sema_user_template_ct_value,
-]
+use {
+    config_files :: core.files
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverCoreSource,
+        jet_driver_compile,
+    ]
+    jet_foundation.[
+        ComptimeEvalError,
+        CtValue,
+        DIAGNOSTIC_ERROR,
+        Expr,
+        Func,
+        JET_CONFIG_VALUE_FILE,
+        JET_CONFIG_VALUE_NAME,
+        JetConfigOutcome,
+        diagnostic_from_registry,
+        jet_config_eval_diagnostic,
+        jet_config_eval_placed,
+        jet_config_plain_literal,
+    ]
+    jet_parser.[jet_config_program]
+    jet_sema.[
+        SemaComptimeItemKind,
+        sema_user_template_ct_value,
+    ]
+}
 
 // Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
 // readable. A plain literal is already its value; every other expression

@@ -4,14 +4,16 @@
 // Registry verification/referrer finalization are mandatory shared dependencies.
 // Rust's InvalidData reports InvalidInput (CORE-GAPS 11); open/create/fsync and
 // Stat.modified nanoseconds owe #3593. No Other-kind fallback.
-use jet_foundation.[foundation_json_quote, foundation_parse_protocol_json]
-use jet_pkg_model.[
-    PublicationRegistryTier, pkg_json_bool, pkg_json_object, pkg_json_text, publication_parse_tier,
-    publication_tier_label,
-]
-use jetpack_foundation.[foundation_write_file_nofollow_at_root]
-use core.files as files
-use core.time as time
+use {
+    jet_foundation.[foundation_json_quote, foundation_parse_protocol_json]
+    jet_pkg_model.[
+        PublicationRegistryTier, pkg_json_bool, pkg_json_object, pkg_json_text, publication_parse_tier,
+        publication_tier_label,
+    ]
+    jetpack_foundation.[foundation_write_file_nofollow_at_root]
+    files :: core.files
+    time :: core.time
+}
 
 struct PublicationIndexEntry {
     name: String

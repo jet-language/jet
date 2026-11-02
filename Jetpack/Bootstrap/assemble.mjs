@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilerSliceDrift } from "./compiler-slice.mjs";
+import { CORE_IMPORT_LINE, unblockUses } from "../../Tools/agent/compiler-packages.mjs";
 
 const mode = process.argv[2] ?? "check";
 if (!["check", "aot", "run", "hosted", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, run, hosted, or internal publication`);
@@ -333,20 +334,20 @@ function append(text) {
 // occurrence is blanked the same way (a duplicate import name is E0105), and
 // grouped Core member imports are deduplicated per member.
 const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_sema|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment|jetpack_secrets|jetpack_integrations)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
-const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
+const CORE_IMPORT = CORE_IMPORT_LINE;
 const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();
 const seenCoreMembers = new Set();
 const blank = (block) => block.replace(/[^\n]/g, " ");
 function blankRepeatedCoreMembers(importText, module, members) {
   const parts = members.split(",");
-  const bindings = parts.map((part) => part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/));
+  const bindings = parts.map((part) => part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/));
   // Leave unsupported or commented forms to the parser; do not guess names.
   if (bindings.some((binding, index) => !binding && parts[index].trim() !== "")) return importText;
   let removed = false;
   const kept = bindings.map((binding) => {
     if (!binding) return false;
-    const key = `${module}.${binding[1]} as ${binding[2] ?? binding[1]}`;
+    const key = `${module}.${binding[1]}`;
     if (seenCoreMembers.has(key)) { removed = true; return false; }
     seenCoreMembers.add(key);
     return true;
@@ -361,7 +362,7 @@ function blankRepeatedCoreMembers(importText, module, members) {
   return importText.slice(0, importText.indexOf("[") + 1) + rewritten + "]";
 }
 function blankPackageImports(text) {
-  return text.replace(PACKAGE_IMPORT, blank)
+  return unblockUses(text).replace(PACKAGE_IMPORT, blank)
     .replace(CORE_MEMBER_IMPORT, blankRepeatedCoreMembers)
     .replace(CORE_IMPORT, (line) => {
     const key = line.trimEnd();
@@ -403,7 +404,7 @@ if (mode === "run") {
   // failure on either tier names the same claim. A failing claim stops the
   // process (E3001); check.sh resumes after it with JETPACK_CLAIM_FROM set to
   // the next claim's index, so one run reports every failing claim.
-  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse core.sys as jetpack_bootstrap_sys\nfn run() {\n");
+  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse jetpack_bootstrap_sys :: core.sys\nfn run() {\n");
   append(`    from :: Int.parse(jetpack_bootstrap_sys.get("JETPACK_CLAIM_FROM") ?? "0") ?? 0\n`);
   for (const [index, { name, fnName }] of testNames.entries()) append(`    if from <= ${index} {\n        ${fnName}()\n        print("pass ${name}")\n    }\n`);
   append(`    print("jetpack-bootstrap: claims done")\n}\n`);

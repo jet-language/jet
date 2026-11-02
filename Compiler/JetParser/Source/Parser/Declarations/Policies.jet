@@ -3,25 +3,27 @@
 // `policy_declarations_from_marker`). Its arguments become the module's
 // policy declarations; a callable policy (`#Policy(retry(3))`) stays a marker
 // on the declaration that follows it.
-use jet_foundation.[
-    Marker,
-    PolicyDeclaration,
-    PolicyScope,
-    PolicyValue,
-    Program,
-    Span,
-    Stmt,
-    policy_key_parse,
-    type_name,
-]
-use jet_lexer.[
-    TOKEN_EOF,
-    TOKEN_HASH,
-    TOKEN_IDENT,
-    TOKEN_LPAREN,
-    TOKEN_RPAREN,
-    TOKEN_SEMI,
-]
+use {
+    jet_foundation.[
+        Marker,
+        PolicyDeclaration,
+        PolicyScope,
+        PolicyValue,
+        Program,
+        Span,
+        Stmt,
+        policy_key_parse,
+        type_name,
+    ]
+    jet_lexer.[
+        TOKEN_EOF,
+        TOKEN_HASH,
+        TOKEN_IDENT,
+        TOKEN_LPAREN,
+        TOKEN_RPAREN,
+        TOKEN_SEMI,
+    ]
+}
 
 fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false

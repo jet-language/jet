@@ -4,13 +4,15 @@
 // checker on a user entry whose program is swapped for the generated-lane
 // parse, as the embedded Core path parses; the import stays the same, so the
 // loaded import edges still hold.
-use jet_driver.[
-    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-    JetDriverCheckedProjectionCapture, JetDriverCompileMode, JetDriverCoreSource,
-    jet_driver_compile_loaded_stages, jet_driver_has_errors, jet_driver_keep_going_log, jet_driver_load,
-]
-use jet_cli.[jet_cli_driver_request]
-use jet_parser.[parse_generated_source, parse_source]
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCheckedProjectionCapture, JetDriverCompileMode, JetDriverCoreSource,
+        jet_driver_compile_loaded_stages, jet_driver_has_errors, jet_driver_keep_going_log, jet_driver_load,
+    ]
+    jet_cli.[jet_cli_driver_request]
+    jet_parser.[parse_generated_source, parse_source]
+}
 
 // What the checker reports as E3101 for `source` as the entry's program.
 fn raw_ui_transfer_reports(source: String) -> [String] {
@@ -19,7 +21,7 @@ fn raw_ui_transfer_reports(source: String) -> [String] {
             canonical_path: "/ui-raw-transfer",
             identity: "ui-raw-transfer-root",
             allow_hardlinks: false,
-            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/ui-raw-transfer/main.jet", relative_path: "main.jet", identity: "ui-raw-transfer-file", source: "use core.ui as ui\nfn run() {{ ui.text(\"jet\") }}\n"}},
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/ui-raw-transfer/main.jet", relative_path: "main.jet", identity: "ui-raw-transfer-file", source: "use ui :: core.ui\nfn run() {{ ui.text(\"jet\") }}\n"}},
             foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
         }},
         entry_root_identity: "ui-raw-transfer-root",
@@ -40,7 +42,7 @@ fn raw_ui_transfer_reports(source: String) -> [String] {
 
 #Test("raw_ui_transfer_requires_an_audited_gate") {
     call :: `ui.__node_transfer("", 0.0, 0.0, -1, 0, [], false, "", 63, false, 0, 0, 0, 0, 0)`
-    source :: "use core.ui as ui\nfn run() {{ {call} }}\n"
+    source :: "use ui :: core.ui\nfn run() {{ {call} }}\n"
     reserved := false
     loop diagnostic in parse_source(source.bytes()).diagnostics {
         if diagnostic.code == "E0067" -> reserved = true
@@ -48,6 +50,6 @@ fn raw_ui_transfer_reports(source: String) -> [String] {
     assert(reserved, "user source must not enter the compiler-reserved identifier lane")
     bare :: raw_ui_transfer_reports(source)
     assert(bare.len() == 1 && bare[0].contains("requires an audited `#Unsafe` region"), "{bare:Debug}")
-    gated :: raw_ui_transfer_reports("use core.ui as ui\nfn run() {{ #Unsafe(\"UI carrier transfer: fixture\") {{ {call} }} }}\n")
+    gated :: raw_ui_transfer_reports("use ui :: core.ui\nfn run() {{ #Unsafe(\"UI carrier transfer: fixture\") {{ {call} }} }}\n")
     assert(gated.is_empty(), "{gated:Debug}")
 }

@@ -71,7 +71,7 @@ duplicating parsers, trees, or error rules. (D-ENCSTREAM1=A)
 
 Keep shared carriers in `core.encoding`: `EncodingLimits`, `EncodingError`,
 `EncodingCause`, `EncodingFormat`, `EncodingErrorKind`, `DataEvent`, and
-`Dyn`. Refer to them through `use core.encoding as encoding`. Keep
+`Dyn`. Refer to them through `use encoding :: core.encoding`. Keep
 format handles and format-only options/events in
 `core.encoding.json`, `core.encoding.jsonl`, `core.encoding.csv`,
 `core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
@@ -251,9 +251,11 @@ already-reserved frame storage to preserve its path.
   capacity, with no growth or retry; EOF and IO errors retain zero buffer length.
   XML coordinates distinguish UTF-8 byte offsets from scalar-based columns.
 ```jet
-use core.encoding as encoding
-use core.encoding.json as json
-use core.files as files
+use {
+    encoding :: core.encoding
+    json :: core.encoding.json
+    files :: core.files
+}
 
 fn run() (EncodingError | IOError)! {
     input :: files.open("catalog.json") ?? return
@@ -728,7 +730,7 @@ the root path is empty and nested paths use the same field/index segments as
 every other codec. Do not add another query or wrapper type. (D-ENCXML-PROJECTION1=A)
 
 ```jet
-use core.encoding.xml as xml
+use xml :: core.encoding.xml
 
 #Codable
 struct Catalog { book: [Book] }
@@ -762,7 +764,7 @@ The node sequence remains ordered and lossless, including document type,
 comments, CDATA, and entity references:
 
 ```jet
-use core.encoding.xml as xml
+use xml :: core.encoding.xml
 
 fn inspect() (XMLError | [FieldError])! {
     source :: "<!DOCTYPE p [<!ENTITY legal 'ok'>]><p a='1'>hi <b>x</b><!--c--><![CDATA[<&]]>&legal;</p>"
@@ -880,8 +882,10 @@ Compiler and runtime code remain std-only; new compiler diagnostics remain
 I4-gated, while runtime `EncodingError` text follows the shared law.
 
 ```jet
-use core.encoding as encoding
-use core.encoding.json as json
+use {
+    encoding :: core.encoding
+    json :: core.encoding.json
+}
 
 fn run() {
     data :: json.parse("{\"b\":-0.0,\"a\":1e30}") ?? panic("parse")
@@ -904,8 +908,10 @@ extension model outweigh MessagePack's ecosystem edge; one format preserves
 I8. The whole-value verbs are `parse`, typed `decode<T>`, `to_bytes`, and
 `to_bytes_canonical`; CBOR has no `to_string`. (D-ENCBIN1=A)
 ```jet
-use core.crypto as crypto
-use core.encoding.cbor as cbor
+use {
+    crypto :: core.crypto
+    cbor :: core.encoding.cbor
+}
 
 #Codable
 struct Tick { count: Int }
@@ -1060,8 +1066,10 @@ misuse. Terminal clone/equality follows the shared reader/writer law.
 
 
 ```jet
-use core.encoding as encoding
-use core.encoding.cbor as cbor
+use {
+    encoding :: core.encoding
+    cbor :: core.encoding.cbor
+}
 
 #Codable
 struct Packet { id: Int, payload: [U8] }
@@ -1208,8 +1216,10 @@ byte; the expert path has narrow named interoperability controls on the same
 mechanical decoder, not a second permissive codec. (D-ENCBASE-STRICT1=A)
 
 ```jet
-use core.encoding.base64 as base64
-use core.encoding.base32 as base32
+use {
+    base64 :: core.encoding.base64
+    base32 :: core.encoding.base32
+}
 
 fn run() {
     body :: "Zg=="

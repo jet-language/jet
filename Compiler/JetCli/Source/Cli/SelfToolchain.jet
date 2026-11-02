@@ -1,13 +1,15 @@
 // Source/main.rs run_toolchain/require_manifest_root and
 // maybe_dispatch_pinned_toolchain. Root selection is the checked package
 // authority, not receipt/repository selection or a text scan.
-use core.files as cli_files
-use core.process as cli_process
-use jet_foundation.[diagnostic_render_all]
-use jet_pkg_model.[WorkspaceDeclarationCache]
-use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
-use jetpack_foundation.[TOOLCHAIN_EXEC_MARKER_ENV]
-use jetpack_trust.[JetPinDecision, trust_pin_decide, trust_pin_handoff_line, trust_pin_report]
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    jet_foundation.[diagnostic_render_all]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+    jetpack_foundation.[TOOLCHAIN_EXEC_MARKER_ENV]
+    jetpack_trust.[JetPinDecision, trust_pin_decide, trust_pin_handoff_line, trust_pin_report]
+}
 
 // The manifest-driven verbs a version-pinned project hands to its pinned `jet`.
 JET_CLI_PINNED_VERBS :: [String]{"run", "build", "test", "check", "fill", "jobs"}

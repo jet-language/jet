@@ -1,14 +1,16 @@
 // Claims ported from crates/jet-env-model/src/ModuleEval/mod.rs #[cfg(test)] (environment surface).
 // JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
-use jet_env_model.[
-    AdapterRecipe, DevServiceExtra, EnvironmentRead, HostOverrideValue, IntegrationKind,
-    ModuleEntryKey, PromptPathMode, PromptStripMode, RestartPolicy, ShutdownPolicy, envmodel_evaluate_env,
-    envmodel_evaluate_env_with_environment, envmodel_evaluate_env_with_preset,
-    envmodel_evaluate_package_profile, envmodel_evaluate_source, envmodel_merge_all,
-    envmodel_merge_error_to_diagnostic, envmodel_merged_entry,
-]
-use jet_foundation.[CtValue, Namespace]
-use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
+use {
+    jet_env_model.[
+        AdapterRecipe, DevServiceExtra, EnvironmentRead, HostOverrideValue, IntegrationKind,
+        ModuleEntryKey, PromptPathMode, PromptStripMode, RestartPolicy, ShutdownPolicy, envmodel_evaluate_env,
+        envmodel_evaluate_env_with_environment, envmodel_evaluate_env_with_preset,
+        envmodel_evaluate_package_profile, envmodel_evaluate_source, envmodel_merge_all,
+        envmodel_merge_error_to_diagnostic, envmodel_merged_entry,
+    ]
+    jet_foundation.[CtValue, Namespace]
+    jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
+}
 
 #Test("evaluates plain fact and packages") {
     src :: "\nmodule dev {{\n    env.dev: Env{{\n        packages: [default.ripgrep, default.fd, unstable.neovim],\n        prompt: \"wordstats\",\n    }}\n}}\n"

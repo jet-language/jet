@@ -1,13 +1,15 @@
 // Source/LSP/Server.rs:353–632: resident request/notification dispatch,
 // workspace transitions and the original advertised capability contract.
-use core.encoding.[Dyn]
-use core.files.runtime.kernel_path_components as lsp_request_path
-use core.files.runtime.kernel_path_components.[OSPath]
-use core.term as lsp_request_term
-use jet_devserver.[
-    EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD,
-    EDITOR_COMMAND_METHOD, number, supported,
-]
+use {
+    core.encoding.[Dyn]
+    lsp_request_path :: core.files.runtime.kernel_path_components
+    core.files.runtime.kernel_path_components.[OSPath]
+    lsp_request_term :: core.term
+    jet_devserver.[
+        EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD,
+        EDITOR_COMMAND_METHOD, number, supported,
+    ]
+}
 
 // Rust353–414: known methods always reach their sole feature provider.
 fn lsp_handle_request(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {

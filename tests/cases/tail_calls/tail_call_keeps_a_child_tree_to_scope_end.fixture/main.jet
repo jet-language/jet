@@ -8,9 +8,11 @@ package {
     authority: { allow: [Exec, FS, IO] }
 }
 
-use core.files as fs
-use core.process as process
-use core.time as time
+use {
+    fs :: core.files
+    process :: core.process
+    time :: core.time
+}
 
 fn hold() {
     child :: process.cmd(["/bin/sh", "-c", "sleep 0.1; : > later; sleep 60"]).spawn() ?? panic("cannot spawn the tree")

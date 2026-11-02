@@ -41,7 +41,7 @@ spelling.
 A diagnostic inconsistency showed up along the way:
 - `trust: .SystemPlusCa(pem: ca)` gives E0003 (parser);
 - `.SystemPlusCa(ca)` gives E0303, whose fix-it suggests
-  `TLSTrust.SystemPlusCa.{ … }`;
+  `TLSTrust.SystemPlusCa.[ … ]`;
 - that spelling gives E0320 ("uses `TLSTrust.SystemPlusCa{…}`, not `.{…}`").
 
 ## Verdicts

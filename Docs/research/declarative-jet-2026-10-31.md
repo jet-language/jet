@@ -103,15 +103,17 @@ Embedded-hal adds the other half. Drivers are generic over traits such as `Outpu
 **Gap and design.** Everything ratified is built from existing mechanisms. What is missing is the declared library shape, so ballot `D-HW-DECLARE1` proposes it.
 
 - **A chip is a value.** `Chip`, `Peripheral`, `Register<Bits, Access>`, `Field`, `Interrupt`, `Clock` and `Pin` are Core types in `core.hw`. Their constructors carry `#Pre` checks for fit, overlap and alignment.
-- **SVD and devicetree are binders.** `use svd.stm32f411 as chip` runs a Language package (D-FFI-LANG1) that reads the vendor SVD file. It emits the chip value plus typed register accessors. A devicetree reader is a second binder of the same shape.
+- **SVD and devicetree are binders.** `use chip :: svd.stm32f411` runs a Language package (D-FFI-LANG1) that reads the vendor SVD file. It emits the chip value plus typed register accessors. A devicetree reader is a second binder of the same shape.
 - **A board is a value built from a chip.** It names the pins, clocks and enabled peripherals. It implements the Core trait that D-HOST-CAPS1 asks for (`HardwareDescription`), so it feeds the target profile, the linker regions, the dossier and requirements.
 - **Drivers are generic over traits, as in embedded-hal.** `OutputPin`, `SerialWrite` and `Spi` are implemented by derived code for each board.
 - **Interrupts are declared on the board.** `#Interrupt(chip.USART2)` attaches a handler. The derive pass builds the vector table from the board value, which closes the D-FOUND-BOARD1 seam.
 
 ```jet
 // not compiled: simple. A board package declares one board from a vendor SVD.
-use svd.stm32f411 as chip            // binder: reads STM32F411.svd, emits `chip.*`
-use core.hw
+use {
+    chip :: svd.stm32f411 // binder: reads STM32F411.svd, emits `chip.*`
+    core.hw
+}
 
 nucleo :: hw.board(chip.device, {
     clock: hw.Hz(100_000_000),
@@ -682,8 +684,10 @@ The failures in §3 are places where a domain did not use the shared parts. The 
 
 ```jet
 // not compiled: one board flows through target, HAL, FFI, perf and ops.
-use svd.stm32f411 as chip
-use c.st_hal as hal                          // C HAL bound by the c binder; its facts
+use {
+    chip :: svd.stm32f411
+    hal :: c.st_hal // C HAL bound by the c binder; its facts
+}
                                              // (register addresses) are checked against `chip`
 sensor :: hw.board(chip.device, { clock: hw.Hz(100_000_000), console: chip.USART2.serial(115_200) })
 

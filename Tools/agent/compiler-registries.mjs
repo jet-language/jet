@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFi
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { CORE_IMPORT_LINE, unblockUses } from './compiler-packages.mjs';
 import { prepareTransport, runTransport } from './compiler-registry-transports.mjs';
 import { assertPinnedSource } from './proof-source.mjs';
 import { partitionRegistries } from './registry-shard.mjs';
@@ -95,8 +96,8 @@ function testsIn(text) {
         return JSON.parse(name[1]);
     });
 }
-const stripImports = (text, seen) => text.replace(/^use (?:jet_\w+|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm,
-    block => block.replace(/[^\n]/g, ' ')).replace(/^use core\.[^\[\n]*$/gm, line => {
+const stripImports = (text, seen) => unblockUses(text).replace(/^use (?:jet_\w+|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm,
+    block => block.replace(/[^\n]/g, ' ')).replace(CORE_IMPORT_LINE, line => {
         if (seen.has(line.trimEnd())) return line.replace(/[^\n]/g, ' ');
         seen.add(line.trimEnd()); return line;
     });

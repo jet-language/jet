@@ -51,7 +51,7 @@ choice shows in the output.
 
 Details:
 
-- A local `term :: 10` beside `use core.term as term` compiles. `term + 1`
+- A local `term :: 10` beside `use term :: core.term` compiles. `term + 1`
   prints 11, and the next line, `term.print("t")`, prints `10` and then `t`.
   The call no longer reaches the module function as written
   (`import_module_term__local_const`).

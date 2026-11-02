@@ -388,8 +388,10 @@ The local entry probe stopped at sandbox-sensitive Hangar migration `E2604`, so 
 
 ```jet
 // @env.jet
-use "./environment/tools" as tools
-use "./environment/workstation" as workstation
+use {
+    tools :: "./environment/tools"
+    workstation :: "./environment/workstation"
+}
 
 fn env(ctx: EnvContext) Environment -[]> {
     browser_tools :: if ctx.target.os == .Linux -> tools.linux_browsers else -> []
@@ -435,7 +437,7 @@ Technical detail: this option amends `D-ROLEFILE1=A` from four marked homes to f
 
 ```jet
 // @env.jet
-use "./environment/common" as common
+use common :: "./environment/common"
 
 fn env(ctx: EnvContext) Environment -[]> {
     return common.environment(ctx)

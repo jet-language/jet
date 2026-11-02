@@ -186,25 +186,29 @@ export function callSites(source, functions, context = null) {
     if (value === "{") { scopes.push({ aliases: new Map(scope.aliases), receivers: new Map(scope.receivers) }); continue; }
     if (value === "}") { if (scopes.length > 1) scopes.pop(); continue; }
     if (value === "use") {
-      const imported = chain(tokens, i + 1);
-      if (!imported) continue;
-      const path = expand(imported.parts, scope.aliases);
-      let at = imported.end;
-      if (tokens[at]?.value === "." && tokens[at + 1]?.value === "[") {
-        at += 2;
-        while (at < tokens.length && tokens[at].value !== "]") {
-          const member = tokens[at++].value;
-          if (!identifier.test(member)) continue;
-          let alias = member;
-          if (tokens[at]?.value === "as") { alias = tokens[at + 1].value; at += 2; }
-          scope.aliases.set(alias, `${path}.${member}`);
+      // `use row` or `use { row row … }`; a row is `path`, `path.[a, b]` or `alias :: path`.
+      let at = i + 1;
+      const block = tokens[at]?.value === "{";
+      if (block) at++;
+      do {
+        let alias = null;
+        if (identifier.test(tokens[at]?.value ?? "") && tokens[at + 1]?.value === "::") { alias = tokens[at].value; at += 2; }
+        const imported = chain(tokens, at);
+        if (!imported) { at++; continue; }
+        const path = expand(imported.parts, scope.aliases);
+        at = imported.end;
+        if (alias === null && tokens[at]?.value === "." && tokens[at + 1]?.value === "[") {
+          at += 2;
+          while (at < tokens.length && tokens[at].value !== "]") {
+            const member = tokens[at++].value;
+            if (identifier.test(member)) scope.aliases.set(member, `${path}.${member}`);
+          }
+          at++;
+        } else {
+          scope.aliases.set(alias ?? imported.parts.at(-1), path);
         }
-        at++;
-      } else {
-        const alias = tokens[at]?.value === "as" ? tokens[at + 1]?.value : imported.parts.at(-1);
-        scope.aliases.set(alias, path);
-        if (tokens[at]?.value === "as") at += 2;
-      }
+      } while (block && at < tokens.length && tokens[at].value !== "}");
+      if (block) at++;
       i = at - 1;
       continue;
     }
@@ -285,7 +289,7 @@ export function embeddedPrograms(source) {
     else {
       try { text = JSON.parse(literal); } catch { continue; }
     }
-    if (/\bfn\s+\w+|\buse\s+(?:core|app)\b/.test(text)) programs.push(text);
+    if (/\bfn\s+\w+|\buse\s+(?:\{\s*)?(?:\w+\s*::\s*)?(?:core|app)\b/.test(text)) programs.push(text);
   }
   return programs;
 }

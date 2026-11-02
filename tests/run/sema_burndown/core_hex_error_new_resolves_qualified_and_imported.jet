@@ -1,8 +1,10 @@
 // #4335: Core's public associated function HexError.new is reachable through
 // the module (`hex.HexError.new`) and through an imported name; the imported
 // name is core.encoding.hex's alias of core.encoding.HexError.
-use core.encoding.hex as hex
-use core.encoding.hex.[HexError]
+use {
+    hex :: core.encoding.hex
+    core.encoding.hex.[HexError]
+}
 
 fn run() {
     qualified :: hex.HexError.new("qualified") ?? return

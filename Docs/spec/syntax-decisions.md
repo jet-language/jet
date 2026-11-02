@@ -20,7 +20,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
-| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: path` imports the module that `use path as alias` names, and an `owner.x` that names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row | — |
+| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row; the retired `use path as alias`, `owner.[x as y]` and `owner.{…}` teach E0630 | — |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
@@ -182,9 +182,10 @@ gzip/zstd under `core.archive`. `core.time` is the one clock/civil-time door.
 Retired free namespaces have no aliases or re-exports, and there is no
 `core.json` short door.
 
-**D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06)*: grouped imports use `use path.[a as x, b]`. A missing
-`as` uses the final path segment. Braces and wildcards are not grouped-import
-syntax.
+**D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06; amended by #6542)*: grouped imports use `use path.[a, b]`.
+Each member keeps its final path segment as its local name; a renamed member is
+its own `x :: path.a` row. Braces, `as` and wildcards are not grouped-import
+syntax (E0630).
 The compiler's checked-build projections select Core graph record types with
 `use core.build.[BuildGraphFile]` and `use core.build.[BuildGraphNode]`.
 Imported Core record types retain their source-owned associated methods:
@@ -1060,7 +1061,7 @@ are bare member names only (E0961 if not — E0963 remains S76 fixed-list
 destructure). In list position the fields splice into the surrounding list;
 elsewhere the result is an ordinary list of that length. Sema desugars before
 inference; no checked-program node. S76 `[T#N]` fixed-size lists are unaffected.
-**D-FANOUT2** (no `s.{…}` second axis) is moot.
+**D-FANOUT2** (no `s.[…]` second axis) is moot.
 
 **D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = {…}` on
 lane/vector types; overlapping writes diagnosed (E3110/E3111).
@@ -1505,7 +1506,7 @@ a name that is both. `Name :: distinct Base` still declares a new nominal type.
 `alias` is an ordinary identifier; `alias X :: Y` is an ordinary parse error
 with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
 unchanged. Core's former `Date :: LocalDate` is the prelude rename
-`pub use core.time.[LocalDate as Date]`.
+`pub use Date :: core.time.LocalDate`.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a
@@ -2059,18 +2060,24 @@ by #343.
 ### Modules, visibility & imports
 
 **S16 — `use`** *(D-S16-USE, D-MOD1/2, D-MOD-DIR, D-SELIMPORT1, D-CORE-USELIST1)*: quotes mean
-a file path, no quotes mean a module; `as alias` optional in both.
+a file path, no quotes mean a module; `alias ::` before either is optional (#6542).
 
 **D-CORE-USELIST1=A amends D-SELIMPORT1.** A grouped member import uses one
-bracket list, with `as` beside the member that needs a local name. The former
-brace-group spelling is retired, and wildcard imports do not parse.
+bracket list. Under #6542 a member that needs a local name is its own
+`alias :: owner.member` row; the former `as` alias and brace-group spellings
+are retired (E0630), and wildcard imports do not parse.
 
 ```jet
-use "./lib"                      // file path, namespace lib
-use "grades/scoring" as g        // file path, alias
+use {
+    "./lib" // file path, namespace lib
+    g :: "grades/scoring" // file path, alias
+}
 module math                      // finds math.jet, then math/module.jet (E0607)
-use math.clamp                   // selective import
-use math.[sin, cos as c]         // grouped + aliased selective import
+use {
+    math.clamp // selective import
+    math.[sin] // grouped selective import
+    c :: math.cos // aliased member
+}
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
@@ -2086,8 +2093,8 @@ The executable witness is
 
 `.[ ]` has one prefix-member law. In expression position, entries remain
 members and produce their values (`point.[x, y]`); after `use`, entries produce
-aliases (`use math.[sin, cos as c]`). The expression grammar keeps member
-entries, while the import grammar additionally permits `as` aliases and dotted
+imports (`use math.[sin, cos]`). The expression grammar keeps member
+entries, while the import grammar additionally permits dotted
 paths. The prefix itself may be dotted at any depth, so
 `use core.encoding.[json, csv]` walks the same members as
 `use core.[encoding.json, encoding.csv]`.
@@ -2450,7 +2457,7 @@ rejection as an ordinary written list.
 **D-MARKER-MODULE1=A — Markers belong to modules**: marker identity is its
 declaring module and declaration, not a process-wide short name. A module may
 write its own marker bare. An imported marker always uses the import's local
-name: `use core.http.server as web` followed by `#web.Get(...)`. Nested exports
+name: `use web :: core.http.server` followed by `#web.Get(...)`. Nested exports
 retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
 E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
 private exports remain E0605. Group members resolve lexically in the group's
@@ -3969,11 +3976,11 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 |---|---|
 | Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
-| Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
-| Project | `use c.raylib as rl` or `use c.[raylib as rl, sqlite3]` — one form per lib per file |
+| Script | `use rl :: "raylib.h"` — compile-time bind on cache miss |
+| Project | `use rl :: c.raylib` or `use c.[raylib, sqlite3]` — one form per lib per file |
 
 All foreign-language namespaces use the same `.[…]` member-list form as ordinary
-namespaces. Single-library `use <lang>.<lib> as alias` remains valid; there is no
+namespaces. Single-library `use alias :: <lang>.<lib>` remains valid; there is no
 FFI-only import grammar (D-VERDICT-1867-1).
 
 **D-SHAPE-CASE2=A — FFI casing escape: binding modules are exempt zones**
@@ -4190,8 +4197,8 @@ never acknowledges shutdown does not authorize premature release.
 
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
-tier (`use "xxhash.h" as xx` — bind on first compile), project tier
-(`use py.h5instrument as h5`, dep pinned in `package.jet` as
+tier (`use xx :: "xxhash.h"` — bind on first compile), project tier
+(`use h5 :: py.h5instrument`, dep pinned in `package.jet` as
 `<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
 overlay wins). `jet inspect bind <lang>` is a per-language binder emitting
 inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
@@ -4305,7 +4312,7 @@ exits from an empty prompt.
 **S9 — Print**: `print` (adds newline).
 
 **S51 — Core library**: exported as the `core` module — `use core.files`,
-`use core.term as term`; dot paths select submodules; never quoted paths. `core`
+`use term :: core.term`; dot paths select submodules; never quoted paths. `core`
 is compiler-reserved (see D-CORENS1).
 
 **D-GAME1 / D-GAME2 / D-GAME3 — Game stack** *(ratified 2026-07-05/06,
@@ -4398,7 +4405,7 @@ the whole-file one-shot is `append_all(path, text)`; the streaming handle's
 D-ENC-YAML1)*: one format-agnostic data model. `#Codable` (≡
 `#[Encode, Decode]`), `#Encode`, `#Decode` derives — a built-in compiler
 field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
-(`core.encoding.{json,csv,toml,yaml}`); encode verbs `to_string` /
+(`core.encoding.[json,csv,toml,yaml]`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
 binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
 `encode`/`decode` verbs over `Dyn`
@@ -4524,7 +4531,7 @@ index, not a substitute for that law.
   D-TERM1's `core.term` remains the direct raw-key bridge.
   *Note (D-CORE-TREE1=A, D-CORE-IO-BUF1=A)*: `core.io` is retired. The stream
   handles, `Reader`, `Writer`, and terminal capabilities named above live in
-  `core.term` (`use core.term as io` keeps the `io.` spellings); there is no
+  `core.term` (`use io :: core.term` keeps the `io.` spellings); there is no
   `core.io` module.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
@@ -5009,7 +5016,7 @@ separate.
 `.Val` spells the same behavior. `List.remove(index, .Slot)` removes by
 position and retains the existing bounds diagnostic. The old one-argument index
 meaning is retired, and every in-repo caller uses `.Slot` where positional
-removal is intended. `RemoveBy.{Val, Slot}` is the closed selector type; no
+removal is intended. `RemoveBy.[Val, Slot]` is the closed selector type; no
 parallel `remove_value` or `remove_at` names ship. Map removal is unchanged.
 
 **D-FIELDDEF1=C — field defaults ride the type (amended by D-DEFAULT-SHAPE1=B)** *(ratified 2026-07-31, card #1367)*: the field-default mechanism covers wire/CLI absence and omitted `Type{ … }` construction fields. The current spelling is `field: T{expr}`, shared with parameter defaults; `#Default(expr)` is retired (E0375), defaults must be compile-time constants (E2414), and required fields are those without `{…}`.
@@ -5092,7 +5099,7 @@ HTTP route parameters use `:name` and final catch-alls use `*name`
 separate transport upgrade, and WebSocket belongs to `core.ws` per D-WS1=B
 (D-HTTPLIB1–3, D-ROUTE1).
 Compression
-`core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
+`core.compress.[gzip,zstd]` (D-CODECS1). Measurement-with-uncertainty in
 `core.science.measurement` (D-HONESTNUM1 shipped/partial; #310 verifies module
 map truth). **D-OPTGC1=A — scoped opt-in tracing GC** *(ratified 2026-07-15,
 card #646)*: GC is magic inside an opted scope, using D-MARK-SCOPE1 from

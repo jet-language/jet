@@ -1,11 +1,13 @@
-use jet_devserver.WatchService.[HotReplaceTxn, RootKind, SessionSnapshot, WatchGraph, WatchSession, canonicalize_loose, poll, within_budget, write]
-use std.fs as fs
-use std.env as env
-use std.thread as thread
-use std.time.[Duration, SystemTime, UNIX_EPOCH]
-use jet_foundation.Persist.[PersistStore, PersistEntry, PersistOutcome]
-use jet_foundation.Persist as Persist
-use jet_foundation.SHA256 as SHA256
+use {
+    jet_devserver.WatchService.[HotReplaceTxn, RootKind, SessionSnapshot, WatchGraph, WatchSession, canonicalize_loose, poll, within_budget, write]
+    fs :: std.fs
+    env :: std.env
+    thread :: std.thread
+    std.time.[Duration, SystemTime, UNIX_EPOCH]
+    jet_foundation.Persist.[PersistStore, PersistEntry, PersistOutcome]
+    Persist :: jet_foundation.Persist
+    SHA256 :: jet_foundation.SHA256
+}
 // GATE #4494: real filesystem, thread, clock and process primitives in the reference tests.
 // Rust: crates/jet-devserver/src/WatchService.rs:2157
 fn tmp_dir(name: String) -> OSPath {
@@ -54,7 +56,7 @@ fn tmp_dir(name: String) -> OSPath {
 #Test("runtime_file_inputs_track_generator_directories_and_files") {
     dir :: tmp_dir("runtime_inputs"); entry :: dir.join("generate.jet"); assets :: dir.join("assets"); image :: assets.join("logo.png")
     fs.create_dir_all(assets).unwrap(); fs.write(image, "asset").unwrap()
-    fs.write(entry, "use core.files as fs\nfn run() {{\n    fs.copy_dir(\"assets\", \"dist/assets\")\n}}\n").unwrap()
+    fs.write(entry, "use fs :: core.files\nfn run() {{\n    fs.copy_dir(\"assets\", \"dist/assets\")\n}}\n").unwrap()
     graph :: WatchGraph.from_entry(entry, []).unwrap()
     entry :: canonicalize_loose(entry); assets :: canonicalize_loose(assets); image :: canonicalize_loose(image)
     assert(graph.nodes.contains_key(assets)); assert(graph.nodes.contains_key(image))

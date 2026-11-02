@@ -1,11 +1,13 @@
-use Compiler.JetLSP.Tests.Integration.Semindex.[fixture, temp_fixture, fact]
-use jet_semindex.[SemanticProvenance, SemanticSymbolIndex, SemanticSymbolKind, SemanticVisibilityAnchor, ViewProjectionFact, ViewSourceFact]
-use jet.Driver.[check_file_with_effect_facts]
-use jet.[check_document]
-use jet.CLI as CLI
-use jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
-use std.[fs, env, process]
-use std.process.[Command]
+use {
+    Compiler.JetLSP.Tests.Integration.Semindex.[fixture, temp_fixture, fact]
+    jet_semindex.[SemanticProvenance, SemanticSymbolIndex, SemanticSymbolKind, SemanticVisibilityAnchor, ViewProjectionFact, ViewSourceFact]
+    jet.Driver.[check_file_with_effect_facts]
+    jet.[check_document]
+    CLI :: jet.CLI
+    jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
+    std.[fs, env, process]
+    std.process.[Command]
+}
 // GATE #4494: actual filesystem and CLI child-process providers.
 
 // Rust: tests/semindex.rs:52
@@ -328,7 +330,7 @@ use std.process.[Command]
     fs.create_dir_all(root).unwrap()
     fs.write(root.join("library.jet"), "fn score(name: String) -> Int {{ return 1 }}\n").unwrap()
     main :: root.join("main.jet")
-    fs.write(main, "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() {{ print(imported_score(\"Ada\")) }}\n").unwrap()
+    fs.write(main, "use api :: \"./library\"\nuse imported_score :: api.score\nfn run() {{ print(imported_score(\"Ada\")) }}\n").unwrap()
     symbols :: open_symbols(main).expect("import symbols")
     assert_eq(symbols.lookup("api").len(), 1)
     imported :: symbols.lookup("imported_score")

@@ -143,7 +143,7 @@ The proposal retains that checked SQL door and D-SQL-SURFACE1. It does not add a
 ### The proposed ordinary program
 
 ```jet
-use core.data as data
+use data :: core.data
 
 enum Region { North, South }
 

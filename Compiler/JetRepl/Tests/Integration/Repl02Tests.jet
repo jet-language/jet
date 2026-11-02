@@ -1,14 +1,16 @@
-use Compiler.JetRepl.Tests.Integration.Repl.[run_repl_process, run_raw_multiline_pty]
-use Compiler.JetRepl.Tests.Integration.Repl02.[fixture_turn]
-use jet.REPL.[run_transcript, run_transcript_with_flags, Docs, Render, ReplTurn, ReplTurnStatus, RerunPlan, Session]
-use jet.AST.[CtValue]
-use jet.SemanticSymbols as SemanticSymbols
-use std.[fs, env, process, thread]
-use std.process.[Command, Stdio]
-use std.io.[Read, Write]
-use std.sync.[mpsc]
-use std.time.[Instant, Duration]
-use core.sys.target.[selected_os, selected_family]
+use {
+    Compiler.JetRepl.Tests.Integration.Repl.[run_repl_process, run_raw_multiline_pty]
+    Compiler.JetRepl.Tests.Integration.Repl02.[fixture_turn]
+    jet.REPL.[run_transcript, run_transcript_with_flags, Docs, Render, ReplTurn, ReplTurnStatus, RerunPlan, Session]
+    jet.AST.[CtValue]
+    SemanticSymbols :: jet.SemanticSymbols
+    std.[fs, env, process, thread]
+    std.process.[Command, Stdio]
+    std.io.[Read, Write]
+    std.sync.[mpsc]
+    std.time.[Instant, Duration]
+    core.sys.target.[selected_os, selected_family]
+}
 // GATE #4494: real child processes, PTYs, channels, clocks and files.
 // GATE #4483: original cfg arms dispatch from selected target facts.
 
@@ -68,7 +70,7 @@ use core.sys.target.[selected_os, selected_family]
     if selected_os() != "linux" -> return
     root :: env.temp_dir().join("jet_repl_interrupt_warning_{process.id()}")
     fs.create_dir_all(root).unwrap()
-    shell :: "\n{{\n  sleep 0.2\n  printf 'use core.process as process\\r'\n  sleep 0.15\n  printf '#FX(authority: Exec) {{ process.run([\"sh\", \"-c\", \"trap '\\''sleep 0.4; exit 130'\\'' INT; while :; do :; done\"]) ?? panic(\"run failed\") }}\\r'\n  sleep 0.6\n  printf '\\003'\n  sleep 0.8\n  printf ':quit\\r'\n}} | timeout 6s script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\" --allow-exec' /dev/null\n"
+    shell :: "\n{{\n  sleep 0.2\n  printf 'use process :: core.process\\r'\n  sleep 0.15\n  printf '#FX(authority: Exec) {{ process.run([\"sh\", \"-c\", \"trap '\\''sleep 0.4; exit 130'\\'' INT; while :; do :; done\"]) ?? panic(\"run failed\") }}\\r'\n  sleep 0.6\n  printf '\\003'\n  sleep 0.8\n  printf ':quit\\r'\n}} | timeout 6s script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\" --allow-exec' /dev/null\n"
     output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_ROOT", root).env("JET_REPL_HISTORY", "off").env("NO_COLOR", "1").output().unwrap()
     transcript := String.from_utf8_lossy(output.stdout) // #4303
     assert(output.status.success(), "PTY blocking interrupt failed: {transcript}")
@@ -105,7 +107,7 @@ use core.sys.target.[selected_os, selected_family]
     fs.create_dir_all(root).expect("create root")
     target :: root.join("must-not-exist.txt")
     input :: "#FX(authority: FS) {{ fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }}"
-    out :: run_transcript(["use core.files as fs", input], root.to_str())
+    out :: run_transcript(["use fs :: core.files", input], root.to_str())
     assert(out.contains("E1803") && out.contains("FS.Write"), "missing deterministic deny: {out}")
     assert(!target.exists(), "denied effect executed")
     _ :: fs.remove_dir_all(root).ok()
@@ -116,11 +118,11 @@ use core.sys.target.[selected_os, selected_family]
     root :: env.temp_dir().join("jet_repl_flags_{process.id()}")
     fs.create_dir_all(root).expect("create root")
     input :: "#FX(authority: FS) {{ fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }}"
-    allowed :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], [])
+    allowed :: run_transcript_with_flags(["use fs :: core.files", input], root.to_str(), ["fs"], [])
     assert(!allowed.contains("E1803"), "--allow-fs rejected: {allowed}")
     assert_eq(fs.read_to_string(root.join("flag.txt")).unwrap(), "allowed")
     fs.remove_file(root.join("flag.txt")).unwrap()
-    denied :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], ["fs"])
+    denied :: run_transcript_with_flags(["use fs :: core.files", input], root.to_str(), ["fs"], ["fs"])
     assert(denied.contains("E1803"), "--deny-fs must override allow: {denied}")
     assert(!root.join("flag.txt").exists(), "explicitly denied effect executed")
     _ :: fs.remove_dir_all(root).ok()
@@ -130,7 +132,7 @@ use core.sys.target.[selected_os, selected_family]
 #Test("repl_cli_allow_and_deny_flags_control_non_tty_execution") {
     root :: env.temp_dir().join("jet_repl_cli_flags_{process.id()}")
     fs.create_dir_all(root).unwrap()
-    input :: "use core.files as fs\n#FX(authority: FS) {{ fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }}\n:quit\n".bytes()
+    input :: "use fs :: core.files\n#FX(authority: FS) {{ fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }}\n:quit\n".bytes()
     run :: (extra: [String]) -> {
         cmd := Command.new(env.binary_path("jet"))
         cmd.arg("repl").arg("--project").arg(root).args(extra).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
@@ -153,7 +155,7 @@ use core.sys.target.[selected_os, selected_family]
 #Test("repl_effect_needs_lexical_grant_even_with_allow_flag") {
     root :: env.temp_dir().join("jet_repl_missing_grant_{process.id()}")
     fs.create_dir_all(root).unwrap()
-    out :: run_transcript_with_flags(["use core.files as fs", "fs.write(\"no.txt\", \"bad\") ?? panic(\"write failed\")"], root.to_str(), ["fs"], [])
+    out :: run_transcript_with_flags(["use fs :: core.files", "fs.write(\"no.txt\", \"bad\") ?? panic(\"write failed\")"], root.to_str(), ["fs"], [])
     assert(out.contains("E1803") && out.contains("no REPL runtime authority"), "missing lexical denial: {out}")
     assert(!root.join("no.txt").exists(), "operation without #FX executed")
     _ :: fs.remove_dir_all(root).ok()
@@ -167,7 +169,7 @@ use core.sys.target.[selected_os, selected_family]
     _ :: fs.remove_file(outside).ok()
     escaped :: outside.to_string_lossy().replace('\\', "\\\\")
     input :: "#FX(authority: FS) {{ fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
-    out :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], [])
+    out :: run_transcript_with_flags(["use fs :: core.files", input], root.to_str(), ["fs"], [])
     assert(out.contains("E1803") && out.contains("FS.Write") && out.contains(escaped), "absolute escape was not rejected before execution: {out}")
     assert(!outside.exists(), "confined REPL wrote outside project root")
     _ :: fs.remove_dir_all(root).ok()
@@ -182,7 +184,7 @@ use core.sys.target.[selected_os, selected_family]
     fs.create_dir_all(outside).unwrap()
     std.os.unix.fs.symlink(outside, root.join("escape")).unwrap()
     input :: "#FX(authority: FS) {{ fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }}"
-    out :: run_transcript_with_flags(["use core.files as fs", input], root.to_str(), ["fs"], [])
+    out :: run_transcript_with_flags(["use fs :: core.files", input], root.to_str(), ["fs"], [])
     assert(out.contains("E1803"), "symlink traversal was not denied: {out}")
     assert(!outside.join("must-not-exist.txt").exists(), "symlink escape executed")
     _ :: fs.remove_file(root.join("escape")).ok()
@@ -195,7 +197,7 @@ use core.sys.target.[selected_os, selected_family]
     root :: env.temp_dir().join("jet_repl_tty_auth_{process.id()}")
     fs.create_dir_all(root).unwrap()
     fs.write(root.join("value.txt"), "ok").unwrap()
-    shell :: "\n{{\n  sleep 0.2\n  printf 'use core.files as fs\\r'\n  sleep 0.2\n  printf '#FX(authority: FS) {{ fs.read(\"value.txt\") ?? panic(\"read failed\") }}\\r'\n  sleep 0.2\n  printf 's'\n  sleep 0.2\n  printf '#FX(authority: FS) {{ fs.read(\"value.txt\") ?? panic(\"read failed\") }}\\r'\n  sleep 0.2\n  printf 'c'\n  sleep 0.2\n  printf ':quit\\r'\n}} | script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\"' /dev/null\n"
+    shell :: "\n{{\n  sleep 0.2\n  printf 'use fs :: core.files\\r'\n  sleep 0.2\n  printf '#FX(authority: FS) {{ fs.read(\"value.txt\") ?? panic(\"read failed\") }}\\r'\n  sleep 0.2\n  printf 's'\n  sleep 0.2\n  printf '#FX(authority: FS) {{ fs.read(\"value.txt\") ?? panic(\"read failed\") }}\\r'\n  sleep 0.2\n  printf 'c'\n  sleep 0.2\n  printf ':quit\\r'\n}} | script -qec '\"$JET_REPL_BIN\" repl --project \"$JET_REPL_ROOT\"' /dev/null\n"
     output :: Command.new("sh").args(["-c", shell]).env("JET_REPL_BIN", env.binary_path("jet")).env("JET_REPL_ROOT", root).env("NO_COLOR", "1").output().expect("run REPL under PTY")
     out := String.from_utf8_lossy(output.stdout) // #4303
     assert(output.status.success(), "PTY status: {output.status}\n{out}")
@@ -207,7 +209,7 @@ use core.sys.target.[selected_os, selected_family]
 
 // Rust: tests/repl.rs:2218
 #Test("repl_http_client_import_hard_rejected") {
-    out :: run_transcript(["use core.http.client as client"], none)
+    out :: run_transcript(["use client :: core.http.client"], none)
     assert(out.contains("E1802"), "HTTP client import should hard-reject, got: {out}")
 }
 // Rust: tests/repl.rs:2228
@@ -294,7 +296,7 @@ use core.sys.target.[selected_os, selected_family]
 // Rust: tests/repl.rs:2377
 #Test("repl_raw_core_module_member_completion_inserts_sqrt") {
     if selected_os() != "linux" -> return
-    output :: run_raw_multiline_pty("printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sq\\t'; sleep 0.12; printf '(16.0)\\r'")
+    output :: run_raw_multiline_pty("printf 'use math :: core.math\\r'; sleep 0.15; printf 'math.sq\\t'; sleep 0.12; printf '(16.0)\\r'")
     out := String.from_utf8_lossy(output.stdout) // #4303
     assert(output.status.success(), "module completion PTY failed: {out}")
     assert(out.contains("4") && (out.contains("Float") || out.contains("4.0")), "math.sq<Tab> did not become math.sqrt(16.0): {out}")
@@ -302,14 +304,14 @@ use core.sys.target.[selected_os, selected_family]
 // Rust: tests/repl.rs:2396
 #Test("repl_raw_f1_shows_cursor_docs_for_core_import_member") {
     if selected_os() != "linux" -> return
-    output :: run_raw_multiline_pty("printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sqrt\\033OP'; sleep 0.15; printf '\\003'")
+    output :: run_raw_multiline_pty("printf 'use math :: core.math\\r'; sleep 0.15; printf 'math.sqrt\\033OP'; sleep 0.15; printf '\\003'")
     out := String.from_utf8_lossy(output.stdout) // #4303
     assert(output.status.success(), "F1 cursor docs PTY failed: {out}")
     assert(out.contains("core.math.sqrt"), "F1 did not show module member docs: {out}")
 }
 // Rust: tests/repl.rs:2409
 #Test("repl_docs_resolve_imported_core_module_member") {
-    out :: run_transcript(["use core.math as math", "?math.sqrt"], none)
+    out :: run_transcript(["use math :: core.math", "?math.sqrt"], none)
     assert(out.contains("core.math.sqrt") && out.contains("Source: core.math"), "imported module member docs missing: {out}")
 }
 // Rust: tests/repl.rs:2418
@@ -645,15 +647,15 @@ use core.sys.target.[selected_os, selected_family]
         "#FX(authority: Rand) {{ random.split(7) }}"
     ]
     loop call in calls {
-        out :: run_transcript_with_flags(["use core.math.random as random", call], none, ["rand"], [])
+        out :: run_transcript_with_flags(["use random :: core.math.random", call], none, ["rand"], [])
         assert(!out.contains("error ["), "authorized call failed: {call}: {out}")
     }
-    shuffle :: run_transcript_with_flags(["use core.math.random as random", "ys := [1, 2, 3, 4, 5]", "#FX(authority: Rand) {{ random.shuffle(&ys) }}"], none, ["rand"], [])
+    shuffle :: run_transcript_with_flags(["use random :: core.math.random", "ys := [1, 2, 3, 4, 5]", "#FX(authority: Rand) {{ random.shuffle(&ys) }}"], none, ["rand"], [])
     assert(!shuffle.contains("error ["), "authorized shuffle failed: {shuffle}")
 }
 // Rust: tests/repl.rs:3220
 #Test("repl_core_fmt_dispatch") {
-    inputs :: ["use core.text.fmt as fmt", "fmt.number(1234567)", "fmt.decimal(Float{{3.14159}}, 2)",
+    inputs :: ["use fmt :: core.text.fmt", "fmt.number(1234567)", "fmt.decimal(Float{{3.14159}}, 2)",
         "fmt.decimal(Float{{1234.5678}}, 2)", "fmt.grouped(Float{{1234.5678}}, 2)", "fmt.percent(0.4567, 1)",
         "fmt.bytes(1500000)", "fmt.duration(93784000)", "fmt.ordinal(23)", "fmt.plural(1, \"item\", \"items\")",
         "fmt.plural(3, \"item\", \"items\")", "fmt.pad_left(\"7\", 3, \"0\")",
@@ -667,7 +669,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3262
 #Test("repl_core_encoding_base32_and_base64url_dispatch") {
-    inputs :: ["use core.encoding.base32 as base32", "use core.encoding.base64 as base64",
+    inputs :: ["use base32 :: core.encoding.base32", "use base64 :: core.encoding.base64",
         "base32.encode([104, 101, 108, 108, 111])", "base32.decode(\"NBSWY3DP\")", "base64.encode_url([251, 239, 190])"]
     out :: run_transcript(inputs, none)
     assert(!out.contains("E0956"), "core.encoding.base32/base64 url variant should dispatch at comptime, got: {out}")
@@ -677,7 +679,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3289
 #Test("repl_core_url_dispatch") {
-    inputs :: ["use core.net.url as url", "url.percent_encode(\"a b/c\")", "url.percent_decode(\"a%20b\")",
+    inputs :: ["use url :: core.net.url", "url.percent_encode(\"a b/c\")", "url.percent_decode(\"a%20b\")",
         "url.query([[\"a\", \"1\"], [\"b\", \"2 c\"]])", "url.parse(\"https://ex.com/a/../b?x=1#f\")",
         "url.parse(\"not a url\")", "url.from_parts(\"https\", \"ex.com\", \"/p\", [[\"k\", \"v\"]], \"\")", "url.file(\"/tmp/x.txt\")"]
     out :: run_transcript(inputs, none)
@@ -691,7 +693,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3329
 #Test("repl_core_data_dispatch") {
-    inputs :: ["use core.data as data", "data.status()"]
+    inputs :: ["use data :: core.data", "data.status()"]
     out :: run_transcript(inputs, none)
     assert(!out.contains("E0956"), "core.data status surface should dispatch at comptime, got: {out}")
     assert(out.contains("core.data.csv") && out.contains("path: \"native\""), "native status missing: {out}")
@@ -700,7 +702,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3354
 #Test("repl_zstd_compress_is_resident") {
-    out :: run_transcript(["use core.archive.zstd as zstd",
+    out :: run_transcript(["use zstd :: core.archive.zstd",
         "frame :: zstd.compress([72, 101, 108, 108, 111]) ?? panic(\"zstd compress\")", "frame.len() > 9",
         "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)"], none)
     assert(!out.contains("E0956"), "zstd compressor hit comptime fallback: {out}")
@@ -708,7 +710,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3372
 #Test("repl_zstd_decompress_is_resident_and_typed") {
-    out :: run_transcript(["use core.archive.zstd as zstd",
+    out :: run_transcript(["use zstd :: core.archive.zstd",
         "zstd.decompress([40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111]) ?? []",
         "zstd.decompress([40, 181, 47]) ?? [255]"], none)
     assert(!out.contains("E0956"), "resident decoder hit fallback: {out}")
@@ -717,7 +719,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3393
 #Test("repl_core_data_query_plans_and_typed_joins") {
-    inputs :: ["use core.data as data", "rows :: [Int]{{3, 1, 2}}", "query :: data.query(rows)",
+    inputs :: ["use data :: core.data", "rows :: [Int]{{3, 1, 2}}", "query :: data.query(rows)",
         "deferred :: query.filter((x) -> x > 10)", "deferred.plan()",
         "planned :: data.query(rows).filter((x) -> x > 1).sort_by((x) -> \"{{x}}\")", "planned.collect() ?? panic(\"collect\")",
         "data.inner_join([1, 2, 1], [1, 1], (x) -> \"{{x}}\", (x) -> \"{{x}}\")",
@@ -730,7 +732,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3426
 #Test("repl_core_data_schema_empty_lists_and_row_law") {
-    inputs :: ["use core.data as data", "struct Ticket {{ team: String minutes: Float }}",
+    inputs :: ["use data :: core.data", "struct Ticket {{ team: String minutes: Float }}",
         "empty_rows: [Ticket] := []", "data.schema(empty_rows)", "data.schema([1.0, 2.0])",
         "t :: Ticket{{team: \"Core\", minutes: 4.0}}", "data.schema([t])",
         "empty_tickets: [Ticket] := []", "data.schema(empty_tickets)", "struct Empty {{}}",
@@ -745,7 +747,7 @@ use core.sys.target.[selected_os, selected_family]
 }
 // Rust: tests/repl.rs:3469
 #Test("repl_core_data_list_query_echo_hides_comptime_metadata") {
-    inputs :: ["use core.data as data", "struct Ticket {{ team: String minutes: Float }}",
+    inputs :: ["use data :: core.data", "struct Ticket {{ team: String minutes: Float }}",
         "empty_rows: [Ticket] := []", "empty_rows", "data.query(empty_rows)", "data.schema(empty_rows)"]
     out :: run_transcript(inputs, none)
     assert(!out.contains("E0956"), "core.data list/query calls should dispatch at comptime, got: {out}")
@@ -759,7 +761,7 @@ use core.sys.target.[selected_os, selected_family]
     fs.create_dir_all(fixture).unwrap()
     fs.write(fixture.join("model.jet"), "#Codable\nstruct Ticket {{ team: String minutes: Float }}\n").unwrap()
     project_dir :: fixture.to_string_lossy().to_string()
-    inputs :: ["use core.data as data",
+    inputs :: ["use data :: core.data",
         "raw :: \"[{{{{\\\"team\\\":\\\"Core\\\",\\\"minutes\\\":4.0}}}},{{{{\\\"team\\\":\\\"Tools\\\",\\\"minutes\\\":5.0}}}},{{{{\\\"team\\\":\\\"Core\\\",\\\"minutes\\\":8.0}}}}]\"",
         "rows :: data.json<Ticket>(raw) ?? panic(\"bad json\")", "data.schema(rows)",
         "selected :: data.query(rows).filter((t) -> t.minutes >= 5.0).collect() ?? panic(\"filter\")",
