@@ -6,6 +6,6 @@ copy: {root}/tests/cases/pkg/fixtures/manifests/lint-code.txt package.jet
 copy: {root}/tests/cases/pkg/fixtures/sources/hi.txt run.jet
 step: jet build run.jet
 exit: nonzero
-stderr: ~ "Error [E1206]: `package.jet` has a manifest shape error." # original predicate
-stderr: ~ "Why: A manifest field, value, or policy form is outside the current `package.jet` grammar." # original predicate
-stderr: ~ "Fix: For a lint selector, use `same_enum_guard_table` in `policy.lints.deny` instead of diagnostic code `L0302`; otherwise use the current `package.jet` grammar." # original predicate
+stderr: ~ "Error [E1206]: `policy.lints.deny` takes a lint name, not diagnostic code `L0302`." # E1206 registry what (DiagnosticRows.jet:9914, D-LINTPOLICY1)
+stderr: ~ "Why: Diagnostic codes identify rendered reports; configuration uses stable snake_case lint names." # E1206 registry why (DiagnosticRows.jet:9915)
+stderr: ~ "Fix: Replace `L0302` with `same_enum_guard_table` in `policy.lints.deny`." # E1206 registry fix (DiagnosticRows.jet:9916), as in tests/ui/lint_policy_code_name.stderr

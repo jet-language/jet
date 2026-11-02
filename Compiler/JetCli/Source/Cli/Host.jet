@@ -175,9 +175,11 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // `run_native_execution`). A `project` check (bare or directory) of a
 // program, not a library, runs in Run mode, so an entry with no `fn run` is
 // E0101 (CmdInspect.rs `check_projection_with_options_and_preflight`,
-// Completion.rs). `finish` ends the process with the outcome once the compile
-// ran, skipping the teardown of its result.
-fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, trace_sink: JetCLITraceSink?, finish: Bool) -> JetDriverVerbOutput {
+// Completion.rs). `verbose` on an explicit-file check adds the check's scope
+// and proof rows on stdout (first-hour.md lesson 3). `finish` ends the
+// process with the outcome once the compile ran, skipping the teardown of
+// its result.
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, trace_sink: JetCLITraceSink?, finish: Bool) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     if !project {
         if jet_cli_missing_project_context(file, source) == .Val(missing) {
@@ -197,6 +199,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
                 if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
             }
             output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
+            if verbose && !project && !json && output.exit_code == JET_DRIVER_EXIT_OK -> output.stdout = jet_cli_inspect_check_text(file, watch.elapsed_millis(), diagnostics.len())
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
             }
@@ -213,7 +216,7 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
 fn jet_cli_check_workspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     exit_code := JET_DRIVER_EXIT_OK
     loop index in 0..<files.len() {
-        output :: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, trace_sink, false)
+        output :: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, trace_sink, false)
         jet_cli_write_output(output)
         if output.exit_code > exit_code -> exit_code = output.exit_code
     }
@@ -2665,7 +2668,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -2678,9 +2681,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Done(done) -> output = ^done
         .Refused(report, color, exit_code, notice) -> output = JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code: exit_code}
         .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
-        .Check(file, source, color, quiet, threads, project, notice, json) -> {
+        .Check(file, source, color, quiet, threads, project, notice, json, verbose) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, trace_sink, true)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, trace_sink, true)
         }
         .CheckWorkspace(files, sources, color, quiet, threads, notice, json) -> {
             jet_cli_write_notice(notice)

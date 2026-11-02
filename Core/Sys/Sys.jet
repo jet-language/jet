@@ -344,6 +344,8 @@ fn version() -[Env, FS, Exec, Time.Wait]> String Never! {
     ""
 }
 
+/// Expands `$VAR`, `${VAR}` and `%VAR%` from the environment; `$$` is a literal `$`.
+/// An unset `$` name expands to nothing, an unset `%VAR%` and any other text stay as written.
 fn expand(value: String) -[Env]> String Never! {
     raw :: value.bytes()
     out := [U8]{}
@@ -351,39 +353,46 @@ fn expand(value: String) -[Env]> String Never! {
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
         byte :: raw[i]
-        if byte == (U8{36}) {
-            i = i + 1
-            start := i
-            if i < raw.len() && raw[i] == (U8{123}) {
-                i = i + 1
-                start = i
-                loop {
-                    if i >= raw.len() || raw[i] == (U8{125}) -> break
-                    i = i + 1
-                }
-                key :: slice_ascii(raw, start, i)
-                if i < raw.len() -> i = i + 1
-                replacement :: get(key) ?? ""
-                loop item in replacement.bytes() -> &out.push(item)
-            } else {
-                loop {
-                    if i >= raw.len() || !is_env_ident(raw[i]) -> break
-                    i = i + 1
-                }
-                replacement :: get(slice_ascii(raw, start, i)) ?? ""
-                loop item in replacement.bytes() -> &out.push(item)
+        if byte == (U8{36}) && i + 1 < raw.len() {
+            after :: raw[i + 1]
+            if after == (U8{36}) {
+                &out.push(byte)
+                i = i + 2
+                next
             }
-        } else {
-            // The historical host contract expands each non-variable byte as
-            // a Unicode scalar (U+0000..U+00FF), not as a UTF-8 text segment.
-            n :: Int.from_u8(byte)
-            if n < 128 -> &out.push(byte)
-            else {
-                &out.push(U8{(192).bit_or((n >> 6))})
-                &out.push(U8{(128).bit_or((n.bit_and(63)))})
+            if after == (U8{123}) {
+                close := i + 2
+                loop close < raw.len() && raw[close] != (U8{125}) -> close = close + 1
+                if close < raw.len() {
+                    replacement :: get(slice_ascii(raw, i + 2, close)) ?? ""
+                    loop item in replacement.bytes() -> &out.push(item)
+                    i = close + 1
+                    next
+                }
             }
-            i = i + 1
+            end := i + 1
+            loop end < raw.len() && is_env_ident(raw[end]) -> end = end + 1
+            if end > i + 1 {
+                replacement :: get(slice_ascii(raw, i + 1, end)) ?? ""
+                loop item in replacement.bytes() -> &out.push(item)
+                i = end
+                next
+            }
         }
+        if byte == (U8{37}) {
+            close := i + 1
+            loop close < raw.len() && is_env_ident(raw[close]) -> close = close + 1
+            if close > i + 1 && close < raw.len() && raw[close] == (U8{37}) {
+                found :: get(slice_ascii(raw, i + 1, close))
+                if found != None {
+                    loop item in found.bytes() -> &out.push(item)
+                    i = close + 1
+                    next
+                }
+            }
+        }
+        &out.push(byte)
+        i = i + 1
     }
 }
 
