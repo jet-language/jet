@@ -331,6 +331,28 @@ fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, program: 
     declared.copy()
 }
 
+// Whether code in the checked module may read or write a field declared in
+// `owner_module`: a `priv` field belongs to its type's module.
+fn sema_expression_field_visible(is_pub: Bool, is_package_pub: Bool, owner_module: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if is_pub -> return true
+    owner_package := ""
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_module_index(graph, owner_module) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
+    }
+    visibility :: if is_package_pub -> 1 else -> 0
+    sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_module, owner_package)
+}
+
+fn sema_expression_private_field_error(member: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{member}` from inside its module, or remove `priv` from its module or field")
+}
+
+// A literal that leaves a `priv` field out still decides its value, so it is
+// refused outside the type's module like a literal that writes the field.
+fn sema_expression_private_field_omitted_error(type_name: String, member: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0605", span, "`{type_name}` can't be built here: its field `{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "get a `{type_name}` from a function of its module, or remove `priv` from `{member}`")
+}
+
 fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // An allocator view (`fixed.alloc(Point{…})`) holds its value in place,
     // so its fields are the held value's fields.
@@ -400,6 +422,10 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
                 names :: loop param in struct_def.type_params -> param.name
                 loop field in struct_def.fields {
                     if field.name == member {
+                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, environment, program) {
+                            &diagnostics.push(sema_expression_private_field_error(member, Span{start: span.end - member.len(), end: span.end}))
+                            return None
+                        }
                         field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args)
                         field_id :: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
                         field_symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
@@ -488,6 +514,14 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         // Native Field carries the whole path; Rust Field carries its member.
         member_span :: Span{start: span.end - member.len(), end: span.end}
         &diagnostics.push(sema_error("E0039", member_span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
+        return None
+    }
+    // `task.x` with no local named `task` in scope: `x` is not a task
+    // combinator (the parser takes only the complete task surface), so teach
+    // the selectors rather than report an unknown `task`.
+    if base == .Ident(root, _, _) && root == "task" && sema_scope_resolve_index(scopes, root) == None {
+        member_span :: Span{start: span.end - member.len(), end: span.end}
+        &diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
         return None
     }
     // `$package.*` / `$build.*` fold from the build snapshot.

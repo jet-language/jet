@@ -1,0 +1,13 @@
+use core.files as files
+
+// A file line source: `files.open(path).lines()` over bad.stdin, whose second
+// line is invalid UTF-8.
+fn run() -[FS, IO]> {
+    input :: files.open("../bad.stdin")
+    count := 0
+    loop line in input.lines() {
+        count += 1
+        print("[{line}]")
+    }
+    print("count {count}")
+}

@@ -1,0 +1,40 @@
+# Claim: a typed `fn run(args: T)` needs no right for the generated parser
+# (`__jet_cli_parse` reads argv and its env fallback, prints help, exits on a
+# refusal), but the entry's own `exit` and environment read still stop with
+# E1803 naming `Exec` and `Env` (Pipeline.jet jet_driver_required_effects).
+fixture: typed_cli_entry_grants_its_parser_but_not_user_effects.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run parsed/run.jet -- --name Ada
+exit: 0 # default: the parser needs no grant
+stdout: = "hello Ada\n" # default: the parser needs no grant
+step: jet run parsed/run.jet --
+env: CLI_GREETING=env
+exit: 0 # default: the env fallback needs no grant
+stdout: = "hello env\n" # default: the env fallback needs no grant
+step: jet run parsed/run.jet -- --bogus
+exit: 2 # default: a refusal exits through the parser
+stdout: = "" # default: a refusal exits through the parser
+stderr: !~ "E1803" # default: a refusal exits through the parser
+step: jet run --release parsed/run.jet -- --name Ada
+exit: 0 # release: the parser needs no grant
+stdout: = "hello Ada\n" # release: the parser needs no grant
+step: jet run exits/run.jet
+exit: 1 # default: the entry's own exit is refused
+stdout: = "" # default: no user code ran
+stderr: ~ "E1803" # default: the entry's own exit is refused
+stderr: ~ "undecided for `Exec" # default: the entry's own exit is refused
+step: jet run --release exits/run.jet
+exit: 1 # release: the entry's own exit is refused
+stdout: = "" # release: no user code ran
+stderr: ~ "undecided for `Exec" # release: the entry's own exit is refused
+step: jet run envs/run.jet
+exit: 1 # default: the entry's own env read is refused
+stdout: = "" # default: no user code ran
+stderr: ~ "E1803" # default: the entry's own env read is refused
+stderr: ~ "`Env" # default: the entry's own env read is refused
+step: jet run --release envs/run.jet
+exit: 1 # release: the entry's own env read is refused
+stdout: = "" # release: no user code ran
+stderr: ~ "`Env" # release: the entry's own env read is refused

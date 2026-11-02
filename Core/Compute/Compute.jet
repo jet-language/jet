@@ -38,9 +38,7 @@ fn ones(shape: [Int]) -> Tensor ComputeError! { filled(shape, 1.0, "Auto") }
 fn full(shape: [Int], value: Float) -> Tensor ComputeError! { filled(shape, value, "Auto") }
 
 fn from_list(values: [Float]) -> Tensor ComputeError! {
-    loop value in values {
-        if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
-    }
+    if !all_finite(values) -> return Err(ComputeError.Arithmetic)
     shape :: [Int]{values.len()}
     _ := storage_len(shape)
     Ok(Tensor{shape: shape, data: values.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: ""})
@@ -191,30 +189,38 @@ fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
     if out_shape.len() == 0 -> &out_shape.push(1)
     extent :: tensor.shape[axis]
     f32 :: tensor.numeric_profile == PROFILE_F32
+    // Each output keeps its own running sum, added in axis order, while the
+    // input is read once in storage order. The input is finite, so a sum
+    // that is not stays so through every later addition: one test of the
+    // totals finds it.
     data := [Float]{}
-    loop o in 0..<outer {
-        loop i in 0..<inner {
-            sum := Float{0.0}
-            loop k in 0..<extent {
-                sum = narrow(tensor.data[(o * extent + k) * inner + i] + sum, f32)
+    next := 0
+    loop _ in 0..<outer {
+        start :: data.len()
+        loop _ in 0..<inner -> &data.push(Float{0.0})
+        loop _ in 0..<extent {
+            loop at in start..<(start + inner) {
+                sum :: tensor.data[next] + data[at]
+                data[at] = if f32 -> narrow(sum, true) else -> sum
+                next = next + 1
             }
-            &data.push(sum)
         }
     }
+    if !all_finite(data) -> return Err(ComputeError.Arithmetic)
     Ok(like(tensor, ^out_shape, data))
 }
 
-fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("add", a, b) }
+fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary(0, a, b) }
 
-fn sub(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("sub", a, b) }
+fn sub(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary(1, a, b) }
 
-fn mul(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("mul", a, b) }
+fn mul(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary(2, a, b) }
 
-fn div(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("div", a, b) }
+fn div(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary(3, a, b) }
 
-fn maximum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("maximum", a, b) }
+fn maximum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary(4, a, b) }
 
-fn minimum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("minimum", a, b) }
+fn minimum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary(5, a, b) }
 
 fn negate(tensor: Tensor) -> Tensor ComputeError! { unary("negate", tensor) }
 
@@ -751,6 +757,26 @@ fn power_of_two(n: Int) -> Bool Never! {
     p == n
 }
 
+struct Butterfly {
+    even_real: Float
+    even_imaginary: Float
+    odd_real: Float
+    odd_imaginary: Float
+}
+
+// One radix-2 butterfly under the F32 profile: every product, sum and
+// difference is rounded to F32 (narrow).
+fn butterfly_f32(cosine: Float, sine: Float, even_real: Float, even_imaginary: Float, odd_real: Float, odd_imaginary: Float) -> Butterfly ComputeError! {
+    product_real :: narrow(narrow(cosine * odd_real, true) - narrow(sine * odd_imaginary, true), true)
+    product_imaginary :: narrow(narrow(cosine * odd_imaginary, true) + narrow(sine * odd_real, true), true)
+    Ok(Butterfly{
+        even_real: narrow(even_real + product_real, true),
+        even_imaginary: narrow(even_imaginary + product_imaginary, true),
+        odd_real: narrow(even_real - product_real, true),
+        odd_imaginary: narrow(even_imaginary - product_imaginary, true),
+    })
+}
+
 // In-order iterative radix-2 transform of a power-of-two length; `inverse`
 // turns the twiddles and scales by 1/n.
 fn radix2(real_in: ^[Float], imaginary_in: ^[Float], inverse: Bool, f32: Bool) -> Spectrum ComputeError! {
@@ -797,20 +823,39 @@ fn radix2(real_in: ^[Float], imaginary_in: ^[Float], inverse: Bool, f32: Bool) -
                 odd :: even + half
                 sine :: sines[offset * step]
                 cosine :: cosines[offset * step]
-                product_real :: narrow(narrow(cosine * real[odd], f32) - narrow(sine * imaginary[odd], f32), f32)
-                product_imaginary :: narrow(narrow(cosine * imaginary[odd], f32) + narrow(sine * real[odd], f32), f32)
+                odd_real :: real[odd]
+                odd_imaginary :: imaginary[odd]
                 even_real :: real[even]
                 even_imaginary :: imaginary[even]
-                real[even] = narrow(even_real + product_real, f32)
-                imaginary[even] = narrow(even_imaginary + product_imaginary, f32)
-                real[odd] = narrow(even_real - product_real, f32)
-                imaginary[odd] = narrow(even_imaginary - product_imaginary, f32)
+                product_real :: cosine * odd_real - sine * odd_imaginary
+                product_imaginary :: cosine * odd_imaginary + sine * odd_real
+                next_even_real := even_real + product_real
+                next_even_imaginary := even_imaginary + product_imaginary
+                next_odd_real := even_real - product_real
+                next_odd_imaginary := even_imaginary - product_imaginary
+                if f32 {
+                    rounded :: butterfly_f32(cosine, sine, even_real, even_imaginary, odd_real, odd_imaginary)
+                    next_even_real = rounded.even_real
+                    next_even_imaginary = rounded.even_imaginary
+                    next_odd_real = rounded.odd_real
+                    next_odd_imaginary = rounded.odd_imaginary
+                }
+                real[even] = next_even_real
+                imaginary[even] = next_even_imaginary
+                real[odd] = next_odd_real
+                imaginary[odd] = next_odd_imaginary
             }
             block = block + stage
         }
         if stage == n -> break
         stage = stage * 2
     }
+    // Under F64 the butterflies skip the per-step finiteness check (narrow):
+    // a non-finite value is absorbed by every later add, subtract and
+    // multiply (a zero twiddle turns it into NaN), and every butterfly value
+    // reaches the output, so one check of the output fails exactly when a
+    // step would.
+    if !f32 && (!all_finite(real) || !all_finite(imaginary)) -> return Err(ComputeError.Arithmetic)
     if inverse {
         scale :: narrow(Float{1.0} / length, f32)
         loop index in 0..<n {
@@ -914,22 +959,32 @@ fn storage_len(shape: [Int]) -> Int ComputeError! {
     Ok(stride * first)
 }
 
-// Validate `tensor` and return its element count: a known device, request
-// and profile, storage matching the shape, finite values the profile holds.
-// Only the CPU oracle owns storage here, so any other device is rejected.
+// Validate `tensor` and return its element count: a CPU tensor requested as
+// Auto or CPU, a known profile, storage matching the shape, finite values
+// the profile holds. Only the CPU oracle owns storage here, so any other
+// device or request is rejected.
 fn checked(tensor: Tensor) -> Int ComputeError! {
-    if !["Auto", "CPU", "Metal", "CUDA", "Vulkan", "WebGPU"].contains(tensor.requested) -> return Err(ComputeError.Device)
     if tensor.numeric_profile != PROFILE_F64 && tensor.numeric_profile != PROFILE_F32 -> return Err(ComputeError.Device)
     if tensor.device != "CPU" -> return Err(ComputeError.Device)
     if tensor.requested != "Auto" && tensor.requested != "CPU" -> return Err(ComputeError.Device)
     n :: storage_len(tensor.shape)
     if tensor.data.len() != n -> return Err(ComputeError.Shape)
-    f32 :: tensor.numeric_profile == PROFILE_F32
-    loop value in tensor.data {
-        if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
-        if f32 && !f32_exact(value) -> return Err(ComputeError.Arithmetic)
+    if !all_finite(tensor.data) -> return Err(ComputeError.Arithmetic)
+    if tensor.numeric_profile == PROFILE_F32 {
+        loop value in tensor.data {
+            if !f32_exact(value) -> return Err(ComputeError.Arithmetic)
+        }
     }
     Ok(n)
+}
+
+// Whether every value in `values` is finite: value * 0.0 is 0.0 for a finite
+// value and NaN for any other, and a NaN stays NaN through every later sum,
+// so one test after the loop does.
+fn all_finite(values: [Float]) -> Bool Never! {
+    poison := Float{0.0}
+    loop value in values -> poison = poison + value * Float{0.0}
+    math.is_finite(poison)
 }
 
 fn same_contract(a: Tensor, b: Tensor) ComputeError! {
@@ -977,11 +1032,16 @@ fn broadcast_shape(a: [Int], b: [Int]) -> [Int] ComputeError! {
     Ok(out)
 }
 
-// The values of `tensor` broadcast to `target`, row-major.
+// The values of `tensor` broadcast to `target`, row-major. A tensor that
+// already has the target shape is its own expansion, so its data is returned
+// whole instead of being re-indexed element by element. Otherwise the source
+// offset is walked like an odometer over the target axes: the last axis steps
+// by its stride, and a carry rewinds that axis and steps the next one.
 fn expand(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
     source_rank :: tensor.shape.len()
     rank :: target.len()
     if source_rank == 0 || source_rank > rank -> return Err(ComputeError.RankMismatch)
+    if tensor.shape == target -> return Ok(tensor.data.copy())
     if broadcast_shape(tensor.shape, target) != target -> return Err(ComputeError.Shape)
     n :: storage_len(target)
     lead :: rank - source_rank
@@ -995,42 +1055,50 @@ fn expand(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
         stride = stride * dim
     }
     out := [Float]{}
-    loop flat in 0..<n {
-        remainder := flat
-        at := 0
-        loop k in 0..<rank {
-            axis :: rank - 1 - k
-            dim :: target[axis]
-            at = at + (remainder % dim) * strides[axis]
-            remainder = remainder /% dim
-        }
+    position := [Int]{}
+    loop _ in 0..<rank -> &position.push(0)
+    at := 0
+    loop _ in 0..<n {
         &out.push(tensor.data[at])
+        axis := rank - 1
+        loop axis >= 0 {
+            position[axis] = position[axis] + 1
+            at = at + strides[axis]
+            if position[axis] < target[axis] -> break
+            at = at - strides[axis] * target[axis]
+            position[axis] = 0
+            axis = axis - 1
+        }
     }
     Ok(out)
 }
 
-fn binary(op: String, a: Tensor, b: Tensor) -> Tensor ComputeError! {
+// `a` and `b` combined element by element by the operator `code`: 0 add,
+// 1 sub, 2 mul, 3 div, 4 maximum, 5 minimum.
+fn binary(code: Int, a: Tensor, b: Tensor) -> Tensor ComputeError! {
     _ := checked(a)
     _ := checked(b)
     same_contract(a, b)
     shape :: broadcast_shape(a.shape, b.shape)
-    left :: expand(a, shape)
-    right :: expand(b, shape)
+    // Operands that already have the result shape are read in place; others
+    // are expanded to it first.
+    if a.shape != shape || b.shape != shape -> return binary(code, like(a, shape.copy(), expand(a, shape)), like(b, shape.copy(), expand(b, shape)))
     f32 :: a.numeric_profile == PROFILE_F32
     data := [Float]{}
-    loop (index, x) in left {
-        y :: right[index]
-        if op == "div" && y == 0.0 -> return Err(ComputeError.Arithmetic)
-        value :: if op == {
-            "add" -> x + y
-            "sub" -> x - y
-            "mul" -> x * y
-            "div" -> x / y
-            "maximum" -> if y > x -> y else -> x
+    loop (index, x) in a.data {
+        y :: b.data[index]
+        value :: if code == {
+            0 -> x + y
+            1 -> x - y
+            2 -> x * y
+            3 -> x / y
+            4 -> if y > x -> y else -> x
             else -> if y < x -> y else -> x
         }
-        &data.push(narrow(value, f32))
+        &data.push(if f32 -> narrow(value, true) else -> value)
     }
+    // A non-finite value fails here, and x / 0.0 is never finite.
+    if !all_finite(data) -> return Err(ComputeError.Arithmetic)
     Ok(like(a, shape.copy(), data))
 }
 

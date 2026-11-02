@@ -45,8 +45,7 @@ fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: Hangar
     leases :: files.join(roots.root, "leases")
     store_ensure_real_directory(leases, "Hangar lease directory")
     if !store_reuse_single_component(entry.id) -> return Err(StoreError.Other("cache lease entry identity is not one path component"))
-    sequence :: store_lease_sequence
-    store_lease_sequence = sequence + 1
+    sequence :: process_sequence_take(STORE_LEASE_SEQUENCE)
     lease_name :: "{sys.pid()}-{sequence}-{entry.id}"
     if lease_name.bytes().len() > STORE_LEASE_NAME_MAX -> return Err(StoreError.InvalidInput("cache lease identity exceeds the recovery bound"))
     if validate_provider_facts {

@@ -506,7 +506,9 @@ task_exit_key := I64{0}
         sync_store(wrapping(destructor + I64{8}), rt_task_exit_destructor_address())
         sync_store(wrapping(destructor + I64{16}), I64{0})
         main_exit_handlers_install(rt_task_exit_run_address())
-        task_exit_key = thread_tls_key_new_locked(destructor, I64{0})
+        #Unsafe("written under the TLS registry mutex") {
+            task_exit_key = thread_tls_key_new_locked(destructor, I64{0})
+        }
     }
     sync_mutex_unlock(thread_tls_registry)
 }

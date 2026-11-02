@@ -473,10 +473,15 @@ fn wants_help(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "h
 
 // D-SHAPE-CLI1 / D-CLI-POS1 / D-CLI-FIELD-MARKERS1 / D-CLI-GLOBAL1: the typed
 // `fn run(args: T)` entry. For a `#CLI` struct `T` the compiler generates
-// `__jet_cli_run` (JetSema Registration/CliEntry.jet), which builds one
-// `CLISpec` with these helpers, parses `process.argv()` against it and
-// constructs `T` from the parsed values. Help, usage and error texts are the
-// D-ARGS1 builder's (`JetArgsSpec::help`, `jet_args_parse_mode`).
+// `__jet_cli_run` (JetSema Registration/CliEntry.jet). When `T` declares no
+// commands the compiler writes a parser for exactly the inputs of `T`: help
+// and error texts are literals, and it calls only the small `__cli_*`
+// helpers its inputs need (the Float check only for a Float input). A `T`
+// with commands writes its inputs and commands as one data table and the
+// help text of every level as text; the entry hands both to `__cli_spec`
+// and parses `process.argv()` with `__cli_parse` (`__cli_parse_float` when an
+// input is a Float). Help, usage and error texts are the D-ARGS1 builder's
+// (`JetArgsSpec::help`, `jet_args_parse_mode`).
 
 // Value kinds of a non-flag input.
 CLI_TEXT :: 0
@@ -486,31 +491,31 @@ CLI_CHOICE :: 3
 CLI_BOOL :: 4
 
 // One `--flag` (a presence flag) or `--name VALUE` option. A positional input
-// also fills from bare argv in declaration order (D-CLI-POS1=A).
+// also fills from bare argv in declaration order (D-CLI-POS1=A). `env` is the
+// value of the input's environment variable when it names one that is set.
 struct CLIInput {
     name: String
     short: String
-    help: String
-    meta: String
     flag: Bool
     kind: Int
     choices: [String]
     default: String?
-    env: String
+    env: String?
     required: Bool
     positional: Bool
 }
 
-// One command word: a method or bound function of the program struct.
+// One command word: a method or bound function of the program struct. `help`
+// is its help text after the program name.
 struct CLICommand {
     name: String
     help: String
-    description: String?
     inputs: [CLIInput]
 }
 
+// `help` is the root help text after the program name.
 struct CLISpec {
-    description: String?
+    help: String
     version: String?
     inputs: [CLIInput]
     commands: [CLICommand]
@@ -520,60 +525,103 @@ struct CLISpec {
 // inherited (they parse at the command level but stay out of its help).
 struct CLILevel {
     program: String
-    description: String?
-    show_version: Bool
+    help: String
     accepts_version: Bool
     inherited: [CLIInput]
     local: [CLIInput]
     commands: [CLICommand]
 }
 
+// Text values by input name. A spec has a handful of inputs, so a list
+// lookup replaces a hash map.
+struct CLIValues {
+    names: [String]
+    values: [String]
+}
+
 // `status` -1 runs the entry; 0 prints `message` to stdout and returns; any
-// other status prints `message` to stderr and exits with it.
+// other status prints `message` to stderr and exits with it. `explicit` names
+// the inputs argv gave.
 struct CLIParsed {
-    flags: [String:Bool]
-    options: [String:String]
-    explicit: [String:Bool]
+    flag_names: [String]
+    flags: [Bool]
+    options: CLIValues
+    explicit: [String]
     positionals: [String]
     command: String
     status: Int
     message: String
 }
 
-fn __cli_spec(description: String, has_description: Bool, version: String, standard: Bool) -> CLISpec Never! {
-    spec := CLISpec{description: if has_description -> Val(description.copy()) else -> None, version: None, inputs: [CLIInput]{}, commands: [CLICommand]{}}
-    if standard {
-        // `#CLI(Standard)` adds the shared verbosity, color and version inputs.
-        spec.version = Val(version.copy())
-        &spec.inputs.push(cli_flag_input("verbose", "v", "print extra detail"))
-        &spec.inputs.push(cli_flag_input("quiet", "q", "suppress normal output"))
-        &spec.inputs.push(CLIInput{name: "color", short: "", help: "control terminal color", meta: "MODE", flag: false, kind: CLI_CHOICE, choices: [String]{"auto", "always", "never"}, default: None, env: "", required: false, positional: false})
+struct CLITableCursor {
+    table: String
+    raw: [U8]
+    at: Int
+}
+
+// The table field at the cursor: its decimal byte length, `:`, its bytes.
+fn cli_take(cursor: &CLITableCursor) -> String Never! {
+    length := 0
+    loop cursor.raw[cursor.at] != (U8{58}) {
+        length = length * 10 + Int{cursor.raw[cursor.at]} - 48
+        cursor.at += 1
+    }
+    start :: cursor.at + 1
+    cursor.at = start + length
+    slice_str(cursor.table, start, start + length)
+}
+
+// The spec the generated entry of a `#CLI` struct with commands wrote as
+// `table` (CliEntry.jet sema_cli_entry_spec_line). Each record opens with one
+// tag byte. `c` starts a command; its name and help text follow. `i` is an
+// input of the root, or of the last command: the kind digit, then `f`, `r`,
+// `p`, `d` and `e` (or `-`) for flag, required, positional, has-default and
+// names-a-variable, then its name, its short name, its default when it has
+// one and, for a choice, the number of choices and each choice. Each text
+// field is its decimal byte length, `:` and the bytes. `envs` holds the
+// environment value of each input that names a variable, in table order.
+fn __cli_spec(table: String, help: String, version: String, has_version: Bool, envs: [String?]) -> CLISpec Never! {
+    spec := CLISpec{help: help.copy(), version: if has_version -> Val(version.copy()) else -> None, inputs: [CLIInput]{}, commands: [CLICommand]{}}
+    cursor := CLITableCursor{table: table.copy(), raw: table.bytes(), at: 0}
+    env_index := 0
+    loop cursor.at < cursor.raw.len() {
+        if cursor.raw[cursor.at] == (U8{99}) {
+            cursor.at += 1
+            name :: cli_take(&cursor)
+            command_help :: cli_take(&cursor)
+            &spec.commands.push(CLICommand{name: name, help: command_help, inputs: [CLIInput]{}})
+            next
+        }
+        kind :: Int{cursor.raw[cursor.at + 1]} - 48
+        flag :: cursor.raw[cursor.at + 2] == (U8{102})
+        required :: cursor.raw[cursor.at + 3] == (U8{114})
+        positional :: cursor.raw[cursor.at + 4] == (U8{112})
+        has_default :: cursor.raw[cursor.at + 5] == (U8{100})
+        has_env :: cursor.raw[cursor.at + 6] == (U8{101})
+        cursor.at += 7
+        name :: cli_take(&cursor)
+        short :: cli_take(&cursor)
+        default := String?{None}
+        if has_default -> default = Val(cli_take(&cursor))
+        choices := [String]{}
+        if kind == CLI_CHOICE {
+            count :: Int.parse(cli_take(&cursor)) ?? 0
+            loop _ in 0..<count -> &choices.push(cli_take(&cursor))
+        }
+        env := String?{None}
+        if has_env {
+            env = envs[env_index].copy()
+            env_index += 1
+        }
+        input :: CLIInput{name: name, short: short, flag: flag, kind: kind, choices: ^choices, default: ^default, env: ^env, required: required, positional: positional}
+        last :: spec.commands.len() - 1
+        if last < 0 {
+            &spec.inputs.push(input)
+        } else {
+            &spec.commands[last].inputs.push(input)
+        }
     }
     spec
-}
-
-fn cli_flag_input(name: String, short: String, help: String) -> CLIInput Never! {
-    CLIInput{name: name, short: short, help: help, meta: "", flag: true, kind: CLI_BOOL, choices: [String]{}, default: None, env: "", required: false, positional: false}
-}
-
-fn cli_new_input(name: String, short: String, help: String, meta: String, flag: Bool, kind: Int, default: String, has_default: Bool, env: String, required: Bool, positional: Bool) -> CLIInput Never! {
-    if flag -> return cli_flag_input(name.copy(), short.copy(), help.copy())
-    CLIInput{name: name.copy(), short: short.copy(), help: help.copy(), meta: meta.copy(), flag: false, kind: kind, choices: [String]{}, default: if has_default -> Val(default.copy()) else -> None, env: env.copy(), required: required, positional: positional}
-}
-
-fn __cli_input(spec: &CLISpec, name: String, short: String, help: String, meta: String, flag: Bool, kind: Int, default: String, has_default: Bool, env: String, required: Bool, positional: Bool) Never! {
-    &spec.inputs.push(cli_new_input(name, short, help, meta, flag, kind, default, has_default, env, required, positional))
-}
-
-fn __cli_command(spec: &CLISpec, name: String, description: String, has_description: Bool) Never! {
-    &spec.commands.push(CLICommand{name: name.copy(), help: if has_description -> description.copy() else -> "", description: if has_description -> Val(description.copy()) else -> None, inputs: [CLIInput]{}})
-}
-
-// One input of the most recently added command.
-fn __cli_command_input(spec: &CLISpec, name: String, short: String, help: String, meta: String, flag: Bool, kind: Int, default: String, has_default: Bool, env: String, required: Bool, positional: Bool) Never! {
-    last :: spec.commands.len() - 1
-    if last < 0 -> return
-    &spec.commands[last].inputs.push(cli_new_input(name, short, help, meta, flag, kind, default, has_default, env, required, positional))
 }
 
 // Rust `jet_args_source_program_name`: argv[0]'s file name without `.jet`.
@@ -589,65 +637,14 @@ fn cli_program_name(argv0: String) -> String Never! {
     name
 }
 
-fn cli_pad(text: String, width: Int) -> String Never! {
-    out := text.copy()
-    count := text.bytes().len()
-    loop count < width {
-        out = "{out} "
-        count += 1
-    }
-    out
-}
-
-fn cli_label(input: CLIInput) -> String Never! {
-    out := if input.short.bytes().len() > 0 -> "-{input.short}, --{input.name}" else -> "--{input.name}"
-    if !input.flag -> out = "{out} {input.meta}"
-    out
-}
-
-// Rust `JetArgsSpec::help`.
-fn cli_help(level: CLILevel) -> String Never! {
-    s := "Usage: {level.program}"
-    positional_count := 0
-    loop input in level.local {
-        if input.positional {
-            s = "{s} {input.name}"
-            positional_count += 1
-        }
-    }
-    s = "{s} [options]\n"
-    if level.description == .Val(description) -> s = "{s}\n{description}\n"
-    if positional_count > 0 {
-        s = "{s}\nArguments:\n"
-        loop input in level.local {
-            if input.positional -> s = "{s}  {cli_pad(input.name, 22)} {input.help}\n"
-        }
-    }
-    if level.local.len() == 0 && level.commands.len() == 0 -> return s
-    s = "{s}\nOptions:\n"
-    loop input in level.local {
-        if input.flag {
-            s = "{s}  {cli_pad(cli_label(input), 24)} {input.help}\n"
-            next
-        }
-        note := input.help.copy()
-        if input.required -> note = "{note} (required)"
-        if input.default == .Val(value) {
-            note = "{note} [default: {value}]"
-            if input.env.bytes().len() > 0 -> note = "{note} [precedence: flag > env > default]"
-        }
-        if input.env.bytes().len() > 0 -> note = "{note} [env: {input.env}]"
-        if input.kind == CLI_CHOICE -> note = "{note} [choices: {input.choices.join(", ")}]"
-        s = "{s}  {cli_pad(cli_label(input), 24)} {note}\n"
-    }
-    loop command in level.commands -> s = "{s}  {cli_pad(command.name, 24)} {command.help}\n"
-    s = "{s}  {cli_pad("--help", 24)} show this help\n"
-    if level.show_version -> s = "{s}  {cli_pad("--version", 24)} show version\n"
-    s
+// Rust `JetArgsSpec::help`; the text after the program name is the
+// compiler's (CliEntry.jet sema_cli_entry_help).
+fn cli_usage(level: CLILevel) -> String Never! {
+    "Usage: {level.program}{level.help}"
 }
 
 fn cli_root_level(spec: CLISpec, program: String) -> CLILevel Never! {
-    CLILevel{program: program.copy(), description: spec.description.copy(), show_version: spec.version != None, accepts_version: spec.version != None, inherited: [CLIInput]{}, local: spec.inputs.copy(), commands: spec.commands.copy()}
+    CLILevel{program: program.copy(), help: spec.help.copy(), accepts_version: spec.version != None, inherited: [CLIInput]{}, local: spec.inputs.copy(), commands: spec.commands.copy()}
 }
 
 // Rust `jet_args_subcommand`: a command inherits every root input; its own
@@ -661,7 +658,7 @@ fn cli_command_level(spec: CLISpec, program: String, command: CLICommand) -> CLI
         }
         if !shadowed -> &local.push(input.copy())
     }
-    CLILevel{program: "{program} {command.name}", description: command.description.copy(), show_version: false, accepts_version: spec.version != None, inherited: spec.inputs.copy(), local: ^local, commands: [CLICommand]{}}
+    CLILevel{program: program.copy(), help: command.help.copy(), accepts_version: spec.version != None, inherited: spec.inputs.copy(), local: ^local, commands: [CLICommand]{}}
 }
 
 fn cli_all(level: CLILevel) -> [CLIInput] Never! {
@@ -685,8 +682,67 @@ fn cli_find_short(inputs: [CLIInput], short: String) -> Int Never! {
     -1
 }
 
+// The index of `name` in `names`, or -1.
+fn cli_slot(names: [String], name: String) -> Int Never! {
+    loop (index, entry) in names {
+        if entry == name -> return index
+    }
+    -1
+}
+
+fn cli_lookup(values: CLIValues, name: String) -> String? Never! {
+    slot :: cli_slot(values.names, name)
+    if slot < 0 -> return None
+    Val(values.values[slot].copy())
+}
+
+fn cli_store(values: &CLIValues, name: String, value: String) Never! {
+    slot :: cli_slot(values.names, name)
+    if slot >= 0 {
+        values.values[slot] = value.copy()
+        return
+    }
+    &values.names.push(name.copy())
+    &values.values.push(value.copy())
+}
+
+fn cli_get_flag(parsed: CLIParsed, name: String) -> Bool? Never! {
+    slot :: cli_slot(parsed.flag_names, name)
+    if slot < 0 -> return None
+    Val(parsed.flags[slot])
+}
+
+fn cli_set_flag(parsed: &CLIParsed, name: String, value: Bool) Never! {
+    slot :: cli_slot(parsed.flag_names, name)
+    if slot >= 0 {
+        parsed.flags[slot] = value
+        return
+    }
+    &parsed.flag_names.push(name.copy())
+    &parsed.flags.push(value)
+}
+
+fn cli_mark(parsed: &CLIParsed, name: String) Never! {
+    if !parsed.explicit.contains(name) -> &parsed.explicit.push(name.copy())
+}
+
+fn cli_parsed(status: Int, message: String) -> CLIParsed Never! {
+    CLIParsed{flag_names: [String]{}, flags: [Bool]{}, options: CLIValues{names: [String]{}, values: [String]{}}, explicit: [String]{}, positionals: [String]{}, command: "", status: status, message: message.copy()}
+}
+
 fn cli_failed(message: String) -> CLIParsed Never! {
-    CLIParsed{flags: [String:Bool]{}, options: [String:String]{}, explicit: [String:Bool]{}, positionals: [String]{}, command: "", status: 2, message: message.copy()}
+    cli_parsed(2, message)
+}
+
+// `text` padded with spaces to `width` bytes (the ArgsSpec help columns).
+fn cli_pad(text: String, width: Int) -> String Never! {
+    out := text.copy()
+    count := text.bytes().len()
+    loop count < width {
+        out = "{out} "
+        count += 1
+    }
+    out
 }
 
 fn cli_ascii_lower(text: String) -> String Never! {
@@ -701,22 +757,28 @@ fn cli_ascii_lower(text: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-fn cli_is_int(text: String) -> Bool Never! {
+fn __cli_is_int(text: String) -> Bool Never! {
     _ := Int.parse(text) ?? return false
     true
 }
 
-fn cli_is_float(text: String) -> Bool Never! {
+fn __cli_is_float(text: String) -> Bool Never! {
     _ := Float.parse(text) ?? return false
     true
 }
 
+// Whether `text` reads as a Bool value: `true` or `false` in any case.
+fn __cli_is_bool(text: String) -> Bool Never! {
+    lower :: cli_ascii_lower(text)
+    lower == "true" || lower == "false"
+}
+
 // Rust `jet_args_store_option`: "" when `value` fits the input, else the
-// refusal.
-fn cli_store_error(input: CLIInput, value: String) -> String Never! {
-    if input.kind == CLI_INT && !cli_is_int(value) -> return "`--{input.name}` expects an Int, got `{value}`\n\nfix: pass a whole number to `--{input.name}`"
-    if input.kind == CLI_FLOAT && !cli_is_float(value) -> return "`--{input.name}` expects a Float, got `{value}`\n\nfix: pass a number to `--{input.name}`"
-    if input.kind == CLI_CHOICE && !input.choices.contains(value) -> return "`--{input.name}` expects one of: {input.choices.join(", ")}; got `{value}`"
+// refusal. `float_ok` checks a Float value.
+fn cli_store_error(input: CLIInput, value: String, float_ok: fn(String) -> Bool Never!) -> String Never! {
+    if input.kind == CLI_INT && !__cli_is_int(value) -> return __cli_int_refusal(input.name, value)
+    if input.kind == CLI_FLOAT && !float_ok(value) -> return __cli_float_refusal(input.name, value)
+    if input.kind == CLI_CHOICE && !input.choices.contains(value) -> return __cli_choice_refusal(input.name, value, input.choices.join(", "))
     ""
 }
 
@@ -744,37 +806,38 @@ fn cli_edit_distance(a: String, b: String) -> Int Never! {
 
 // Rust `jet_args_unknown`.
 fn cli_unknown(name: String, inputs: [CLIInput], help: String) -> String Never! {
-    suggestion := ""
-    loop input in inputs {
-        if cli_edit_distance(input.name, name) <= 2 {
-            suggestion = "\ndid you mean `--{input.name}`?"
-            break
-        }
+    names :: loop input in inputs -> input.name.copy()
+    "{__cli_unknown(name, names)}\n\n{help}"
+}
+
+// The refusal of the unknown option `--name`, with the first of `names`
+// within two edits as a suggestion.
+fn __cli_unknown(name: String, names: [String]) -> String Never! {
+    loop known in names {
+        if cli_edit_distance(known, name) <= 2 -> return "unknown option `--{name}`\ndid you mean `--{known}`?"
     }
-    "unknown option `--{name}`{suggestion}\n\n{help}"
+    "unknown option `--{name}`"
 }
 
 // Rust `jet_args_parse_mode` over argv[start..]: options, flags, shorts, one
 // command word and the positional fill, with the explicit > env > default
 // precedence.
-fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -[Env]> CLIParsed Never! {
-    help :: cli_help(level)
+fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int, float_ok: fn(String) -> Bool Never!) -> CLIParsed Never! {
     all :: cli_all(level)
-    out := CLIParsed{flags: [String:Bool]{}, options: [String:String]{}, explicit: [String:Bool]{}, positionals: [String]{}, command: "", status: -1, message: ""}
+    out := cli_parsed(-1, "")
     root_help :: start >= argv.len() && level.commands.len() > 0
-    out.flags["help"] = false
-    out.flags["version"] = false
-    fallbacks := [String:String]{}
+    cli_set_flag(&out, "help", false)
+    cli_set_flag(&out, "version", false)
+    fallbacks := CLIValues{names: [String]{}, values: [String]{}}
     loop input in all {
         if input.flag {
-            out.flags[input.name.copy()] = false
+            cli_set_flag(&out, input.name, false)
             next
         }
-        environment :: if input.env.bytes().len() > 0 -> core.process.env_get(input.env) else -> String?{None}
-        if environment == .Val(value) {
-            fallbacks[input.name.copy()] = value.copy()
+        if input.env == .Val(value) {
+            cli_store(&fallbacks, input.name, value)
         } else if input.default == .Val(value) {
-            fallbacks[input.name.copy()] = value.copy()
+            cli_store(&fallbacks, input.name, value)
         }
     }
     i := start
@@ -791,8 +854,8 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
         if starts(arg, "--") {
             rest :: drop_prefix(arg, 2)
             if rest == "help" || (rest == "version" && level.accepts_version) {
-                out.flags[rest.copy()] = true
-                out.explicit[rest.copy()] = true
+                cli_set_flag(&out, rest, true)
+                cli_mark(&out, rest)
                 i += 1
                 next
             }
@@ -802,27 +865,27 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
                 value :: slice_str(rest, eq + 1, rest.bytes().len())
                 option :: cli_find(all, name, false)
                 if option >= 0 {
-                    refusal :: cli_store_error(all[option], value)
+                    refusal :: cli_store_error(all[option], value, float_ok)
                     if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-                    out.options[name.copy()] = value.copy()
-                    out.explicit[name.copy()] = true
+                    cli_store(&out.options, name, value)
+                    cli_mark(&out, name)
                 } else if cli_find(all, name, true) >= 0 {
-                    return cli_failed("--{name} is a flag; it takes no value (got `={value}`)\n\n{help}")
+                    return cli_failed("--{name} is a flag; it takes no value (got `={value}`)\n\n{cli_usage(level)}")
                 } else {
-                    return cli_failed(cli_unknown(name, all, help))
+                    return cli_failed(cli_unknown(name, all, cli_usage(level)))
                 }
             } else if cli_find(all, rest, true) >= 0 {
-                out.flags[rest.copy()] = true
-                out.explicit[rest.copy()] = true
+                cli_set_flag(&out, rest, true)
+                cli_mark(&out, rest)
             } else {
                 option :: cli_find(all, rest, false)
-                if option < 0 -> return cli_failed(cli_unknown(rest, all, help))
+                if option < 0 -> return cli_failed(cli_unknown(rest, all, cli_usage(level)))
                 i += 1
-                if i >= argv.len() -> return cli_failed("`--{rest}` requires a value\n\n{help}")
-                refusal :: cli_store_error(all[option], argv[i])
+                if i >= argv.len() -> return cli_failed("`--{rest}` requires a value\n\n{cli_usage(level)}")
+                refusal :: cli_store_error(all[option], argv[i], float_ok)
                 if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-                out.options[rest.copy()] = argv[i].copy()
-                out.explicit[rest.copy()] = true
+                cli_store(&out.options, rest, argv[i])
+                cli_mark(&out, rest)
             }
             i += 1
             next
@@ -834,11 +897,11 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
             loop k < length {
                 short :: slice_str(rest, k, k + 1)
                 found :: cli_find_short(all, short)
-                if found < 0 -> return cli_failed(if length > 1 -> "unknown option `-{short}`\n\n{help}" else -> "unknown option `-{rest}`\n\n{help}")
+                if found < 0 -> return cli_failed(if length > 1 -> "unknown option `-{short}`\n\n{cli_usage(level)}" else -> "unknown option `-{rest}`\n\n{cli_usage(level)}")
                 input :: all[found].copy()
                 if input.flag {
-                    out.flags[input.name.copy()] = true
-                    out.explicit[input.name.copy()] = true
+                    cli_set_flag(&out, input.name, true)
+                    cli_mark(&out, input.name)
                     k += 1
                     next
                 }
@@ -846,13 +909,13 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
                 value := slice_str(rest, k + 1, length)
                 if value.bytes().len() == 0 {
                     i += 1
-                    if i >= argv.len() -> return cli_failed("`-{short}` requires a value\n\n{help}")
+                    if i >= argv.len() -> return cli_failed("`-{short}` requires a value\n\n{cli_usage(level)}")
                     value = argv[i].copy()
                 }
-                refusal :: cli_store_error(input, value)
+                refusal :: cli_store_error(input, value, float_ok)
                 if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-                out.options[input.name.copy()] = value.copy()
-                out.explicit[input.name.copy()] = true
+                cli_store(&out.options, input.name, value)
+                cli_mark(&out, input.name)
                 break
             }
             i += 1
@@ -868,20 +931,20 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
             }
             if command_index >= 0 {
                 command :: level.commands[command_index].copy()
-                nested :: cli_parse_level(spec, cli_command_level(spec, level.program, command), argv, i + 1)
+                nested :: cli_parse_level(spec, cli_command_level(spec, level.program, command), argv, i + 1, float_ok)
                 if nested.status >= 0 -> return nested
-                loop (name, value) in nested.flags {
-                    if nested.explicit.get(name) != None || out.flags.get(name) == None -> out.flags[name.copy()] = value
+                loop (index, name) in nested.flag_names {
+                    if nested.explicit.contains(name) || cli_slot(out.flag_names, name) < 0 -> cli_set_flag(&out, name, nested.flags[index])
                 }
-                loop (name, value) in nested.options {
-                    if nested.explicit.get(name) != None || out.options.get(name) == None -> out.options[name.copy()] = value.copy()
+                loop (index, name) in nested.options.names {
+                    if nested.explicit.contains(name) || cli_slot(out.options.names, name) < 0 -> cli_store(&out.options, name, nested.options.values[index])
                 }
                 loop value in nested.positionals -> &out.positionals.push(value.copy())
-                loop (name, value) in nested.explicit -> out.explicit[name.copy()] = value
+                loop name in nested.explicit -> cli_mark(&out, name)
                 out.command = command.name.copy()
                 break
             }
-            if level.commands.len() > 0 -> return cli_failed("unknown command `{arg}`\n\n{help}")
+            if level.commands.len() > 0 -> return cli_failed("unknown command `{arg}`\n\n{cli_usage(level)}")
         }
         &out.positionals.push(arg.copy())
         i += 1
@@ -890,43 +953,35 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
     // consumes one bare value without shifting later positionals.
     bare := 0
     missing := [String]{}
-    filled := [String:Bool]{}
+    filled := [String]{}
     loop input in all {
         if !input.positional -> next
-        if out.options.get(input.name) != None {
+        if cli_slot(out.options.names, input.name) >= 0 {
             if bare < out.positionals.len() -> bare += 1
             next
         }
         if bare < out.positionals.len() {
             value :: out.positionals[bare].copy()
-            refusal :: cli_store_error(input, value)
+            refusal :: cli_store_error(input, value, float_ok)
             if refusal.bytes().len() > 0 -> return cli_failed(refusal)
-            out.options[input.name.copy()] = value
+            cli_store(&out.options, input.name, value)
             bare += 1
-        } else if fallbacks.get(input.name) == .Val(value) {
-            out.options[input.name.copy()] = value.copy()
-            filled[input.name.copy()] = true
+        } else if cli_lookup(fallbacks, input.name) == .Val(value) {
+            cli_store(&out.options, input.name, value)
+            &filled.push(input.name.copy())
         } else {
             &missing.push(input.name.copy())
         }
     }
-    if out.command.bytes().len() == 0 && bare < out.positionals.len() {
-        surplus := [String]{}
-        loop index in bare..<out.positionals.len() -> &surplus.push("`{out.positionals[index]}`")
-        plural :: if surplus.len() == 1 -> "" else -> "s"
-        return cli_failed("unexpected argument{plural}: {surplus.join(", ")}\n\n{help}")
-    }
+    if out.command.bytes().len() == 0 && bare < out.positionals.len() -> return cli_failed("{__cli_surplus(out.positionals, bare)}\n\n{cli_usage(level)}")
     loop input in all {
-        if input.flag || filled.get(input.name) != None || out.options.get(input.name) != None -> next
-        if fallbacks.get(input.name) == .Val(value) -> out.options[input.name.copy()] = value.copy()
+        if input.flag || filled.contains(input.name) || cli_slot(out.options.names, input.name) >= 0 -> next
+        if cli_lookup(fallbacks, input.name) == .Val(value) -> cli_store(&out.options, input.name, value)
     }
-    asked_help :: out.flags.get("help") ?? false
-    if missing.len() > 0 && !root_help && !asked_help {
-        plural :: if missing.len() == 1 -> "" else -> "s"
-        return cli_failed("missing required argument{plural}: {missing.join(", ")}\n\n{help}")
-    }
+    asked_help :: cli_get_flag(out, "help") ?? false
+    if missing.len() > 0 && !root_help && !asked_help -> return cli_failed("{__cli_missing(missing)}\n\n{cli_usage(level)}")
     loop input in all {
-        if input.required && !input.flag && out.options.get(input.name) == None && !root_help && !asked_help -> return cli_failed("missing required option `--{input.name}`\n\n{help}")
+        if input.required && !input.flag && cli_slot(out.options.names, input.name) < 0 && !root_help && !asked_help -> return cli_failed("missing required option `--{input.name}`\n\n{cli_usage(level)}")
     }
     out
 }
@@ -934,20 +989,20 @@ fn cli_parse_level(spec: CLISpec, level: CLILevel, argv: [String], start: Int) -
 // Parses argv (argv[0] names the program) against `spec`; the generated
 // entry prints `--help`, `--version`, the bare command list and every
 // refusal from the returned status.
-fn __cli_parse(spec: CLISpec, argv: [String]) -[Env]> CLIParsed Never! {
+fn cli_parse(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!) -> CLIParsed Never! {
     program :: cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")
     root :: cli_root_level(spec, program)
-    parsed := cli_parse_level(spec, root, argv, 1)
+    parsed := cli_parse_level(spec, root, argv, 1, float_ok)
     if parsed.status >= 0 -> return parsed
-    if parsed.flags.get("help") ?? false {
+    if cli_get_flag(parsed, "help") ?? false {
         parsed.status = 0
-        parsed.message = cli_help(root)
+        parsed.message = cli_usage(root)
         loop command in spec.commands {
-            if command.name == parsed.command -> parsed.message = cli_help(cli_command_level(spec, program, command))
+            if command.name == parsed.command -> parsed.message = "Usage: {program}{command.help}"
         }
         return parsed
     }
-    if spec.version == .Val(version) && (parsed.flags.get("version") ?? false) {
+    if spec.version == .Val(version) && (cli_get_flag(parsed, "version") ?? false) {
         parsed.status = 0
         parsed.message = version.copy()
         return parsed
@@ -955,7 +1010,7 @@ fn __cli_parse(spec: CLISpec, argv: [String]) -[Env]> CLIParsed Never! {
     // A bare invocation of a command program asks what it can do.
     if spec.commands.len() > 0 && parsed.command.bytes().len() == 0 {
         parsed.status = 0
-        parsed.message = cli_help(root)
+        parsed.message = cli_usage(root)
         return parsed
     }
     // Environment and default values decode like argv values.
@@ -967,42 +1022,87 @@ fn __cli_parse(spec: CLISpec, argv: [String]) -[Env]> CLIParsed Never! {
     }
     loop input in inputs {
         if input.flag -> next
-        value :: parsed.options.get(input.name) ?? next
+        value :: cli_lookup(parsed.options, input.name) ?? next
         reason :: if {
-            input.kind == CLI_INT && !cli_is_int(value) -> "is not a whole number"
-            input.kind == CLI_FLOAT && !cli_is_float(value) -> "is not a number"
-            input.kind == CLI_BOOL && cli_ascii_lower(value) != "true" && cli_ascii_lower(value) != "false" -> "is not true or false"
+            input.kind == CLI_INT && !__cli_is_int(value) -> "is not a whole number"
+            input.kind == CLI_FLOAT && !float_ok(value) -> "is not a number"
+            input.kind == CLI_BOOL && !__cli_is_bool(value) -> "is not true or false"
             else -> ""
         }
-        if reason.bytes().len() > 0 -> return cli_failed("invalid value for --{input.name}: `{value}` {reason}\n\n{cli_help(root)}")
+        if reason.bytes().len() > 0 -> return cli_failed("invalid value for --{input.name}: `{value}` {reason}\n\n{cli_usage(root)}")
     }
     parsed
+}
+
+fn __cli_parse(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
+    cli_parse(spec, argv, (text: String) -> false)
+}
+
+// The parse of a spec with a Float input.
+fn __cli_parse_float(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
+    cli_parse(spec, argv, (text: String) -> __cli_is_float(text))
 }
 
 fn __cli_status(parsed: CLIParsed) -> Int Never! { parsed.status }
 fn __cli_message(parsed: CLIParsed) -> String Never! { parsed.message.copy() }
 fn __cli_command_name(parsed: CLIParsed) -> String Never! { parsed.command.copy() }
-fn __cli_flag(parsed: CLIParsed, name: String) -> Bool Never! { parsed.flags.get(name) ?? false }
-fn __cli_has(parsed: CLIParsed, name: String) -> Bool Never! { parsed.options.get(name) != None }
-fn __cli_text(parsed: CLIParsed, name: String) -> String Never! { (parsed.options.get(name) ?? "").copy() }
-fn __cli_int(parsed: CLIParsed, name: String) -> Int Never! { Int.parse(__cli_text(parsed, name)) ?? 0 }
-fn __cli_float(parsed: CLIParsed, name: String) -> Float Never! { Float.parse(__cli_text(parsed, name)) ?? 0.0 }
-fn __cli_bool(parsed: CLIParsed, name: String) -> Bool Never! { cli_ascii_lower(__cli_text(parsed, name)) == "true" }
-fn __cli_text_opt(parsed: CLIParsed, name: String) -> String? Never! {
-    if !__cli_has(parsed, name) -> return None
-    Val(__cli_text(parsed, name))
+fn __cli_flag(parsed: CLIParsed, name: String) -> Bool Never! { cli_get_flag(parsed, name) ?? false }
+fn __cli_explicit(parsed: CLIParsed, name: String) -> Bool Never! { parsed.explicit.contains(name) }
+fn __cli_value(parsed: CLIParsed, name: String) -> String? Never! { cli_lookup(parsed.options, name) }
+
+// The decoded value of an input from its text, `value` (None when absent).
+fn __cli_text_of(value: String?) -> String Never! { value.copy() ?? "" }
+fn __cli_int_of(value: String?) -> Int Never! { Int.parse(__cli_text_of(value)) ?? 0 }
+fn __cli_float_of(value: String?) -> Float Never! { Float.parse(__cli_text_of(value)) ?? 0.0 }
+fn __cli_bool_of(value: String?) -> Bool Never! { cli_ascii_lower(__cli_text_of(value)) == "true" }
+fn __cli_text_opt_of(value: String?) -> String? Never! { value.copy() }
+fn __cli_int_opt_of(value: String?) -> Int? Never! {
+    if value == None -> return None
+    Val(__cli_int_of(value))
 }
-fn __cli_int_opt(parsed: CLIParsed, name: String) -> Int? Never! {
-    if !__cli_has(parsed, name) -> return None
-    Val(__cli_int(parsed, name))
+fn __cli_float_opt_of(value: String?) -> Float? Never! {
+    if value == None -> return None
+    Val(__cli_float_of(value))
 }
-fn __cli_float_opt(parsed: CLIParsed, name: String) -> Float? Never! {
-    if !__cli_has(parsed, name) -> return None
-    Val(__cli_float(parsed, name))
+fn __cli_bool_opt_of(value: String?) -> Bool? Never! {
+    if value == None -> return None
+    Val(__cli_bool_of(value))
 }
-fn __cli_bool_opt(parsed: CLIParsed, name: String) -> Bool? Never! {
-    if !__cli_has(parsed, name) -> return None
-    Val(__cli_bool(parsed, name))
+
+// The pieces of the parser the compiler writes for a `#CLI` struct without
+// commands. `help` is the root help text after the program name.
+fn __cli_usage(argv: [String], help: String) -> String Never! {
+    "Usage: {cli_program_name(if argv.len() > 0 -> argv[0].copy() else -> "")}{help}"
+}
+fn __cli_with_usage(message: String, argv: [String], help: String) -> String Never! {
+    "{message}\n\n{__cli_usage(argv, help)}"
+}
+fn __cli_long(arg: String) -> Bool Never! { starts(arg, "--") }
+fn __cli_short(arg: String) -> Bool Never! { starts(arg, "-") && arg.bytes().len() > 1 }
+fn __cli_rest(text: String, start: Int) -> String Never! { slice_str(text, start, text.bytes().len()) }
+fn __cli_slice(text: String, start: Int, end: Int) -> String Never! { slice_str(text, start, end) }
+fn __cli_eq(text: String) -> Int Never! { index_of(text, "=") }
+fn __cli_int_refusal(name: String, value: String) -> String Never! {
+    "`--{name}` expects an Int, got `{value}`\n\nfix: pass a whole number to `--{name}`"
+}
+fn __cli_float_refusal(name: String, value: String) -> String Never! {
+    "`--{name}` expects a Float, got `{value}`\n\nfix: pass a number to `--{name}`"
+}
+fn __cli_choice_refusal(name: String, value: String, choices: String) -> String Never! {
+    "`--{name}` expects one of: {choices}; got `{value}`"
+}
+fn __cli_flag_value(name: String, value: String) -> String Never! {
+    "--{name} is a flag; it takes no value (got `={value}`)"
+}
+fn __cli_surplus(positionals: [String], start: Int) -> String Never! {
+    surplus := [String]{}
+    loop index in start..<positionals.len() -> &surplus.push("`{positionals[index]}`")
+    plural :: if surplus.len() == 1 -> "" else -> "s"
+    "unexpected argument{plural}: {surplus.join(", ")}"
+}
+fn __cli_missing(names: [String]) -> String Never! {
+    plural :: if names.len() == 1 -> "" else -> "s"
+    "missing required argument{plural}: {names.join(", ")}"
 }
 
 // D-ARGS1: the `args.spec()` builder (Rust `JetArgsSpec`). A spec keeps its
@@ -1289,9 +1389,9 @@ fn args_find_short(all: [ArgEntry], short: String) -> Int Never! {
 // Rust `jet_args_store_option`: "" after storing `value`, else the refusal.
 // A repeatable option keeps every value; another keeps the last.
 fn args_store(options: &[String:[String]], entry: ArgEntry, value: String) -> String Never! {
-    if entry.value == CLI_INT && !cli_is_int(value) -> return "`--{entry.name}` expects an Int, got `{value}`\n\nfix: pass a whole number to `--{entry.name}`"
-    if entry.value == CLI_FLOAT && !cli_is_float(value) -> return "`--{entry.name}` expects a Float, got `{value}`\n\nfix: pass a number to `--{entry.name}`"
-    if entry.value == CLI_CHOICE && !entry.choices.contains(value) -> return "`--{entry.name}` expects one of: {entry.choices.join(", ")}; got `{value}`"
+    if entry.value == CLI_INT && !__cli_is_int(value) -> return __cli_int_refusal(entry.name, value)
+    if entry.value == CLI_FLOAT && !__cli_is_float(value) -> return __cli_float_refusal(entry.name, value)
+    if entry.value == CLI_CHOICE && !entry.choices.contains(value) -> return __cli_choice_refusal(entry.name, value, entry.choices.join(", "))
     values := if entry.repeat -> (options.get(entry.name) ?? [String]{}).copy() else -> [String]{}
     &values.push(value.copy())
     options[entry.name.copy()] = ^values

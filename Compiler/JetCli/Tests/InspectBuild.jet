@@ -3,7 +3,7 @@ use jet_foundation.[DIAGNOSTIC_LINT, diagnostic_from_registry]
 use core.build.[BuildGraphNode, BuildGraphInputDigest]
 use jet_driver.[
     jet_driver_query_build_nodes, jet_driver_compile, jet_driver_source_query,
-    JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+    JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
     JetDriverAuthorizedSourceSnapshot, JetDriverBuildQueryResult, JetDriverBuildQueryScope,
     JetDriverCompileMode, JetDriverCompileRequest, JetDriverGeneratedModule,
     jet_driver_build_plan_json, jet_driver_query_build_plan,
@@ -77,8 +77,8 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_require(jet_cli_build_duration(1.2345) == "1.234", "do not double-round binary float")
     inspect_build_require(jet_cli_build_duration(build_math.from_bits(1)) == "0.000", "subnormal")
     record :: BuildRecord.new("main", [BuildNodeRecord]{{kind: "check", key: "key", subject: "main", duration_ms: 0.1875, why_ran: "source-changed", inputs: [String]{"main.jet"}}})
-    inspect_build_require(jet_cli_build_nodes_report(record, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
-    inspect_build_require(jet_cli_build_nodes_report(record, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}]}}\n", "node schema does not invent fields")
+    inspect_build_require(jet_cli_build_nodes_report("main", Val(record), [BuildGraphNode]{}, false) == "check\tkey\tmain\t0.188\tsource-changed\tmain.jet\n", "real node fields human")
+    inspect_build_require(jet_cli_build_nodes_report("main", Val(record), [BuildGraphNode]{}, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"check\",\"key\":\"key\",\"subject\":\"main\",\"duration_ms\":0.188,\"why_ran\":\"source-changed\",\"inputs\":[\"main.jet\"]}}],\"planned\":[]}}\n", "node schema does not invent fields")
     scope := JetDriverBuildQueryScope{}
     static_response := jet_driver_query_build_nodes(inspect_build_request(), &scope)
     static_request := ^static_response.request
@@ -95,8 +95,8 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     observed :: jet_cli_build_compile_observation(static_query.nodes[1], 12.5, None, object) ?? panic("actual compile observation rejected")
     inspect_build_require(observed.object == object && observed.node.duration_ms == 12.5, "object identity and measured duration are retained without substitution")
     observed_record :: BuildRecord.new("main", [observed.node])
-    inspect_build_require(jet_cli_build_nodes_report(observed_record, false) == "compile\tfc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\tmain\t12.500\tfirst-run\tcheck:main.jet\n", "executed compile exact human receipt")
-    inspect_build_require(jet_cli_build_nodes_report(observed_record, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"compile\",\"key\":\"fc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\",\"subject\":\"main\",\"duration_ms\":12.500,\"why_ran\":\"first-run\",\"inputs\":[\"check:main.jet\"]}}]}}\n", "executed compile exact JSON receipt")
+    inspect_build_require(jet_cli_build_nodes_report("main", Val(observed_record), [BuildGraphNode]{}, false) == "compile\tfc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\tmain\t12.500\tfirst-run\tcheck:main.jet\n", "executed compile exact human receipt")
+    inspect_build_require(jet_cli_build_nodes_report("main", Val(observed_record), [BuildGraphNode]{}, true) == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[{{\"kind\":\"compile\",\"key\":\"fc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\",\"subject\":\"main\",\"duration_ms\":12.500,\"why_ran\":\"first-run\",\"inputs\":[\"check:main.jet\"]}}],\"planned\":[]}}\n", "executed compile exact JSON receipt")
     prior :: jet_cli_build_compile_observation(static_query.nodes[1], 12.5, Val(record), object) ?? panic("prior record observation rejected")
     inspect_build_require(prior.node.why_ran == "input:check:main.jet", "Rust prior-record literal names input without inventing input-changed")
     inspect_build_require(jet_cli_build_compile_observation(static_query.nodes[0], 12.5, None, object) == .Err(_), "object observation cannot stamp an unexecuted check node")
@@ -141,8 +141,12 @@ fn inspect_build_request() -> JetDriverCompileRequest {
     inspect_build_require(generated_query.complete && generated_query.nodes.len() == 4, "final generated source is a checked module")
     inspect_build_node(generated_query.nodes[0], "check", "build/generated.jet", "070a459848bc4669182150dd08b8cd3802535d2649bf3be1f38047472cee92b8", [String]{"build/generated.jet"})
     inspect_build_require(generated_query.nodes[0].input_digests == [BuildGraphInputDigest]{{name: "build/generated.jet", digest: "601d5b33f645e3713d0435b7ad669435dc3274d9f866b26079fddc352629ec72"}}, "generated bytes are retained, not omitted Doc modules or virtual origins")
-    refused :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true, false, false)
-    inspect_build_require(refused.exit_code == JET_DRIVER_EXIT_USER_ERROR && refused.stdout.contains("E2104") && !refused.stdout.contains("first-run") && !refused.stdout.contains("duration_ms"), "missing execution evidence refuses, never static fabricated metrics")
+    planned_text :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, false, false, false)
+    inspect_build_require(planned_text.exit_code == JET_DRIVER_EXIT_OK && planned_text.stdout == "no build recorded for main yet; planned steps:\ncheck\te05c67e9bab9aa34ca3456b464c3adbe3b66f767085eb68b85663f8b70695957\tmain.jet\tmain.jet\ncompile\tfc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\tmain\tcheck:main.jet\nlink\tb6423079c3279ff750ff90cba335186d0999283f94ff5bfd41815734385e0138\tmain\tcompile:main\n", "no record lists the planned steps with no time or reason")
+    planned_json :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", None, true, false, false)
+    inspect_build_require(planned_json.exit_code == JET_DRIVER_EXIT_OK && planned_json.stdout == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[],\"planned\":[{{\"kind\":\"check\",\"key\":\"e05c67e9bab9aa34ca3456b464c3adbe3b66f767085eb68b85663f8b70695957\",\"subject\":\"main.jet\",\"inputs\":[\"main.jet\"]}},{{\"kind\":\"compile\",\"key\":\"fc7c98733a19662c13cb2cf9d4fd679654cb2d58d4a6ee86b659b14b9ea189d8\",\"subject\":\"main\",\"inputs\":[\"check:main.jet\"]}},{{\"kind\":\"link\",\"key\":\"b6423079c3279ff750ff90cba335186d0999283f94ff5bfd41815734385e0138\",\"subject\":\"main\",\"inputs\":[\"compile:main\"]}}]}}\n", "no record has empty nodes and planned entries without duration_ms or why_ran")
+    foreign :: jet_cli_build_nodes_host(inspect_build_request(), &scope, "main.jet", "main", Val(BuildRecord.new("other", [BuildNodeRecord]{})), true, false, false)
+    inspect_build_require(foreign.exit_code == JET_DRIVER_EXIT_USER_ERROR && foreign.stdout.contains("E2104"), "a record for another program still refuses")
     broken := inspect_build_request()
     broken.authorized_sources.roots[0].files[0].source = "fn run() -> Int {{ true }}"
     failed_response := jet_driver_query_build_plan(^broken, &scope)

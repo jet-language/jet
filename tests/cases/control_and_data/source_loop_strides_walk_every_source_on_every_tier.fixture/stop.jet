@@ -1,0 +1,39 @@
+struct Words {
+    data: [String]
+}
+
+struct WordsIter {
+    words: Words
+    idx: Int
+}
+
+impl WordsIter.Iterator {
+    type Item = String
+
+    fn next(&self) -> String? {
+        if self.idx >= self.words.data.len() -> return None
+        v :: self.words.data[self.idx]
+        self.idx += 1
+        Val(v)
+    }
+}
+
+impl Words.Iterable {
+    type Iter = WordsIter
+
+    fn iter(^self) -> WordsIter { WordsIter{words: self, idx: 0} }
+}
+
+fn source() -> Words {
+    print("source")
+    Words{data: [String]{"one", "two"}}
+}
+
+fn stride() -> Int {
+    print("stride")
+    0
+}
+
+fn run() {
+    loop w in source(), stride() -> print("word {w}")
+}

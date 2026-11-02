@@ -220,14 +220,21 @@ try {
   const exportNames = readFileSync(prefix + '.exports', 'utf8').trim().split('\n').sort();
   if (JSON.stringify(abi.map(row => row.symbol).sort()) !== JSON.stringify(exportNames)) throw Error('runtime ABI and checked exports disagree');
   const abiSha256 = sha256(abiBytes);
+  // The thread receipt (Request.jet ir_thread_exports): the exports that can
+  // start a second thread, or `*` when a lifecycle hook can.
+  const threadsBytes = readFileSync(prefix + '.threads');
+  const threadNames = threadsBytes.toString('utf8').split('\n').filter(Boolean);
+  if (!(threadNames.length === 1 && threadNames[0] === '*') && threadNames.some(name => !exportNames.includes(name))) throw Error('runtime thread receipt names a symbol the checked exports lack');
+  const threadsSha256 = sha256(threadsBytes);
   const vendoredArchives = built.map(({ name, archive }) => ({ name, path: `foreign/${name}/lib${name}.a`, sha256: sha256(readFileSync(archive)) }));
-  const identity = { format: 'jet-native-runtime/v1', source: source.sha256, abi: abiSha256, backend: backend.sha256, lifecycle: lifecycle.sha256, platform: platformInputs.map(row => row.sha256), vendored: vendoredArchives.map(row => row.sha256) };
+  const identity = { format: 'jet-native-runtime/v2', source: source.sha256, abi: abiSha256, threads: threadsSha256, backend: backend.sha256, lifecycle: lifecycle.sha256, platform: platformInputs.map(row => row.sha256), vendored: vendoredArchives.map(row => row.sha256) };
   const key = sha256(JSON.stringify(identity));
   const directory = join(out, key);
   mkdirSync(directory, { recursive: true });
   copyFileSync(prefix + '.o', join(directory, 'jet_runtime_jet.o'));
   copyFileSync(prefix + '.abi.json', join(directory, 'runtime.abi.json'));
   copyFileSync(prefix + '.exports', join(directory, 'runtime.exports'));
+  copyFileSync(prefix + '.threads', join(directory, 'runtime.threads'));
   copyFileSync(pack, join(directory, 'jet_runtime.pack.o'));
   copyFileSync(image, join(directory, 'jet_runtime.image'));
   copyFileSync(web + '.wasm', join(directory, 'jet_runtime.wasm'));
@@ -238,7 +245,7 @@ try {
     copyFileSync(library.archive, join(target, `lib${library.name}.a`));
     for (const notice of ['LICENSE', 'VERSION']) if (existsSync(join(library.source, notice))) copyFileSync(join(library.source, notice), join(target, notice));
   }
-  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), imageSha256: sha256(readFileSync(image)), webSha256: sha256(readFileSync(web + '.wasm')), rustObjects: 0, llvmObjects: 0, abiSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, vendoredC: { recipeSha256: vendorRecipeSha256, archives: vendoredArchives }, compilerSha256, recipeSha256 };
+  const provenance = { backend: 'jet-native', runtimeKey: key, objectSha256: sha256(readFileSync(prefix + '.o')), packSha256: sha256(readFileSync(pack)), imageSha256: sha256(readFileSync(image)), webSha256: sha256(readFileSync(web + '.wasm')), rustObjects: 0, llvmObjects: 0, abiSha256, threadsSha256, source, backendInputs: backend, lifecycle, cPlatformArchives: platformInputs, vendoredC: { recipeSha256: vendorRecipeSha256, archives: vendoredArchives }, compilerSha256, recipeSha256 };
   writeFileSync(join(directory, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   writeFileSync(join(out, 'provenance.json'), JSON.stringify(provenance, null, 2) + '\n');
   publishPlatform();

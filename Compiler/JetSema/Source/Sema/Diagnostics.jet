@@ -265,7 +265,7 @@ fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
 fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     fix := "declare it first: `{name} :: ...`"
     if core_module_for_alias(name) == .Val(owner) {
-        fix = "add `use {owner} as {name}`"
+        fix = "add `use {name} :: {owner}`"
     } else if sema_scope_closest_visible_name(scopes, name) == .Val(near) {
         fix = "did you mean `{near}`?"
     }

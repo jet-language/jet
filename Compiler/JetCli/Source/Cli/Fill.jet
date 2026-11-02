@@ -214,7 +214,7 @@ fn jet_cli_fill_result(file: String, line: Int?, json: Bool, color: Bool, result
         diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         source :: cli_files.read(file) ?? ""
         if json {
-            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_base(file), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
         return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

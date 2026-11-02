@@ -11,7 +11,9 @@ sentry_root := I64{0}
 // runtime-init: 4 when sentry_root
 #Export(c) fn jet_rt_sentry_init() {
     if (sentry_root != I64{0}) -> return
-    sentry_root = jet_rt_alloc(I64{112}, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        sentry_root = jet_rt_alloc(I64{112}, I64{8})
+    }
     thread_zero(sentry_root, I64{112})
     sync_store(wrapping(sentry_root + I64{24}), I64{1})
 }

@@ -23,7 +23,7 @@ import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
 import { computeVersion } from './version.mjs';
 import * as docs from './docs.mjs';
-import { createLiveBoard } from './live.mjs';
+import { FAST_GZIP, createLiveBoard } from './live.mjs';
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const MEDIA_MIME = {
@@ -51,7 +51,7 @@ function etagFor(data, key = 'body') {
 
 export function encodeResponse(data, { revision = null, key = 'body', gzip = true } = {}) {
   const raw = Buffer.isBuffer(data) ? data : Buffer.from(String(data));
-  const compressed = gzip ? gzipSync(raw) : raw;
+  const compressed = gzip ? gzipSync(raw, FAST_GZIP) : raw;
   return { raw, compressed, etag: etagFor(raw, revision == null ? key : `rev-${revision}`) };
 }
 
@@ -65,7 +65,7 @@ function sendBytes(req, res, code, data, { contentType = 'application/octet-stre
     return res.end();
   }
   const acceptsGzip = /\bgzip\b/i.test(String(req?.headers?.['accept-encoding'] || ''));
-  const compressed = acceptsGzip ? gzipSync(raw) : raw;
+  const compressed = acceptsGzip ? gzipSync(raw, FAST_GZIP) : raw;
   if (acceptsGzip) common['content-encoding'] = 'gzip';
   common['content-length'] = compressed.length;
   res.writeHead(code, common);
@@ -356,6 +356,16 @@ export function serve(store, port = 7878, open = false) {
   // the #1738 whole-board rev refusal). Whole-board replaces (undo) still
   // require expectRev, enforced by store.restore.
   const commit = (state) => live.adopt(state).value;
+  // A write reply carries the whole adopted board. Its JSON is already encoded
+  // once for GET /api/state and the SSE ring, so splice those bytes in instead
+  // of stringifying the full board again on every write.
+  const sendCommitted = (res, result, state) => {
+    const index = live.adopt(state);
+    const head = JSON.stringify({ ok: true, result }).slice(0, -1);
+    return sendBytes(res.__towerReq, res, 200, Buffer.concat([
+      Buffer.from(`${head},"state":`), index.body.raw, Buffer.from('}'),
+    ]), { contentType: 'application/json', revision: index.rev });
+  };
   const auditAcceptanceReject = async (decisionId, route, reason, by, ownerAuthenticated = false) => {
     // Rejected owner-verification requests are still audit mutations. Do not let
     // an unauthenticated payload forge the actor on that event.
@@ -549,7 +559,7 @@ export function serve(store, port = 7878, open = false) {
         const prev = readLatestJSON(bdir, 'tower-', null);
         if (prev === null) return send(res, 400, { error: 'E_INVALID', message: 'nothing to undo (no backups yet)' });
         const { state } = store.restore(prev, { expectRev: p.expectRev });
-        return send(res, 200, { ok: true, state: commit(state) });
+        return sendCommitted(res, undefined, state);
       }
       if (req.method === 'POST' && (url.pathname === '/api/acceptance/challenge' || url.pathname === '/api/acceptance/resolve')) {
         const p = await jsonBody(req);
@@ -588,7 +598,7 @@ export function serve(store, port = 7878, open = false) {
         const provenance = { kind: 'owner-ui', session: session.auditId, challenge: challenge.challengeAudit,
           issuedFor: challenge.decisionId, outcome: challenge.outcome, resolvedAt: new Date().toISOString() };
         const { result, state } = await store.mutateAsync((s) => resolveAcceptance(s, p.decisionId, p.outcome, p.comment, provenance));
-        return send(res, 200, { ok: true, result, state: commit(state) });
+        return sendCommitted(res, result, state);
       }
       if (req.method === 'POST' && url.pathname.startsWith('/api/')) {
         const name = url.pathname.slice(5);
@@ -628,7 +638,7 @@ export function serve(store, port = 7878, open = false) {
           if (session) ownerUi = { kind: 'owner-ui', session: session.auditId };
         }
         const { result, state } = await store.mutateAsync((s, cfg, history) => fn(s, p, cfg, history, ownerUi), { expectRev: p.expectRev });
-        return send(res, 200, { ok: true, result, state: commit(state) });
+        return sendCommitted(res, result, state);
       }
       if (req.method === 'GET') return serveStatic(req, res);
       res.writeHead(405); res.end();

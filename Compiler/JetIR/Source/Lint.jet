@@ -1127,11 +1127,11 @@ fn ir_lint_route_gaps(exports: [String]) -> [IRLintFinding] Never! {
         &out.push(IRLintFinding{function: key.copy(), key: "", pass: "core.calls", rule: IR_LINT_CORE_ROUTE, message: "{key} names {name}, which no runtime route carries"})
     }
     // A Prelude static (`Pool.new()`) crosses route `<path>::<method>`
-    // (ir_static_call): `Atomic.new` is built inline, and each Authority
-    // static names its own `jet_authority_<method>` route.
+    // (ir_static_call): `Atomic.new` and `Atomic.try_new` are built inline,
+    // and each Authority static names its own `jet_authority_<method>` route.
     loop row in BUILTIN_STATIC_ROWS {
         if row.lowering == .PreludeStatic(rooted, path, _) {
-            if rooted && path == "JetAtomic" && row.method == "new" -> next
+            if rooted && path == "JetAtomic" && (row.method == "new" || row.method == "try_new") -> next
             symbol :: if rooted && path == "JetAuthority" -> "jet_authority_{row.method}" else -> "{path}::{row.method}"
             name :: ir_route_symbol(symbol)
             if ir_route_builder_lowered(name) || ir_environment_route(name) != None || ir_runtime_route(name) != None -> next

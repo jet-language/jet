@@ -6,7 +6,7 @@
 // roots. Only the first equal file in each output is shared, because linking
 // two equal files within one output changes its canonical archive identity.
 
-store_shared_cas_sequence := 0
+STORE_SHARED_CAS_SEQUENCE :: shared ProcessSequence{next: 0}
 
 struct SharedCASReport {
     optimized_files: Int
@@ -156,9 +156,7 @@ fn store_ensure_shared_file(shared: String, key: String, source_path: String, so
 }
 
 fn store_next_shared_cas_sequence() -> Int Never! {
-    sequence :: store_shared_cas_sequence
-    store_shared_cas_sequence += 1
-    sequence
+    process_sequence_take(STORE_SHARED_CAS_SEQUENCE)
 }
 
 fn store_files_equal(left: String, right: String) -[FS]> Bool StoreError! {

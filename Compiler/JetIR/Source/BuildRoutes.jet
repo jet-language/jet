@@ -919,7 +919,18 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
                 return ir_list_try_reserve(&m, p, &b, ty, subject, element, one, -1, value, span)
             }
             .Clear -> {
+                // The buffer is the receiver's own (ir_make_unique above):
+                // its elements end here and the buffer stays for refilling.
+                // A write window's elements stay its owner's.
                 zero :: ir_word_const(&m, &b, 0)
+                if m.types[element].drop != "" {
+                    capacity :: ir_load_word(&m, &b, subject, 8)
+                    below :: ir_word_const(&m, &b, -1)
+                    owner :: ir_bool_op(&m, &b, IROp.Lt, below, capacity)
+                    ir_open_if(&b.f, owner, b.line)
+                    ir_list_drop_items(&m, &b, subject, element)
+                    ir_end(&b.f, b.line)
+                }
                 ir_emit(&b.f, IROp.Store, -1, subject, 0, zero, b.line)
                 return -1
             }
@@ -3225,6 +3236,22 @@ fn ir_float_word(m: &IRModule, b: &IRBuilder, floating: Int, row: Int, unsigned:
 // an out slot; an Option or Result result as a tag word with its payload in
 // one zeroed out slot, from which the builder makes its own box.
 
+// The Core leaf routes that are pure and never fail, each built as the one
+// operation it is: `math.sqrt(x)` the IEEE square root, `math.fabs(x)` the
+// sign-bit clear, `math.is_finite(x)` and the other Float predicates the
+// operation their receiver form `x.is_finite()` lowers to (BuildTypes.jet
+// ir_float_predicate). None for any other route.
+fn ir_leaf_route(name: String) -> String? Never! {
+    if name == {
+        "jet_std_math_sqrt" -> Val("sqrt")
+        "jet_std_math_abs_f64" -> Val("fabs")
+        "jet_std_math_is_finite" -> Val("is_finite")
+        "jet_std_math_is_infinite" -> Val("is_infinite")
+        "jet_std_math_is_nan" -> Val("is_nan")
+        else -> None
+    }
+}
+
 // Routes built inline rather than calling the runtime (list.get /
 // list.index_of); None for any other route. Every argument is borrowed.
 fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int? Never! {
@@ -3322,11 +3349,20 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         ir_release(&m, &b, inputs[1])
         return Val(stream)
     }
-    // `math.sqrt(x)`: the IEEE square root, one instruction.
-    if name == "jet_std_math_sqrt" {
-        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "sqrt with {inputs.len()} arguments"))
+    // A pure, never-failing Core leaf (ir_leaf_route): the operation itself,
+    // with no call and so no stop poll after it.
+    if ir_leaf_route(name) == .Val(leaf) {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "{leaf} with {inputs.len()} arguments"))
         row :: b.f.slot_type[inputs[0]]
-        if m.types[row].kind != .Float -> return Val(ir_fail_slot(&b, span, "sqrt of {ir_type_name(m.types[row].ty)}"))
+        if leaf != "sqrt" && leaf != "fabs" -> return Val(ir_float_predicate(&m, &b, inputs[0], leaf, m.types[row].ty.copy(), span))
+        if m.types[row].kind != .Float -> return Val(ir_fail_slot(&b, span, "{leaf} of {ir_type_name(m.types[row].ty)}"))
+        if leaf == "fabs" {
+            word_row :: ir_word_row(&m)
+            bits :: ir_reinterpret(&m, &b, inputs[0], word_row)
+            mask :: ir_word_const(&m, &b, 9223372036854775807)
+            magnitude :: ir_word_op(&m, &b, IROp.BitAnd, bits, mask)
+            return Val(ir_reinterpret(&m, &b, magnitude, row))
+        }
         root :: ir_temp(&m, &b, row)
         ir_emit(&b.f, IROp.Sqrt, root, inputs[0], -1, -1, b.line)
         return Val(root)
@@ -3995,7 +4031,7 @@ fn ir_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [
 // (core_call_native_return_labels).
 fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name :: ir_route_symbol(symbol)
-    if IR_ROUTES_INLINE.contains(name) {
+    if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None {
         if ir_route_inline(&m, p, &b, name, inputs, result, span) == .Val(inlined) -> return inlined
     }
     if ir_environment_route(name) == .Val(environment) -> return ir_environment_call(&m, p, &b, environment, inputs, result, span)
@@ -4156,8 +4192,8 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 &lowered.push(slot)
             }
             .Option(some) -> {
-                // An Option crosses as its own borrowed word: an Option<Int>
-                // its inline word (IR_OPTION_INT_NONE when absent), an Option
+                // An Option crosses as its own borrowed word: an inline Option
+                // its word (IR_OPTION_INT_NONE when absent), an Option
                 // of a runtime handle its box (null when absent, the handle
                 // word at 0).
                 inner :: if ir_untag(shown) == .Option(item) -> item else -> { return ir_fail_slot(&b, span, "runtime route {name} Option argument of {shown}") }
@@ -4255,12 +4291,13 @@ fn ir_route_symbol(symbol: String) -> String Never! {
     symbol.copy()
 }
 
-// The routes ir_route_inline builds in place instead of calling the runtime;
-// ir_route_labeled reaches it only for these.
+// The routes ir_route_inline builds in place instead of calling the runtime
+// besides the leaf routes (ir_leaf_route); ir_route_labeled reaches it only
+// for these.
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from", "JetCache::new",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_std_math_sqrt", "jet_devtools_publish_payload",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",
@@ -4274,12 +4311,12 @@ IR_ROUTES_INLINE :: comptime { [String]{
 IR_ROUTES_NATIVE_INDEX :: comptime { [String]{"jet_bit_set_has", "jet_bitset_add", "jet_bitset_remove"} }
 
 // Whether the builder lowers a Core call of route `name` itself, with no
-// runtime or environment route: an inline route, a special of ir_core_call
-// (the raw List layout leaves, crypto.wipe, channels, event policy, object
-// entries), or an Iter route (BuildLazy.jet ir_lazy_symbol). IR Lint's
-// registry check (Lint.jet ir_lint_core_routes) reads it.
+// runtime or environment route: an inline or leaf route, a special of
+// ir_core_call (the raw List layout leaves, crypto.wipe, channels, event
+// policy, object entries), or an Iter route (BuildLazy.jet ir_lazy_symbol).
+// IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 fn ir_route_builder_lowered(name: String) -> Bool Never! {
-    if IR_ROUTES_INLINE.contains(name) -> return true
+    if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
     if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" || name == "jet_raw_crypto_wipe" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::JetEvent::with_policy" -> return true
     if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
@@ -4399,7 +4436,7 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         // The runtime answers its generic Option box (ir_option_unbox).
         pointer_row :: ir_pointer_row(&m)
         boxed :: ir_runtime(&m, &b, export, args, pointer_row)
-        return ir_option_unbox(&m, &b, boxed, row)
+        return ir_option_unbox(&m, p, &b, boxed, row)
     }
     ir_runtime(&m, &b, export, args, row)
 }

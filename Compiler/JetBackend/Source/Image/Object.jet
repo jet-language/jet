@@ -112,7 +112,8 @@ fn elf64_section_header(bytes: &[U8], name: Int, kind: Int, flags: Int, offset: 
     elf64_u64(&bytes, entry_size)
 }
 
-// libc main transfers its raw argc/argv/envp before jet_rt_main(entry).
+// libc main transfers its raw argc/argv/envp (the startup stack's, so
+// jet_rt_host_main_arguments) before jet_rt_main(entry).
 // The push keeps rsp 16-byte aligned at all calls. Host constructors have
 // already run through the runtime object's init array. A program that owns
 // its main (`owned`, JetIR EntryOwned.jet) runs the entry itself, with no
@@ -125,7 +126,7 @@ fn x64_object_main(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64Compil
     arguments_at :: x64_call_rel32(&code)
     start_at :: x64_call_rel32(&code)
     if owned {
-        relocs := [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}}
+        relocs := [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_main_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}}
         if attach {
             attach_at :: x64_call_rel32(&code)
             &relocs.push(X64Reloc{at: attach_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_thread_init"}})
@@ -139,7 +140,7 @@ fn x64_object_main(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64Compil
         &relocs.push(X64Reloc{at: owned_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main_owned_start"}})
         &relocs.push(X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}})
         &relocs.push(X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}})
-        return X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code, relocs: relocs}
+        return X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code, relocs: relocs, align: X64_FUNCTION_ALIGN}
     }
     entry_at :: x64_lea_rip(&code, X64_RDI)
     call_at :: x64_call_rel32(&code)
@@ -149,8 +150,8 @@ fn x64_object_main(entry: X64FunctionID, owned: Bool, attach: Bool) -> X64Compil
     x64_mov_rr(&code, X64_RAX, X64_RBX)
     x64_pop(&code, X64_RBX)
     x64_ret(&code)
-    relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
-    X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code, relocs: relocs}
+    relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_main_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
+    X64CompiledFunction{id: X64FunctionID{value: -1}, name: "main", code: code, relocs: relocs, align: X64_FUNCTION_ALIGN}
 }
 
 // `main`'s frame: after `push rbx` the CFA is rsp + 16 with rbx below the
@@ -210,19 +211,22 @@ struct X64ObjectTextPart {
     outputs: [X64ObjectTextRows]
 }
 
-// A function range's `.text` bytes (from its first function's offset, calls
-// between functions patched) and `.rela.text` entries, in function and
-// relocation order. A runtime call's entry is written with symbol 0: its
-// byte offset in `relas` is in `runtime_at` and its symbol's row in the
-// range's own `imports` (first use order) in `runtime_local`; the merge
-// writes the object's symbol over it. With own sections the functions are
-// not padded and calls are relocations; per function its end in `text` and
-// in `relas` is in `text_ends` and `rela_ends`.
+// A function range's `.text` bytes (from its first function's offset,
+// `start`, calls between functions patched) and `.rela.text` entries, in
+// function and relocation order. A runtime call's entry is written with
+// symbol 0: its byte offset in `relas` is in `runtime_at` and its symbol's
+// row in the range's own `imports` (first use order) in `runtime_local`; the
+// merge writes the object's symbol over it. With own sections the functions
+// are not padded and calls are relocations; per function its end in `text`
+// and in `relas` is in `text_ends` and `rela_ends`, and its alignment in
+// `aligns`.
 struct X64ObjectTextRows {
+    start: Int
     text: [U8]
     relas: [U8]
     text_ends: [Int]
     rela_ends: [Int]
+    aligns: [Int]
     runtime_at: [Int]
     runtime_local: [Int]
     imports: [String]
@@ -253,6 +257,7 @@ fn x64_object_text_part(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Obj
     relas := [U8]{}
     text_ends := [Int]{}
     rela_ends := [Int]{}
+    aligns := [Int]{}
     runtime_at := [Int]{}
     runtime_local := [Int]{}
     imports := [String]{}
@@ -265,13 +270,14 @@ fn x64_object_text_part(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Obj
     own :: function_symbols.len() > 0
     loop index in start..<end {
         function :: reads.value.functions[index]
-        // Every offset is aligned and `base` is one, so the range's own
-        // length aligns as the whole `.text` would. An own section is
-        // aligned by its header.
-        if !own {
-            loop text.len() % X64_FUNCTION_ALIGN != 0 -> x64_int3(&text)
-        }
         offset :: reads.value.offsets[index]
+        // Every offset is aligned to its function and `base` is the
+        // range's first, so padding up to the offset aligns the function
+        // as the whole `.text` would. An own section is aligned by its
+        // header.
+        if !own {
+            loop base + text.len() < offset -> x64_int3(&text)
+        }
         &text.extend(function.code)
         loop reloc in function.relocs {
             at :: offset + reloc.at
@@ -307,9 +313,10 @@ fn x64_object_text_part(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Obj
         if own {
             &text_ends.push(text.len())
             &rela_ends.push(relas.len())
+            &aligns.push(function.align)
         }
     }
-    &permit.value.outputs.push(X64ObjectTextRows{text: ^text, relas: ^relas, text_ends: ^text_ends, rela_ends: ^rela_ends, runtime_at: ^runtime_at, runtime_local: ^runtime_local, imports: ^imports, errors: ^errors})
+    &permit.value.outputs.push(X64ObjectTextRows{start: base, text: ^text, relas: ^relas, text_ends: ^text_ends, rela_ends: ^rela_ends, aligns: ^aligns, runtime_at: ^runtime_at, runtime_local: ^runtime_local, imports: ^imports, errors: ^errors})
     1
 }
 
@@ -396,16 +403,18 @@ fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64Compi
         count :: ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + program.data.len() + hooks)
         if count >= ELF64_OBJECT_SECTION_LIMIT -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"a section per function and data object makes {count} sections; ELF reserves the indices from {ELF64_OBJECT_SECTION_LIMIT}, and the object writer writes no extended section numbering"}}
     }
-    // Each function's place in `.text`: aligned, in function order; with own
-    // sections the start of its own.
+    // Each function's place in `.text`: on its alignment, in function order;
+    // with own sections the start of its own. `.text` takes the largest.
     offsets := [Int]{}
     text_size := 0
+    text_align := X64_FUNCTION_ALIGN
     loop function in functions {
+        if function.align > text_align -> text_align = function.align
         if own_sections {
             &offsets.push(0)
             next
         }
-        loop text_size % X64_FUNCTION_ALIGN != 0 -> text_size += 1
+        loop text_size % function.align != 0 -> text_size += 1
         &offsets.push(text_size)
         text_size += function.code.len()
     }
@@ -506,7 +515,7 @@ fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64Compi
         rows := x64_object_text_part_take(part)
         &errors.extend(rows.errors)
         if !own_sections && rows.text.len() > 0 {
-            loop text.len() % X64_FUNCTION_ALIGN != 0 -> x64_int3(&text)
+            loop text.len() < rows.start -> x64_int3(&text)
             &text.extend(rows.text)
         }
         globals := [Int]{}
@@ -537,7 +546,7 @@ fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64Compi
         loop (row, text_end) in rows.text_ends {
             rela_end :: rows.rela_ends[row]
             target :: ELF64_OBJECT_FIRST_OWN + own.len()
-            &own.push(X64ObjectSection{name: ".text", kind: 1, flags: 6, bytes: x64_object_bytes(rows.text, text_from, text_end), link: 0, info: 0, align: X64_FUNCTION_ALIGN, entry_size: 0})
+            &own.push(X64ObjectSection{name: ".text", kind: 1, flags: 6, bytes: x64_object_bytes(rows.text, text_from, text_end), link: 0, info: 0, align: rows.aligns[row], entry_size: 0})
             relas := x64_object_bytes(rows.relas, rela_from, rela_end)
             &own.push(x64_object_rela_bytes_section(".rela.text", ^relas, target))
             text_from = text_end
@@ -581,7 +590,7 @@ fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64Compi
     files := [[U8]]{}
     task.group x64_object_release_group {
         dropped :: task x64_object_release(released)
-        &files.push(x64_object_file(dwarf, text, rodata, rodata_align, ^rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, ^own))
+        &files.push(x64_object_file(dwarf, text, text_align, rodata, rodata_align, ^rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, ^own))
         _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     X64ExecutableResult{bytes: &files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
@@ -637,11 +646,11 @@ fn x64_object_release_programs(released: Shared<X64ObjectReleased>) -> [X64Objec
 // ELF header, the section contents and the section header table. `own`
 // holds the sections from ELF64_OBJECT_FIRST_OWN (empty: none);
 // `guard_sections` per export the header indices of its hook's guards.
-fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_align: Int, rela_text: ^[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: ^[X64ObjectSection]) -> [U8] Never! {
+fn x64_object_file(dwarf: X64DwarfSections, text: [U8], text_align: Int, rodata: [U8], rodata_align: Int, rela_text: ^[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: ^[X64ObjectSection]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
-        {name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: X64_FUNCTION_ALIGN, entry_size: 0},
+        {name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: text_align, entry_size: 0},
         // .data: PROGBITS, WRITE + ALLOC
         {name: ".data", kind: 1, flags: 3, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
         x64_object_rela_bytes_section(".rela.text", ^rela_text, ELF64_OBJECT_TEXT),

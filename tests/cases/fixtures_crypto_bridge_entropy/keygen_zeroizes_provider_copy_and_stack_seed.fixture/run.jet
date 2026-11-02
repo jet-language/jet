@@ -35,11 +35,14 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
 }
 #Test("keygen_zeroizes_provider_copy_and_stack_seed") {
     signing :: crypto.SigningKey.new_random() ?? panic("keygen")
-    assert_eq(signing.bytes.len(), 32)
     assert_eq(signing.public_key().bytes.len(), 32)
-    nonzero := false
-    loop byte in signing.bytes {
-        if byte != (U8{0}) -> nonzero = true
+    #Unsafe("crypto expert: the test reads the generated seed to prove it is live and 32 bytes") {
+        seed :: expert.signing_key_bytes(signing)
+        assert_eq(seed.len(), 32)
+        nonzero := false
+        loop byte in seed {
+            if byte != (U8{0}) -> nonzero = true
+        }
+        assert(nonzero)
     }
-    assert(nonzero)
 }

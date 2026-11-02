@@ -8,7 +8,10 @@ use jet_foundation.[
     AccessConvention,
     BinderRef,
     CallArg,
+    DIAGNOSTIC_ERROR,
     Diagnostic,
+    DiagnosticCryptoMisuseReason,
+    DiagnosticStructured,
     Expr,
     FunctionDefaultRef,
     CopyFact,
@@ -474,6 +477,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         &source_indices.push(args[index].flags.source_index ?? -1)
     }
     if !complete -> return None
+    sema_call_crypto_misuse(callee, params, args, values, slots, context, &diagnostics)
     &reference_starts.push(context.name_references.len())
     loop position in 0..<take_indices.len() {
         if sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, context) -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[take_indices[position]].expr))
@@ -521,6 +525,173 @@ fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
         return found
     }
     false
+}
+
+// One registered E2702 bound (D-CRYPTO-DIAG1=A): a parameter of a Core
+// crypto operation and the values the operation accepts there
+// (Core/Crypto/Crypto.jet, Expert.jet return CryptoError outside it).
+// `bytes`: the bound is on a byte list's length, not on an Int.
+struct SemaCryptoBound {
+    parameter: String
+    reason: DiagnosticCryptoMisuseReason
+    noun: String
+    bytes: Bool
+    low: Int
+    high: Int?
+}
+
+fn sema_crypto_int(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int?) -> SemaCryptoBound Never! {
+    SemaCryptoBound{parameter: parameter, reason: reason, noun: noun, bytes: false, low: low, high: high}
+}
+
+fn sema_crypto_bytes(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int) -> SemaCryptoBound Never! {
+    SemaCryptoBound{parameter: parameter, reason: reason, noun: noun, bytes: true, low: low, high: Val(high)}
+}
+
+fn sema_crypto_bounds(callee: String) -> [SemaCryptoBound] Never! {
+    output :: DiagnosticCryptoMisuseReason.OutputLength
+    material :: DiagnosticCryptoMisuseReason.InvalidLength
+    nonce :: DiagnosticCryptoMisuseReason.NonceLength
+    if callee == {
+        "core.crypto.hkdf_sha256" | "core.crypto.expert.hkdf_sha256_raw" -> [SemaCryptoBound]{sema_crypto_int("len", output, "output length", 0, Val(8160))}
+        "core.crypto.pbkdf2_hmac" -> [SemaCryptoBound]{
+            sema_crypto_int("iterations", DiagnosticCryptoMisuseReason.IterationCount, "iteration count", 1, None),
+            sema_crypto_int("key_len", output, "key length", 1, Val(67108864)),
+        }
+        "core.crypto.expert.argon2id" -> [SemaCryptoBound]{
+            sema_crypto_bytes("salt", DiagnosticCryptoMisuseReason.SaltLength, "salt", 8, 64),
+            sema_crypto_int("memory_kib", DiagnosticCryptoMisuseReason.MemoryCost, "memory cost in KiB", 8192, Val(262144)),
+            sema_crypto_int("iterations", DiagnosticCryptoMisuseReason.IterationCount, "iteration count", 1, Val(10)),
+            sema_crypto_int("lanes", DiagnosticCryptoMisuseReason.LaneCount, "lane count", 1, Val(8)),
+            sema_crypto_int("output_len", output, "output length", 16, Val(64)),
+        }
+        "core.crypto.expert.xchacha20poly1305_seal" | "core.crypto.expert.xchacha20poly1305_open" -> [SemaCryptoBound]{
+            sema_crypto_bytes("key", material, "key", 32, 32),
+            sema_crypto_bytes("nonce", nonce, "nonce", 24, 24),
+        }
+        "core.crypto.expert.aes256gcm_seal" | "core.crypto.expert.aes256gcm_open" -> [SemaCryptoBound]{
+            sema_crypto_bytes("key", material, "key", 32, 32),
+            sema_crypto_bytes("nonce", nonce, "nonce", 12, 12),
+        }
+        "core.crypto.expert.ed25519_sign" -> [SemaCryptoBound]{sema_crypto_bytes("secret", material, "secret key", 32, 32)}
+        "core.crypto.expert.ed25519_verify_strict" -> [SemaCryptoBound]{
+            sema_crypto_bytes("public", material, "public key", 32, 32),
+            sema_crypto_bytes("signature", material, "signature", 64, 64),
+        }
+        "core.crypto.expert.x25519_raw" -> [SemaCryptoBound]{
+            sema_crypto_bytes("secret_bytes", material, "secret key", 32, 32),
+            sema_crypto_bytes("public_bytes", material, "public key", 32, 32),
+        }
+        else -> [SemaCryptoBound]{}
+    }
+}
+
+// The compiler-known length of a byte-list argument: a written list literal
+// without spreads, or a value of a fixed-length list type.
+fn sema_crypto_known_length(value: Expr, ty: Type) -> Int? Never! {
+    if value == .ListLit(elements, _, _) {
+        loop element in elements {
+            if element == .Spread(_, _, _) -> return None
+        }
+        return Val(elements.len())
+    }
+    if ty == .FixedList(_, length) {
+        if length == .Literal(_, count) -> return Val(count)
+    }
+    None
+}
+
+fn sema_crypto_misuse(operation: String, bound: SemaCryptoBound, expected: String, actual: Int, span: Span) -> Diagnostic Never! {
+    unit :: if !bound.bytes -> "" else if actual == 1 -> " byte" else -> " bytes"
+    over :: if bound.bytes -> " bytes" else -> ""
+    article :: if bound.noun.starts_with("i") || bound.noun.starts_with("o") -> "an" else -> "a"
+    diagnostic := sema_error("E2702", span, "Crypto API misuse", "the {bound.noun} is {actual}{unit}, and `{operation}` takes {expected}{over}, so the call can only fail", "Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass {article} {bound.noun} of {expected}{over}")
+    diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: bound.reason, operation: operation, expected: Val(expected), actual: Val(actual)})
+    diagnostic
+}
+
+// E2702: a call whose compiler-known argument is outside the bound its Core
+// crypto operation documents (sema_crypto_bounds) can only fail. It reads the
+// checked call, so an argument's own type error comes first, and a raw
+// `core.crypto.expert` call outside `#Unsafe` is its E0510 alone. A value only
+// known at run time is the operation's to check. The call stays checked, so
+// the effect solve still reads its arguments; its implicit propagation is not
+// reported again (sema_crypto_misused_call), and an error of any earlier
+// check drops every E2702 (sema_crypto_misuse_precedence).
+fn sema_call_crypto_misuse(callee: String, params: [SemaCallParam], args: [CallArg], values: [TExpr], slots: [Int], context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    if !callee.starts_with("core.crypto.") -> return
+    bounds :: sema_crypto_bounds(callee)
+    if bounds.len() == 0 -> return
+    if callee.starts_with("core.crypto.expert.") && context.unsafe_depth == 0 -> return
+    parts :: callee.split(".").to_list()
+    operation :: parts[parts.len() - 1].copy()
+    memory := Int?{None}
+    iterations := Int?{None}
+    memory_span := Span?{None}
+    refused := false
+    loop bound in bounds {
+        index :: sema_crypto_argument_index(params, slots, bound.parameter) ?? next
+        known :: if bound.bytes -> sema_crypto_known_length(args[index].expr, values[index].ty) else -> sema_call_compute_literal_int(args[index].expr)
+        actual :: known ?? next
+        if bound.parameter == "memory_kib" {
+            memory = Val(actual)
+            memory_span = Val(expr_span(args[index].expr))
+        }
+        if bound.parameter == "iterations" -> iterations = Val(actual)
+        expected := "at least {bound.low}"
+        if bound.high == .Val(high) {
+            if actual >= bound.low && actual <= high -> next
+            expected = if bound.low == high -> "exactly {high}" else -> "{bound.low}..{high}"
+        } else if actual >= bound.low {
+            next
+        }
+        &diagnostics.push(sema_crypto_misuse(operation, bound, expected, actual, expr_span(args[index].expr)))
+        refused = true
+    }
+    if refused || callee != "core.crypto.expert.argon2id" -> return
+    // Argon2id's joint work bound (spec.md, the expert surface): memory cost
+    // × iterations of at most 1048576, each within its own bound above.
+    if memory == .Val(kib) && iterations == .Val(passes) && memory_span == .Val(at) && kib * passes > 1048576 {
+        work :: sema_crypto_int("memory_kib", DiagnosticCryptoMisuseReason.MemoryTimeCost, "memory cost × iterations", 0, Val(1048576))
+        &diagnostics.push(sema_crypto_misuse(operation, work, "at most 1048576", kib * passes, at))
+    }
+}
+
+// Whether the call `source` already has its E2702 among `diagnostics`.
+fn sema_crypto_misused_call(source: Expr?, diagnostics: [Diagnostic]) -> Bool Never! {
+    call :: source ?? return false
+    span :: expr_span(call)
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E2702" -> next
+        if diagnostic.span == .Val(at) {
+            if at.start >= span.start && at.end <= span.end -> return true
+        }
+    }
+    false
+}
+
+// D-CRYPTO-DIAG1=A precedence: E2702 is considered only once syntax, types,
+// effects and every other check pass, so any other error drops each E2702.
+fn sema_crypto_misuse_precedence(diagnostics: &[Diagnostic]) Never! {
+    misused := false
+    other := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E2702" -> misused = true
+        else if diagnostic.severity == DIAGNOSTIC_ERROR -> other = true
+    }
+    if !misused || !other -> return
+    kept := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E2702" -> &kept.push(diagnostic)
+    }
+    diagnostics = kept
+}
+
+fn sema_crypto_argument_index(params: [SemaCallParam], slots: [Int], parameter: String) -> Int? Never! {
+    loop index in 0..<slots.len() {
+        if params[slots[index]].name == parameter -> return Val(index)
+    }
+    None
 }
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is

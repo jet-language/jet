@@ -3979,10 +3979,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 // call edges. The maximal row an open-world call (an unannotated function
 // value, an extern) seeds into `solved` is a ceiling fact (E0743), not a
 // required right, so it never widens the authority the application must hold.
-// The generated typed-CLI entry `__jet_cli_run` (D-SHAPE-CLI1) reads argv and
-// its env fallbacks, prints help and exits on a refusal through Core; that
-// parse is the toolchain's, as the Rust runtime parse was, so only the user
-// functions it dispatches to contribute required effects.
+// The generated typed-CLI entry `__jet_cli_run` (D-SHAPE-CLI1) and the parser
+// it calls, `__jet_cli_parse` of its module (`__jet_cli_parse_<binding>` for
+// `__jet_cli_run_<binding>`; JetSema Registration/CliEntry.jet), read argv and
+// its env fallbacks, print help and exit on a refusal through Core; that parse
+// is the toolchain's, as the Rust runtime parse was, so only the user
+// functions they dispatch to contribute required effects.
 fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_keys: [String]) -> [String] Never! {
     // Each key's first row: a hashed map, only looked up.
     by_key :: ir_first_function_rows(functions)
@@ -3993,18 +3995,20 @@ fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_k
         if name_rows_get_text(by_key, key) == .Val(init) -> &pending.push(init)
     }
     seen := (loop _ in functions -> false)
+    parser := -1
     required := [String]{}
     loop pending.len() > 0 {
         index :: &pending.pop() ?? break
         if seen[index] -> next
         seen[index] = true
-        cli_entry :: functions[index].name.starts_with("__jet_cli_run") && functions[index].key == entry_key
-        if !cli_entry {
+        cli :: index == parser || (functions[index].name.starts_with("__jet_cli_run") && functions[index].key == entry_key)
+        if !cli {
             loop effect_name in functions[index].effects.direct -> &required.push(effect_name)
         }
         loop edge in functions[index].effects.call_edges {
             callee :: name_rows_get_text(by_key, edge) ?? next
-            if cli_entry && functions[callee].module_name.starts_with("core.") -> next
+            if cli && functions[callee].module_name.starts_with("core.") -> next
+            if cli && index != parser && functions[callee].module_identity == functions[index].module_identity && functions[callee].name == functions[index].name.replace("__jet_cli_run", "__jet_cli_parse") -> parser = callee
             &pending.push(callee)
         }
     }

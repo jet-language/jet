@@ -112,7 +112,7 @@ fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> Sem
         if method == "ready" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UDPSocketReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
         if method == "close" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.UDPSocketClose, sema_network_handle_net_result(unit), [SemaCallParam]{}, AccessConvention.Read))
         if method == "receive" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.UDPSocketReceiveDeadline, sema_network_handle_net_result(Type.Named{name: "UDPPacket"}), [SemaCallParam]{sema_network_handle_argument("max_bytes", int), sema_network_handle_deadline()}, AccessConvention.Read))
-        if method == "send_to" && argc == 3 -> return Val(sema_network_handle_spec(THandleOp.UDPSocketSendToDeadline, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_argument("address", string), sema_network_handle_deadline()}, AccessConvention.Read))
+        if method == "send_to" && argc == 3 -> return Val(sema_network_handle_spec(THandleOp.UDPSocketSendToDeadline, sema_network_handle_net_result(int), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_argument("address", Type.Named{name: "SocketAddr"}), sema_network_handle_deadline()}, AccessConvention.Read))
     }
     if owner == "UnixListener" {
         if method == "accept" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.UnixListenerAcceptDeadline, sema_network_handle_net_result(Type.Named{name: "UnixStream"}), [SemaCallParam]{sema_network_handle_deadline()}, AccessConvention.Read))

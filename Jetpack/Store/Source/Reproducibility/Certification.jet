@@ -13,8 +13,8 @@ STORE_REPRO_REPORT_SCHEMA :: "jet-reproducibility-report-v1"
 STORE_REPRO_CERTIFICATION_STAGE_DIR :: "reproducibility-staging"
 STORE_REPRO_INDEPENDENT_PREFIX :: "independent-agreeing-v1:"
 
-store_repro_report_sequence := 0
-store_repro_certification_sequence := 0
+STORE_REPRO_REPORT_SEQUENCE :: shared ProcessSequence{next: 0}
+STORE_REPRO_CERTIFICATION_SEQUENCE :: shared ProcessSequence{next: 0}
 
 fn store_recover_certification_staging_unlocked(roots: HangarRoots) -[FS, Env]> Int StoreError! {
     parent :: files.join(roots.hangar_dir(), STORE_REPRO_CERTIFICATION_STAGE_DIR)
@@ -46,8 +46,7 @@ struct RootWorkspace {
         store_ensure_real_directory(parent, "reproducibility staging")
         path := ""
         loop {
-            sequence :: store_repro_certification_sequence
-            store_repro_certification_sequence += 1
+            sequence :: process_sequence_take(STORE_REPRO_CERTIFICATION_SEQUENCE)
             candidate :: files.join(parent, "{sys.pid()}-{side}-{attempt}-{sequence}")
             files.create_dir(candidate) ?? {
                 if store_io_is_already_exists(err) -> next
@@ -534,8 +533,7 @@ fn store_repro_persist_report(roots: HangarRoots, action_key: String, report: St
         if info.is_symlink || !info.is_file -> return Err(store_repro_invalid("reproducibility evidence path is not a regular file"))
         return Err(store_repro_unreproducible_error(action_key, "this action already has durable unreproducible evidence"))
     }
-    sequence :: store_repro_report_sequence
-    store_repro_report_sequence += 1
+    sequence :: process_sequence_take(STORE_REPRO_REPORT_SEQUENCE)
     partial :: files.join(directory, ".{store_repro_report_file_stem(action_key)}-partial-{sys.pid()}-{sequence}")
     store_repro_publish_report(directory, partial, destination, report) ?? {
         failure :: err

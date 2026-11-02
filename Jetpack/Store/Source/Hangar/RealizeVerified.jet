@@ -644,8 +644,7 @@ fn store_try_substitute_invalid_candidate(verification: &StoreVerification, root
     if candidate.envelope.output_hash == "" || candidate.envelope.output_hash.contains("/") || candidate.out != files.join(objects, candidate.envelope.output_hash) {
         return Ok(false)
     }
-    sequence :: store_substitute_sequence
-    store_substitute_sequence = store_substitute_sequence + 1
+    sequence :: process_sequence_take(STORE_SUBSTITUTE_SEQUENCE)
     stage :: files.join(objects, ".substitute-{process.current_pid()}-{sequence}")
     // Keep the verified private stage inside the Hangar object directory.
     // The production policy permits atomic publication within that sealed
@@ -657,7 +656,7 @@ fn store_try_substitute_invalid_candidate(verification: &StoreVerification, root
     result
 }
 
-store_substitute_sequence := 0
+STORE_SUBSTITUTE_SEQUENCE :: shared ProcessSequence{next: 0}
 
 fn store_substitute_into_stage(verification: &StoreVerification, roots: HangarRoots, candidate: StoreEntry, expectation: CacheExpectation, bindings: [CacheBinding], stage: String) -> Bool StoreError! {
     substituted := false

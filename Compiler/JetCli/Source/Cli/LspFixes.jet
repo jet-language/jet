@@ -15,6 +15,15 @@ struct JetCLIFixApply {
     deferred: Int
 }
 
+// A fix `jet fix` did not apply (FixCommands.jet), and why: one that needs
+// review (`--all` applies it), or one whose edited file no longer checks.
+// The fix log records each (jet_cli_fix_log).
+struct JetCLIFixSkip {
+    title: String
+    edit: TextEdit
+    reason: String
+}
+
 fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {
     fixes := [JetCLIFix]{}
     loop diagnostic in diagnostics {

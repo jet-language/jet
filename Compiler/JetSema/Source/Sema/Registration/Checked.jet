@@ -86,6 +86,7 @@ use jet_foundation.[
     ast_comptime_generated_path,
     comptime_walk_calls,
     comptime_walk_identifiers,
+    diagnostic_registry_row,
     expr_span,
     jet_target_layout_engine_with_registry,
     jet_target_layout_enum_c_tag,
@@ -1129,7 +1130,8 @@ fn sema_checked_foreign_signature(graph: SemaRegistrationGraph, module_identity:
         }
         if {
             pointer_return -> {
-                &diagnostics.push(sema_error("E3202", return_span, "Type `{type_name(return_type)}` cannot cross the C boundary here.", "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe` region", "Move the call inside `#Unsafe`, or change the type to a C-safe value type."))
+                row :: diagnostic_registry_row("E3202") ?? panic("E3202 has no registry row")
+                &diagnostics.push(sema_error("E3202", return_span, row.what.replace("{{ty}}", type_name(return_type)), row.why, row.fix))
                 valid = false
             }
             !sema_checked_foreign_type(graph, return_type, module_identity, c_abi, registered.declaration.generated, handles, [String]{}) -> {
@@ -2129,11 +2131,32 @@ fn sema_checked_allows_float_money(markers: [Marker]) -> Bool Never! {
 fn sema_checked_validate_layout(definition: StructDef, diagnostics: &[Diagnostic]) {
     if definition.layout == .Val(layout) {
         if layout == .CAligned(alignment, target_mode) {
-            if alignment <= 0 || (alignment).bit_and((alignment - 1)) != 0 || (!target_mode && alignment > 1048576) {
-                &diagnostics.push(sema_error("E1119", definition.layout_span ?? definition.name_span, "the requested layout alignment is not usable", "aligned layouts require a positive power-of-two supported by the selected target and portable baseline", "use a positive power-of-two alignment no larger than 1048576, or use target alignment mode"))
+            reason :: if {
+                alignment <= 0 -> "the value is not positive"
+                (alignment).bit_and((alignment - 1)) != 0 -> "the value is not a power of two"
+                !target_mode && alignment > 1048576 -> "the value is larger than the portable baseline of 1048576 bytes"
+                else -> ""
+            }
+            if reason != "" {
+                suggestion :: "{sema_checked_usable_alignment(alignment, target_mode)}"
+                span :: definition.layout_alignment_span ?? (definition.layout_span ?? definition.name_span)
+                row :: diagnostic_registry_row("E1119") ?? panic("E1119 has no registry row")
+                &diagnostics.push(sema_error("E1119", span, row.what.replace("{{value}}", "{alignment}"), row.why.replace("{{reason}}", reason), row.fix.replace("{{suggestion}}", suggestion)))
             }
         }
     }
+}
+
+// The largest power of two at or below `alignment`, at least 1 and, outside
+// target mode, at most the portable baseline.
+fn sema_checked_usable_alignment(alignment: Int, target_mode: Bool) -> Int Never! {
+    limit :: if !target_mode && alignment > 1048576 -> 1048576 else -> alignment
+    usable := 1
+    loop {
+        if usable * 2 > limit -> break
+        usable = usable * 2
+    }
+    usable
 }
 
 // Rust CheckerFieldPolicy.rs `process_computed_fields`: E0382 for a field
@@ -2746,6 +2769,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
             sema_checked_validate_field_policy(value, &diagnostics)
             sema_checked_validate_patchable(value, &diagnostics)
             sema_checked_validate_layout(value, &diagnostics)
+            sema_receipt_validate_declaration(value, &diagnostics)
             fields :: sema_checked_struct_fields(graph, module_row, value, generic_params, &diagnostics)
             kind = Val(TTypeDefKind.Struct{fields: fields, methods: sema_checked_nominal_methods(definition, nominal.methods)})
         }

@@ -1,8 +1,9 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { openStore, empty } from '../app/store.mjs';
+import { openStore, empty, emptyHistory } from '../app/store.mjs';
 import { configFile, historyFile, writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
@@ -80,5 +81,34 @@ test('board state is slim, closed content is lazy, and HTTP responses cache safe
   const activeOnly = await fetch(url('/api/state'));
   assert.equal(activeOnly.status, 200);
   assert.equal(Object.hasOwn(await activeOnly.json(), 'closed'), false);
+});
+
+test('each CLI-style write process reuses an identical history backup instead of copying the archive again', () => {
+  const data = mkdtempSync(join(process.cwd(), '.tower-perf-backup-'));
+  try {
+    writeJSON(join(data, 'tower.json'), empty('Backups'));
+    writeJSON(configFile(data), { project: 'Backups' });
+    writeJSON(historyFile(data), emptyHistory());
+    const storeUrl = new URL('../app/store.mjs', import.meta.url).href;
+    const write = (title) => {
+      const run = spawnSync(process.execPath, ['--input-type=module', '-e',
+        `import { openStore, addCard } from ${JSON.stringify(storeUrl)};
+         openStore(${JSON.stringify(data)}).mutate((s, cfg) => addCard(s, { title: ${JSON.stringify(title)}, by: 'Pip' }, cfg));`,
+      ], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+    };
+    const historyBackups = () => readdirSync(join(data, 'backups')).filter(name => name.startsWith('history-'));
+    write('first');
+    write('second');
+    write('third');
+    assert.equal(historyBackups().length, 1, 'unchanged archive: one history backup serves every write');
+    assert.equal(readdirSync(join(data, 'backups')).filter(name => name.startsWith('tower-')).length, 3, 'undo keeps one live backup per write');
+    assert.equal(readFileSync(join(data, 'backups', historyBackups()[0]), 'utf8'), readFileSync(historyFile(data), 'utf8'));
+    writeJSON(historyFile(data), { ...emptyHistory(), events: [{ type: 'note', at: '2026-10-31T00:00:00.000Z' }] });
+    write('fourth');
+    assert.equal(historyBackups().length, 2, 'a changed archive gets a fresh backup');
+  } finally {
+    rmSync(data, { recursive: true, force: true });
+  }
 });
 

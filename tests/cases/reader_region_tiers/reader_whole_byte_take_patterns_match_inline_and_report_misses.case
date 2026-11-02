@@ -1,0 +1,16 @@
+# A Reader take whose parts are whole bytes (literals, U8, U16/U24/U32/U64 in
+# either byte order) matches inline; a short read or a literal miss still
+# reports the runtime's message and leaves the position, and off-boundary
+# fields and rests keep the runtime scan. Same on every tier.
+fixture: reader_whole_byte_take_patterns_match_inline_and_report_misses.fixture
+step default: jet run main.jet
+exit: 0
+stdout: = reader_whole_byte_take_patterns_match_inline_and_report_misses.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: == default
+step: jet build main.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default

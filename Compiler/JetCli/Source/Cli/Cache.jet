@@ -96,7 +96,7 @@ fn jet_cli_cache_format_size(bytes: Int) -> String Never! {
 fn jet_cli_cache_error(code: String, what: String, why: String, fix: String, json: Bool, exit_code: Int) -[FS, Env]> JetDriverVerbOutput Never! {
     diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
     if json {
-        text :: jet_cli_reports_status_json("status", false, jet_cli_report_cwd(), "", "", [Diagnostic]{diagnostic}).removesuffix("\n")
+        text :: jet_cli_reports_status_json("status", false, jet_cli_report_base(""), "", "", [Diagnostic]{diagnostic}).removesuffix("\n")
         return JetDriverVerbOutput{stdout: text, stderr: "", exit_code: exit_code}
     }
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, false), exit_code: exit_code}

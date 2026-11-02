@@ -624,6 +624,16 @@ fn sema_marker_rules_effect_path(argument: Expr, source_type: String) -> String?
     sema_marker_rules_argument_path(argument)
 }
 
+// The span of the root an argument path starts from: `Bogus` in `Bogus.Write`
+// or in `!Bogus`.
+fn sema_marker_rules_root_span(argument: Expr) -> Span {
+    if argument == .Unary(op, operand, _, _) {
+        if op == UnOp.Not -> return sema_marker_rules_root_span(operand)
+    }
+    if argument == .Field(base, _, _, _) -> return sema_marker_rules_root_span(base)
+    expr_span(argument)
+}
+
 // Whether an argument names an item; an `Effect` argument may name it denied.
 fn sema_marker_rules_names_item(argument: Expr, source_type: String) -> Bool {
     if source_type == "Effect" && argument == .Unary(op, operand, _, _) {
@@ -898,10 +908,13 @@ fn sema_marker_rules_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu
     return if menu.first_variant_segment -> segments[start] else -> segments[segments.len() - 1]
 }
 
-fn sema_marker_rules_unknown_variant_error(marker: Marker, menu: TAppliedRuleArgumentMenu, written: String) -> Diagnostic {
+// A `.Variant` argument is underlined from the rule name; a bare or labeled
+// argument from the `#`, as the Rust checker's snapshots pin.
+fn sema_marker_rules_unknown_variant_error(marker: Marker, menu: TAppliedRuleArgumentMenu, written: String, argument: Expr) -> Diagnostic {
     variants := (loop variant in menu.variants -> "`{variant}`")
     choices := variants.join(", ")
-    sema_error("E0930", marker.span, "`#{marker.name}` has no `{menu.name}` called `{written}`", "`{menu.name}` is a closed menu: {choices}", "pick one of {choices}")
+    start :: if argument == .EnumLit(_, _, _, _, _, _, _) -> marker.name_span.start else -> marker.span.start
+    sema_error("E0930", Span{start: start, end: marker.span.end}, "`#{marker.name}` has no `{menu.name}` called `{written}`", "`{menu.name}` is a closed menu: {choices}", "pick one of {choices}")
 }
 
 fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?, declared: Bool, owns_menu: Bool, registry: SemaScopeMembersMarkerRegistry, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], facts: &[SemaMarkerRuleArgumentFact], comptime_sources: &[SemaComptimeItemSource], comptime_requests: &[SemaComptimeRequest], diagnostics: &[Diagnostic]) -> Bool {
@@ -935,17 +948,28 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
             }
         }
         if !declared && !owns_menu {
-            menu_index_option := sema_marker_rules_menu_index(registry.argument_menus, source_type)
+            // A `[Menu]` parameter checks each written element against the menu.
+            list_menu :: source_type.starts_with("[") && source_type.ends_with("]")
+            menu_type :: if list_menu -> source_type.slice(1, source_type.len() - 1) else -> source_type
+            menu_index_option := sema_marker_rules_menu_index(registry.argument_menus, menu_type)
             if menu_index_option != None {
                 menu_index :: menu_index_option ?? return false
                 menu := registry.argument_menus[menu_index]
+                elements := [Expr]{argument}
+                if list_menu {
+                    elements = if argument == .ListLit(items, _, _) -> items else -> [Expr]{}
+                }
                 if menu.variants.len() > 0 {
-                    path :: sema_marker_rules_effect_path(argument, source_type)
-                    if path == .Val(value) {
-                        candidate := sema_marker_rules_menu_candidate(value, menu)
-                        if candidate != "" && !menu.variants.contains(candidate) {
-                            &diagnostics.push(sema_marker_rules_unknown_variant_error(marker, menu, candidate))
-                            return false
+                    loop element in elements {
+                        path :: sema_marker_rules_effect_path(element, menu_type)
+                        if path == .Val(value) {
+                            candidate := sema_marker_rules_menu_candidate(value, menu)
+                            if candidate != "" && !menu.variants.contains(candidate) {
+                                // An unknown effect root is the effect vocabulary's own E0119, reported once.
+                                unknown :: if menu.name == "Effect" -> sema_effect_unknown(candidate, sema_marker_rules_root_span(element)) else -> sema_marker_rules_unknown_variant_error(marker, menu, candidate, element)
+                                &diagnostics.push(unknown)
+                                return false
+                            }
                         }
                     }
                 }
@@ -2103,7 +2127,7 @@ fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironme
     if call.name != "print" && call.name != "input" -> return false
     if !sema_module_no_prelude(environment, program) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
     name :: call.name
-    &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use core.term as io` and call `io.{name}(…)`, or remove `#NoPrelude`"))
+    &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use io :: core.term` and call `io.{name}(…)`, or remove `#NoPrelude`"))
     loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     true
 }

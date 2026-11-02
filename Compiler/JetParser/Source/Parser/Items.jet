@@ -2,6 +2,7 @@
 // Rust parser or semantic compiler is involved.
 use jet_foundation.[
     AccessConvention,
+    AppliedRuleApplication,
     CLICommandBinding,
     CallLabel,
     ConstAttr,
@@ -40,6 +41,7 @@ use jet_foundation.[
     PatSlot,
     Pattern,
     PrepParam,
+    RuleSite,
     RustConstKind,
     Span,
     StateDecl,
@@ -73,6 +75,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     expr_span,
     diagnostic_with_edit,
+    marker_registered,
 ]
 use jet_lexer.[
     TOKEN_AMP,
@@ -131,7 +134,8 @@ use jet_lexer.[
 
 struct ParsedItemOrImport {
     item: Item?
-    import: ImportDecl?
+    // One import for a `use` line, one per row for a `use { … }` block.
+    imports: [ImportDecl]{[ImportDecl]{}}
     handled: Bool
 }
 
@@ -206,85 +210,82 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
     // item/file rules before the dedicated C-module parser sees the head.
     if parser_c_module_ahead_at(&state, 0) {
         value :: parser_parse_c_module(&state)
-        return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+        return ParsedItemOrImport{item: Val(value), handled: true}
     }
     modifiers :: parser_parse_item_modifiers(&state, true)
     if {
         parser_module_ahead(&state) -> {
             value :: parser_parse_module(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_test_ahead(&state) -> {
             value :: parser_parse_test(&state)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_unit_family_ahead(&state) -> {
             value :: parser_parse_unit_family(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_distinct_ahead(&state) -> {
             value :: parser_parse_distinct(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_type_alias_ahead_at(&state, 0) -> {
             value :: parser_parse_type_alias(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
         }
         parser_state_section_ahead(&state) -> {
             section_start :: parser_current(&state).span
             section := parser_parse_state_section(&state, "", section_start)
             parser_report_ineligible_state_section(&state, section, "module")
-            return ParsedItemOrImport{item: None, import: None, handled: true}
+            return ParsedItemOrImport{item: None, handled: true}
         }
         parser_state_ahead(&state) -> {
             declaration := parser_parse_state_decl(&state, modifiers)
             parser_report_top_level_state_decl(&state, declaration)
-            return ParsedItemOrImport{item: None, import: None, handled: true}
+            return ParsedItemOrImport{item: None, handled: true}
         }
         parser_protocol_ahead(&state) -> {
             value :: parser_parse_protocol(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_marker_decl_ahead(&state) -> {
             value :: parser_parse_marker_decl(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_fact_decl_ahead(&state) -> {
             value :: parser_parse_fact_decl(&state)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_tag_decl_ahead(&state) -> {
             value :: parser_parse_tag_policy(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_migration_ahead(&state) -> {
             value :: parser_parse_migration(&state)
-            return ParsedItemOrImport{item: Val(Item.Migration{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Migration{value: value}), handled: true}
         }
         parser_item_declaration_ahead_at(&state, 0) && parser_extern_ahead(&state) -> {
             value :: parser_parse_extern_rust(&state)
-            return ParsedItemOrImport{item: Val(value), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_current_kind(&state) == TOKEN_KW_USE -> {
-            import := parser_parse_import(&state)
-            import.is_pub = modifiers.reexport
-            import.is_package_pub = false
-            return ParsedItemOrImport{item: None, import: Val(import), handled: true}
+            return ParsedItemOrImport{item: None, imports: parser_parse_import(&state, modifiers.reexport), handled: true}
         }
     }
     token :: parser_current(&state)
     if {
         parser_output_ahead_at(&state, 0) -> {
             value :: parser_parse_output(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Const{value: value}), handled: true}
         }
         parser_output_defaults_ahead_at(&state, 0) -> {
             value :: parser_parse_output_defaults(&state)
-            return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Const{value: value}), handled: true}
         }
         parser_template_loop_ahead(&state) -> {
             value :: parser_parse_template_loop(&state)
-            return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), handled: true}
         }
         // An ALL_CAPS `NAME :: value` in an inline module body is a module
         // constant, and so is `Name :: path` until sema reads what the path
@@ -292,41 +293,41 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         // reaching here.
         parser_marked_const_ahead(&state, 0) || parser_path_binding_ahead_at(&state, 0) -> {
             value :: parser_parse_const(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Const{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_FN -> {
             parsed :: parser_parse_function(&state, modifiers, true)
-            return ParsedItemOrImport{item: Val(Item.Func{value: parsed.value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Func{value: parsed.value}), handled: true}
         }
         token.kind == TOKEN_KW_STRUCT -> {
             value :: parser_parse_struct(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Struct{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_ENUM -> {
             value :: parser_parse_enum(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Enum{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Enum{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_TRAIT -> {
             value :: parser_parse_trait(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Trait{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Trait{value: value}), handled: true}
         }
-        token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(&state)), import: None, handled: true}
-        token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(&state, modifiers)), import: None, handled: true}
+        token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(&state)), handled: true}
+        token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(&state, modifiers)), handled: true}
         token.kind == TOKEN_KW_EFFECT -> {
             value :: parser_parse_effect_decl(&state)
-            return ParsedItemOrImport{item: Val(Item.EffectDecl{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.EffectDecl{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_TAG -> {
             value :: parser_parse_tag_decl(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Tag{value: value}), import: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.Tag{value: value}), handled: true}
         }
-        token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(&state)), import: None, handled: true}
+        token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(&state)), handled: true}
         token.kind == TOKEN_KW_DERIVE -> {
-            value :: parser_parse_user_derive(&state) ?? return ParsedItemOrImport{item: None, import: None, handled: true}
-            return ParsedItemOrImport{item: Val(Item.UserDerive{value: value}), import: None, handled: true}
+            value :: parser_parse_user_derive(&state) ?? return ParsedItemOrImport{item: None, handled: true}
+            return ParsedItemOrImport{item: Val(Item.UserDerive{value: value}), handled: true}
         }
     }
-    ParsedItemOrImport{item: None, import: None, handled: false}
+    ParsedItemOrImport{item: None, handled: false}
 }
 fn parser_report_top_level_state_decl(state: &JetParserState, declaration: StateDecl) {
     state_names := ""
@@ -524,23 +525,67 @@ fn parser_marker_first_expr(marker: Marker) -> Expr? {
     }
 }
 
-fn parser_parse_import(state: &JetParserState) -> ImportDecl {
-    start :: parser_bump(&state)
+// `use ROW` or a `use { … }` block with one ROW per line (#6542). A row is
+// a module path, a member list, or a "file" path, any of them after an
+// `alias ::`: `alias :: path` means what `use path as alias` means. `pub`
+// before `use` re-exports every row.
+fn parser_parse_import(state: &JetParserState, is_pub: Bool) -> [ImportDecl] {
+    keyword :: parser_bump(&state)
+    imports := [ImportDecl]{}
+    if parser_current_kind(&state) != TOKEN_LBRACE {
+        import := parser_parse_import_row(&state, keyword.span)
+        import.is_pub = is_pub
+        &imports.push(import)
+        return imports
+    }
+    open :: parser_bump(&state)
+    parser_skip_semicolons(&state)
+    if parser_current_kind(&state) == TOKEN_RBRACE {
+        parser_add_error(&state, open.span, "a `use` block cannot be empty", "a `use {{ … }}` block lists one import per line", "write one import per line inside the braces, or delete the block")
+    }
+    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
+        before :: state.position
+        row_start :: parser_current(&state).span
+        import := parser_parse_import_row(&state, row_start)
+        import.is_pub = is_pub
+        &imports.push(import)
+        parser_skip_semicolons(&state)
+        // A row that read nothing (a stray token) must not stall the block.
+        if state.position == before -> parser_bump(&state)
+    }
+    parser_expect(&state, TOKEN_RBRACE, "`}}` after the rows of a `use` block")
+    parser_finish_statement(&state)
+    imports
+}
+
+// One import row: `use` has been read, and `start` is where the import's
+// span begins (the `use` keyword, or the row's first token in a block).
+fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
+    named := Token?{None}
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON {
+        named = Val(parser_bump(&state))
+        parser_bump(&state)
+    }
     token :: parser_current(&state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         path :: parser_bump(&state)
         alias := parser_path_basename(parser_value(state, path))
-        alias_span := start.span
+        alias_span := start
+        if named == .Val(name) {
+            alias = parser_value(state, name)
+            alias_span = name.span
+        }
         if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-            parser_bump(&state)
+            word :: parser_bump(&state)
             alias_token :: parser_expect_name(&state, "after `as` in an import")
+            if named != None -> parser_import_second_alias(&state, word.span, alias)
             alias = parser_value(state, alias_token)
             alias_span = alias_token.span
         }
         parser_finish_statement(&state)
         end := path.span
         if state.position > 0 -> end = parser_lookahead(&state, -1).span
-        return ImportDecl{kind: ImportKind.File{path: parser_value(state, path), span: path.span}, alias: alias, alias_span: alias_span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+        return ImportDecl{kind: ImportKind.File{path: parser_value(state, path), span: path.span}, alias: alias, alias_span: alias_span, span: parser_cover(start, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
     }
     first :: parser_expect_name(&state, "after `use`")
     path := parser_value(state, first)
@@ -559,14 +604,18 @@ fn parser_parse_import(state: &JetParserState) -> ImportDecl {
     if parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
         if parser_current_kind(&state) == TOKEN_LBRACKET {
-            return parser_parse_import_member_list(&state, start.span, path, module_span)
+            if named == .Val(name) {
+                named_text :: parser_value(state, name)
+                parser_add_error(&state, name.span, "a member list takes no `{named_text} ::` alias", "`alias :: path` names one module or item, and a member list names several", "drop `{named_text} ::`, or write one `alias :: {path}.member` row per member")
+            }
+            return parser_parse_import_member_list(&state, start, path, module_span)
         }
         if parser_current_kind(&state) == TOKEN_STAR {
             star :: parser_bump(&state)
             parser_add_fatal_code(&state, "E0612", star.span, "wildcard imports are not supported", "`use {path}.*` would hide where each name comes from", "list each item instead: `use {path}.[item, other]`")
             parser_finish_statement(&state)
             end := parser_lookahead(&state, -1).span
-            return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start.span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+            return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start, span: parser_cover(start, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
         }
         if parser_current_kind(&state) == TOKEN_LBRACE {
             open :: parser_bump(&state)
@@ -580,22 +629,28 @@ fn parser_parse_import(state: &JetParserState) -> ImportDecl {
             parser_add_error(&state, open.span, "brace import groups are not supported", "`use {path}.{{…}}` is the retired grouped-import spelling", "write `use {path}.[item, other as local]`")
             parser_finish_statement(&state)
             end := parser_lookahead(&state, -1).span
-            return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start.span, span: parser_cover(start.span, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+            return ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: parser_value(state, parts[parts.len() - 1]), alias_span: start, span: parser_cover(start, end), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
         }
         suffix :: parser_current(&state)
         parser_add_error(&state, suffix.span, "expected an import member suffix after `.`", "a trailing import dot starts a member list or wildcard suffix", "write `.[member]` after the module path")
     }
     alias := parser_value(state, parts[parts.len() - 1])
     alias_span := first.span
-    if parts.len() > 1 -> alias_span = start.span
+    if parts.len() > 1 -> alias_span = start
     inline_version := InlineVersion?{None}
     if parts.len() == 1 && parser_current_kind(&state) == TOKEN_HASH {
         inline_version = Val(parser_parse_inline_version(&state))
     }
     explicit_alias := false
+    if named == .Val(name) {
+        alias = parser_value(state, name)
+        alias_span = name.span
+        explicit_alias = true
+    }
     if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-        parser_bump(&state)
+        word :: parser_bump(&state)
         alias_token :: parser_expect_name(&state, "after `as` in an import")
+        if named != None -> parser_import_second_alias(&state, word.span, alias)
         alias = parser_value(state, alias_token)
         alias_span = alias_token.span
         explicit_alias = true
@@ -603,12 +658,17 @@ fn parser_parse_import(state: &JetParserState) -> ImportDecl {
     parser_finish_statement(&state)
     end := last_span
     if state.position > 0 -> end = parser_lookahead(&state, -1).span
-    span := parser_cover(start.span, end)
+    span := parser_cover(start, end)
     if parts.len() == 2 && !explicit_alias {
         item_span := parts[1].span
         return ImportDecl{kind: ImportKind.Unqualified{module_alias: parser_value(state, first), module_alias_span: first.span, items: [ImportedItem]{ImportedItem{original: parser_value(state, parts[1]), alias: None}}, items_span: item_span, span: span}, alias: alias, alias_span: item_span, span: span, item_spans: [Span]{item_span}, local_spans: [Span]{item_span}, is_pub: false, is_package_pub: false, inline_version: None}
     }
     ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: alias, alias_span: alias_span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: inline_version}
+}
+
+// `alias :: path as other`: a row has one alias.
+fn parser_import_second_alias(state: &JetParserState, span: Span, alias: String) {
+    parser_add_error(&state, span, "this import already has the alias `{alias}`", "`{alias} :: path` names the import, so `as` would name it twice", "delete `as` and the name after it")
 }
 
 fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_alias: String, module_alias_span: Span) -> ImportDecl {
@@ -824,6 +884,12 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
     if parser_current_kind(&state) == TOKEN_HASH {
         marker :: parser_parse_marker(&state)
         root = marker.name == "Root"
+        // An unregistered name applies to the parameter site, where sema
+        // reports it from the shared applied-rule vocabulary (E0927).
+        if !marker_registered(marker.name) {
+            span :: marker.span
+            &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(span), site: Val(RuleSite.Parameter)})
+        }
     }
     convention := AccessConvention.Read
     access_kind :: parser_current_kind(&state)
@@ -1821,6 +1887,7 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     parser_apply_struct_type_markers(&value, modifiers.markers)
     value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
     value.layout_span = parser_layout_marker_span(modifiers.markers, modifiers.grouped_markers, value.layout)
+    value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(modifiers.markers) else -> None
     if parser_current_kind(&state) != TOKEN_LBRACE {
         parser_add_error_here(&state, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
         return value
@@ -2327,6 +2394,15 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             parser_report_ineligible_state_section(&state, section, "trait")
             next
         }
+        // An unregistered marker before a trait member applies to the method
+        // site, where sema reports it from the shared applied-rule
+        // vocabulary (E0927); the member after it still parses.
+        if parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && !marker_registered(parser_value_at(&state, 1)) {
+            marker :: parser_parse_marker(&state)
+            span :: marker.span
+            &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(span), site: Val(RuleSite.Method)})
+            next
+        }
         if {
             parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "type" -> {
                 kw :: parser_bump(&state)
@@ -2390,11 +2466,32 @@ fn parser_parse_trait_bounds(state: &JetParserState, list_context: String, close
     }
     loop {
         bound :: parser_expect_name(&state, single_context)
-        &bounds.push(parser_value(state, bound))
+        bound_name :: parser_value(state, bound)
+        if bound_name == "Quantity" && parser_current_kind(&state) == TOKEN_LT {
+            &bounds.push(parser_parse_quantity_bound(&state))
+        } else {
+            &bounds.push(bound_name)
+        }
         if parser_current_kind(&state) != TOKEN_PIPE -> break
         parser_bump(&state)
     }
     bounds
+}
+
+// `Quantity<Dimension, .Kind>` bounds a parameter to the quantities of one
+// dimension and kind. The dimension is any family name; the kind is the
+// closed set `.Linear`, `.Point`, `.Delta`. The bound is kept as its canonical
+// text, `Quantity<Length, .Linear>`.
+fn parser_parse_quantity_bound(state: &JetParserState) -> String {
+    parser_bump(&state)
+    dimension :: parser_expect_name(&state, "for the quantity dimension")
+    parser_expect(&state, TOKEN_COMMA, "`,` between the quantity dimension and kind")
+    parser_expect(&state, TOKEN_DOT, "`.` before the quantity kind")
+    kind_token :: parser_expect_name(&state, "for the quantity kind")
+    kind :: parser_value(state, kind_token)
+    if kind != "Linear" && kind != "Point" && kind != "Delta" -> parser_add_error(&state, kind_token.span, "`.{kind}` is not a quantity kind", "Quantity bounds distinguish linear values, affine points, and affine deltas", "Use `.Linear`, `.Point`, or `.Delta`")
+    if parser_type_close_here(&state) -> parser_take_type_close(&state) else -> parser_expect(&state, TOKEN_GT, "`>` after the quantity kind")
+    "Quantity<{parser_value(state, dimension)}, .{kind}>"
 }
 
 // The one parenthesized right-hand type allowed on an

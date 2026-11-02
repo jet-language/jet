@@ -15,11 +15,15 @@ fn read_fraction() -> F32 { fraction }
 fn read_precise() -> Float { precise }
 fn read_constant() -> I64 { CONSTANT_I64 }
 
+// A function writes a plain module `:=` only inside `#Unsafe`
+// (D-MODULE-WRITE1=A); the writes still check against each declared type.
 #Test("scalar_global_fixtures") {
-    root = I64{3}
-    argc = I64{-2}
-    small = U8{1}
-    enabled = Bool{true}
-    fraction = F32{2.5}
-    precise = Float{3.5}
+    #Unsafe("single-threaded test: plain module writes of each scalar type") {
+        root = I64{3}
+        argc = I64{-2}
+        small = U8{1}
+        enabled = Bool{true}
+        fraction = F32{2.5}
+        precise = Float{3.5}
+    }
 }

@@ -48,7 +48,7 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
                 loop byte in ciphertext -> &generated.push(byte)
                 assert_eq(generated, envelope)
             }
-            assert_eq(expert.open_v1(key, envelope), Ok(plain))
+            assert_eq(expert.open_v1(key, envelope) ?? panic("v1 open"), plain)
             loop mode in 0..<5 {
                 hostile := envelope.copy()
                 if mode == 0 -> hostile[0] = (U8{Int.from_u8(hostile[0]).bit_xor(1)})
@@ -60,10 +60,19 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
                 }
                 if mode == 4 -> &hostile.push(U8{0})
                 // expert.jet609-620: all failures intentionally OpenFailed.
-                assert_eq(expert.open_v1(key, hostile), Err(crypto.CryptoError.OpenFailed))
+                if expert.open_v1(key, hostile) == {
+                    .Ok(_) -> panic("hostile v1 envelope opened")
+                    .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
+                }
             }
         }
-        assert_eq(expert.open_v1(filled(0, 31), filled(0, 34)), Err(crypto.CryptoError.OpenFailed))
-        assert_eq(expert.open_v1(key, filled(0, 33)), Err(crypto.CryptoError.OpenFailed))
+        if expert.open_v1(filled(0, 31), filled(0, 34)) == {
+            .Ok(_) -> panic("31-byte key opened")
+            .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
+        }
+        if expert.open_v1(key, filled(0, 33)) == {
+            .Ok(_) -> panic("33-byte envelope opened")
+            .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
+        }
     }
 }

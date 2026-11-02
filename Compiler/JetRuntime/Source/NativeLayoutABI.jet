@@ -75,7 +75,9 @@ fn layout_inner_release(inner: I64) {
     coll_zero(root, I64{104})
     layout_list_init(wrapping(root + I64{8}))
     layout_put(wrapping(root + I64{32}), I64{24})
-    layout_registry_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        layout_registry_root = root
+    }
 }
 fn rt_layout_registry_drop_address() -> I64 {
     // Native-approved RuntimeLibrary FunctionAddress intrinsic (arity 1).

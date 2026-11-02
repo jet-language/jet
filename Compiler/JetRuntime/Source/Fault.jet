@@ -19,7 +19,8 @@
 // mapping (HOST_AT_IMAGE), else /proc/self/exe mapped read-only, so `jet
 // run` and the built program print the same report. The report never
 // allocates: every byte goes through one buffer on the alternate stack to
-// fd 2. Source lines are read from the file the table names.
+// fd 2. Source lines are read from the file the table names, under the
+// compilation directory, else under the working directory.
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
 fn rt_fault_signal_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
@@ -42,13 +43,21 @@ fault_backtrace := I64{0}
 
 // The image's entry passes a `brief` or `off` backtrace before it runs
 // anything else (JetIR ir_entry_function).
-#Export(c) fn jet_rt_fault_backtrace(mode: I64) { fault_backtrace = mode }
+#Export(c) fn jet_rt_fault_backtrace(mode: I64) {
+    #Unsafe("the image's entry calls this before it starts any other thread") {
+        fault_backtrace = mode
+    }
+}
 
 // The handler for the four fatal signals, and the calling thread's
 // alternate stack. jet_rt_main calls it once per entry; a loaded-image host
 // running another entry on the same thread keeps the first stack.
 fn fault_start() {
-    if (fault_main_stack == I64{0}) -> fault_main_stack = fault_stack_start()
+    if (fault_main_stack == I64{0}) {
+        #Unsafe("jet_rt_main calls this on the main thread before the entry runs") {
+            fault_main_stack = fault_stack_start()
+        }
+    }
     handler :: rt_fault_signal_address()
     fault_action(I64{11}, handler)
     fault_action(I64{7}, handler)

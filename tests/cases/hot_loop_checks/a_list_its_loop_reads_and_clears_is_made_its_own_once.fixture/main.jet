@@ -1,0 +1,46 @@
+// words' token is read by String.from_bytes (a copy), emptied by clear and
+// grown by push: nothing in its loop shares its buffer. kept's loop keeps
+// copies of its token, so each push there makes the token its own again.
+fn words(bytes: [U8]) {
+    token := [U8]{}
+    space :: U8{32}
+    loop byte in bytes {
+        if byte == space {
+            if !token.is_empty() {
+                word :: String.from_bytes(token) ?? "<bad>"
+                print("w {token.len()} {word}")
+                &token.clear()
+            }
+        } else {
+            &token.push(byte)
+        }
+    }
+}
+
+fn kept(bytes: [U8]) {
+    token := [U8]{}
+    space :: U8{32}
+    copies := [[U8]]{}
+    loop byte in bytes {
+        if byte == space {
+            &copies.push(token.copy())
+            &token.clear()
+        } else {
+            &token.push(byte)
+            &copies.push(token.copy())
+        }
+    }
+    loop item in copies {
+        word :: String.from_bytes(item) ?? "<bad>"
+        print("k {item.len()} {word}")
+    }
+}
+
+fn run() {
+    bytes := "one two  thréé longerthanfour".bytes()
+    &bytes.push(U8{32})
+    &bytes.push(U8{255})
+    &bytes.push(U8{32})
+    words(bytes.copy())
+    kept(bytes)
+}

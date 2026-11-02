@@ -24,16 +24,13 @@ renumber one. Lexer, parser, and semantic checks raise the row that owns the
 violated rule; the CLI, LSP, machine reports, web pages, and backends project
 those rows rather than defining a second message or exposing raw backend text.
 
-Retired marker spellings retain their `$retired` replacement in
-`Prelude/Markers.jet`. Parser recovery must teach that same replacement and
-must not reinterpret a retired foreign import as a binding-generator module.
 Known declaration heads such as `#Import module c.<lib>` are parsed as items
 before unresolved library marker heads are retained as file-level rule facts.
 
 Lexical recovery does not end diagnostic collection: the retained token stream
-is parsed so parser-owned teaching (including retired operators) accompanies
-lexer errors. Failed embedded-Core parses keep the Core source identity and
-text through loader-error conversion, just as successful parses do.
+is parsed so parser-owned teaching accompanies lexer errors. Failed
+embedded-Core parses keep the Core source identity and text through
+loader-error conversion, just as successful parses do.
 
 ## Plain-words rubric
 
@@ -130,6 +127,14 @@ Repeated codes are not deduplicated. Every field comes from that cause's own
 and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
+
+A report's `file` fields (the root's, each cause's and each `fix_edits`
+entry's) are absolute paths, so a report stays resolvable from any working
+directory. An E2702 crypto-misuse report is the exception (D-CRYPTO-DIAG1):
+it names a source relative to the project the checked input belongs to (its
+workspace, repository or package root), else relative to the working
+directory, else by its file name, so it never carries the machine's
+directory layout.
 
 Registry-supplied machine next actions must apply to the actual diagnostic,
 not leak a registry example's names. E0104's `no_fix_reason.next` directs the

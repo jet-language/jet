@@ -256,7 +256,9 @@ fn source_shared_free(payload: I64, meta: I64) {
 // runtime-init: 4 when source_borrows
 #Export(c) fn jet_rt_source_shared_init() {
     if (source_borrows == I64{0}) {
-        source_borrows = jet_rt_alloc(I64{16}, I64{8})
+        #Unsafe("runtime-init runs before any other thread exists") {
+            source_borrows = jet_rt_alloc(I64{16}, I64{8})
+        }
         thread_zero(source_borrows, I64{16})
     }
 }

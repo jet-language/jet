@@ -82,6 +82,8 @@ fn jet_cli_emit_ast_find_methods(methods: [Func], name: String, found: &[JetCLIE
     }
 }
 
+// One `use` line in current syntax (#6542): a module or file alias prints as
+// `alias :: path`.
 fn jet_cli_emit_ast_import(import: ImportDecl) -> String Never! {
     target :: if import.kind == {
         .File(path, _) -> jet_cli_debug_quote(path)
@@ -93,7 +95,7 @@ fn jet_cli_emit_ast_import(import: ImportDecl) -> String Never! {
     }
     if import.kind == .Unqualified(_, _, _, _, _) -> return "use {target}"
     if import.alias == "" || import.alias == target -> return "use {target}"
-    "use {target} as {import.alias}"
+    "use {import.alias} :: {target}"
 }
 
 fn jet_cli_emit_ast_imported(item: ImportedItem) -> String Never! {

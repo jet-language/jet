@@ -383,7 +383,7 @@ fn jet_cli_expand_available_lenses() -> String Never! {
 fn jet_cli_expand_usage(code: String, what: String, why: String, fix: String, json: Bool, color: Bool, list_lenses: Bool) -> JetCLIExpandParse {
     if json {
         diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
-        output :: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{diagnostic})
+        output :: jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{diagnostic})
         return JetCLIExpandParse.Done{output: JetDriverVerbOutput{stdout: output, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     }
     text_why :: if code == "E2941" -> "jet prove accepts only its registered proof lenses" else -> jet_cli_why(code)

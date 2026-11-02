@@ -109,8 +109,12 @@ fn sema_call_check_special_approx(call: Call, expected: Type?, environment: Sema
         }
         else -> Type.Float
     }
-    line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
-    converted :: sema_expr_numeric_conversion(argument, target, call.name_span, line) ?? argument
+    // `approx` is the one explicit lossy crossing (core-library "approx(value)
+    // explicitly accepts possible precision loss"): the whole number rounds to
+    // the nearest float through a plain cast, never the exactness-checked
+    // crossing that stops on a value it cannot hold exactly.
+    rust_type :: sema_expr_numeric_rust_type(target) ?? "f64"
+    converted :: TExpr{ty: target, kind: TExprKind.NumericMethod{receiver: argument, operation: TNumericOp.CastAs{dst_rust: rust_type}}, span: call.name_span}
     checked :: sema_expr_expected(converted, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }

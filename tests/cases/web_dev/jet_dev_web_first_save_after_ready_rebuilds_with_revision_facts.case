@@ -7,14 +7,14 @@ env: NO_COLOR=1
 stderr: null
 recv app line until ~ "App preview: " timeout 120s # original waits for the dev server readiness line
 capture: port = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
-cap:port: is-u32
+cap:port: is-u32 # the listener URL ends in a numeric port
 json: cap:port doc $ <= 65535
 copy: edited.source app.jet
 step: jet test claims
 env: S5_PORT={cap:port}
 env: S5_PHASE=accepted
 exit: 0
-recv app line until ~ "\"action\":\"dev.rebuild\"" timeout 10s
+recv app line until ~ "\"action\":\"dev.rebuild\"" timeout 10s # original waits for the rebuilt status line
 stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ^= "{\"schema\":\"jet.status/v1\"" # original rebuilt.starts_with
 stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"ok\":true,\"reports\":[]" # original rebuilt.contains
 stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"candidate\":null" # original rebuilt.contains
@@ -25,7 +25,7 @@ step: jet test claims
 env: S5_PORT={cap:port}
 env: S5_PHASE=rejected
 exit: 0
-recv app line until ~ "\"action\":\"dev.rebuild\"" timeout 10s
+recv app line until ~ "\"action\":\"dev.rebuild\"" timeout 10s # original waits for the rejected status line
 stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"ok\":false" # original rejected.contains
 stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "\"schema\":\"jet.report/v3\"" # original rejected.contains
 stdout.filter(~ "\"action\":\"dev.rebuild\"").line(0): ~ "E0003" # original rejected.contains

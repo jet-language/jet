@@ -20,6 +20,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
+| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: path` imports the module that `use path as alias` names, and an `owner.x` that names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row | — |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
@@ -4484,7 +4485,7 @@ running: `Int` mixed with `Float` gives `Float`, `/` always gives `Float`, and
 any other mismatch stops naming both kinds. `==`/`!=` compare contents and keep
 `Int` and `Float` distinct; `< <= > >=` mix numbers, compare `Text` and `Bytes`
 in order and `DateTime` by instant, and stop on other kinds. A `Dyn` is never a
-condition (E0170). Its own members are `get`, `has`, `keys`, `remove`, `len`,
+condition (E0173). Its own members are `get`, `has`, `keys`, `remove`, `len`,
 `decode`, `to_text`, `field`, `at`, `int`, `float`, `text`, `bool`,
 `equal_unordered`, and `encode`; a field with one of those names is reached
 with `row["len"]` (E0171). Printing shows a value's `to_text()` and containers
@@ -5682,7 +5683,13 @@ execution waits on sandbox/provenance proof. D-BUILDSCHED1=A: the scheduler is
 deterministic with automatic parallelism and named resource pools (`cpu`,
 `memory`, `linker`, `console`, `gpu`). D-BUILDQUERY1=A: graph inspection is
 `jet inspect graph`, `jet inspect query build`, and `jet inspect explain-build <target/file/action>`,
-with the LSP using the same graph/provenance model.
+with the LSP using the same graph/provenance model. D-EXPLAIN-NORECORD1=A
+(ratified 2026-11-01, #4893): `jet inspect explain-build` always lists the
+planned steps (kind, key, subject, inputs) and lists measured steps only when a
+build record exists. With no record it exits 0, prints `no build recorded for
+<program> yet; planned steps:` and the planned rows, and its JSON has
+`nodes: []` plus the always-present `planned` list; no time or reason is
+printed for a step that has not run. A record for another program keeps E2104.
 
 **D-FFI-BUILD1=A — explicit preview and acceptance activate imported builds**
 *(ratified 2026-09-05, #2933)*:

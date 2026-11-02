@@ -39,7 +39,9 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     envelope :: crypto.seal([recipient.public_key()], plaintext, [U8]{}) ?? panic("seal")
     assert_eq(crypto.open(recipient, envelope, [U8]{}) ?? panic("open"), plaintext)
     signing :: crypto.SigningKey.new_random() ?? panic("keygen")
-    assert_eq(signing.bytes.len(), 32)
+    #Unsafe("crypto expert: the test reads the generated seed length") {
+        assert_eq(expert.signing_key_bytes(signing).len(), 32)
+    }
     assert_eq(signing.public_key().bytes.len(), 32)
     password :: crypto.Secret.from_text("password")
     stored :: crypto.password_hash(password) ?? panic("hash")

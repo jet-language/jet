@@ -75,6 +75,14 @@ fn host_i32(value: I64) -> I64 {
     jet_rt_process_exit(native)
 }
 
+// process.exit in a program that owns its main (JetIR EntryOwned.jet): it
+// runs under no root and starts no task, so no stop is ever delivered to it
+// and jet_std_process_exit would take its last step: the exit handlers run
+// and the process exits here. It links none of the root's stop publishing.
+#Export(c) fn jet_std_process_exit_owned(code: I64) {
+    jet_rt_process_exit(host_i32(code))
+}
+
 // Raw tuples marshal into the generator's separate out slots, never a boxed
 // tuple. Bool is one byte; exact Int success/error facts fit inline words.
 fn host_sample_out(result: I64, available: I64, value: I64, errno: I64) {

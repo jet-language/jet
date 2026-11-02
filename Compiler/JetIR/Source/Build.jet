@@ -44,10 +44,20 @@ struct IRWriteBack { cell: Int, slot: Int }
 
 // An open loop: `exit` is the Block that `break` leaves, `next` the
 // construct that `next` (continue) leaves or restarts; `mark` the bindings
-// visible when it opened (leaving it drops the owned ones declared since).
+// visible when it opened (leaving it drops the owned ones declared since);
+// `guards` the statement guards held when it opened (leaving it drops the
+// ones taken since, ir_exit_statement_guards).
 // A valued loop (`x :: loop { ... break v }`) writes its break value into
 // `value` (-1: a statement loop).
-struct IRLoopFrame { label: String?, exit: Int, next: Int, mark: Int, value: Int{-1} }
+struct IRLoopFrame { label: String?, exit: Int, next: Int, mark: Int, guards: Int, value: Int{-1} }
+
+// A guard a temporary in the statement being built took, or a temporary
+// with cleanup lent to a read parameter (IRBuilder statement_guards): its
+// slot, and where it was taken: the innermost open construct then (-1:
+// none) and, for an If, its Else then (-1: the then part), so an early exit
+// ends it only where it is held. `glue` closes the temporary first (-1: it
+// only drops); `drops` is whether its type has a drop.
+struct IRStatementGuard { slot: Int, opener: Int, part: Int, glue: Int{-1}, drops: Bool{true} }
 
 // An open `.expect_fail` region (BuildTests.jet ir_scope_member): `scope`
 // the slot holding its scope id, `exit` the Block a caught stop leaves,
@@ -74,7 +84,7 @@ struct IRBuilder {
     subjects: [Int]
     // Pattern bindings of the condition being built, bound when its If opens.
     pending: [IRPending]
-    // The address a write window's inline Int? subject was read from, by
+    // The address a write window's inline Option subject was read from, by
     // the subject slot (BuildExpr.jet ir_borrow): its payload binds there.
     windows: [Int:Int]{[Int:Int]{}}
     // The allocator storage an allocator view was read from, by the view
@@ -123,6 +133,11 @@ struct IRBuilder {
     lambdas: [String:Int]
     // Building a stop edge (ir_stop_return): its cleanup checks for no stop.
     stopping: Bool{false}
+    // A body the runtime calls for a status word and trusts without a stop
+    // check of its own (a line source's next: IterSources.jet
+    // iter_source_pull): its stop edges return -1, the stopped status, not
+    // whatever the last call left in the result register.
+    stop_status: Bool{false}
     // The open `.expect_fail` regions (innermost last) whose catch a stop
     // edge tries first (ir_stop_catches).
     catches: [IRCatchFrame]{[IRCatchFrame]{}}
@@ -147,9 +162,22 @@ struct IRBuilder {
     // index has no bounds check (ir_checked_element).
     proven_index: [Int:Int]{[Int:Int]{}}
     // Guards taken by a temporary in the statement being built
-    // (`store.guard_edit().value.items[key] = text`): their permits end with
-    // the statement (ir_stmt).
-    statement_guards: [Int]{[Int]{}}
+    // (`store.guard_edit().value.items[key] = text`), and temporaries with
+    // cleanup lent to a read parameter (`show(open("x"))`): they end with
+    // the statement (ir_stmt), or on an early exit out of it
+    // (ir_exit_statement_guards).
+    statement_guards: [IRStatementGuard]{[IRStatementGuard]{}}
+    // How many constructs were open when the statement being built began
+    // (-1: none is being built). A temporary made deeper, in a branch or a
+    // loop condition of the statement, ends where it is made instead
+    // (ir_close_temporary).
+    statement_depth: Int{-1}
+    // Values the body only borrows, which it never closes (ir_lent): a
+    // `Val`/`Ok`/`Err` carrier or aggregate built around a value it does not
+    // own (a variable or parameter, or another lent value), the result of a
+    // call that returns a view (`-> T from self | x`), and any part, binding
+    // or `?` payload of a lent value. Their owner closes them.
+    lent: [Int:Bool]{[Int:Bool]{}}
     // The instance this body builds (IRInstance; none for a body that is no
     // generic instance).
     instance: IRInstance{IRInstance{names: [String]{}, args: [Type]{}, types: [Type]{}}}
@@ -216,7 +244,7 @@ struct IRChecks {
     // D-JOB-SUBCMD1=C: the jobs the program's first word can select ahead of
     // the entry; the entry function calls each (ir_entry_function).
     jobs: [IRJob]{[IRJob]{}}
-    // JET_CHECKED_ALLOC=1 at build time (D-SIZE-PAYUSE1 A): the entry calls
+    // `--checked-alloc` (the `checked_alloc` build option): the entry calls
     // jet_rt_alloc_check_link, so the link keeps the runtime's checked heap
     // (ir_checked_alloc_link).
     checked_alloc: Bool{false}
@@ -1185,7 +1213,7 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
     id
 }
 
-// A JET_CHECKED_ALLOC=1 build's entry (or test harness main) first calls
+// A `--checked-alloc` build's entry (or test harness main) first calls
 // jet_rt_alloc_check_link: the call keeps the runtime's checked heap in the
 // link (JetRuntime Alloc.jet alloc_check_linked).
 fn ir_checked_alloc_link(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
@@ -1455,7 +1483,8 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
             next
         }
         if row.window && ir_option_inline(m, subject_row) {
-            // An inline Int?'s payload is its word: the name binds the
+            // An inline Option's payload is its word (zero-extended, so a
+            // payload store of its own width keeps it): the name binds the
             // word's storage at the window's place.
             address :: b.windows.get(row.subject) ?? -1
             if address < 0 {
@@ -1521,9 +1550,10 @@ fn ir_fail(b: &IRBuilder, span: Span, message: String) Never! {
 
 fn ir_failed(b: IRBuilder) -> Bool Never! { b.error != "" }
 
-// Returns `slot` (-1: nothing) after dropping every owned variable. Code
-// after the Return in the same block is dead, so the variables keep the
-// ownership they had: the paths that go on past the enclosing branch see it.
+// Returns `slot` (-1: nothing) after releasing the guards the statements
+// being built hold and dropping every owned variable. Code after the
+// Return in the same block is dead, so the variables keep the ownership
+// they had: the paths that go on past the enclosing branch see it.
 fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
     states :: ir_own_states(b, b.bindings.len())
     if slot >= 0 {
@@ -1532,6 +1562,7 @@ fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
         ir_disown(&b, slot)
     }
     ir_close_disarm(&b, slot)
+    ir_exit_statement_guards(&b, 0)
     ir_entry_ending(&m, &b)
     ir_drop_bindings(&m, &b, 0)
     ir_emit(&b.f, IROp.Return, -1, slot, -1, -1, b.line)
@@ -1543,6 +1574,40 @@ fn ir_emit_return(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
 // drops free nothing (#5478). Its user cleanup (closes, guards) still runs.
 fn ir_entry_ending(m: &IRModule, b: &IRBuilder) Never! {
     if b.entry -> _ :: ir_runtime(&m, &b, "jet_rt_process_entry_return", [Int]{}, -1)
+}
+
+// Takes the guard `held` a temporary of the statement being built
+// dereferences, or holds a temporary with cleanup closed by `glue` (-1:
+// none; `drops`: its type has a drop): it ends with the statement (ir_stmt)
+// or an early exit out of it (ir_exit_statement_guards).
+fn ir_hold_statement_guard(b: &IRBuilder, held: Int, glue: Int, drops: Bool) Never! {
+    opener :: if b.f.open.len() > 0 -> b.f.open[b.f.open.len() - 1] else -> -1
+    part :: if opener >= 0 && b.f.op[opener] == .If -> b.f.b[opener] else -> -1
+    &b.statement_guards.push(IRStatementGuard{slot: held, opener: opener, part: part, glue: glue, drops: drops})
+}
+
+// An early exit (a return, `?`, or a break/next out of a loop whose frame
+// kept `mark`) skips the ends of the statements being built, where ir_stmt
+// releases their guards and temporaries: it ends those taken since `mark`,
+// latest first. One taken on a branch the exit is not on is not held there.
+// The statements keep them for the paths that go on.
+fn ir_exit_statement_guards(b: &IRBuilder, mark: Int) Never! {
+    index := b.statement_guards.len() - 1
+    loop index >= mark {
+        guard :: b.statement_guards[index]
+        index -= 1
+        if !ir_statement_guard_held(b.f, guard) -> next
+        if guard.glue >= 0 -> ir_close_call(&b, guard.glue, guard.slot)
+        if guard.drops -> ir_emit(&b.f, IROp.Drop, -1, guard.slot, -1, -1, b.line)
+    }
+}
+
+// Whether the code being emitted runs after `guard` was taken on every
+// path: the construct it was taken in is still open, in the same part.
+fn ir_statement_guard_held(f: IRFunction, guard: IRStatementGuard) -> Bool Never! {
+    if guard.opener < 0 -> return true
+    if !f.open.contains(guard.opener) -> return false
+    f.op[guard.opener] != .If || f.b[guard.opener] == guard.part
 }
 
 // Drops the owned variables among bindings[mark..], latest first; a
@@ -1588,9 +1653,9 @@ fn ir_drop_binding(m: &IRModule, b: &IRBuilder, binding: IRBinding) Never! {
 // fresh to the holder that stores it); an aggregate another holder keeps
 // is shared (a byte copy whose buffers gain an owner, ir_copy_value); any
 // other read of a place another holder keeps is copied through its type's
-// runtime clone. A value with a drop and no clone (a file or socket handle)
-// moves: the variable it is read from stops owning it, so its scope-end
-// drop cannot release what the new holder keeps.
+// runtime clone. A value with a drop and no clone (a file or socket handle,
+// or an aggregate holding one) moves: the variable it is read from stops
+// owning it, so its scope-end drop cannot release what the new holder keeps.
 fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
     if slot < 0 || b.fresh[slot] || !ir_has_drop(m, b, slot) -> return slot
     row :: b.f.slot_type[slot]
@@ -1600,10 +1665,26 @@ fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
             b.fresh[slot] = true
             return slot
         }
-        // A List whose items have no clone glue is never shared: a by-value
-        // walk of a shared buffer clones each item (jet_rt_native_iter_from_list),
-        // and there is no clone to call. Sema keeps such a List uniquely
-        // owned, so meeting one here is an internal error (I2).
+        // Sema reads a variable holding an aggregate with no clone (a List
+        // of handles, a struct or tuple holding one) as a move, its last use
+        // (E0121 on any later one), so the variable gives it up as `^x` does
+        // and its closing parts no longer end it.
+        if ir_owned_binding(b, slot) && ir_row_lacks_clone(&m, p, row) {
+            ir_close_disarm(&b, slot)
+            ir_disown(&b, slot)
+            b.fresh[slot] = true
+            return slot
+        }
+        // `^x` of a payload bound from the Option or Result box a variable
+        // owns (`if ^warm == { .Val(list) -> keep(^list) }`) moves the
+        // payload out of the box the same way (ir_payload_take).
+        if b.moving == slot && ir_row_lacks_clone(&m, p, row) {
+            taken :: ir_payload_take(&m, p, &b, slot)
+            if taken >= 0 -> return taken
+        }
+        // Any other shared List whose items have no clone glue is an internal
+        // error (I2): a by-value walk of a shared buffer clones each item
+        // (jet_rt_native_iter_from_list), and there is no clone to call.
         if ir_list_items_lack_clone(&m, p, row) -> return ir_fail_slot(&b, Span{start: 0, end: 0}, "a shared {ir_type_name(m.types[row].ty)}, whose items have no clone")
         return ir_copy_value(&m, p, &b, slot, Span{start: 0, end: 0})
     }
@@ -1612,7 +1693,40 @@ fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
         ir_disown(&b, slot)
         return slot
     }
+    // `^x` of a variable's own Option, Result or enum box whose payload has
+    // no clone moves the box: a second owner of it would share a payload
+    // that has no clone (I2), and a payload moved out of it later
+    // (ir_payload_take) needs the box's only owner.
+    if ir_movable_binding(b, slot) && ir_box_row(m, row) && ir_row_lacks_clone(&m, p, row) {
+        ir_disown(&b, slot)
+        b.fresh[slot] = true
+        return slot
+    }
     ir_clone(&m, &b, slot, row)
+}
+
+// The payload binding in `slot` moved out (`^x`) of the Option or Result box
+// in `carrier` that a variable owns on every path here, as a value of its own
+// (ir_box_hand_over): the box hands it over, and the variable stops holding
+// the box on this path, so neither its drop nor its closing parts reach the
+// payload. -1 when `slot` is no such binding.
+fn ir_payload_take(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
+    index := b.bindings.len() - 1
+    loop index >= 0 && b.bindings[index].slot != slot -> index -= 1
+    if index < 0 -> return -1
+    binding :: b.bindings[index]
+    carrier :: binding.carrier
+    if binding.owned || binding.indirect >= 0 || carrier < 0 || !ir_owned_binding(b, carrier) -> return -1
+    carrier_row :: b.f.slot_type[carrier]
+    if !ir_box_row(m, carrier_row) -> return -1
+    if ir_untag(m.types[carrier_row].ty) == {
+        .Option(_) | .Result(_, _) -> {}
+        else -> return -1
+    }
+    ir_close_disarm(&b, slot)
+    ir_close_disarm(&b, carrier)
+    ir_disown(&b, carrier)
+    ir_box_hand_over(&m, p, &b, carrier, slot, b.f.slot_type[slot])
 }
 
 // Whether a variable owns the value in `slot` (its own storage) on every
@@ -2044,7 +2158,7 @@ fn ir_stop_poll(m: &IRModule, key: String) -> Int Never! {
 // dropped, whose rollback hooks run, as ir_tx_unwind does; then every owned
 // variable's close and drop), inside one runtime cleanup scope, then a
 // return with no result written (no caller reads it: its own stop check
-// comes first).
+// comes first), or -1 from a stop_status body.
 fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
     if ir_stop_cleans(b) {
         b.stopping = true
@@ -2083,6 +2197,11 @@ fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
         ir_set_own_states(&b, states)
         _ :: ir_runtime(&m, &b, "jet_rt_cleanup_leave", [Int]{saved}, -1)
         b.stopping = false
+    }
+    if b.stop_status {
+        stopped :: ir_word_const(&m, &b, -1)
+        ir_emit(&b.f, IROp.Return, -1, stopped, -1, -1, b.line)
+        return
     }
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
 }
@@ -2465,16 +2584,19 @@ fn ir_result_rebox(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: In
     boxed
 }
 
-// An Option of an Int (or a type laid out as one) is one word, not a box
-// (BuildTypes.jet ir_value_type_laid): the Int's own word when present,
-// IR_OPTION_INT_NONE when absent. That word is never an Int: an inline Int
-// lies in [-2^62, 2^62 - 1], and a big Int is 2^62 | the address of its
-// node (JetRuntime Int.jet int_tag), a heap or data address and never null.
-// Its drop and clone are the Int's; the runtime's pass the niche by.
+// An Option of an Int (or a type laid out as one), or of a scalar with no
+// drop whose words stay below 2^62 (a Bool, a Char, an unsigned word of up to
+// 62 bits, a payload-free enum), is one word, not a box (BuildTypes.jet
+// ir_value_type_laid): the payload's own word when present,
+// IR_OPTION_INT_NONE when absent. That word is never a payload: an inline Int
+// lies in [-2^62, 2^62 - 1], a big Int is 2^62 | the address of its node
+// (JetRuntime Int.jet int_tag), a heap or data address and never null, and a
+// scalar's word is zero-extended below 2^62. An Int payload's drop and clone
+// are the Int's (the runtime's pass the niche by); a scalar's has neither.
 IR_OPTION_INT_NONE :: 4611686018427387904
 
 fn ir_option_inline(m: IRModule, row: Int) -> Bool Never! {
-    m.types[row].kind == .Word && m.types[row].clone == "jet_rt_int_clone"
+    m.types[row].option_word
 }
 
 // The word of an absent Option of row `row`: null for a box.
@@ -2548,15 +2670,20 @@ fn ir_option_set(m: &IRModule, b: &IRBuilder, result: Int, made: Int) Never! {
 }
 
 // The inline Option of row `row` a runtime result `boxed` stands for: the
-// runtime's generic Option is a fresh 8-byte block owning the Int (null
-// when absent). The Int moves out and the block is freed.
-fn ir_option_unbox(m: &IRModule, b: &IRBuilder, boxed: Int, row: Int) -> Int Never! {
+// runtime's generic Option is a fresh 8-byte block owning the payload (null
+// when absent). The payload moves out and the block is freed. A scalar is
+// read at its own width: the block's other bytes are not its.
+fn ir_option_unbox(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, row: Int) -> Int Never! {
     out :: ir_fresh_temp(&m, &b, row)
     ir_option_none(&m, &b, out)
+    item_row := row
+    if m.types[row].drop == "" && ir_untag(m.types[row].ty) == .Option(inner) {
+        item_row = ir_value_type(&m, p, inner) ?? row
+    }
     zero :: ir_word_const(&m, &b, 0)
     present :: ir_bool_op(&m, &b, IROp.Ne, boxed, zero)
     ir_open_if(&b.f, present, b.line)
-    item :: ir_load_at(&m, &b, boxed, 0, row)
+    item :: ir_load_at(&m, &b, boxed, 0, item_row)
     ir_emit(&b.f, IROp.Move, out, item, -1, -1, b.line)
     eight :: ir_word_const(&m, &b, 8)
     ir_free(&m, &b, boxed, eight)

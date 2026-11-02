@@ -10,7 +10,9 @@
 //   FDE per function with the function's call frame instructions. The
 //   in-process linker keeps an FDE exactly when its function is live and
 //   the startup object registers the table, so the runtime's unwinder and
-//   debuggers both walk through Jet frames.
+//   debuggers both walk through Jet frames. When no unwinder is linked, a
+//   split link writes the table to the side debug file as `.debug_frame`
+//   instead (StaticLink.jet link_debug_frame), for debuggers and profilers.
 // - `.debug_abbrev`, `.debug_info`: one compile unit covering `.text` (with
 //   one section per function, a unit without an address range); the
 //   types of X64ModuleDebug.types; one subprogram per function (frame base

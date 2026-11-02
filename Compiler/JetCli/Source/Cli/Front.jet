@@ -40,6 +40,7 @@ use jet_foundation.[
     Diagnostic,
     PolicyKey,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_render_all,
     policy_key_parse,
 ]
@@ -302,7 +303,7 @@ fn jet_cli_done(stdout: String, stderr: String, exit_code: Int) -> JetCLIPlan Ne
 }
 
 fn jet_cli_diagnostics_output(file: String, source: String, report: Diagnostic, color: Bool, json: Bool, notice: String) -[FS, Env]> JetDriverVerbOutput Never! {
-    if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, [Diagnostic]{report}), stderr: notice, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, [Diagnostic]{report}), stderr: notice, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all(file, source, [Diagnostic]{report}, color)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
@@ -824,7 +825,7 @@ fn jet_cli_profile_name(jet_argv: [String]) -> String Never! {
 // selected profile's fields, then the flags (`--optimize=full`); a package
 // build adds its `fn build` layer between the two (jet_cli_build_package). A
 // profile `package.jet` declares replaces the stock profile of that name:
-// `release` is `optimize: full`, `debug` the stock values.
+// `release` is `optimize: full, debug_info: split`, `debug` the stock values.
 fn jet_cli_build_options(jet_argv: [String], command: String, file: String, source: String, color: Bool, quiet: Bool) -[FS, Env]> JetCLIBuildOptions Never! {
     written := [BuildOptionChoice]{}
     flags := [BuildOptionChoice]{}
@@ -854,11 +855,15 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
             }
         } else {
             if {
-                name == "release" -> &written.push(jet_cli_stock_release_choice())
+                name == "release" -> &written.extend(jet_cli_stock_release_choices())
                 // The stock `debug` profile is the stock values; the front end keeps its `dev` profile.
                 name == "debug" -> profile = ""
                 name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
-                else -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "build profile `{name}` isn't declared", jet_cli_why("E2104"), "declare it under `build:` in package.jet, or select `release` or `debug`", color, JET_DRIVER_EXIT_USAGE)}
+                // The registered E1219 row is the unknown-profile report; its holes name the profile.
+                else -> {
+                    row :: diagnostic_registry_row("E1219") ?? panic("E1219 is not registered")
+                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E1219", row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name), color, JET_DRIVER_EXIT_USAGE)}
+                }
             }
         }
     }
@@ -885,9 +890,14 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
     }
 }
 
-// The stock `release` profile: `optimize: full`.
-fn jet_cli_stock_release_choice() -> BuildOptionChoice Never! {
-    BuildOptionChoice{name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: "of the stock `release` profile", pinned: false}
+// The stock `release` profile: `optimize: full`, and `debug_info: split`,
+// which `jet build` writes as a side debug file beside the image.
+fn jet_cli_stock_release_choices() -> [BuildOptionChoice] Never! {
+    site :: "of the stock `release` profile"
+    [BuildOptionChoice]{
+        {name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: site.copy(), pinned: false},
+        {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.copy(), pinned: false},
+    }
 }
 
 // `plan` (a build, package build, or run) with the build options its entry
@@ -1692,6 +1702,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         if jet_cli_looks_like_source(command) {
             // `jet <file>` is `jet run <file>`; Source/main.rs dispatches it
             // before the help and flag checks, so it ignores both.
+            if jet_cli_pinned_toolchain(raw, Val(command), color, quiet || json) == .Val(plan) -> return plan
             threads := Int?{None}
             if !jet_cli_any_help_flag(jet_argv) {
                 if jet_cli_threads(jet_argv, "run", color) == {
@@ -1736,7 +1747,9 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         return jet_cli_fail("E2102", "`--canvas` is only valid with `jet dev`", jet_cli_why("E2102"), "run `jet dev <file.jet> --canvas` to open the Canvas IDE", color, JET_DRIVER_EXIT_USAGE)
     }
     if JET_CLI_PINNED_VERBS.contains(command) {
-        if jet_cli_pinned_toolchain(raw, color, quiet || json) == .Val(plan) -> return plan
+        target := String?{None}
+        if args.len() > 1 && jet_cli_looks_like_source(args[1]) -> target = Val(args[1])
+        if jet_cli_pinned_toolchain(raw, target, color, quiet || json) == .Val(plan) -> return plan
     }
 
     if jet_cli_engine_commands(command, argv) == .Val(plan) -> return plan

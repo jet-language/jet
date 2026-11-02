@@ -167,7 +167,8 @@ enum IRClass { Integer Pointer Float Memory }
 // One interned type row: the checked type and its machine layout.
 // `drop` is the runtime symbol that ends a value's life ("" when trivial);
 // `clone` the one that makes an owned copy of it ("" when none: a value
-// with a drop and no clone only moves).
+// with a drop and no clone only moves). `option_word` marks an Option laid
+// out as one word, not a box (Build.jet IR_OPTION_INT_NONE).
 struct IRType {
     ty: Type
     kind: IRTypeKind
@@ -178,6 +179,7 @@ struct IRType {
     bits: Int
     drop: String
     clone: String{""}
+    option_word: Bool{false}
 }
 
 enum IRSlotKind { Param Local Temp }
@@ -224,6 +226,9 @@ struct IRFunction {
     // The counted loops of this body sema's loop proof covers, as built
     // (ir_range_loop).
     loop_proofs: [IRLoopProof]{[IRLoopProof]{}}
+    // Code that runs at most once and off the program's work (Opt.jet
+    // ir_opt_mark_cold): optimized for size.
+    cold: Bool{false}
 }
 
 // One counted loop sema proved (AutoVectorizationFacts, JetSema
@@ -313,6 +318,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // owns its main. `owned_main`: the program's entry runs under a main of its
 // own, with no process root (EntryOwned.jet ir_entry_own). `owned_attach`:
 // that main attaches its thread first (IR_OWNED_ATTACH_ROUTES).
+// `single_thread`: the program provably never runs a second thread (JetCli
+// Host.jet jet_cli_single_thread), so x86-64 selection updates its RC
+// counts without the lock prefix; false for the runtime library.
 // `debug_directory`: the compilation directory the image's DWARF records
 // ("": the working directory), which relative source paths (a fault
 // report's) resolve from. `host_literals`: the compile-time literals that are
@@ -355,6 +363,7 @@ struct IRModule {
     stop_points: Bool{false}
     owned_main: Bool{false}
     owned_attach: Bool{false}
+    single_thread: Bool{false}
     debug_directory: String{""}
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
 }

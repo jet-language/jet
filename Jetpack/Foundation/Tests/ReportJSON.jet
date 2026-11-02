@@ -34,10 +34,12 @@ use jetpack_foundation.[
     text :: envelope.json() ?? panic("finite status JSON")
     line :: envelope.json_line() ?? panic("finite status JSON line")
     assert_eq(line, "{text}\n")
+    // The strict parser keeps every number as its exact lexeme (`Dyn.Number`,
+    // core.encoding.json `parse`), so the float field reads back as "1.25".
     tree :: report_json_codec.parse(text) ?? panic("finite status JSON parses")
     value :: tree.field("value") ?? panic("status value")
     if value == {
-        .Float(number) -> assert(number == 1.25)
-        else -> panic("status value must stay a float")
+        .Number(lexeme) -> assert_eq(lexeme, "1.25")
+        else -> panic("status value must stay the JSON number 1.25")
     }
 }

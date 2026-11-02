@@ -1,0 +1,14 @@
+# Claim: `^x` of a payload bound from a moved Option or Result (`if ^warm == { .Val(list) -> keep(^list) }`) whose payload has no clone (a List of values holding file handles) builds and moves the payload out of its carrier: each item closes exactly once, where its new holder ends it, and a payload left in its carrier closes once with it; on o0, o1 and o2 (#6528).
+# Hand-derived: "close X" is printed by each item's close; a moved item closes at the end of its `keep` iteration, after "keep X"; "d" stays in its carrier and closes once when the carrier ends.
+fixture: moved_payload_of_a_moved_carrier_closes_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none run.jet
+exit: 0 # o0
+stdout: = moved_payload_of_a_moved_carrier_closes_once.out # o0
+step: jet run --optimize=basic run.jet
+exit: 0 # o1
+stdout: = moved_payload_of_a_moved_carrier_closes_once.out # o1
+step: jet run --optimize=full run.jet
+exit: 0 # o2
+stdout: = moved_payload_of_a_moved_carrier_closes_once.out # o2

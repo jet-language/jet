@@ -84,6 +84,68 @@ fn sync_mutex_unlock(address: I64) {
     if (sync_swap(address, I64{0}) == I64{2}) { sync_wake(address, I64{1}) }
 }
 
+// Sole-thread lock elision (#6444). A hot lock (stdout's, the stdin buffer's)
+// costs two locked instructions, each a full fence draining the store buffer
+// the copy before it filled. While only one thread can run Jet code, the lock
+// word is set and cleared with plain stores instead: no other thread reads
+// it, and a fault report on this thread still finds it held.
+// sync_sole is 1 from process start until a second thread may run Jet code:
+// thread_spawn and the raw clone clear it before the thread exists, and an
+// attach (jet_rt_thread_attach, jet_rt_thread_bootstrap) from any thread but
+// the process's main one clears it there, since a host thread may attach
+// while the main thread is inside an elided section. sync_sole_inflight
+// counts this thread's open elided sections; it is written before
+// sync_sole is read (sync_sole_enter), and sync_sole_end, after clearing the
+// flag, makes every thread's earlier stores visible with membarrier before it
+// waits for the count to drain (an asymmetric Dekker fence: either the main
+// thread read the cleared flag and locks for real, or its count is seen).
+sync_sole := I64{1}
+sync_sole_inflight := I64{0}
+
+// true: the lock word was set with a plain store (an elided section); release
+// it with sync_sole_exit(address, true). false: the mutex is held.
+fn sync_sole_enter(address: I64) -> Bool {
+    #Unsafe("sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier") {
+        sync_sole_inflight = wrapping(sync_sole_inflight + I64{1})
+        if (sync_sole != I64{0}) {
+            os_store_i64(address, I64{1})
+            return true
+        }
+        sync_sole_inflight = wrapping(sync_sole_inflight - I64{1})
+    }
+    sync_mutex_lock(address)
+    false
+}
+
+fn sync_sole_exit(address: I64, sole: Bool) {
+    if !sole {
+        sync_mutex_unlock(address)
+        return
+    }
+    #Unsafe("an elided section: only this thread has written the lock word and the count since sync_sole_enter") {
+        os_store_i64(address, I64{0})
+        sync_sole_inflight = wrapping(sync_sole_inflight - I64{1})
+    }
+}
+
+// Ends elision for good before a second thread runs Jet code. Each clearer
+// stores 0, issues the barrier (MEMBARRIER_CMD_PRIVATE_EXPEDITED after its
+// registration, else MEMBARRIER_CMD_GLOBAL) and yields until every elided
+// section still open on the main thread has closed.
+fn sync_sole_end() {
+    if (sync_sole == I64{0}) -> return
+    #Unsafe("membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0") {
+        sync_sole = I64{0}
+        fenced := os_syscall_i64(I64{324}, I64{16}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+        if fenced { fenced = os_syscall_i64(I64{324}, I64{8}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0} }
+        if !fenced { _ := os_syscall_i64(I64{324}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
+        loop {
+            if (sync_sole_inflight == I64{0}) { break }
+            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+}
+
 // Caller holds mutex, checks its predicate in a loop, and keeps the same
 // absolute deadline across repetitions. Mutex is held again on return.
 fn sync_cond_wait(sequence: I64, mutex: I64, deadline_ns: I64) -> Bool {

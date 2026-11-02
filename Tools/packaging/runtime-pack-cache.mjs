@@ -38,7 +38,7 @@ export function readNativeRuntimePack(directory, recipe = null) {
   if (recipe !== null && provenance.recipeSha256 !== recipe) throw Error('runtime pack recipe does not match this toolchain');
   const files = new Map([['provenance.json', provenanceBytes]]);
   for (const [name, expected] of [['jet_runtime.pack.o', provenance.packSha256], ['jet_runtime.image', provenance.imageSha256],
-    ['jet_runtime_jet.o', provenance.objectSha256], ['runtime.abi.json', provenance.abiSha256]]) {
+    ['jet_runtime_jet.o', provenance.objectSha256], ['runtime.abi.json', provenance.abiSha256], ['runtime.threads', provenance.threadsSha256]]) {
     const bytes = heldFile(join(root, name));
     if (!/^[a-f0-9]{64}$/.test(expected ?? '') || nativePackHash(bytes) !== expected) throw Error(`runtime pack digest mismatch: ${name}`);
     files.set(name, bytes);
@@ -58,8 +58,8 @@ export function readNativeRuntimePack(directory, recipe = null) {
     if (!/^[a-f0-9]{64}$/.test(row.sha256 ?? '') || nativePackHash(bytes) !== row.sha256) throw Error(`runtime pack digest mismatch: ${row.path}`);
     files.set(row.path, bytes);
   }
-  const identity = { format: 'jet-native-runtime/v1', source: provenance.source.sha256,
-    abi: provenance.abiSha256, backend: provenance.backendInputs.sha256,
+  const identity = { format: 'jet-native-runtime/v2', source: provenance.source.sha256,
+    abi: provenance.abiSha256, threads: provenance.threadsSha256, backend: provenance.backendInputs.sha256,
     lifecycle: provenance.lifecycle.sha256, platform: provenance.cPlatformArchives.map(row => row.sha256),
     vendored: vendored.map(row => row.sha256) };
   if (nativePackHash(JSON.stringify(identity)) !== key) throw Error('runtime pack identity does not match native.key');

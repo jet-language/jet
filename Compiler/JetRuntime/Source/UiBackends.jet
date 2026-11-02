@@ -439,11 +439,101 @@ fn ui_paint(state: I64, node: I64) {
         ui_tui_grid_blank(state)
     }
     ui_visit(state, node, ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
+    if (ui_web_attached != I64{0}) -> ui_web_record_scene(node, frame)
     geometry_drop(frame, UI_RECT_BYTES)
     if {
         (kind == UI_BACKEND_GTK) -> ui_gtk_reconcile(state, node)
         else -> ui_paint_focus(state, node)
     }
+}
+
+// ---- web scene ----------------------------------------------------------------
+
+// The host of a web build (JetWeb Host.jet) attaches when its page has a
+// document. From then on each paint records its scene, which the host turns
+// into the elements of `#jet-app`; a click on an element with a click slot
+// comes back through jet_ui_web_click. A native run never attaches, so its
+// paints record nothing.
+//
+// The scene is one record per leaf in paint order; a Box adds none and
+// stacks its children as ui_visit does. A record is its fields separated by
+// tabs: kind, click slot (0 for none), x, y, width, height, color (empty for
+// none), the label's byte length, then the label's bytes and a newline.
+// Only an attached build writes these words, and a web page's module runs
+// on one thread.
+ui_web_attached := I64{0}
+ui_web_scene := I64{0}
+ui_web_scene_fresh := I64{0}
+
+#Export(c) fn jet_ui_web_attach() {
+    #Unsafe("a web page's module runs on one thread") {
+        ui_web_attached = I64{1}
+    }
+}
+
+fn ui_web_push_number(scene: I64, value: I64) {
+    rt_text_push_number(scene, value)
+    rt_text_push_scalar(scene, I64{9})
+}
+fn ui_web_push_float(scene: I64, value: Float) {
+    ui_text_push_float(scene, value)
+    rt_text_push_scalar(scene, I64{9})
+}
+fn ui_web_record(scene: I64, node: I64, x: Float, y: Float, width: Float, height: Float) {
+    if (ui_node_kind(node) == UI_KIND_BOX) {
+        at := y
+        count :: ui_node_child_count(node)
+        index := I64{0}
+        loop index < count {
+            child :: ui_node_child(node, index)
+            child_height :: ui_node_height(child)
+            ui_web_record(scene, child, x, at, width, child_height)
+            at = at + child_height
+            index += I64{1}
+        }
+        return
+    }
+    ui_web_push_number(scene, ui_node_kind(node))
+    clickable :: ui_carrier_word(wrapping(node + UI_NODE_ABSENT_MASK)).bit_and(UI_NODE_SLOT_CLICK) == I64{0}
+    ui_web_push_number(scene, if clickable -> ui_carrier_word(wrapping(node + UI_NODE_CLICK_FN)) else -> I64{0})
+    ui_web_push_float(scene, x)
+    ui_web_push_float(scene, y)
+    ui_web_push_float(scene, width)
+    ui_web_push_float(scene, height)
+    color :: ui_carrier_word(wrapping(node + UI_NODE_COLOR))
+    if (color != I64{0}) -> ui_text_push_static(scene, color)
+    rt_text_push_scalar(scene, I64{9})
+    label :: ui_carrier_word(wrapping(node + UI_NODE_LABEL))
+    ui_web_push_number(scene, rt_text_len(label))
+    ui_text_push_static(scene, label)
+    rt_text_push_scalar(scene, I64{10})
+}
+fn ui_web_record_scene(node: I64, frame: I64) {
+    scene :: jet_rt_string_builder_new()
+    ui_web_record(scene, node, ui_float_at(frame), ui_float_at(wrapping(frame + I64{8})), ui_float_at(wrapping(frame + I64{16})), ui_float_at(wrapping(frame + I64{24})))
+    if (ui_web_scene != I64{0}) -> jet_rt_string_drop(ui_web_scene)
+    #Unsafe("only an attached web build records, on its one thread") {
+        ui_web_scene = jet_rt_string_builder_finish(scene)
+        ui_web_scene_fresh = I64{1}
+    }
+}
+
+// 1 once per paint since the host last asked, then the scene's bytes are
+// jet_ui_web_scene_data and jet_ui_web_scene_length; else 0.
+#Export(c) fn jet_ui_web_scene_take() -> I64 {
+    fresh :: ui_web_scene_fresh
+    #Unsafe("a web page's module runs on one thread") {
+        ui_web_scene_fresh = I64{0}
+    }
+    fresh
+}
+#Export(c) fn jet_ui_web_scene_data() -> I64 {
+    if (ui_web_scene == I64{0}) -> return I64{0}
+    rt_text_data(ui_web_scene)
+}
+#Export(c) fn jet_ui_web_scene_length() -> I64 {
+    if (ui_web_scene == I64{0}) -> return I64{0}
+    rt_text_len(ui_web_scene)
 }
 
 // ---- TUI grid ---------------------------------------------------------------
@@ -807,15 +897,32 @@ fn ui_text_words_output(base: I64, out_data: I64) -> I64 {
 // ---- buttons and click slots ------------------------------------------------
 
 // jet_ui_register_click: ids from 1; each slot keeps its handler (env,
-// invoke, release) for the process, as the reference's registry does.
+// invoke, release) for the process, as the reference's registry does. A
+// button may be built on any task, so registration runs under the host lock.
 ui_click_slots := I64{0}
 fn ui_register_click(env: I64, invoke: I64, release: I64) -> I64 {
-    if (ui_click_slots == I64{0}) -> ui_click_slots = ui_words_scratch(I64{1})
+    host_lock()
+    if (ui_click_slots == I64{0}) {
+        #Unsafe("written under the host lock") {
+            ui_click_slots = ui_words_scratch(I64{1})
+        }
+    }
     base :: ui_click_slots
     event_words_push(base, env)
     event_words_push(base, invoke)
     event_words_push(base, release)
-    ui_carrier_word(base) / I64{3}
+    id :: ui_carrier_word(base) / I64{3}
+    host_unlock()
+    id
+}
+// A web host's click on a scene element: runs the handler click slot `id`
+// keeps, as the reactive runtime runs an effect body (invoke(env, out) with
+// no result slot). An unknown id does nothing.
+#Export(c) fn jet_ui_web_click(id: I64) {
+    base :: ui_click_slots
+    if (base == I64{0} || id < I64{1} || id * I64{3} > ui_carrier_word(base)) -> return
+    first :: (id - I64{1}) * I64{3}
+    _ := coll_call2(event_words_get(base, first + I64{1}), event_words_get(base, first), I64{0})
 }
 fn ui_button_node(label: I64) -> I64 {
     node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})

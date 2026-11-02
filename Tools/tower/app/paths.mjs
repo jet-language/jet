@@ -331,21 +331,27 @@ function readFileAt(authority, name, maxBytes, message) {
     fd = openSync(raw, readFlags);
     const opened = fstatSync(fd);
     if (!safeRegular(opened) || !sameIdentity(before, opened)) atomicFailure(message);
-    const chunks = [];
-    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, Math.max(1, maxBytes || 1)));
+    // Read straight into one buffer sized from the pinned descriptor; the
+    // archive is tens of MB, and chunk copies plus a concat doubled its cost.
+    // A file that grows while read still gets the bound check below.
+    let buffer = Buffer.allocUnsafe(Math.min(opened.size, maxBytes) + 1);
     let total = 0;
     for (;;) {
-      const count = readSync(fd, chunk, 0, chunk.length, null);
+      if (total === buffer.length) {
+        const grown = Buffer.allocUnsafe(Math.min(buffer.length * 2, maxBytes + 1));
+        buffer.copy(grown, 0, 0, total);
+        buffer = grown;
+      }
+      const count = readSync(fd, buffer, total, buffer.length - total, null);
       if (!count) break;
       total += count;
       if (total > maxBytes) atomicFailure(`file exceeds read bound: ${join(authority.expectedPath, name)}`);
-      chunks.push(Buffer.from(chunk.subarray(0, count)));
     }
     const after = fstatSync(fd);
     if (!safeRegular(after) || !sameIdentity(opened, after) || after.size > maxBytes)
       atomicFailure(message);
     guardedAuthority(authority, `read ${name}`);
-    return Buffer.concat(chunks, total);
+    return buffer.subarray(0, total);
   } catch (error) {
     if (['EACCES', 'EAGAIN', 'EISDIR', 'ELOOP', 'ENODEV', 'ENOTDIR', 'ENXIO', 'EPERM', 'EINVAL'].includes(error.code))
       atomicFailure(message);

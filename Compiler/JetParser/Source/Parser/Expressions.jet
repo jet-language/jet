@@ -2,6 +2,7 @@
 // behavior-preserving method repairs.
 use jet_foundation.[
     AccessConvention,
+    AppliedRuleApplication,
     BinOp,
     ByteTextPart,
     Call,
@@ -16,12 +17,14 @@ use jet_foundation.[
     ExprMember,
     ExprPair,
     IndexKind,
+    Marker,
     Lambda,
     LambdaBody,
     LambdaParam,
     NamedSpan,
     OrFallback,
     PlaceAccess,
+    RuleSite,
     Span,
     Stmt,
     StrFormat,
@@ -39,6 +42,7 @@ use jet_foundation.[
     diagnostic_with_edit_grade,
     expr_span,
     diagnostic_with_edit,
+    marker_registered,
 ]
 use jet_lexer.[
     STRING_PART_BYTE,
@@ -642,7 +646,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     token :: parser_current(&state)
     kind :: token.kind
     word :: if kind == TOKEN_IDENT -> parser_value(state, token) else -> ""
-    if kind == TOKEN_IDENT && word == "task" -> return parser_parse_task_surface(&state, depth + 1)
+    if kind == TOKEN_IDENT && word == "task" && parser_task_surface_ahead(&state) -> return parser_parse_task_surface(&state, depth + 1)
     // `shared expr` is the one shared-cell construction
     // form. `shared` stays an ordinary name unless the next token opens a
     // value; the cell is the `Shared.new` call shape every tier lowers, and
@@ -891,6 +895,14 @@ fn parser_parse_marker_value(state: &JetParserState, depth: Int, allow_struct_li
         "Todo" -> return ParsedExpr{expr: Expr.Todo{span: head_span, expected_type: None, id: parser_node_id(&state)}, span: head_span}
         "Add" | "Mul" | "Min" | "Max" -> return ParsedExpr{expr: Expr.ReduceMarker{name: name, span: head_span, id: parser_node_id(&state)}, span: head_span}
         else -> {}
+    }
+    // A marker with no value after it is no tag application: an unregistered
+    // name applies to the expression site, where sema reports it from the shared
+    // applied-rule vocabulary (E0927) like every other unknown marker.
+    if !parser_starts_expression(parser_current_kind(&state)) && !marker_registered(name) {
+        marker :: Marker{name: name, negated: false, name_span: Span{start: first.span.start, end: name_end}, args: [], arg_labels: [], span: head_span, ct: None}
+        &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(head_span), site: Val(RuleSite.Expression)})
+        return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(&state)}, span: head_span}
     }
     applied := name
     if name == "Tainted" {
@@ -1406,6 +1418,22 @@ fn parser_task_spawn(state: &JetParserState, head: Span, take_names: [NamedSpan]
     parser_task_call(&state, head, "task.spawn", head, body_lambda, body_span)
 }
 
+// Only the complete `task` surface spawns: `task {`, `task ^name`, a
+// `task.all/race/any/group/timeout` selector, or an atom or control operand.
+// Followed by `(`, `[`, another `.`, or an operator, `task` is an ordinary name.
+fn parser_task_surface_ahead(state: &JetParserState) -> Bool Never! {
+    next :: parser_kind_at(&state, 1)
+    if next == TOKEN_LBRACE || next == TOKEN_CARET -> return true
+    if next == TOKEN_DOT {
+        selector :: parser_lookahead(&state, 2)
+        if selector.kind != TOKEN_IDENT -> return false
+        name :: parser_value(state, selector)
+        return name == "all" || name == "race" || name == "any" || name == "group" || name == "timeout"
+    }
+    if next == TOKEN_LPAREN || next == TOKEN_LBRACKET || next == TOKEN_MINUS || next == TOKEN_BANG || next == TOKEN_STAR || next == TOKEN_AMP -> return false
+    parser_starts_expression(next)
+}
+
 // One `task` word owns single-task
 // spawn (`task { … }`, `task ^name { … }`, `task value`), `task.timeout(d)`
 // and the `all`/`race`/`any` combinators. Named `task.all` branches build a
@@ -1426,10 +1454,6 @@ fn parser_parse_task_surface(state: &JetParserState, depth: Int) -> ParsedExpr {
             close :: parser_expect(&state, TOKEN_RPAREN, "to finish `task.timeout`")
             span :: parser_cover(head, close.span)
             return ParsedExpr{expr: parser_task_call(&state, head, "task.timeout", selector.span, argument.expr, argument.span), span: span}
-        }
-        if name != "all" && name != "race" && name != "any" {
-            parser_add_error(&state, selector.span, "unknown task selector `{name}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`")
-            return ParsedExpr{expr: Expr.Unit{span: head, id: parser_node_id(&state)}, span: head}
         }
         open :: parser_expect(&state, TOKEN_LBRACE, "after the task selector")
         named := [TupleField]{}

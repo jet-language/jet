@@ -3,7 +3,7 @@
 .type jet_rt_fixture_missing,@function
 jet_rt_fixture_missing:
     sub $8, %rsp
-    call jet_ws_connect
+    call jet_rt_fixture_absent_provider
     add $8, %rsp
     ret
 .size jet_rt_fixture_missing, .-jet_rt_fixture_missing

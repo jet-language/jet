@@ -41,7 +41,7 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
             result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-            // An inline Int? word (IR_OPTION_INT_NONE) never crosses as an Int.
+            // An inline Option word (IR_OPTION_INT_NONE) never crosses as its payload.
             if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
             if m.types[result_row].kind == {
                 .Int | .Word | .Bool | .Float | .String -> {}

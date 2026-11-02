@@ -9,7 +9,9 @@ compiler_mapped_root := I64{0}
     if (compiler_mapped_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(root, I64{16})
-    compiler_mapped_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        compiler_mapped_root = root
+    }
 }
 fn compiler_mapped_key(path: I64) -> I64 {
     at := I64{0}

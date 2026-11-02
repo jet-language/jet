@@ -104,9 +104,10 @@ fn host_stdout_byte_locked(byte: I64) -> I64 {
 // Bytes are borrowed, never copied into an intermediate String/line
 // allocation. They go into the 8192-byte buffer a run at a time (a word copy):
 // a full buffer is written out, and on a terminal so is each run that ends in
-// an LF (line buffering).
+// an LF (line buffering). The output lock is elided while one thread runs
+// (Sync.jet sync_sole_enter).
 fn host_stdout_write(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
-    host_lock()
+    sole :: sync_sole_enter(host_root)
     failure := I64{0}
     #Unsafe("the caller lends length bytes; the output lock owns the destination buffer") {
         index := I64{0}
@@ -136,7 +137,7 @@ fn host_stdout_write(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
         if (failure == I64{0} && line) { failure = host_stdout_byte_locked(I64{10}) }
         if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
     }
-    host_unlock()
+    sync_sole_exit(host_root, sole)
     failure
 }
 
@@ -213,7 +214,11 @@ fn host_stdout_flush_fault() {
 // state, else 0: a program that never runs a test prints straight through.
 host_print_capture_code := I64{0}
 
-fn host_print_capture_install(code: I64) { host_print_capture_code = code }
+fn host_print_capture_install(code: I64) {
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        host_print_capture_code = code
+    }
+}
 
 #Export(c) fn jet_term_write_stdout_line(value: I64, flush: U8) {
     capture :: host_print_capture_code

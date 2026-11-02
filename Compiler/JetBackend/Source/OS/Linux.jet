@@ -66,41 +66,25 @@ OS_O_RDONLY_CLOEXEC :: 0x80000
 OS_EEXIST :: 17
 OS_EINTR :: 4
 
-// One raw system call with up to six arguments. Every input is pushed before
-// any argument register is written, so the operands may live in any register;
-// the argument registers are restored afterwards.
+// One raw system call with up to six arguments. The operands arrive in rdi,
+// rsi, rdx, rcx, r8, r9 and r10 (InlineAsm.jet X64_ASM_INPUTS), and each is
+// read before its register is written; r11 holds the sixth while r10 takes
+// the fourth. The leaf is a call, which clobbers the argument registers, so
+// none is restored.
 #[Unsafe("a raw Linux x86-64 system call; the caller passes the call number and arguments that call expects"), FFI(asm)]
 fn os_syscall(number: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int {
     """
-    push rdi
-    push rsi
-    push rdx
-    push r10
-    push r8
-    push r9
-    push {number}
-    push {a1}
-    push {a2}
-    push {a3}
-    push {a4}
-    push {a5}
-    push {a6}
-    pop r9
-    pop r8
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
-    pop rax
+    mov rax, {number}
+    mov rdi, {a1}
+    mov rsi, {a2}
+    mov rdx, {a3}
+    mov r11, {a6}
+    mov r10, {a4}
+    mov r8, {a5}
+    mov r9, r11
     syscall
-    pop r9
-    pop r8
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
     mov rax, rax ; -> return
-    ; clobbers rcx, r11
+    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
     """
 }
 
@@ -297,38 +281,21 @@ fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
 
 // Runtime leaves use machine words, never exact Int: an allocator must not
 // enter the arbitrary-precision numeric runtime while bootstrapping its heap.
+// The registers move as os_syscall's do.
 #[Unsafe("a raw Linux x86-64 syscall; the caller supplies the syscall's valid machine-word arguments"), FFI(asm)]
 fn os_syscall_i64(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
     """
-    push rdi
-    push rsi
-    push rdx
-    push r10
-    push r8
-    push r9
-    push {number}
-    push {a1}
-    push {a2}
-    push {a3}
-    push {a4}
-    push {a5}
-    push {a6}
-    pop r9
-    pop r8
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
-    pop rax
+    mov rax, {number}
+    mov rdi, {a1}
+    mov rsi, {a2}
+    mov rdx, {a3}
+    mov r11, {a6}
+    mov r10, {a4}
+    mov r8, {a5}
+    mov r9, r11
     syscall
-    pop r9
-    pop r8
-    pop r10
-    pop rdx
-    pop rsi
-    pop rdi
     mov rax, rax ; -> return
-    ; clobbers rcx, r11
+    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r9, r10
     """
 }
 

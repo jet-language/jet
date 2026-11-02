@@ -1,0 +1,130 @@
+// A small scalar's Option is one word like an Int? (option_int_niche.jet):
+// the payload's zero-extended word when present, the niche 2^62 when absent.
+// U8, U16, U32, Bool, Char and payload-free enum Options keep every value
+// apart from None through returns, records, collections, maps, lazy
+// iterators, equality, ordering, comptime values and write windows, on
+// every tier.
+
+enum Light { Red Amber Green }
+
+fn byte(i: Int) -> U8? {
+    if i < 0 || i > 255 -> return None
+    Val(U8{i})
+}
+
+fn flag(i: Int) -> Bool? {
+    if i % 3 == 0 -> return None
+    Val(i % 3 == 1)
+}
+
+fn light(i: Int) -> Light? {
+    if i == 0 -> return Val(Light.Red)
+    if i == 1 -> return Val(Light.Amber)
+    if i == 2 -> return Val(Light.Green)
+    None
+}
+
+fn wide(i: Int) -> U32? {
+    if i < 0 -> return None
+    Val(U32{i})
+}
+
+fn half(i: Int) -> U16? {
+    if i % 2 == 1 -> return None
+    Val(U16{i >> 1})
+}
+
+fn show_light(l: Light?) -> String {
+    if l == {
+        .Val(.Red) -> "red"
+        .Val(.Amber) -> "amber"
+        .Val(.Green) -> "green"
+        None -> "none"
+    }
+}
+
+struct Sample {
+    name: String
+    code: U8?
+    on: Bool?
+    mark: Char?
+    light: Light?
+}
+
+K_BYTE :: comptime { byte(255) }
+K_NONE :: comptime { byte(256) }
+K_FLAG :: comptime { flag(2) }
+K_LIGHT :: comptime { light(2) }
+
+// Write windows into an inline Option: a write parameter, a field, a variable.
+fn bump(o: &U8?, by: U8) {
+    if &o == {
+        .Val(n) -> n = n + by
+        None -> {}
+    }
+}
+
+fn windows() {
+    local := byte(250)
+    if &local == {
+        .Val(n) -> n = n + U8{4}
+        None -> {}
+    }
+    print("window local {local}")
+    bump(&local, U8{1})
+    print("window param {local}")
+    s := Sample{name: "w", code: byte(7), on: flag(1), mark: Val('x'), light: light(0)}
+    if &s.code == {
+        .Val(n) -> n = n * U8{3}
+        None -> {}
+    }
+    if &s.on == {
+        .Val(v) -> v = !v
+        None -> {}
+    }
+    print("window field {s.code} {s.on}")
+    empty := byte(-1)
+    bump(&empty, U8{5})
+    print("window none {empty}")
+}
+
+fn run() {
+    edges :: [Int]{-1, 0, 1, 127, 128, 255, 256}
+    loop i in edges {
+        o :: byte(i)
+        print("{i} {o} {o ?? U8{9}} {o == None} {o == byte(255)}")
+    }
+    print("flags {flag(0)} {flag(1)} {flag(2)} {flag(0) == flag(3)} {flag(1) == flag(2)}")
+    print("lights {show_light(light(0))} {show_light(light(2))} {show_light(light(3))} {light(1) == light(1)} {light(1) == None}")
+    print("wide {wide(-1)} {wide(0)} {wide(4294967295)} {half(3)} {half(65534)}")
+    print("order {byte(3) < byte(4)} {byte(-1) < byte(0)} {byte(255) > byte(254)} {flag(2) < flag(1)}")
+    // Collections.
+    list :: [U8?]{byte(1), None, byte(255), byte(0)}
+    loop item in list -> print("item {item}")
+    copied :: list.copy()
+    print("{copied.len()} {copied[0]} {copied[1]} {copied == list}")
+    raw :: [U8]{5, 200, 9}
+    print("{raw.first()} {raw.last()} {raw.get(1)} {raw.get(9)}")
+    chars :: "héllo".chars()
+    print("{chars.first()} {chars.get(1)} {chars.get(7)}")
+    popped := [Bool]{true, false}
+    print("{&popped.pop()} {&popped.pop()} {&popped.pop()}")
+    m := [String: U8]{}
+    m["a"] = U8{200}
+    print("{m.get("a")} {m.get("b")} {&m.remove("a")} {&m.remove("a")}")
+    flags := [Int: Bool]{1: true, 2: false}
+    print("{flags.get(1)} {flags.get(2)} {flags.get(3)}")
+    // Lazy iteration.
+    bytes :: "jet".bytes()
+    picked :: bytes.lazy().filter_map((b) -> if b > (U8{100}) -> Val(b) else -> None).collect()
+    print("{picked.len()} {picked[0]} {picked[1]}")
+    print("{bytes.lazy().first()} {bytes.lazy().skip(3).first()} {bytes.find((b) -> b == U8{101})}")
+    // Records.
+    a :: Sample{name: "a", code: byte(65), on: flag(2), mark: Val('é'), light: light(1)}
+    b :: Sample{name: "b", code: None, on: None, mark: None, light: None}
+    print("{a}")
+    print("{b}")
+    print("{a.code == b.code} {a.mark} {show_light(a.light)} {show_light(b.light)}")
+    print("comptime {K_BYTE} {K_NONE} {K_FLAG} {show_light(K_LIGHT)}")
+    windows()
+}

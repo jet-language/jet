@@ -317,7 +317,7 @@ fn jet_cli_try_output(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: S
     if failed {
         if json {
             fields :: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(false)), jet_cli_status_field("verdict", jet_cli_status_text("failed")), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
-            reports :: jet_cli_reports_json(jet_cli_report_cwd(), plan.entry, entry_source, verdict.diagnostics)
+            reports :: jet_cli_reports_json(jet_cli_report_base(plan.entry), plan.entry, entry_source, verdict.diagnostics)
             return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("try", false, reports, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
         return JetDriverVerbOutput{stdout: "", stderr: "try `{plan.name}`: verdict failed; rolled back\n{diagnostic_render_all(plan.entry, entry_source, verdict.diagnostics, false)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -359,7 +359,7 @@ fn jet_cli_try_run(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
         plan_path :: cli_files.realpath(path) ?? return jet_cli_try_fail("could not canonicalize try plan `{path}`: {jet_cli_io_error_text(err)}")
         root :: jet_cli_parent(plan_path) ?? return jet_cli_try_fail("try plan has no parent directory")
         log_name :: "{receipt}.log.json"
-        _ :: jet_cli_commit_source_changes(root, changes, log_name, jet_cli_fix_log(root, receipt, changes, operations)) ?? return jet_cli_try_fail(err.message)
+        _ :: jet_cli_commit_source_changes(root, changes, log_name, jet_cli_fix_log(root, receipt, changes, operations, [JetCLIFixSkip]{})) ?? return jet_cli_try_fail(err.message)
     }
     jet_cli_try_output(plan, verdict, receipt, keep, json, source)
 }

@@ -124,9 +124,9 @@ file: run.jet sha256 = "{cap:source_sha}"
 file: package.jet = "{cap:package_with_library}"
 file: .jet/lock same-as {cap:initial_lock}
 file: .jet/lock sha256 = "{cap:initial_lock_sha}"
-when os unix:
+when os unix
 capture: cc = first-spawnable cc --version | gcc --version | clang --version
-when captured cc:
+when captured cc
 write: foreign.c foreign.c.template
 when os-name linux: step: {cap:cc} -std=c11 -I {work}/.jet/build {work}/foreign.c {work}/.jet/build/libpulse.a -o {work}/foreign -ldl -lpthread -lm
 when os-name !linux: step: {cap:cc} -std=c11 -I {work}/.jet/build {work}/foreign.c {work}/.jet/build/libpulse.a -o {work}/foreign

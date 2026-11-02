@@ -44,25 +44,41 @@ fn display_literal(word: I64, length: I64) -> I64 {
 }
 
 // Both work in the negative domain: even i64::MIN has an exact magnitude
-// there. `%` and `/%` floor, so a nonpositive n uses the truncated `%%` digit
-// and divides by -10 before negating (-7 /% -10 is 0), as Int.jet does.
+// there. A nonpositive n divided by a negative divisor floors to the
+// truncated magnitude of the quotient (-123 /% -100 is 1), and n plus that
+// quotient times the divisor's magnitude is minus the remainder. An x86
+// division costs tens of cycles, so the length is found by comparisons and
+// the digits are written in pairs from a 00..99 table, one division a pair.
 fn display_integer_length(value: I64) -> I64 Never! {
-    n := if (value > I64{0}) -> -value else -> value
+    n :: if (value > I64{0}) -> -value else -> value
     length := I64{1}
-    loop n <= (I64{-10}) {
-        n = -(n /% I64{-10})
+    bound := I64{-10}
+    // i64 has at most 19 digits; the bound stops at -10^18.
+    loop n <= bound && length < (I64{19}) {
         length += I64{1}
+        if (length < I64{19}) { bound = wrapping(bound * I64{10}) }
     }
     length
 }
 
+// The `width` low digits of |value| end at offset `end` of `data`; digits
+// past the value's own are zeros.
 fn display_integer_digits(data: I64, end: I64, value: I64, width: I64) {
+    pairs :: display_word(rt_static_text("00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899"))
     n := if (value > I64{0}) -> -value else -> value
     i := end
-    loop i > end - width {
-        i -= I64{1}
-        display_put(wrapping(data + i), I64{48} - n %% I64{10})
-        n = -(n /% I64{-10})
+    first :: end - width
+    loop i - first >= (I64{2}) {
+        quotient :: n /% I64{-100}
+        pair :: -(n + quotient * I64{100}) * I64{2}
+        i -= I64{2}
+        display_put(wrapping(data + i), display_byte(wrapping(pairs + pair)))
+        display_put(wrapping(data + i + I64{1}), display_byte(wrapping(pairs + pair + I64{1})))
+        n = -quotient
+    }
+    if (i > first) {
+        quotient :: n /% I64{-10}
+        display_put(wrapping(data + first), I64{48} - (n + quotient * I64{10}))
     }
 }
 

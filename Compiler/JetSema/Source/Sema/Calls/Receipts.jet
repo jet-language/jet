@@ -1,0 +1,173 @@
+// Typed receipt sections. `receipt` is one compiler-owned ambient handle: a
+// `#[Receipt("name"), Codable]` record declares a section, and
+// `receipt.attach(value)` publishes the value's canonical encoding under that
+// section. The section name, declared type name and schema digest are
+// declaration facts the checked call carries to the `jet_receipt_attach`
+// runtime route; no source constructor or `core.receipt` module exists.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    FunctionDefaultRef,
+    Marker,
+    Span,
+    StructDef,
+    TFailureCarrier,
+    Type,
+    core_call,
+    expr_span,
+    sha256_bytes,
+    sha256_hex_bytes,
+    type_name,
+]
+
+// The record's live `#Receipt` marker.
+fn sema_receipt_marker(definition: StructDef) -> Marker? Never! {
+    loop marker in definition.type_markers {
+        if marker.name == "Receipt" && !marker.negated -> return Val(marker)
+    }
+    None
+}
+
+fn sema_receipt_codable(definition: StructDef) -> Bool Never! {
+    loop marker in definition.type_markers {
+        if marker.name == "Codable" && !marker.negated -> return true
+    }
+    false
+}
+
+// The marker's one compile-time string argument.
+fn sema_receipt_marker_name(marker: Marker) -> String? Never! {
+    if marker.ct == .Val(value) {
+        return if value == .Str(text) -> Val(text) else -> None
+    }
+    if marker.args.len() != 1 -> return None
+    if marker.args[0] == .Expr(expression) {
+        if expression == .Str(parts, _, _) {
+            if parts.len() == 0 -> return Val("")
+            if parts.len() == 1 {
+                if parts[0] == .Lit(text) -> return Val(text)
+            }
+        }
+    }
+    None
+}
+
+// Non-empty, at most 128 bytes, no control character and no path separator.
+fn sema_receipt_section_name_valid(name: String) -> Bool Never! {
+    bytes :: name.bytes()
+    if bytes.len() == 0 || bytes.len() > 128 -> return false
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code < 32 || code == 127 || code == 47 || code == 92 -> return false
+        // U+0080..U+009F (C1 controls) encode as C2 80..C2 9F.
+        if code == 194 && index + 1 < bytes.len() {
+            following :: Int.from_u8(bytes[index + 1])
+            if following >= 128 && following <= 159 -> return false
+        }
+    }
+    true
+}
+
+// A `#Receipt` declaration must be `#Codable` and name its section with one
+// valid compile-time string.
+fn sema_receipt_validate_declaration(definition: StructDef, diagnostics: &[Diagnostic]) {
+    marker :: sema_receipt_marker(definition) ?? return
+    if !sema_receipt_codable(definition) {
+        &diagnostics.push(sema_error("E2411", marker.span, "receipt section type `{definition.name}` must be `#Codable`", "typed receipt sections use the shared Codable wire contract", "add `#Codable` beside `#Receipt`"))
+        return
+    }
+    name :: sema_receipt_marker_name(marker) ?? {
+        &diagnostics.push(sema_error("E0103", marker.span, "`#Receipt` requires one compile-time string name", "receipt section identity is fixed at declaration time", "write `#Receipt(\"name\")`"))
+        return
+    }
+    if !sema_receipt_section_name_valid(name) {
+        &diagnostics.push(sema_error("E0103", marker.span, "`#Receipt` section name is invalid", "section names are bounded and cannot contain path separators", "use a non-empty name of at most 128 bytes"))
+    }
+}
+
+// The section name of a valid `#Receipt` declaration.
+fn sema_receipt_section_name(definition: StructDef) -> String? Never! {
+    marker :: sema_receipt_marker(definition) ?? return None
+    if !sema_receipt_codable(definition) -> return None
+    name :: sema_receipt_marker_name(marker) ?? return None
+    if !sema_receipt_section_name_valid(name) -> return None
+    Val(name)
+}
+
+// SHA-256 of the declared type name, a NUL, then `name:Type;` for each stored
+// field in declaration order.
+fn sema_receipt_schema_digest(definition: StructDef) -> String Never! {
+    schema := [U8]{}
+    &schema.extend(definition.name.bytes())
+    &schema.push(U8{0})
+    loop field in definition.fields {
+        if field.computed != None -> next
+        &schema.extend("{field.name}:{type_name(field.ty)};".bytes())
+    }
+    sha256_hex_bytes(sha256_bytes(schema[0..<schema.len()]))
+}
+
+// The struct declaration a checked payload type names.
+fn sema_receipt_payload_struct(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> StructDef? Never! {
+    if program.registration_graph == .Val(graph) {
+        row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.source == .SourceAST(item) {
+            if item == .Struct(definition) -> return Val(definition)
+        }
+    }
+    None
+}
+
+fn sema_receipt_text(text: String, span: Span) -> TExpr Never! {
+    sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
+}
+
+// `receipt.attach(value)` while no local binding named `receipt` exists.
+fn sema_receipt_try_attach(receiver: Expr, method: String, span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "attach" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    receiver_name :: if receiver == .Ident(name, _, _) -> name else -> ""
+    if receiver_name != "receipt" || sema_scope_resolve_index(scopes, "receipt") != None -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0103", span, "`receipt.attach` takes exactly one argument", "one typed value becomes one named receipt section", "write `receipt.attach(value)`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    payload_span :: expr_span(args[0].expr)
+    scopes.ownership_call_depth += 1
+    checked := sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.ownership_call_depth -= 1
+    payload :: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    payload_name :: if payload.ty == {
+        .Named(name) -> name
+        .Apply(name, _) -> name
+        else -> ""
+    }
+    if payload_name == "" {
+        &diagnostics.push(sema_error("E2411", payload_span, "receipt sections require a named `#Receipt` type", "the section schema and wire encoder are declaration-owned", "declare a `#Codable` record with `#Receipt(\"name\")`"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    definition :: sema_receipt_payload_struct(payload.ty, environment, program)
+    section := String?{None}
+    if definition == .Val(found) -> section = sema_receipt_section_name(found)
+    if section == None {
+        &diagnostics.push(sema_error("E2411", payload_span, "type `{type_name(payload.ty)}` is not a `#Receipt` section", "receipt attachment accepts only declaration-owned typed sections", "add `#Receipt(\"name\")` and `#Codable` to the record"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if !sema_serde_type_is_admissible(environment, program, payload.ty, SemaSerdeDirection.Encode) {
+        &diagnostics.push(sema_error("E0905", payload_span, "`{type_name(payload.ty)}` does not implement `Encode`", "a receipt section is the value's canonical encoding", "derive `Codable` on this type, or write its Encode implementation"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if !sema_ownership_check_call_receiver(&state, args[0].expr, AccessConvention.Read, scopes, payload_span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    declared :: definition ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    record :: core_call("core.prelude", "__receipt_attach") ?? panic("checked receipt attach row is missing")
+    result :: Type.Named{name: "Unit"}
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    encoded :: sema_tree_node(sema_dyn_type(), TExprKind.HandleMethod{receiver: payload, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, payload_span)
+    values :: [TExpr]{encoded, sema_receipt_text(section ?? "", span), sema_receipt_text(declared.name, span), sema_receipt_text(sema_receipt_schema_digest(declared), span)}
+    value :: sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false, false, false, false}, fallibility: TFailureCarrier.Infallible}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}

@@ -1,0 +1,59 @@
+struct Words {
+    data: [String]
+}
+
+struct WordsIter {
+    words: Words
+    idx: Int
+}
+
+impl WordsIter.Iterator {
+    type Item = String
+
+    fn next(&self) -> String? {
+        if self.idx >= self.words.data.len() -> return None
+        v :: self.words.data[self.idx]
+        self.idx += 1
+        Val(v)
+    }
+}
+
+impl Words.Iterable {
+    type Iter = WordsIter
+
+    fn iter(^self) -> WordsIter { WordsIter{words: self, idx: 0} }
+}
+
+#Layout(columnar)
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn source() -> [Int] {
+    print("source")
+    [0, 1, 2, 3, 4, 5, 6]
+}
+
+fn stride() -> Int {
+    print("stride")
+    3
+}
+
+fn run() {
+    loop item in source(), stride() {
+        if item == 0 { next }
+        print("list {item}")
+    }
+    tens :: [Int]{10, 20, 30, 40, 50}
+    loop (i, x) in tens, 2 -> print("pair {i} {x}")
+    names :: [String]{"ann", "bo", "cy", "di", "ed"}
+    loop name in names, 2 -> print("name {name}")
+    loop c in "héllo".chars(), 2 -> print("char {c}")
+    words :: Words{data: [String]{"one", "two", "three", "four"}}
+    loop w in words, 3 -> print("word {w}")
+    sevens :: [Int]{1, 2, 3, 4, 5, 6, 7}
+    loop n in sevens.lazy(), 4 -> print("lazy {n}")
+    points :: [Point]{Point{x: 1, y: 2}, Point{x: 3, y: 4}, Point{x: 5, y: 6}}
+    loop p in points, 2 -> print("point {p.x} {p.y}")
+}

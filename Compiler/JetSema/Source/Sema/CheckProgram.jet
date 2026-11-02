@@ -787,7 +787,7 @@ fn sema_incremental_item_header(item: Item) -> Item Never! {
             published_schema_span: definition.published_schema_span,
             is_single_use: definition.is_single_use, single_use_span: definition.single_use_span,
             is_must_use: definition.is_must_use, must_use_span: definition.must_use_span,
-            layout: definition.layout, layout_span: definition.layout_span,
+            layout: definition.layout, layout_span: definition.layout_span, layout_alignment_span: definition.layout_alignment_span,
             serde_markers: definition.serde_markers, type_markers: definition.type_markers,
             validate_block: definition.validate_block, validate_span: definition.validate_span,
         }}
@@ -7696,6 +7696,19 @@ fn sema_runtime_ceiling_import_modules(declaration: ImportDecl) -> [String] Neve
     names
 }
 
+// The local name an import gives `module_name`: the declaration alias, or
+// the alias of the member row that names that module.
+fn sema_runtime_ceiling_import_alias(declaration: ImportDecl, module_name: String) -> String Never! {
+    if declaration.kind == .Unqualified(module_alias, _, items, _, _) {
+        loop item in items {
+            if "{module_alias}.{item.original}" != module_name -> next
+            if item.alias == .Val(alias) -> return alias.copy()
+            return item.original.copy()
+        }
+    }
+    declaration.alias.copy()
+}
+
 // How a written usage reaches its Core helper: the ambient `input()` helper,
 // an import of the helper's module, or the prelude itself.
 fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> String Never! {
@@ -7704,7 +7717,7 @@ fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> St
     if parts.len() > 1 {
         loop declaration in imports {
             loop module_name in sema_runtime_ceiling_import_modules(declaration) {
-                if module_name == parts[0] -> return "`use {module_name} as {declaration.alias}` → `{usage}`"
+                if module_name == parts[0] -> return "`use {sema_runtime_ceiling_import_alias(declaration, module_name)} :: {module_name}` → `{usage}`"
             }
         }
     }
@@ -8899,6 +8912,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) -> &reported.push(diagnostic)
     }
     diagnostics = reported
+    sema_crypto_misuse_precedence(&diagnostics)
     programs := [Program]{}
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> &programs.push(source_module.program)

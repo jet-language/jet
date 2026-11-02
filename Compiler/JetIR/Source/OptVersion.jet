@@ -1,4 +1,4 @@
-// Versioning (O2, pass "version", just before the SSA round trip): code
+// Versioning (pass "version", just before the SSA round trip): code
 // that runs Int arithmetic is copied behind tests that its Ints are
 // inline, so that inside the copy OptRange (OptRange.jet) can prove the
 // arithmetic inline and give it the plain i64 instructions, and drop the
@@ -71,9 +71,9 @@
 // names each index such a loop writes: `stepped index <function>: guarded
 // before the Loop`, or `declined (<why>)`.
 //
-// A function without loops whose body ends in a Return or Unreachable and
-// reads an Int parameter in such an operation is guarded the same way at
-// its entry, on up to IR_VERSION_GUARDS such parameters:
+// At O2, a function without loops whose body ends in a Return or
+// Unreachable and reads an Int parameter in such an operation is guarded
+// the same way at its entry, on up to IR_VERSION_GUARDS such parameters:
 //
 //     block
 //       br_if int_big(p, 61), 0
@@ -87,13 +87,17 @@
 // stays in memory, built on two paths), and the caller's own versioning
 // already covers the inlined Ints.
 //
-// A copy fits IR_VERSION_BODY instructions and a function's loop copies
-// stay within IR_VERSION_BUDGET.
+// O1 copies only the loops (the first two forms), and only those of
+// IR_VERSION_BODY_SMALL instructions: a larger body's own work dwarfs the
+// overflow tests the copy saves, while its copy grows the program. O2 copies
+// up to IR_VERSION_BODY instructions. A function's loop copies stay within
+// IR_VERSION_COPIES times the copy limit.
 
 use jet_foundation.[compiler_threads_single, name_rows_set]
 
 IR_VERSION_BODY :: 160
-IR_VERSION_BUDGET :: 480
+IR_VERSION_BODY_SMALL :: 64
+IR_VERSION_COPIES :: 3
 IR_VERSION_GUARDS :: 4
 
 // The guard's bounds: OptRange reads a compare with an inline constant, so
@@ -118,10 +122,11 @@ IR_VERSION_GUARD_BITS :: 61
 // as it was.
 IR_VERSION_PRODUCT_BITS :: 31
 
-// Versions the loops of `f`; returns how many copies it made. Each index
-// a guarded loop writes gets a row in `report` (stepped or not), and so
-// does each factor (IR_VERSION_PRODUCT_BITS).
-fn ir_opt_version_loops(m: IRModule, f: &IRFunction, report: &IROptReport) -> Int Never! {
+// Versions the loops of `f` that fit `body` instructions (IR_VERSION_BODY
+// at O2, IR_VERSION_BODY_SMALL at O1); returns how many copies it made. Each
+// index a guarded loop writes gets a row in `report` (stepped or not), and
+// so does each factor (IR_VERSION_PRODUCT_BITS).
+fn ir_opt_version_loops(m: IRModule, f: &IRFunction, body: Int, report: &IROptReport) -> Int Never! {
     ir_opt_compact(&f)
     facts :: ir_opt_facts(f)
     // Per slot the first and last instruction naming it.
@@ -158,7 +163,7 @@ fn ir_opt_version_loops(m: IRModule, f: &IRFunction, report: &IROptReport) -> In
     guard_limit := [Int]{}
     guard_range := [Bool]{}
     guard_bits := [Int]{}
-    budget := IR_VERSION_BUDGET
+    budget := IR_VERSION_COPIES * body
     loop at in 0..<f.op.len() {
         if f.op[at] != .Loop -> next
         // A loop inside one already copied goes with it.
@@ -173,7 +178,7 @@ fn ir_opt_version_loops(m: IRModule, f: &IRFunction, report: &IROptReport) -> In
         guards := [Int]{}
         if bound < 0 && bool_row >= 0 -> guards = ir_version_guarded(m, f, facts, first, start, at, end)
         if bound < 0 && guards.len() == 0 -> next
-        if size > IR_VERSION_BODY || size > budget -> next
+        if size > body || size > budget -> next
         budget -= size
         // The Ints guarded once before the loop: those it never writes, and
         // an index it steps up by one of them.

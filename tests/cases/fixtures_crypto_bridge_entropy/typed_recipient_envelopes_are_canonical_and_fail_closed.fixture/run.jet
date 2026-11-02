@@ -44,10 +44,19 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
     assert_eq(cut(bytes, 0, 4), "JETV".bytes())
     assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, aad) ?? panic("open"), plain)
     // Core/Crypto/crypto.jet447,477 public tag OpenFailed.
-    assert_eq(crypto.open(wrong, crypto.Sealed{bytes: bytes.copy()}, aad), Err(crypto.CryptoError.OpenFailed))
-    assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, "wrong".bytes()), Err(crypto.CryptoError.OpenFailed))
+    if crypto.open(wrong, crypto.Sealed{bytes: bytes.copy()}, aad) == {
+        .Ok(_) -> panic("wrong recipient opened")
+        .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
+    }
+    if crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, "wrong".bytes()) == {
+        .Ok(_) -> panic("wrong aad opened")
+        .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
+    }
     tampered := bytes.copy()
     last :: tampered.len() - 1
     tampered[last] = (U8{Int.from_u8(tampered[last]).bit_xor(1)})
-    assert_eq(crypto.open(alice, crypto.Sealed{bytes: tampered}, aad), Err(crypto.CryptoError.OpenFailed))
+    if crypto.open(alice, crypto.Sealed{bytes: tampered}, aad) == {
+        .Ok(_) -> panic("tampered envelope opened")
+        .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)
+    }
 }

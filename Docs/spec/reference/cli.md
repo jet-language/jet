@@ -279,7 +279,14 @@ Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
 editor code actions. Without `--all`, both the applicability and safety class
 must permit an unattended formatting or behavior-preserving change. Exact
 duplicate edits apply once; overlapping edits are deferred and rechecked for
-at most sixteen rounds. `--dry-run` renders the diff without publishing.
+at most sixteen rounds. Each round's edited file is checked again: when it
+has more errors than the file had before `jet fix`, each edit is retried on
+top of the ones kept, and an edit that adds an error is rolled back and
+reported with that error. The receipt's `skipped` rows record every edit left
+out (one needing review, or one rolled back) with its reason. A `#Deprecated`
+`use:` replacement is offered as an edit only when it is a plain rename, a
+declared function that takes the same call; otherwise L2001's Fix says to edit
+the use by hand. `--dry-run` renders the diff without publishing.
 `--edition=2027` performs the registered JSON/CBOR migrations first, retaining
 written propagation and making panic fallbacks idempotent. Human status is
 suppressed by `--quiet` and `--json`; machine mode does not create a fake fix
@@ -522,7 +529,9 @@ The options below are intentionally named exactly as in `jet help`:
 - `--locked` requires locked dependency and provenance facts; `--fixtures`
   selects an explicit fixture bundle.
 - `--lib` makes `build` emit the native Library and C header; `--output` selects
-  a named output; `--small` favors a smaller binary.
+  a named output; `--small` favors a smaller binary; `--checked-alloc` on
+  `build`, `run` and `test` links the checked memory allocator, which stops at
+  a bad free or a write after free.
 - `--json`, `--quiet`, `--color`, and `--verbose` select output detail.
 - `--watch`, `--fresh`, `--docs`, `--coverage`, `--where`, and `--capture`
   control test or development execution; `--browser` selects browser engines.
@@ -831,7 +840,14 @@ inside loops. View-materialization lints remain sema-owned. Findings exit 1
 on stderr (diagnostic JSON Lines under `--json`); clean invocations exit 0.
 Bare `inspect explain-build <file>` selects the authorized invocation entry
 under its authenticated workspace root, then reads the authenticated last-run
-record. Missing records refuse; static node keys are not execution timings.
+record. It always reports the planned steps the compiler knows: the JSON
+document `jet.explain-build/v1` carries a `planned` list of `{kind, key,
+subject, inputs}` beside `nodes`, the recorded steps with `duration_ms` and
+`why_ran`. A program with no record exits 0 with `nodes: []`; the text form
+prints `no build recorded for <program> yet; planned steps:` and one
+`kind key subject inputs` row per planned step, with no time or reason. With a
+record the text form prints the recorded rows. A record for another program
+is refused with E2104.
 
 Checked build queries use the Driver's invocation-owned build scope and real
 build evaluator; the CLI does not reconstruct a graph from source spellings.
@@ -1006,9 +1022,14 @@ the aliasing, early-exit, effect and cross-iteration verdicts, how many list
 accesses sema proved in bounds and how many of them the build lowered with no
 bounds check. Each loop lowers one scalar round per index.
 Last it names the program's `main:`. A program gets `program-owned` when none
-of its stop edges cleans up anything (each edge only returns or frees memory)
-and every runtime route it calls behaves the same with no process root. It
-then runs under a main of its own with no stop points. A stop writes the same
+of its stop edges cleans up anything a process exit could observe. Each edge
+only writes and frees memory (its drops' routines too), enters and leaves a
+cleanup scope, or returns. Every runtime route it calls must also behave the
+same with no process root. Those routes include exact `Int` arithmetic, except
+shifts, and the generated `#CLI` parser's (argument reads, `Int` parsing,
+refusals on stderr and `process.exit`). It then runs under a main of its own
+with no stop points and no cleanup scopes, and its `process.exit` publishes no
+stop. A stop writes the same
 report and exits with the same code as under the root. Any other program
 gets `process root:` and the first function, route or stop edge that needs
 the root.

@@ -10,6 +10,7 @@ use jet_foundation.[
     Param,
     Span,
     Type,
+    diagnostic_registry_row,
     type_name,
 ]
 use jet_parser.[parser_guest_import_symbol]
@@ -112,7 +113,8 @@ fn sema_guest_check_c_signature(graph: SemaRegistrationGraph, module_index: Int,
         }
         if {
             pointer_return -> {
-                &diagnostics.push(sema_error("E3202", return_span, "Type `{type_name(return_type)}` cannot cross the C boundary here.", "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe` region", "Move the call inside `#Unsafe`, or change the type to a C-safe value type."))
+                row :: diagnostic_registry_row("E3202") ?? panic("E3202 has no registry row")
+                &diagnostics.push(sema_error("E3202", return_span, row.what.replace("{{ty}}", type_name(return_type)), row.why, row.fix))
                 valid = false
             }
             !sema_checked_foreign_type(graph, return_type, module_identity, true, false, handles, [String]{}) -> {

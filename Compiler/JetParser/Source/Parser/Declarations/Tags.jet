@@ -27,6 +27,11 @@ fn parser_parse_tag_policy(state: &JetParserState, modifiers: ParsedItemModifier
     name :: parser_expect_name(&state, "after `tag`")
     deny := [NamedSpan]{}
     from := [NamedSpan]{}
+    if parser_current_kind(&state) != TOKEN_LBRACE {
+        tag_name :: parser_value(state, name)
+        parser_tag_error(&state, name.span, "tag `{tag_name}` needs a policy body", "a tag declares a dataflow fact, including where that fact is denied", "write `tag {tag_name} {{ deny: [Effect] }}`")
+        return Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: tag_name, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, name.span)}}
+    }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a tag policy")
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)

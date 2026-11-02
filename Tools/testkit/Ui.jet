@@ -66,7 +66,10 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
         loop row in rows {
             if row.name == name {
                 known = true
-                if row.capability != "" -> call.refused = row.capability
+                // `@generated_source` only reaches the generated-source compile for a
+                // top-level `generated_cffi_*` file; on any other file it is a plain check.
+                plain :: name == "generated_source" && !files.basename(file).starts_with("generated_cffi_")
+                if row.capability != "" && !plain -> call.refused = row.capability
             }
         }
         if !known -> call.refused = "unported fixture directive: {name}"

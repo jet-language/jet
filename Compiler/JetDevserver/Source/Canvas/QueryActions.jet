@@ -486,13 +486,11 @@ fn core_source_callee(src: String, module_path: String) -> String {
     if imported_core_alias(src, module_path) == .Val(alias) -> alias else -> module_path.rsplit('.').next().unwrap_or(module_path).to_string()
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1509
+// The local name of `module_path` when the source imports it: an `alias ::`
+// row, the older `as alias`, or a `use {` block row (core_imports, #6542).
 fn imported_core_alias(src: String, module_path: String) -> String? {
-    prefix :: "use {module_path} as "
-    loop line in src.lines() {
-        code := line.split("//").next().unwrap_or("").trim() // #4303
-        rest :: code.strip_prefix(prefix) ?? next
-        alias := rest.split((c) -> !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("").trim() // #4303
-        if !alias.is_empty() -> return .Some(alias.to_string())
+    loop import in core_imports(src) {
+        if import.module_ref == module_path -> return .Some(^import.alias)
     }
     .None
 }

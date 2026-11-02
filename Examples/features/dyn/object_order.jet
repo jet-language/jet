@@ -19,6 +19,12 @@ fn run() {
 
     print(json.to_string(Dyn.Object(["ok": true, "n": 7])))
 
+    // An ordered pair list builds the object in list order (#6434): bound
+    // first, or passed directly as a typed literal.
+    fields :: [(key: String, value: Dyn)]{(key: "z", value: Dyn.Int(1)), (key: "a", value: Dyn.Int(2))}
+    print(json.to_string(Dyn.Object(fields)))
+    print(json.to_string(Dyn.Object([(key: String, value: Dyn)]{(key: "z", value: Dyn.Int(1)), (key: "a", value: Dyn.Int(2))})))
+
     values :: [String:Int]{"z": 26, "a": 1, "m": 13}
     print(json.to_string(values))
 }

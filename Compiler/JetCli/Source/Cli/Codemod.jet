@@ -1783,6 +1783,8 @@ fn jet_cli_codemod_undo_v2(value: JetCLIStatusValue, path: String, project: Stri
     declared :: jet_cli_codemod_take_string(&object, "project")
     _ :: jet_cli_codemod_take_array_opt(&object, "semantic_ops")
     rows :: jet_cli_codemod_take_array(&object, "files")
+    // `jet fix` lists the fixes it left out (jet_cli_fix_log); undo needs none.
+    _ :: jet_cli_codemod_take_array_opt(&object, "skipped")
     jet_cli_codemod_reject_unknown(object, "schema 2 replay log")
     canonical :: cli_files.realpath(declared) ?? return Err(jet_cli_codemod_error("could not canonicalize replay project: {jet_cli_io_error_text(err)}"))
     if canonical != project -> return Err(jet_cli_codemod_error("replay log project does not match its .jet/codemods location"))

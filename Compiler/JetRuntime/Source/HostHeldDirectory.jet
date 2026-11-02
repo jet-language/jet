@@ -13,7 +13,9 @@ fs_held_root := I64{0}
     root :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(root, I64{24})
     sync_store(wrapping(root + I64{8}), I64{1})
-    fs_held_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        fs_held_root = root
+    }
 }
 
 // Only the root lock reads the list.

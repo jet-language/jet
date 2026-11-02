@@ -1,0 +1,62 @@
+// The Core surfaces no `jet` has built yet (R2(b)). Each one type-checks, but
+// what it lowers to has no IR builder, no runtime route, or a route whose
+// export the runtime pack lacks: an R4 gap (LintPlanted.jet --route-gaps lists
+// every one). Lowering a user call of one would stop inside the compiler, so
+// sema refuses the call with E2104 in any compile that lowers it. This is the
+// only table of unbuilt surfaces. A row names the feature, the card that builds
+// it, and its user-facing surface:
+// - the Core calls `module_name.member` for each member in `members`;
+// - every method of each handle type in `handles`, and its static `new`.
+// A row goes away when its feature lands.
+struct CoreUnbuiltRow {
+    feature: String
+    card: Int
+    module_name: String
+    members: [String]
+    handles: [String]
+}
+
+CORE_UNBUILT_ROWS :: [CoreUnbuiltRow]{
+    {
+        feature: "the module loader runtime and its grants",
+        card: 4599,
+        module_name: "core.mod",
+        members: [String]{"load"},
+        handles: [String]{},
+    },
+    {
+        feature: "the browser automation runtime (sessions and test reports)",
+        card: 4954,
+        module_name: "core.web.browser",
+        members: [String]{"connect", "connect_profile", "connect_browser_profile", "report_json", "report_text", "report_html", "write_report"},
+        handles: [String]{"Browser", "BrowserContext", "BrowserPage", "BrowserFrame", "BrowserLocator", "BrowserIntercept", "BrowserEvent", "BrowserAbilities", "BrowserTrace", "BrowserReceipt", "BrowserPrivacy", "BrowserProtocol", "BrowserLocked", "BrowserTestServer", "BrowserTestReport", "BrowserTestConfig"},
+    },
+    {
+        feature: "the configured HTTP client runtime (pools, cookies, redirects, proxies, TLS, HTTP/2)",
+        card: 3665,
+        module_name: "",
+        members: [String]{},
+        handles: [String]{"HTTPClient"},
+    },
+}
+
+// The unbuilt row of the Core call `module_name.member`, if it has one.
+fn core_unbuilt_call(module_name: String, member: String) -> CoreUnbuiltRow? Never! {
+    loop row in CORE_UNBUILT_ROWS {
+        if row.module_name != module_name -> next
+        loop name in row.members {
+            if name == member -> return Val(row)
+        }
+    }
+    None
+}
+
+// The unbuilt row of the handle type `owner`, if it has one.
+fn core_unbuilt_handle(owner: String) -> CoreUnbuiltRow? Never! {
+    loop row in CORE_UNBUILT_ROWS {
+        loop name in row.handles {
+            if name == owner -> return Val(row)
+        }
+    }
+    None
+}

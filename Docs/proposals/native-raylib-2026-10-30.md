@@ -6,12 +6,18 @@ on D-RAYLIB-FONT-HOME1 also asks for a C raylib binding that the C binder
 generates, as a showcase of that binder. Section 6 lists the open ballots.
 Tower owns the card plan.
 
+Package name (owner answer 2026-11-01): Jet's own library is the package
+`raylib`, imported as `ray`. With today's imports that is `use raylib as ray`;
+with the Go-style import blocks of #6542 it is `use ray :: raylib`. Below,
+`ray` names that library as code refers to it. The C binding in the first row
+of section 1 therefore needs another package name; the owner has not given one.
+
 ## 1. Three pieces, three homes
 
 | Piece | What it is | Home |
 |---|---|---|
-| `raylib` | The real C raylib, bound by the C binder from `raylib.h`. It needs raylib installed. | First-party package |
-| `ray` | Jet's own library: windows, shapes, textures, text, input and audio mixing, all in Jet. | First-party package |
+| C binding (name not yet given) | The real C raylib, bound by the C binder from `raylib.h`. It needs raylib installed. | First-party package |
+| `raylib`, imported as `ray` | Jet's own library: windows, shapes, textures, text, input and audio mixing, all in Jet. | First-party package |
 | `font` | Jet's own font engine: reads TrueType and OpenType, rasterizes glyphs, shapes text. `ray` and `gui` use it. | First-party package |
 
 All three ship with Jet (D-JPK-RINGSHIP1), and `jet add` writes the dependency
@@ -94,7 +100,7 @@ using the software path, so they stay exact everywhere.
 (card 5086 asks for 1:1). D-RAY-API1 asks the owner to ratify this shape.
 
 ```jet
-use ray
+use raylib as ray
 
 win :: ray.init_window(800, 450, "demo")?
 loop frame in win.frames() {
@@ -122,11 +128,11 @@ calls take `win.`, and loaders stay on `ray.`.
 | Stage | Delivers | Proof |
 |---|---|---|
 | 1 | The software rasterizer as internal Core code behind `core.game.raylib`'s names, on the headless path | Core `#Test` rows assert exact framebuffer checksums; game goldens on o0, o1, o2 |
-| 2 | The `ray` package, headless: `Window`, `Frame`, the shapes, images, text, `load_image_from_screen` | Goldens with frame checksums on o0, o1, o2 |
+| 2 | The `raylib` package (imported as `ray`), headless: `Window`, `Frame`, the shapes, images, text, `load_image_from_screen` | Goldens with frame checksums on o0, o1, o2 |
 | 3 | The platform clients: Wayland, X11, evdev, PulseAudio, ALSA; `core.game.raylib` retires | A window opens on Wayland and on X11 from one static binary; a recorded input replay drives a golden |
 | 4 | The `font` package: outlines, anti-aliased glyphs, kerning, ligatures; then complex-script shaping | Glyph checksums; HarfBuzz's own shaping test data |
 | 5 | The opt-in Vulkan renderer | Its frames match the software frames within a stated tolerance; the software goldens stay exact |
-| 6 | The generated `raylib` binding package | The C binder builds it from `raylib.h`; a raylib example runs where raylib is installed |
+| 6 | The generated C raylib binding package (name not yet given) | The C binder builds it from `raylib.h`; a raylib example runs where raylib is installed |
 
 Open owner ballots:
 

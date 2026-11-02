@@ -1,0 +1,17 @@
+struct Count { value: Int }
+
+HITS :: shared Count{value: 0}
+raw := 0
+
+fn bump() {
+    HITS.value += 1
+    #Unsafe("this program starts no task, so nothing else writes `raw`") {
+        raw += 2
+    }
+}
+
+fn run() {
+    bump()
+    bump()
+    print("{HITS.value} {raw}")
+}

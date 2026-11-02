@@ -884,22 +884,29 @@ fn jfmt_derive_body_item_end(f: JetFmt, body_item: DeriveBodyItem) -> Int {
 }
 
 // Rust `ModuleBodyEntry`: module imports and items live in separate AST
-// vectors, so retain authored order while formatting.
+// vectors, so retain authored order while formatting. Each run of imports
+// with no item between them prints as one group (jfmt_fmt_import_groups).
 fn jfmt_fmt_module_body(f: &JetFmt, imports: [ImportDecl], items: [Item], span_end: Int) {
     entries := [JetFmtMember]{}
     loop index in 0..<imports.len() -> &entries.push(JetFmtMember{kind: JFMT_MEMBER_IMPORT, index: index, start: imports[index].span.start})
     loop index in 0..<items.len() -> &entries.push(JetFmtMember{kind: JFMT_MEMBER_ITEM, index: index, start: jfmt_item_span_start(f, items[index])})
     sorted :: jfmt_sort_members(entries)
-    loop position in 0..<sorted.len() {
+    position := 0
+    loop position < sorted.len() {
         entry :: sorted[position]
         if position > 0 -> jfmt_blank_separator_before_item(&f)
-        jfmt_emit_leading(&f, entry.start)
         if entry.kind == JFMT_MEMBER_IMPORT {
-            jfmt_fmt_import(&f, imports[entry.index])
-            jfmt_emit_trailing(&f, imports[entry.index].span.end)
+            run := [ImportDecl]{}
+            loop position < sorted.len() && sorted[position].kind == JFMT_MEMBER_IMPORT {
+                &run.push(imports[sorted[position].index].copy())
+                position += 1
+            }
+            jfmt_fmt_import_groups(&f, run)
         } else {
+            jfmt_emit_leading(&f, entry.start)
             jfmt_fmt_item(&f, items[entry.index])
             jfmt_emit_trailing(&f, jfmt_item_span_end(items[entry.index]))
+            position += 1
         }
     }
     // Comments between the last body member and the closing brace have no
@@ -2156,48 +2163,81 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
     jfmt_fmt_expr(&f, c.value, JFMT_PREC_OR_FALLBACK)
 }
 
+// The imports of one scope (#6542): two or more print as one `use { … }`
+// block with a row per line, the re-exports as one `pub use { … }` block,
+// and a lone import keeps its one line. Comments before the first import
+// print above the group; the rest stay beside their rows.
+fn jfmt_fmt_import_groups(f: &JetFmt, imports: [ImportDecl]) {
+    plain := [ImportDecl]{}
+    reexports := [ImportDecl]{}
+    loop import in imports {
+        if import.is_pub -> &reexports.push(import) else -> &plain.push(import)
+    }
+    if plain.len() > 0 -> jfmt_fmt_import_group(&f, plain)
+    if reexports.len() > 0 {
+        if plain.len() > 0 {
+            jfmt_newline(&f)
+            jfmt_newline(&f)
+        }
+        jfmt_fmt_import_group(&f, reexports)
+    }
+}
+
+fn jfmt_fmt_import_group(f: &JetFmt, imports: [ImportDecl]) {
+    jfmt_emit_leading(&f, imports[0].span.start)
+    if imports.len() == 1 {
+        jfmt_fmt_import(&f, imports[0])
+        jfmt_emit_trailing(&f, imports[0].span.end)
+        return
+    }
+    if imports[0].is_pub -> jfmt_write(&f, "pub ")
+    jfmt_write(&f, "use {{")
+    jfmt_newline(&f)
+    f.indent += 1
+    loop import in imports {
+        jfmt_emit_leading(&f, import.span.start)
+        jfmt_fmt_import_row(&f, import)
+        jfmt_emit_trailing(&f, import.span.end)
+        jfmt_newline(&f)
+    }
+    f.indent -= 1
+    jfmt_write(&f, "}}")
+}
+
 fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
     // `pub use` is the only re-export spelling (ballot pending).
     if imp.is_pub -> jfmt_write(&f, "pub ")
-    jfmt_write(&f, "use")
-    jfmt_write(&f, " ")
+    jfmt_write(&f, "use ")
+    jfmt_fmt_import_row(&f, imp)
+}
+
+// One import row; an alias prints as `alias :: path` (#6542).
+fn jfmt_fmt_import_row(f: &JetFmt, imp: ImportDecl) {
     if imp.kind == {
         .File(path, _) -> {
+            if imp.alias != jfmt_last_segment(path, "/") -> jfmt_write(&f, "{imp.alias} :: ")
             jfmt_write(&f, "\"")
             jfmt_write(&f, path)
             jfmt_write(&f, "\"")
-            if imp.alias != jfmt_last_segment(path, "/") {
-                jfmt_write(&f, " ")
-                jfmt_write(&f, "as")
-                jfmt_write(&f, " ")
-                jfmt_write(&f, imp.alias)
-            }
         }
         .Module(name, _) -> {
+            // A two-segment `a.b` with no alias reads as the member `b` of
+            // `a`, so that module keeps its alias even when it repeats the
+            // last segment; `foo` and `a.b.c` can omit a matching one.
+            two_segments :: name.split(".").to_list().len() == 2
+            if imp.alias != jfmt_last_segment(name, ".") || two_segments -> jfmt_write(&f, "{imp.alias} :: ")
             jfmt_write(&f, name)
             // U11 `use pkg#version;` inline dep.
             if imp.inline_version == .Val(version) {
                 jfmt_write(&f, "#")
                 jfmt_write(&f, version.text)
             }
-            // A dotted `use a.b` with no `as` parses as an *unqualified* item
-            // import (`b` from `a`), not a module import. So for a dotted
-            // module name the `as alias` is load-bearing even when it equals
-            // the last segment — keep it. Only a single-segment name (`use
-            // foo`) can safely omit a matching alias.
-            if imp.alias != jfmt_last_segment(name, ".") || name.contains(".") {
-                jfmt_write(&f, " ")
-                jfmt_write(&f, "as")
-                jfmt_write(&f, " ")
-                jfmt_write(&f, imp.alias)
-            }
         }
         .Unqualified(module_alias, module_alias_span, items, items_span, _) -> {
             if items.len() == 0 -> return
             // The dotless single-item spelling (`use math.clamp`) only means
             // the same thing when nothing else in the path carries a dot or an
-            // alias: `use core.math.[abs]` and `use math.[abs as a]` would both
-            // re-read as a module import.
+            // alias: `use core.math.[abs]` would re-read as a module import.
             first :: items[0]
             collapses :: items.len() == 1 && first.alias == None && !first.original.contains(".") && !module_alias.contains(".")
             if collapses {

@@ -5,7 +5,7 @@
 
 STORE_RECEIPT_PARTIAL_SUFFIX :: ".partial"
 
-store_receipt_sequence := 0
+STORE_RECEIPT_SEQUENCE :: shared ProcessSequence{next: 0}
 
 // Prepare the immutable receipt before the closure WAL becomes authoritative.
 // The caller keeps the returned digest in the package projection, so the
@@ -49,8 +49,7 @@ fn store_materialize_receipt(roots: HangarRoots, entry: StoreEntry) -> (digest: 
         .Err(error) -> if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
     }
 
-    sequence :: store_receipt_sequence
-    store_receipt_sequence = store_receipt_sequence + 1
+    sequence :: process_sequence_take(STORE_RECEIPT_SEQUENCE)
     partial :: files.join(receipts, ".{digest}-{process.current_pid()}-{sequence}{STORE_RECEIPT_PARTIAL_SUFFIX}")
     store_receipt_write_new(partial, bytes) ?? {
         files.remove(partial).drop("the failed receipt partial may never have been created")

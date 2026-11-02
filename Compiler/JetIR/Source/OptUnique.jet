@@ -1,6 +1,6 @@
 use jet_foundation.[name_rows_value]
 
-// Uniqueness hoisting (O2), before inlining: a call making a local list's
+// Uniqueness hoisting (O1, O2), before inlining: a call making a local list's
 // counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
 // out of every Loop that cannot make the buffer shared again, to just
 // before the outermost such Loop. Inside such a Loop the buffer stays the
@@ -17,10 +17,12 @@ use jet_foundation.[name_rows_value]
 // than by a Load, another such call or a store keeping the buffer its own
 // (of the length or capacity, or of a buffer fresh from jet_rt_alloc, as
 // a growth does), or hands the buffer pointer loaded from it to a call
-// (but the growth's jet_rt_mem_move, jet_rt_block_release and
-// jet_rt_free), a store or a move.
+// (but a route that only reads it: ir_opt_buffer_reader), a store or a
+// move.
+// `jet inspect decisions` names each call in a Loop: `unique <function>
+// <list type>: made unique before the Loop`, or `declined (<why>)`.
 
-fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String]) -> Int Never! {
+fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String], notes: &[String]) -> Int Never! {
     count :: f.slot_type.len()
     facts :: ir_opt_facts(f)
     // The header each slot names (-1: none).
@@ -65,20 +67,34 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String]) -> Int Never
     target := [Int]{}
     loop _ in 0..<f.op.len() -> &target.push(-1)
     moved := 0
+    rows := [String]{}
     loop at in 0..<f.op.len() {
         header :: ir_opt_unique_header(f, keys, root, at)
         if header < 0 -> next
         slot :: f.args[f.b[at]]
         place := -1
         candidate := inner[at]
-        loop candidate >= 0 && facts.def_at[slot] < candidate && ir_opt_header_ready(f, facts, root, header, candidate) && !ir_opt_reshares(m, f, facts, keys, root, header, candidate, ends[candidate]) {
+        why := ""
+        loop candidate >= 0 && facts.def_at[slot] < candidate {
+            if !ir_opt_header_ready(f, facts, root, header, candidate) {
+                why = "the list holds no buffer before the Loop"
+                break
+            }
+            why = ir_opt_reshares(m, f, facts, keys, root, header, candidate, ends[candidate])
+            if why != "" -> break
             place = candidate
             candidate = outer[candidate]
+        }
+        if place >= 0 || why != "" {
+            list :: ir_opt_unique_list(keys[f.a[at]])
+            row :: if place >= 0 -> "unique {f.name} {list}: made unique before the Loop" else -> "unique {f.name} {list}: declined ({why})"
+            if !rows.contains(row) -> &rows.push(row)
         }
         if place < 0 -> next
         target[at] = place
         moved += 1
     }
+    loop row in rows -> &notes.push(row)
     if moved == 0 -> return 0
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<f.op.len() {
@@ -106,6 +122,16 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String]) -> Int Never
     moved
 }
 
+// The list type a `#unique<..>` helper's key names, as `[U8]`, for a row.
+fn ir_opt_unique_list(key: String) -> String Never! {
+    bytes :: key.bytes()
+    open :: U8{91}
+    loop at in 0..<bytes.len() {
+        if bytes[at] == open -> return String.from_bytes(bytes.slice(at, bytes.len() - 1)) ?? key.copy()
+    }
+    key.copy()
+}
+
 // The header instruction `at` makes unique when it calls a `#unique<..>`
 // helper on a frame header, else -1.
 fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> Int Never! {
@@ -118,20 +144,24 @@ fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> 
 }
 
 // Whether the buffer of `header` is stored before the Loop at `opener`, in
-// a region around it; a parameter's header holds one from the start.
+// a region around it, by a Store of it or a CopyBytes of a whole list
+// header into it (`l := other`); a parameter's header holds one from the
+// start.
 fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
     if header < f.param_count -> return true
     loop at in 0..<opener {
-        if f.op[at] != .Store || f.b[at] != 16 || f.a[at] < 0 || root[f.a[at]] != header -> next
+        stores :: f.op[at] == .Store && f.b[at] == 16
+        copies :: f.op[at] == .CopyBytes && f.c[at] >= 24
+        if (!stores && !copies) || f.a[at] < 0 || root[f.a[at]] != header -> next
         if ir_opt_encloses(facts, facts.region[at], facts.region[opener]) -> return true
     }
     false
 }
 
-// Whether the Loop at `opener` (End at `end`) can make the buffer of
-// `header` shared again. What a dead end in it reads (ir_opt_dead_end: a
-// failure's cleanup) never reaches its next iteration.
-fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], header: Int, opener: Int, end: Int) -> Bool Never! {
+// Why the Loop at `opener` (End at `end`) can make the buffer of `header`
+// shared again, or "" when it cannot. What a dead end in it reads
+// (ir_opt_dead_end: a failure's cleanup) never reaches its next iteration.
+fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], header: Int, opener: Int, end: Int) -> String Never! {
     count :: f.slot_type.len()
     // The slots holding the buffer pointer loaded from the header.
     buffer := [Int]{}
@@ -155,17 +185,34 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], 
                 if op == .Load && f.a[at] == slot -> next
                 if unique -> next
                 if op == .Store && f.a[at] == slot && f.c[at] != slot && ir_opt_header_store_keeps(m, f, facts, at) -> next
-                return true
+                return "the Loop hands on the list by its {ir_op_name(op)}"
             }
             if buffer.contains(slot) {
-                if ir_opt_calls_route(m, f, at, "jet_rt_mem_move") || ir_opt_calls_route(m, f, at, "jet_rt_block_release") || ir_opt_calls_route(m, f, at, "jet_rt_free") -> next
-                if op == .Call || op == .CallRuntime || op == .CallIndirect || op == .Move || op == .Copy -> return true
-                if op == .Store && f.c[at] == slot -> return true
+                if ir_opt_buffer_reader(m, f, at) -> next
+                if op == .CallRuntime -> return "the Loop hands the buffer to a runtime route that may keep it"
+                if op == .Call || op == .CallIndirect || op == .Move || op == .Copy -> return "the Loop hands the buffer on by its {ir_op_name(op)}"
+                if op == .Store && f.c[at] == slot -> return "the Loop stores the buffer"
             }
         }
         written :: ir_x64_write(f, at)
-        if written >= 0 && written < count && root[written] == header -> return true
+        if written >= 0 && written < count && root[written] == header -> return "the Loop rebinds the list"
         at += 1
+    }
+    ""
+}
+
+// Whether instruction `at` is a runtime route that only reads the buffer it
+// is handed, leaving its owners as they were: the growth's jet_rt_mem_move,
+// jet_rt_block_release and jet_rt_free; jet_rt_block_unique, which loads its
+// count (Refcount.jet jet_rt_rc_unique); jet_rt_block_inherit_zero, which
+// loads its zero mark and marks only the replica; and jet_string_from_bytes
+// and jet_string_from_bytes_lossy, which copy its bytes into a new text
+// (TextBytes.jet: text_bytes_owned, rt_text_builder_with_capacity).
+fn ir_opt_buffer_reader(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.op[at] != .CallRuntime -> return false
+    readers :: [String]{"jet_rt_mem_move", "jet_rt_block_release", "jet_rt_free", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_string_from_bytes", "jet_string_from_bytes_lossy"}
+    loop route in readers {
+        if ir_opt_calls_route(m, f, at, route) -> return true
     }
     false
 }
@@ -193,7 +240,7 @@ fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: In
     ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
 }
 
-// Uniqueness at the caller (O2, before the call graph is built). A
+// Uniqueness at the caller (O1, O2, before the call graph is built). A
 // function's first step can be to make a `&` list parameter's buffer its
 // own: after hoisting, a `#unique<..>` call on the parameter that only Block
 // openers, other such calls and side-effect-free instructions writing no
@@ -206,7 +253,7 @@ fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: In
 // FunctionAddress; and every Call of it passes a header of the parameter's
 // own type row.
 // Returns the calls ir_opt_hoist_unique moved on the way.
-fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String]) -> Int Never! {
+fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String], notes: &[String]) -> Int Never! {
     count :: functions.len()
     if m.entry < 0 || m.entry >= count -> return 0
     addressed := [Bool]{}
@@ -231,7 +278,7 @@ fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String
     helpers := [Int]{}
     loop id in 0..<count {
         if addressed[id] || !ir_opt_unique_on_param(functions[id], keys) -> next
-        hoisted += ir_opt_hoist_unique(m, &functions[id], keys)
+        hoisted += ir_opt_hoist_unique(m, &functions[id], keys, &notes)
         ir_opt_entry_uniques(m, functions[id], keys, id, &callees, &params, &sites, &helpers)
     }
     if callees.len() == 0 -> return hoisted

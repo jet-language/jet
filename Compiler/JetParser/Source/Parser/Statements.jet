@@ -28,6 +28,7 @@ use jet_foundation.[
     ast_binding,
     ast_empty_call_arg_flags,
     expr_span,
+    marker_registered,
     pattern_binding_names,
 ]
 use jet_lexer.[
@@ -1816,11 +1817,14 @@ fn parser_named_line_does_work(state: &JetParserState, expr: Expr) -> Bool Never
 }
 
 // Any other line works when it starts with the `&`/`^`
-// mark of the call that writes or takes that place (`&buf.push(x)`).
+// mark of the call that writes or takes that place (`&buf.push(x)`),
+// including the compact Result handler on that call
+// (`&w.write(x) ? _ -> … ! err -> …`).
 fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: Int) -> Bool Never! {
     if start_kind == TOKEN_AMP || start_kind == TOKEN_CARET {
         call :: if expr == {
             .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) -> true
+            .If(_, _, _, _, _, _, _) -> parser_is_result_handler_expr(expr)
             else -> false
         }
         if call -> return true
@@ -2039,6 +2043,15 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
         parser_parse_body_block(&state, false)
         parser_add_error_code(&state, "E0927", parser_cover(marker_span, close.span), "`#{word}<…>` is retired", "marker arguments use the ordinary call form from the registry", "write `#{word}(Row) {{ … }}`")
         return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
+    }
+    // A name the registry doesn't know, written before an ordinary statement,
+    // applies to that statement, so sema reports it from the shared applied-rule
+    // vocabulary (E0927) or as a declared marker, not as a missing block.
+    if parser_current_kind(&state) != TOKEN_LBRACE && !marker_registered(word) {
+        target_start :: parser_current(&state).span.start
+        statement :: parser_parse_statement(&state)
+        &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(Span{start: target_start, end: parser_previous_end(state)}), site: Val(RuleSite.Statement)})
+        return statement
     }
     saved_tail_depth :: state.callable_tail_depth
     value_tail :: marker.name == "Unsafe" && state.callable_tail_value && state.callable_tail_depth == state.block_depth

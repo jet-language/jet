@@ -6,11 +6,15 @@
 // here `commit` rolls back its own failures and a caller that abandons a
 // transaction before `commit` calls `rollback` on that path.
 
-store_transaction_sequence := 0
+STORE_TRANSACTION_SEQUENCE :: shared ProcessSequence{next: 0}
 
 // Test seam (Rust thread-local ADMISSION_FAILURE): 0 = none, else the
 // 1-based `AdmissionFailurePoint` tag that fails after that step.
-store_admission_failure := 0
+struct AdmissionFailureSeam {
+    armed: Int
+}
+
+STORE_ADMISSION_FAILURE :: shared AdmissionFailureSeam{armed: 0}
 
 // A verified object supplied by a format adapter. The adapter owns how the
 // bytes were fetched and hashed; the transaction owns their durable
@@ -55,17 +59,18 @@ enum AdmissionFailurePoint {
 // Arm the injected failure for the admissions that follow; returns the
 // previous setting for `store_end_admission_failure`.
 fn store_begin_admission_failure(point: AdmissionFailurePoint) -> Int Never! {
-    previous :: store_admission_failure
-    store_admission_failure = point.tag()
+    permit :: STORE_ADMISSION_FAILURE.guard_edit()
+    previous :: permit.value.armed
+    permit.value.armed = point.tag()
     previous
 }
 
 fn store_end_admission_failure(previous: Int) Never! {
-    store_admission_failure = previous
+    STORE_ADMISSION_FAILURE.armed = previous
 }
 
 fn store_injected_failure(point: AdmissionFailurePoint) StoreError! {
-    if store_admission_failure == point.tag() {
+    if STORE_ADMISSION_FAILURE.armed == point.tag() {
         return Err(StoreError.Other("injected Hangar admission failure after {point.name()}"))
     }
 }
@@ -94,8 +99,7 @@ struct AdmissionTransaction {
         stage_parent :: files.join(hangar, STORE_STAGE_DIR)
         store_ensure_real_directory(stage_parent, "Hangar admission staging")
         loop {
-            sequence :: store_transaction_sequence
-            store_transaction_sequence = store_transaction_sequence + 1
+            sequence :: process_sequence_take(STORE_TRANSACTION_SEQUENCE)
             candidate :: files.join(stage_parent, "admission-{process.current_pid()}-{sequence}")
             if files.create_dir(candidate) == {
                 .Ok(_) -> return Ok(AdmissionTransaction{verification: verification.copy(), roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
@@ -357,8 +361,7 @@ struct AdmissionTransaction {
                 if !StoreError.IO(error).is_not_found() -> return Err(StoreError.IO(error))
             }
         }
-        sequence :: store_transaction_sequence
-        store_transaction_sequence = store_transaction_sequence + 1
+        sequence :: process_sequence_take(STORE_TRANSACTION_SEQUENCE)
         partial :: files.join(receipts, ".{receipt.digest}-{process.current_pid()}-{sequence}.partial")
         published :: store_transaction_publish_receipt(partial, path, receipts, receipt) ? value -> value ! error -> {
             files.remove(partial).drop("the receipt partial may never have been created")

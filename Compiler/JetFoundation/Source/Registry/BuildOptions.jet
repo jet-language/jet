@@ -10,7 +10,8 @@
 // How a row's value is written. A Choice value is a word (`optimize: full`,
 // `--optimize=full`, `b.optimize(.Full)`); a Bool value is `true` or `false`
 // everywhere (`debug_info: false`, `--debug-info=false`,
-// `b.debug_info(false)`), and its bare flag (`--small`) is `true`. A Text
+// `b.debug_info(false)`), and its bare flag (`--small`) is `true`;
+// `debug_info` also takes the word `split` as a profile field and a flag. A Text
 // value is a string (`output_dir: "dist"`, `--output-dir=dist`,
 // `b.output_dir("dist")`). A List value is strings (`libs: ["z"]`,
 // `b.libs(["z"])`), one flag per item (`--libs=z --libs=bz2`); it is kept as
@@ -46,7 +47,13 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     {name: "bounds", kind: BuildOptionKind.Choice, values: [String]{"fatal", "report", "off"}, stock_build: "fatal", stock_run: "fatal", removes_check: [String]{"report", "off"}, help: "What a failed bounds check does: fatal, report or off"},
     // false leaves the DWARF sections (.debug_*) out of the image; .eh_frame
     // stays, and a crash report then names addresses, not functions and lines.
-    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true or false"},
+    // split (the stock `release` profile's) has `jet build` write the DWARF,
+    // the symbol table and the section headers to the side file
+    // `<image>.debug` and to the package's symbol store
+    // `.jet/symbols/.build-id/`, both found by the image's GNU build id; the
+    // other commands keep it in the image as with true. `fn build` writes
+    // true or false only (build_option_method_values).
+    {name: "debug_info", kind: BuildOptionKind.Bool, values: [String]{"true", "false", "split"}, stock_build: "true", stock_run: "true", removes_check: [String]{}, help: "Whether the image carries DWARF debug info: true, false or split"},
     // true keeps the optimizer's inlining to the O1 limits at any level, so
     // inlining grows the code no more than `optimize: basic` does.
     {name: "small", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Favor a smaller binary by keeping inlining to the O1 limits: true or false"},
@@ -63,6 +70,13 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // also builds every other non-generic function of the built package, so the
     // image carries each one (a debugger or a profiler can name it).
     {name: "dead_code", kind: BuildOptionKind.Choice, values: [String]{"remove", "keep"}, stock_build: "remove", stock_run: "remove", removes_check: [String]{}, help: "Whether the image keeps the package's unreached functions: remove or keep"},
+    // true links the checked heap (JetRuntime Alloc.jet, checked mode): every
+    // heap block carries guards and its allocating call chain, and a double,
+    // foreign or wrong-layout free, a write past the end or a write after free
+    // stops the program with a report naming the call sites. false (the stock)
+    // links none of it and the program reads nothing at start for it. A web
+    // build has no checked heap, so true with `os: web` is refused (E2104).
+    {name: "checked_alloc", kind: BuildOptionKind.Bool, values: [String]{"false", "true"}, stock_build: "false", stock_run: "false", removes_check: [String]{}, help: "Build with the checked memory allocator, which stops at a bad free or a write after free: true or false"},
     // on writes each source `fn build` generates (`b.generate`) to its
     // `.jet/generated/<package>/<name>.jet` path under the package root for
     // inspection; off (the stock) writes none.
@@ -91,6 +105,13 @@ JET_BUILD_OPTIONS :: comptime { [BuildOptionRow]{
     // value is refused (E2104).
     {name: "min_os", kind: BuildOptionKind.Text, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The oldest OS version the image runs on (\"\" is none)"},
 } }
+
+// The runtime exports of the checked heap (JetRuntime Alloc.jet): its link
+// entry, which the entry of a `checked_alloc` build calls, and its start-up
+// hook, which turns checked mode on. A runtime build every program shares
+// (the prelinked native image, the web runtime partition) leaves both out,
+// so only a program built with `checked_alloc` runs checked.
+CHECKED_ALLOC_RUNTIME_EXPORTS :: comptime { [String]{"jet_rt_alloc_check_link", "jet_rt_alloc_check_init"} }
 
 // The Jai build options Jet refuses, each with the law that leaves nothing for
 // it to switch. A profile field, flag or `fn build` call of one of these names
@@ -257,8 +278,20 @@ fn build_option_variants_text(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
     if row.kind == BuildOptionKind.List -> return "a list literal of strings"
     words := [String]{}
-    loop value in row.values -> &words.push(build_option_argument(row, value))
+    loop value in build_option_method_values(row) -> &words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
+}
+
+// The values `fn build` writes for a Choice or Bool row: a Bool row's are
+// its Bool literals, since `debug_info`'s `split` is a profile field's and a
+// flag's value only.
+fn build_option_method_values(row: BuildOptionRow) -> [String] Never! {
+    if row.kind != BuildOptionKind.Bool -> return row.values.copy()
+    out := [String]{}
+    loop value in row.values {
+        if value == "true" || value == "false" -> &out.push(value.copy())
+    }
+    out
 }
 
 fn build_option_join(words: [String]) -> String Never! {
@@ -410,6 +443,12 @@ fn build_options_resolve(command: String, profile: String, written: [BuildOption
     }
     if os.value != "linux" && os.value != "web" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(os)} asks for a {os.value} image, and the native backend writes Linux x86-64 ELF images only", fix: "drop it, or write `os: linux`"}
+    }
+    // The web runtime partition holds no checked heap
+    // (CHECKED_ALLOC_RUNTIME_EXPORTS).
+    checked_alloc :: values[build_option_index("checked_alloc")].copy()
+    if os.value == "web" && checked_alloc.value == "true" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(checked_alloc)} asks for the checked allocator, and a web build has none", fix: "drop it, or build for Linux"}
     }
     min_os :: values[build_option_index("min_os")].copy()
     if min_os.value != "" {

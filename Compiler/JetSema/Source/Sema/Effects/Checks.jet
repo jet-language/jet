@@ -759,8 +759,17 @@ fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String], pa
 }
 
 // A package `authority.deny` row reached by one of the package's functions.
-fn sema_effect_package_denied_diagnostic(node: SemaEffectNode, reached: [String], denied: String) -> Diagnostic {
+// A denied Panic names the reachable function where the stop enters the call
+// graph (`panic_site`) and the three exits, the same as a `-[!Panic]>` row.
+fn sema_effect_package_denied_diagnostic(node: SemaEffectNode, reached: [String], denied: String, panic_site: String) -> Diagnostic {
     reached_list :: sema_effect_show(reached)
+    reaches_panic :: loop effect_name in reached {
+        if sema_effect_root(effect_name) == "Panic" -> break true
+    } ?? false
+    if reaches_panic {
+        diagnostic :: sema_error("E0749", node.name_span, "`{node.name}` can stop, but the package denies Panic with `authority: {{ deny: [{denied}] }}`", "`{panic_site}` can stop; every function in the package and every callee it can reach must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `{denied}` from `authority.deny`")
+        return diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name, panic_site}, [String]{}, None)
+    }
     diagnostic :: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which the package denies with `authority: {{ deny: [{denied}] }}`", "a package `deny` row means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop `{denied}` from `authority.deny`")
     diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
@@ -2498,8 +2507,13 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             if graph_module >= denial_modules.len() || !denial_modules[graph_module] -> next
             reached :: sema_effect_covered(solved[node_index], [String]{denied})
             if reached.len() == 0 -> next
+            panic_site := "the reachable call graph"
+            if sema_effect_root(denied) == "Panic" {
+                seen := (loop _ in nodes -> false)
+                if sema_effect_panic_site(nodes, calls.node_by_key, node_index, &seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
+            }
             denial_diagnostics := [Diagnostic]{}
-            &denial_diagnostics.push(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied))
+            &denial_diagnostics.push(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_site))
             sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^denial_diagnostics)
         }
     }

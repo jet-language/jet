@@ -50,7 +50,7 @@ struct __JetcStat {
     status: Int, errno: Int, dev: Int, ino: Int, len: Int,
     mtime: Int, mtime_ns: Int, nlink: Int, is_file: Bool, is_dir: Bool,
 }
-struct JetcFd { fd: Int }
+struct JetcFd { priv fd: Int } // priv: a literal elsewhere could close any descriptor at scope end
 // Close reads the consumed receiver in place. Rebinding it (`owner :: ^self`)
 // would make a second owner whose scope-end Close re-enters this one.
 impl JetcFd.Close {

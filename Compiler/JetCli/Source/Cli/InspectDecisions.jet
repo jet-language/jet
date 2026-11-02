@@ -28,7 +28,7 @@ struct JetCLIDecisions {
 // `--optimize=full`) over them; or the refusal of a flag.
 fn jet_cli_decisions_options(options: [String], release: Bool) -> BuildOptionsResolved Never! {
     written := [BuildOptionChoice]{}
-    if release -> &written.push(jet_cli_stock_release_choice())
+    if release -> &written.extend(jet_cli_stock_release_choices())
     if build_option_flags(options) == {
         .Refused(code, what, fix) -> return BuildOptionsResolved.Refused{code: code, what: what, fix: fix}
         .Resolved(given, _) -> loop flag in given.written -> &written.push(flag.copy())

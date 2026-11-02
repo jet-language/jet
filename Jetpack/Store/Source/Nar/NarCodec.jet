@@ -18,7 +18,7 @@ STORE_NAR_MAX_NAME_BYTES :: 4096
 STORE_NAR_MAX_INFO_BYTES :: 1048576
 STORE_NAR_CHUNK_BYTES :: 65536
 
-store_nar_stage_sequence := 0
+STORE_NAR_STAGE_SEQUENCE :: shared ProcessSequence{next: 0}
 
 struct NarStats {
     digest: String
@@ -522,8 +522,7 @@ fn store_nar_publish_decoded_node(node: NarNode, destination: String) StoreError
     if parent == "" -> return Err(store_nar_invalid("NAR substitution destination has no parent"))
     store_nar_validate_destination_parent(parent)
     files.create_dir_all(parent)
-    sequence :: store_nar_stage_sequence
-    store_nar_stage_sequence = store_nar_stage_sequence + 1
+    sequence :: process_sequence_take(STORE_NAR_STAGE_SEQUENCE)
     staging :: files.join(parent, ".nar-stage-{process.current_pid()}-{store_nar_unique_suffix(sequence)}")
     if files.lexists(staging) -> store_nar_remove_tree(staging)
     store_nar_publish_staged(node, staging, destination) ?? {
@@ -743,8 +742,7 @@ fn store_nar_write_atomic(path: String, bytes: [U8]) StoreError! {
     store_nar_validate_destination_parent(parent)
     files.create_dir_all(parent)
     if files.lexists(path) -> return Err(store_nar_invalid("binary-cache destination already exists"))
-    sequence :: store_nar_stage_sequence
-    store_nar_stage_sequence = store_nar_stage_sequence + 1
+    sequence :: process_sequence_take(STORE_NAR_STAGE_SEQUENCE)
     partial :: "{files.with_suffix(path, "")}.nar-partial-{process.current_pid()}-{store_nar_unique_suffix(sequence)}"
     writer :: files.create(partial, if_exists: .Refuse)
     writer.write_all(bytes)

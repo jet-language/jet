@@ -35,7 +35,9 @@ fn rt_log_state_drop_address() -> I64 {
     rt_text_store(closure, I64{1})
     rt_text_store(wrapping(closure + I64{8}), rt_log_state_drop_address())
     rt_text_store(wrapping(closure + I64{16}), I64{0})
-    log_state_key = jet_rt_tls_key_new(closure)
+    #Unsafe("runtime-init runs before any other thread exists") {
+        log_state_key = jet_rt_tls_key_new(closure)
+    }
 }
 #Export(c) fn jet_rt_log_state_drop(_closure: I64, state: I64) -> I64 {
     log_text_drop(rt_text_word(wrapping(state + LOG_STATE_SINK)))

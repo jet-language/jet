@@ -319,12 +319,8 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         before := state.position
         declaration :: parser_parse_item_or_import(&state)
-        if declaration.import == {
-            .Val(value) -> &imports.push(value)
-            .None -> {
-                if declaration.item == .Val(value) -> &body.push(value)
-            }
-        }
+        loop import in declaration.imports -> &imports.push(import)
+        if declaration.item == .Val(value) -> &body.push(value)
         if !declaration.handled -> parser_report_module_member(&state)
         parser_recover_aborted_item(&state, before)
         if state.position == before {
@@ -522,10 +518,8 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         before := state.position
         declaration :: parser_parse_item_or_import(&state)
-        if declaration.import == {
-            .Val(value) -> &imports.push(value)
-            .None -> { if declaration.item == .Val(value) -> &body.push(value) }
-        }
+        loop import in declaration.imports -> &imports.push(import)
+        if declaration.item == .Val(value) -> &body.push(value)
         if !declaration.handled -> parser_report_module_member(&state)
         parser_recover_aborted_item(&state, before)
         if state.position == before -> parser_bump(&state)

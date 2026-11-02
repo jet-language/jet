@@ -298,3 +298,12 @@ fn marker_registered_signature(name: String) -> String Never! {
     }
     "()"
 }
+
+// Whether the shared registry has an applied rule row named `name`. Marker
+// declarations in scope are not visible here; sema resolves those.
+fn marker_registered(name: String) -> Bool Never! {
+    loop rule in marker_source_read(MARKER_SOURCE) {
+        if rule.name == name -> return true
+    }
+    false
+}

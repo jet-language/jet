@@ -163,6 +163,12 @@ not a naive transliteration. A cell without a reference is uncovered and fails
 the gate, and a peer win never closes a cell whose ceiling is unmet. A better
 technique replaces the reference and raises the target.
 
+The ceiling delivers the same features as the Jet program. Where a Jet feature
+(diagnostics, safety checks, fault reports) physically costs bytes or cycles,
+the reference includes the smallest hand-written implementation of that
+feature. Jet minimizes each feature's cost and never removes a feature to meet
+the ceiling.
+
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
 area: web, games, CLI and scripts, data analysis, backend services, GUI

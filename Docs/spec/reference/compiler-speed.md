@@ -115,6 +115,18 @@ same dev baseline, corpus, CPU affinity and build profile; report their
 measured deltas, not projections from older or differently configured runs.
 
 
+## Always-on checks
+
+Checks and debug info run once in every default build: ownership, effect
+tracking and failure inference in sema, the IR consistency check, and DWARF
+debug info. None of them leaves the default build to reach a speed milestone,
+and none runs twice. If a milestone lands short of its lines-per-second target,
+the measured number is what ships (`D-SPEED-CHECKS1`).
+
+`Tools/perf/budget/budget.json` marks the rows that carry these checks
+`always_on`. `Tools/perf/budget/check.mjs` prints their subtotal. It fails a
+full-unit trace (the compile reached `lower`) that lacks any always-on span.
+
 ## Performance gate and dated evidence
 
 The repository gate compares each matched cell and metric independently. Every

@@ -10,19 +10,22 @@
 //    under `module_type_name` (`bank.Account` -> `M4BankAccount`); the bare and
 //    qualified spellings resolve inside the module, and the qualified spelling
 //    resolves in its enclosing file, including members of `priv module`s;
-// 2. a top-level module's member functions lift under `member_name`
-//    (`bank.open` -> `__jet_bank_dopen`) with their sibling calls renamed, so
+// 2. a module's member functions, top-level or nested, lift under
+//    `member_name` (`bank.open` -> `__jet_bank_dopen`, `bank.audit.log` ->
+//    `__jet_bank_daudit_dlog`) with their sibling calls renamed, so
 //    registration, body checking and lowering see ordinary functions;
-// 3. `bank.f(...)` calls and `use bank.[f]` imports resolve to the member
-//    identity: an unknown member is E0608/E0611, a private one E0609;
+// 3. `bank.f(...)` and `bank.audit.f(...)` calls and `use bank.[f]` imports
+//    resolve to the member identity: an unknown member is E0608/E0611, a
+//    private one E0609; a nested `priv module` is usable only inside the
+//    module enclosing it, which names its children relatively (`audit.f()`);
 // 4. a module's own `use` declarations (Rust `Pipeline/InlineImports.rs`)
 //    bind inside that module only, and its `pub use` re-exports a member as
 //    `module.name`; a module named as a value is E0107, like Rust.
 //
 // A generic-module instance arrives here as an ordinary module expanded by
-// `sema_generic_modules_expand`. Nested module functions and module
-// constants are never registered by Rust, so they are dropped. A module that
-// imports Core or a foreign namespace keeps its functions in its body.
+// `sema_generic_modules_expand`. Module constants are never registered by
+// Rust, so they are dropped. A module that imports Core or a foreign
+// namespace keeps its functions in its body.
 use core.text as unicode
 use jet_foundation.[
     AST_NODE_GENERATED,
@@ -95,7 +98,13 @@ struct SemaInlineTarget {
 }
 
 struct SemaInlineModuleSurface {
+    // How the rewritten body spells the module: its full dotted path, or,
+    // inside an enclosing module, its path relative to that module.
     name: String
+    // The full dotted path its member identities are named under.
+    path: String
+    // A nested `priv module`: the path of the module it is private to.
+    private_to: String?
     // Member function names reachable by this enclosing file.
     functions: [String:Bool]
     // `pub use` inside the module: re-exported local name -> its owner.
@@ -612,11 +621,43 @@ fn sema_inline_rewrite_module_call(rewrite: &SemaInlineRewrite, surface: SemaInl
         return Val(Expr.Call{call: forwarded, id: AST_NODE_GENERATED})
     }
     if surface.functions.get(method) == None {
-        &rewrite.diagnostics.push(sema_error("E0608", alias_span, "`{method}` is not defined in module `{surface.name}`", "check the module body for the function you're calling", "make sure the function name is spelled correctly"))
+        &rewrite.diagnostics.push(sema_error("E0608", alias_span, "`{method}` is not defined in module `{surface.path}`", "check the module body for the function you're calling", "make sure the function name is spelled correctly"))
         return None
     }
-    call :: Call{name: sema_inline_member_name(surface.name, method), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args)}
+    call :: Call{name: sema_inline_member_name(surface.path, method), name_span: method_span, type_args: sema_inline_rewrite_types(rewrite, type_args), args: sema_inline_rewrite_call_args(&rewrite, args)}
     Val(Expr.Call{call: call, id: AST_NODE_GENERATED})
+}
+
+// `a.b.c` as a call receiver: each identifier segment with its span, false
+// for any other receiver.
+fn sema_inline_receiver_path(receiver: Expr, segments: &[NamedSpan]) -> Bool Never! {
+    if receiver == {
+        .Ident(name, span, _) -> {
+            &segments.push(NamedSpan{name: name, span: span})
+            return true
+        }
+        .Field(base, member, span, _) -> {
+            if !sema_inline_receiver_path(base, &segments) -> return false
+            &segments.push(NamedSpan{name: member, span: span})
+            return true
+        }
+        else -> return false
+    }
+}
+
+// A nested `priv module` on the path `segments` names is usable only inside
+// the module that encloses it: the body being rewritten (`sibling_module`,
+// "" for the file) must be that module or one nested in it (E0609).
+fn sema_inline_private_step(rewrite: SemaInlineRewrite, segments: [NamedSpan]) -> Diagnostic? Never! {
+    prefix := segments[0].name.copy()
+    loop index in 1..<segments.len() {
+        prefix = "{prefix}.{segments[index].name}"
+        surface :: sema_inline_surface(rewrite, prefix) ?? return None
+        owner :: surface.private_to ?? next
+        if rewrite.sibling_module == owner || rewrite.sibling_module.starts_with("{owner}.") -> next
+        return Val(sema_error("E0609", segments[index].span, "`{segments[index].name}` is private in module `{owner}`", "a `priv module` is usable only by its enclosing module", "call it from inside `{owner}`, or remove `priv` from `module {segments[index].name}`"))
+    }
+    None
 }
 
 fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Expr Never! {
@@ -687,6 +728,21 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
                     rewritten :: sema_inline_rewrite_module_call(&rewrite, surface, alias_span, method, method_span, type_args, args)
                     if rewritten == .Val(value) -> return value
                     return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), id: node}
+                }
+            }
+            // `math.inner.f(...)`: a member of a nested inline module. A
+            // private step is reported here and the call still resolves, so
+            // the file pass that rewrites the lifted body again stays quiet.
+            if receiver == .Field(_, _, _, _) {
+                segments := [NamedSpan]{}
+                if sema_inline_receiver_path(receiver, &segments) && !sema_inline_is_local(rewrite, segments[0].name) {
+                    path :: (loop segment in segments -> segment.name).join(".")
+                    if sema_inline_surface(rewrite, path) == .Val(surface) {
+                        if sema_inline_private_step(rewrite, segments) == .Val(diagnostic) -> &rewrite.diagnostics.push(diagnostic)
+                        rewritten :: sema_inline_rewrite_module_call(&rewrite, surface, segments[segments.len() - 1].span, method, method_span, type_args, args)
+                        if rewritten == .Val(value) -> return value
+                        return Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: sema_inline_rewrite_call_args(&rewrite, args), id: node}
+                    }
                 }
             }
             mapped_receiver := receiver
@@ -1230,12 +1286,17 @@ fn sema_inline_hoist_module(code_module: CodeModule, source_path: String, hoist:
 }
 
 // Rust `rewrite_exported_inline_types`: member types reach every function of
-// the enclosing file (and its inline modules) by their qualified name.
+// the enclosing file (and its inline modules) by their qualified name. The
+// file's own structs, enums and tests name them the same way, so a field
+// `stream: transport.BodyStream` holds the hoisted member type.
 fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [Item] Never! {
     mapped := [Item]{}
     loop item in items {
         if item == {
             .Func(function) -> &mapped.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+            .Struct(definition) -> &mapped.push(Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, "")})
+            .Enum(definition) -> &mapped.push(Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, "")})
+            .Test(_) -> &mapped.push(sema_inline_rewrite_item(&rewrite, item))
             // D-IMPLDOT1: an impl head names member types and traits by their
             // module path (`impl inner.Loud.inner.Shout`), so it binds to the
             // hoisted declarations the module's own impls bind to.
@@ -1243,6 +1304,7 @@ fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [
                 updated := definition
                 updated.type_name = sema_inline_mapped_name(rewrite, definition.type_name)
                 if definition.trait_name == .Val(trait_name) -> updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
+                updated.methods = sema_inline_rewrite_funcs(&rewrite, definition.methods)
                 &mapped.push(Item.Impl{value: updated})
             }
             .CodeModule(definition) -> {
@@ -1396,10 +1458,82 @@ fn sema_inline_modules_check_imports(graph: &SemaRegistrationGraph, module_index
     loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
 }
 
-// Rust registers only a top-level module's functions, and never a module
-// constant or test (CheckInner.rs registers an inline body's `Item::Func`
-// members only): nested functions, constants and tests leave the lowered
-// program.
+// Every lowerable module nested in `body` (module `parent`), depth first, with
+// the import bindings its members see. Each module binds its imports here,
+// once, so its `pub use` re-exports are on its surface before any body is
+// rewritten.
+fn sema_inline_collect_nested(body: [Item], parent: String, file_imports: [ImportDecl], surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], nested: &[SemaInlineModuleSurface], bindings: &[SemaInlineRewrite]) Never! {
+    loop item in body {
+        if item == .CodeModule(child) {
+            child_body :: child.body ?? next
+            if !sema_inline_module_lowerable(child, file_imports) -> next
+            path :: "{parent}.{child.name}"
+            private_to := String?{None}
+            if !child.is_pub && !child.is_package_pub -> private_to = Val(parent.copy())
+            surface := SemaInlineModuleSurface{name: path.copy(), path: path.copy(), private_to: private_to, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
+            loop inner in child_body {
+                if inner == .Func(function) -> surface.functions[function.name] = true
+            }
+            binding := sema_inline_rewrite_empty()
+            binding.sibling_module = path.copy()
+            binding.siblings = surface.functions
+            surface.reexports = sema_inline_bind_module_imports(child, surfaces, file_aliases, &binding)
+            &nested.push(surface)
+            &bindings.push(binding)
+            sema_inline_collect_nested(child_body, path, file_imports, surfaces, file_aliases, &nested, &bindings)
+        }
+    }
+}
+
+// The inline modules a body inside module `context` calls through: every
+// nested module by its full path, and those nested in `context` also by their
+// path relative to it (`inner.f()` inside `math` is `math.inner.f()`).
+fn sema_inline_scope_surfaces(nested: [SemaInlineModuleSurface], context: String) -> [SemaInlineModuleSurface] Never! {
+    scope := [SemaInlineModuleSurface]{}
+    prefix :: "{context}."
+    loop surface in nested {
+        &scope.push(surface)
+        if !surface.path.starts_with(prefix) -> next
+        relative := surface
+        relative.name = String.from_bytes(surface.path.bytes()[prefix.bytes().len()..<surface.path.bytes().len()]) ?? next
+        &scope.push(relative)
+    }
+    scope
+}
+
+// Lifts the member functions of every module nested in `body` (module
+// `parent`) under their member identities, each body rewritten with the
+// bindings sema_inline_collect_nested made for its module.
+fn sema_inline_lift_nested(body: [Item], parent: String, file_imports: [ImportDecl], nested: [SemaInlineModuleSurface], bindings: [SemaInlineRewrite], lifted: &[Item], diagnostics: &[Diagnostic]) Never! {
+    loop item in body {
+        if item == .CodeModule(child) {
+            child_body :: child.body ?? next
+            if !sema_inline_module_lowerable(child, file_imports) -> next
+            path :: "{parent}.{child.name}"
+            row :: loop (index, surface) in nested {
+                if surface.path == path -> break index
+            } ?? -1
+            if row < 0 -> next
+            rewrite := bindings[row]
+            rewrite.modules = sema_inline_scope_surfaces(nested, path)
+            loop inner in child_body {
+                if inner == .Func(function) {
+                    member := sema_inline_rewrite_func(&rewrite, function)
+                    member.name = sema_inline_member_name(path, function.name)
+                    &lifted.push(Item.Func{value: member})
+                }
+            }
+            loop diagnostic in rewrite.diagnostics -> &diagnostics.push(diagnostic)
+            sema_inline_lift_nested(child_body, path, file_imports, nested, bindings, &lifted, &diagnostics)
+        }
+    }
+}
+
+// Every module's functions are lifted (top-level ones in
+// sema_inline_modules_lower, nested ones by sema_inline_lift_nested), and a
+// module constant or test is never registered (CheckInner.rs registers an
+// inline body's `Item::Func` members only): functions, constants and tests
+// leave the lowered program.
 fn sema_inline_strip_members(body: [Item]) -> [Item] Never! {
     kept := [Item]{}
     loop item in body {
@@ -1489,8 +1623,9 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
         hoisted_items = sema_inline_rewrite_exported(hoisted_items, &exported)
     }
 
-    // 2. Top-level module functions become their member identities, with
-    //    each module's own `use` bindings applied to its member bodies.
+    // 2. Module functions, top-level and nested, become their member
+    //    identities, with each module's own `use` bindings applied to its
+    //    member bodies.
     file_aliases := [String:Bool]{}
     loop declaration in program.imports {
         if declaration.kind == {
@@ -1506,12 +1641,21 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
             if definition.body == .Val(body) {
                 inline_names[definition.name] = true
                 if sema_inline_module_lowerable(definition, program.imports) {
-                    surface := SemaInlineModuleSurface{name: definition.name, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
+                    surface := SemaInlineModuleSurface{name: definition.name, path: definition.name, private_to: None, functions: [String:Bool]{}, reexports: [String:SemaInlineTarget]{}}
                     loop inner in body {
                         if inner == .Func(function) -> surface.functions[function.name] = true
                     }
                     &surfaces.push(surface)
                 }
+            }
+        }
+    }
+    nested := [SemaInlineModuleSurface]{}
+    nested_bindings := [SemaInlineRewrite]{}
+    loop item in hoisted_items {
+        if item == .CodeModule(definition) {
+            if definition.body == .Val(body) {
+                if sema_inline_module_lowerable(definition, program.imports) -> sema_inline_collect_nested(body, definition.name, program.imports, surfaces, file_aliases, &nested, &nested_bindings)
             }
         }
     }
@@ -1523,6 +1667,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
                 if sema_inline_module_lowerable(definition, program.imports) {
                     siblings := sema_inline_rewrite_empty()
                     siblings.sibling_module = definition.name
+                    siblings.modules = sema_inline_scope_surfaces(nested, definition.name)
                     surface_index := -1
                     loop (index, surface) in surfaces {
                         if surface.name == definition.name -> surface_index = index
@@ -1542,6 +1687,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
                         }
                     }
                     loop diagnostic in siblings.diagnostics -> &diagnostics.push(diagnostic)
+                    sema_inline_lift_nested(body, definition.name, program.imports, nested, nested_bindings, &lifted, &diagnostics)
                     module_item := definition
                     module_item.body = Val(sema_inline_strip_members(body))
                     &lowered_items.push(Item.CodeModule{value: module_item})
@@ -1557,6 +1703,7 @@ fn sema_inline_modules_lower(program: &Program, diagnostics: &[Diagnostic]) -> S
     // 3. Qualified calls and `use` bindings, in every body of the file.
     calls := sema_inline_rewrite_empty()
     imports :: sema_inline_bind_imports(program, surfaces, inline_names, &calls)
+    loop surface in nested -> &surfaces.push(surface)
     calls.modules = ^surfaces
     rewritten := [Item]{}
     loop item in lowered_items -> &rewritten.push(sema_inline_rewrite_item(&calls, item))

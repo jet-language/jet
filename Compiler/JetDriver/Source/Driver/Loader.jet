@@ -34,6 +34,7 @@ use jet_foundation.[
     core_bare_source_module,
     core_module_export,
     core_module_has_member,
+    core_module_has_type,
     diagnostic_with_source_path,
     jet_ring_parse_manifest_layer,
     source_file_id,
@@ -58,6 +59,7 @@ use jet_lexer.[
     TOKEN_LBRACKET,
     TOKEN_LINE_COMMENT,
     TOKEN_LPAREN,
+    TOKEN_LT,
     TOKEN_RAW_STRING,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
@@ -1013,10 +1015,9 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
         }
         if !block.found -> next
         if has_manifest {
-            // The entry's own block is worded by the entry-facts check, a
-            // stock carrier by its registry row (Rust `package_facts_for_entry`).
-            span :: Span{start: block.start, end: block.end}
-            conflict :: if file_index == entry_index -> jet_driver_diagnostic("E1363", span, "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block") else -> jet_driver_row_diagnostic("E1363", Val(span))
+            // The entry's own block and a stock carrier both report the
+            // registry row (Rust `package_facts_for_entry`).
+            conflict :: jet_driver_row_diagnostic("E1363", Val(Span{start: block.start, end: block.end}))
             &diagnostics.push(diagnostic_with_source_path(^conflict, carrier_path, 0))
             return None
         }
@@ -1992,10 +1993,15 @@ fn jet_driver_find_source_path(source_units: [JetDriverSourceUnit], root_index: 
     loop relative_path in relative_paths {
         loop (index, unit) in source_units {
             if unit.root_index == root_index && unit.relative_path == relative_path {
+                // A capitalized module (`use Util`) yields the same candidate
+                // path twice ({m}.jet and {P}.jet), so a repeat of the unit
+                // already chosen is that one file, not a second match.
                 if target == .Val(first) {
-                    first_path :: source_units[first].relative_path
-                    &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
-                    return None
+                    if first != index {
+                        first_path :: source_units[first].relative_path
+                        &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
+                        return None
+                    }
                 }
                 target = Val(index)
             }
@@ -3203,6 +3209,10 @@ struct JetDriverCoreIdentifierDemand {
     // A `#UnitFamily` declaration: its explicit conversions lower to their
     // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
     unit_family: Bool{false}
+    // A generic `.decode<T>()` call or a `FieldError` use: Dyn decode and
+    // `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
+    // (BuildDyn.jet ir_dyn_decode, ir_decode_under), so core.encoding loads.
+    codec_decode: Bool{false}
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core as core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (fixed_sigs.rs:5488 hmac_sha256,
@@ -3242,6 +3252,8 @@ struct JetDriverCoreDemandNames {
     pattern_matches_name: Int
     pattern_match_name: Int
     unit_family_name: Int
+    decode_name: Int
+    field_error_name: Int
     bare: [Int]
     bare_alias: [Int]
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
@@ -3283,7 +3295,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
             if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3305,6 +3317,8 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
         if tokens[index].kind == TOKEN_IDENT {
             name :: name_index(tokens[index].decoded)
             if name == names.or_err_name -> demand.option_or_err = true
+            if name == names.field_error_name -> demand.codec_decode = true
+            if name == names.decode_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LT -> demand.codec_decode = true
             // Loading a potential source owner is syntactic; Sema alone
             // decides whether this receiver is the canonical primitive Int.
             if name == names.abs_name {
@@ -3417,6 +3431,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.math_abs_receiver -> demand.math_abs_receiver = true
         if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
+        if output.codec_decode -> demand.codec_decode = true
         if output.unit_family -> demand.unit_family = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
@@ -3662,6 +3677,107 @@ fn jet_driver_core_runtime_member_imports(program: &Program, core_sources: [JetD
         &rewritten.push(declaration)
     }
     program.imports = rewritten
+}
+
+// #6542: `alias :: owner.x` binds whatever the path names. When the path names
+// no module and its owner declares the member `x`, the row is that member, as
+// `use owner.[x as alias]` is. The owner can be a Core module, an inline module
+// of this file, or the file that a body-less `module owner` of this file
+// declares. Any other path stays a module import and keeps its own error.
+fn jet_driver_member_imports(program: &Program, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) {
+    if jet_driver_member_rows(program.imports, program.items, program.items, request, source_units, unit) == .Val(rows) -> program.imports = rows
+    loop index in 0..<program.items.len() {
+        if program.items[index] == .CodeModule(code_module) && code_module.body == .Val(body) {
+            rows :: jet_driver_member_rows(code_module.imports, body, program.items, request, source_units, unit) ?? next
+            module_value := code_module.copy()
+            module_value.imports = rows
+            program.items[index] = Item.CodeModule{value: module_value}
+        }
+    }
+}
+
+// `imports` with each member row read as a member list, or None when no row
+// names a member. `scope` holds the items of the importing module body and
+// `outer` the file's top-level items.
+fn jet_driver_member_rows(imports: [ImportDecl], scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> [ImportDecl]? {
+    rows := [ImportDecl]{}
+    changed := false
+    loop declaration in imports {
+        if jet_driver_member_import(declaration, scope, outer, request, source_units, unit) == .Val(member) {
+            &rows.push(member)
+            changed = true
+        } else {
+            &rows.push(declaration.copy())
+        }
+    }
+    if !changed -> return None
+    Val(rows)
+}
+
+fn jet_driver_member_import(declaration: ImportDecl, scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> ImportDecl? {
+    if declaration.kind == .Module(name, span) {
+        parts :: name.split(".").to_list()
+        if parts.len() < 2 -> return None
+        member :: parts[parts.len() - 1]
+        owner :: name.slice(0, name.count_bytes() - member.count_bytes() - 1)
+        names_member := false
+        if parts[0] == "core" {
+            if parts.len() == 2 || jet_driver_core_module_named(request.core_sources, name) || jet_driver_core_private_unit(name, span) != None -> return None
+            names_member = core_module_has_member(owner, member) || core_module_has_type(owner, member)
+        } else if parts.len() == 2 {
+            names_member = jet_driver_inline_module_declares(scope, owner, member) || jet_driver_inline_module_declares(outer, owner, member) || jet_driver_file_module_declares(outer, owner, member, request, source_units, unit)
+        }
+        if !names_member -> return None
+        owner_span :: Span{start: span.start, end: span.start + owner.count_bytes()}
+        member_span :: Span{start: owner_span.end + 1, end: span.end}
+        local :: if declaration.alias != member -> String?{Val(declaration.alias)} else -> String?{None}
+        local_span :: if local == None -> member_span else -> declaration.alias_span
+        return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: owner, module_alias_span: owner_span, items: [ImportedItem]{ImportedItem{original: member, alias: local}}, items_span: member_span, span: declaration.span}, alias: owner, alias_span: owner_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None})
+    }
+    None
+}
+
+// Whether `module_name` is a Core module: a public export row or a source row.
+fn jet_driver_core_module_named(core_sources: [JetDriverCoreSource], module_name: String) -> Bool Never! {
+    if core_module_export(module_name) != None -> return true
+    loop row in core_sources {
+        if row.module_name == module_name -> return true
+    }
+    false
+}
+
+// Whether `items` hold the inline module `owner` that declares `member`.
+fn jet_driver_inline_module_declares(items: [Item], owner: String, member: String) -> Bool Never! {
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == owner && code_module.body == .Val(body) {
+            loop named in jet_driver_namespace_item_names(body) {
+                if named.name == member -> return true
+            }
+            loop nested in body {
+                if nested == .CodeModule(inner) && inner.name == member -> return true
+            }
+        }
+    }
+    false
+}
+
+// Whether `items` hold a body-less `module owner` whose file declares `member`
+// at its top level. That file is parsed here only for this question; the
+// loader still parses and loads it through the `module owner` declaration.
+fn jet_driver_file_module_declares(items: [Item], owner: String, member: String, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> Bool {
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == owner && code_module.body == None {
+            unresolved := [Diagnostic]{}
+            target :: jet_driver_code_module_file(source_units, unit, owner, code_module.name_span, &unresolved) ?? return false
+            text :: jet_driver_source_unit_text(request, source_units[target]) ?? return false
+            parsed :: jet_driver_parse_user_unit(text, false)
+            loop named in jet_driver_namespace_item_names(parsed.parsed.program.items) {
+                if named.name == member -> return true
+            }
+            return false
+        }
+    }
+    false
 }
 
 // The runtime unit row a source file is when it sits at that unit's
@@ -4211,7 +4327,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         demand :: ^parsed_unit.demand
         parse_result := ^parsed_unit.parsed
         // Runtime member imports consult shared rows only on the load thread.
-        if importer_core -> jet_driver_core_runtime_member_imports(&parse_result.program, request.core_sources)
+        if importer_core -> jet_driver_core_runtime_member_imports(&parse_result.program, request.core_sources) else -> jet_driver_member_imports(&parse_result.program, request, source_units, unit)
         parse_diagnostic_start :: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> &diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
@@ -4275,6 +4391,15 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             if !bare_modules.contains("core.text.fmt") -> &bare_modules.push("core.text.fmt")
             fmt_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.text.fmt", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if fmt_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
+        if demand.codec_decode {
+            encoding_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.encoding", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            if encoding_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     &pending.push(index)

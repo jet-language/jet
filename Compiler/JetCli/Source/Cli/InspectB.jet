@@ -378,12 +378,12 @@ fn jet_cli_llm_digest() -> String Never! {
         "Errors: failures propagate implicitly; handle `T?` or `T E!` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition {{ ... }} else {{ ... }}`; loops use `loop name in source {{ ... }}`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{{ field: value }}`; list literals use `[T]{{ value1, value2 }}`.",
-        "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
+        "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use alias :: core.module`, and two or more imports use one `use {{ … }}` block with a row per line.",
         "Ownership is safe by default. `&T` writes, `^T` moves, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     }
     core_rules_body :: core_rules_lines.join("\n")
     marker_body :: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
-    core_body :: "Use a module alias, then call an indexed item: `use core.term as term`; `term.print(\"hi\")`.\n\n```text\n{jet_cli_digest_core_module_text()}\n```"
+    core_body :: "Use a module alias, then call an indexed item: `use term :: core.term`; `term.print(\"hi\")`.\n\n```text\n{jet_cli_digest_core_module_text()}\n```"
     diagnostic_body :: "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked reserved are not current syntax.\n\n```text\n{jet_cli_digest_diagnostic_text()}\n```"
     sections :: [String]{
         "# Jet LLM surface digest",
@@ -781,7 +781,7 @@ fn jet_cli_inspect_env_host(file: String, source: String, base_dir: String, colo
         .Ok(evaluated) -> evaluated
         .Err(error) -> {
             if json {
-                return jet_cli_inspect_env_output(jet_cli_reports_status_json("inspect.env", false, jet_cli_report_cwd(), file, source, [Diagnostic]{error.diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
+                return jet_cli_inspect_env_output(jet_cli_reports_status_json("inspect.env", false, jet_cli_report_base(file), file, source, [Diagnostic]{error.diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
             }
             return jet_cli_inspect_env_output("", diagnostic_render_all(file, source, [Diagnostic]{error.diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
         }

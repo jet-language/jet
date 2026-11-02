@@ -1,0 +1,34 @@
+// A fresh value with cleanup ended in place closes exactly once, right
+// there: `close(^make(..))` and `consume(make(..))` close it before the next
+// statement, and so does throwing a Res, a Res IOError! or a Res? away with
+// `.drop("why")`. A Close type with no buffers closes the same way.
+
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Plain { id: Int }
+impl Plain.Close {
+    fn close(^self) { print("close plain {self.id}") }
+}
+
+fn make(name: String) -> Res { Res{name: name} }
+fn attempt(name: String) -> Res IOError! { Ok(Res{name: name}) }
+fn maybe(name: String) -> Res? { Val(Res{name: name}) }
+
+fn run() {
+    close(^make("closed"))
+    print("after close")
+    close(^Plain{id: 7})
+    print("after plain")
+    consume(make("consumed"))
+    print("after consume")
+    make("dropped").drop("discarded on purpose")
+    print("after drop")
+    attempt("attempted").drop("discarded on purpose")
+    print("after result drop")
+    maybe("maybe").drop("discarded on purpose")
+    print("after option drop")
+    print("done")
+}

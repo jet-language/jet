@@ -1570,12 +1570,10 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
         jfmt_write(&f, "#NoPrelude")
         jfmt_newline(&f)
     }
-    loop import in prog.imports {
+    if prog.imports.len() > 0 {
         if !first -> jfmt_blank_line_between_items(&f)
         first = false
-        jfmt_emit_leading(&f, import.span.start)
-        jfmt_fmt_import(&f, import)
-        jfmt_emit_trailing(&f, import.span.end)
+        jfmt_fmt_import_groups(&f, prog.imports)
     }
     if has_ordered_file_rules && !ordered_file_rules_precede_imports {
         if !first -> jfmt_blank_line_between_items(&f)

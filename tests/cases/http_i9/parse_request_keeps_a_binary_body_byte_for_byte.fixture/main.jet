@@ -1,0 +1,47 @@
+use core.http as http
+use core.http.[Body]
+
+fn message(body: [U8]) -> [U8] Never! {
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    raw := "POST /upload HTTP/1.1{crlf}Host: example.test{crlf}Content-Length: {body.len()}{crlf}{crlf}".bytes()
+    loop byte in body -> &raw.push(byte)
+    raw
+}
+
+fn same(left: [U8], right: [U8]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        if left[index] != right[index] -> return false
+    }
+    true
+}
+
+fn show(name: String, body: [U8]) {
+    if http.parse_request(message(body)) == {
+        .Ok(request) -> {
+            carried :: request.body()
+            kind :: if carried == {
+                .Bytes(_) -> "Bytes"
+                .Text(_) -> "Text"
+                .Empty -> "Empty"
+            }
+            print("{name}: {kind}, {http.body_as_bytes(carried).len()} bytes, same: {same(http.body_as_bytes(carried), body)}")
+            if request.text() == {
+                .Ok(text) -> print("{name} text: {text}")
+                .Err(error) -> {
+                    if error == {
+                        .UnsupportedEncoding -> print("{name} text: UnsupportedEncoding")
+                        else -> print("{name} text: other error")
+                    }
+                }
+            }
+        }
+        .Err(_) -> print("{name}: rejected")
+    }
+}
+
+fn run() {
+    show("binary", [U8]{0, 255, 1, 128, 13, 10, 254})
+    show("utf8", "héllo".bytes())
+    show("empty", [U8]{})
+}

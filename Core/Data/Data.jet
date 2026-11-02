@@ -1053,11 +1053,28 @@ fn __group_steps<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String
 
 // Groups come out in ascending key order (a stable sort of the first-seen
 // groups); reaching `max_groups` fails before a new group is retained.
-fn __group_find<K: Comparable>(keys: [K], key: K) -> Int Never! {
-    loop index in 0..<keys.len() {
-        if (keys[index] <=> key) == Ordering.Equal -> return index
+// `order` holds the positions of `keys` sorted by key, so a row's lookup is a
+// binary search: the key's position in `keys`, else -1 - the slot in `order`
+// where a new group's position goes (__group_add).
+fn __group_find<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
+    low := 0
+    high := order.len()
+    loop low < high {
+        middle :: low + (high - low) /% 2
+        compared :: keys[order[middle]] <=> key
+        if compared == Ordering.Equal -> return order[middle]
+        if compared == Ordering.Less {
+            low = middle + 1
+        } else {
+            high = middle
+        }
     }
-    -1
+    -1 - low
+}
+
+fn __group_add<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
+    &order.insert(-1 - found, keys.len())
+    &keys.push(key)
 }
 
 fn __group_sorted<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
@@ -1072,15 +1089,16 @@ fn __group_count<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Gro
         limits := DataLimits.safe()
         cell :: grouped.__key.guard_read()
         keys := [K]{}
+        order := [Int]{}
         counts := [Int]{}
         loop row in rows {
             group_key :: cell.value.key(row.copy()) ?? return Err(err)
-            found :: __group_find<K>(keys, group_key)
+            found :: __group_find<K>(keys, order, group_key)
             if found >= 0 {
                 counts[found] = counts[found] + 1
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.count"))
-                &keys.push(group_key)
+                __group_add<K>(&keys, &order, found, group_key)
                 &counts.push(1)
             }
         }
@@ -1098,17 +1116,18 @@ fn __group_sum<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(
         limits := DataLimits.safe()
         cell :: grouped.__key.guard_read()
         keys := [K]{}
+        order := [Int]{}
         totals := [V]{}
         loop row in rows {
             group_key :: cell.value.key(row.copy()) ?? return Err(err)
             group_value :: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
-            found :: __group_find<K>(keys, group_key)
+            found :: __group_find<K>(keys, order, group_key)
             if found >= 0 {
                 total :: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
                 totals[found] = total
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
-                &keys.push(group_key)
+                __group_add<K>(&keys, &order, found, group_key)
                 &totals.push(group_value)
             }
         }
@@ -1137,19 +1156,20 @@ fn __group_mean<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T)
         limits := DataLimits.safe()
         cell :: grouped.__key.guard_read()
         keys := [K]{}
+        order := [Int]{}
         totals := [Float]{}
         counts := [Int]{}
         loop row in rows {
             group_key :: cell.value.key(row.copy()) ?? return Err(err)
             group_value :: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
             if nonfinite(group_value) -> return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
-            found :: __group_find<K>(keys, group_key)
+            found :: __group_find<K>(keys, order, group_key)
             if found >= 0 {
                 totals[found] = totals[found] + group_value
                 counts[found] = counts[found] + 1
             } else {
                 if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.mean"))
-                &keys.push(group_key)
+                __group_add<K>(&keys, &order, found, group_key)
                 &totals.push(group_value)
                 &counts.push(1)
             }
@@ -1906,20 +1926,19 @@ fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
     // The output cardinality is known from per-key counts before any row is
     // built, so a limit breach costs O(left + right) rather than one push per
     // row up to max_join_rows.
-    right_counts :: join_key_counts(right_keys)
+    right_index :: join_index(right_keys)
     total := 0
     loop key in left_keys {
-        total += right_counts.get(key) ?? 0
+        total += join_match_count(right_index, key)
         if total > limits.max_join_rows {
             return Err(data_error(DataErrorKind.Limit, "max_join_rows exceeded", "inner_join"))
         }
     }
     out := [DataJoin<T, U>]{}
     loop left_index in 0..<left.len() {
-        if (right_counts.get(left_keys[left_index]) ?? 0) == 0 -> next
-        loop right_index in 0..<right.len() {
-            if left_keys[left_index] != right_keys[right_index] -> next
-            &out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index]})
+        position :: right_index.positions.get(left_keys[left_index]) ?? next
+        loop right_index_at in right_index.rows[position] {
+            &out.push(DataJoin<T, U>{left: left[left_index], right: right[right_index_at]})
         }
     }
     if out.len() > limits.max_output_rows {
@@ -1941,10 +1960,10 @@ fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: 
         &right_keys.push(key)
     }
     // Every left row yields at least one output row; see inner_join.
-    right_counts :: join_key_counts(right_keys)
+    right_index :: join_index(right_keys)
     total := 0
     loop key in left_keys {
-        matches := right_counts.get(key) ?? 0
+        matches := join_match_count(right_index, key)
         if matches == 0 -> matches = 1
         total += matches
         if total > limits.max_join_rows {
@@ -1953,13 +1972,13 @@ fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: 
     }
     out := [DataJoin<T, U?>]{}
     loop left_index in 0..<left.len() {
-        if (right_counts.get(left_keys[left_index]) ?? 0) == 0 {
+        position :: right_index.positions.get(left_keys[left_index]) ?? -1
+        if position < 0 {
             &out.push(DataJoin<T, U?>{left: left[left_index], right: None})
             next
         }
-        loop right_index in 0..<right.len() {
-            if left_keys[left_index] != right_keys[right_index] -> next
-            &out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index])})
+        loop right_index_at in right_index.rows[position] {
+            &out.push(DataJoin<T, U?>{left: left[left_index], right: Val(right[right_index_at])})
         }
     }
     if out.len() > limits.max_output_rows {
@@ -1968,13 +1987,33 @@ fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: 
     Ok(out)
 }
 
-fn join_key_counts(keys: [String]) -> [String:Int] Never! {
-    counts := [String:Int]{}
-    loop key in keys {
-        seen :: counts.get(key) ?? 0
-        _ :: &counts.add(key, seen + 1)
+// The right rows of each join key, in row order: rows[positions[key]]. A
+// join then visits only a left row's matches, not every right row.
+struct __DataJoinIndex {
+    positions: [String:Int]
+    rows: [[Int]]
+}
+
+fn join_index(keys: [String]) -> __DataJoinIndex Never! {
+    positions := [String:Int]{}
+    rows := [[Int]]{}
+    loop at in 0..<keys.len() {
+        position := 0
+        if positions.get(keys[at]) == .Val(found) {
+            position = found
+        } else {
+            position = rows.len()
+            positions[keys[at].copy()] = position
+            &rows.push([Int]{})
+        }
+        &rows[position].push(at)
     }
-    counts
+    __DataJoinIndex{positions: positions, rows: rows}
+}
+
+fn join_match_count(index: __DataJoinIndex, key: String) -> Int Never! {
+    position :: index.positions.get(key) ?? return 0
+    index.rows[position].len()
 }
 
 fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
@@ -2446,20 +2485,16 @@ fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
     }
 }
 
+// Callers pass finite values (quantile refuses the rest), where list sort's
+// total order differs from `<` only between -0.0 and 0.0, which the callers
+// normalize: the native O(n log n) merge sort gives the same results.
 fn sort_floats(values: [Float]) -> [Float] Never! {
     out := [Float]{}
     loop value in values -> &out.push(value)
-    loop i in 0..<out.len() {
-        loop j in (i + 1)..<out.len() {
-            if out[j] < out[i] {
-                value := out[i]
-                out[i] = out[j]
-                out[j] = value
-            }
-        }
-    }
+    &out.sort()
     out
 }
+
 fn render_bar_text(labels: [String], values: [Float]) -> String Never! {
     bounds :: value_bounds(values)
     minimum :: bounds.min

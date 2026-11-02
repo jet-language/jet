@@ -365,7 +365,7 @@ impl Parser {
         )
     }
 
-    // Whitespace is read in place: no per-byte `U8?` (a heap box natively).
+    // Whitespace is read in place, without a per-byte `U8?`.
     fn skip_ws(&self) -> Bool EncodingError! {
         if self.index < 0 -> return Err(self.err("JSON parser index became negative"))
         loop self.index < self.bytes.len() {

@@ -80,13 +80,19 @@ testing_thread_next := I64{0}
 fn testing_thread_id() -> I64 {
     if (testing_thread_key == I64{0}) {
         host_lock()
-        if (testing_thread_key == I64{0}) -> testing_thread_key = jet_rt_tls_key_new(I64{0})
+        if (testing_thread_key == I64{0}) {
+            #Unsafe("written under the host lock") {
+                testing_thread_key = jet_rt_tls_key_new(I64{0})
+            }
+        }
         host_unlock()
     }
     id := jet_rt_tls_get(testing_thread_key)
     if (id == I64{0}) {
         host_lock()
-        testing_thread_next = testing_thread_next + I64{1}
+        #Unsafe("written under the host lock") {
+            testing_thread_next = testing_thread_next + I64{1}
+        }
         id = testing_thread_next
         host_unlock()
         jet_rt_tls_set(testing_thread_key, id)

@@ -556,7 +556,7 @@ fn core_call_prefix_and_import(src: String, module_ref: String) -> (String, Text
     alias :: default_core_alias(module_ref)
     (offset, joins_use_block) :: core_import_insert_point(src)
     suffix :: if joins_use_block -> "\n" else -> "\n\n"
-    import :: edit(SourceSpan { start: offset, end: offset }, "use {module_ref} as {alias}{suffix}")
+    import :: edit(SourceSpan { start: offset, end: offset }, "use {alias} :: {module_ref}{suffix}")
     return (_0: alias, _1: .Val(import))
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
@@ -576,24 +576,35 @@ fn imported_core_prefix(src: String, module_ref: String) -> String? {
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1168
 struct CoreImport { module_ref: String; alias: String }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
+// A `use` line or a row of a `use {` block (#6542): `alias :: core.x`,
+// the older `core.x as alias`, or `core.x` named by its last segment.
 fn core_imports(src: String) -> [CoreImport] {
     imports := []
+    in_block := false
     loop line in src.lines() {
         code := line.split("//").next().unwrap_or("").trim() // #4303
-        rest :: code.strip_prefix("use core.") ?? next
-        full :: "core.{rest}"
+        if in_block && code.starts_with("}}") {
+            in_block = false
+            next
+        }
+        if !in_block && code.starts_with("use {{") {
+            in_block = true
+            next
+        }
+        row :: if in_block -> code else -> (code.strip_prefix("use ") ?? next)
         module_ref: String
         alias: String
-        if full.split_once(" as ") == .Val(tuple_4) {
-            found_module :: tuple_4._0
-            found_alias :: tuple_4._1
-            module_ref = found_module.trim() // #4303
-            alias_text := found_alias.trim() // #4303
-            alias = ident_prefix(alias_text)
+        if row.split_once(" :: ") == .Val(named) {
+            alias = ident_prefix(named._0.trim()) // #4303
+            module_ref = named._1.trim() // #4303
+        } else if row.split_once(" as ") == .Val(tuple_4) {
+            module_ref = tuple_4._0.trim() // #4303
+            alias = ident_prefix(tuple_4._1.trim()) // #4303
         } else {
-            module_ref = full.trim() // #4303
+            module_ref = row.trim() // #4303
             alias = default_core_alias(module_ref)
         }
+        if !module_ref.starts_with("core.") -> next
         if !module_ref.is_empty() && !alias.is_empty() -> imports.push(CoreImport { module_ref: module_ref.to_string(), alias: ^alias })
     }
     return ^imports
@@ -603,14 +614,21 @@ fn ident_prefix(text: String) -> String { text.chars().take_while((c) -> c.is_as
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1203
 fn default_core_alias(module_ref: String) -> String { module_ref.rsplit('.').next().unwrap_or("core").to_string() }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1207
+// The new `use` line goes after the leading imports; a `use {` block's
+// rows and its closing `}` count as import lines (#6542).
 fn core_import_insert_point(src: String) -> (Usize, Bool) {
     offset := 0
     insert_at := 0
     saw_use := false
+    in_block := false
     loop line in src.split_inclusive('\n') {
         trimmed := line.trim() // #4303
-        if trimmed.starts_with("use ") {
+        if in_block {
+            if trimmed.starts_with("}}") -> in_block = false
+            insert_at = offset + line.len()
+        } else if trimmed.starts_with("use ") {
             saw_use = true
+            if trimmed.starts_with("use {{") -> in_block = true
             insert_at = offset + line.len()
         } else if saw_use -> break
         else if trimmed.is_empty() || trimmed.starts_with("//") -> insert_at = offset + line.len()

@@ -1,0 +1,12 @@
+fn names(count: Int) -> [String] {
+    out := [String]{}
+    loop k in 0..<count -> &out.push("name {k}")
+    out
+}
+
+fn run() {
+    first :: names(3)
+    second :: first.copy()
+    worker :: task { 1 }
+    print(first.len() + second.len() + (^worker.join() ?? 0))
+}

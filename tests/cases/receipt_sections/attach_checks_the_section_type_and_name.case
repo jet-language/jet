@@ -1,0 +1,21 @@
+# `receipt.attach` takes one value of a named `#[Receipt("name"), Codable]` struct, and
+# `#Receipt` itself needs `#Codable` and one valid compile-time section name.
+fixture: attach_checks_the_section_type_and_name.fixture
+step: jet check plain.jet
+exit: nonzero
+stderr: ~ "[E2411]: Type `Plain` is not a `#Receipt` section" # a Codable struct without #Receipt
+step: jet check scalar.jet
+exit: nonzero
+stderr: ~ "[E2411]: Receipt sections require a named `#Receipt` type" # an unnamed payload type
+step: jet check arity.jet
+exit: nonzero
+stderr: ~ "[E0103]: `receipt.attach` takes exactly one argument" # arity
+step: jet check not_codable.jet
+exit: nonzero
+stderr: ~ "[E2411]: Receipt section type `Audit` must be `#Codable`" # the declaration check
+step: jet check bad_name.jet
+exit: nonzero
+stderr: ~ "[E0103]: `#Receipt` section name is invalid" # a path separator in the name
+step: jet check unnamed.jet
+exit: nonzero
+stderr: ~ "[E0103]: `#Receipt` requires one compile-time string name" # a bare marker

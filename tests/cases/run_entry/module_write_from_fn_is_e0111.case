@@ -1,0 +1,24 @@
+# A function writing a plain module `:=` is E0111 on o0, o1 and o2
+# (D-MODULE-WRITE1=A, #6332); the same state in a `shared` holder, or a raw
+# write inside `#Unsafe`, runs.
+fixture: module_write_from_fn_is_e0111.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 1
+stderr: ~ "[E0111]" # the plain module write from `bump` is refused (o0)
+stderr: ~ "`hits` is module state, so a function can't change it directly" # the What names the written binding
+step: jet run --optimize=basic main.jet
+exit: 1
+stderr: ~ "[E0111]" # the same refusal at o1
+step: jet run --optimize=full main.jet
+exit: 1
+stderr: ~ "[E0111]" # the same refusal at o2
+step: jet run --optimize=none ok.jet
+exit: 0
+stdout: = module_write_from_fn_is_e0111.out
+step: jet run --optimize=basic ok.jet
+exit: 0
+stdout: = module_write_from_fn_is_e0111.out
+step: jet run --optimize=full ok.jet
+exit: 0
+stdout: = module_write_from_fn_is_e0111.out

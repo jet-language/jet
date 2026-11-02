@@ -1,0 +1,14 @@
+# #6085: para_map(f, limit: n) over 100 items runs chunks shorter than 64 so n workers share them.
+# Source order holds for every limit, and the lowest failing index (37, not 70 or 99) is reported.
+fixture: para_map_limit_keeps_order_and_lowest_failure.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 70 # the failing para_map stops the program
+stdout: = "limit 0: 100 1 298 true\nlimit 1: 100 1 298 true\nlimit 7: 100 1 298 true\nlimit 32: 100 1 298 true\nlimit 100: 100 1 298 true\nlimit 200: 100 1 298 true\n"
+stderr: ~ "Stop [E3001]: `panic: item-37`" # the lowest failing index wins
+stderr: !~ "item-70" # a later failing chunk is never the one reported
+stderr: !~ "item-99" # nor the last one

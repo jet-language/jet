@@ -24,6 +24,7 @@ use jet_foundation.[
     diagnostic_source_position,
     diagnostic_source_texts,
 ]
+use jet_pkg_model.[WorkspaceDeclarationCache]
 
 JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
 
@@ -62,6 +63,84 @@ fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
         }
     }
     "/{parts.join("/")}"
+}
+
+// The bases of a batch's report paths: `cwd` makes a relative path absolute
+// (jet_cli_report_path), and `root` is the project the batch's input belongs
+// to (its workspace, repository or package root), which a redacted path is
+// named under (jet_cli_report_redacted).
+struct JetCLIReportBase {
+    cwd: String?
+    root: String?
+}
+
+// The report base of a batch checked under `file` ("" for a command-level
+// report): the working directory, and the project root that encloses
+// `file`, else the working directory's.
+fn jet_cli_report_base(file: String) -[FS, Env]> JetCLIReportBase? Never! {
+    cwd :: jet_cli_report_cwd()
+    absolute :: jet_cli_report_path(cwd, file)
+    start := cwd ?? ""
+    if absolute.starts_with("/") {
+        start = if cli_files.is_dir(absolute) -> absolute.copy() else -> jet_cli_parent(absolute) ?? absolute.copy()
+    }
+    if start.len() == 0 -> return Val(JetCLIReportBase{cwd: cwd, root: None})
+    Val(JetCLIReportBase{cwd: cwd, root: jet_cli_report_root(start)})
+}
+
+// The project root that encloses `start`, in jet_cli_selected_project_root
+// order (workspace, repository, package), or None for a standalone source.
+fn jet_cli_report_root(start: String) -[FS, Env]> String? Never! {
+    cache := WorkspaceDeclarationCache.new()
+    if jet_cli_find_workspace_root_checked(&cache, start) == .Ok(found) {
+        if found != None -> return found
+    }
+    if jet_cli_find_repository_root(start) == .Val(root) -> return Val(root)
+    if jet_cli_find_package_root_checked(&cache, start) == .Ok(found) -> return found
+    None
+}
+
+// The report path of `value` under `base`: absolute (jet_cli_report_path),
+// so a report stays resolvable from any working directory, except for a
+// crypto-misuse report (`redact`), whose paths jet_cli_report_redacted names.
+fn jet_cli_report_file(base: JetCLIReportBase?, value: String, redact: Bool) -> String Never! {
+    cwd :: if base == .Val(known) -> known.cwd else -> String?{None}
+    absolute :: jet_cli_report_path(cwd, value)
+    if redact -> return jet_cli_report_redacted(base, absolute)
+    absolute
+}
+
+// D-CRYPTO-DIAG1 (Diagnostics.rs `project_relative_diagnostic_path`): an
+// E2702 report names a source without the machine's directory layout:
+// relative to the project root, else to the working directory, else by its
+// file name alone.
+fn jet_cli_report_redacted(base: JetCLIReportBase?, absolute: String) -> String Never! {
+    if !absolute.starts_with("/") -> return absolute.copy()
+    if base == .Val(known) {
+        if known.root == .Val(root) {
+            if jet_cli_report_under(root, absolute) == .Val(relative) -> return relative
+        }
+        if known.cwd == .Val(cwd) {
+            if jet_cli_report_under(cwd, absolute) == .Val(relative) -> return relative
+        }
+    }
+    jet_cli_file_name(absolute)
+}
+
+// `absolute` relative to the directory `root`, or None outside it.
+fn jet_cli_report_under(root: String, absolute: String) -> String? Never! {
+    prefix :: if root.ends_with("/") -> root.copy() else -> "{root}/"
+    if absolute.starts_with(prefix) && absolute.len() > prefix.len() -> return Val(absolute.removeprefix(prefix))
+    None
+}
+
+// Whether `diagnostic` is a crypto-misuse report (E2702, D-CRYPTO-DIAG1),
+// whose paths are redacted.
+fn jet_cli_report_redacts(diagnostic: Diagnostic) -> Bool Never! {
+    if diagnostic.structured == .Val(structured) {
+        if structured == .CryptoMisuse(_, _, _, _) -> return true
+    }
+    false
 }
 
 fn jet_cli_report_moment(moment: DiagnosticMoment) -> String Never! {
@@ -271,21 +350,23 @@ fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
 }
 
 // Diagnostics.rs `to_report_with_clears` + Report.rs `ReportEnvelope::json`:
-// one report object. `file` is the batch's report path (`jet_cli_report_path`)
-// and `source` its bytes; a diagnostic's own origin replaces both. `cwd`
-// makes origin paths absolute the way `ReportPath::from_process` does.
-fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
+// one report object. `file` is the batch's report path (`jet_cli_report_file`)
+// and `source` its bytes; a diagnostic's own origin replaces both. `base`
+// makes origin paths absolute the way `ReportPath::from_process` does; a
+// crypto-misuse report's paths are redacted (jet_cli_report_redacted).
+fn jet_cli_report_json(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int) -> String Never! {
     sources := diagnostic_source_texts()
-    jet_cli_report_json_with(diagnostic, cwd, file, source, clears, &sources)
+    jet_cli_report_json_with(diagnostic, base, file, source, clears, &sources)
 }
 
 // jet_cli_report_json over a batch's indexed sources (`sources`, Render.jet):
 // each source a line or column reads is indexed once per batch.
-fn jet_cli_report_json_with(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int, sources: &DiagnosticSourceTexts) -> String Never! {
+fn jet_cli_report_json_with(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int, sources: &DiagnosticSourceTexts) -> String Never! {
     // copy: `file` stays with the caller (`file` is a read parameter: no move out of it, E0201) and
     // the binding `report_file` owns its own.
-    report_file := file.copy()
-    if diagnostic.origin == .Val(origin) -> report_file = jet_cli_report_path(cwd, origin.path)
+    redact :: jet_cli_report_redacts(diagnostic)
+    report_file := if redact -> jet_cli_report_redacted(base, file) else -> file.copy()
+    if diagnostic.origin == .Val(origin) -> report_file = jet_cli_report_file(base, origin.path, redact)
     severity :: if diagnostic.severity == DIAGNOSTIC_LINT -> "warning" else -> "error"
     out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
     if diagnostic.applicability == .Val(applicability) {
@@ -321,7 +402,7 @@ fn jet_cli_report_json_with(diagnostic: Diagnostic, cwd: String?, file: String, 
         cause_line := "null"
         cause_col := "null"
         if cause.origin == .Val(cause_origin) {
-            path :: jet_cli_report_path(cwd, cause_origin.path)
+            path :: jet_cli_report_file(base, cause_origin.path, redact)
             if path.len() > 0 -> cause_file = jet_cli_json_string(path)
             if cause.span == .Val(cause_span) {
                 position :: diagnostic_source_position(&sources, cause.origin, "")
@@ -357,20 +438,21 @@ fn jet_cli_report_json_with(diagnostic: Diagnostic, cwd: String?, file: String, 
 }
 
 // One report object per diagnostic, each with its batch clear count. `file`
-// is the process label the diagnostics were checked under.
-fn jet_cli_reports_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
-    report_file :: jet_cli_report_path(cwd, file)
+// is the process label the diagnostics were checked under, and `base` the
+// batch's report base (jet_cli_report_base).
+fn jet_cli_reports_json(base: JetCLIReportBase?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
+    report_file :: jet_cli_report_file(base, file, false)
     clears :: jet_cli_report_clear_counts(diagnostics)
     sources := diagnostic_source_texts()
     reports := [String]{}
-    loop (index, diagnostic) in diagnostics -> &reports.push(jet_cli_report_json_with(diagnostic, cwd, report_file, source, clears[index], &sources))
+    loop (index, diagnostic) in diagnostics -> &reports.push(jet_cli_report_json_with(diagnostic, base, report_file, source, clears[index], &sources))
     reports
 }
 
 // Diagnostics.rs `render_all_json`: JSON Lines, one report per line; an empty
 // batch is no bytes.
-fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
-    reports :: jet_cli_reports_json(cwd, file, source, diagnostics)
+fn jet_cli_render_all_json(base: JetCLIReportBase?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+    reports :: jet_cli_reports_json(base, file, source, diagnostics)
     if reports.len() == 0 -> return ""
     "{reports.join("\n")}\n"
 }
@@ -378,8 +460,8 @@ fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagnosti
 // The one status line around a batch of reports (main.rs `report_problems`,
 // CmdInspect.rs `render_check_failure`): `action` names the producer and `ok`
 // matches the exit status.
-fn jet_cli_reports_status_json(action: String, ok: Bool, cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
-    "{jet_cli_status_render_with_reports(action, ok, jet_cli_reports_json(cwd, file, source, diagnostics), [JetCLIStatusField]{})}\n"
+fn jet_cli_reports_status_json(action: String, ok: Bool, base: JetCLIReportBase?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+    "{jet_cli_status_render_with_reports(action, ok, jet_cli_reports_json(base, file, source, diagnostics), [JetCLIStatusField]{})}\n"
 }
 
 // main.rs `emit_cli_report`: one spanless command diagnostic in the `cli`

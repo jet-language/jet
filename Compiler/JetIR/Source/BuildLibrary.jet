@@ -99,6 +99,7 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
         {name: "rt_test_capture_abort_address", shape: .FunctionAddress{symbol: "jet_rt_test_capture_abort", arity: 2}},
         {name: "rt_test_suite_state_drop_address", shape: .FunctionAddress{symbol: "jet_rt_test_suite_state_drop", arity: 2}},
         {name: "rt_fault_allocation_drop_address", shape: .FunctionAddress{symbol: "jet_rt_fault_allocation_drop", arity: 2}},
+        {name: "rt_fault_check_address", shape: .FunctionAddress{symbol: "jet_rt_fault_check", arity: 1}},
         {name: "rt_crypto_entropy_drop_address", shape: .FunctionAddress{symbol: "jet_rt_crypto_entropy_drop", arity: 2}},
         {name: "rt_log_state_drop_address", shape: .FunctionAddress{symbol: "jet_rt_log_state_drop", arity: 2}},
         {name: "rt_journey_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_journey_destructor", arity: 2}},
@@ -169,9 +170,9 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     if lifecycle_problem != "" -> return ir_library_failed([String]{lifecycle_problem})
     hooked := 0
     loop (index, row) in exports {
-        if lifecycle.get(row.symbol) == None -> next
+        hook :: lifecycle.get(row.symbol) ?? next
         hooked += 1
-        if !ir_void_hook(p.functions[export_rows[index]]) -> return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must take no parameters and return nothing"})
+        if !ir_lifecycle_hook(p.functions[export_rows[index]], hook) -> return ir_library_failed([String]{"runtime lifecycle export {row.symbol} must return nothing and take no parameters, or, as an init hook, the init array's (argc, argv, envp) as three I64"})
     }
     if hooked != lifecycle.len() -> return ir_library_failed([String]{"a runtime lifecycle row names no checked #Export(c) function"})
     intrinsics := [String:IRRuntimeIntrinsic]{}
@@ -309,6 +310,87 @@ fn ir_export_abi_json(rows: [IRExportABI]) -> String Never! {
         &encoded.push("{{\"symbol\":{foundation_json_quote(row.symbol)},\"parameters\":[{parameters.join(",")}],\"result\":{result}}}")
     }
     "[{encoded.join(",")}]"
+}
+
+// The C symbols whose call can run code beside the calling thread: a new
+// thread, a signal handler that returns into the code it interrupted
+// (ProcessSignal.jet), a loaded library.
+IR_THREAD_START_SYMBOLS :: [String]{"pthread_create", "signal", "dlopen"}
+
+// The thread receipt of a library (`<prefix>.threads`): the exports whose
+// call can reach an IR_THREAD_START_SYMBOLS call through direct calls, the
+// runtime routes the library itself defines and the function addresses it
+// takes, sorted. A lifecycle hook that can reach one runs whenever its
+// program keeps one of the hook's guards (ir_lifecycle_rows), so every
+// export that can reach a guard's storage is listed too; the receipt is
+// just "*" when such a hook has no guard, since every program that links
+// the library runs it.
+fn ir_thread_exports(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
+    count :: m.functions.len()
+    defined := [String:Int]{}
+    loop row in exports -> defined[row.symbol.copy()] = row.function
+    callers := [[Int]]{}
+    loop _ in 0..<count -> &callers.push([Int]{})
+    // Each DataAddress: the data row and the function that takes it.
+    data_rows := [Int]{}
+    data_users := [Int]{}
+    reaches := [Bool]{}
+    work := [Int]{}
+    loop (id, f) in m.functions {
+        starts := false
+        loop (at, op) in f.op {
+            callee := -1
+            if op == .Call || op == .FunctionAddress -> callee = f.a[at]
+            if op == .CallRuntime {
+                name :: m.names[f.a[at]]
+                if IR_THREAD_START_SYMBOLS.contains(name) -> starts = true
+                callee = defined.get(name) ?? -1
+            }
+            if op == .DataAddress {
+                &data_rows.push(f.a[at])
+                &data_users.push(id)
+            }
+            if callee >= 0 && callee < count -> &callers[callee].push(id)
+        }
+        &reaches.push(starts)
+        if starts -> &work.push(id)
+    }
+    guarded := [Bool]{}
+    loop _ in exports -> &guarded.push(false)
+    head := 0
+    loop {
+        loop head < work.len() {
+            id :: work[head]
+            head += 1
+            loop caller in callers[id] {
+                if reaches[caller] -> next
+                reaches[caller] = true
+                &work.push(caller)
+            }
+        }
+        // A hook that can reach a thread start: whatever keeps its guard
+        // storage runs it.
+        added := false
+        loop (index, row) in exports {
+            if guarded[index] || !reaches[row.function] || (row.init_priority < 0 && row.fini_priority < 0) -> next
+            if row.guards.len() == 0 -> return [String]{"*"}
+            guarded[index] = true
+            loop (at, data) in data_rows {
+                id :: data_users[at]
+                if !row.guards.contains(data) || reaches[id] -> next
+                reaches[id] = true
+                &work.push(id)
+                added = true
+            }
+        }
+        if !added -> break
+    }
+    symbols := [String]{}
+    loop row in exports {
+        if reaches[row.function] -> &symbols.push(row.symbol.copy())
+    }
+    &symbols.sort()
+    symbols
 }
 
 // Ordered process-lifecycle hooks of the library object. Each row is
@@ -485,6 +567,19 @@ fn ir_void_hook(function: FnBody) -> Bool Never! {
     function.params.len() == 0 && ir_c_export_result(function) == None
 }
 
+// A lifecycle hook: no result, and no parameters or, for an init-only hook,
+// the (argc, argv, envp) every startup's init-array loop calls an entry with
+// (glibc's convention, which JetBackend Image/StaticLink.jet's startups
+// keep), as three I64.
+fn ir_lifecycle_hook(function: FnBody, hook: IRLifecycle) -> Bool Never! {
+    if ir_void_hook(function) -> return true
+    if ir_c_export_result(function) != None || hook.fini_priority >= 0 || function.params.len() != 3 -> return false
+    loop param in function.params {
+        if (ir_c_primitive(param.ty) ?? "") != "I64" -> return false
+    }
+    true
+}
+
 // A runtime-only ordinary Jet reference function of `count` parameters
 // that an intrinsic may replace: never a mismatched declaration.
 fn ir_intrinsic_signature(function: FnBody, count: Int) -> Bool Never! {
@@ -596,12 +691,17 @@ fn ir_address_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args:
     slot
 }
 
-// The bits of the one argument (of row `input`) as a value of row `output`:
-// stored in a frame word, loaded back.
+// The bits of the one argument (of row `input`) as a value of row `output`.
 fn ir_bitcast(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], input: Int, output: Int, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "a runtime bitcast reads one value")
     value :: ir_value_as(&m, p, &b, args[0].value, input, span)
     if ir_failed(b) -> return -1
+    ir_reinterpret(&m, &b, value, output)
+}
+
+// The bits of scalar slot `value` as a fresh value of row `output`: stored
+// in a frame word, loaded back in the other class.
+fn ir_reinterpret(m: &IRModule, b: &IRBuilder, value: Int, output: Int) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
     area :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.StackAddress, area, 8, 8, -1, b.line)

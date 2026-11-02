@@ -1,8 +1,9 @@
 // CAbiParallel.rs:9-33 / Core.rs:360-420 / ParallelKernel.rs:60-90.
 // A range callback borrows env until every worker has joined. Chunk failures
 // are isolated, all chunks run, and the lowest failing chunk start wins.
-// Worker80: len0 chunks8 workers16 index24 env32 invoke40 stop48 start56
-// pthread64 save72 (save points into the caller-owned 32-byte control scope).
+// Worker120: len0 chunks8 workers16 index24 env32 invoke40 stop48 start56
+// pthread64 save72 (save points into the caller-owned 32-byte control scope
+// at 80) size112 (items per chunk).
 fn rt_parallel_worker_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
@@ -14,16 +15,28 @@ fn parallel_limit(limit: I64, cap: I64) -> I64 {
     if (count == I64{0}) -> I64{1} else if count < cap -> count else -> cap
 }
 
+// Items per chunk: 64, except that a para_map with an explicit `limit`
+// spreads its items over `limited` workers (#6085). Without that, 100 items
+// under `limit: 32` were two 64-item chunks, so two workers ran every item.
+// para_fold, para_filter, para_partition and an unlimited para_map pass a
+// negative limit and keep 64 (para_fold's merge tree is built on it).
+fn parallel_chunk_size(length: I64, limit: I64, limited: I64) -> I64 {
+    if int_negative(limit) -> return I64{64}
+    size :: (length + limited - I64{1}) / limited
+    if size < (I64{64}) -> size else -> I64{64}
+}
+
 #Export(c) fn jet_rt_native_para_worker(worker: I64) -> I64 {
     chunk := sync_load(wrapping(worker + I64{24}))
     chunks :: sync_load(wrapping(worker + I64{8}))
     stride :: sync_load(wrapping(worker + I64{16}))
     length :: sync_load(worker)
     save :: sync_load(wrapping(worker + I64{72}))
+    size :: sync_load(wrapping(worker + I64{112}))
     loop chunk < chunks {
-        start :: chunk * I64{64}
+        start :: chunk * size
         remaining :: length - start
-        end :: start + (if remaining < (I64{64}) -> remaining else -> I64{64})
+        end :: start + (if remaining < size -> remaining else -> size)
         control :: scheduler_control_new()
         sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_TASK)
         scheduler_control_enter(control, save)
@@ -87,13 +100,14 @@ fn parallel_raise(record: I64) {
     if (length == I64{0}) {
         return
     }
-    chunks :: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
     cap :: scheduler_available_parallelism(I64{1})
     if (jet_rt_session_propagate() != I64{0}) -> return
     limited :: parallel_limit(limit, cap)
+    size :: parallel_chunk_size(length, limit, limited)
+    chunks :: length / size + (if (length % size == I64{0}) -> I64{0} else -> I64{1})
     count :: if limited < chunks -> limited else -> chunks
     // Each worker owns its descriptor and its control save slot through join.
-    bytes :: count * I64{112}
+    bytes :: count * I64{120}
     workers :: jet_rt_alloc(bytes, I64{8})
     if (workers == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
     thread_zero(workers, bytes)
@@ -101,7 +115,7 @@ fn parallel_raise(record: I64) {
     started := I64{0}
     spawn_failed := false
     loop at < count {
-        worker :: workers + at * I64{112}
+        worker :: workers + at * I64{120}
         sync_store(worker, length)
         sync_store(wrapping(worker + I64{8}), chunks)
         sync_store(wrapping(worker + I64{16}), count)
@@ -109,6 +123,7 @@ fn parallel_raise(record: I64) {
         sync_store(wrapping(worker + I64{32}), env)
         sync_store(wrapping(worker + I64{40}), invoke)
         sync_store(wrapping(worker + I64{72}), worker + I64{80})
+        sync_store(wrapping(worker + I64{112}), size)
         if (count == I64{1}) { _ := jet_rt_native_para_worker(worker) } else {
             handle :: thread_spawn(rt_parallel_worker_address(), worker)
             if (handle < I64{0}) {
@@ -123,14 +138,14 @@ fn parallel_raise(record: I64) {
     // Rust joins in reverse creation order; no borrowed input escapes here.
     loop started > (I64{0}) {
         started -= I64{1}
-        handle :: sync_load(wrapping(wrapping(workers + started * I64{112}) + I64{64}))
+        handle :: sync_load(wrapping(wrapping(workers + started * I64{120}) + I64{64}))
         if (thread_join(handle, I64{0}) != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
     }
     first := I64{0}
     index := length
     at = I64{0}
     loop at < count {
-        worker :: workers + at * I64{112}
+        worker :: workers + at * I64{120}
         record :: sync_load(wrapping(worker + I64{48}))
         start :: sync_load(wrapping(worker + I64{56}))
         if (record != I64{0}) {

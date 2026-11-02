@@ -186,22 +186,29 @@ struct FileScope {
     }
 }
 
+// The native file resources below are filled only by Core's own opens:
+// their `priv handle` keeps a literal outside core.files from forging one
+// (core-library.md:635/:701: `.path` stays readable, the handle does not).
 struct MappedFile {
     path: String
     bytes: [U8]
+    priv handle: Int
 }
 
 struct TempDir {
     path: String
     is_dir: Bool
+    priv handle: Int
 }
 
 struct TempFile {
-    priv path: String
+    path: String
+    priv handle: Int
 }
 
 struct FileLock {
-    priv path: String
+    path: String
+    priv handle: Int
 }
 
 
@@ -239,7 +246,7 @@ struct __LockWait {
 /// An exclusive advisory lock on a held directory. Closing this owner releases
 /// the OS lock without removing any filesystem name.
 struct AdvisoryLock {
-    handle: Int
+    priv handle: Int
 }
 
 impl AdvisoryLock.Close {
@@ -250,9 +257,11 @@ impl AdvisoryLock.Close {
 
 /// An open file for reading. `read_line`, `lines`, and `read(max)` advance
 /// one shared position; `read` returns up to `max` bytes and an empty list
-/// at end of file.
+/// at end of file. Only Core's opens fill the `priv handle`, so a literal
+/// outside core.files cannot forge one.
 struct FileReader {
     path: String
+    priv handle: Int
 
     /// What the open file is now (fstat). Comparing
     /// `id` with a later `files.stat(path).id` shows whether the path was
@@ -268,8 +277,11 @@ struct FileReader {
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
 /// `flush` hands the bytes to the system and `fsync` also makes them durable.
+/// Only Core's opens fill the `priv handle`, so a literal outside core.files
+/// cannot forge one.
 struct FileWriter {
     path: String
+    priv handle: Int
 
     /// What the open file is now (fstat). Bytes still
     /// buffered are not counted until `flush` or `fsync`.
@@ -346,7 +358,7 @@ fn rename_code(if_exists: RenameIfExists) -> Int Never! {
 /// leaves scope or at `close(^directory)`.
 struct Directory {
     path: String
-    handle: Int
+    priv handle: Int
 
     /// Open the regular file `name` for reading.
     fn open(self, name: String) -[FS.Read]> FileReader IOError! {
@@ -705,9 +717,10 @@ fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
     Ok()
 }
 
-fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
-    file_fault("FS.Read", .Read, path)
-    core.files.__read_bytes_os(path)
+fn read_bytes(path: String | Path) -[FS.Read]> [U8] IOError! {
+    source :: path_text(path)
+    file_fault("FS.Read", .Read, source)
+    core.files.__read_bytes_os(source)
 }
 
 
@@ -732,10 +745,11 @@ fn write(path: String | Path, text: String) IOError! -[FS.Write]> {
 }
 
 
-fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
-    file_writer_refusal(path)
-    file_fault("FS.Write", .Write, path)
-    core.files.__write_bytes_os(path, bytes)
+fn write_bytes(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_writer_refusal(target)
+    file_fault("FS.Write", .Write, target)
+    core.files.__write_bytes_os(target, bytes)
 }
 
 
@@ -800,16 +814,18 @@ fn write_atomic(path: String | Path, bytes: [U8]) IOError! -[FS.Write]> {
 }
 
 
-fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
-    file_fault("FS.Read", .Read, path)
-    core.files.__read_at_os(path, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
+fn read_at(path: String | Path, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
+    source :: path_text(path)
+    file_fault("FS.Read", .Read, source)
+    core.files.__read_at_os(source, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
 }
 
 
-fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
-    file_writer_refusal(path)
-    file_fault("FS.Write", .Write, path)
-    core.files.__write_at_os(path, if offset < 0 -> 0 else -> offset, bytes)
+fn write_at(path: String | Path, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_writer_refusal(target)
+    file_fault("FS.Write", .Write, target)
+    core.files.__write_at_os(target, if offset < 0 -> 0 else -> offset, bytes)
 }
 
 
@@ -1243,9 +1259,10 @@ fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
 }
 
 
-fn read_link(path: String) -[FS.Read]> String IOError! {
-    file_fault("FS.Read", .Read, path)
-    core.files.__read_link_os(path)
+fn read_link(path: String | Path) -[FS.Read]> String IOError! {
+    source :: path_text(path)
+    file_fault("FS.Read", .Read, source)
+    core.files.__read_link_os(source)
 }
 
 

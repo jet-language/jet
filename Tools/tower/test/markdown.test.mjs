@@ -11,6 +11,13 @@ test('markdown renderer: headings, lists, code, bold', () => {
   assert.match(html, /<code class="md__code">x<\/code>/);
 });
 
+test('markdown renderer returns the same HTML for repeated text', () => {
+  const text = '# Cached\n\n- one\n- two';
+  const first = renderMarkdown(text);
+  assert.equal(renderMarkdown(text), first);
+  assert.equal(renderMarkdown(`${text}\n- three`).includes('three'), true);
+});
+
 test('splitBlocks separates headings and paragraphs', () => {
   const blocks = splitBlocks('# A\n\npara one\n\n## B\n\n- x\n- y');
   assert.ok(blocks.length >= 3);

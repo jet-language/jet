@@ -1076,16 +1076,28 @@ fn __accept_conn(stream: ^TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -
     Val(__HTTPConn{tcp: Val(^stream), tls: None})
 }
 
-// Whether the connection's request was answered by the mux.
+// Whether the connection's request was answered by the mux. A request the
+// handler upgraded to a WebSocket gets no HTTP response, and its socket is
+// left to the upgraded connection rather than closed here.
 fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
     budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := __HTTPWire{buffer: [U8]{}, end_ns: core.time.__clock_mono_ns() + budget}
     answered := false
+    upgraded := false
     if __read_request(stream, &wire) == {
-        .Ok(request) -> {
+        .Ok(received) -> {
+            fd :: if stream.tcp == .Val(plain) -> core.net.__tcp_fd(plain) else -> -1
+            cell :: http.__upgrade_cell(fd)
+            request := received
+            request.__upgrade = Val(cell)
             reply :: __dispatch(mux, request)
-            bytes :: __response_wire(request.method, reply) ?? __error_wire(500)
-            answered = __send(stream, bytes, core.time.__clock_mono_ns() + budget)
+            upgraded = http.__upgraded(cell)
+            if upgraded {
+                answered = true
+            } else {
+                bytes :: __response_wire(request.method, reply) ?? __error_wire(500)
+                answered = __send(stream, bytes, core.time.__clock_mono_ns() + budget)
+            }
         }
         .Err(fault) -> {
             if fault == .Reply(status) {
@@ -1095,7 +1107,7 @@ fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[N
     }
     // A TLS stream sends close_notify and closes the socket it owns.
     if stream.tls == .Val(secure) -> secure.close()
-    if stream.tcp == .Val(plain) {
+    if !upgraded && stream.tcp == .Val(plain) {
         if plain.close() == {
             .Ok(_) -> {}
             .Err(_) -> {}

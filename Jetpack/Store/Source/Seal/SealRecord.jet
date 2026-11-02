@@ -11,7 +11,7 @@ STORE_SEAL_SCHEMA :: "1"
 STORE_MAX_SEAL_BYTES :: 512
 STORE_SEAL_PARTIAL_SUFFIX :: ".partial"
 
-store_seal_sequence := 0
+STORE_SEAL_SEQUENCE :: shared ProcessSequence{next: 0}
 
 // One command/library invocation owns this state. Copies of the owner retain
 // the same shared ledger; no request copies the memo, census, digest, or
@@ -183,8 +183,7 @@ fn store_write_seal(verification: &StoreVerification, path: String, hangar: Stri
     seals :: files.join(hangar, STORE_SEALS_DIR)
     store_seal_ensure_real_directory(seals, "Hangar seal directory")
     target :: files.join(seals, digest)
-    sequence :: store_seal_sequence.copy()
-    store_seal_sequence = store_seal_sequence + 1
+    sequence :: process_sequence_take(STORE_SEAL_SEQUENCE)
     temporary :: files.join(seals, ".{digest}-{process.current_pid()}-{sequence}{STORE_SEAL_PARTIAL_SUFFIX}")
     store_seal_publish(temporary, target, record.bytes()) ?? {
         files.remove(temporary).drop("the seal partial may never have been created")

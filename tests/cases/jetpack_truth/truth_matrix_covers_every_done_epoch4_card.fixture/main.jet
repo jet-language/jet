@@ -1,6 +1,7 @@
 use core.files as truth_files
 use core.process as truth_process
 use core.text.parse as truth_text
+use core.encoding as truth_encoding
 use core.encoding.json as truth_json
 
 // ORACLE-PORT tests/jetpack_truth.rs:12-17,39-111,148-294.
@@ -30,7 +31,7 @@ fn truth_matrix_rows(raw: String) -> [Int: TruthMatrixRow] {
         loop stripped.ends_with("|") -> stripped = truth_slice(stripped, 0, stripped.bytes().len() - 1)
         cells := [String]{}
         loop cell in truth_text.split(stripped, "|") -> &cells.push(cell.trim().copy())
-        assert_eq(cells.len(), 4, "malformed truth row: {line}")
+        assert(cells.len() == 4, "malformed truth row: {line}")
         number_text := cells[0].copy()
         loop number_text.starts_with("#") -> number_text = truth_slice(number_text, 1, number_text.bytes().len())
         num :: Int.parse(number_text) ?? panic("truth row card number")
@@ -77,8 +78,8 @@ fn truth_ingest_card(cards: &[Int: TruthCardState], card: Dyn, prefer_existing: 
     value :: card.field("num") ?? panic("Tower card num is required")
     num :: if value == {
         .Int(number) -> number
-        .Float(number) -> number.to_int()
-        .Number(number) -> (Float.parse(number) ?? panic("card num is not numeric")).to_int()
+        .Float(number) -> Int.from_float(number) ?? panic("card num is not an integer")
+        .Number(number) -> Int.from_float(Float.parse(number) ?? panic("card num is not numeric")) ?? panic("card num is not an integer")
         else -> panic("card num is not numeric")
     }
     if prefer_existing && cards.has_key(num) -> return
@@ -94,13 +95,18 @@ fn truth_ingest_card(cards: &[Int: TruthCardState], card: Dyn, prefer_existing: 
 }
 // The board under test is the tree's own Tools/tower/.tower. TOWER_DATA pins
 // the Tower CLI to it: left to itself, Tower follows a linked worktree to the
-// main checkout's live board, and a test must never read that.
+// main checkout's live board, and a test must never read that. The board is
+// tens of MiB, past `json.parse`'s 16 MiB safe bound, so the parses below
+// choose their own input budget.
+fn truth_board_limits() -> truth_encoding.EncodingLimits {
+    truth_encoding.EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 1073741824, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
+}
 fn truth_tower_cards(root: String) -> [Int: TruthCardState] {
     cards := [Int: TruthCardState]{}
     board :: truth_files.join(root, "Tools/tower/.tower")
     live :: truth_process.cmd([String]{"node", "Tools/tower/tower.mjs", "card", "list", "--json"}).cwd(root).env("TOWER_DATA", truth_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
     assert(live.success, "Tower projection failed: {live.errors}")
-    live_json :: truth_json.parse(live.output) ?? panic("parse live Tower JSON")
+    live_json :: truth_json.parse_with_limits(live.output, truth_board_limits()) ?? panic("parse live Tower JSON: {err.reason}")
     if live_json == {
         .Array(entries) -> {
             loop card in entries -> truth_ingest_card(&cards, card, false)
@@ -110,7 +116,7 @@ fn truth_tower_cards(root: String) -> [Int: TruthCardState] {
     // Original missing/unreadable history is optional; malformed readable JSON
     // is not. A non-array/missing `cards` field contributes no historical cards.
     if truth_files.read(truth_files.join(board, "history.json")) == .Ok(raw) {
-        hist :: truth_json.parse(raw) ?? panic("parse Tower history")
+        hist :: truth_json.parse_with_limits(raw, truth_board_limits()) ?? panic("parse Tower history: {err.reason}")
         if hist.field("cards") == .Ok(field) {
             if field == .Array(entries) {
                 loop card in entries -> truth_ingest_card(&cards, card, true)
@@ -128,7 +134,7 @@ fn run() {
     &audited.sort()
     expected := [Int]{3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215, 229, 231, 232, 233, 234, 242, 330, 359, 361, 393, 394, 418, 419, 421, 424, 426, 476, 477, 478, 479, 539, 540, 541, 578, 582, 586, 605, 608, 611, 615}
     &expected.sort()
-    assert_eq(audited, expected, "truth matrix audited set drifted")
+    assert(audited == expected, "truth matrix audited set drifted")
     loop item in cards {
         if item.value.epoch == "e4" && item.value.phase == "done" {
             assert(rows.has_key(item.key), "live E4 done cards missing from audit: #{item.key}")
@@ -137,7 +143,7 @@ fn run() {
     reopened_cards :: [Int]{6, 330}
     loop reopened in reopened_cards {
         card :: cards.get(reopened) ?? panic("#{reopened} must remain reopened until its live successor lands")
-        assert_eq(card.phase, "ready", "#{reopened} must remain reopened until its live successor lands")
+        assert(card.phase == "ready", "#{reopened} must remain reopened until its live successor lands")
     }
     allowed :: [String]{"live", "compatibility-only", "model-only", "schema-only", "fixture-only"}
     loop item in rows {

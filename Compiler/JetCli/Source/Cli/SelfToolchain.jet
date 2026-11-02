@@ -26,11 +26,18 @@ fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
 
 // A pinned project runs the verb on its pinned toolchain: None when this `jet`
 // satisfies the pin (or there is no pin or project), otherwise the pin's
-// refusal or the pinned toolchain's own run.
-fn jet_cli_pinned_toolchain(raw: [String], color: Bool, quiet: Bool) -> JetCLIPlan? {
+// refusal or the pinned toolchain's own run. The project is the one the verb
+// builds: the package owning `target` (a source file or directory argument)
+// when the verb names one, the working directory's otherwise, so the pin means
+// the same thing whatever directory the verb runs from.
+fn jet_cli_pinned_toolchain(raw: [String], target: String?, color: Bool, quiet: Bool) -> JetCLIPlan? {
     cache := WorkspaceDeclarationCache.new()
+    start :: if target == {
+        .Val(path) -> if cli_files.is_dir(path) -> path else -> jet_cli_parent(path) ?? "."
+        .None -> cli_files.cwd() ?? "."
+    }
     found := String?{None}
-    if jet_cli_find_package_root_checked(&cache, cli_files.cwd() ?? ".") == {
+    if jet_cli_find_package_root_checked(&cache, start) == {
         .Ok(value) -> found = value
         .Err(_) -> return None
     }

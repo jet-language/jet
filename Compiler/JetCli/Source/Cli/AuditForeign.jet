@@ -229,7 +229,7 @@ fn jet_cli_audit_foreign(file: String, source: String, color: Bool, json: Bool) 
         .Checked(result, inputs, snapshot) -> {
             errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
             if errors.len() > 0 {
-                rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, errors) else -> jet_driver_report_problems(file, source, errors, color, false)
+                rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors) else -> jet_driver_report_problems(file, source, errors, color, false)
                 return JetDriverVerbOutput{stdout: "", stderr: rendered, exit_code: JET_DRIVER_EXIT_USER_ERROR}
             }
             facts :: result.foreign_link.copy()

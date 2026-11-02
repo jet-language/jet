@@ -5,7 +5,14 @@
 # nothing to clean up. `rooted` overflows the same way, but its deferred close
 # must run on the way out, so it keeps the root and prints the close first.
 # `plain` owns its main too but never allocates, so its main thread gets no
-# thread block (JetRuntime Thread.jet jet_rt_thread_init's guards).
+# thread block (JetRuntime Thread.jet jet_rt_thread_init's guards). `exact`
+# (#6498) grows an exact Int past the inline range and then divides by zero:
+# the Int routes are root-free and its stop edges only drop a String and a
+# List of records (drop routines that only free memory) inside cleanup
+# scopes, so it owns its main and links no root, scheduler or deadline code.
+# `cli` is a #CLI program: its generated parser's routes are root-free and
+# its refusals leave through process.exit, so it owns its main and keeps the
+# parser's text, codes and stdout order.
 fixture: fixtures/program_owned_main
 env: NO_COLOR=1
 step: jet inspect decisions owned.jet
@@ -59,3 +66,50 @@ step: {work}/.jet/build/rooted
 exit: 70
 stdout: = "body\nclose resource\n"
 stderr: ~ "Stop [E3010]" # the built image runs the close too
+step: jet inspect decisions exact.jet
+exit: 0
+stdout: ~ "main: program-owned" # big Int arithmetic, memory-only drops and cleanup scopes need no root
+step: jet run --release exact.jet
+exit: 70
+stdout: = "big 1000008000032000080000138000168000144000080000026\n"
+stderr: ~ "divided by zero" # the Int division's stop, written with no root
+step: jet build exact.jet
+exit: 0
+file: .jet/build/exact !~ "jet_rt_root_begin" # no process root
+file: .jet/build/exact !~ "jet_rt_cleanup_leave" # an owned main drops its cleanup scopes
+step: {work}/.jet/build/exact
+exit: 70
+stdout: = "big 1000008000032000080000138000168000144000080000026\n"
+stderr: ~ "divided by zero" # the built image stops the same way
+step: jet inspect decisions cli.jet
+exit: 0
+stdout: ~ "main: program-owned" # the generated parser needs no root
+step: jet run cli.jet -- 7
+exit: 0
+stdout: = "half 3\n"
+step: jet run --release cli.jet -- 7
+exit: 0
+stdout: = "half 3\n" # the same at O2
+step: jet run cli.jet -- --bogus
+exit: 2
+stdout: = ""
+stderr: ~ "unknown option `--bogus`" # the refusal exits through process.exit
+step: jet run cli.jet --
+exit: 2
+stdout: = ""
+stderr: ~ "missing required argument: n" # only the refusal line is pinned; the parser's own cases pin the rest
+step: jet run cli.jet -- x
+exit: 2
+stderr: ~ "`--n` expects an Int, got `x`" # only the refusal line is pinned; the parser's own cases pin the rest
+step: jet run cli.jet -- --help
+exit: 0
+stdout: ~ "--help                   show this help" # the help goes to stdout
+step: jet build cli.jet
+exit: 0
+file: .jet/build/cli !~ "jet_rt_root_begin" # no process root
+step: {work}/.jet/build/cli 9
+exit: 0
+stdout: = "half 4\n" # the built image parses its own arguments
+step: {work}/.jet/build/cli --nn 9
+exit: 2
+stderr: ~ "did you mean `--n`?" # only the suggestion is pinned; the parser's own cases pin the rest
