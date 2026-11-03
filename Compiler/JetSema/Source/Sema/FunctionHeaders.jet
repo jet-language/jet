@@ -326,6 +326,14 @@ fn sema_function_header_marker_projected(name: String) -> Bool Never! {
     name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic" || name == "Pre" || name == "Post" || name == "Job" || name == "Every" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy"
 }
 
+// The function rules the body checker has a route for: the projected rules
+// above plus the rules it reads from parsed `Func` fields or its own passes
+// (sema_function_header_supported). Any other builtin rule on a function has
+// no route, so the marker check refuses it at a site its row does not allow.
+fn sema_function_header_marker_routed(name: String) -> Bool Never! {
+    sema_function_header_marker_projected(name) || name == "Reactive" || name == "Kernel" || name == "Memo" || name == "allow" || name == "DevPanel" || name == "Target" || name == "WasmExport" || name == "State" || name == "Transition" || name == "Export" || name == "Import"
+}
+
 // (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
 // a function opens its lexical fixed-width arithmetic mode for the whole
 // body; an argument that names no mode opens none.
