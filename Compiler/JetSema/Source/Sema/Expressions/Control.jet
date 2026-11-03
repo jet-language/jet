@@ -2200,6 +2200,11 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // bare `None` then-value, checked after the else arm, keeps a copy of the
     // then-arm table and state.
     fork :: sema_ownership_fork(&state)
+    // A binding condition that failed leaves the names its pattern writes
+    // unbound, so the then arm's errors would only cascade from them (E0107);
+    // the arm is still checked for its types but reports nothing.
+    quiet_then :: condition_check.checked == None && sema_expression_condition_binds(condition)
+    then_diagnostic_start :: diagnostics.len()
     then_mark :: sema_scope_mark(&scopes)
     sema_scope_enter(&scopes, &state, "if.then@{span.start}")
     sema_expression_declare_condition_bindings(condition_check.bindings, &scopes, &state, true, &diagnostics)
@@ -2209,6 +2214,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         sema_scope_rollback(&scopes, then_mark)
         found_sites :: state.share_found.copy()
         sema_ownership_fork_drop(&state, fork, found_sites, [SemaOwnershipShareSite]{})
+        if quiet_then -> loop diagnostics.len() > then_diagnostic_start -> _ := &diagnostics.pop()
         return None
     }
     // Owner rule (bare `None`): without an optional expected type, a bare
@@ -2239,6 +2245,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
             sema_scope_rollback(&scopes, then_mark)
             found_sites :: state.share_found.copy()
             sema_ownership_fork_drop(&state, fork, found_sites, [SemaOwnershipShareSite]{})
+            if quiet_then -> loop diagnostics.len() > then_diagnostic_start -> _ := &diagnostics.pop()
             return None
         }
         then_first = Val(first)
@@ -2246,6 +2253,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         sema_ownership_leave_scope(&state)
         then_path = sema_ownership_fork_path(state, fork)
     }
+    if quiet_then -> loop diagnostics.len() > then_diagnostic_start -> _ := &diagnostics.pop()
     sema_scope_rollback(&scopes, then_mark)
     sema_ownership_fork_rollback(&state, fork)
     then_found :: if defer_then -> deferred_then_state.share_found else -> then_path.share_found
@@ -2283,21 +2291,24 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     else_path :: sema_ownership_fork_path(state, fork)
     sema_ownership_fork_rollback(&state, fork)
 
+    deferred_diagnostic_start :: diagnostics.len()
     then_checked :: then_first ?? {
         deferred_expected :: if defer_then_err -> sema_expression_err_sibling(Val(else_checked)) else -> sema_expression_absent_sibling(Val(else_checked))
         sema_check_expression(then_value, deferred_expected, environment, program, &deferred_then_scopes, &deferred_then_state, &tail_store, &context, &diagnostics) ?? {
             sema_scope_leave(&deferred_then_scopes, &deferred_then_state)
             sema_ownership_fork_drop(&state, fork, deferred_then_state.share_found, else_path.share_found)
+            if quiet_then -> loop diagnostics.len() > deferred_diagnostic_start -> _ := &diagnostics.pop()
             return None
         }
     }
+    if quiet_then -> loop diagnostics.len() > deferred_diagnostic_start -> _ := &diagnostics.pop()
     then_reaches_merge :: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
     if defer_then {
         sema_single_use_check_scope_end(deferred_then_state, &diagnostics)
         sema_ownership_leave_scope(&deferred_then_state)
         then_path = sema_ownership_fork_path(deferred_then_state, fork)
     } else {
-        loop diagnostic in then_end_diagnostics -> &diagnostics.push(diagnostic)
+        if !quiet_then -> loop diagnostic in then_end_diagnostics -> &diagnostics.push(diagnostic)
     }
     // The single-use check reads the state before the `if`, which the
     // rollback left live; the join and share notes report nothing.
@@ -2317,6 +2328,8 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // A share site found on an arm that leaves is still found.
     loop site in then_path.share_found -> sema_ownership_note_share_found(&state, site)
     loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
+    // The quiet then arm's type is not compared either: the level has no value.
+    if quiet_then -> return None
     joined_then := then_checked
     joined_else := else_checked
     result_ty :: if {
