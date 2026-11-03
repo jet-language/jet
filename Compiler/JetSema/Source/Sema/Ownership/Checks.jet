@@ -2371,6 +2371,14 @@ fn sema_ownership_diag_moved(place: String, origin: SemaOwnershipMoveOrigin, spa
     )
     labeled :: diagnostic_with_label(^diagnostic, origin.label_span ?? origin.span, label)
     if origin.moved_ty == .Val(ty) && sema_call_reflection_one_pass(ty) -> return diagnostic_with_detail(^labeled, sema_ownership_one_pass_note(place, ty))
+    // A value consumed by `close` is a Close resource that is now closed: it
+    // has no copy to give, so a note says to acquire a new one instead.
+    if consumer == "`close`" && origin.moved_ty == .Val(ty) {
+        if ty == {
+            .Named(name) | .Apply(name, _) -> return diagnostic_with_detail(^labeled, " Note: acquire a new `{sema_call_reflection_leaf_name(name)}` resource; closed resources cannot be copied or reused")
+            else -> {}
+        }
+    }
     labeled
 }
 
