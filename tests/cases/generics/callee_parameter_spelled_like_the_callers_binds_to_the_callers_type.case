@@ -1,0 +1,19 @@
+# A callee type parameter spelled like one of the caller's in-scope type
+# parameters is a different variable. Inside `twice<T>`, calling `wrap<T>` with
+# the caller's `T?` or `[T]` binds the callee's `T` to that type; it is not a
+# cycle, so there is no E0904, and conflicting evidence does not recurse into
+# E3012. Same result on every optimization level.
+fixture: callee_parameter_spelled_like_the_callers_binds_to_the_callers_type.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = callee_parameter_spelled_like_the_callers_binds_to_the_callers_type.out
+stderr: empty
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = callee_parameter_spelled_like_the_callers_binds_to_the_callers_type.out
+stderr: empty
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = callee_parameter_spelled_like_the_callers_binds_to_the_callers_type.out
+stderr: empty
