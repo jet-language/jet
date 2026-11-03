@@ -3183,6 +3183,10 @@ fn ir_call_row(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [
             slot = ir_value_as(&m, p, &b, arg.value, param_row, span)
         }
         if ir_failed(b) -> return -1
+        // A Unit argument (`finish(^done)` at T = Unit) has no value slot, but
+        // the callee keeps a Param slot of the Unit row for it (ir_param_slot),
+        // so it is passed as a fresh Unit temp, which holds no bits to set.
+        if slot < 0 && m.types[param_row].kind == .Unit -> slot = ir_temp(&m, &b, param_row)
         if slot < 0 -> return ir_fail_slot(&b, span, "Unit call argument")
         if params[index].convention == .Move -> ir_close_disarm(&b, slot)
         &slots.push(if params[index].convention == .Move -> ir_own(&m, p, &b, slot) else -> slot)

@@ -1,0 +1,23 @@
+#Error
+enum StepError {
+    Negative
+}
+
+fn step(n: Int) StepError! {
+    if n < 0 -> return Err(StepError.Negative)
+    Ok(())
+}
+
+fn finish<T>(value: ^T) -> T StepError! {
+    Ok(^value)
+}
+
+fn run() {
+    done :: step(1) ?? panic("step")
+    finish(^done) ?? panic("finish")
+    print("unit through a generic: ok")
+    if step(-1) == {
+        .Ok(_) -> print("unexpected")
+        .Err(_) -> print("step error: negative")
+    }
+}
