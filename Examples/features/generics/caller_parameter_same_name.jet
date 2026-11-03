@@ -1,0 +1,27 @@
+// A generic function may call another generic function whose type parameter
+// has the same name. Inside `pick<T>`, the call `keep(x)` binds `keep`'s own
+// `T` to the caller's `T?`; the shared spelling is not a cycle. A generic
+// call in tail position returns its inferred optional result as it is.
+
+fn keep<T>(value: T) -> T { value }
+
+fn pick<T>(x: T?) -> T? {
+    keep(x)
+}
+
+fn pick_inner<T>(x: T?) -> T? {
+    inner :: keep(x?)
+    Val(inner)
+}
+
+fn concrete(x: Int?) -> Int? {
+    return keep(x)
+}
+
+fn run() {
+    print(pick(Int?{Val(4)}) ?? 0)
+    print(pick(Int?{None}) ?? 0)
+    print(pick_inner(Int?{Val(5)}) ?? 0)
+    print(pick_inner(Int?{None}) ?? 0)
+    print(concrete(Int?{Val(6)}) ?? 0)
+}

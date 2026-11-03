@@ -7201,7 +7201,10 @@ available in dev and release binaries; `#Job(.Internal)` jobs are dev-only.
 The first program word selects a job before the ordinary `fn run` CLI parser;
 `jet run <entry> -- <name> [args…]` uses the same selection. Job names are
 reserved by the shared command registry (D-JET-VERBS1=A), and two jobs may not collide at one scope.
-`.Internal` jobs remain callable from code and schedulers, never from argv.
+A `.Dev` or `.Ship` job may not share its word with a `#CLI` command of its
+module; the check error E0928 names both lines.
+`.Internal` jobs remain callable from code and schedulers, never from argv, so
+they never clash.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
 

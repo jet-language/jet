@@ -1091,6 +1091,22 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     }
 }
 
+// A union that holds the general `Err` is open: `Err("message")` builds that
+// member, the same default error an unannotated function's message sends.
+fn sema_call_default_err_message_into_open_union(value: Expr, err: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    open := false
+    if sema_expr_unwrap_tag(err) == .Union(members) {
+        loop member in members {
+            if sema_expr_unwrap_tag(member) == (Type.Named{name: "Err"}) -> open = true
+        }
+    }
+    if !open -> return false
+    message :: sema_failure_union_unparen(value)
+    if message == .Str(_, _, _) -> return true
+    probed :: sema_failure_union_probe_type(message, environment, program, &scopes, &state, &tail_store, &context) ?? return false
+    sema_expr_unwrap_tag(probed) == .String
+}
+
 fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     result :: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
@@ -1099,7 +1115,7 @@ fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaSco
         // never resolves.
         &context.failure_edges.push("")
         if result_value == .Result(ok, err) {
-            if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None {
+            if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None && !sema_call_default_err_message_into_open_union(call.args[0].expr, err, environment, program, &scopes, &state, &tail_store, &context) {
                 return sema_call_default_err_contextual_result(call, result_value, ok, err, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             // Record what this `Err` sends down the

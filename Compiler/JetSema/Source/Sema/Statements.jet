@@ -6742,12 +6742,24 @@ fn sema_stmt_value_return_mismatch(value: Expr, return_type: Type?, diagnostic_s
 // value calls on the payload route, where their failure propagates.
 fn sema_stmt_return_probed_carrier(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
-    if sema_stmt_return_known_type(value, environment, scopes) != None -> return false
     required :: sema_stmt_return_required_type(return_type)
-    if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) -> return false
+    if sema_stmt_return_known_type(value, environment, scopes) == .Val(known) {
+        // A generic callee declares its result as its own parameter (`-> T`),
+        // so only the call's inferred type shows whether it is the carrier.
+        if !(sema_stmt_return_unparen(value) == .Call(_, _)) || sema_stmt_return_types_are_carriers(known, required) -> return false
+    } else if !sema_stmt_return_probe_shape(value, sema_expr_unwrap_tag(required) == .Option(_)) {
+        return false
+    }
     probe_diagnostics := [Diagnostic]{}
     probed :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
     sema_stmt_return_types_are_carriers(probed.ty, required)
+}
+
+fn sema_stmt_return_unparen(value: Expr) -> Expr Never! {
+    if value == {
+        .Paren(inner, _, _) -> sema_stmt_return_unparen(inner)
+        else -> value
+    }
 }
 
 // The value shapes whose own type the return check infers before choosing

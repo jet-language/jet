@@ -1,0 +1,20 @@
+// A `.Ship` or `.Dev` job can't share its word with a `#CLI` command.
+// An `.Internal` job never clashes.
+#CLI(Standard)
+struct Commands {
+    #Doc("Start the service") fn serve(self) { print("command serve") }
+
+    #Doc("Write the report") fn report(self) { print("command report") }
+
+    #Doc("Preview changes") plan = plan_impl
+}
+
+fn plan_impl(_args: Commands) { print("command plan") }
+
+#Job(.Ship) fn serve() { print("job serve") }
+
+#Job(.Dev) fn plan() { print("job plan") }
+
+#Job(.Internal) fn report() { print("job report") }
+
+fn run(_args: Commands) {}

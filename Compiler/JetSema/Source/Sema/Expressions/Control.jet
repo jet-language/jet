@@ -334,7 +334,8 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
             return None
         }
     }
-    message_payload :: !success && expected_err == (Val(Type.Named{name: "Err"})) && !sema_expression_default_err_struct(value) && !sema_expression_err_payload_is_err(value, environment, program, &scopes, &state, &tail_store, &context)
+    default_message :: !success && !sema_expression_default_err_struct(value) && !sema_expression_err_payload_is_err(value, environment, program, &scopes, &state, &tail_store, &context)
+    message_payload :: default_message && (expected_err == (Val(Type.Named{name: "Err"})) || sema_call_default_err_message_into_open_union(value, expected_err ?? Type.Named{name: "Never"}, environment, program, &scopes, &state, &tail_store, &context))
     if message_payload {
         result_type :: Type.Result{ok: expected_ok ?? Type.Named{name: "Unit"}, err: expected_err ?? Type.Named{name: "Err"}}
         checked_default :: sema_expression_default_err_call(value, span, result_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None

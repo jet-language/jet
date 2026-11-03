@@ -1,0 +1,24 @@
+// `parse_age` writes no failure contract. It creates its own `BadNumber`
+// case and also fails with a plain message, so its failures are the open
+// union `Err | ParseAgeError`. A caller matches the typed case by its flat
+// name, and the message arrives as the general `Err` member.
+
+fn parse_age(raw: String) -> Int {
+    if raw == "" -> return Err(.BadNumber(raw.copy()))
+    if raw == "x" -> return Err("odd input")
+    42
+}
+
+fn describe(raw: String) -> String {
+    if parse_age(raw) == {
+        .Ok(n) -> "age {n}"
+        .Err(.BadNumber(_)) -> "bad number"
+        .Err(.Err(error)) -> "other: {error.message}"
+    }
+}
+
+fn run() {
+    print(describe(""))
+    print(describe("x"))
+    print(describe("7"))
+}
