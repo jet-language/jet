@@ -1,6 +1,6 @@
-// D-SHAPE-CLI1 / D-CLIFLAG1: the typed entry `fn run(args: T)` over a `#CLI`
+// The typed entry `fn run(args: T)` over a `#CLI`
 // struct `T`. The compiler appends `fn __jet_cli_run()`, which parses
-// `process.argv()` against the D-ARGS1 spec of `T` and then calls `run` (or,
+// the process argument vector against the spec of `T` and then calls `run` (or,
 // when `T` declares commands, the selected command). When `T` declares no
 // commands the entry calls `fn __jet_cli_parse() -> T`, a parser written for
 // exactly the inputs of `T` (sema_cli_entry_direct): help and error texts are
@@ -463,7 +463,7 @@ fn sema_cli_entry_label(input: SemaCLIInput) -> String Never! {
     out
 }
 
-// Parses `process.argv()`: through `__spec` and the `core.args` interpreter
+// Parses the process argument vector: through `__spec` and the `core.args` interpreter
 // when the spec has commands, else through the parser written for its inputs
 // (sema_cli_entry_direct). Help and version print and run `help_end`. A
 // refusal prints to stderr and exits, or in a `projection` stores its text in
@@ -472,7 +472,7 @@ fn sema_cli_entry_label(input: SemaCLIInput) -> String Never! {
 fn sema_cli_entry_parse(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool) {
     if spec.table == .Val(table) {
         &lines.push(table)
-        &lines.push("    __parsed :: __jet_cli_args.{spec.parse}(__spec, __jet_cli_process.argv())")
+        &lines.push("    __parsed :: __jet_cli_args.{spec.parse}(__spec, __jet_cli_args.__cli_argv())")
         &lines.push("    __status :: __jet_cli_args.__cli_status(__parsed)")
         &lines.push("    if __status == 0 {{")
         &lines.push("        print(__jet_cli_args.__cli_message(__parsed))")
@@ -499,7 +499,7 @@ fn sema_cli_entry_parse(lines: &[String], spec: SemaCLIEntrySpec, help_end: Stri
 // `__e{slot}` and, with `marks`, whether argv named it in `__x{slot}`.
 fn sema_cli_entry_direct(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool) {
     root :: spec.root
-    &lines.push("    __argv :: __jet_cli_process.argv()")
+    &lines.push("    __argv :: __jet_cli_args.__cli_argv()")
     &lines.push("    __help :: {sema_cli_entry_text(spec.help)}")
     names := [String]{}
     shorts := false
@@ -788,7 +788,7 @@ fn sema_cli_entry_source(definition: StructDef, items: [Item], type_ref: String,
 }
 
 // `args.decode<T>()` and `T.merge(args, settings)` for each `#CLI` struct
-// `T` of `items`. Both parse `process.argv()` through the entry's spec, so
+// `T` of `items`. Both parse the process argument vector through the entry's spec, so
 // help and refusals match `fn run(args: T)`; a refusal is a `FieldError`.
 // `merge` takes each field from `args` when its input was given explicitly,
 // otherwise from `settings`, which already holds the environment value or

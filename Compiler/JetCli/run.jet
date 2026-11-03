@@ -1,6 +1,12 @@
-// The Jet-hosted `jet` process entry.
-use process :: core.process
+// The Jet-hosted `jet` process entry. The start path comes first: a release
+// hard link named `jet-cc`, `jet-cxx` or `jet-c++` selects that verb.
+use {
+    process :: core.process
+    sys :: core.sys
+}
 
 fn run() {
-    process.exit(jet_cli_main(jet_cli_alias_args(process.argv())))
+    words := [String]{sys.executable()}
+    loop word in process.args() -> &words.push(word)
+    process.exit(jet_cli_main(jet_cli_alias_args(words)))
 }

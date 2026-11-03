@@ -1,19 +1,22 @@
 # Docs/spec/reference/cc-driver.md:10-15: `jet-cc` is `jet cc`; `jet-cxx` and `jet-c++` are
-# `jet c++`. Each alias is a link of the same `jet` binary, which reads argv[0]; it must
-# behave exactly as the verb it names. Before R7a this was Source/main.rs normalize_compiler_alias.
+# `jet c++`. Each alias is a hard link of the same `jet` binary in one directory, and `jet`
+# selects the verb from the path it was started through; it must behave exactly as the verb
+# it names.
 env: NO_COLOR=1
 requires: os:unix
 mkdir: bin
-symlink: {jet} bin/jet-cc
-symlink: {jet} bin/jet-cxx
-symlink: {jet} bin/jet-c++
-step cc: {jet} cc --unknown-compiler-option -- main.c
+copy: {jet} bin/jet
+chmod: bin/jet 0755
+hardlink: bin/jet bin/jet-cc
+hardlink: bin/jet bin/jet-cxx
+hardlink: bin/jet bin/jet-c++
+step cc: {work}/bin/jet cc --unknown-compiler-option -- main.c
 exit: any # the verdict is the cc driver's or the missing-engine report, whichever this host's jetpack gives; the alias must match it
 step alias_cc: {work}/bin/jet-cc --unknown-compiler-option -- main.c
 exit: == cc
 stdout: == cc
 stderr: == cc
-step cxx: {jet} c++ --unknown-compiler-option -- main.cpp
+step cxx: {work}/bin/jet c++ --unknown-compiler-option -- main.cpp
 exit: any # the verdict is the c++ driver's or the missing-engine report, whichever this host's jetpack gives; the alias must match it
 step alias_cxx: {work}/bin/jet-cxx --unknown-compiler-option -- main.cpp
 exit: == cxx

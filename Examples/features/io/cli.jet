@@ -10,11 +10,11 @@ use {
 }
 
 fn run() {
-    args :: process.argv()
+    args :: process.args()
     mode :: env.get("JET_M10_MODE") ?? "default"
-    // `jet run tool.jet alice` forwards words after the file as argv (index 0 stays the program name).
+    // `jet run tool.jet alice` forwards the words after the file; `process.args()` holds only those words.
     if {
-        args.len() >= 2 -> { print(args.get(1) ?? "") }
+        args.len() >= 1 -> { print(args.get(0) ?? "") }
         else -> { print(args.len()) }
     }
     print(mode)

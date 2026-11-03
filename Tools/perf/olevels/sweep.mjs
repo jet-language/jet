@@ -24,7 +24,7 @@
 // same metrics, run directly (no scope: its startup cost would swamp short programs), fixture restored
 // before every run. `--cpus` pins compiles, runs and peers to one CPU set.
 // `--cli-adapter argv` (default) rewrites a `#CLI struct Args` + `fn run(args: Args)` entry into a
-// plain `fn run()` that reads the same positional arguments from `process.argv()`, because the native
+// plain `fn run()` that reads the same positional arguments from `process.args()`, because the native
 // compilers reject the typed CLI entry (E1321); `literal` writes the spec arguments in as literals
 // instead (no core.process import). The body is untouched and both digests are recorded.
 //
@@ -121,7 +121,7 @@ function measure(command, { cwd, env = process.env, timeoutS, scopeMem = null, c
 
 // `#CLI struct Args {...}` + `fn run(args: Args) RET {` → plain `fn run() RET` that builds the same
 // Args. Mode `argv`: from the positional arguments (field order, as the gauntlet passes them) through
-// process.argv(). Mode `literal`: the entry's spec args written in as literals (no core.process
+// process.args(). Mode `literal`: the entry's spec args written in as literals (no core.process
 // import; the values become compile-time constants, which the table states).
 function adaptCli(source, mode, args) {
   const runHead = /^fn run\(args: Args\)([^{\n]*)\{/m.exec(source);
@@ -141,14 +141,14 @@ function adaptCli(source, mode, args) {
       if (f.type === 'Int') { if (!/^-?\d+$/.test(value)) throw new Error(`spec argument ${value} is not an Int`); return `${f.name}: ${value}`; }
       return `${f.name}: "${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\{/g, '{{').replace(/\}/g, '}}')}"`;
     }
-    const word = `(olevel_argv.get(${i + 1}) ?? panic("olevel: missing argument ${i + 1}"))`;
+    const word = `(olevel_args.get(${i}) ?? panic("olevel: missing argument ${i + 1}"))`;
     return `${f.name}: ${f.type === 'Int' ? `Int.parse(${word}) ?? panic("olevel: argument ${i + 1} is not an Int")` : word}`;
   });
   const ret = runHead[1];
   let out = source.replace(struct[0], struct[0].replace(/^#CLI\s+/, ''));
   out = out.replace(runHead[0], `fn olevel_body(args: Args)${ret}{`);
   out = `${argv ? 'use olevel_process :: core.process\n' : ''}${out.endsWith('\n') ? out : `${out}\n`}\n` +
-    `fn run()${ret}{\n${argv ? '    olevel_argv :: olevel_process.argv()\n' : ''}    olevel_body(Args{${values.join(', ')}})\n}\n`;
+    `fn run()${ret}{\n${argv ? '    olevel_args :: olevel_process.args()\n' : ''}    olevel_body(Args{${values.join(', ')}})\n}\n`;
   return { source: out, adapted: mode };
 }
 

@@ -1776,7 +1776,7 @@ actually reads either capability.
 
 For example, interpolated `print` in
 `Examples/features/basics/first_hour_expert.jet` records both `IO` and the
-`Mem.Alloc` needed for its fresh `String`; `core.process.argv()` records the
+`Mem.Alloc` needed for its fresh `String`; `core.process.args()` records the
 `Exec.Args` leaf, while starting a process records the `Exec` root. A Core
 call with a precise leaf under its own root records only that leaf, so
 `files.read` requires `FS.Read` and `files.write` requires `FS.Write`; the root
@@ -4448,7 +4448,7 @@ Plain `#CLI` always registers `--help`.
 
 `run` is the reserved program entry name. A typed `fn run(args: T)` is an
 explicit request for command input; a `main` function has no entry meaning.
-Raw argv access remains explicit through `core.args` or `core.term.args`. An
+Raw argument access remains explicit through `core.process.args()`. An
 `Output.Executable` entry uses the same contract. There is no variadic typed
 entry. An App-returning typed entry decodes the one argument, calls `run(args)`,
 and serves the returned App; it does not change the CLI schema

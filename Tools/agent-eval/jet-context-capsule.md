@@ -73,7 +73,7 @@ use {
 }
 
 fn run() {
-    path :: process.argv().get(1) ?? panic("missing path")
+    path :: process.args().get(0) ?? panic("missing path")
     text :: files.read(path) ?? panic("read failed")
     print(text.trim())
 }
@@ -252,7 +252,7 @@ fn run() {
 use process :: core.process
 
 fn run() {
-    name :: process.argv().get(1) ?? "world"
+    name :: process.args().get(0) ?? "world"
     print("hello, {name}")
 }
 ```
@@ -266,7 +266,7 @@ use {
 }
 
 fn run() {
-    path :: process.argv().get(1) ?? panic("missing path")
+    path :: process.args().get(0) ?? panic("missing path")
     text :: files.read(path) ?? panic("read failed")
     print(text.trim())
 }
@@ -286,7 +286,7 @@ struct State {
 }
 
 fn run() (HTTPError | NetError | IOError)! {
-    port :: process.argv().get(1) ?? "18080"
+    port :: process.args().get(0) ?? "18080"
     listener :: net.tcp_listen("127.0.0.1:{port}")
     state :: shared State{done: false}
     mux :: server.mux()

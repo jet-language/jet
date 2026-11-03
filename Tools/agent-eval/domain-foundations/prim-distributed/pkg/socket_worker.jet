@@ -10,8 +10,8 @@ use {
 }
 
 fn run() {
-    args :: process.argv()
-    addr :: args.get(1) ?? panic("missing listener address")
+    args :: process.args()
+    addr :: args.get(0) ?? panic("missing listener address")
     stream :: net.tcp_connect(addr)
     request :: stream.read_text(8192)
     value :: request.trim().to_int() ?? panic("typed message was not Int")

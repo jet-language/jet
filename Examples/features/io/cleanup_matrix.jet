@@ -96,8 +96,8 @@ fn child(path: String) CaseFail! {
 }
 
 fn run() CaseFail! {
-    args :: process.argv()
-    if args.len() > 1 -> return child(args.get(1) ?? "")
+    args :: process.args()
+    if args.len() > 0 -> return child(args.get(0) ?? "")
     loop path in ["return", "error", "panic", "cancel", "exit", "stop"] {
         spec :: process.cmd([os.executable(), path]).stdout(.Capture).stderr(.Capture)
         receipt :: process.run_spec(spec) ?? panic("child {path} did not start")

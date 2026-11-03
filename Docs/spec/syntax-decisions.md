@@ -343,8 +343,8 @@ derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`).
 The ratified program-struct command form is recorded by D-CLI-GLOBAL1 below.
 There is no Jet `main` entry and no
-variadic entry signature. Raw argv access stays explicit inside `fn run()`
-via `core.process.argv`. See Docs/spec/spec.md
+variadic entry signature. Raw argument access stays explicit inside `fn run()`
+via `core.process.args()`. See Docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. The
 existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding

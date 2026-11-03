@@ -207,12 +207,12 @@ use {
 }
 
 fn run() {
-    args :: process.argv()
-    if args.len() < 2 {
+    args :: process.args()
+    if args.len() < 1 {
         term.eprint("usage: greet <name>")
         return
     }
-    name :: args.get(1) ?? return
+    name :: args.get(0) ?? return
     greeting :: sys.get("GREETING") ?? "hello"
     fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return
     print(fs.read("/tmp/greet.txt") ?? return)
@@ -226,8 +226,8 @@ jet run tool.jet -- World --verbose
 jet build tool.jet
 ```
 
-`process.argv()` retains `argv[0]`; `process.args()` supplies only the
-arguments after it. The process and subprocess API is documented in the
+`process.args()` supplies only the words after the program name; the program
+path comes from `sys.executable()`. The process and subprocess API is documented in the
 [core.process](#coreprocess--process-execution) section below.
 
 ## Importing modules and compile-time views
@@ -1657,7 +1657,7 @@ fn run() {
         .flag("verbose", "print extra detail")
         .option("output", "write result to FILE", "FILE")
         .positional("input", "file to read")
-    parsed :: spec.parse(process.argv()) ?? return
+    parsed :: spec.parse(process.args()) ?? return
     print(parsed.flag("verbose"))
     print(parsed.option("output") ?? "(default)")
 }
@@ -1676,8 +1676,8 @@ fn run() {
 | `spec.subcommand(name, help, spec)` | `ArgsSpec` | Add a named nested command specification. |
 | `spec.description(text)` / `spec.version(text)` | `ArgsSpec` | Add help text or enable `--version`. |
 | `spec.help()` / `spec.completion(shell)` | `String` | Render help or shell completion text. |
-| `spec.parse(argv)` | `ParsedArgs !Err` | Parse without exiting, suitable for tests and custom errors. |
-| `spec.parse_or_exit(argv)` | `ParsedArgs` | Handle `--help` and usage errors through process exit. |
+| `spec.parse(args)` | `ParsedArgs !Err` | Parse without exiting, suitable for tests and custom errors. |
+| `spec.parse_or_exit(args)` | `ParsedArgs` | Handle `--help` and usage errors through process exit. |
 | `parsed.flag(name)` / `parsed.option(name)` | `Bool` / `?String` | Read a boolean or optional string value. |
 | `parsed.option_int(name)` / `parsed.option_float(name)` | `?Int` / `?Float` | Read a typed numeric option. |
 | `parsed.options(name)` / `parsed.positional(index)` | `[String]` / `?String` | Read repeated values or a zero-based positional. |
@@ -1929,7 +1929,7 @@ fn run() -[Exec, Time.Wait]> {
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
-| `process.args()` / `process.argv()` | `[String] -[Exec]>` | Return the process arguments supplied by the host. |
+| `process.args()` | `[String] -[Exec]>` | Return the words after the program name, as the host supplied them. |
 | `process.cmd(argv)` | `ProcessSpec -[Exec]>` | Build a specification from an explicit executable-and-arguments vector. |
 | `process.shell(line)` | `ProcessSpec -[Exec, Env]>` | Explicit shell escape hatch: `sh -c` on Unix-like targets and `cmd /C` on Windows. |
 | `process.run_spec(spec)` | `ProcessReceipt !IOError -[Exec, Time.Wait]>` | Run a specification and return its receipt without treating a nonzero exit as a thrown error. |

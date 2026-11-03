@@ -135,14 +135,14 @@ fn reaped(pid_files: [String]) {
 }
 
 fn run() {
-    args :: process.argv()
-    mode :: args.get(1) ?? ""
-    if mode == "output" -> output(args.get(2) ?? "large")
+    args :: process.args()
+    mode :: args.get(0) ?? ""
+    if mode == "output" -> output(args.get(1) ?? "large")
     else if mode == "cpu" -> cpu()
     else if mode == "memory" -> memory()
     else if mode == "files" -> descriptors()
-    else if mode == "tree" -> tree(args.get(2) ?? panic("tree needs a pid file"))
-    else if mode == "descendant" -> descendant(args.get(2) ?? panic("descendant needs a pid file"))
-    else if mode == "reaped" -> reaped(args.slice(2, args.len()))
+    else if mode == "tree" -> tree(args.get(1) ?? panic("tree needs a pid file"))
+    else if mode == "descendant" -> descendant(args.get(1) ?? panic("descendant needs a pid file"))
+    else if mode == "reaped" -> reaped(args.slice(1, args.len()))
     else -> process.exit(2)
 }

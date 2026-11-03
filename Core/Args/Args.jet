@@ -471,7 +471,7 @@ fn wants_help(tree: Dyn) -> Bool Never! { get_bool(tree, "help") || has(tree, "h
 // helpers its inputs need (the Float check only for a Float input). A `T`
 // with commands writes its inputs and commands as one data table and the
 // help text of every level as text; the entry hands both to `__cli_spec`
-// and parses `process.argv()` with `__cli_parse` (`__cli_parse_float` when an
+// and parses the process argument vector with `__cli_parse` (`__cli_parse_float` when an
 // input is a Float). Help, usage and error texts are the D-ARGS1 builder's
 // (`JetArgsSpec::help`, `jet_args_parse_mode`).
 
@@ -1060,6 +1060,9 @@ fn __cli_bool_opt_of(value: String?) -> Bool? Never! {
     Val(__cli_bool_of(value))
 }
 
+// The start vector the compiler's generated entry parses: the program name,
+// then the program's words. User code reads `process.args()` instead.
+fn __cli_argv() -[Exec.Args]> [String] Never! { core.process.argv() }
 // The pieces of the parser the compiler writes for a `#CLI` struct without
 // commands. `help` is the root help text after the program name.
 fn __cli_usage(argv: [String], help: String) -> String Never! {
@@ -1589,20 +1592,20 @@ fn args_parse_level(spec: ArgsSpec, at: Int, argv: [String], start: Int, out: &P
     ""
 }
 
-// Rust `jet_args_parse`: argv[0] names the program; a refusal is the Err's
-// message.
-fn __args_parse(spec: ArgsSpec, argv: [String]) -[Env, Exec.Args]> ParsedArgs Err! {
+// Parses the user's words (`process.args()`, no program name); a refusal
+// is the Err's message.
+fn __args_parse(spec: ArgsSpec, args: [String]) -[Env, Exec.Args]> ParsedArgs Err! {
     out := args_parsed()
-    refusal :: args_parse_level(spec, 0, argv, 1, &out)
+    refusal :: args_parse_level(spec, 0, args, 0, &out)
     if refusal.bytes().len() > 0 -> return Err(refusal)
     Ok(out)
 }
 
 // Rust `jet_args_parse_or_exit`: `--help` prints the help and exits 0; a
 // refusal goes to stderr and exits 2.
-fn __args_parse_or_exit(spec: ArgsSpec, argv: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
+fn __args_parse_or_exit(spec: ArgsSpec, args: [String]) -[Env, Exec, Exec.Args, IO, Time.Wait]> ParsedArgs Never! {
     out := args_parsed()
-    refusal :: args_parse_level(spec, 0, argv, 1, &out)
+    refusal :: args_parse_level(spec, 0, args, 0, &out)
     if refusal.bytes().len() > 0 {
         core.term.eprint(refusal)
         core.process.exit(2)

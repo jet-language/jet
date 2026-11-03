@@ -296,5 +296,5 @@ Shipping first-hour
 
 The matching expert path is
 [`first_hour_expert.jet`](../../../Examples/features/basics/first_hour_expert.jet).
-It demonstrates raw `process.argv()` while the flagship keeps the typed
+It demonstrates raw `process.args()` while the flagship keeps the typed
 `#CLI` entry short.

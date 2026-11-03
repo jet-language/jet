@@ -478,6 +478,7 @@ fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) 
     if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` is not a Core member", "fresh values use a type-owned `new` constructor", "use `ExpiringValue.new(value, ttl, clock)`")
     if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` is not a Core member", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
     if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` is not a Core member", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
+    if module_name == "core.process" && member == "argv" -> return sema_error("E1004", span, "`process.argv` is not a Core member", "`process.args()` is the one list of the program's words, without the program name", "use `process.args()` for the words and `sys.executable()` for the program path")
     if module_name == "core.crypto" && member.ends_with("_bytes") {
         algorithm :: member.removesuffix("_bytes")
         digest :: if algorithm == {
@@ -1276,6 +1277,12 @@ fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
         &diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
+        return None
+    }
+    // The start vector stays private to Core source; the generated `#CLI`
+    // entry reads it through `core.args`.
+    if record.module_name == "core.process" && record.member == "argv" && !environment.source_file.starts_with("<corelib>/") {
+        &diagnostics.push(sema_call_core_unknown_item("core.process", "argv", span))
         return None
     }
     if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {

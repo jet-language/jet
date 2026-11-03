@@ -124,7 +124,7 @@ than making the long form the only path (D-EXAMPLES-SHORTPATH1=A).
 
 | Teach first | Keep beside it as expert |
 | --- | --- |
-| `#CLI` typed entry arguments | Raw `process.argv()` walks |
+| `#CLI` typed entry arguments | Raw `process.args()` walks |
 | `para_map` / `task.group` | Hand-rolled channels, tasks, and joins |
 | `files.open(...).lines()` streaming | Materializing all file text before processing |
 
