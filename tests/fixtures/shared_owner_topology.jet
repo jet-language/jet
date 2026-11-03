@@ -10,12 +10,12 @@ fn extract_owner(holder: ^Holder) -> Shared<Int> {
     return holder.owner
 }
 
-fn append_then_fail(values: &[Int], value: Int) -> Int? String! {
+fn append_then_fail(values: &[Int], value: Int) -> Int? Err! {
     &values.push(value)
     return Err("expected failure")
 }
 
-fn make_counter(owner: ^Shared<Int>) -> fn(Int) Int {
+fn make_counter(owner: ^Shared<Int>) -> fn(Int) -> Int {
     bucket := Bucket{values: [Int]{}, by_name: [String:Int]{}}
     return (value: Int) -> {
         failure :: append_then_fail(&bucket.values, value) ?? -value
@@ -26,7 +26,7 @@ fn make_counter(owner: ^Shared<Int>) -> fn(Int) Int {
 
 fn take_once(owner: ^Shared<Int>) -> Shared<Int> {
     callback :: () -> {
-        return owner
+        owner
     }
     return callback()
 }
@@ -35,16 +35,41 @@ fn replace_then_take(owner: ^Shared<Int>) -> Shared<Int> {
     current := ^owner
     callback :: () -> {
         current = shared 13
-        return current
+        current
     }
     return callback()
 }
 
 fn take_captured_first(pair: ^SharedPair) -> Shared<Int> {
     callback :: () -> {
-        return pair.first
+        pair.first
     }
     return callback()
+}
+
+// Each scope below is its own function so its copies and moved owners drop
+// at the scope's end; a bare `{` after a `)` line is E0986 (S6-R,
+// syntax-decisions.md:3949).
+fn copy_scope(escaped: Shared<Int>) {
+    copied :: escaped.copy()
+    print(copied.strong_count())
+    print(escaped.strong_count())
+}
+
+fn snapshot_scope(escaped: Shared<Int>) {
+    snapshot :: escaped.capture()
+    snapshot_copy :: snapshot.copy()
+    print(escaped.strong_count())
+    print(snapshot_copy.value())
+}
+
+fn counter_scope(live: ^Shared<Int>, escaped: Shared<Int>) {
+    counter :: make_counter(^live)
+    alias :: counter.copy()
+    print(counter(1))
+    print(alias(2))
+    print(counter(3))
+    print(escaped.strong_count())
 }
 
 fn expired_weak() -> Shared.Weak<Int> {
@@ -58,34 +83,18 @@ fn run() {
     holder :: Holder{owner: ^owner}
     escaped :: extract_owner(^holder)
     print(escaped.strong_count())
-    {
-        copied :: escaped.copy()
-        print(copied.strong_count())
-        print(escaped.strong_count())
-    }
+    copy_scope(escaped)
     print(escaped.strong_count())
-    {
-        snapshot :: escaped.capture()
-        snapshot_copy :: snapshot.copy()
-        print(escaped.strong_count())
-        print(snapshot_copy.value)
-    }
+    snapshot_scope(escaped)
     projection :: escaped.capture((value: Int) -> value + 1)
-    print(projection.value)
+    print(projection.value())
     replace_snapshot :: escaped.capture()
     replaced :: escaped.try_replace(^replace_snapshot, 8) ?? false
     print(replaced)
-    print(escaped.capture().value)
+    print(escaped.capture().value())
 
     live :: weak.upgrade() ?? panic("moved aggregate released its owner")
-    {
-        counter :: make_counter(^live)
-        alias :: counter.copy()
-        print(counter(1))
-        print(alias(2))
-        print(counter(3))
-        print(escaped.strong_count())
-    }
+    counter_scope(^live, escaped)
     print(escaped.strong_count())
 
     once_owner :: shared 9
@@ -96,7 +105,7 @@ fn run() {
     replaced_owner := shared 37
     replaced_weak :: replaced_owner.downgrade()
     replaced_result :: replace_then_take(^replaced_owner)
-    print(replaced_result.capture().value)
+    print(replaced_result.capture().value())
     print(replaced_result.strong_count())
     print(replaced_weak.upgrade() == .None)
     first_owner := shared 11
@@ -105,7 +114,7 @@ fn run() {
     rest_weak :: rest_owner.downgrade()
     pair := SharedPair{first: ^first_owner, rest: ^rest_owner}
     captured_first :: take_captured_first(^pair)
-    print(captured_first.capture().value)
+    print(captured_first.capture().value())
     print(captured_first.strong_count())
     print(first_weak.upgrade() != .None)
     print(rest_weak.upgrade() == .None)

@@ -1689,6 +1689,9 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
                 func.unsafe_span = Val(marker.span)
                 first := parser_marker_first_expr(marker)
                 if first == .Val(reason) -> func.unsafe_reason = parser_expr_literal_string(reason)
+                if parser_unsafe_obligation_policy(&state, marker, PolicyScope.Function, func.span) == .Val(declaration) {
+                    &state.block_policy_declarations.push(declaration)
+                }
             }
             "Reactive" -> {
                 if marker.args.len() == 0 -> func.is_reactive = true
@@ -2438,13 +2441,20 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 &constants.push(TraitConstDecl{name: parser_value(state, constant_name), name_span: constant_name.span, ty: constant_type.ty, ty_span: constant_type.span, default: ^default, span: parser_cover(constant_name.span, end)})
                 parser_finish_statement(&state)
             }
-            parser_current_kind(&state) == TOKEN_KW_FN -> {
+            // Markers before a requirement attach to it, as they do to any
+            // method; sema judges them against the applied-rule vocabulary.
+            parser_current_kind(&state) == TOKEN_KW_FN || parser_current_kind(&state) == TOKEN_HASH -> {
                 method_modifiers := parser_parse_item_modifiers(&state, false)
+                if parser_current_kind(&state) != TOKEN_KW_FN {
+                    parser_add_error_here(&state, "expected a trait method, associated type or trait constant", "trait bodies declare callable requirements, associated types and compile-time constants", "write `fn name(...)`, `type Name` or `name: Type`")
+                    parser_recover_statement(&state)
+                    next
+                }
                 parsed :: parser_parse_function(&state, method_modifiers, false)
                 method := parsed.value
                 default_body := [Stmt]?{None}
                 if parsed.has_body -> default_body = Val(method.body)
-                &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: ^default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
+                &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: ^default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance, markers: method.markers})
             }
             else -> {
                 parser_add_error_here(&state, "expected a trait method, associated type or trait constant", "trait bodies declare callable requirements, associated types and compile-time constants", "write `fn name(...)`, `type Name` or `name: Type`")

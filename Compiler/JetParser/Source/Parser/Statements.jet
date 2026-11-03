@@ -2083,6 +2083,9 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
                 audit_expr = Val(args[0].expr)
                 reason = parser_expr_literal_string(args[0].expr)
             }
+            if parser_unsafe_obligation_policy(&state, marker, PolicyScope.Block, span) == .Val(declaration) {
+                &state.block_policy_declarations.push(declaration)
+            }
             Stmt.Unsafe{audit: reason, audit_expr: audit_expr, body: body.statements, span: span}
         }
         "Impure" -> {

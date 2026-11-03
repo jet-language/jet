@@ -915,8 +915,21 @@ fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environm
     result := Type?{None}
     if function.ty == .Fn(params, ret, _, _, _, _) && params.len() == 2 {
         accepts :: sema_call_type_assignable(params[0], left_payload, environment, program) == (Val(true)) && sema_call_type_assignable(params[1], right_payload, environment, program) == (Val(true))
-        // copy: `value` is a payload of the checked callable's type, which the callable keeps
-        if accepts && ret == .Val(value) -> result = Val(Type.Option{inner: value.copy()})
+        // A total callable (`T Never!`) answers its success, as a direct call
+        // does; a fallible one (`T Err!`, a declared fn's default route) makes
+        // the call the Result of the lifted option, so its failure propagates
+        // as a direct `f(a, b)` would.
+        if accepts && ret == .Val(value) {
+            // copy: the lifted payload is a type of its own; the callable keeps its signature
+            payload := value.copy()
+            failure := Type?{None}
+            if sema_expr_unwrap_tag(value) == .Result(ok, err) {
+                payload = ok.copy()
+                if sema_expr_unwrap_tag(err) != (Type.Named{name: "Never"}) -> failure = Val(err.copy())
+            }
+            lifted :: Type.Option{inner: ^payload}
+            result = Val(if failure == .Val(error) -> Type.Result{ok: ^lifted, err: error.copy()} else -> ^lifted)
+        }
     }
     result_ty :: result ?? {
         &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`Option.lift2`'s first argument must be a function, got {sema_type_show(function.ty)}", "`Option.lift2(f, a, b)` needs `f: fn(T, U) R`", "pass a two-argument function or lambda"))
@@ -926,6 +939,7 @@ fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environm
     left_row :: sema_arena_adopt(&context, left_value)
     right_row :: sema_arena_adopt(&context, right_value)
     value :: sema_node(&context, result_ty, NodeKind.OptionLift2{function: function_row, left: left_row, right: right_row}, span)
+    if sema_expr_unwrap_tag(value.ty) == .Result(_, _) -> return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)}
 }
 

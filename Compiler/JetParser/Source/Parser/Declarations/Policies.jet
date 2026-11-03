@@ -67,6 +67,32 @@ fn parser_policy_block_stmt(state: &JetParserState, marker: Marker, body: [Stmt]
     Val(Stmt.Policy{declarations: declarations, body: body, span: span})
 }
 
+// `#Unsafe(reason, obligations: .Track)` selects the gate's per-site
+// obligation mode (Rust `at_unsafe_stmt` / `unsafe_obligation_policy`).
+// Returns the declaration targeting `target`, or None when the mode is
+// absent or `.None`. A package-level mode written at a gate is E3108;
+// other argument shapes are left to sema's typed marker-argument check.
+fn parser_unsafe_obligation_policy(state: &JetParserState, marker: Marker, scope: PolicyScope, target: Span) -> PolicyDeclaration? {
+    values :: parser_marker_bindings(marker, [String]{"reason", "obligations"}) ?? return None
+    written :: values[1] ?? return None
+    if written == .EnumLit(type_name, variant, _, args, _, span, _) {
+        if type_name != "" || args.len() > 0 -> return None
+        value :: if variant == {
+            "Track" -> PolicyValue.Track
+            "Skip" -> PolicyValue.Skip
+            "GateOnly" | "Obligations" | "PerSite" -> {
+                parser_add_error_code(&state, "E3108", span, "`.{variant}` is not a per-site obligation mode", "a gate tracks typed obligations, skips them when policy permits, or keeps the default", "write `.Track`, `.Skip`, or `.None`")
+                return None
+            }
+            else -> {
+                return None
+            }
+        }
+        return Val(PolicyDeclaration{key: PolicyKey.Unsafe, value: value, scope: scope, span: marker.span, target: Val(target), source: "<source>"})
+    }
+    None
+}
+
 fn parser_policy_retired_memory(state: &JetParserState, name: String, span: Span, limit: Int?) -> Bool {
     replacement :: if name == {
         "no_alloc" -> "`-[!Mem.Alloc]>`"

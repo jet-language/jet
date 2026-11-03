@@ -493,6 +493,10 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
             return sema_expr_expected_owned(^core_value, expected, environment, program, &diagnostics)
         }
     }
+    if sema_fact_read_unknown_member(member, span) == .Val(unknown) {
+        &diagnostics.push(unknown)
+        return None
+    }
     &diagnostics.push(sema_error("E0302", span, "`.{member}` only works on a declared struct or tuple field", "field access needs declaration metadata instead of guessing a successful type", "use a declared field on a struct or tuple"))
     None
 }

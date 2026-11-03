@@ -1,9 +1,15 @@
-# Port of tests/release_gates.rs::cbor_deprecation_release_fixture; all original predicates, runtime UNRUN.
+# Port of tests/release_gates.rs::cbor_deprecation_release_fixture.
+# 7bef65ccd4 (owner) makes 2026 the only language edition (spec.md "Editions and
+# compatibility", release-policy.md banner): a manifest pinning 2027 or 2028 is an
+# unsupported edition, E2001, before any source is checked.
 fixture: fixtures/cbor_deprecation_release_fixture
 write: package.jet = "name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"2027\"\n"
 step: jet check --verbose run.jet
-exit: 0
+exit: nonzero
+stderr: ~ "Error [E2001]: Package manifest requests an unsupported language edition" # E2001 registry what (7bef65ccd4)
+stderr: ~ "Why: This compiler supports edition 2026" # E2001 why (Loader.jet:1274)
 write: package.jet = "name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"2028\"\n"
 step: jet check --verbose run.jet
 exit: nonzero
-
+stderr: ~ "Error [E2001]: Package manifest requests an unsupported language edition" # E2001 registry what (7bef65ccd4)
+stderr: ~ "Why: This compiler supports edition 2026" # E2001 why (Loader.jet:1274)

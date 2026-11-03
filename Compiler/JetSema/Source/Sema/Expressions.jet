@@ -4467,6 +4467,19 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
                 &diagnostics.push(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(value_ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(value_ty)}?` if it can be missing"))
                 return None
             }
+            // An optional compared with `None` is the presence test
+            // (S31 `x == None`, D-FLOWTYPE1 `x != None`): it reads the
+            // tag only, so the payload needs no Equatable.
+            if sema_expr_unwrap_tag(value_ty) == .Option(_) {
+                none_right :: sema_expression_absent_none(right)
+                none_span :: if none_right -> expr_span(right) else -> expr_span(left)
+                subject :: if none_right -> checked_lhs else -> checked_rhs
+                checked_pattern := sema_check_pattern(subject, Pattern.Absent{span: none_span}, TPatternPosition.Arm, false, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                checked :: checked_pattern.checked ?? return None
+                absent :: sema_tree_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span)
+                if op == BinOp.Eq -> return sema_expr_expected_owned(^absent, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: absent}, span), expected, environment, program, &diagnostics)
+            }
         }
     }
     // `x == 5` holds only when the optional `x` holds 5, and

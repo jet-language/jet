@@ -4549,11 +4549,11 @@ has a valid built-in-only schema. Metadata failures are E2103
 
 ## Editions and compatibility
 
-A package may pin an edition with `edition: "2026"` in `package.jet`. Supported
-editions are `2026`, `2027`, and `2028`; a missing field uses the newest stable
-edition supported by the running toolchain. A single-file `jet run file.jet`
-has no edition marker and uses that newest edition. An unsupported future
-edition is E2001. The durable compatibility contract for patch, minor, major,
+A package may pin an edition with `edition: "2026"` in `package.jet`. The one
+supported edition is `2026`, and it carries no edition-gated behaviour; a
+missing field uses that edition, as does a single-file `jet run file.jet`,
+which has no edition marker. Any other edition is E2001 (7bef65ccd4). The
+durable compatibility contract for patch, minor, major,
 epoch, edition, migration, deprecation, and generated-code licensing lives in
 [the release policy](release-policy.md) (D-REL3, E2-V4).
 
