@@ -8771,9 +8771,17 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     // The root package's `authority.deny` row binds the root package's own modules.
     denial_modules := [Bool]{}
     loop graph_module in final_graph.modules -> &denial_modules.push(graph_module.package_identity == final_graph.package_identity)
+    // Each `#FX(…)` module cap names known effects, checked once where it is
+    // written; a file module's caps reach its file through the module graph.
+    loop graph_module in final_graph.modules {
+        cap_diagnostics := [Diagnostic]{}
+        sema_effect_module_cap_names(graph_module.program.items, &cap_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, graph_module.source_segments, ^cap_diagnostics)
+    }
+    file_caps :: sema_effect_file_module_caps(final_graph.modules, final_graph.edges)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, final_graph.decls, threads)
+    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, file_caps, final_graph.decls, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false

@@ -1,0 +1,17 @@
+use fs :: core.files
+
+#FX(IO)
+module report {
+    fn show() { print("ok") }
+    fn load() -> String { fs.read("rates.txt") ?? "" }
+    #FX(!IO)
+    module quiet {
+        fn hush() { print("x") }
+    }
+}
+
+fn run() {
+    report.show()
+    print(report.load())
+    report.quiet.hush()
+}

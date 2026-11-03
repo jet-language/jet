@@ -149,7 +149,7 @@ edit when the rewrite is mechanical. A function-return colon gets the existing
 E0003's existing wording.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
-every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Abilities`, `#Pre`);
+every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#FX`, `#Pre`);
 lowercase `#[allow(...)]` is the registered lint-policy exception. Traits are
 PascalCase. The standard library is
 **"Core"** — never "std"/"stdlib" — in docs, identifiers, and error copy.
@@ -2583,7 +2583,7 @@ package scope. The nearest declaration of a key wins, unmentioned keys inherit,
 and `jet explain` reports the effective value plus every declaration it
 overrode. A compiler-owned applicability matrix decides which levels each
 setting may use and whether it may tighten, override, or merge. Site-specific
-proof and authority stay site-bound: `#Unsafe` authorization, `#Abilities`,
+proof and authority stay site-bound: `#Unsafe` authorization, `#FX`,
 direct fact tags, `#Scrub(Tag)`, and field wire attributes do not widen through this
 ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
@@ -2594,7 +2594,7 @@ it returns one effective value and the complete outer-to-inner declaration
 chain. The registry keeps only non-memory policy settings: `gc: true`,
 `explicit_units: true`, `copies: .Explicit`, and `sentries: .Off`. Memory
 floors are effect-row prohibitions, not policy fields. Site-bound
-`#Unsafe`, `#Abilities`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
+`#Unsafe`, `#FX`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
 explicit applicability but never inherit.
 The concrete terminal view uses the ratified existing route:
 `jet explain marker Source/sensor.jet:9` reports the effect-row denial.
@@ -2605,14 +2605,16 @@ settled by D-POLICY-WORD1 holds a typed `{ ... }` value whose governance
 keys are ordinary fields, written like every other Package role field, with
 bare top-level `name:`/`version:` identity — not the `#Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
-`#Policy(...)` marker uses. Memory floors use the `effects:` rights namespace,
+`#Policy(...)` marker uses. Memory floors use the `authority:` rights namespace,
 so `deny: [Mem.Alloc]` is the manifest spelling and there is no package
 memory-policy mirror. Package policy may only tighten safety — it
 can forbid unsafe code but can never authorize an unsafe operation; that
 still requires a written `#Unsafe("reason")` block or function. Reuse across
 a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
 which extracts a shared `policy:` value into a named `Config` when needed;
-`policy:` itself does not compose a `use:` list of named profiles.
+`policy:` itself does not compose a `use:` list of named profiles. Effect
+ceilings are not policy fields: a package caps effects with
+`authority: { deny: […] }`, and a module caps them with `#FX(…) module name`.
 
 ```jet
 # package.jet — policy: reads beside bare Package identity
@@ -2620,7 +2622,7 @@ name:     "meter"
 version:  "1.0.0"
 policy:   {
     unsafe: .Deny,
-    effects: { ".": -[]> }
+    expert: .Deny
 }
 
 # Source/sensor.jet — a function writes the memory denial on its signature
@@ -3184,7 +3186,7 @@ exits — deadline first, then cancel.
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
 erased in codegen. Assert or restrict via `-[Net, DB]>` on a signature and
-`#Abilities(Net) { … }` regions.
+`#FX(Net) { … }` regions.
 
 **D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
 owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*: every explicit
@@ -3240,12 +3242,12 @@ the exact call chain, where a checker that says ok to a program the run
 refuses gives two.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
-D-EFF4/5 names are tree roots; a signature/`#Abilities`/`-[!…]>` entry may
+D-EFF4/5 names are tree roots; a signature/`#FX`/`-[!…]>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
 learned once and reused: `-[FS]>` accepts any `FS.*` callee; `-[FS.Read]>`
-rejects a sibling `FS.Write` callee; `#Abilities(FS.Read)` doesn't authorize
+rejects a sibling `FS.Write` callee; `#FX(FS.Read)` doesn't authorize
 `FS.Write`; `-[!FS]>` prohibits the whole `FS.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat names stay
 valid for the ten non-FFI roots — Core stdlib calls are still tagged with a
@@ -3255,7 +3257,7 @@ bare root; leaf precision is a user-declared-contract concept.
 card #1299)*: `effect FS.Read` is a compile-time package declaration. A package
 view contains its own declarations, declarations from loaded dependencies, and
 Prelude leaves. Once a root has one declared leaf, every dotted use under that
-root in effect rows, `#Abilities`, and package budgets must name a declared
+root in effect rows, `#FX`, and package budgets must name a declared
 leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
 A root with no declared leaves stays open for gradual adoption. Declarations
 erase before the IR is built.
@@ -3295,7 +3297,7 @@ trait Renderer { fn render(self) -[GPU]> Image }
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
-`#Abilities(abilities: FS) { … }` authorizes effects in a lexical scope and binds an
+`#FX(authority: FS) { … }` authorizes effects in a lexical scope and binds an
 erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
@@ -3369,9 +3371,10 @@ tier-1); not inside one JIT module. *(rides JIT hot-reload runtime)*
 
 **D-EFFBUDGET1 — Package effect budget**: every build prints a one-line
 effect summary and records per-dependency provenance in the lock.
-`effects: { allow: […], deny: […] }` in `package.jet` enforces the whole graph,
-including the package's own code; E1220 names the offending package, function,
-and effect. `grants: { "dep": [Effect] }` per-dep escape; malformed block E1221.
+`authority: { allow: […], deny: […] }` in `package.jet` enforces the whole
+graph, including the package's own code; E1220 names the offending package,
+function, and effect. `authority: { grants: { "dep": [Effect] } }` is the
+per-dependency escape; a malformed block is E1221.
 
 **D-STREAMYIELD1 — Generators** *(amended by D-CONC-STREAM1=A)*:
 `fn f() Stream<T>` uses `yield expr` to hand a value to the consumer and
@@ -4270,7 +4273,7 @@ npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 **D-REPLCOREEFFECT1=A (ratified 2026-07-11)**: `jet repl` uses the existing
-effect model for ambient Core calls. An enclosing `#Abilities(root)` supplies
+effect model for ambient Core calls. An enclosing `#FX(root)` supplies
 lexical authority. Interactive sessions then authorize the exact
 `(root, operation, resource)` tuple once or for the in-memory session;
 reusing session authority offers continue or revoke before execution.
@@ -4278,7 +4281,7 @@ reusing session authority offers continue or revoke before execution.
 Non-TTY and transcript sessions never prompt and deny effects without the
 matching allow flag. Filesystem operations stay within the REPL project root
 and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
-gets its own consequence prompt interactively and needs both `#Abilities(Exec)`
+gets its own consequence prompt interactively and needs both `#FX(Exec)`
 and `--allow-exec` outside a TTY.
 
 **D-FE-REPL-HISTORY1=A (ratified 2026-07-11)**: `jet repl` persists the
@@ -5489,7 +5492,7 @@ does not invent activation evidence.
 
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`package.jet`** (bare `name:`/`version:` identity + `packages:` +
-`deps:` + `targets:` + `effects:`); `env.jet` owns named source aliases
+`deps:` + `targets:` + `authority:`); `env.jet` owns named source aliases
 (`sources: { name: target@provider }`) and environment facts; other `.jet`
 files contribute Configs; `module workspace` is discovered by declaration (`members:` may run
 comptime — inline lists, `find("./dir")`, or an expression referencing a
@@ -7631,15 +7634,14 @@ dependency, source, and expert boundaries. The canonical fields are:
 
 ```jet
 policy: {
-    effects: { "src": -[IO.Read]> },
     unsafe: .Paths(["src/ffi"]),
     expert: .Deny,
     deps: .List(["serde"])
 }
 ```
 
-`effects` maps project-relative source paths to positive effect ceilings. The
-longest matching path wins, and an empty ceiling (`-[]>`) is pure. `unsafe` is
+Effect ceilings are not a policy field: D-EFFECT-RUNGS1=A caps a module
+with `#FX(…) module name` and a package with `authority:`. `unsafe` is
 absent, `.Deny`, or a normalized project-relative `.Paths([...])` allow-list
 for `#Unsafe` gates. `expert` is absent, `.Deny`, or `.Allow`; `.Deny` rejects
 expert-only constructs such as `#Shield`, `#Context`, `#Region`, `#Transact`,
@@ -7651,7 +7653,7 @@ list entries normalize to one sorted value. `.Allow` is not a valid
 
 The parser reports malformed package policy as `E1206`. A valid policy
 violation is a compile/check error `E2960` naming the policy key, rejected
-construct or effect, and project path. `jet inspect guarantees` projects the
+construct, and project path. `jet inspect guarantees` projects the
 same normalized values, preserving absent keys and explicit empty deny lists;
 it never infers or silently widens a boundary.
 
@@ -7754,7 +7756,7 @@ fallible result, add facts, or stay undenied. The row is compile-time only and
 does not add a runtime effect mechanism or an execution-tier exception.
 
 **2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
-  vocabulary only as a deny-only row: no positive signature, `#Abilities`, or grant
+  vocabulary only as a deny-only row: no positive signature, `#FX`, or grant
   may name it. Positive naming is E0751 (`Panic can't be granted, only denied`);
   `-[!Panic]>`, manifest denial, E0749, and `#Pre`/refinement discharge remain
 valid. `check_panic_call` contributes the existing reachability sentinel, and

@@ -265,12 +265,6 @@ fn pkg_debug_authority(authority: PackageAuthority) -> String Never! {
     "PackageAuthority {{ allow: {pkg_debug_opt_str_list(authority.allow)}, deny: {pkg_debug_opt_str_list(authority.deny)}, needs: {pkg_debug_str_list(authority.needs)}, grants: {pkg_debug_grants(authority.grants)}, trust: {trust}, providers: [{providers.join(", ")}] }}"
 }
 
-fn pkg_debug_policy_effects(effects: [String: [String]]) -> String Never! {
-    parts := [String]{}
-    loop key in pkg_manifest_sorted(effects.keys().to_list()) -> &parts.push("{pkg_debug_str(key)}: {pkg_debug_str_set(effects[key])}")
-    "{{{parts.join(", ")}}}"
-}
-
 fn pkg_debug_claims(grade: ClaimsGrade?) -> String Never! {
     if grade == {
         .Val(value) -> "Some({value.debug()})"
@@ -301,7 +295,7 @@ fn pkg_facts_semantic_text(facts: PackageFacts) -> String Never! {
         "services={pkg_debug_services(facts.services)};outputs={pkg_debug_outputs(facts.outputs)};environments={pkg_debug_environments(facts.environments)};defaults={pkg_debug_str_map(facts.defaults)};",
         "build_profiles={pkg_debug_build_profiles(facts.build_profiles)};settings={pkg_debug_settings(facts.settings)};configs={pkg_debug_str_list(facts.configs)};members={pkg_debug_members(facts.members)};",
         "authority={pkg_debug_authority(facts.authority)};effects_enabled={pkg_debug_bool(facts.effects_enabled)};effects_allow={pkg_debug_opt_str_list(facts.effects_allow)};effects_deny={pkg_debug_opt_str_list(facts.effects_deny)};",
-        "policy_lints_deny={pkg_debug_opt_str_list(policy.lints_deny)};policy_effects={pkg_debug_policy_effects(policy.effects)};policy_unsafe_paths={pkg_debug_opt_str_list(policy.unsafe_paths)};policy_expert={pkg_debug_opt_bool(policy.expert)};",
+        "policy_lints_deny={pkg_debug_opt_str_list(policy.lints_deny)};policy_unsafe_paths={pkg_debug_opt_str_list(policy.unsafe_paths)};policy_expert={pkg_debug_opt_bool(policy.expert)};",
         "policy_deps={pkg_debug_opt_str_list(policy.deps)};policy_claims_min={pkg_debug_claims(policy.claims_min)};policy_contain={pkg_debug_str_set(policy.contain)};policy_harden={pkg_debug_bool(policy.harden)};",
         "policy_licenses={pkg_debug_opt_str_list(policy.licenses)};policy_source_maps={pkg_debug_source_maps(policy.source_maps)};policy_exceptions={pkg_debug_exceptions(policy.exceptions)};",
     }

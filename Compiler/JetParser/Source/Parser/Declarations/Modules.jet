@@ -9,6 +9,7 @@ use {
         CompileWorkloadDecl,
         ContribValue,
         Contribution,
+        EffectRowEntry,
         EnvLit,
         Expr,
         FleetField,
@@ -24,8 +25,10 @@ use {
         ImageLit,
         ImportDecl,
         Item,
+        Marker,
         ModuleAliasDef,
         ModuleArg,
+        ModuleCap,
         ModuleDecl,
         NamedExpr,
         NamedSpan,
@@ -40,6 +43,7 @@ use {
         SystemFieldValue,
         SystemLit,
         Type,
+        UnOp,
         VMTestField,
         VMTestFieldValue,
         VMTestLit,
@@ -133,7 +137,10 @@ fn parser_parse_module(state: &JetParserState, modifiers: ParsedItemModifiers) -
         parser_current_kind(&state) == TOKEN_COLON_COLON -> parser_parse_module_alias_after_name(&state, modifiers, start.span, name_head)
         parser_current_kind(&state) == TOKEN_LT || parser_current_kind(&state) == TOKEN_LPAREN -> parser_parse_generic_module_after_name(&state, modifiers, start.span, name_head)
         parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(&state) -> parser_parse_module_decl_after_name(&state, modifiers, start.span, name_head)
-        else -> parser_parse_code_module_after_name(&state, modifiers, start.span, name_head)
+        else -> {
+            module_item :: parser_parse_code_module_after_name(&state, modifiers, start.span, name_head)
+            parser_module_apply_cap(&state, modifiers.markers, ^module_item)
+        }
     }
 }
 
@@ -332,6 +339,84 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
     Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+}
+
+// `#FX(Net, !FS) module pricing …` caps every function in the module (see
+// `ModuleCap`). Entries are written like a block `#FX(…)` cap, with `!` for a
+// denial; sema validates the names. An inline body carries the cap on each
+// of its functions; a file module's cap reaches its file through the module
+// graph.
+fn parser_module_apply_cap(state: &JetParserState, markers: [Marker], item: ^Item) -> Item {
+    if item == .CodeModule(definition) {
+        loop marker in markers {
+            if marker.name != "FX" -> next
+            cap :: parser_module_fx_cap(&state, marker, definition.name) ?? return ^item
+            updated := definition
+            updated.cap = Val(cap)
+            if definition.body == .Val(body) -> updated.body = Val(parser_module_body_caps(body.copy(), cap))
+            return Item.CodeModule{value: updated}
+        }
+    }
+    ^item
+}
+
+fn parser_module_fx_cap(state: &JetParserState, marker: Marker, module_name: String) -> ModuleCap? {
+    entries := [EffectRowEntry]{}
+    loop argument in marker.args {
+        expr :: if argument == .Expr(value) -> value else -> {
+            parser_marker_shape_error(&state, marker)
+            return None
+        }
+        prefix := ""
+        path := expr
+        if expr == .Unary(op, operand, _, _) {
+            if op == UnOp.Not {
+                prefix = "!"
+                path = operand
+            }
+        }
+        written :: parser_authority_effect_path(path) ?? {
+            parser_marker_shape_error(&state, marker)
+            return None
+        }
+        name := written
+        if name.starts_with("Effect.") -> name = name.slice(7, name.len())
+        &entries.push(EffectRowEntry{name: "{prefix}{name}", span: expr_span(expr)})
+    }
+    Val(ModuleCap{module_name: module_name, entries: entries, span: marker.span})
+}
+
+// Every function under the module, nested modules and impl methods included,
+// takes `cap` ahead of the caps of the modules nested inside it.
+fn parser_module_body_caps(body: [Item], cap: ModuleCap) -> [Item] Never! {
+    capped := [Item]{}
+    loop item in body {
+        if item == {
+            .Func(definition) -> &capped.push(Item.Func{value: parser_func_with_cap(definition, cap)})
+            .Impl(definition) -> {
+                updated := definition
+                methods := [Func]{}
+                loop method in definition.methods -> &methods.push(parser_func_with_cap(method, cap))
+                updated.methods = methods
+                &capped.push(Item.Impl{value: updated})
+            }
+            .CodeModule(definition) -> {
+                updated := definition
+                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_caps(inner.copy(), cap))
+                &capped.push(Item.CodeModule{value: updated})
+            }
+            else -> &capped.push(item)
+        }
+    }
+    capped
+}
+
+fn parser_func_with_cap(definition: Func, cap: ModuleCap) -> Func Never! {
+    updated := definition
+    caps := [ModuleCap]{cap}
+    loop inner in definition.module_caps -> &caps.push(inner)
+    updated.module_caps = caps
+    updated
 }
 
 // (Rust `Parser::apply_module_visibility`): every declaration

@@ -1,0 +1,13 @@
+# A `#FX(…)` cap on a file module (`module pricing` names pricing.jet) binds
+# every function in that file, through its calls, and the report names where
+# the cap is written.
+fixture: module_cap_file_module_denial_is_e0749/input
+step: jet check run.jet
+env: NO_COLOR=1
+exit: 1
+stderr: count "[E0749]" = 2 # `rates` reads a file; `total` reaches it through `rates`
+stderr: count "Error [" = 2 # the denials are the only errors
+stderr: ~ "`rates` reaches the `FS.Read` effect, which module `pricing` denies" # the direct read is denied
+stderr: ~ "`total` reaches the `FS.Read` effect, which module `pricing` denies" # the denial holds through the call
+stderr: ~ "the cap is written at `run.jet:1`" # the report in pricing.jet names the cap's line
+stderr: ~ "pricing.jet:3:4" # the report points at the function in the module's file
