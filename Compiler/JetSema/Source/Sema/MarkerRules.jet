@@ -29,6 +29,7 @@ use jet_foundation.[
     UnOp,
     diagnostic_from_registry,
     diagnostic_with_edit,
+    diagnostic_with_label,
     expr_span,
     symbol_id,
     type_name,
@@ -1531,8 +1532,10 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
     if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
-fn sema_marker_rules_repeated_error(marker: Marker) -> Diagnostic {
-    sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+fn sema_marker_rules_repeated_error(marker: Marker, first: Marker) -> Diagnostic {
+    diagnostic := sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+    diagnostic.detail = Val("second application span: the copy this report points at\nfirst application span: the earlier copy on the same target")
+    diagnostic_with_label(^diagnostic, first.span, "first application span")
 }
 
 fn sema_marker_rules_collect_function(function: Func, markers: &[Marker]) Never! {
@@ -1724,7 +1727,7 @@ fn sema_marker_rules_validate_user_sites(registry: SemaScopeMembersMarkerRegistr
 }
 
 fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
-    seen := [String:Bool]{}
+    seen := [String:Marker]{}
     loop application in sema_marker_rules_applications(program) {
         builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
         repeatable := false
@@ -1749,12 +1752,15 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
         if repeatable {
             next
         }
-        // Same declaration on the same target.
+        // Same declaration on the same target. An application with no
+        // target span, such as a marked block, has no identity to repeat on.
+        if application.target == None -> next
         key :: "{sema_marker_rules_declaration_key(application.marker)}|{sema_marker_rules_span_key(application.target)}"
-        if seen.get(key) != None {
-            &diagnostics.push(sema_marker_rules_repeated_error(application.marker))
+        if seen.get(key) == .Val(first) {
+            &diagnostics.push(sema_marker_rules_repeated_error(application.marker, first))
+            next
         }
-        seen[key] = true
+        seen[key] = application.marker
     }
 }
 

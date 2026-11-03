@@ -833,7 +833,7 @@ fn parser_prev_token_end(state: JetParserState) -> Int Never! {
 }
 
 // Undo a speculative parse: restore the cursor and drop every diagnostic,
-// block span and `else` arm it recorded.
+// block span, `else` arm and statement rule it recorded.
 fn parser_rewind(state: &JetParserState, position: Int, diagnostics: Int, blocks: Int, else_arms: Int) {
     state.position = position
     loop state.diagnostics.len() > diagnostics -> _ := &state.diagnostics.pop()
@@ -841,6 +841,12 @@ fn parser_rewind(state: &JetParserState, position: Int, diagnostics: Int, blocks
     // An abort raised inside the undone parse is undone with it.
     if state.abort_mark > diagnostics -> state.abort_mark = 0
     loop state.else_arms.len() > else_arms -> _ := &state.else_arms.pop()
+    // A rule recorded by the undone parse starts at or after the rewind
+    // point; the reparse records it again.
+    if position < state.tokens.len() {
+        start :: state.tokens[position].span.start
+        loop state.statement_rules.len() > 0 && state.statement_rules[state.statement_rules.len() - 1].marker.span.start >= start -> _ := &state.statement_rules.pop()
+    }
 }
 
 fn parser_recover_statement(state: &JetParserState) Never! {

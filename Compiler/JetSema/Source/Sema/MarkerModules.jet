@@ -484,17 +484,24 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
         // A bare marker that no applied rule, marker declaration or derive
         // provider names is outside the closed vocabulary (E0927); a
         // source-declared marker attaches only at its declared sites (E0355).
+        // A rule that is not repeatable applies once per target (E0999);
+        // the program registry carries the module's own rules beside the
+        // builtin rows, so it judges both kinds.
+        repeat_checked := false
         if (unresolved.len() > 0 || source_declared) && !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
             program_registry :: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
             if program_registry == .Val(registry) {
                 if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, &diagnostics)
                 if source_declared -> sema_marker_rules_validate_user_sites(registry, graph.modules[module_row_index].program, &diagnostics)
+                sema_marker_rules_validate_repeatability(registry, graph.modules[module_row_index].program, &diagnostics)
+                repeat_checked = true
             }
         }
         sema_marker_module_check_groups(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.items, "", true, catalog, &diagnostics)
         if !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
             sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, &diagnostics)
-            sema_marker_module_check_function_sites(catalog, graph.modules[module_row_index].program, &diagnostics)
+            sema_marker_module_check_builtin_sites(catalog, graph.modules[module_row_index].program, &diagnostics)
+            if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, &diagnostics)
         }
         sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_row_index].source_segments)
     }
@@ -527,24 +534,28 @@ fn sema_marker_module_check_unbuilt_rules(catalog: SemaScopeMembersMarkerRegistr
     }
 }
 
-// A builtin rule written on a function or method that its row does not allow
-// there, and that the body checker has no route for, is E0355. `#FX` caps a
-// block or a module; a function states its limit in its effect row. Without
-// this refusal the marker reached body checking as an internal fault.
-fn sema_marker_module_check_function_sites(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
+// A builtin rule written at a site its registry row does not allow is E0355.
+// The unbuilt-rule check above reports its own applications; this one covers
+// every other site: a declaration, a function, a method, a module. `#FX`
+// caps a block or a module; a function states its limit in its effect row.
+// Without this refusal `#FX` above a `fn` reached body checking as an
+// internal fault, and a misplaced rule such as `#Job` on a method checked
+// clean.
+fn sema_marker_module_check_builtin_sites(catalog: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
     reported := [String:Bool]{}
     loop application in sema_policy_unsupported_applications(program) -> reported[sema_marker_rules_application_key(application)] = true
     applications :: sema_marker_rules_applications(program)
     loop application in applications {
         site :: application.site ?? next
-        if site != RuleSite.Function && site != RuleSite.Method -> next
-        if sema_function_header_marker_routed(application.marker.name) -> next
+        // A lint allowance is placed by its own check
+        // (sema_marker_rules_validate_allow), not by its registry row.
+        if application.marker.name == "allow" -> next
         index :: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
         key :: sema_marker_rules_application_key(application)
         if reported.get(key) != None -> next
         reported[key] = true
         if sema_marker_rules_fact_allows(catalog.applied_rules[index], application, applications) -> next
-        if application.marker.name == "FX" {
+        if application.marker.name == "FX" && (site == RuleSite.Function || site == RuleSite.Method) {
             &diagnostics.push(sema_error("E0355", application.marker.span, "`#FX` cannot attach to a function", "`#FX(…)` caps a block or a module; a function states its limit in its effect row", "write the limit in the function's row, such as `fn show() -[IO]> {{ … }}`, or put `#FX(…)` on a block inside it"))
             next
         }
