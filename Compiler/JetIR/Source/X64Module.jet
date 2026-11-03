@@ -407,13 +407,14 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
     owned_main :: owned.program.owned_main
     owned_attach :: owned.program.owned_attach
+    kept :: owned.program.kept.copy()
     program :: ir_x64_object_module(&owned)
     main :: x64_object_main(X64FunctionID{value: entry}, owned_main, owned_attach)
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
-    ir_x64_reached_only(&functions, &debug)
+    ir_x64_reached_only(&functions, &debug, kept)
     threads :: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
@@ -431,11 +432,12 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
 }
 
 // Keeps the rows of `functions` (with their `debug` rows) whose function the
-// first row, `main`, reaches through function relocations. The optimizer
-// keeps every body it inlined (ir_optimize_module), so a function whose
-// calls were all inlined has none left; a program object is one `.text`,
-// which the static link keeps whole, so its dead functions go here.
-fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) Never! {
+// first row, `main`, or a `dead_code: keep` root (`roots`, IRModule.kept)
+// reaches through function relocations. The optimizer keeps every body it
+// inlined (ir_optimize_module), so a function whose calls were all inlined
+// has none left; a program object is one `.text`, which the static link
+// keeps whole, so its dead functions go here.
+fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], roots: [Int]) Never! {
     if functions.len() != debug.len() -> panic("the object writer has {functions.len()} functions and {debug.len()} debug rows")
     max_id := -1
     loop function in functions {
@@ -453,6 +455,11 @@ fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDe
     }
     work := [Int]{functions[0].id.value}
     reached[functions[0].id.value + 1] = true
+    loop id in roots {
+        if id + 1 < 0 || id + 1 >= reached.len() || reached[id + 1] -> next
+        reached[id + 1] = true
+        &work.push(id)
+    }
     loop work.len() > 0 {
         id :: &work.pop() ?? { break }
         loop row in id_rows[id + 1] {

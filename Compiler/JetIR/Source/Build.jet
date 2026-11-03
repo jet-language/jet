@@ -1122,15 +1122,22 @@ fn ir_build_program(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     }
     p.entry = row
     roots := [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
+    kept_keys := [String]{}
     if p.checks.keep {
         loop kept in 0..<p.functions.len() {
             function :: p.functions[kept]
             if kept == row || p.checks.modules.get(function.module_identity) == None -> next
             if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 -> next
             &roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
+            &kept_keys.push(function.key.copy())
         }
     }
-    ir_build_waves(^p, ^roots, true, threads)
+    built := ir_build_waves(^p, ^roots, true, threads)
+    loop key in kept_keys {
+        at :: name_rows_get_text(built.program.function_rows, key) ?? next
+        &built.program.kept.push(at)
+    }
+    built
 }
 
 // Builds the functions `root_keys` name in `program` (ir_program_new, or
