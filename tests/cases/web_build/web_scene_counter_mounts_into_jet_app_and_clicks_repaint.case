@@ -1,13 +1,15 @@
-# A web build of a reactive core.ui counter paints into `#jet-app` once a page
-# has a document: one element per leaf at its frame (#6514). A button's click
-# runs its Jet handler and the effect's repaint replaces the elements.
+# A web build of a reactive core.ui counter (Examples/features/web/ui_web_mount.jet)
+# paints into `#jet-app` once a page has a document: one element per leaf at
+# its frame (#6514). A button's click runs its Jet handler and the effect's
+# repaint replaces the elements. The output is the example's web golden.
 requires: tool:node
 fixture: web_scene_counter_mounts_into_jet_app_and_clicks_repaint.fixture
 env: NO_COLOR=1
+copy: {root}/Examples/features/web/ui_web_mount.jet main.jet
 step: jet build --target web main.jet
 exit: 0
 copy: harness.mjs .jet/build/harness.mjs
 step: node harness.mjs
 cwd: .jet/build
 exit: 0
-stdout: = web_scene_counter_mounts_into_jet_app_and_clicks_repaint.stdout.expected
+stdout: = ../../../Examples/features/expected/web/ui_web_mount.web.out

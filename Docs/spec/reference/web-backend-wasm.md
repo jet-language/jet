@@ -104,6 +104,7 @@ Each file is named here so documentation review cannot silently omit a new examp
 - `store_history.jet`
 - `ui_showcase.jet`
 - `ui_web_click.jet`
+- `ui_web_mount.jet`
 - `ui_web_reactive.jet`
 - `web_app.jet`
 - `web_compute.jet`
