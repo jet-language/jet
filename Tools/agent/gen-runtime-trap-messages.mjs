@@ -61,6 +61,15 @@ for (const code of ["E3001", "E3010", "E3011", "E0128"]) {
   source += `// ${code} Why: ${why}\n// Fix: ${fix}\n`;
   source += emit(`trap_footer_${code.toLowerCase()}`, ` Why: ${why}\n Fix: ${fix}\nMore: jet-lang.dev/e/${code}\n`) + "\n";
 }
+// A failed `#Pre`/`#Post` clause (Trap.jet trap_contract_stop): the row's Why
+// quotes the stop's own message at `{msg}`, so it is written in two pieces
+// around that message.
+const contractWhy = field("E3005", "why").split("{msg}");
+if (contractWhy.length !== 2) throw new Error("E3005.why must quote {msg} exactly once");
+const contractFix = field("E3005", "fix");
+source += `// E3005 Why: ${contractWhy.join("{msg}")}\n// Fix: ${contractFix}\n`;
+source += emit("trap_footer_e3005_head", ` Why: ${contractWhy[0]}`) + "\n";
+source += emit("trap_footer_e3005_tail", `${contractWhy[1]}\n Fix: ${contractFix}\nMore: jet-lang.dev/e/E3005\n`) + "\n";
 source += emit("trap_invalid_layout_head", `Stop [E3001]: ${field("E3001", "what").replace("{msg}", "invalid box layout")}\n  --> <core.prelude>:0\n`);
 // A host stop whose code has no active runtime row renders the host form
 // of RuntimeDiagnosticCore.rs jet_write_runtime_stop; the code word sits
@@ -90,6 +99,7 @@ const literals = {
   header_panic: "Stop [E3001]: " + field("E3001", "what").split("{msg}")[0],
   header_numeric: "Stop [E3010]: " + field("E3010", "what").split("{msg}")[0],
   header_todo: "Stop [E3011]: `",
+  header_contract: "Stop [E3005]: ",
   header_zip: "Stop [E0128]: " + field("E0128", "what").split("{msg}")[0],
   zip_end: field("E0128", "what").split("{msg}")[1] + "\n",
   collections_end: "`\n  --> <core.collections>:0\n",

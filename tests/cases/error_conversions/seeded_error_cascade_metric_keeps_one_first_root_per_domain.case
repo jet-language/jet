@@ -8,5 +8,6 @@ json: stdout doc $.reports #= 2
 json: stdout doc $.reports[?code="E2404"] #= 2
 json: stdout doc $.reports[?detail^="failure-domain:load_row|"] #= 1 # original predicate
 json: stdout doc $.reports[0].code = "E2404"
-json: stdout doc $.reports[0].what ~ "from `load_row`" # original predicate
+# The E2404 registry row's what: "`{{callee}}` fails with `{{Source}}`, ...".
+json: stdout doc $.reports[0].what ~ "`load_row` fails with" # original predicate: what names the helper
 json: stdout doc $.reports[0].cause = []

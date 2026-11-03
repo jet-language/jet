@@ -1,4 +1,4 @@
-
+package { name: "async-event-cancel-close" authority: { allow: [Time] } }
 use {
     event :: core.event
     tasks :: core.tasks
@@ -16,14 +16,14 @@ fn run() {
 
     cancel_scope :: event.scope()
     cancel_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    #Context(deadline: time.now() + 100000) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 100000) {
         cancel_queued :: cancel_event.emit_async(1)
         cancel_pending :: cancel_event.emit_async(2)
         cancel_event.on(cancel_scope, (n: Int) -> {})
         cancel_scope.cancel()
         cancel_gate_release_tx.send(1)
-        queued_report :: cancel_queued.join()
-        pending_report :: cancel_pending.join()
+        queued_report :: cancel_queued.join() ?? panic("cancel queued join")
+        pending_report :: cancel_pending.join() ?? panic("cancel pending join")
         print("cancel queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
         print("cancel pending={pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
     }
@@ -40,14 +40,14 @@ fn run() {
     close_scope :: event.scope()
     close_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     close_event.on(close_scope, (n: Int) -> {})
-    #Context(deadline: time.now() + 100000) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 100000) {
         close_queued :: close_event.emit_async(3)
         close_pending :: close_event.emit_async(4)
         close_event.close()
         close_scope.cancel()
         close_gate_release_tx.send(1)
-        queued_report :: close_queued.join()
-        pending_report :: close_pending.join()
+        queued_report :: close_queued.join() ?? panic("close queued join")
+        pending_report :: close_pending.join() ?? panic("close pending join")
         print("close queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
         print("close pending={pending_report.state() == .Closed} trace={pending_report.trace().summary()}")
     }

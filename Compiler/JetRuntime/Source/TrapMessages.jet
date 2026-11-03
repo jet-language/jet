@@ -34,6 +34,20 @@ fn trap_footer_e0128() { trap_write_static(trap_footer_e0128_text()) }
 
 fn trap_build_footer_e0128(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e0128_text()) }
 
+// E3005 Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split) — with file:line.
+// Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).
+fn trap_footer_e3005_head_text() -> I64 { rt_static_text(" Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `") }
+
+fn trap_footer_e3005_head() { trap_write_static(trap_footer_e3005_head_text()) }
+
+fn trap_build_footer_e3005_head(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3005_head_text()) }
+
+fn trap_footer_e3005_tail_text() -> I64 { rt_static_text("` is the clause's own message string. Checked in every build (not a debug/release split) — with file:line.\n Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).\nMore: jet-lang.dev/e/E3005\n") }
+
+fn trap_footer_e3005_tail() { trap_write_static(trap_footer_e3005_tail_text()) }
+
+fn trap_build_footer_e3005_tail(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e3005_tail_text()) }
+
 fn trap_invalid_layout_head_text() -> I64 { rt_static_text("Stop [E3001]: `panic: invalid box layout`\n  --> <core.prelude>:0\n") }
 
 fn trap_invalid_layout_head() { trap_write_static(trap_invalid_layout_head_text()) }
@@ -91,6 +105,16 @@ fn trap_msg_header_todo() {
 fn trap_build_msg_header_todo(builder: I64) {
     rt_text_push_word(builder, I64{3694459264210793555}, I64{8})
     rt_text_push_word(builder, I64{27057032807919920}, I64{7})
+}
+
+fn trap_msg_header_contract() {
+    trap_write_word(I64{3694459264210793555}, I64{8})
+    trap_write_word(I64{35435043958832}, I64{6})
+}
+
+fn trap_build_msg_header_contract(builder: I64) {
+    rt_text_push_word(builder, I64{3694459264210793555}, I64{8})
+    rt_text_push_word(builder, I64{35435043958832}, I64{6})
 }
 
 fn trap_msg_header_zip_text() -> I64 { rt_static_text("Stop [E0128]: Zip inputs have different lengths under `") }

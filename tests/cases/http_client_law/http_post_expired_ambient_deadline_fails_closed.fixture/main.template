@@ -1,10 +1,10 @@
-
+package { name: "http-post-expired-deadline" authority: { allow: [Net, Time] } }
 use {
     http :: core.http.client
     time :: core.time
 }
 fn run() {
-    #Context(deadline: time.now()) {
+    #Context(deadline: time.unix_ns() /% 1_000_000) {
         if http.post("http://{cap:addr}/expired", "body") == {
             .Ok(_) -> print("ok")
             .Err(_) -> print("timeout")

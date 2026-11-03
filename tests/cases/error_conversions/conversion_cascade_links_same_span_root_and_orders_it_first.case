@@ -8,5 +8,6 @@ exit: nonzero
 json: stdout doc $.reports[?code="E0104"] #>= 1 # original predicate
 json: stdout doc $.reports[?code="E2404"] #>= 1 # original predicate
 json: stdout doc $.reports[?code in ["E0104","E2404"]][0].code = "E0104" # original predicate: first root position is before first dependent, not necessarily before unrelated reports
-json: stdout doc $.reports[?code="E2404"][0].cause = ["E0104"]
+# jet.report/v3 causes are objects with `code`, `file`, `line`, `col` and `span` (diagnostics.md "Machine reports and causes").
+json: stdout doc $.reports[?code="E2404"][0].cause[*].code = ["E0104"]
 json: stdout doc $.reports[?code="E0104"][?cause=[]][?clears=1] #>= 1 # original same-record JSON predicate

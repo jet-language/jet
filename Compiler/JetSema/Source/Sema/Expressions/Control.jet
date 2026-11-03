@@ -1071,10 +1071,15 @@ fn sema_expression_auto_propagates(ty: Type, expected: Type?, context: SemaCheck
 
 // A call root rejected after its callee was resolved still has the callee's
 // result carrier; as in the reference, its automatic propagation is checked
-// as for an accepted call.
-fn sema_expression_rejected_call_propagation(result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+// as for an accepted call. `source` names the call for the report's
+// provenance. A report that propagation adds names the call's own first
+// error since `root_mark` as its cause, so fixing that error is seen to
+// clear it too.
+fn sema_expression_rejected_call_propagation(result_type: Type, source: Expr?, root_mark: Int, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if !context.failure_success_view || !sema_expression_auto_propagates(result_type, expected, context) -> return
-    _ := sema_expression_propagation_conversion(result_type, None, None, span, true, environment, program, &scopes, &context, &diagnostics)
+    mark :: diagnostics.len()
+    _ := sema_expression_propagation_conversion(result_type, source, None, span, true, environment, program, &scopes, &context, &diagnostics)
+    sema_link_reports_to_first_error(&diagnostics, root_mark, mark)
 }
 
 fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -2187,8 +2192,9 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     // whether that arm can ever run.
     else_table_head :: !chain_head && !context.noelse_chain_starts.contains(span.start) && sema_coverage_is_else_table(environment, program, span)
     if else_table_head -> &context.noelse_chain_starts.push(span.start)
-    checked :: sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics).checked ?? return None
-    checked_condition :: checked.value
+    condition_mark :: diagnostics.len()
+    condition_check :: sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if condition_check.checked == None && !sema_has_error_since(diagnostics, condition_mark) -> return None
     // Each arm runs in its own frame on the live scope table and on the live
     // ownership state, both rolled back (sema_ownership_fork). Only a deferred
     // bare `None` then-value, checked after the else arm, keeps a copy of the
@@ -2196,7 +2202,7 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     fork :: sema_ownership_fork(&state)
     then_mark :: sema_scope_mark(&scopes)
     sema_scope_enter(&scopes, &state, "if.then@{span.start}")
-    sema_expression_declare_condition_bindings(checked.bindings, &scopes, &state, true, &diagnostics)
+    sema_expression_declare_condition_bindings(condition_check.bindings, &scopes, &state, true, &diagnostics)
     then_result :: sema_check_statements(then_body, then_mark.saved.return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, then_mark.saved.loop_depth)
     if !then_result.complete {
         sema_scope_leave(&scopes, &state)
@@ -2345,6 +2351,11 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         else_reaches_merge -> else_checked.ty
         else -> expected ?? Type.Named{name: "Never"}
     }
+    // A condition that reported its own error still has both arms checked, so
+    // their own errors and an arm type mismatch are reported too; the level
+    // itself then has no value.
+    checked :: condition_check.checked ?? return None
+    checked_condition :: checked.value
     if chain_head {
         chain_conditions :: sema_coverage_noelse_chain_conditions(checked_condition, else_checked, span, context)
         if chain_conditions == .Val(table) {

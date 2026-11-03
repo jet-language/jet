@@ -19,11 +19,11 @@ impl Order {
     #Transition(Cancelled, Draft) fn restore(self: ^Order) -> Order { return self }
 }
 
-fn run(paid: Bool) {
+fn job(paid: Bool) {
     order := Order.start(1)
     if {
-        paid -> order = order.confirm()
-        else -> order = order.cancel()
+        paid -> order = ^order.confirm()
+        else -> order = ^order.cancel()
     }
     print(order.id)
 }

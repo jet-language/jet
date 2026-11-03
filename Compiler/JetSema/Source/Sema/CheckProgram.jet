@@ -7962,6 +7962,29 @@ fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String:B
     survived
 }
 
+// E2404 repeated sites: every call of one callee whose failure domain has no
+// route into the same caller domain is one root, reported once at its first
+// site. `seen` carries the reported domains across the bundle's report lists.
+fn sema_failure_domain_dedupe(diagnostics: &[Diagnostic], seen: &[String:Bool]) Never! {
+    repeated :: loop diagnostic in diagnostics {
+        if diagnostic.code == "E2404" -> break true
+    } ?? false
+    if !repeated -> return
+    kept := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        detail :: diagnostic.detail ?? ""
+        if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") {
+            &kept.push(diagnostic)
+            next
+        }
+        key :: detail.split("\n").to_list()[0]
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &kept.push(diagnostic)
+    }
+    diagnostics = kept
+}
+
 // #3708 for one comptime function closure: the failure rows, function-value
 // uses and failure obligations of its checked bodies. Every function a
 // comptime body reaches is in its closure, so the closure's own solve proves
@@ -8725,6 +8748,12 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop settle_index in 0..<modules.len() {
         if sema_failure_settle_obligations(&modules[settle_index].diagnostics, infallible_keys) -> modules[settle_index].complete = false
     }
+    // The bundle list and the per-module lists each keep one report per
+    // failure domain.
+    bundle_domains := [String:Bool]{}
+    sema_failure_domain_dedupe(&diagnostics, &bundle_domains)
+    module_domains := [String:Bool]{}
+    loop dedupe_index in 0..<modules.len() -> sema_failure_domain_dedupe(&modules[dedupe_index].diagnostics, &module_domains)
     // The `#Inline(Always)` promise (E0917-E0919) needs every body's
     // function-value references first. These read-only checks, the effect
     // inputs with each module's effect-graph rows, and the liveness verdicts

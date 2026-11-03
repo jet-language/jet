@@ -582,10 +582,11 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 // A pending core.testing evidence failure (`golden`, `snap`, `fixture`) is
 // what a failed `assert`/`assert_eq` of that result reports: its message is
 // the stop's message and its detail (the path, then any bounded diff) the
-// locals line. An explicit `panic` (kind 2) keeps its own text. The stop does
-// not return, so the pair stays owned by the thread's test state.
+// locals line. An explicit `panic` (kind 2) and a failed contract clause
+// (kind 3) keep their own text. The stop does not return, so the pair stays
+// owned by the thread's test state.
 #Export(c) fn jet_rt_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
-    state :: if (kind == I64{2}) -> I64{0} else -> test_scope_pending_failure()
+    state :: if (kind >= I64{2}) -> I64{0} else -> test_scope_pending_failure()
     if (state == I64{0}) {
         trap_require_stop(kind, descriptor, message, left, right, locals)
         return
@@ -595,6 +596,10 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 
 fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
     comptime_serve_stop(I64{4}, kind, message, left, right)
+    if (kind == I64{3}) {
+        trap_contract_stop(descriptor, message, locals)
+        return
+    }
     // Same raw task message as trap_rich; equality stops carry their text.
     // Every domain offers it to rt_task_panic_publish, which records the raw
     // stop on each open `.expect_fail` frame before it checks for a task: a
@@ -622,6 +627,13 @@ fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right:
         else -> trap_write_handle(message)
     }
     trap_msg_message_end()
+    trap_descriptor_context(descriptor, locals)
+    trap_footer(I64{0})
+}
+
+// A require-style stop's location (IR ir_stop's 88-byte descriptor) and its
+// locals line, when it has any.
+fn trap_descriptor_context(descriptor: I64, locals: I64) {
     trap_context(trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})), trap_word(wrapping(descriptor + I64{40})), trap_word(wrapping(descriptor + I64{48})), trap_line(trap_word(wrapping(descriptor + I64{56}))), trap_line(trap_word(wrapping(descriptor + I64{64}))))
     if (locals != I64{0}) {
         if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
@@ -630,7 +642,27 @@ fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right:
             trap_msg_newline()
         }
     }
-    trap_footer(I64{0})
+}
+
+// A failed `#Pre`/`#Post` clause (JetIR BuildContracts.jet ir_contract) is
+// E3005: its message is the clause's report (`#Pre contract failed: …`) and
+// the row's Why quotes it. A task body publishes that message as a `panic`
+// does; an expectation frame records it under E3005.
+fn trap_contract_stop(descriptor: I64, message: I64, locals: I64) {
+    data :: trap_word(message)
+    length :: trap_word(wrapping(message + I64{8}))
+    test_scope_record_raw_stop(TEST_SCOPE_E3005, I64{5}, data, length)
+    if rt_task_panic_publish_recorded(data, length) -> return
+    trap_root_prepare()
+    jet_rt_stdout_flush()
+    trap_msg_header_contract()
+    trap_write_handle(message)
+    trap_msg_newline()
+    trap_descriptor_context(descriptor, locals)
+    trap_footer_e3005_head()
+    trap_write_handle(message)
+    trap_footer_e3005_tail()
+    trap_exit(I64{70})
 }
 
 fn trap_range_end(start: I64, end: I64, exclusive: U8, len: I64) -> I64 Never! {

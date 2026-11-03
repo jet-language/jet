@@ -7,4 +7,4 @@ exit: nonzero
 json: stdout doc $.reports[?code="E2404"] #= 2
 json: stdout doc $.reports[?code="E2404"][0].detail ^= "failure-domain:load_row|SourceErr|TargetErr" # original predicate
 json: stdout doc $.reports[?code="E2404"][1].detail ^= "failure-domain:load_other|OtherSourceErr|OtherTargetErr" # original predicate
-json: stdout doc $.reports[?code="E2404"][*].cause = []
+json: stdout doc $.reports[?code="E2404"][?cause=[]] #= 2 # every independent root has no cause

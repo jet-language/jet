@@ -371,14 +371,14 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
     &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
-// E0941 (D-COPY-WORD1=A): the retired prefix copy sigil. The Safe fix
+// E0941: the retired prefix copy sigil. The Safe fix
 // rewrites `~operand` to `operand.copy()`, parenthesized when the operand is
 // not a postfix chain; without operand text the fix stays prose.
 fn parser_report_retired_copy_sigil(state: &JetParserState, sigil: Span, full: Span) {
     operand_text :: parser_source_slice(state, sigil.end, full.end).trim()
     shown :: if operand_text == "" -> "x" else -> operand_text
     replacement :: if parser_is_postfix_operand(shown) -> "{shown}.copy()" else -> "({shown}).copy()"
-    diagnostic :: diagnostic_from_registry("E0941", Val(sigil), "the `~` copy sigil is retired; a copy is the method `x.copy()`", "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` (D-COPY-WORD1), so a copy reads as a word and chains like any method", "write `{replacement}`")
+    diagnostic :: diagnostic_from_registry("E0941", Val(sigil), "the `~` copy sigil is retired; a copy is the method `x.copy()`", "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()`, so a copy reads as a word and chains like any method", "write `{replacement}`")
     if operand_text == "" {
         &state.diagnostics.push(diagnostic)
         return
@@ -688,13 +688,13 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.Unary{op: op, operand: operand.expr, span: span, id: parser_node_id(&state)}, span: span}
     }
-    // D-COPY-WORD1=A: the prefix `~x` sigil and the `copy x` word are
+    // The prefix `~x` sigil and the `copy x` word are
     // retired; a copy is the built-in method `x.copy()`. Teach (E0941 with a
     // Safe rewrite, E0991 in prose), then recover as the copy so parsing
     // continues.
     if kind == TOKEN_TILDE || kind == TOKEN_KW_COPY {
         parser_bump(&state)
-        if kind == TOKEN_KW_COPY -> parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` (D-COPY-WORD1) — so all code reads the same", "write `name.copy()` in place of `copy name`")
+        if kind == TOKEN_KW_COPY -> parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` — so all code reads the same", "write `name.copy()` in place of `copy name`")
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(token.span, operand.span)
         if kind == TOKEN_TILDE -> parser_report_retired_copy_sigil(&state, token.span, span)

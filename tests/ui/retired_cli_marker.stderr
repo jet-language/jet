@@ -1,17 +1,18 @@
-Error [E0927]: `#Cli` is retired
-  --> tests/ui/retired_cli_marker.jet:1:1
-    |
-  1 | #Cli struct Args {
-    | ^^^^
- Why: The applied-rule registry owns retired spellings and replacements
- Fix: Write `#CLI`
-More: jet-lang.dev/e/E0927
-
 Error [E1308]: `run`'s parameter isn't a CLI-derived type
   --> tests/ui/retired_cli_marker.jet:5:14
     |
   5 | fn run(args: Args) {
     |              ^^^^
- Why: A typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived program struct.
- Fix: Mark the program struct `#[CLI]` (or `#CLI(Standard)` for the standard pack)
+ Why: A typed `fn run(args: T)` entry only works when `T` is a `#CLI`-derived program struct.
+ Fix: Mark the program struct `#CLI`.
 More: jet-lang.dev/e/E1308
+
+Error [E0927]: `#Cli` isn't a known applied rule
+  --> tests/ui/retired_cli_marker.jet:1:2
+    |
+  1 | #Cli struct Args {
+    |  ^^^
+ Why: `Cli` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: Did you mean `#CLI`?
+More: jet-lang.dev/e/E0927
+

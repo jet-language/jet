@@ -844,7 +844,7 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
         check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !check.arguments_complete {
-            sema_expression_rejected_call_propagation(check.result_type, span, expected, environment, program, &scopes, &context, &diagnostics)
+            sema_expression_rejected_call_propagation(check.result_type, None, diagnostics.len(), span, expected, environment, program, &scopes, &context, &diagnostics)
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
         value := sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
@@ -1292,7 +1292,11 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     }
     source_args := call.args
     args := call.args
-    binding := sema_call_bind_direct(call.name, candidate.signature, &args, call.name_span, &diagnostics) ?? return None
+    root_mark :: diagnostics.len()
+    binding := sema_call_bind_direct(call.name, candidate.signature, &args, call.name_span, &diagnostics) ?? {
+        sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, &scopes, &context, &diagnostics)
+        return None
+    }
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, program, &scopes, &state, &tail_store, &context)
         sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, program, &scopes, &state, &tail_store, &context)
@@ -1359,7 +1363,10 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         resolved_binding = resolved
     }
     abi :: sema_call_direct_target_abi(candidate, environment, program)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? {
+        sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, &scopes, &context, &diagnostics)
+        return None
+    }
     sema_call_lint_shared_loop_arguments(source_args, environment, scopes, &diagnostics)
     callee_facts :: sema_contract_function_facts(environment, program, candidate.symbol.id)
     if callee_facts == .Val(facts) {
@@ -1401,6 +1408,26 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+// A direct call rejected at its arguments after its callee resolved: the
+// callee's declared result still auto-propagates, linked to the call's own
+// error (sema_expression_rejected_call_propagation). Only a rejection that
+// reported an error has one: an argument still waiting on a compile-time
+// value rejects without one and is checked again. The check adds reports
+// only; the facts it would record belong to a call that never lowers, and a
+// discarded probe must not keep them, so the context is rolled back. A
+// generic callee whose type arguments are still open has no settled result
+// type to check.
+fn sema_call_direct_rejected_propagation(candidate: SemaCallDirectTarget, call: Call, root_mark: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    if !sema_has_error_since(diagnostics, root_mark) -> return
+    if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() -> return
+    result_type_raw :: sema_call_signature_return(candidate.signature) ?? return
+    result_type :: sema_call_resolved_type(result_type_raw, environment, program)
+    source :: Expr.Call{call: call.copy(), id: AST_NODE_GENERATED}
+    mark :: sema_check_context_save(context)
+    sema_expression_rejected_call_propagation(result_type, Val(source), root_mark, call.name_span, expected, environment, program, &scopes, &context, &diagnostics)
+    sema_check_context_rollback(&context, mark)
 }
 
 // D-MEMPROVENANCE3=A (Rust `check_param_view_from_requirements`): a

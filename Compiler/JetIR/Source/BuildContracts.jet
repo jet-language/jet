@@ -1,18 +1,21 @@
-// The IR builder's `#Pre`/`#Post` contracts. A checked clause is a `require`
-// of its condition with its message; a function with contracts has its body
-// in a ContractScope whose `pre` clauses run on entry and whose `post`
-// clauses run at every return, with the returned carrier (or its success
-// payload) bound to `result`.
+// The IR builder's `#Pre`/`#Post` contracts. A checked clause tests its
+// condition and, when it is false, stops with E3005 and the clause's report;
+// a function with contracts has its body in a ContractScope whose `pre`
+// clauses run on entry and whose `post` clauses run at every return, with the
+// returned carrier (or its success payload) bound to `result`.
 
-use jet_foundation.[Span, BodyContract, TContractResult, TPanicLoc, TPanicLocal, BodyRequireKind]
+use jet_foundation.[Span, Type, BodyContract, TContractResult, TPanicLoc, TPanicLocal]
 
 // An open contract scope: the result binding and the `post` clauses each
 // return checks.
 struct IRContractFrame { result: TContractResult, post: [BodyContract] }
 
-// One checked clause: a proven or stripped clause emits nothing. Its report
-// quotes the clause's source line with the caret under its span: the callee
-// name of a `#Pre` call site, the clause of a `#Post`.
+// One checked clause: a proven or stripped clause emits nothing. A failed
+// clause is the E3005 stop (runtime ordinal 3) whose message is
+// `#Pre contract failed: {msg}` or `#Post contract failed: {msg}`, the
+// registry row's what. Its report quotes the clause's source line with the
+// caret under its span: the callee name of a `#Pre` call site, the clause of
+// a `#Post`.
 fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
     if contract.disposition != .Check -> return
     if contract.file != b.f.source_file -> return ir_fail(&b, contract.span, "contract source differs from its function source")
@@ -21,7 +24,31 @@ fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract
     site :: b.line
     b.line = contract.line
     location :: TPanicLoc{file: contract.file, source_line: source_line, line: contract.line, column: column, caret: contract.span.end - contract.span.start, function: "", locals: [TPanicLocal]{}}
-    _ :: ir_require_stop(&m, p, &b, BodyRequireKind.Require{cond: contract.condition, msg: Val(contract.message)}, location, false, contract.span)
+    report :: ir_report_location(p, location)
+    condition :: ir_expr(&m, p, &b, contract.condition)
+    if ir_failed(b) || condition < 0 {
+        b.line = site
+        return
+    }
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    failed :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Not, failed, condition, -1, -1, b.line)
+    ir_open_if(&b.f, failed, b.line)
+    slot :: ir_expr(&m, p, &b, contract.message)
+    if ir_failed(b) -> return
+    message_ty :: ir_ty(p, b, contract.message)
+    text :: ir_render(&m, p, &b, message_ty, slot, IRRender.Display, contract.span)
+    if ir_failed(b) -> return
+    pointer_row :: ir_pointer_row(&m)
+    builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
+    b.fresh[builder] = false
+    ir_push_static(&m, &b, builder, if contract.kind == .Pre -> "#Pre contract failed: " else -> "#Post contract failed: ")
+    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+    string_row :: ir_string_row(&m)
+    message :: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    null :: ir_word_const(&m, &b, 0)
+    ir_stop(&m, p, &b, 3, message, null, null, report)
+    ir_end(&b.f, b.line)
     b.line = site
 }
 

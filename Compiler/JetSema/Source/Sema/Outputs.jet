@@ -298,6 +298,19 @@ fn sema_output_entry_contract(graph: SemaRegistrationGraph, module_index: Int, f
     } else if kind == OutputKind.Service || kind == OutputKind.Check {
         params_ok = function.parameters.len() == 0
     }
+    // E1308: one struct parameter that isn't `#CLI`-derived is the typed-entry
+    // shape with its derive missing, reported at the parameter's type.
+    if kind == OutputKind.Executable && function.parameters.len() == 1 && !params_ok && function.declaration.params.len() == 1 {
+        module_identity :: graph.modules[module_index].module_identity
+        if sema_type_resolve_nominal_row(graph, function.parameters[0].ty, module_identity) == .Val(row) {
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+                if item == .Struct(_) {
+                    &diagnostics.push(sema_error("E1308", function.declaration.params[0].ty_span, "`{source_name}`'s parameter isn't a CLI-derived type", "A typed `fn {source_name}(args: T)` entry only works when `T` is a `#CLI`-derived program struct.", "Mark the program struct `#CLI`."))
+                    return false
+                }
+            }
+        }
+    }
     return_ok :: if function.declaration.return_type == {
         None -> true
         Val(ty) -> if ty == {

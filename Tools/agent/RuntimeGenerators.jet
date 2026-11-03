@@ -639,6 +639,16 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         source = "{source}// {code} Why: {why}\n// Fix: {fix}\n"
         source = "{source}{emit("trap_footer_{code.lower()}", " Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}\n", "trap_write_word")}\n"
     }
+    // A failed `#Pre`/`#Post` clause (Trap.jet trap_contract_stop): the row's
+    // Why quotes the stop's own message at `{msg}`, so it is written in two
+    // pieces around that message.
+    contract_why :: registry_field(registry, "E3005", "why") ?? return Err(err)
+    contract_fix :: registry_field(registry, "E3005", "fix") ?? return Err(err)
+    hole :: contract_why.find("{{msg}}")
+    if hole < 0 || after_hole(contract_why).find("{{msg}}") >= 0 -> return Err(generator_fail("E3005.why must quote {{msg}} exactly once"))
+    source = "{source}// E3005 Why: {contract_why}\n// Fix: {contract_fix}\n"
+    source = "{source}{emit("trap_footer_e3005_head", " Why: {before_hole(contract_why)}", "trap_write_word")}\n"
+    source = "{source}{emit("trap_footer_e3005_tail", "{after_hole(contract_why)}\n Fix: {contract_fix}\nMore: jet-lang.dev/e/E3005\n", "trap_write_word")}\n"
     e3001_what :: registry_field(registry, "E3001", "what") ?? return Err(err)
     e3010_what :: registry_field(registry, "E3010", "what") ?? return Err(err)
     e0128_what :: registry_field(registry, "E0128", "what") ?? return Err(err)
@@ -680,6 +690,7 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         MessageLiteral{name: "header_panic", text: "Stop [E3001]: {before_hole(e3001_what)}"},
         MessageLiteral{name: "header_numeric", text: "Stop [E3010]: {before_hole(e3010_what)}"},
         MessageLiteral{name: "header_todo", text: "Stop [E3011]: `"},
+        MessageLiteral{name: "header_contract", text: "Stop [E3005]: "},
         MessageLiteral{name: "header_zip", text: "Stop [E0128]: {before_hole(e0128_what)}"},
         MessageLiteral{name: "zip_end", text: "{after_hole(e0128_what)}\n"},
         MessageLiteral{name: "collections_end", text: "`\n  --> <core.collections>:0\n"},
