@@ -145,14 +145,14 @@ test("a case's own `jet run` step runs from the example's directory", () => {
   assert.ok(runCwd(entry, "step: jet run authority_core_method.jet\n", undefined).endsWith("/Examples/features/effects"));
 });
 
-test("a refused run's full file paths compare relative to the example's directory", () => {
+test("a refused run's full file paths compare relative to the example's directory, or as {work} for a case step", () => {
   const entry = { stem: "safety/v_failure_cases/null_field", shown: "Examples/features/safety/v_failure_cases/null_field.jet", path: "/repo/Examples/features/safety/v_failure_cases/null_field.jet" };
   const report = "Error [E0303]: missing\n  --> /stage/Examples/features/safety/v_failure_cases/null_field.jet:10:16\n";
   assert.equal(withoutExampleDirectory(report, entry, null, "/stage"), "Error [E0303]: missing\n  --> null_field.jet:10:16\n");
   const stepped = { stem: "effects/authority_denied", shown: "Examples/features/effects/authority_denied.jet", path: "/repo/Examples/features/effects/authority_denied.jet" };
   const caseText = "step: jet run authority_denied.jet\n";
   const cwd = runCwd(stepped, caseText, "/stage");
-  assert.equal(withoutExampleDirectory("  --> /stage/Examples/features/effects/authority_denied.jet:12:4\n", stepped, caseText, cwd), "  --> authority_denied.jet:12:4\n");
+  assert.equal(withoutExampleDirectory("  --> /stage/Examples/features/effects/authority_denied.jet:12:4\n", stepped, caseText, cwd), "  --> {work}/authority_denied.jet:12:4\n");
 });
 
 test("a case's own `stdout: = FILE` assertion names the expected stdout", () => {
