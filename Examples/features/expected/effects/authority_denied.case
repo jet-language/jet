@@ -1,6 +1,9 @@
 # The package's own `deny: [Env]` refuses the program before it starts on every
-# tier, so the oracle is the one tier-independent run.
+# tier, so the oracle is the one tier-independent run. A refused `jet run` names
+# the file by its full path; the one expected output is compared without the
+# run folder, as the run-tier example runner compares it.
 step: jet run authority_denied.jet
+normalize: replace "{work}/" ""
 exit: 1
 stdout: empty
 stderr: = authority_denied.err.out
