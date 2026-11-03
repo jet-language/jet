@@ -31,10 +31,11 @@ exit: 0
 rename: open/.jet/build/main open/.jet/build/main_debug
 capture: debug_size = size file open/.jet/build/main_debug
 file: open/.jet/build/main_debug ~ ".eh_frame" # an image with its debug info keeps the loaded unwind table
+file: open/.jet/build/main_debug ~ ".debug_info" # and its DWARF sections
 step: jet build --debug-info=false main.jet
 cwd: open
 exit: 0
-file: open/.jet/build/main size < {cap:debug_size}
+file: open/.jet/build/main !~ ".debug_info" # `debug_info: false` leaves the DWARF sections out (#5005)
 step: jet run --debug-info=split main.jet
 cwd: open
 exit: 70
