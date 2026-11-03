@@ -2079,6 +2079,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             }
         }
         param_mutable := func.params[param_index].convention == AccessConvention.Write
+        // A sized-integer parameter starts with its type's interval, which a
+        // later exit guard narrows.
+        param_bounds :: sema_expression_type_interval(parameter_ty)
         param_symbol := Symbol{
             id: symbol_id(SymbolKind.Parameter, module_identity, owner_id.key, func.params[param_index].name),
             kind: SymbolKind.Parameter,
@@ -2090,7 +2093,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             visibility: 0,
         }
         if {
-            !sema_scope_declare_local(&scopes, sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program), param_mutable, func.params[param_index].convention, None, false) -> {
+            !sema_scope_declare_local(&scopes, sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program), param_mutable, func.params[param_index].convention, param_bounds, false) -> {
                 &diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }

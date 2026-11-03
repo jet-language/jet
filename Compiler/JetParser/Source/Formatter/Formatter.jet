@@ -1606,6 +1606,17 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             jfmt_write(&f, "#HTML(Path{{\"{escaped}\"}})")
             jfmt_newline(&f)
         }
+    } else if !grouped_file_rules && !has_ordered_file_rules {
+        // A page named by an expression (`#HTML(PAGE)`) keeps its written
+        // argument; only a literal page is the canonical `Path{…}` above.
+        loop application in prog.rule_facts {
+            if application.target == None && application.marker.name == "HTML" {
+                if !first -> jfmt_blank_line_between_items(&f)
+                first = false
+                jfmt_fmt_marker_group(&f, [Marker]{application.marker}, "#", true)
+                break
+            }
+        }
     }
     // Module-scoped `#Policy(...)` at a fixed position.
     module_policies := [PolicyDeclaration]{}

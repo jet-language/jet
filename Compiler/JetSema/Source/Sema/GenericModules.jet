@@ -901,8 +901,57 @@ fn sema_genmod_definition_items(items: [Item]) -> [Item] {
 // Expands `program`'s module aliases in place; a program without one is left
 // untouched (not copied).
 fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) {
-    rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported, settings) ?? return
-    program.items = rewritten
+    if sema_generic_modules_rewritten_items(program, module_identity, imported, settings) == .Val(rewritten) -> program.items = rewritten
+    if !sema_genmod_has_expression_tests(program.items) -> return
+    enums :: sema_genmod_enums(program.items, [GenericModuleDef]{})
+    sema_genmod_resolve_test_names(&program.items, sema_genmod_setting_literals(settings, enums), enums)
+}
+
+// A test named by an expression (`#Test(NAME)`, `#Test(label)` in a generic
+// module) is named by the string that expression folds to at compile time,
+// behind its instance's prefix. Every later pass reads the resolved `name`:
+// the duplicate-name check, the test plan and the test report.
+fn sema_genmod_resolve_test_names(items: &[Item], inherited: [String:Expr], enums: [String:Bool]) {
+    values :: sema_genmod_folded_consts(items, inherited, enums)
+    loop index in 0..<items.len() {
+        if items[index] == {
+            .Test(definition) -> {
+                if definition.name != None -> next
+                expression :: definition.name_expr ?? next
+                folded :: sema_genmod_fold(expression, values, enums) ?? next
+                text :: sema_genmod_text(folded) ?? next
+                updated := definition
+                updated.name = Val(if definition.name_prefix == .Val(prefix) -> sema_genmod_value_name(prefix, text) else -> text)
+                items[index] = Item.Test{value: updated}
+            }
+            .CodeModule(definition) -> {
+                body := definition.body ?? next
+                if !sema_genmod_has_expression_tests(body) -> next
+                sema_genmod_resolve_test_names(&body, values, enums)
+                updated := definition
+                updated.body = Val(body)
+                items[index] = Item.CodeModule{value: updated}
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_genmod_has_expression_tests(items: [Item]) -> Bool {
+    loop item in items {
+        if item == {
+            .Test(definition) -> {
+                if definition.name == None && definition.name_expr != None -> return true
+            }
+            .CodeModule(definition) -> {
+                if definition.body == .Val(body) {
+                    if sema_genmod_has_expression_tests(body) -> return true
+                }
+            }
+            else -> {}
+        }
+    }
+    false
 }
 
 // The expanded item list of `program`, or None when it has no module alias to

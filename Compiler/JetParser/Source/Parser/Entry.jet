@@ -41,6 +41,7 @@ use {
         TOKEN_COLON,
         TOKEN_COMMA,
         TOKEN_COLON_COLON,
+        TOKEN_COLON_EQ,
         TOKEN_DOT,
         TOKEN_EOF,
         TOKEN_FENCE_CLOSE,
@@ -861,6 +862,23 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                     parser_sync_top(&state)
                 }
             }
+            parser_marked_module_binding_ahead(&state) -> {
+                markers := [Marker]{}
+                loop parser_current_kind(&state) == TOKEN_HASH -> &markers.push(parser_parse_marker(&state))
+                start :: parser_current(&state).span
+                errors_before :: state.diagnostics.len()
+                statement :: parser_parse_binding_statement(&state)
+                definition_option :: parser_module_binding_def(statement, start, parser_previous_end(state))
+                if parser_error_since(state, errors_before) {
+                    parser_sync_top(&state)
+                } else if definition_option == .Val(definition) {
+                    loop marker in markers -> &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(start), site: Val(RuleSite.Declaration)})
+                    &program.items.push(Item.Const{value: definition})
+                } else {
+                    parser_sync_top(&state)
+                }
+                if state.position == before -> parser_bump(&state)
+            }
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
                 loop import in declaration.imports -> &program.imports.push(import)
@@ -960,6 +978,48 @@ fn parser_unattached_marker_at_end(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     parser_kind_at(&state, offset) == TOKEN_EOF
+}
+
+// The offset just past one `#[!]Name(.Name)*(…)` marker head at `start`
+// (relative to the cursor), or -1 when none starts there.
+fn parser_marker_head_end(state: &JetParserState, start: Int) -> Int Never! {
+    if parser_kind_at(&state, start) != TOKEN_HASH -> return -1
+    offset := start + 1
+    if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
+    if parser_kind_at(&state, offset) != TOKEN_IDENT -> return -1
+    offset += 1
+    loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
+    if parser_kind_at(&state, offset) == TOKEN_LPAREN {
+        depth := 1
+        offset += 1
+        loop depth > 0 {
+            kind :: parser_kind_at(&state, offset)
+            if kind == TOKEN_EOF -> return -1
+            if kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RPAREN -> depth -= 1
+            offset += 1
+        }
+    }
+    offset
+}
+
+// `#Rule name :: value` at file scope: rules before a lowercase module
+// binding. A marked constant (`NAME :: …`) and a type (`Name :: …`) take the
+// item route. The binding is the rules' Declaration site, which sema checks
+// against each rule's row.
+fn parser_marked_module_binding_ahead(state: &JetParserState) -> Bool Never! {
+    offset := parser_marker_head_end(&state, 0)
+    if offset < 0 -> return false
+    loop parser_kind_at(&state, offset) == TOKEN_HASH {
+        offset = parser_marker_head_end(&state, offset)
+        if offset < 0 -> return false
+    }
+    if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
+    next :: parser_kind_at(&state, offset + 1)
+    if next != TOKEN_COLON_COLON && next != TOKEN_COLON_EQ -> return false
+    name :: parser_lookahead(&state, offset)
+    bytes :: parser_value(state, name).bytes()
+    bytes.len() > 0 && ((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95)
 }
 
 // File rules bare

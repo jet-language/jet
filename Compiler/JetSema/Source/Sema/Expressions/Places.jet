@@ -76,6 +76,23 @@ fn sema_expression_integer_index(value: TExpr, span: Span, diagnostics: &[Diagno
     false
 }
 
+// The interval every value of an integer type holds: a sized integer's width
+// or an inline range's bounds. Int, and a width as wide as Int or wider,
+// states none.
+fn sema_expression_type_interval(ty: Type) -> TIntegerBounds? Never! {
+    if sema_expr_unwrap_tag(ty) == {
+        .IntN(signed, bits) -> {
+            if bits <= 0 || bits >= 63 -> return None
+            half := 1
+            loop _ in 1..<bits -> half *= 2
+            if signed -> return Val(TIntegerBounds{lo: 0 - half, hi: half - 1})
+            Val(TIntegerBounds{lo: 0, hi: half * 2 - 1})
+        }
+        .InlineRange(_, lo, hi) -> Val(TIntegerBounds{lo: lo, hi: hi})
+        else -> None
+    }
+}
+
 fn sema_expression_field_ref(symbol: Symbol, owner: SymbolID?, fallback_ty: Type) -> TFieldRef Never! {
     field_ty :: symbol.ty ?? fallback_ty
     TFieldRef{owner: owner, field: symbol.id, name: symbol.name, ty: field_ty, boxed: false}

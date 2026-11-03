@@ -8285,9 +8285,9 @@ fn sema_stmt_os_dispatch_arm_head(cond: Expr) -> String Never! {
 fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     complete := true
     if statement == {
-        .Unsafe(audit, _, body, span) -> {
+        .Unsafe(audit, audit_expr, body, span) -> {
             if {
-                !sema_effect_check_unsafe_region(audit, span, &diagnostics) -> {
+                !sema_effect_check_unsafe_region(audit, audit_expr != None, span, &diagnostics) -> {
                     complete = false
                 }
                 else -> {

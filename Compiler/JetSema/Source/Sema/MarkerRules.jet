@@ -1527,9 +1527,14 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
             }
         }
     }
-    fix := if nearest != "" && !ambiguous -> "did you mean `#{nearest}`?" else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
+    fix := if {
+        // A retired rule names the form that replaced it.
+        marker.name == "Invariant" -> "`#Invariant` is retired: use `distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline"
+        nearest != "" && !ambiguous -> "did you mean `#{nearest}`?"
+        else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
+    }
     diagnostic := sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.", fix)
-    if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
+    if nearest != "" && !ambiguous && marker.name != "Invariant" -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
 fn sema_marker_rules_repeated_error(marker: Marker, first: Marker) -> Diagnostic {

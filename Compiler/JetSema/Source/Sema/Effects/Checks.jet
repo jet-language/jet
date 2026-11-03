@@ -660,8 +660,10 @@ fn sema_effect_positive_panic(span: Span) -> Diagnostic {
     sema_error("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from the list, or write `-[!Panic]>`")
 }
 
-fn sema_effect_check_unsafe_region(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    if (reason ?? "").len() > 0 -> return true
+// A checked String argument that is not a literal (`#Unsafe(reason)`) is a
+// reason; the rule's signature check owns its type.
+fn sema_effect_check_unsafe_region(reason: String?, has_reason_expr: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if (reason ?? "").len() > 0 || (reason == None && has_reason_expr) -> return true
     &diagnostics.push(sema_error("E3112", span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`"))
     false
 }
@@ -3078,8 +3080,8 @@ fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagno
     valid := true
     loop statement in statements {
         if statement == {
-            .Unsafe(audit, _, body, span) -> {
-                if !sema_effect_check_unsafe_region(audit, span, &diagnostics) -> valid = false
+            .Unsafe(audit, audit_expr, body, span) -> {
+                if !sema_effect_check_unsafe_region(audit, audit_expr != None, span, &diagnostics) -> valid = false
                 if !sema_effect_check_unsafe_statements(body, &diagnostics) -> valid = false
             }
             .While(_, body, _, _, _) -> {
