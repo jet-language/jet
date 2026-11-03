@@ -1680,14 +1680,18 @@ the linker supplies the few glibc-only names below. What the linker does:
   section's relocations assigns GOT slots and reports undefined symbols.
 - **Layout.** ET_EXEC at the link base (`LINK_BASE` 0x400000 for `jet
   build`; `LINK_RUN_BASE` 0x200000000000 for an image `jet run` maps into its
-  own process, `Image/Loader.jet`) with file offset = address - base, three
-  page-aligned `PT_LOAD` segments: read-only (headers, `.rodata*`,
+  own process, `Image/Loader.jet`) with three `PT_LOAD` segments on pages of
+  their own: read-only (headers, `.rodata*`,
   `.gcc_except_table*`, the kept unwind records plus a zero terminator),
   read+execute (`.text*`, padded with `int3`), read+write (`.tdata`, the
   init/fini arrays, `.data.rel.ro*`, the GOT, `.data*`, then `.bss*` and
   common symbols), plus `PT_TLS` (`.tdata` + `.tbss`) and `PT_GNU_STACK`.
-  Section headers, `.symtab` and debug sections follow the loaded image
-  (Debug information, above).
+  In the file the read+write bytes follow the read-only ones (the two
+  mappings share that file page, neither executable), then section headers,
+  `.symtab` and debug sections (Debug information, above), then the code
+  from a page boundary to the end of the file, so the code's mapping reads
+  nothing else. A runtime image (`Image/RuntimePack.jet`) and a resident
+  executable keep file offset = address - base.
 - **Relocation.** `R_X86_64_64`, `PC32`, `PLT32`, `32`, `32S`, `PC64`,
   `GOTPCREL`, `GOTPCRELX`, `REX_GOTPCRELX`, `GOTPC32`, `GOTOFF64`, `TLSGD`,
   `TLSLD`, `DTPOFF32/64`, `GOTTPOFF`, `TPOFF32/64` and `SIZE32/64`; anything

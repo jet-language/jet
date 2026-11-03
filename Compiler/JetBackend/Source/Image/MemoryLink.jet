@@ -261,7 +261,7 @@ fn link_bind_layout(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
         file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
         has_rw: has_rw, has_tls: false, tdata_end: rw_start, init_start: rw_start, init_end: rw_start,
         fini_start: rw_start, fini_end: rw_start, preinit_start: rw_start, preinit_end: rw_start,
-        bss_start: file_end, note_at: 0, notes: [String:Int]{},
+        bss_start: file_end, note_at: 0, notes: [String:Int]{}, packed: false, rw_shift: 0,
     }
 }
 
@@ -303,9 +303,9 @@ fn link_bind_write(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l:
         if link_u32(c.bufs, 1, at) == 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
     }
     start :: view.program_base
-    link_phdr(&out, c.base, 1, 4, start, l.r_end - start, l.r_end - start, LINK_PAGE)
-    link_phdr(&out, c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
-    if l.has_rw -> link_phdr(&out, c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    link_phdr(&out, start - c.base, 1, 4, start, l.r_end - start, l.r_end - start, LINK_PAGE)
+    link_phdr(&out, l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
+    if l.has_rw -> link_phdr(&out, l.rw_start - c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
     loop k in 0..<view.phnum {
         at :: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
