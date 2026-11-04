@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6565,
-    "rev": 90395,
+    "nextNum": 6566,
+    "rev": 90400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61887,6 +61887,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T18:22:47.673Z"
+        },
+        {
+          "n": 23,
+          "text": "E0107's fix text no longer suggests 'Declare it first: it :: ...' when the unknown name is it, since that suggestion is itself E0003. The fix names the real remedy (name the subject or the loop item), with the UI snapshot updated from real output (found by Research-2, 2026-11-04).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T19:36:10.259Z"
         }
       ],
       "refs": [
@@ -61901,7 +61910,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-04T18:24:32.790Z",
+      "updated": "2026-11-04T19:36:10.259Z",
       "updatedBy": "Main",
       "goals": [
         "G17"
@@ -67420,86 +67429,6 @@
       "created": "2026-10-29T20:27:37.698Z",
       "updated": "2026-11-01T03:28:59.133Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0pd0x6j",
-      "num": 6256,
-      "title": "An #FX grant passed to `process.cmd(...).under(grant)` inside its own #FX block is rejected as an escape (E0711); Examples/features/types/authority fails and has no golden row",
-      "body": "Found by CoverPort during CP3 (#5902). Examples/features/types/authority/run.jet fails at dev base with E0711 (the grant escaping #FX), although the grant is used inside its own #FX block. Its only coverage is the case row tests/cases/authority/authority_example_runs_on_all_hosted_tiers.case, parked in Tools/testkit/known-failing.tsv:604 under the generic triage card #5454. The example also has no golden row, which violates I5.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": "Find why sema treats `.under(grant)` within the grant's own #FX scope as an escape (the escape check probably sees the builder chain's result type carrying the grant). Fix it in sema so a grant used inside its block is accepted and a real escape (returned, stored outside, captured by an escaping closure) is still E0711. Add the example's golden and UI tests for both sides.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Examples/features/types/authority passes run-feature-examples on --tier run and --tier build with its golden (expected/types/authority.out); tests/cases/authority/authority_example_runs_on_all_hosted_tiers (jet run --release + jet run) PASSes after its fixture is recopied from the example, and its known-failing row is removed (IrTypes-51, base jet 1620f05362) Landed in wave 29 as dev 11cf095719 (IrTypes-51)."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "Host note 2026-10-30: this machine has no bubblewrap (bwrap) installed, and the Jet runtime has no isolation-backend port, so `.under(policy)` spawns refuse. io/agent_executor and types/authority get `requires: tool:bwrap` (TestGreen-2, wave 2), so they skip on a host without bwrap and still fail where bwrap exists until this card lands."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "GoldC-2 2026-10-30: C1 is blocked by the isolation backend. The example is refused at runtime with 'authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn' (JetRuntime ProcessExecutionRoutes.jet:19,59). C2 and C3 are met in GoldC-g24."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "GoldC-2 2026-10-30: C1 is blocked at runtime: authority-bound process execution refuses with 'requires the #398/#893 isolation backend', so the authority example cannot print 'authority' on any tier. Sema side (C2) is being fixed in GoldC-2's g24 batch."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Examples/features/types/authority runs on o0/o1/o2 with a golden row, and the case row leaves known-failing.tsv",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in wave 29 at dev 11cf095719. Composed wave on bb770de593: chain FIXED_POINT; goldens 1205/1205, 0 lost; ui 1859→1859, 0 lost; cases 2514→2516, 0 lost (the replaced checked_alloc_request case is the intended deletion). IrTypes-51 (lane-check CHECK OK): Examples/features/types/authority passes on --tier run and --tier build with its golden, and tests/cases/authority/authority_example_runs_on_all_hosted_tiers (jet run --release + jet run) passes and has left known-failing.tsv.",
-          "at": "2026-11-01T19:33:45.398Z"
-        },
-        {
-          "n": 2,
-          "text": "UI tests pin the accepted in-block use and a rejected real escape",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "tests/ui/effects/grant_delegated_to_process_spec_ok (accepted in-block use) and grant_bound_process_spec_escape_is_e0711 (real escape)",
-          "at": "2026-10-30T10:19:33.685Z"
-        },
-        {
-          "n": 3,
-          "text": "golden/ui/cases compare loses 0 rows",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "golden/ui/cases lost 0 (golden-goldc-g27, ui-goldc-g27, cases-goldc-g26)",
-          "at": "2026-10-30T10:19:34.479Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-29T20:38:54.534Z",
-      "updated": "2026-11-01T19:34:01.583Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-01T19:34:01.583Z"
     },
     {
       "id": "c0ui9zol",
@@ -73580,81 +73509,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c055kwjg",
-      "num": 6493,
-      "title": "A foreign C host that never calls jet_rt_host_arguments runs with checked-alloc unenforced",
-      "body": "AsmPar-15 (2026-10-31) moves the JET_CHECKED_ALLOC environment scan out of eager startup and into the host argument path. A foreign C host that embeds the Jet runtime and never calls jet_rt_host_arguments is therefore not refused or checked under JET_CHECKED_ALLOC; it runs unchecked. Make the checked-alloc decision reachable on every entry (for example, on the first allocation, from envp captured once at a defined point) without restoring the eager whole-environment scan, and add an embed-host case.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "The startup environment scan is deleted. A C host that links the runtime object with a system linker keeps the jet_rt_alloc_check_init hook, so it always runs checked: never unenforced, and never dependent on whether it calls jet_rt_host_arguments. The prelinked runtime image leaves out the hook and jet_rt_alloc_check_link (RuntimePack.jet LINK_IMAGE_UNROOTED_EXPORTS), so image-bound programs stay unchecked. alloc-parity embed-clean and embed-double-free PASS. Landed in wave 29 as dev 11cf095719 (AsmPar-26)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Main: superseded in approach by D-CHECKED-BUILD1=A (unchecked builds link no checked heap, so a foreign host can't run unenforced). Implementing as AsmPar-26."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "AsmPar-25 (lazy check at the first allocation; hello 1,273 instructions in every environment) is held, not landed: it lets user code run before the exit-70 refusal, against D-SIZE-PAYUSE1 A ('stops with exit 70 before user code'). The scan's removal waits on D-CHECKED-BUILD1."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Main-1 (wave 24, landed as dev a34ef0affd; ui/cases rows from /mnt/jetscratch/lanes/Main/q/sg/{ui,cases}-w24-wave.txt) moves UiGreen-37's case fixture from fn main to fn run; the checked_alloc_request case PASSES. The card stays open: the eager startup env scan it forbids is still in .init_array. See also D-CHECKED-BUILD1 (redesigned 2026-11-01 as a build flag, which would delete the scan)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Stays open; UiGreen-37's approach misses this card's own constraint. The card asks for the checked-alloc decision on every entry 'without restoring the eager whole-environment scan'. UiGreen-37 (wave 22) adds jet_rt_alloc_check_refuse_init (Compiler/JetRuntime Alloc.jet:266, 301 B) to .init_array. At every startup it walks all of envp and byte-compares each 'J…' entry against JET_CHECKED_ALLOC=1. AsmPar-1 bisected hello's instructions:u: 45ab = w19 = w20 = w21 = 2682, w22 = w23 = 3235 (+553, more with more JET_* vars; asm-parity measured +725), at default and release. Rows: /mnt/jetscratch/lanes/AsmPar/selfab/hello-bis.tsv. Needed: decide lazily, as the card suggests (envp captured once, read on the first allocation or the first host-argument call), so a program that never allocates pays nothing; then re-prove run-alloc-parity embed-* and the checked_alloc_request case."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "wave 22 landed as dev 163d4852ad (wave s2 FIXED_POINT; goldens 1203=1203 0 lost; ui +1 0 lost; cases 2335 -> 2458, 1 lost = blocks_shared_by_two_tasks_are_freed_once E2105 build-write error under suite load, PASS alone via suite.sh --filter on the same s2). UiGreen-37 landed: the checked-alloc decision is made in the runtime .init_array, and run-alloc-parity embed-clean, embed-checked-clean and embed-double-free PASS. Not closed: its new case allocator_families/checked_alloc_request_is_decided_at_runtime_init FAILs on the landed tree with E0101, because the fixture spells its entry fn main. Main-1 in wave 24 renames it to fn run; by hand it then prints part0,part1,part2 and refuses with exit 70 under JET_CHECKED_ALLOC=1."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "UiGreen-37 in wave 22 (CHECK OK, s2==s3, 3 embed-host parity checks pass; jet run hello opens /proc/self/environ once instead of twice). Open: hello +496 instructions (2784 -> 3280) because the startup hook walks every envp entry. If that counts as the eager whole-environment scan this card forbids, make the hook only store envp and decide on the first allocator map. Handoff: /mnt/jetscratch/lanes/UiGreen/HANDOFF.md."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A foreign C host that links the Jet runtime object never runs with checked allocation silently unenforced: enforcement does not depend on whether it calls jet_rt_host_arguments or on an environment variable, and alloc-parity embed cases pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in wave 29 at dev 11cf095719 (AsmPar-26, lane-check CHECK OK; wave 29 compares 0 lost). The startup environment scan is deleted. A C host that links the runtime object with a system linker keeps the jet_rt_alloc_check_init hook, so it always runs checked and never depends on jet_rt_host_arguments. The prelinked image leaves out the hook (RuntimePack.jet LINK_IMAGE_UNROOTED_EXPORTS). The alloc-parity embed-clean and embed-double-free cases PASS.",
-          "at": "2026-11-01T19:34:56.462Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T00:30:40.286Z",
-      "updated": "2026-11-01T19:35:00.912Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-01T19:35:00.912Z"
-    },
-    {
       "id": "c0awiifz",
       "num": 6497,
       "title": "Size root 1: #CLI emits a parser specialized to the Args fields (about 163 KB, 55% of each CLI binary)",
@@ -74951,70 +74805,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c0ljn4r2",
-      "num": 6535,
-      "title": "jet refuses to start under JET_CHECKED_ALLOC=1, so no checked program can be built",
-      "body": "Found by CardClose-1 on 2026-11-01 (log /mnt/jetscratch/lanes/CardClose/smr.out). Docs/spec/reference/environment.md and Host.jet:420-425 (jet_cli_checked_alloc) say JET_CHECKED_ALLOC=1 is set when jet builds a program, and only such a build links the runtime's checked heap. But jet is itself a Jet program built without the checked heap, and the runtime's refusal (a program built without the checked allocator exits 70 when the variable is set) fires in jet's own startup. a0_022, the wave-21 s1 and tsb s1 all exit 70 with 'jet checked allocator (JET_CHECKED_ALLOC=1): this program was built without the checked allocator'. The refusal moved into the envp walk in 808ea17eec (AsmPar-15), and UiGreen-37 (#6493) moves it to a runtime-init hook. Both keep it on the toolchain's own images.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "New tests/cases/allocator_families/checked_alloc_is_chosen_at_build_time.case pins both directions. The unchecked image links no jet_rt_alloc_check symbol. The --checked-alloc image links jet_rt_alloc_check_init and prints the same output, under both jet build and jet run. run-alloc-parity.mjs covers the checked traps: double-free, foreign-free, layout-mismatch, overflow and write-after-free all PASS. Under decision A the refusal no longer exists, so the case pins this contract instead. It PASSes in cases --filter allocator_families (9 PASS; the 3 FAILs are the base's known ones). lane-check CHECK OK on ck. Goldens show no new failures besides the o0 process_run_all exit-70 flake, which passed 5/5 reruns. On web the image holds no checked heap (BuildOptions CHECKED_ALLOC_RUNTIME_EXPORTS, skipped by the web runtime partition): the case builds the program with --target web and node prints the same output, and --target web --checked-alloc is refused with E2104 (exit 2). Landed in wave 29 as dev 11cf095719 (AsmPar-26)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Decision D-CHECKED-BUILD1 = A: checked allocation is the `checked_alloc` build option (`--checked-alloc`, stock false, part of every build key), and JET_CHECKED_ALLOC is no longer read anywhere. Because the variable is gone, jet itself, an unchecked Jet program, cannot refuse to start. `jet build --checked-alloc` links the checked heap and the program runs checked; alloc-parity on tree ck passes all 10 rows. Self-build FIXED_POINT (s2 == s3). Landed in wave 29 as dev 11cf095719 (AsmPar-26)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Main: D-CHECKED-BUILD1=A ratified. Assigned to AsmPar-1 as AsmPar-26 (flag --checked-alloc, delete the env refusal ctor and the /proc/self/environ read, retire JET_CHECKED_ALLOC in one cutover). AsmPar-25 (lazy check) stays held."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "With JET_CHECKED_ALLOC=1 in the environment, jet build (and jet run) of a program succeeds and links the checked heap; the built program runs checked. The toolchain's own images (jet, jetpack) do not refuse their own start, and a program built without the checked heap still refuses when run under the variable.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in wave 29 at dev 11cf095719. Composed wave on bb770de593: chain FIXED_POINT; goldens 1205/1205, 0 lost; ui 1859→1859, 0 lost; cases 2514→2516, 0 lost (the replaced checked_alloc_request case is the intended deletion). AsmPar-26 (lane-check CHECK OK): with D-CHECKED-BUILD1=A ratified, checked allocation is the --checked-alloc build option and JET_CHECKED_ALLOC is no longer read anywhere, so jet no longer refuses to start and a checked program builds and runs checked.",
-          "at": "2026-11-01T19:33:40.276Z"
-        },
-        {
-          "n": 2,
-          "text": "A case pins both directions (checked build succeeds under the variable; an unchecked build refuses under it with exit 70), and lane-check returns CHECK OK.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in wave 29 at dev 11cf095719. Composed wave on bb770de593: chain FIXED_POINT; goldens 1205/1205, 0 lost; ui 1859→1859, 0 lost; cases 2514→2516, 0 lost (the replaced checked_alloc_request case is the intended deletion). AsmPar-26: tests/cases/allocator_families/checked_alloc_is_chosen_at_build_time.case pins both directions (the unchecked image links no jet_rt_alloc_check symbol; --checked-alloc links jet_rt_alloc_check_init with the same output under jet build and jet run). PASS in wave 29 cases; lane-check CHECK OK.",
-          "at": "2026-11-01T19:33:41.829Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T08:15:43.273Z",
-      "updated": "2026-11-01T19:33:55.799Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-01T19:33:55.799Z"
-    },
-    {
       "id": "c035bwsi",
       "num": 6536,
       "title": "Interactive command picker for bare jet on a terminal (help_pty cases)",
@@ -75441,51 +75231,6 @@
       "updated": "2026-11-04T10:29:28.061Z",
       "updatedBy": "Main",
       "completedAt": "2026-11-04T10:29:28.061Z"
-    },
-    {
-      "id": "c04jmyw7",
-      "num": 6546,
-      "title": "jet build overwrites its output in place: E2105 Text file busy when the previous binary is still running or held",
-      "body": "IrTypes-3 and Main, 2026-11-01. tests/cases/memory_semantics/blocks_shared_by_two_tasks_are_freed_once fails intermittently on chain-built compilers: 2 of 11 runs on the IrTypes stack s1, 1 of 12 on a base 1620f05362 chain s1, and once in the wave 25 suite. Step 3, jet build main.jet, reports E2105 'Couldn't write …/.jet/build/main: Text file busy (os error 26)' right after the release build step passed. jet build opens the existing output path for writing. Linux refuses that while any process is executing the file, or while a forked child still holds an inherited descriptor. Root fix: write the image to a temporary file in the same directory (O_CLOEXEC) and rename() it over the destination. That is atomic, never ETXTBSY, and never leaves a half-written executable. Same meaning on every tier.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "jet_cli_native_write (the one executable writer for build/run/test/dev) writes <path>.<pid>.new and renames it over <path>; the script cache and C archive already staged+renamed. Probe that keeps the old binary running while `jet build` rewrites it: 50/50 ok on s1 (base: 0/5, all ETXTBSY). blocks_shared_by_two_tasks_are_freed_once 30/30 PASS on chain s1 5981de7a818b0f25 (IrTypes-50) Landed in wave 29 as dev 11cf095719 (IrTypes-50)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "jet build (and every other path that writes an executable or library image) writes through a same-directory temp file plus rename. A probe that keeps the old binary running while jet build rewrites it succeeds 50 of 50 times, and blocks_shared_by_two_tasks_are_freed_once passes 30 of 30 runs on a chain-built s1.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in wave 29 at dev 11cf095719. Composed wave on bb770de593: chain FIXED_POINT; goldens 1205/1205, 0 lost; ui 1859→1859, 0 lost; cases 2514→2516, 0 lost (the replaced checked_alloc_request case is the intended deletion). IrTypes-50 (lane-check CHECK OK): jet_cli_native_write, the one executable writer for build/run/test/dev, writes <path>.<pid>.new and renames it over <path>. The probe that keeps the old binary running while jet build rewrites it succeeded 50/50.",
-          "at": "2026-11-01T19:33:43.450Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T16:10:23.266Z",
-      "updated": "2026-11-01T19:33:58.635Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-01T19:33:58.635Z"
     },
     {
       "id": "c0hjv9e5",
@@ -76760,6 +76505,67 @@
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
       "updated": "2026-11-04T18:09:20.214Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c09umw0r",
+      "num": 6565,
+      "title": "Pipe syntax: steps read top to bottom with the value written as it (D-PIPE1)",
+      "body": "The owner asked for pipes to be researched and proposed (2026-11-04), knowing they duplicate a named value used once. The study (Docs/research/2026-11-04-pipes.md) finds about 950 repo sites where steps are functions rather than methods, so dots cannot fix them. The ballot D-PIPE1 chooses the spelling. Nothing is built before it is ratified.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Precondition, a wrong-meaning bug found by the pipes study: inside a bindingless loop body, a subject table over a computed value (if .age * 2 == { … }) must give its arms its own subject as it, not the loop item. Fixed with a golden on o0, o1 and o2 before any pipe work starts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T19:36:09.026Z"
+        },
+        {
+          "n": 2,
+          "text": "After D-PIPE1 is ratified: the ratified spelling is registered in the syntax registry, parses, and lowers each stage to a hidden :: binding before type checking. A paired IR test proves the pipe and the hand-named form give identical IR at O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T19:36:09.425Z"
+        },
+        {
+          "n": 3,
+          "text": "After D-PIPE1 is ratified: every pipe error the ballot names (a stage without it, a pipe where another it is visible, a pipe inside a stage, a pipe inside a larger expression) has a registered code, what/why/fix text and a UI snapshot. An example with goldens runs on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T19:36:09.832Z"
+        }
+      ],
+      "refs": [
+        "Docs/proposals/2026-11-04-pipes.md",
+        "Docs/research/2026-11-04-pipes.md"
+      ],
+      "tags": [],
+      "goals": [
+        "G22"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T19:36:01.124Z",
+      "updated": "2026-11-04T19:36:09.832Z",
       "updatedBy": "Main"
     }
   ],
@@ -150484,165 +150290,6 @@
       "ratifiedAt": "2026-11-01"
     },
     {
-      "id": "D-CHECKED-BUILD1",
-      "cardId": "c0ljn4r2",
-      "group": "tooling",
-      "title": "How a debugging build asks for the checked memory allocator",
-      "situation": "",
-      "gist": "Which signal tells jet to build a program with the checked allocator, now that jet itself refuses to start under JET_CHECKED_ALLOC=1?",
-      "lesson": "JET_CHECKED_ALLOC=1 asks for a program whose every heap block is guarded and checked. jet reads it while building, but jet is itself a program built without that checking. So jet stops at start-up, and no checked program can be built today. Every unchecked program also scans its whole environment at start-up, only to refuse this variable.",
-      "explainer": "",
-      "story": "Mia hunts a double free. She runs JET_CHECKED_ALLOC=1 jet build app.jet, and jet exits 70 before building anything. Under option A she runs jet build --checked-alloc app.jet, then ./app, and the bad free is reported with its call sites. Her everyday builds start faster, because no program checks its environment for the variable any more.",
-      "inWild": "Go: the race detector is chosen when building, with go build -race, and the built program checks itself. Source: https://go.dev/doc/articles/race_detector\n\nAddressSanitizer: chosen at compile time with -fsanitize=address; ASAN_OPTIONS only tunes a program already built with it. Source: https://clang.llvm.org/docs/AddressSanitizer.html",
-      "detail": "Found 2026-11-01 by CardClose-1. Docs/spec/reference/environment.md says the variable is read when jet builds a program and again when the program starts. A program built without the checked heap but started with the variable set stops with exit 70. jet is such a program, so it stops first. No current rule lets only the toolchain carry a mark: double-underscore names are open only to Core and generated code, and the first-party reservation covers only import names. The variable is marked internal.\n\nRedesign 2026-11-01 (owner: engineer the downsides away). The first version recommended two variables, one for the build and one for the run. That kept a cost on every program.\n\nThe start-up refusal hook (JetRuntime Alloc.jet jet_rt_alloc_check_refuse_init, 301 bytes in .init_array) walks the whole environment at every start. Measured by AsmPar-1 on hello: 2682 user instructions per run before the hook landed and 3235 after (+553, more with a larger environment), and the default hello binary grew 72 bytes. A build flag removes the run variable, so the hook, its refusal and its scan go away from every program, and jet never sees a variable at start-up.\n\nPrior art: Go chooses the race detector with go build -race and the built program always checks itself. Clang chooses AddressSanitizer with -fsanitize=address; ASAN_OPTIONS only tunes a program already built with it. Neither turns checking on with a run-time variable in an unchecked program.\n\nSwitching is not a loss: checked and unchecked builds are cached under separate keys, so dropping or adding the flag reuses the other build at once, as Go does for -race.\n\nRelation to ratified D-SIZE-PAYUSE1 A: its checker part (\"the build environment holds JET_CHECKED_ALLOC=1\", \"every program keeps the class-limit load and the start test\") is what A replaces. A keeps its intent, a checker linked only into programs that ask for it, but chooses it with the flag. Every program then drops the start test, and nothing runs unchecked by mistake, because no run-time variable exists to be ignored. The crash table and live inspection parts of D-SIZE-PAYUSE1 are unchanged.\n\nMeasured 2026-11-01 by AsmPar-1 on the wave-24 tree: with the start-up environment walk taken out, hello runs 1,273 user instructions in every environment, against 3,235 with the walk today. A deletes the hook outright, so hello costs no more than that. A lazy check that waits for the first allocation was also built, and is not offered: it lets user code run before the refusal, which the ratified rule forbids.",
-      "options": [
-        {
-          "key": "A",
-          "name": "A build flag, like Go's -race",
-          "detail": "jet build --checked-alloc, jet run --checked-alloc and jet test --checked-alloc link the checked heap, and the built program always checks itself. Unchecked programs link no checked heap and run no start-up check. JET_CHECKED_ALLOC is retired.",
-          "technical": "BuildOptions gains checked_alloc, so build_options_key separates checked and unchecked outputs in the cache. Host.jet jet_cli_checked_alloc reads the option instead of the variable. In a checked build, the checked heap turns checked mode on unconditionally (Alloc.jet jet_rt_alloc_check_init). So alloc_check_requested and its /proc/self/environ read go.\n\njet_rt_alloc_check_refuse_init, alloc_check_refuse_entry and alloc_check_refuse are deleted, with their .init_array entry. run-alloc-parity.mjs builds its checked cases with the flag. The runtime-init case becomes a flag case. environment.md drops the row, and the build reference gains the flag.",
-          "code": "$ jet build --checked-alloc app.jet\n$ ./app\njet checked allocator: double free of 0x7f3a…\n  freed at app.jet:12, again at app.jet:19"
-        },
-        {
-          "key": "B",
-          "name": "Separate build and run variables",
-          "detail": "JET_BUILD_CHECKED_ALLOC=1 asks jet to link the checked heap. JET_CHECKED_ALLOC=1 keeps its run-time meaning and its refusal. jet never sees the run variable while building.",
-          "technical": "Host.jet jet_cli_checked_alloc reads the build variable and puts it in the build key. The runtime refusal hook keeps reading only JET_CHECKED_ALLOC, so every program keeps the start-up environment scan. environment.md gets one new row.",
-          "code": "$ JET_BUILD_CHECKED_ALLOC=1 jet build app.jet\n$ JET_CHECKED_ALLOC=1 ./app"
-        },
-        {
-          "key": "C",
-          "name": "Keep today's behavior",
-          "detail": "jet keeps refusing to start under the variable, so the checked allocator stays unusable until another design lands.",
-          "technical": "No code change. environment.md is corrected to say checked builds are unavailable.",
-          "code": "$ JET_CHECKED_ALLOC=1 jet build app.jet\njet checked allocator: this program was built without the checked allocator (exit 70)"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "The race detector is a build choice; the built program checks itself. Source: https://go.dev/doc/articles/race_detector",
-          "code": "go build -race ./app && ./app"
-        },
-        {
-          "lang": "C (Clang)",
-          "note": "AddressSanitizer is a compile flag; ASAN_OPTIONS only tunes a checked program. Source: https://clang.llvm.org/docs/AddressSanitizer.html",
-          "code": "clang -fsanitize=address app.c && ASAN_OPTIONS=detect_leaks=1 ./a.out"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A asks for checking where Go and Clang do, at build time, and the built program always checks itself. That needs no reserved names, no toolchain special case and no run-time variable, so unchecked programs carry no start-up check at all.",
-        "gains": [
-          "Checked builds work again with one signal.",
-          "Every unchecked program drops the start-up environment scan: 553 fewer instructions and 72 fewer bytes in hello."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps two variables and makes every program scan its environment at start-up."
-          },
-          {
-            "key": "C",
-            "reason": "C leaves the memory debugging aid unusable."
-          }
-        ],
-        "tradeoff": "None remaining: one signal, and no start-up cost in any other program."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Which signal asks jet to build a program with the checked memory allocator?",
-        "lesson": "JET_CHECKED_ALLOC=1 asks for checked memory, but jet itself refuses to start under it. So no checked program can be built today. Every other program also scans its environment at start-up, only to refuse this variable.",
-        "trio": {
-          "current": {
-            "note": "jet stops before building anything.",
-            "code": "$ JET_CHECKED_ALLOC=1 jet build app.jet   # exit 70"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "The race detector is a build flag; the built program checks itself. Source: https://go.dev/doc/articles/race_detector",
-            "code": "go build -race ./app"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "A build flag, like Go's -race",
-            "gist": "jet build --checked-alloc links the checked heap; the program always checks itself.",
-            "gains": [
-              "One signal; jet never sees it at start-up.",
-              "No start-up check in any other program.",
-              "Both builds are cached; switching is instant."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "$ jet build --checked-alloc app.jet\n$ ./app"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Separate build and run variables",
-            "gist": "A build variable asks for the checked heap; the run variable keeps its refusal.",
-            "gains": [
-              "Works with no toolchain special case."
-            ],
-            "losses": [
-              "Two variables to learn.",
-              "Every program still scans its environment at start-up."
-            ],
-            "proposed": {
-              "code": "$ JET_BUILD_CHECKED_ALLOC=1 jet build app.jet\n$ JET_CHECKED_ALLOC=1 ./app"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep today's behavior",
-            "gist": "jet keeps refusing under the variable; checked builds stay unavailable.",
-            "gains": [
-              "No change."
-            ],
-            "losses": [
-              "The memory debugging aid cannot be used."
-            ],
-            "proposed": {
-              "code": "$ JET_CHECKED_ALLOC=1 jet build app.jet   # exit 70"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A asks for checking at build time, as Go and Clang do. The built program always checks itself, so no program needs a start-up check.",
-          "gains": [
-            "Checked builds work with one signal.",
-            "hello runs 553 fewer instructions at start-up."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B keeps two variables and a start-up scan in every program."
-            },
-            {
-              "key": "C",
-              "reason": "C leaves the debugging aid unusable."
-            }
-          ],
-          "tradeoff": "None remaining."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-01T08:25:34.525Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-01"
-    },
-    {
       "id": "D-WEB-CEILING1",
       "cardId": "c0j6lwuh",
       "group": "performance",
@@ -157555,6 +157202,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T19:36:10.259Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#23 E0107's fix text no longer suggests 'Declare it first: it ::"
+    },
+    {
+      "at": "2026-11-04T19:36:09.832Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09umw0r",
+      "note": "#3 After D-PIPE1 is ratified: every pipe error the ballot names"
+    },
+    {
+      "at": "2026-11-04T19:36:09.425Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09umw0r",
+      "note": "#2 After D-PIPE1 is ratified: the ratified spelling is register"
+    },
+    {
+      "at": "2026-11-04T19:36:09.026Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09umw0r",
+      "note": "#1 Precondition, a wrong-meaning bug found by the pipes study: "
+    },
+    {
+      "at": "2026-11-04T19:36:01.124Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c09umw0r",
+      "note": "Pipe syntax: steps read top to bottom with the value written as it (D-PIPE1)"
+    },
     {
       "at": "2026-11-04T19:22:03.439Z",
       "by": "Main",
