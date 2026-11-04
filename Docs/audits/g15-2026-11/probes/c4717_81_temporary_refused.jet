@@ -1,0 +1,14 @@
+// #4717 c81: true temporaries are still refused: these arguments die at the end of the call, so the returned view must be rejected.
+enum Packet {
+    Data([Int])
+    Empty
+}
+
+fn head(packet: Packet, spare: [Int]) -> View<Int> from packet | spare {
+    if packet == .Data(items) -> return items[0..1]
+    spare[0..0]
+}
+
+fn run() {
+    print(head(Packet.Data([Int]{7, 8}), [Int]{0}))
+}
