@@ -129,12 +129,13 @@ unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
 
 A report's `file` fields (the root's, each cause's and each `fix_edits`
-entry's) are absolute paths, so a report stays resolvable from any working
-directory. An E2702 crypto-misuse report is the exception (D-CRYPTO-DIAG1):
-it names a source relative to the project the checked input belongs to (its
-workspace, repository or package root), else relative to the working
-directory, else by its file name, so it never carries the machine's
-directory layout.
+entry's) follow one rule for every code (D-REPORT-PATH1). A file under the
+folder jet ran in is named relative to that folder. Another file of the
+project that folder belongs to (its workspace, repository or package root) is
+named with `../` steps from it. Any other file keeps its absolute path. A
+report therefore resolves from the folder jet ran in, and it does not carry
+the machine's directory layout for a project's own files. LSP keeps absolute
+`file://` URIs.
 
 Registry-supplied machine next actions must apply to the actual diagnostic,
 not leak a registry example's names. E0104's `no_fix_reason.next` directs the
