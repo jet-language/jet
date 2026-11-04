@@ -1,4 +1,4 @@
-Error [E0112]: `double` wants Int (a whole number) here, but this is String (text)
+Error [jet.ValueTypeMismatch]: `double` wants Int (a whole number) here, but this is String (text)
   --> main.jet:2:35
     |
   2 | fn first() -> Int { helper.double("two") }
@@ -7,7 +7,7 @@ Error [E0112]: `double` wants Int (a whole number) here, but this is String (tex
  Fix: Use Int (a whole number) here
 More: jet-lang.dev/e/E0112
 
-Error [E0109]: Text isn't joined with `+`
+Error [jet.OperatorTypeMismatch]: Text isn't joined with `+`
   --> main.jet:3:32
     |
   3 | fn second() -> String { helper.label(4) + 1 }
@@ -16,7 +16,7 @@ Error [E0109]: Text isn't joined with `+`
  Fix: Write the pieces inside one interpolated string (schematic: the checked operands are not simple names)
 More: jet-lang.dev/e/E0109
 
-Error [E0102]: Nothing named `unknown_call` exists here
+Error [jet.UnknownFunction]: Nothing named `unknown_call` exists here
   --> main.jet:4:21
     |
   4 | fn third() -> Int { unknown_call(3) }
@@ -25,7 +25,7 @@ Error [E0102]: Nothing named `unknown_call` exists here
  Fix: Define it first (fn unknown_call() { ... }), or call one that exists
 More: jet-lang.dev/e/E0102
 
-Error [E0109]: `==` can't compare or combine Bool (true or false) and String (text)
+Error [jet.OperatorTypeMismatch]: `==` can't compare or combine Bool (true or false) and String (text)
   --> main.jet:5:30
     |
   5 | fn fourth() -> Bool { helper.flag(2) == "yes" }
@@ -34,7 +34,7 @@ Error [E0109]: `==` can't compare or combine Bool (true or false) and String (te
  Fix: Use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair
 More: jet-lang.dev/e/E0109
 
-Error [E0113]: This value is Int (a whole number), but `label` returns String
+Error [jet.ReturnTypeMismatch]: This value is Int (a whole number), but `label` returns String
   --> helper.jet:2:34
     |
   2 | fn label(value: Int) -> String { value }
@@ -43,7 +43,7 @@ Error [E0113]: This value is Int (a whole number), but `label` returns String
  Fix: Put the value in text with interpolation: "{value}"
 More: jet-lang.dev/e/E0113
 
-Error [E0107]: Nothing named `missing` exists here
+Error [jet.UnknownName]: Nothing named `missing` exists here
   --> helper.jet:3:59
     |
   3 | fn ratio(total: Int, count: Int) -> Int { total / count + missing }
@@ -52,7 +52,7 @@ Error [E0107]: Nothing named `missing` exists here
  Fix: Declare it first: `missing :: ...`
 More: jet-lang.dev/e/E0107
 
-Error [E0113]: This value is Int (a whole number), but `flag` returns Bool
+Error [jet.ReturnTypeMismatch]: This value is Int (a whole number), but `flag` returns Bool
   --> helper.jet:4:31
     |
   4 | fn flag(value: Int) -> Bool { value + 1 }

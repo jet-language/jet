@@ -38,12 +38,12 @@ fn sema_gate_ledger_collect(modules: [SemaGateModule], names: NameLedger, gates:
         sema_gate_statements(row.source, row.program.script_body, &ledger, context)
         sema_gate_items(row.source, row.program.items, &ledger, context)
         loop application in row.program.rule_facts {
-            if application.marker.name != "allow" -> next
+            if application.marker.name != "Allow" -> next
             reason_expr :: sema_gate_marker_expr(application.marker, 1)
             reason :: if sema_gate_literal_text(reason_expr) == .Val(literal) -> Val(literal) else -> reason_expr.map((expression) -> sema_gate_expression_text(expression))
             detail :: if sema_gate_marker_expr(application.marker, 0) == .Val(value) -> sema_gate_expression_text(value) else -> "None"
             scope :: if application.site == .Val(site) -> sema_gate_rule_site_name(site) else -> "source"
-            gate_ledger_push(&ledger, gate_source_entry(GateKind.LintAllow, "lint", scope, row.source, application.marker.span, "#allow", reason, detail, if reason_expr != None -> "recorded" else -> "missing"))
+            gate_ledger_push(&ledger, gate_source_entry(GateKind.LintAllow, "lint", scope, row.source, application.marker.span, "#Allow", reason, detail, if reason_expr != None -> "recorded" else -> "missing"))
         }
     }
     sema_gate_append_structure(&ledger, names)
@@ -394,6 +394,7 @@ fn sema_gate_rule_site_name(site: RuleSite) -> String Never! {
         .Expression -> "expression"
         .Type -> "type"
         .Impl -> "impl"
+        .Trait -> "trait"
         .Declaration -> "declaration"
         .Constant -> "constant"
         .Field -> "field"

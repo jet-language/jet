@@ -1,14 +1,18 @@
+struct RejectedType {
+    impl Diagnostic {
+        code :: "E0927"
+        fn what(self) -> String { "the rule rejected this type" }
+        fn why(self) -> String { "the test rule is deliberately strict" }
+        fn fix(self) -> String { "remove the marker" }
+    }
+}
+
 struct Rejects {
     impl Marker {
         sites :: [.Type]
 
         fn expand(self, target: Target) {
-            reject(
-                code: "E0927",
-                what: "the rule rejected this type",
-                why: "the test rule is deliberately strict",
-                fix: "remove the marker"
-            )
+            reject(RejectedType{})
         }
     }
 }

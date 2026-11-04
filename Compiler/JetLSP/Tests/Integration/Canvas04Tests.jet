@@ -334,7 +334,7 @@ use {
     err :: Canvas.debug_session_json_for_file(path, req).unwrap_err()
     assert(err.contains("\"protocol\":\"jet.canvas.debug\""), err)
     assert(err.contains("\"kind\":\"diagnostic\""), err)
-    assert(err.contains("Error [E2203]"), err)
+    assert(err.contains("Error [jet.DebuggerUnavailable]"), err)
     assert(!err.contains("rustc"), err)
     assert_eq(fs.read_to_string(path).unwrap(), src)
 }
@@ -611,7 +611,7 @@ use {
     err :: Canvas.apply_transaction_json(path, invalid_expr).unwrap_err()
     assert(err.contains("\"protocol\":\"jet.canvas.edit\""), err)
     assert(err.contains("\"kind\":\"diagnostic\""), err)
-    assert(err.contains("Error [E0107]"), err)
+    assert(err.contains("Error [jet.UnknownName]"), err)
     assert(!err.contains("rustc"), err)
     assert_eq(fs.read_to_string(path).unwrap(), before)
 }

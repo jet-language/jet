@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0126 — Jet diagnostic</title>
-<meta name="description" content="Default expression references a later parameter (D-NARG-D2)">
+<meta name="description" content="Default expression references a later parameter">
 <meta property="og:title" content="E0126 — Jet diagnostic">
-<meta property="og:description" content="Default expression references a later parameter (D-NARG-D2)">
+<meta property="og:description" content="Default expression references a later parameter">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0126</h1>
-<p>Default expression references a later parameter (D-NARG-D2)</p>
+<p>Default expression references a later parameter</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Default expression references a later parameter (D-NARG-D2)</p>
+<p class="diag-copy what" data-registry-field="what">Default expression references a later parameter</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Move the referenced parameter before the parameter that uses it as a default.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0126</code>: <code>tests/ui/default_forward_ref.stderr</code>.</p>
-<pre class="diag">Error [E0126]: Default for `a` in `f` references `b`, which comes after it
+<pre class="diag">Error [jet.DefaultReadsLaterParameter]: Default for `a` in `f` references `b`, which comes after it
   --&gt; tests/ui/default_forward_ref.jet:1:13
     |
   1 | fn f(a: Int{b}, b: Int) -&gt; Int { a }
@@ -46,7 +46,7 @@
  Fix: Reorder the parameters so `b` comes before `a`, or use a constant default
 More: jet-lang.dev/e/E0126
 
-Error [E0104]: `f` expects 2 arguments, got 1
+Error [jet.ArgumentCountMismatch]: `f` expects 2 arguments, got 1
   --&gt; tests/ui/default_forward_ref.jet:3:10
     |
   3 |     _ :: f(1)

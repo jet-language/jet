@@ -278,6 +278,19 @@ fn gh_grammar_keyword_words() -> [String] {
     assert_eq(missing.join("\n"), "")
 }
 
+// The `#X :: value` marker line: the tree-sitter section renders the
+// registry's separator, and the grammar's `inbody_marker` rule parses it.
+#Test("tree_sitter_parses_the_inbody_marker_line_with_the_registry_separator") {
+    separator := ""
+    loop constant in gh_constants() {
+        if constant.name == "MARKER_INBODY_SEPARATOR" -> separator = constant.value
+    }
+    assert(separator != "", "missing MARKER_INBODY_SEPARATOR in {GH_SYNTAX_DIR}")
+    assert(gh_generated_section(GH_TREE_SITTER).contains("const JET_MARKER_INBODY_SEPARATOR = \"{separator}\";"), "{GH_TREE_SITTER} does not render MARKER_INBODY_SEPARATOR")
+    assert(gh_read(GH_TREE_SITTER).contains("inbody_marker:"), "{GH_TREE_SITTER} has no `inbody_marker` rule")
+    assert(gh_has(gh_anonymous_node_types(), separator), "{GH_NODE_TYPES} does not list `{separator}`")
+}
+
 // tests/grammar.rs:204: the Zed generated block names exactly the word tokens
 // (other than marker rules) that tree-sitter parses as anonymous literals.
 #Test("zed_generated_query_covers_anonymous_highlight_words") {

@@ -28,16 +28,16 @@ stderr: ~ "vendor/libmissing.a` doesn't exist" # an archive is linked as written
 step: jet run --link-args=-Wl,--as-needed app.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]" # the native linker takes no flags
+stderr: ~ "Error [jet.InvalidCommandInput]" # the native linker takes no flags
 stderr: ~ "-Wl,--as-needed" # the refused word is named
 step: jet run --link-args=greet.o app.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]" # it reads `ar` archives only
+stderr: ~ "Error [jet.InvalidCommandInput]" # it reads `ar` archives only
 step: jet run --libs= app.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]" # an empty item
+stderr: ~ "Error [jet.InvalidCommandInput]" # an empty item
 step: jet build app.jet
 cwd: open
 exit: 0
@@ -53,7 +53,7 @@ stdout: = "linked\n"
 step: jet run --output-dir=out app.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]" # a run writes no executable to place
+stderr: ~ "Error [jet.InvalidCommandInput]" # a run writes no executable to place
 stderr: ~ "`--output-dir=out` places the executables `jet build` writes, and `jet run` writes none" # the refused flag is named
 step: jet build --os=windows app.jet
 cwd: open
@@ -70,7 +70,7 @@ stderr: ~ "`os: web` in profile `web` of package.jet asks for a web build" # the
 step: jet build --min-os=10.15 app.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]" # a Linux ELF image has no versioned ABI floor
+stderr: ~ "Error [jet.InvalidCommandInput]" # a Linux ELF image has no versioned ABI floor
 stderr: ~ "`--min-os=10.15` sets a minimum OS version" # the refused flag is named
 step: jet build --output-dir=.jet/build
 cwd: code
@@ -91,11 +91,11 @@ file: code/other/app exists # any directory under the package root
 step: jet run --link-args=-Lvendor main.jet
 cwd: forbid
 exit: 1
-stderr: ~ "Error [E3415]: The `link_override` gate at `command line (--link-args=-Lvendor)` is forbidden by" # the package policy forbids the gate
+stderr: ~ "Error [jet.GateDeniedByPolicy]: The `link_override` gate at `command line (--link-args=-Lvendor)` is forbidden by" # the package policy forbids the gate
 step: jet build --profile=vendored main.jet
 cwd: forbid
 exit: 1
-stderr: ~ "Error [E3415]: The `link_override` gate at `link_args: [\"-Lvendor\"] in profile vendored of package.jet` is forbidden by" # the profile field is the gate's site
+stderr: ~ "Error [jet.GateDeniedByPolicy]: The `link_override` gate at `link_args: [\"-Lvendor\"] in profile vendored of package.jet` is forbidden by" # the profile field is the gate's site
 step: jet run main.jet
 cwd: forbid
 exit: 0
@@ -103,10 +103,10 @@ stdout: = "checked\n"
 step: jet run --profile=flat main.jet
 cwd: refused_profile
 exit: 2
-stderr: ~ "Error [E2104]" # a List row takes a list literal
+stderr: ~ "Error [jet.InvalidCommandInput]" # a List row takes a list literal
 stderr: ~ "a list of strings" # the expected kind is named
 step: jet build
 cwd: refused_code
 exit: 1
-stderr: ~ "Error [E3502]" # so does its fn build call
+stderr: ~ "Error [jet.BuildPlanFailed]" # so does its fn build call
 stderr: ~ "b.libs" # the refused call is named

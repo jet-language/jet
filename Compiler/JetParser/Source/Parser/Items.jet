@@ -12,7 +12,6 @@ use {
         CtValue,
         DeriveBodyItem,
         DeriveDef,
-        EffectDecl,
         EffectRowEntry,
         EnumDef,
         EnumGroup,
@@ -139,9 +138,10 @@ struct ParsedItemOrImport {
     // One import for a `use` line, one per row for a `use { … }` block.
     imports: [ImportDecl]{[ImportDecl]{}}
     handled: Bool
-    // The marker a `struct Name { … impl Marker { … } }` declares, an item
-    // of its own beside the struct.
-    companion: Item?{None}
+    // What a struct or enum declares beside itself, each an item of its own:
+    // the marker of `impl Marker { … }` and the effect names of
+    // `impl Effect { … }`.
+    companions: [Item]{[Item]{}}
 }
 
 struct ParsedItemModifiers {
@@ -306,22 +306,20 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_STRUCT -> {
             value :: parser_parse_struct(&state, modifiers)
-            companion := Item?{None}
-            if value.marker == .Val(declaration) -> companion = Val(Item.MarkerDecl{value: declaration})
-            return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companion: companion}
+            return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companions: parser_type_companions(value.marker, value.effect_impl)}
         }
         token.kind == TOKEN_KW_ENUM -> {
             value :: parser_parse_enum(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Enum{value: value}), handled: true}
+            return ParsedItemOrImport{item: Val(Item.Enum{value: value}), handled: true, companions: parser_type_companions(None, value.effect_impl)}
         }
         token.kind == TOKEN_KW_TRAIT -> {
             value :: parser_parse_trait(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Trait{value: value}), handled: true}
         }
-        token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(&state)), handled: true}
+        token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(&state, modifiers)), handled: true}
         token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(&state, modifiers)), handled: true}
         token.kind == TOKEN_KW_EFFECT -> {
-            value :: parser_parse_effect_decl(&state)
+            value :: parser_parse_effect_word(&state) ?? return ParsedItemOrImport{item: None, handled: true}
             return ParsedItemOrImport{item: Val(Item.EffectDecl{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_TAG -> {
@@ -1214,9 +1212,21 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
             has_body = true
         }
         parser_current_kind(&state) == TOKEN_LBRACE -> {
+            // Marker lines directly in this body join the function's
+            // markers; a nested block or a lambda body reads them as
+            // statements, which report the Block site.
+            outer_depth :: state.inbody_marker_depth
+            outer_markers :: state.inbody_markers.copy()
+            state.inbody_marker_depth = state.block_depth + 1
+            state.inbody_markers = [Marker]{}
             body :: parser_parse_callable_body(&state, parser_return_type_has_value(return_type))
+            inside :: state.inbody_markers.copy()
+            state.inbody_marker_depth = outer_depth
+            state.inbody_markers = outer_markers
             func.body = body.statements
             func.span = parser_cover(modifiers.start_span, body.span)
+            merged :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, body.span.end - 1, "function `{func_name}`")
+            func.markers = parser_drop_body_shaping_lines(&state, merged)
             has_body = true
         }
         else -> {
@@ -1232,7 +1242,9 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
             func.span = parser_cover(modifiers.start_span, signature_end)
         }
     }
-    parser_apply_function_markers(&state, &func, modifiers.markers)
+    // copy: the markers are read while the function they mark is updated.
+    markers :: func.markers.copy()
+    parser_apply_function_markers(&state, &func, markers)
     if guest_import && !is_ffi -> parser_bind_guest_import_symbol(&state, &func)
     ParsedFunction{value: func, has_body: has_body}
 }
@@ -1245,6 +1257,26 @@ fn parser_marker_is_c_guest_import(marker: Marker) -> Bool Never! {
     first :: parser_marker_first_expr(marker) ?? return false
     if first == .Ident(name, _, _) -> return name == "c"
     false
+}
+
+// `#FFI` and `#Import(c)` decide how a function's body is read (as foreign
+// source, or as the C symbol), so they are written above it.
+fn parser_marker_shapes_body(marker: Marker) -> Bool Never! {
+    marker.name == "FFI" || parser_marker_is_c_guest_import(marker)
+}
+
+// A body-shaping line inside that body comes too late to shape it and is
+// reported and left out.
+fn parser_drop_body_shaping_lines(state: &JetParserState, markers: [Marker]) -> [Marker] {
+    kept := [Marker]{}
+    loop marker in markers {
+        if marker.inside && parser_marker_shapes_body(marker) {
+            parser_add_error_code(&state, "E0355", marker.span, "`#{marker.name} :: …` cannot be written inside the body it shapes", "`#{marker.name}` decides how the function's body is read, so it must be known before the body starts", "write `#{parser_marker_above_text(marker)}` above the function")
+            next
+        }
+        &kept.push(marker)
+    }
+    kept
 }
 
 // (Rust `guest_import_fn_from_markers`): the one string body
@@ -1900,21 +1932,20 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
-    // Rust `attach_type_markers`: the markers, the derives and serde markers
-    // they request, the package auto-derive default and the
-    // SingleUse/MustUse/PublishedSchema facts.
-    parser_apply_struct_type_markers(&value, modifiers.markers)
-    value.layout = parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, false)
-    value.layout_span = parser_layout_marker_span(modifiers.markers, modifiers.grouped_markers, value.layout)
-    value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(modifiers.markers) else -> None
     if parser_current_kind(&state) != TOKEN_LBRACE {
+        parser_apply_struct_markers(&state, &value, modifiers.markers, modifiers.grouped_markers)
         parser_add_error_here(&state, "expected `{{` before struct fields", "record fields are declared inside a struct body", "open a struct body with `{{`")
         return value
     }
     parser_bump(&state)
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
+            next
+        }
         member_start :: state.position
         member_modifiers := parser_parse_item_modifiers(&state, false)
         if parser_state_section_ahead(&state) {
@@ -1955,10 +1986,13 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 &value.methods.push(method.value)
             }
             TOKEN_KW_IMPL -> {
-                if parser_value_at(&state, 1) == "Marker" && parser_kind_at(&state, 2) == TOKEN_LBRACE {
-                    parser_parse_marker_impl(&state, &value)
-                } else {
-                    &value.trait_impls.push(parser_parse_trait_impl_block(&state))
+                if {
+                    parser_value_at(&state, 1) == "Marker" && parser_kind_at(&state, 2) == TOKEN_LBRACE -> parser_parse_marker_impl(&state, &value)
+                    parser_value_at(&state, 1) == "Effect" && parser_kind_at(&state, 2) == TOKEN_LBRACE -> {
+                        parsed :: parser_parse_effect_impl(&state, value.name, value.effect_impl != None)
+                        if parsed != None -> value.effect_impl = parsed
+                    }
+                    else -> &value.trait_impls.push(parser_parse_trait_impl_block(&state, member_modifiers.markers))
                 }
             }
             else -> {
@@ -2015,8 +2049,22 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct fields")
     value.span = parser_cover(modifiers.start_span, close.span)
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "struct `{value.name}`")
+    parser_apply_struct_markers(&state, &value, markers, modifiers.grouped_markers)
     parser_finish_marker_struct(&state, &value)
+    value.effect_impl = parser_finish_effect_type(&state, value.name, value.name_span, value.effect_impl, [Variant]{})
     value
+}
+
+// Rust `attach_type_markers`: the markers, the derives and serde markers they
+// request, the package auto-derive default and the SingleUse/MustUse/
+// PublishedSchema facts. They apply once the whole body is read, so a marker
+// line anywhere in the body counts the same as the markers above.
+fn parser_apply_struct_markers(state: &JetParserState, value: &StructDef, markers: [Marker], grouped: Bool) {
+    parser_apply_struct_type_markers(&value, markers)
+    value.layout = parser_layout_marker_fact(&state, markers, grouped, false)
+    value.layout_span = parser_layout_marker_span(markers, grouped, value.layout)
+    value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(markers) else -> None
 }
 
 // A struct field name; a keyword followed by `:` names a field too (a
@@ -2038,16 +2086,17 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     value.is_pub = modifiers.is_pub
     value.is_package_pub = modifiers.is_package_pub
     value.type_params = parser_parse_type_params(&state)
-    // Rust `attach_type_markers`, as for structs: markers, derives, serde
-    // markers, the package auto-derive default and SingleUse/MustUse.
-    parser_apply_enum_type_markers(&value, modifiers.markers)
-    _ := parser_layout_marker_fact(&state, modifiers.markers, modifiers.grouped_markers, true)
     parser_expect(&state, TOKEN_LBRACE, "`{{` before enum variants")
+    inside := [Marker]{}
     // A fatal error ends the whole enum, as Rust's `?` does; the item loop
     // resynchronizes.
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         if parser_current_kind(&state) == TOKEN_SEMI {
             parser_bump(&state)
+            next
+        }
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
             next
         }
         if parser_state_section_ahead(&state) {
@@ -2063,13 +2112,24 @@ fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
         kind :: parser_current_kind(&state)
         markers :: if kind == TOKEN_HASH -> parser_parse_variant_markers(&state) else -> [Marker]{}
         if {
-            kind == TOKEN_KW_IMPL -> &value.trait_impls.push(parser_parse_trait_impl_block(&state))
-            else -> parser_parse_variant_entry(&state, "", &value, markers)
+            kind == TOKEN_KW_IMPL && parser_value_at(&state, 1) == "Effect" && parser_kind_at(&state, 2) == TOKEN_LBRACE -> {
+                parsed :: parser_parse_effect_impl(&state, value.name, value.effect_impl != None)
+                if parsed != None -> value.effect_impl = parsed
+            }
+            kind == TOKEN_KW_IMPL -> &value.trait_impls.push(parser_parse_trait_impl_block(&state, markers))
+            else -> parser_parse_variant_entry(&state, "", &value, markers, &inside)
         }
         if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after enum variants")
     value.span = parser_cover(modifiers.start_span, close.span)
+    // Rust `attach_type_markers`, as for structs: markers, derives, serde
+    // markers, the package auto-derive default and SingleUse/MustUse, applied
+    // once the body (and every marker line in it) is read.
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
+    parser_apply_enum_type_markers(&value, markers)
+    _ := parser_layout_marker_fact(&state, markers, modifiers.grouped_markers, true)
+    value.effect_impl = parser_finish_effect_type(&state, value.name, value.name_span, value.effect_impl, value.variants)
     value
 }
 
@@ -2113,7 +2173,7 @@ fn parser_parse_variant_markers(state: &JetParserState) -> [Marker] {
 // `Name { … }`. Leaves are recorded flat with their full dotted path and each
 // group path in `groups`; groups nest to any depth. Payloads live on leaves
 // only (E0331).
-fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &EnumDef, markers: [Marker]) {
+fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &EnumDef, markers: [Marker], inside: &[Marker]) {
     name :: parser_expect_name(&state, "for a variant name")
     if parser_aborting(&state) -> return
     path :: if prefix.len() == 0 -> parser_value(state, name) else -> "{prefix}.{parser_value(state, name)}"
@@ -2151,8 +2211,12 @@ fn parser_parse_variant_entry(state: &JetParserState, prefix: String, value: &En
             parser_bump(&state)
             next
         }
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
+            next
+        }
         entry_markers :: if kind == TOKEN_HASH -> parser_parse_variant_markers(&state) else -> [Marker]{}
-        parser_parse_variant_entry(&state, path, &value, entry_markers)
+        parser_parse_variant_entry(&state, path, &value, entry_markers, &inside)
         if parser_current_kind(&state) == TOKEN_SEMI || parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` to close the variant group")
@@ -2188,25 +2252,48 @@ fn parser_parse_variant_payload(state: &JetParserState) -> VariantPayload {
 
 // S28: `impl Trait { … }` inside a struct or enum body, with
 // associated types `type Name = Type`, trait constants `name :: value` and
-// one parenthesized right-hand type on an operator trait.
-fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
-    parser_bump(&state)
+// one parenthesized right-hand type on an operator trait. The trait may be
+// dotted (`impl labels.Named`, `impl Literal.Int`), and `impl Trait using
+// field` delegates the trait to a field, as a top-level impl does. `above`
+// holds the markers written before `impl`.
+fn parser_parse_trait_impl_block(state: &JetParserState, above: [Marker]) -> TraitImplBlock {
+    start :: parser_bump(&state)
     trait_name :: parser_expect_name(&state, "after `impl`")
-    trait_text :: parser_value(state, trait_name)
+    trait_text := parser_value(state, trait_name)
+    trait_end := trait_name.span
+    loop parser_current_kind(&state) == TOKEN_DOT && !parser_aborting(&state) {
+        parser_bump(&state)
+        segment :: parser_expect_name(&state, "after `.` in `impl`")
+        trait_text = "{trait_text}.{parser_value(state, segment)}"
+        trait_end = segment.span
+    }
+    trait_span :: parser_cover(trait_name.span, trait_end)
     operator_rhs :: parser_parse_operator_rhs(&state, Val(trait_text.copy()))
-    operator_marker := OperatorMarker?{None}
+    operator_marker := parser_operator_marker(above)
     loop parser_current_kind(&state) == TOKEN_HASH {
         marker :: parser_parse_marker(&state)
         if marker.name == "Commutative" -> operator_marker = Val(OperatorMarker.Commutative)
+    }
+    using :: parser_current(&state)
+    if using.kind == TOKEN_IDENT && parser_value(state, using) == "using" {
+        parser_bump(&state)
+        field :: parser_expect_name(&state, "after `using` for the delegation field")
+        parser_finish_statement(&state)
+        return TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, compiler_generated: false, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, delegation_field: Val(parser_value(state, field)), markers: above, span: Val(parser_cover(start.span, field.span))}
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the trait impl body")
     methods := [Func]{}
     assoc_types := [NamedType]{}
     constants := [ImplConstValue]{}
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         token :: parser_current(&state)
         if token.kind == TOKEN_SEMI {
             parser_bump(&state)
+            next
+        }
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
             next
         }
         if parser_state_section_ahead(&state) {
@@ -2234,8 +2321,19 @@ fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
         }
         &methods.push(parser_parse_type_method(&state))
     }
-    parser_expect(&state, TOKEN_RBRACE, "`}}` to close the trait impl body")
-    TraitImplBlock{trait_name: trait_text, trait_span: trait_name.span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants}
+    close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the trait impl body")
+    markers :: parser_merge_inbody_markers(&state, above, inside, start.span.start, close.span.start, "impl `{trait_text}`")
+    if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
+    TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants, delegation_field: None, markers: markers, span: Val(parser_cover(start.span, close.span))}
+}
+
+// `Commutative` among an impl's markers makes it commutative, as the
+// `#Commutative` written after the trait does.
+fn parser_operator_marker(markers: [Marker]) -> OperatorMarker? Never! {
+    loop marker in markers {
+        if marker.name == "Commutative" && !marker.negated -> return Val(OperatorMarker.Commutative)
+    }
+    None
 }
 
 // `name :: value` in an impl body: the value of one trait constant.
@@ -2423,9 +2521,14 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     methods := [TraitMethodSig]{}
     assoc_types := [NamedSpan]{}
     constants := [TraitConstDecl]{}
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
+            next
+        }
         if parser_state_section_ahead(&state) {
             section_start :: parser_current(&state).span
             section := parser_parse_state_section(&state, "", section_start)
@@ -2487,7 +2590,9 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after trait members")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods}
+    trait_name :: parser_value(state, name)
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "trait `{trait_name}`")
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers}
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
@@ -2567,7 +2672,8 @@ fn parser_parse_operator_rhs(state: &JetParserState, trait_name: String?) -> Typ
 // `Type.Literal.Int` / `Type.Literal.Float` tail names one literal capability.
 // (as respelled by): `impl Source -> Target { body }`
 // declares the conversion of a `Source` error into a `Target` error.
-fn parser_parse_impl(state: &JetParserState) -> Item {
+// `modifiers` holds the markers written above `impl`.
+fn parser_parse_impl(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start :: parser_bump(&state)
     parts := [Token]{}
     &parts.push(parser_expect_name(&state, "after `impl`"))
@@ -2645,7 +2751,7 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
         trait_span = Val(named.span)
     }
     operator_rhs :: parser_parse_operator_rhs(&state, trait_name)
-    operator_marker := OperatorMarker?{None}
+    operator_marker := parser_operator_marker(modifiers.markers)
     loop parser_current_kind(&state) == TOKEN_HASH && !parser_aborting(&state) {
         marker :: parser_parse_marker(&state)
         if marker.name == "Commutative" -> operator_marker = Val(OperatorMarker.Commutative)
@@ -2656,16 +2762,21 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
         parser_bump(&state)
         field :: parser_expect_name(&state, "after `using` for the delegation field")
         parser_finish_statement(&state)
-        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}}
+        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(modifiers.markers), markers: modifiers.markers}}
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `impl` body")
     methods := [Func]{}
     assoc_types := [NamedType]{}
     constants := [ImplConstValue]{}
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         token :: parser_current(&state)
         if token.kind == TOKEN_SEMI {
             parser_bump(&state)
+            next
+        }
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
             next
         }
         if parser_state_section_ahead(&state) {
@@ -2694,35 +2805,27 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
         &methods.push(parser_parse_type_method(&state))
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after implementation methods")
-    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: None}}
+    written := type_name.copy()
+    if trait_name == .Val(text) -> written = "{written}.{text}"
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, start.span.start, close.span.start, "impl `{written}`")
+    if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
+    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(markers), markers: markers}}
 }
 
-fn parser_parse_effect_decl(state: &JetParserState) -> EffectDecl {
-    start := parser_bump(&state)
-    name :: parser_effect_path_name(&state)
-    irreversible := false
-    declaration_end := name.span.end
-    fact := parser_current(&state)
-    if fact.kind == TOKEN_IDENT && parser_value(state, fact) == "$irreversible" {
-        parser_bump(&state)
-        irreversible = true
-        declaration_end = fact.span.end
+// The native OS an impl is gated to by `#Target(OS.Linux|MacOS|Windows)`
+// among its markers, spelled as sema reads it (`linux`, `macos`, `windows`).
+fn parser_impl_os_target(markers: [Marker]) -> String? {
+    loop marker in markers {
+        if marker.name != "Target" || marker.args.len() != 1 -> next
+        if marker.args[0] == .Expr(value) {
+            if parser_marker_target_path(value) == .Val(path) {
+                if path == "OS.Linux" -> return Val("linux")
+                if path == "OS.MacOS" -> return Val("macos")
+                if path == "OS.Windows" -> return Val("windows")
+            }
+        }
     }
-    parser_finish_statement(&state)
-    EffectDecl{name: name.name, name_span: name.span, irreversible: irreversible, span: Span{start: start.span.start, end: declaration_end}}
-}
-
-fn parser_effect_path_name(state: &JetParserState) -> NamedSpan {
-    first :: parser_expect_name(&state, "after the `effect` declaration keyword")
-    name := parser_value(state, first)
-    end := first.span
-    loop parser_current_kind(&state) == TOKEN_DOT {
-        parser_bump(&state)
-        segment :: parser_expect_name(&state, "for an effect path segment after `.`")
-        name = "{name}.{parser_value(state, segment)}"
-        end = segment.span
-    }
-    NamedSpan{name: name, span: parser_cover(first.span, end)}
+    None
 }
 
 fn parser_parse_tag_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> TagDef {

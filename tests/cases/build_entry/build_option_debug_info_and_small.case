@@ -66,11 +66,11 @@ exit: 0
 step: jet build --debug-info=maybe main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]: `--debug-info=maybe` isn't a value of `debug_info`" # debug_info takes true, false or split
+stderr: ~ "Error [jet.InvalidCommandInput]: `--debug-info=maybe` isn't a value of `debug_info`" # debug_info takes true, false or split
 step: jet build --small=false --small main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]: `--small=false` and `--small` disagree" # the bare flag is true
+stderr: ~ "Error [jet.InvalidCommandInput]: `--small=false` and `--small` disagree" # the bare flag is true
 step: jet build
 cwd: code
 exit: 0
@@ -82,5 +82,5 @@ stderr: ~ "note: --debug-info=true replaces b.debug_info(false) at build.jet:2 f
 step: jet build
 cwd: refused_code
 exit: 1
-stderr: ~ "Error [E3502]: This isn't a value of build option `debug_info`" # a Bool row takes a Bool literal
+stderr: ~ "Error [jet.BuildPlanFailed]: This isn't a value of build option `debug_info`" # a Bool row takes a Bool literal
 stderr: ~ "Fix: Write `b.debug_info(false)`" # the fix spells the row's value

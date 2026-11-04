@@ -541,27 +541,25 @@ fn sema_effect_span_contains(outer: Span, inner: Span) -> Bool Never! {
     outer.start <= inner.start && inner.end <= outer.end
 }
 
+// An effect's own declaration says whether it is irreversible (`FS.Read`
+// is not, `FS.Write` is, and the family `FS` is because a case is); a
+// name the canonical module does not declare follows its root.
 fn sema_effect_declarations_irreversible_fact(declarations: [Item], effect_name: String) -> Bool? {
-    found := false
-    irreversible := false
+    root :: sema_effect_root(effect_name)
+    root_fact := Bool?{None}
     loop item in declarations {
-        if item == {
-            .EffectDecl(declaration) -> {
-                if sema_effect_root(declaration.name) == sema_effect_root(effect_name) {
-                    found = true
-                    if declaration.irreversible -> irreversible = true
-                }
-            }
-            else -> {}
+        if item == .EffectDecl(declaration) {
+            if declaration.name == effect_name -> return Val(declaration.irreversible)
+            if declaration.name == root -> root_fact = Val(declaration.irreversible)
         }
     }
-    if found -> Val(irreversible) else -> None
+    root_fact
 }
 
-// The transaction wall follows the canonical `effect … $irreversible`
-// declarations loaded from the pinned Prelude module. It deliberately does
-// not maintain a second root allowlist: adding or removing an irreversible
-// effect in Prelude/Effects.jet changes this fact at the source boundary.
+// The transaction wall follows the canonical `fn irreversible` facts loaded
+// from the pinned Prelude module. It deliberately does not maintain a second
+// allowlist: changing an effect's `irreversible` method in
+// Prelude/Effects.jet changes this fact at the source boundary.
 fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
     if program.registration_graph == .Val(graph) {
         canonical_identity :: graph.canonical_effect_module_identity
@@ -573,7 +571,7 @@ fn sema_effect_canonical_irreversible_fact(environment: SemaScopeEnvironment, pr
     None
 }
 
-fn sema_effect_root_is_irreversible(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
+fn sema_effect_is_irreversible(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
     sema_effect_canonical_irreversible_fact(environment, program, effect_name)
 }
 
@@ -592,7 +590,7 @@ fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program
     loop entry in row {
         if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
         parsed :: sema_effect_parse_name(entry.name) ?? next
-        irreversible :: sema_effect_root_is_irreversible(environment, program, parsed) ?? return None
+        irreversible :: sema_effect_is_irreversible(environment, program, parsed) ?? return None
         if irreversible {
             &diagnostics.push(sema_effect_transaction_wall_diagnostic(api, parsed, span))
             return Val(false)

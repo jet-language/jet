@@ -10,19 +10,27 @@ contract, and the checks for changing a diagnostic. The canonical source is
 
 ## One registry, many projections
 
-Each row in
-[`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet) owns
-its stable code, stage, severity, timing, What/Why/Fix templates, named holes,
-and structured-fix metadata. Preserve the code and its meaning when changing a
-row. The Foundation embeds this source as `Registry::DIAGNOSTIC_SOURCE` and
-loads it through `Registry::diagnostic_rows()`.
+Each diagnostic in
+[`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet) is a struct that
+implements Core `Diagnostic`. Its fields are the named holes; its constants
+hold the stable code, stage, severity (`.Error` by default), timing, status, and
+structured-fix metadata; and `what`, `why`, and `fix` each return one string
+literal whose `{self.field}` holes the report fills. Preserve the code and its
+meaning when changing an impl. `Tools/agent/DiagnosticRows.jet` reads the impls
+as source and writes the Foundation rows in `Registry/DiagnosticRows.jet`
+(`--check` proves they agree). Retired and reserved codes stay types with their
+status.
 
-The current registered code shapes are `E` or `L` followed by four digits,
-`JT` followed by four digits for source-migration reports, and `E-WORD-WORD`
-with two or more uppercase words. Codes are stable identities: do not reuse or
-renumber one. Lexer, parser, and semantic checks raise the row that owns the
-violated rule; the CLI, LSP, machine reports, web pages, and backends project
-those rows rather than defining a second message or exposing raw backend text.
+A diagnostic's name is its type path: `jet.UnusedParameter` for the compiler's
+own, `web.BadPath` for a library's. The current registered code shapes are `E`
+or `L` followed by four digits, `JT` followed by four digits for
+source-migration reports, and `E-WORD-WORD` with two or more uppercase words. A
+library diagnostic without a `code` constant uses its type path as its code.
+Codes are stable identities: do not reuse or renumber one. Lexer, parser, and
+semantic checks raise the row that owns the violated rule; a library rule
+raises its own type with `reject(Value)`. The CLI, LSP, machine reports, web
+pages, and backends project those rows rather than defining a second message or
+exposing raw backend text.
 
 Known declaration heads such as `#Import module c.<lib>` are parsed as items
 before unresolved library marker heads are retained as file-level rule facts.
@@ -58,13 +66,18 @@ with its unsafe obligation checked separately.
 
 ## Human rendering
 
-The fixed headings are `Error [CODE]:` and `Warning [CODE] (lint_name):`. A
-report with a span includes its source location and underline; a report without
-a span omits that block. Every report keeps `Why:`, `Fix:`, and
-`More: jet-lang.dev/e/<CODE>` in that order, with optional detail before
-`More:`. Multiple diagnostics are separated by one blank line. Lints do not
-block compilation by default; a package may deny a named lint through its lint
-policy, but a diagnostic code is never a policy value.
+The fixed headings are `Error [jet.Name]:` and `Warning [jet.Name]:`, naming
+the diagnostic type. A report with a span includes its source location and
+underline; a report without a span omits that block. Every report keeps `Why:`,
+`Fix:`, and `More: jet-lang.dev/e/<CODE>` in that order, with optional detail
+before `More:`; a diagnostic whose code is its type path has no `More:` line,
+and `jet explain web.BadPath` prints its impl's literals with their holes.
+Runtime reports keep their code in the heading. Multiple diagnostics are
+separated by one blank line. Lints do not block compilation by default;
+`#Allow(jet.Name, "why")` silences one lint or library warning inside its
+target, and a package may deny a named lint through its lint policy, but a
+diagnostic code is never a policy value. JSON and LSP `code` stays the
+registered code.
 
 Package-budget reports retain the authored callable witness's span and source
 snapshot, including witnesses in dependency modules. A named witness must not
@@ -162,7 +175,7 @@ target. The exact rendered snapshot is part of the contract and is kept in
 `tests/ui/freestanding_e3301.stderr`:
 
 ```text
-Error [E3301]: `files.read` is not available on a no-OS target.
+Error [jet.OsApiOnNoOsTarget]: `files.read` is not available on a no-OS target.
   --> tests/ui/freestanding_e3301.jet:5:13
     |
   5 |     _ :: fs.read("config.txt")

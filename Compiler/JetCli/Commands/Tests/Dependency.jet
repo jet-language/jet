@@ -48,7 +48,7 @@ use {
         .Ok(_) -> panic("missing dependency name")
         .Err(error) -> {
             assert_eq(error.output.stdout, "")
-            assert_eq(error.output.stderr, "Error [E2104]: `jet add` needs a dependency name\n Why: Jet needs valid command input before it can run this command\n Fix: try `jet add mylib --path ../mylib`\nMore: jet-lang.dev/e/E2104\n")
+            assert_eq(error.output.stderr, "Error [jet.InvalidCommandInput]: `jet add` needs a dependency name\n Why: Jet needs valid command input before it can run this command\n Fix: try `jet add mylib --path ../mylib`\nMore: jet-lang.dev/e/E2104\n")
             assert_eq(error.output.exit_code, JET_DRIVER_EXIT_USER_ERROR)
         }
     }
@@ -80,12 +80,12 @@ use {
     assert_eq(cli_files.read(path) ?? panic("read concurrent carrier"), concurrent)
     absent :: jet_cli_package_dependency(root, "remove", [String]{"remove", "absent"}, [String]{"remove", "absent"}, false, false)
     assert_eq(absent.stdout, "")
-    assert_eq(absent.stderr, "Error [E2104]: dependency `absent` is not present in package.jet\n Why: Jet needs valid command input before it can run this command\n Fix: remove a dependency listed in package.jet, or add `absent` first\nMore: jet-lang.dev/e/E2104\n")
+    assert_eq(absent.stderr, "Error [jet.InvalidCommandInput]: dependency `absent` is not present in package.jet\n Why: Jet needs valid command input before it can run this command\n Fix: remove a dependency listed in package.jet, or add `absent` first\nMore: jet-lang.dev/e/E2104\n")
     assert_eq(absent.exit_code, JET_DRIVER_EXIT_USER_ERROR)
     report :: diagnostic_from_registry("E1202", None, "missing graph", "locked read", "fetch first")
     source_error :: jet_cli_dependency_source_error(path, concurrent, report).output
     assert_eq(source_error.stdout, "")
-    assert_eq(source_error.stderr, "Error [E1202]: missing graph\n Why: locked read\n Fix: fetch first\nMore: jet-lang.dev/e/E1202\n")
+    assert_eq(source_error.stderr, "Error [jet.StaleLockFile]: missing graph\n Why: locked read\n Fix: fetch first\nMore: jet-lang.dev/e/E1202\n")
     assert_eq(source_error.exit_code, JET_DRIVER_EXIT_USER_ERROR)
     cli_files.remove_all(root) ?? panic("cleanup fixture")
 }

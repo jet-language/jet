@@ -291,11 +291,13 @@ these C doors.
 The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects the checked program has hit an
 internal compiler error, not another language checker.
-Checked compile-time `reject(code:, what:, why:, fix:)` calls use the canonical
+Checked compile-time `reject(Value)` calls use the canonical
 `core.compiler.__reject` intrinsic row, declared in `Prelude/Core.jet` and
-projected into both Core inventories. Its four diagnostic fields remain in
-that order; the evaluator reports the registered project diagnostic rather
-than treating a missing row as an unsupported construct.
+projected into both Core inventories. Its one argument is a value whose type
+implements `Diagnostic`; the evaluator reads that impl's `code` and `severity`
+constants and its `what`, `why` and `fix` literals with the value's fields
+filled in, and reports the result at the rule's use site rather than treating a
+missing row as an unsupported construct.
 
 Callable-tail, value-block and fallback-block parsing first distinguishes
 guard tables with direct `-> return` or `-> break` statement arms from value

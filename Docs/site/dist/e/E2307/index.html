@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive, use a proven `View&lt;str&gt;` boundary, write `view.copy()` at the highlighted owning expression (the checker grades that edit), or remove `copies: .Explicit` for the default owning copy.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2307</code>: <code>tests/ui/copies_explicit_view_field.stderr</code>.</p>
-<pre class="diag">Error [E2307]: `label` cannot be used directly here without an owning copy
+<pre class="diag">Error [jet.StringViewOutlivesOwner]: `label` cannot be used directly here without an owning copy
   --&gt; tests/ui/copies_explicit_view_field.jet:12:24
     |
  12 |     user :: User{name: label}
@@ -46,7 +46,7 @@
  Fix: Write `label.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 
-Error [E2307]: `user` cannot be used directly here without an owning copy
+Error [jet.StringViewOutlivesOwner]: `user` cannot be used directly here without an owning copy
   --&gt; tests/ui/copies_explicit_view_field.jet:13:11
     |
  13 |     print(user.name)

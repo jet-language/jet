@@ -540,7 +540,7 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
         }
         TOKEN_KW_STRUCT -> Item.Struct{value: parser_parse_struct(&state, modifiers)}
         TOKEN_KW_ENUM -> Item.Enum{value: parser_parse_enum(&state, modifiers)}
-        TOKEN_KW_IMPL -> parser_parse_impl(&state)
+        TOKEN_KW_IMPL -> parser_parse_impl(&state, modifiers)
         TOKEN_KW_TAG -> Item.Tag{value: parser_parse_tag_decl(&state, modifiers)}
         else -> {
             parser_add_error_here(&state, "expected an item in a marker body", "marker templates contain declarations or statements", "write a function, struct, enum, impl, or statement")

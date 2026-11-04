@@ -1,7 +1,7 @@
 // CmdExpand.rs memory/layout/origin lenses: render only compiler-owned facts.
 use {
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, diagnostic_from_registry, diagnostic_registry_row, diagnostic_line_at, diagnostic_column_at, type_name]
+    jet_foundation.[TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, diagnostic_display_name, diagnostic_from_registry, diagnostic_registry_row, diagnostic_line_at, diagnostic_column_at, type_name]
     jet_sema.[SemaMemoryProjection, sema_user_template_ct_value]
 }
 
@@ -127,7 +127,7 @@ fn jet_cli_expand_layout_text(layout: TComptimeValue) -> String Never! {
     status := ""
     if jet_cli_expand_layout_unavailable(layout) {
         diagnostic :: jet_cli_expand_layout_diagnostic()
-        status = " byte_facts=unavailable[{diagnostic.code}] {diagnostic.what}; Why: {diagnostic.why}; Fix: {diagnostic.fix}; More: jet-lang.dev/e/{diagnostic.code}"
+        status = " byte_facts=unavailable[{diagnostic_display_name(diagnostic.code)}] {diagnostic.what}; Why: {diagnostic.why}; Fix: {diagnostic.fix}; More: jet-lang.dev/e/{diagnostic.code}"
     }
     "{header_parts.join(" ")}{status} fields=[{fields.join(",")}]"
 }

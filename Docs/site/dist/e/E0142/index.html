@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0142 — Jet diagnostic</title>
-<meta name="description" content="`#SingleUse` value lent/shared instead of moved (D-LIN1)">
+<meta name="description" content="`#SingleUse` value lent/shared instead of moved">
 <meta property="og:title" content="E0142 — Jet diagnostic">
-<meta property="og:description" content="`#SingleUse` value lent/shared instead of moved (D-LIN1)">
+<meta property="og:description" content="`#SingleUse` value lent/shared instead of moved">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0142</h1>
-<p>`#SingleUse` value lent/shared instead of moved (D-LIN1)</p>
+<p>`#SingleUse` value lent/shared instead of moved</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`#SingleUse` value lent/shared instead of moved (D-LIN1)</p>
+<p class="diag-copy what" data-registry-field="what">`#SingleUse` value lent/shared instead of moved</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Move the `#SingleUse` value instead of lending or sharing it.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0142</code>: <code>tests/ui/loop_borrowed_task_list.stderr</code>.</p>
-<pre class="diag">Error [E0120]: `hs` was not moved here, so this loop can&#39;t take its handles
+<pre class="diag">Error [jet.ReadOnlyValueNotOwned]: `hs` was not moved here, so this loop can&#39;t take its handles
   --&gt; tests/ui/loop_borrowed_task_list.jet:3:15
     |
   3 |     loop h in hs -&gt; total += h.join() ?? 0
@@ -46,7 +46,7 @@
  Fix: Take the list with the move marker `^`: `hs: ^[Task&lt;Int&gt;]`, or collect the work in a canonical `task.all` or `task.group` block
 More: jet-lang.dev/e/E0120
 
-Error [E0142]: `handles` can&#39;t be shared — it must be used exactly once
+Error [jet.SingleUseLent]: `handles` can&#39;t be shared — it must be used exactly once
   --&gt; tests/ui/loop_borrowed_task_list.jet:9:17
     |
   9 |     print(drain(handles))
@@ -55,7 +55,7 @@ Error [E0142]: `handles` can&#39;t be shared — it must be used exactly once
  Fix: Move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
 More: jet-lang.dev/e/E0142
 
-Error [E0140]: `handles` still owes `consume`
+Error [jet.SingleUseDropped]: `handles` still owes `consume`
   --&gt; tests/ui/loop_borrowed_task_list.jet:8:5
     |
   8 |     handles :: [task 1, task 2]

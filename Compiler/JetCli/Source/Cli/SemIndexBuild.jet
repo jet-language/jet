@@ -728,10 +728,12 @@ fn jet_cli_sem_record_call(db: &JetCLISemDB, ctx: JetCLISemWalk, callee: String,
 
 fn jet_cli_sem_allow_markers(markers: [Marker], site: String, db: &JetCLISemDB, ctx: JetCLISemWalk) Never! {
     loop marker in markers {
-        if marker.name != "allow" -> next
+        if marker.name != "Allow" -> next
         loop argument in marker.args {
             if argument == .Expr(value) {
-                if value == .Ident(lint_name, _, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: lint_name, module_path: ctx.module_path, span: marker.span})
+                if value == .Field(base, member, _, _) {
+                    if base == .Ident(package, _, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: "{package}.{member}", module_path: ctx.module_path, span: marker.span})
+                }
             }
         }
     }

@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1103</code>: <code>tests/ui/task_detach_unsound.stderr</code>.</p>
-<pre class="diag">Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned task
+<pre class="diag">Error [jet.ReadOnlyValueNotOwned]: `greet` was not moved here, so it cannot be captured by a spawned task
   --&gt; tests/ui/task_detach_unsound.jet:5:15
     |
   5 |     t :: task greet
@@ -46,7 +46,7 @@
  Fix: make the parameter owned with the move marker `^`: `greet: ^fn()`
 More: jet-lang.dev/e/E0120
 
-Error [E1102]: this task returns `fn()`, which isn&#39;t sendable
+Error [jet.ValueNotSendable]: this task returns `fn()`, which isn&#39;t sendable
   --&gt; tests/ui/task_detach_unsound.jet:5:15
     |
   5 |     t :: task greet
@@ -55,7 +55,7 @@ Error [E1102]: this task returns `fn()`, which isn&#39;t sendable
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
-Error [E1103]: can&#39;t detach task `t` — it captured a value that can&#39;t cross a thread boundary
+Error [jet.DetachUnsendableTask]: can&#39;t detach task `t` — it captured a value that can&#39;t cross a thread boundary
   --&gt; tests/ui/task_detach_unsound.jet:6:7
     |
   6 |     t.detach()

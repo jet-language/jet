@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Read or edit through the live window name instead of the owner.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0220</code>: <code>tests/ui/ownership/named_write_window_calls_keep_alias_and_read_view_checks.stderr</code>.</p>
-<pre class="diag">Error [E0111]: `window` was made with `::`, so it can&#39;t be changed
+<pre class="diag">Error [jet.ImmutableAssignment]: `window` was made with `::`, so it can&#39;t be changed
   --&gt; named_write_window_calls_keep_alias_and_read_view_checks.jet:9:11
     |
   9 |     both(&amp;window, value)
@@ -46,7 +46,7 @@
  Fix: Declare it with `window := ...`
 More: jet-lang.dev/e/E0111
 
-Error [E0204]: `value` is being changed in this call, so it can&#39;t be used again here
+Error [jet.UseWhileWriteActive]: `value` is being changed in this call, so it can&#39;t be used again here
   --&gt; named_write_window_calls_keep_alias_and_read_view_checks.jet:9:19
     |
   9 |     both(&amp;window, value)
@@ -55,7 +55,7 @@ Error [E0204]: `value` is being changed in this call, so it can&#39;t be used ag
  Fix: Pass the write-access marker `&amp;` (`&amp;value`) only once, or copy first with `value.copy()`
 More: jet-lang.dev/e/E0204
 
-Error [E0220]: `value` cannot be read while `window` has a live exclusive write window into it
+Error [jet.ReadDuringWriteWindow]: `value` cannot be read while `window` has a live exclusive write window into it
   --&gt; named_write_window_calls_keep_alias_and_read_view_checks.jet:9:19
     |
   9 |     both(&amp;window, value)

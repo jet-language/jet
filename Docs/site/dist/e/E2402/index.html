@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Add `impl {err} -&gt; Err { … }` before this function, or change the enclosing return type to `T !{err}`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2402</code>: <code>tests/ui/carrier_partial_not_kept.stderr</code>.</p>
-<pre class="diag">Error [E2417]: Explicit failure domain `ImportErr` is not an Error type
+<pre class="diag">Error [jet.FailureDomainNotErrorType]: Explicit failure domain `ImportErr` is not an Error type
   --&gt; tests/ui/carrier_partial_not_kept.jet:7:35
     |
   7 | fn import_rows(rows: [String]) -&gt; [String] ImportErr! {
@@ -46,7 +46,7 @@
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [E2402]: This implicit fallible call can&#39;t convert `ImportErr` into `Err` — no declared conversion exists
+Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `ImportErr` into `Err` — no declared conversion exists
   --&gt; tests/ui/carrier_partial_not_kept.jet:13:15
     |
  13 |     spotty :: import_rows([String]{})

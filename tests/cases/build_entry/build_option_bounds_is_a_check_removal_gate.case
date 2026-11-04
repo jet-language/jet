@@ -38,7 +38,7 @@ stderr: = build-option-bounds-forbid-e3415.stderr
 step: jet build --profile=unchecked main.jet
 cwd: forbid
 exit: 1
-stderr: ~ "Error [E3415]: The `check_removal` gate at `bounds: report in profile unchecked of package.jet` is forbidden by" # the profile field is the gate's site
+stderr: ~ "Error [jet.GateDeniedByPolicy]: The `check_removal` gate at `bounds: report in profile unchecked of package.jet` is forbidden by" # the profile field is the gate's site
 step: jet run main.jet
 cwd: forbid
 exit: 0
@@ -46,20 +46,20 @@ stdout: = "checked\n"
 step: jet run --null=off main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2102]: `--null` isn't a build option jet has" # refused as no option
+stderr: ~ "Error [jet.UnknownFlag]: `--null` isn't a build option jet has" # refused as no option
 stderr: ~ "a reference is never null" # naming the law
 step: jet build --casts main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2102]: `--casts` isn't a build option jet has" # refused as no option
+stderr: ~ "Error [jet.UnknownFlag]: `--casts` isn't a build option jet has" # refused as no option
 stderr: ~ "a conversion is total or returns an Optional" # naming the law
 step: jet run --profile=nulls main.jet
 cwd: refused_profile
 exit: 2
-stderr: ~ "Error [E2104]: `null: off` in profile `nulls` of package.jet isn't a build option" # refused as no option
+stderr: ~ "Error [jet.InvalidCommandInput]: `null: off` in profile `nulls` of package.jet isn't a build option" # refused as no option
 stderr: ~ "a reference is never null" # naming the law
 step: jet build
 cwd: refused_code
 exit: 1
-stderr: ~ "Error [E3502]: `b.casts` isn't a build option" # refused as no option
+stderr: ~ "Error [jet.BuildPlanFailed]: `b.casts` isn't a build option" # refused as no option
 stderr: ~ "a conversion is total or returns an Optional" # naming the law

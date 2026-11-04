@@ -637,7 +637,8 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
 // nominal's trait impl answers a method it doesn't write with the trait's
 // default body, and a delegating impl answers every trait method. The call
 // dispatches through the trait, whose emitted form carries the default body
-// and the delegation forwarding.
+// and the delegation forwarding. A top-level `impl T.Trait` and an
+// `impl Trait` block in the body of `T` answer the same way.
 fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     candidates := [SemaCallMethodCandidate]{}
     loop graph_module_index in 0..<graph.modules.len() {
@@ -651,22 +652,38 @@ fn sema_call_implemented_trait_method_candidates(graph: SemaRegistrationGraph, n
             } ?? false
             if written -> next
             trait_row :: sema_call_trait_row_for_symbol(graph, trait_symbol.id) ?? next
-            trait_nominal :: graph.modules[trait_row.module_index].nominals[trait_row.row]
-            if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) -> next
-            loop trait_method in trait_nominal.trait_methods {
-                if trait_method.declaration.name != method -> next
-                if graph.modules[graph_module_index].impls[implementation_index].delegation_field == .None && trait_method.declaration.default_body == .None {
-                    next
-                }
-                candidate :: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, &diagnostics) ?? next
-                duplicate :: loop existing in candidates {
-                    if existing.method.symbol.key == candidate.method.symbol.key {
-                        break true
-                    }
-                } ?? false
-                if !duplicate -> &candidates.push(candidate)
+            delegated :: graph.modules[graph_module_index].impls[implementation_index].delegation_field != .None
+            sema_call_unwritten_trait_method_candidates(graph, trait_row, delegated, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, &diagnostics, &candidates)
+        }
+    }
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            written := false
+            loop function in block.methods {
+                if function.name == method -> written = true
             }
+            if written -> next
+            trait_row :: sema_checked_trait_nominal_row(graph, nominal.symbol.module_name, block.trait_name) ?? next
+            sema_call_unwritten_trait_method_candidates(graph, trait_row, block.delegation_field != None, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, &diagnostics, &candidates)
         }
     }
     candidates
+}
+
+// The trait's `method` for an impl that doesn't write it: its default body,
+// or any method when the impl delegates.
+fn sema_call_unwritten_trait_method_candidates(graph: SemaRegistrationGraph, trait_row: SemaRegistrationRowRef, delegated: Bool, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic], candidates: &[SemaCallMethodCandidate]) Never! {
+    trait_nominal :: graph.modules[trait_row.module_index].nominals[trait_row.row]
+    if !sema_call_trait_visible(graph, trait_nominal, caller_module, caller_package) -> return
+    loop trait_method in trait_nominal.trait_methods {
+        if trait_method.declaration.name != method -> next
+        if !delegated && trait_method.declaration.default_body == .None -> next
+        candidate :: sema_call_trait_method_candidate_from_registration(graph, trait_nominal, trait_method, receiver_type, type_args, caller_module, generic_params, span, &diagnostics) ?? next
+        duplicate :: loop existing in candidates {
+            if existing.method.symbol.key == candidate.method.symbol.key {
+                break true
+            }
+        } ?? false
+        if !duplicate -> &candidates.push(candidate)
+    }
 }

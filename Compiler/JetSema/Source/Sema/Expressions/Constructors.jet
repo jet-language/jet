@@ -112,6 +112,8 @@ fn sema_expression_core_export_variants(environment: SemaScopeEnvironment, progr
 // Rust `infer_field` (`is_known_enum`): `Name.Variant` reads a variant when
 // `Name` is a declared enum, a compiler-owned enum menu (`Ordering`,
 // `RemoveBy`, the fact enums) or a Core enum, and no value binding shadows it.
+// A struct or distinct type the program declares under a Core enum's name
+// (`Severity`) is that type, not the Core enum.
 fn sema_expression_names_enum(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
     index := sema_scope_resolve_index(scopes, name)
     if index == .Val(found) && scopes.bindings[found].symbol.kind != SymbolKind.Type -> return false
@@ -119,6 +121,8 @@ fn sema_expression_names_enum(name: String, environment: SemaScopeEnvironment, p
     owner := sema_expression_type_symbol(&scopes, environment, program, name)
     if owner == .Val(symbol) {
         if sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum) -> return true
+        user_declared :: !symbol.module_name.starts_with("<corelib>/")
+        if user_declared && (sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Struct) || sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Distinct)) -> return false
         if sema_expression_core_export_variants(environment, program, symbol) != None -> return true
     }
     sema_expression_core_enum_name(name)

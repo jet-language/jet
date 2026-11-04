@@ -257,21 +257,22 @@ fn semindex_structure_test_allow_marker_projection() Never! {
     db := SymbolDB.new()
     span :: Span{start: 4, end: 30}
     markers :: [Marker]{
-        {name: "allow", negated: false, name_span: span, args: [MarkerCallArg]{
-            MarkerCallArg.Expr{value: Expr.Ident{name: "decimal", span: span, id: AST_NODE_GENERATED}},
+        {name: "Allow", negated: false, name_span: span, args: [MarkerCallArg]{
+            MarkerCallArg.Expr{value: Expr.Field{base: Expr.Ident{name: "jet", span: span, id: AST_NODE_GENERATED}, member: "FloatMoney", span: span, id: AST_NODE_GENERATED}},
             MarkerCallArg.Expr{value: Expr.Unit{span: span, id: AST_NODE_GENERATED}},
             MarkerCallArg.EffectRow{effects: [EffectRowEntry]{}, span: span},
-            MarkerCallArg.Expr{value: Expr.Ident{name: "copies", span: span, id: AST_NODE_GENERATED}},
+            MarkerCallArg.Expr{value: Expr.Field{base: Expr.Ident{name: "jet", span: span, id: AST_NODE_GENERATED}, member: "ImplicitCopy", span: span, id: AST_NODE_GENERATED}},
+            MarkerCallArg.Expr{value: Expr.Ident{name: "decimal", span: span, id: AST_NODE_GENERATED}},
         }, arg_labels: [CallLabel?]{}, span: span, ct: None},
-        {name: "Allow", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "ignored", span: span, id: AST_NODE_GENERATED}}}, arg_labels: [CallLabel?]{}, span: span, ct: None},
+        {name: "allow", negated: false, name_span: span, args: [MarkerCallArg]{MarkerCallArg.Expr{value: Expr.Ident{name: "ignored", span: span, id: AST_NODE_GENERATED}}}, arg_labels: [CallLabel?]{}, span: span, ct: None},
     }
     semindex_collect_allow_markers(&db, markers, "field", "main.jet")
     assert_eq(db.bypasses.len(), 2)
     assert_eq(db.bypasses[0].kind, BypassKind.LintAllow)
     assert_eq(db.bypasses[0].site, "field")
-    assert_eq(db.bypasses[0].detail, "decimal")
+    assert_eq(db.bypasses[0].detail, "jet.FloatMoney")
     assert_eq(db.bypasses[0].span, semindex_source_span(span))
-    assert_eq(db.bypasses[1].detail, "copies")
+    assert_eq(db.bypasses[1].detail, "jet.ImplicitCopy")
     assert_eq(db.bypasses[1].module_path, "main.jet")
 }
 

@@ -1,0 +1,44 @@
+// A declaration's markers may be written as lines inside its body:
+// `#X :: value` is the same marker as `#X(value)` above the declaration.
+// `#X :: true` applies `#X`, `#X :: false` is `#!X`, and one name, string or
+// number is the one argument. Type facts such as `$layout` are settled once
+// the whole body is read, so the lines may come last. A declaration writes
+// its whole set in one place; `jet fix --markers above` moves it above.
+struct Pixel {
+    a: U8
+    b: Int
+    c: U8
+    #Layout :: c
+    #Equatable :: true
+    #Debug :: false
+}
+
+// The same fields with no marker: the compiler reorders them.
+struct Packed {
+    a: U8
+    b: Int
+    c: U8
+}
+
+PIXEL_SIZE :: comptime { Pixel.$layout.size ?? -1 }
+
+PIXEL_C :: comptime { Pixel.$layout.fields[2].offset ?? -1 }
+
+PACKED_SIZE :: comptime { Packed.$layout.size ?? -1 }
+
+fn brightness(pixel: Pixel) -> Int {
+    #Inline :: true
+    #MustUse :: true
+    pixel.b * 3
+}
+
+fn run() {
+    print("Pixel (C layout): size {PIXEL_SIZE}, c at {PIXEL_C}")
+    print("Packed: size {PACKED_SIZE}")
+    first :: Pixel{a: U8{1}, b: 20, c: U8{3}}
+    second :: Pixel{a: U8{1}, b: 20, c: U8{3}}
+    print(first == second)
+    print(first == Pixel{a: U8{1}, b: 21, c: U8{3}})
+    level :: brightness(first)
+    print("brightness {level}")
+}

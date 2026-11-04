@@ -61,7 +61,7 @@ try {
     pill: document.querySelector("#jet-dev-pill .label")?.textContent || "",
   }))()`);
   assert(overlay.title.includes("Build failed — app.jet"), `bad overlay title: ${overlay.title}`);
-  assert(overlay.body.includes("Error [E0102]"), `diagnostic code missing: ${overlay.body}`);
+  assert(overlay.body.includes("Error [jet.UnknownFunction]"), `diagnostic code missing: ${overlay.body}`);
   assert(overlay.body.includes("missing_hybrid_symbol"), `diagnostic body missing source: ${overlay.body}`);
   assert(overlay.footer.startsWith(overlay.pill), "overlay footer drifted from parity pill");
   const lastGoodJs = await driver.evaluate('fetch("/app.js", {cache:"no-store"}).then((r) => r.text())');

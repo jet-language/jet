@@ -1650,8 +1650,8 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             item_i == prog.items.len() -> true
             else -> jfmt_stmt_span(prog.script_body[stmt_i]).start < jfmt_item_span_start(f, prog.items[item_i])
         }
-        // A marker prints inside the struct that declares it.
-        if !emit_stmt && prog.items[item_i] == .MarkerDecl(_) {
+        // A marker or an effect name prints inside the type that declares it.
+        if !emit_stmt && jfmt_item_prints_inside_type(prog.items, item_i) {
             item_i += 1
             next
         }

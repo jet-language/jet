@@ -139,7 +139,7 @@ fn parser_parse_module(state: &JetParserState, modifiers: ParsedItemModifiers) -
         parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(&state) -> parser_parse_module_decl_after_name(&state, modifiers, start.span, name_head)
         else -> {
             module_item :: parser_parse_code_module_after_name(&state, modifiers, start.span, name_head)
-            parser_module_apply_cap(&state, modifiers.markers, ^module_item)
+            parser_module_apply_cap(&state, ^module_item)
         }
     }
 }
@@ -313,24 +313,29 @@ fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VMTestLit {
 fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
     if parser_current_kind(&state) == TOKEN_SEMI {
         close :: parser_bump(&state)
-        return Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+        return Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: parser_cover(start, close.span), markers: modifiers.markers}}
     }
     if parser_current_kind(&state) != TOKEN_LBRACE {
         parser_add_error_here(&state, "expected `{{` or `;` after a module name", "a code module is either a file declaration or an inline item body", "write `module name;` or `module name {{ ... }}")
         parser_recover_statement(&state)
-        return Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: parser_cover(start, name_head.span)}}
+        return Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: None, imports: [ImportDecl]{}, web_target: None, instance_identity: None, span: parser_cover(start, name_head.span), markers: modifiers.markers}}
     }
     open :: parser_bump(&state)
     body := [Item]{}
     imports := [ImportDecl]{}
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
+            next
+        }
         before := state.position
         declaration :: parser_parse_item_or_import(&state)
         loop import in declaration.imports -> &imports.push(import)
         if declaration.item == .Val(value) -> &body.push(value)
-        if declaration.companion == .Val(companion) -> &body.push(companion)
+        loop companion in declaration.companions -> &body.push(companion)
         if !declaration.handled -> parser_report_module_member(&state)
         parser_recover_aborted_item(&state, before)
         if state.position == before {
@@ -339,17 +344,18 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
-    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "module `{name_head.name}`")
+    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span), markers: markers}}
 }
 
 // `#FX(Net, !FS) module pricing …` caps every function in the module (see
-// `ModuleCap`). Entries are written like a block `#FX(…)` cap, with `!` for a
-// denial; sema validates the names. An inline body carries the cap on each
-// of its functions; a file module's cap reaches its file through the module
-// graph.
-fn parser_module_apply_cap(state: &JetParserState, markers: [Marker], item: ^Item) -> Item {
+// `ModuleCap`), as does an `#FX :: (Net, !FS)` line in its body. Entries are
+// written like a block `#FX(…)` cap, with `!` for a denial; sema validates
+// the names. An inline body carries the cap on each of its functions; a file
+// module's cap reaches its file through the module graph.
+fn parser_module_apply_cap(state: &JetParserState, item: ^Item) -> Item {
     if item == .CodeModule(definition) {
-        loop marker in markers {
+        loop marker in definition.markers {
             if marker.name != "FX" -> next
             cap :: parser_module_fx_cap(&state, marker, definition.name) ?? return ^item
             updated := definition
@@ -608,7 +614,7 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
         declaration :: parser_parse_item_or_import(&state)
         loop import in declaration.imports -> &imports.push(import)
         if declaration.item == .Val(value) -> &body.push(value)
-        if declaration.companion == .Val(companion) -> &body.push(companion)
+        loop companion in declaration.companions -> &body.push(companion)
         if !declaration.handled -> parser_report_module_member(&state)
         parser_recover_aborted_item(&state, before)
         if state.position == before -> parser_bump(&state)

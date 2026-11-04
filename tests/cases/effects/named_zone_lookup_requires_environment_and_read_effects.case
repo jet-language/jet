@@ -4,9 +4,9 @@
 # function reports its ceiling as E3401, which replaced the Rust test's E0740.
 step: jet check {root}/tests/ui/time_zone_effects.jet
 exit: 1
-stderr: ~ "Error [E3401]: `pure` calls the impure function `time.zone`" # the pure ceiling
-stderr: ~ "Error [E0740]: `env_only` uses the effect `FS.Read`" # the Env-only ceiling
-stderr: ~ "Error [E0740]: `read_only` uses the effect `Env`" # the read-only ceiling
+stderr: ~ "Error [jet.ImpureCallInPureContext]: `pure` calls the impure function `time.zone`" # the pure ceiling
+stderr: ~ "Error [jet.EffectBoundExceeded]: `env_only` uses the effect `FS.Read`" # the Env-only ceiling
+stderr: ~ "Error [jet.EffectBoundExceeded]: `read_only` uses the effect `Env`" # the read-only ceiling
 stderr: count "Error [" = 3 # only the named user ceilings fail
 step: jet check {root}/tests/fixtures/time_zone_effects_truthful.jet
 exit: 0 # truthful zone bounds and pure numeric-offset parsing compile

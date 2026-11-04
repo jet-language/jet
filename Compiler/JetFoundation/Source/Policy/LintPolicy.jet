@@ -31,19 +31,20 @@ fn lint_policy_code_error(detail: String, code: String, name: String?) -> LintPo
     LintPolicyError{detail: detail, code: Val(code), name: name}
 }
 
-// Rust `registered_lints` (`Registry::lint_rows`): every lint-severity row.
+// Rust `registered_lints` (`Registry::lint_rows`): every current lint-severity
+// row; a retired lint is never reported.
 fn lint_registered_lints() -> [DiagnosticRegistryRow] Never! {
     rows := [DiagnosticRegistryRow]{}
     loop row in DIAGNOSTIC_ROWS {
-        if row.severity == DIAGNOSTIC_LINT -> &rows.push(row)
+        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> &rows.push(row)
     }
     rows
 }
 
 // Rust `lint_by_name`.
 fn lint_by_name(name: String) -> DiagnosticRegistryRow? Never! {
-    loop row in DIAGNOSTIC_ROWS {
-        if row.severity == DIAGNOSTIC_LINT && row.lint_name == .Val(lint_name) && lint_name == name -> return Val(row)
+    loop row in lint_registered_lints() {
+        if row.lint_name == .Val(lint_name) && lint_name == name -> return Val(row)
     }
     None
 }
@@ -66,9 +67,8 @@ fn lint_auto_derive_name() -> String Never! {
     row.lint_name ?? panic("lint rows have names")
 }
 
-// The registered refusal for a source-level lint allowance that used a
-// rendered diagnostic code: `#allow(...)` follows the package policy's
-// name-only law.
+// The registered refusal for a lint selector that used a rendered
+// diagnostic code: a package policy selector follows the name-only law.
 fn lint_selection_code_error(value: String, surface: String, span: Span?) -> Diagnostic? Never! {
     if !lint_is_diagnostic_code_shape(value) -> return None
     name :: lint_name_for_code(value)

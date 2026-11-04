@@ -101,12 +101,12 @@ fn semindex_s9_checked_text_assertions(index: SemIndex, symbols: SemanticSymbolI
 
 // tests/semindex.rs1476–1552: original spelled bypass fixture and assertions.
 fn semindex_s9_bypasses_source() -> String Never! {
-    "\nstruct Invoice {{\n    #allow(float_money)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
+    "\nstruct Invoice {{\n    #Allow(jet.FloatMoney)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
 }
 fn semindex_s9_bypasses_assertions(index: SemIndex, dossier_json: String, dossier_text: String) {
     semindex_test_dossier_bypass_facts(index)
     assert(dossier_json.contains("\"bypass_facts\""))
     assert(dossier_json.contains("\"lint_allow\""))
     assert(dossier_text.contains("bypass facts"))
-    assert(dossier_text.contains("float_money"))
+    assert(dossier_text.contains("jet.FloatMoney"))
 }

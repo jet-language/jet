@@ -52,7 +52,7 @@ PUBLICATION_SIGN_E1292_SNAPSHOT :: comptime { embed_file("../../../tests/fixture
     assert_eq(diagnostic.what, row.what)
     assert_eq(diagnostic.why, row.why)
     assert_eq(diagnostic.fix, row.fix)
-    assert_eq(diagnostic_render(diagnostic, "", "", false), "Error [E1292]: Jet could not create the package-signing key.\n Why: The operating system could not provide cryptographic randomness.\n Fix: Retry as a new operation on a supported host; no key files were created.\nMore: jet-lang.dev/e/E1292\n")
+    assert_eq(diagnostic_render(diagnostic, "", "", false), "Error [jet.MissingRandomness]: Jet could not create the package-signing key.\n Why: The operating system could not provide cryptographic randomness.\n Fix: Retry as a new operation on a supported host; no key files were created.\nMore: jet-lang.dev/e/E1292\n")
 }
 #Test("publication sign encodings reject malformed and noncanonical wire") {
     if publication_sign_hex_decode("a") == {

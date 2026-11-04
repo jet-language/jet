@@ -230,7 +230,7 @@ fn sema_policy_unsupported_applications(program: Program) -> [AppliedRuleApplica
     unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "allow" -> &unsupported.push(application)
+        if application.marker.name != "Allow" -> &unsupported.push(application)
     }
     loop application in program.rule_facts {
         // A file `#Target`, `#NoPrelude` or `#HTML(page)` is lowered by the
@@ -239,7 +239,7 @@ fn sema_policy_unsupported_applications(program: Program) -> [AppliedRuleApplica
         // their own.
         if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude" || application.marker.name == "HTML") -> next
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "allow" -> &unsupported.push(application)
+        if application.marker.name != "Allow" -> &unsupported.push(application)
     }
     unsupported
 }

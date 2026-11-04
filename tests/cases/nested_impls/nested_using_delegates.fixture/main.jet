@@ -1,0 +1,32 @@
+// `impl Trait using field` in a struct body forwards every trait method to
+// the field, as `impl T.Trait using field` does at the top level.
+trait Greet {
+    fn name(self) -> String
+    fn hello(self) -> String {
+        "hello {self.name()}"
+    }
+}
+
+struct Inner {
+    n: String
+
+    impl Greet {
+        fn name(self) -> String { self.n }
+    }
+}
+
+struct Outer {
+    inner: Inner
+
+    // Forwards to the field.
+    impl Greet using inner
+}
+
+fn greet_twice(value: Greet) -> String { "{value.hello()} {value.hello()}" }
+
+fn run() {
+    outer :: Outer{inner: Inner{n: "b"}}
+    print(outer.name())
+    print(outer.hello())
+    print(greet_twice(outer))
+}

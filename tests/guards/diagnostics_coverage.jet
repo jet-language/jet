@@ -100,26 +100,68 @@ fn dc_extract_codes(text: String, codes: &[String]) {
     }
 }
 
+// A report header a source writes with its type path, `"Error [jet.MissingEngine]: …"`,
+// emits that row's code.
+fn dc_extract_type_paths(text: String, names: &[String]) {
+    bytes :: text.bytes()
+    loop (index, byte) in bytes {
+        if byte != (U8{91}) -> next
+        end := index + 1
+        loop end < bytes.len() {
+            c :: bytes[end]
+            if !(c >= (U8{65}) && c <= (U8{90})) && !(c >= (U8{97}) && c <= (U8{122})) && !(c >= (U8{48}) && c <= (U8{57})) && c != (U8{46}) -> break
+            end += 1
+        }
+        if end < bytes.len() && bytes[end] == (U8{93}) {
+            name :: dc_slice(text, index + 1, end)
+            if name.starts_with("jet.") -> dc_add(&names, name)
+        }
+    }
+}
+
 fn dc_emitted_codes() -> [String] {
     codes := [String]{}
-    loop path in dc_source_paths() -> dc_extract_codes(dc_read(path), &codes)
+    names := [String]{}
+    loop path in dc_source_paths() {
+        text :: dc_read(path)
+        dc_extract_codes(text, &codes)
+        dc_extract_type_paths(text, &names)
+    }
+    loop row in dc_registered_rows() {
+        if dc_has(names, row.name) -> dc_add(&codes, row.code)
+    }
     codes
 }
 
 struct DcRow {
+    name: String
     code: String
     status: String
 }
 
-// The typed rows from their one home (D-REPORT-HOME1=A): tab-separated
-// `diagnostic CODE stage severity moment status …` lines.
+// The typed rows from their one home: each `struct X {` in
+// Compiler/Prelude/Diagnostics.jet whose `impl Diagnostic` block names its
+// `code` and, unless it is active, its `status` is the type `jet.X`.
 fn dc_registered_rows() -> [DcRow] {
     rows := [DcRow]{}
+    name := ""
+    code := ""
+    status := ""
     loop line in dc_read("Compiler/Prelude/Diagnostics.jet").split("\n") {
-        if !line.starts_with("diagnostic\t") -> next
-        fields :: line.split("\t").to_list()
-        assert(fields.len() > 6, "diagnostic row without a status: {line}")
-        &rows.push(DcRow{code: fields[1].copy(), status: fields[5].copy()})
+        if line.starts_with("struct ") && line.ends_with(" {{") {
+            name = "jet.{dc_slice(line, 7, line.count_bytes() - 2)}"
+        } else if line == "    impl Diagnostic {{" {
+            code = ""
+            status = "active"
+        } else if line.starts_with("        code :: \"") && line.ends_with("\"") {
+            code = dc_slice(line, 17, line.count_bytes() - 1)
+        } else if line.starts_with("        status :: .") {
+            status = dc_slice(line, 19, line.count_bytes()).lower()
+        } else if line == "    }}" && status != "" {
+            assert(code != "", "diagnostic impl without a code before line `{line}`")
+            &rows.push(DcRow{name: name.copy(), code: code.copy(), status: status.copy()})
+            status = ""
+        }
     }
     assert(rows.len() > 100, "the typed diagnostic rows must be readable")
     rows
@@ -156,8 +198,9 @@ fn dc_snapshot_texts() -> [(path: String, text: String)] {
     out
 }
 
-// tests/diagnostics_coverage.rs report openers: `Error [CODE]`, `Warning [CODE]`,
-// `Stop [CODE]`, `Lint [CODE]` at the start of a line.
+// tests/diagnostics_coverage.rs report openers: `Error [ID]`, `Warning [ID]`,
+// `Stop [ID]`, `Lint [ID]` at the start of a line, where ID is a registered
+// row's type path (`jet.UnknownName`) or a runtime code.
 fn dc_report_codes(text: String) -> [String] {
     codes := [String]{}
     loop line in text.split("\n") {

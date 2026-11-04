@@ -1,6 +1,7 @@
 use diagnostic_unicode :: core.text
 
-enum DiagnosticRegistryStatus { Active Reserved }
+// A retired row is never reported; it stays so `jet explain` reads old logs.
+enum DiagnosticRegistryStatus { Active Reserved Retired }
 
 enum DiagnosticRegistryFix {
     SourceEdit
@@ -15,13 +16,15 @@ enum DiagnosticRegistryFix {
     GeneratedRedundantTailReturn
 }
 
-// This is a generated view of Compiler/Prelude/Diagnostics.jet.
-// DiagnosticRows.jet owns the data; this file owns the Source-side projection
-// and canonical construction rules. Human wording at a raise site remains
+// This is a generated view of the Diagnostic impls in
+// Compiler/Prelude/Diagnostics.jet; Tools/agent/DiagnosticRows.jet renders
+// DiagnosticRows.jet from them. This file owns the Source-side projection and
+// canonical construction rules. Human wording at a raise site remains
 // authored input, while moment, severity, row edits, grades, and no-fix facts
-// come from the generated row.
+// come from the generated row. `name` is the diagnostic's type name.
 struct DiagnosticRegistryRow {
     code: String
+    name: String
     lint_name: String?
     stage: String
     severity: Int
@@ -346,7 +349,25 @@ fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? Never! {
     diagnostic_registry_row_in(DIAGNOSTIC_ROWS, code)
 }
 
-// Every registry row in source order (Registry.rs `diagnostic_rows`).
+// The row whose Diagnostic type path is `name` (`jet.UnknownName`).
+fn diagnostic_registry_row_named(name: String) -> DiagnosticRegistryRow? Never! {
+    loop row in DIAGNOSTIC_ROWS {
+        if row.name == name -> return Val(row)
+    }
+    None
+}
+
+// What a report's header prints for `code`: a registered row's type path
+// (`jet.UnknownName`); any other code is already a type path (`web.BadPath`).
+// A row the runtime reports keeps its code, which is what the runtime prints.
+fn diagnostic_display_name(code: String) -> String Never! {
+    if diagnostic_registry_row(code) == .Val(row) {
+        if !row.has_stage("runtime") -> return row.name
+    }
+    code.copy()
+}
+
+// Every registry row in source order, retired rows included.
 fn diagnostic_registry_rows() -> [DiagnosticRegistryRow] Never! { DIAGNOSTIC_ROWS }
 
 fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
@@ -388,6 +409,7 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 // (diagnostic_display_identities), with clashes judged over the whole message.
 fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
+    if row.status == DiagnosticRegistryStatus.Retired -> panic("diagnostic `{code}` is retired and is never reported")
     clashes :: diagnostic_identity_clashes("{what}\n{why}\n{fix}".bytes())
     diagnostic :: Diagnostic{
         moment: row.moment,

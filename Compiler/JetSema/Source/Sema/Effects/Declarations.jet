@@ -216,13 +216,7 @@ fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnos
     loop item in items {
         if item == {
             .EffectDecl(declaration) -> {
-                if {
-                    sema_effect_parse_name(declaration.name) == None -> &diagnostics.push(sema_effect_unknown(declaration.name, declaration.name_span))
-                    !declaration.name.contains(".") -> {
-                        diagnostic :: sema_error("E0750", declaration.name_span, "`{declaration.name}` names an effect root, not a leaf", "an effect declaration must name one leaf beneath its root", "write `effect {declaration.name}.Name`")
-                        &diagnostics.push(diagnostic_with_rights(^diagnostic, "vocabulary", [String]{declaration.name}, [String]{}, None))
-                    }
-                }
+                if sema_effect_parse_name(declaration.name) == None -> &diagnostics.push(sema_effect_unknown(declaration.name, declaration.name_span))
             }
             .Func(function) -> sema_effect_leaf_check_function(leaves, function, &diagnostics)
             .Struct(definition) -> {

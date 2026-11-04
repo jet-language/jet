@@ -32,7 +32,7 @@ refused: hangar-verified-realization
 #         .unwrap();
 #     assert!(!output.status.success());
 #     let stderr = String::from_utf8_lossy(&output.stderr);
-#     assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
+#     assert!(stderr.contains("Error [jet.HangarIngestFailed]:"), "stderr: {stderr}");
 #     assert!(stderr.contains("32-byte file"), "stderr: {stderr}");
 #     assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
 #     // Criterion 4: a failed Store lease publication must remove its private
@@ -45,7 +45,7 @@ refused: hangar-verified-realization
 #         "failed lease setup left an executable container"
 #     );
 #     let diagnostic = stderr
-#         .find("Error [E1315]:")
+#         .find("Error [jet.HangarIngestFailed]:")
 #         .map(|offset| &stderr[offset..])
 #         .expect("lease failure diagnostic");
 #     assert_jetos_stderr_snapshot_trimmed(
@@ -61,7 +61,7 @@ env: JETPACK_FIXTURES={work}/fixtures
 step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- omp
 cwd: project
 exit: nonzero
-stderr: ~ "Error [E1315]:" # original contains predicate
+stderr: ~ "Error [jet.HangarIngestFailed]:" # original contains predicate
 stderr: ~ "32-byte file" # original contains predicate
 stdout: !~ "hello from jetpack" # original negative contains predicate
 when dir-readable root/leases: entries: root/leases = 0

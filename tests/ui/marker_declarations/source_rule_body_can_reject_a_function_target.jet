@@ -1,15 +1,19 @@
 
+struct FunctionNotAllowed {
+    impl Diagnostic {
+        code :: "E0927"
+        fn what(self) -> String { "the function is not allowed" }
+        fn why(self) -> String { "the test rule rejects this declaration" }
+        fn fix(self) -> String { "remove the marker" }
+    }
+}
+
 struct RejectsFunction {
     impl Marker {
         sites :: [.Function]
 
         fn expand(self, target: Target) {
-            reject(
-                code: "E0927",
-                what: "the function is not allowed",
-                why: "the test rule rejects this declaration",
-                fix: "remove the marker"
-            )
+            reject(FunctionNotAllowed{})
         }
     }
 }

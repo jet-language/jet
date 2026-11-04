@@ -6,8 +6,8 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check c1/main.jet
 exit: 1 # tests/closures.rs:576 sema errors
-stderr: ~ "Error [E0224]" # tests/closures.rs:577 the &self receiver is checked
+stderr: ~ "Error [jet.MissingReceiverMark]" # tests/closures.rs:577 the &self receiver is checked
 step: jet check c2/main.jet
 exit: 1 # tests/closures.rs:590 sema errors
-stderr: ~ "Error [E3401]: `pure` calls or reaches impure effects `IO`" # tests/closures.rs:591 the method effect is checked
+stderr: ~ "Error [jet.ImpureCallInPureContext]: `pure` calls or reaches impure effects `IO`" # tests/closures.rs:591 the method effect is checked
 stderr: !~ "`Net," # the callable field (every effect) was not selected

@@ -1,7 +1,8 @@
-// D-LINTPOLICY1 site rungs: `#allow(lint_name, "why")` on a statement, a
-// function or method, or a struct field silences that one lint inside its
-// target. MarkerRules validates the reason (L3103) and refuses
-// `allow_reason` (E0355); this pass only applies the allowance.
+// Site rungs: `#Allow(jet.UnusedParameter, "why")` on a
+// statement, a function or method, or a struct field silences that one lint
+// inside its target. The lint is named by its diagnostic type path.
+// MarkerRules validates the reason (L3103) and refuses `jet.AllowReason`
+// (E0355); this pass only applies the allowance.
 use jet_foundation.[
     DIAGNOSTIC_LINT,
     Diagnostic,
@@ -11,8 +12,8 @@ use jet_foundation.[
     Program,
     RuleSite,
     Span,
+    diagnostic_display_name,
     expr_span,
-    lint_name_for_code,
 ]
 
 // One allowance in its module's aggregate coordinates, keyed by the source
@@ -24,11 +25,14 @@ struct SemaLintAllowance {
     target: Span
 }
 
-// The lint name an `#allow` marker names, if it is one.
+// The lint type path an `#Allow` marker names (`jet.UnusedParameter`), if it
+// is one.
 fn sema_lint_allowance_name(marker: Marker) -> String? Never! {
-    if marker.name != "allow" || marker.negated || marker.args.len() == 0 -> return None
+    if marker.name != "Allow" || marker.negated || marker.args.len() == 0 -> return None
     if marker.args[0] == .Expr(expr) {
-        if expr == .Ident(name, _, _) -> return Val(name)
+        if expr == .Field(base, member, _, _) {
+            if base == .Ident(package, _, _) -> return Val("{package}.{member}")
+        }
     }
     None
 }
@@ -89,7 +93,7 @@ fn sema_lint_allowed(diagnostic: Diagnostic, allowances: [SemaLintAllowance]) ->
     span :: diagnostic.span ?? return false
     path :: diagnostic.source_path ?? return false
     offset :: diagnostic.source_offset ?? return false
-    lint :: lint_name_for_code(diagnostic.code) ?? return false
+    lint :: diagnostic_display_name(diagnostic.code)
     loop allowance in allowances {
         if allowance.lint == lint && allowance.source_path == path && allowance.source_offset == offset && allowance.target.start <= span.start && span.end <= allowance.target.end -> return true
     }

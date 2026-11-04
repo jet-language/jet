@@ -3,14 +3,14 @@
 set -eu
 if [ "${JET_TESTKIT_ICE:-}" = 1 ]; then exit 101; fi
 if [ "${JET_TESTKIT_WARNING:-}" = 1 ]; then
-    printf 'Warning [L0507]: unjoined task at function boundary\n' >&2
+    printf 'Warning [jet.BranchArmTable]: unjoined task at function boundary\n' >&2
 fi
 here=$(dirname "$0")
 case "$1" in
     emit) printf 'fn main() {}\n' ;;
     check) exit 0 ;;
     build)
-        if [ "${JET_TESTKIT_REJECT:-}" = 1 ]; then printf 'Error [E0001]: rejected\n' >&2; exit 1; fi
+        if [ "${JET_TESTKIT_REJECT:-}" = 1 ]; then printf 'Error [jet.StrayCharacter]: rejected\n' >&2; exit 1; fi
         directory=$(dirname "$2")
         name=$(basename "$2" .jet)
         artifact="$directory/.jet/build/$name"

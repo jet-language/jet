@@ -1696,6 +1696,16 @@ fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, le
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
 
+// The `impl Trait { … }` blocks a struct or enum writes in its body.
+fn sema_registration_item_trait_blocks(item: Item) -> [TraitImplBlock] Never! {
+    if item == {
+        .Struct(definition) -> return definition.trait_impls
+        .Enum(definition) -> return definition.trait_impls
+        else -> {}
+    }
+    [TraitImplBlock]{}
+}
+
 fn sema_registration_nominal(item: Item, module_identity: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
     if item == {
         .Struct(definition) -> {

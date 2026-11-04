@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E2510 — Jet diagnostic</title>
-<meta name="description" content="`.ReduceOp` is not a reduce operation, or a retired `#Op` spelling was used.">
+<meta name="description" content="A reduce-op marker is only valid inside a lane `.reduce(…)`.">
 <meta property="og:title" content="E2510 — Jet diagnostic">
-<meta property="og:description" content="`.ReduceOp` is not a reduce operation, or a retired `#Op` spelling was used.">
+<meta property="og:description" content="A reduce-op marker is only valid inside a lane `.reduce(…)`.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E2510</h1>
-<p>`.ReduceOp` is not a reduce operation, or a retired `#Op` spelling was used.</p>
+<p>A reduce-op marker is only valid inside a lane `.reduce(…)`.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`.ReduceOp` is not a reduce operation, or a retired `#Op` spelling was used.</p>
+<p class="diag-copy what" data-registry-field="what">A reduce-op marker is only valid inside a lane `.reduce(…)`.</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">SIMD reduction takes one typed `ReduceOp` value: `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Pass a listed dot value, or use `v.sum()` / `v.product()` / `v.min()` / `v.max()`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2510</code>: <code>tests/ui/simd_reduce_bad_marker.stderr</code>.</p>
-<pre class="diag">Error [E2510]: This value is not a `ReduceOp`
+<pre class="diag">Error [jet.ReduceMarkerOutsideReduce]: This value is not a `ReduceOp`
   --&gt; tests/ui/simd_reduce_bad_marker.jet:4:20
     |
   4 |     print(v.reduce(.Median))

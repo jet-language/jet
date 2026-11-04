@@ -58,14 +58,14 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
     (projected, panels) := projection(1)
     projected.status.state = .Error
     projected.status.diagnostic_code = .Val("E0102")
-    projected.status.diagnostic = .Val("Error [E0102]: unknown symbol\n  --> app.jet:12:9\n")
+    projected.status.diagnostic = .Val("Error [jet.UnknownFunction]: unknown symbol\n  --> app.jet:12:9\n")
     state := BrowserWebState.new("s1")
     state.sync(projected, panels).unwrap()
     page := render_page(state, .InApp)
     assert(!page.contains("data-tool=\"source\""))
     assert(!page.contains("data-tool=\"rebuild\""))
     assert(page.contains("no rebuild executor is registered for this host"))
-    assert(page.contains("<pre class=\"diag\">Error [E0102]: unknown symbol"))
+    assert(page.contains("<pre class=\"diag\">Error [jet.UnknownFunction]: unknown symbol"))
     state.tools.source = true; state.tools.source_reason = .None
     source_page := render_page(state, .InApp)
     assert(source_page.contains("data-tool=\"source\" data-focus=\"tool:source\" data-file=\"app.jet\">Fix in source"))

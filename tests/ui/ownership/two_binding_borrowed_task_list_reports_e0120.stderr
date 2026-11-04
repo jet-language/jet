@@ -1,4 +1,4 @@
-Error [E0120]: `hs` was not moved here, so this loop can't take its handles
+Error [jet.ReadOnlyValueNotOwned]: `hs` was not moved here, so this loop can't take its handles
   --> two_binding_borrowed_task_list_reports_e0120.jet:4:20
     |
   4 |     loop (i, h) in hs { total += (h.join() ?? 0) + i }
@@ -7,7 +7,7 @@ Error [E0120]: `hs` was not moved here, so this loop can't take its handles
  Fix: Take the list with the move marker `^`: `hs: ^[Task<Int>]`, or collect the work in a canonical `task.all` or `task.group` block
 More: jet-lang.dev/e/E0120
 
-Error [E0142]: `handles` can't be shared — it must be used exactly once
+Error [jet.SingleUseLent]: `handles` can't be shared — it must be used exactly once
   --> two_binding_borrowed_task_list_reports_e0120.jet:9:17
     |
   9 |     print(drain(handles))
@@ -16,7 +16,7 @@ Error [E0142]: `handles` can't be shared — it must be used exactly once
  Fix: Move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
 More: jet-lang.dev/e/E0142
 
-Error [E0140]: `handles` still owes `consume`
+Error [jet.SingleUseDropped]: `handles` still owes `consume`
   --> two_binding_borrowed_task_list_reports_e0120.jet:8:5
     |
   8 |     handles :: [task 1]

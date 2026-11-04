@@ -2415,11 +2415,29 @@ Layout is the formatter's job, one rule: a marker on a type, function, or
 method goes on its own line above it; a marker on a field, parameter, binding,
 statement, or block stays inline.
 
+**D-MARKER-INBODY1=A — Markers as lines inside the body** *(ratified
+2026-11-04, card #6562; amends S82)*: a declaration's markers may instead be
+written inside its body, one per line, as `#X :: value`, anywhere directly in
+the body of a struct, enum, trait, impl, module, or function. The separator is
+the registry row `MARKER_INBODY_SEPARATOR`. `#X :: true` applies `#X` with no
+arguments, `#X :: false` is `#!X`, `#X :: v` passes one name path, string, or
+number, and `#X :: (args)` passes any other list (E0943 otherwise). The line is
+the same marker as `#X(args)` above, at the same site; type facts apply after
+the whole body is read. One declaration writes its whole set in one place
+(E0942, fixed by moving the set above). A line in a nested block or lambda
+body, and a marker that decides how a function body is read (`#FFI`,
+`#Import(c)`), are E0355. The formatter keeps the placement.
+
+**D-MARKER-MOVE1=A — Moving a marker set** *(ratified, card #6562)*:
+`jet fix --markers inside FILE` and `jet fix --markers above FILE` move every
+declaration's set; plain `jet fix` moves a mixed set above; an editor offers
+both moves as code actions on the declaration under the cursor.
+
 **D-MARK-REPEAT1=A — One rule once per target** *(ratified 2026-08-05, card
 #1455)*: writing the same rule twice on one target is an E0999 error with a
 remove-the-repeat fix. Rows whose repetition carries meaning declare
 `repeatable` in the registry: `#Pre` and `#Post` (several contracts, each with
-its own message) and `#allow` (several lints). Every other row rejects the
+its own message) and `#Allow` (several lints). Every other row rejects the
 second copy, because a silent duplicate is a typo or a merge artifact and two
 copies can only disagree once one of them gains arguments.
 
@@ -7594,8 +7612,10 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
   writes, and its `impl Marker { … }` block holds the rule's settings as
   `name :: value` lines: `sites`, `repeatable`, `owns_menu`, `inherits`,
   `resolution`, `scopes` and `companion`.
-- `Compiler/Prelude/Effects.jet` holds one `effect Name`
-  declaration per effect root.
+- `Compiler/Prelude/Effects.jet` holds one type per effect root: a struct, or
+  an enum whose cases are the root's closed leaves, each with an in-body
+  `impl Effect { … }` block whose `fn irreversible(self) -> Bool` gives the
+  per-case rollback fact.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
   hold the vocabulary; both are read from those two files.
 - D-VARIADIC1: a marker that takes a list of arguments writes it the same way a

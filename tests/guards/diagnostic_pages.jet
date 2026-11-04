@@ -1,7 +1,7 @@
 // Port of the deleted tests/diagnostic_pages.rs (#6096 diagnostic-pages): one
 // `Docs/site/dist/e/<CODE>/index.html` page per registered diagnostic row,
-// rendered from the typed rows' one home (Compiler/Prelude/Diagnostics.jet,
-// D-REPORT-HOME1=A) and the first UI snapshot naming the code.
+// rendered from the typed rows' one home (the `Diagnostic` impls in
+// Compiler/Prelude/Diagnostics.jet) and the first UI snapshot naming the code.
 //
 // The check compares the committed pages with the rendering. Set
 // JET_UPDATE_DIAGNOSTIC_PAGES=1 to write the rendered pages instead, as the
@@ -16,6 +16,8 @@ DP_SNAPSHOT_DIRS :: [String]{"tests/ui", "tests/ui_lint"}
 
 struct DpRow {
     code: String
+    // The type path a report's header prints: `jet.` and the impl's type.
+    name: String
     what: String
     why: String
     fix: String
@@ -61,24 +63,94 @@ fn dp_snapshots() -> [DpSnapshot] {
     snapshots
 }
 
-// The typed rows: tab-separated `diagnostic CODE stage severity moment status
-// meaning what why fix …` lines, sorted by code as the Rust `sorted_rows` did.
+// A text method's literal as its registry template: `\"` and `\\` unescaped,
+// `{{`/`}}` read as one brace, and a `{self.name}` hole shown as `{name}`.
+fn dp_template(literal: String) -> String {
+    bytes :: literal.replace("{{self.", "{{").bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        byte :: bytes[index]
+        doubled :: index + 1 < bytes.len() && bytes[index + 1] == byte && (byte == (U8{123}) || byte == (U8{125}))
+        if byte == (U8{92}) && index + 1 < bytes.len() {
+            &out.push(bytes[index + 1])
+            index += 2
+        } else if doubled {
+            &out.push(byte)
+            index += 2
+        } else {
+            &out.push(byte)
+            index += 1
+        }
+    }
+    String.from_bytes(out) ?? panic("a diagnostic text literal is UTF-8")
+}
+
+// The literal between the first and last `"` of a `fn what(self) -> String
+// { "…" }` line, of the line after a `fn what(self) -> String {` opener, or of
+// a `code :: "…"` line.
+fn dp_literal(line: String) -> String {
+    bytes :: line.bytes()
+    open := -1
+    close := -1
+    loop (index, byte) in bytes {
+        if byte == (U8{34}) {
+            if open < 0 -> open = index
+            close = index
+        }
+    }
+    assert(open >= 0 && close > open, "diagnostic text method without a literal: {line}")
+    if close == open + 1 -> return ""
+    String.from_bytes(bytes[(open + 1)..(close - 1)]) ?? panic("a diagnostic text literal is UTF-8")
+}
+
+// The typed rows: each diagnostic struct's `impl Diagnostic` block's `code`
+// and its `what`, `why` and `fix` literals, sorted by code as the Rust
+// `sorted_rows` did.
 fn dp_rows() -> [DpRow] {
     rows := [DpRow]{}
+    row := DpRow{code: "", name: "", what: "", why: "", fix: ""}
+    name := ""
+    pending := ""
     loop line in dp_read("Compiler/Prelude/Diagnostics.jet").split("\n") {
-        if !line.starts_with("diagnostic\t") -> next
-        fields :: line.split("\t").to_list()
-        assert(fields.len() > 9, "diagnostic row without what/why/fix: {line}")
-        &rows.push(DpRow{code: fields[1].copy(), what: fields[7].copy(), why: fields[8].copy(), fix: fields[9].copy()})
+        method :: if {
+            line.starts_with("        fn what(self) -> String {{") -> "what"
+            line.starts_with("        fn why(self) -> String {{") -> "why"
+            line.starts_with("        fn fix(self) -> String {{") -> "fix"
+            else -> ""
+        }
+        if method != "" && line.ends_with("{{") {
+            pending = method
+            next
+        }
+        target :: if pending != "" -> pending.copy() else -> method
+        pending = ""
+        if target == "what" {
+            row.what = dp_template(dp_literal(line))
+        } else if target == "why" {
+            row.why = dp_template(dp_literal(line))
+        } else if target == "fix" {
+            row.fix = dp_template(dp_literal(line))
+        } else if line.starts_with("struct ") && line.ends_with(" {{") {
+            name = line.slice(7..<(line.len() - 2))
+        } else if line == "    impl Diagnostic {{" {
+            row = DpRow{code: "", name: "jet.{name}", what: "", why: "", fix: ""}
+        } else if line.starts_with("        code :: \"") {
+            row.code = dp_literal(line)
+        } else if line == "    }}" && row.code != "" {
+            assert(row.what != "" && row.why != "" && row.fix != "", "diagnostic {row.code} without what/why/fix")
+            &rows.push(row.copy())
+            row = DpRow{code: "", name: "", what: "", why: "", fix: ""}
+        }
     }
     assert(rows.len() > 100, "the typed diagnostic rows must be readable")
-    codes := rows.map(row -> row.code)
+    codes := rows.map(entry -> entry.code)
     &codes.sort()
     sorted := [DpRow]{}
     loop code in codes {
-        loop row in rows {
-            if row.code == code {
-                &sorted.push(row.copy())
+        loop candidate in rows {
+            if candidate.code == code {
+                &sorted.push(candidate.copy())
                 break
             }
         }
@@ -86,8 +158,8 @@ fn dp_rows() -> [DpRow] {
     sorted
 }
 
-fn dp_first_snapshot(snapshots: [DpSnapshot], code: String) -> DpSnapshot? {
-    marker :: "[{code}]"
+fn dp_first_snapshot(snapshots: [DpSnapshot], name: String) -> DpSnapshot? {
+    marker :: "[{name}]"
     loop snapshot in snapshots {
         if snapshot.text.contains(marker) -> return Val(snapshot.copy())
     }
@@ -214,7 +286,7 @@ fn dp_body(page: String) -> String {
     body_drifted := [String]{}
     generated := 0
     loop row in rows {
-        page :: dp_render_page(row, dp_first_snapshot(snapshots, row.code))
+        page :: dp_render_page(row, dp_first_snapshot(snapshots, row.name))
         loop entry in [(field: "what", value: row.what), (field: "why", value: row.why), (field: "fix", value: row.fix)] {
             if !page.contains("<p class=\"diag-copy {entry.field}\" data-registry-field=\"{entry.field}\">{dp_html_escape(entry.value)}</p>") -> &lost.push("{row.code} page lost registry {entry.field} text")
         }

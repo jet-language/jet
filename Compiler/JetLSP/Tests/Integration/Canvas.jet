@@ -553,7 +553,7 @@ fn source_order(src: String, names: [String]) -> [Int] {
     wrong_req :: "{{\"schema_version\":1,\"op\":\"move_link\",\"revision\":\"{revision}\",\"wire_id\":\"{wire_id}\",\"replacement\":\"missing\"}}"
     err :: apply_transaction_json(wrong_path, wrong_req).unwrap_err()
     assert(err.contains("\"kind\":\"diagnostic\""), err)
-    assert(err.contains("Error [E0107]"), err)
+    assert(err.contains("Error [jet.UnknownName]"), err)
     assert_eq(fs.read_to_string(wrong_path).unwrap(), before)
 }
 // Rust: tests/canvas.rs:1304

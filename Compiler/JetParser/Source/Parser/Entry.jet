@@ -886,7 +886,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                     if declaration.item == {
                         .Val(value) -> {
                             &program.items.push(value)
-                            if declaration.companion == .Val(companion) -> &program.items.push(companion)
+                            loop companion in declaration.companions -> &program.items.push(companion)
                         }
                         .None -> {
                             if !declaration.handled {

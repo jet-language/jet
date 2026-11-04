@@ -13,6 +13,7 @@ import {
   readActiveMarkers,
   readAnonymousTokens,
   readHighlightTokens,
+  readInbodySeparator,
   renderTreeSitter,
   renderZed,
   replaceSection,
@@ -47,8 +48,21 @@ test("only marker structs are highlighted as active rules", () => {
     assert.ok(names.includes("Zzactive"));
     assert.ok(!names.includes("Zzplain"));
     const tokens = readHighlightTokens(root);
-    assert.match(renderTreeSitter(tokens), /JET_HIGHLIGHT_MARKER_RULE = \[[^\n]*"Zzactive"/);
+    assert.match(renderTreeSitter(tokens, readAnonymousTokens(root), readInbodySeparator(root)), /JET_HIGHLIGHT_MARKER_RULE = \[[^\n]*"Zzactive"/);
     assert.doesNotMatch(renderZed(tokens, readAnonymousTokens(root)), /Zzplain/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the in-body marker separator comes from the syntax registry", () => {
+  const root = fixtureRoot();
+  try {
+    const markers = join(root, "Compiler/JetFoundation/Data/Syntax/Markers.jet");
+    writeFileSync(markers, readFileSync(markers, "utf8").replace('MARKER_INBODY_SEPARATOR :: "::"', 'MARKER_INBODY_SEPARATOR :: "=>"'));
+    assert.match(renderTreeSitter(readHighlightTokens(root), readAnonymousTokens(root), readInbodySeparator(root)), /const JET_MARKER_INBODY_SEPARATOR = "=>";/);
+    writeFileSync(markers, readFileSync(markers, "utf8").replace('MARKER_INBODY_SEPARATOR :: "=>"', ""));
+    assert.throws(() => readInbodySeparator(root), /missing MARKER_INBODY_SEPARATOR/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

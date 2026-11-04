@@ -106,8 +106,8 @@ export function runGate({ out, artifacts, seed = 4, count = 50, prepareOnly = fa
   for (const [fixture, expectedDiagnostics] of [["lowlevel_mem_direct_import_without_unsafe", 3], ["sys_posix_wrapper_without_unsafe", 2]]) {
     if (!jet || !existsSync(jet) || checker.head !== manifest.dev_head) { add(fixture, "gap", "no exact-head admitted checker"); continue; }
     const check = command(fixture, jet, ["check", join(repo, "tests/ui", `${fixture}.jet`)]);
-    const diagnostics = `${check.stdout}${check.stderr}`.match(/Error \[E3103\]/gu) ?? [];
-    add(fixture, check.status === 1 && diagnostics.length === expectedDiagnostics ? "pass" : "fail", `exit ${check.status ?? check.signal ?? check.error?.code}; ${diagnostics.length}/${expectedDiagnostics} E3103; ${fixture}.log`);
+    const diagnostics = `${check.stdout}${check.stderr}`.match(/Error \[jet\.UnsafeCallOutsideUnsafe\]/gu) ?? [];
+    add(fixture, check.status === 1 && diagnostics.length === expectedDiagnostics ? "pass" : "fail", `exit ${check.status ?? check.signal ?? check.error?.code}; ${diagnostics.length}/${expectedDiagnostics} jet.UnsafeCallOutsideUnsafe; ${fixture}.log`);
   }
 
   const goldenCases = collectGoldenEntries().filter((entry) => /^(memory|collections|strings|lowlevel|safety|concurrency)\//u.test(entry.stem)).flatMap((entry) => {

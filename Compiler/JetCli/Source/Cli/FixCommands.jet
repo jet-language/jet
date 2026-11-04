@@ -4,7 +4,7 @@ use {
     cli_files :: core.files
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, Span, TextEdit, DiagnosticFixApplicability, DiagnosticFixSafety, diagnostic_with_edit_grade, DIAGNOSTIC_ERROR]
-    jet_parser.[jet_format_unified_diff]
+    jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
 }
 
 // `errors`: the file's errors, each `CODE: what` (jet_cli_fix_checked
@@ -126,7 +126,27 @@ fn jet_cli_fix_skip(skips: &[JetCLIFixSkip], fix: JetCLIFix, reason: String) Nev
     &skips.push(JetCLIFixSkip{title: fix.title, edit: fix.edit, reason: reason})
 }
 
-fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
+// `jet fix --markers inside|above`: write every declaration's whole marker
+// set in one place. Nested declarations overlap their parent's edit, so the
+// moves apply in rounds.
+fn jet_cli_fix_markers(before: String, inside: Bool) -> JetCLIFixApply {
+    source := before
+    count := 0
+    round := 0
+    loop round < 16 {
+        fixes := [JetCLIFix]{}
+        loop edit in parser_marker_placement_edits(source.bytes(), inside) -> &fixes.push(JetCLIFix{title: "move the markers", edit: edit, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
+        if fixes.len() == 0 -> break
+        applied :: jet_cli_fix_apply_non_overlapping(source, fixes)
+        if applied.source == source -> break
+        source = applied.source
+        count += applied.applied
+        round += 1
+    }
+    JetCLIFixApply{source: source, applied: count, deferred: 0}
+}
+
+fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
     before :: cli_files.read(file) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     all_fixes := [JetCLIFix]{}
     baseline := [String]{}
@@ -138,27 +158,38 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, color: Bool, quiet: B
         .Refused(output) -> { return output }
     }
     fixes :: if all -> all_fixes else -> jet_cli_safe_fixes(all_fixes)
-    skipped :: all_fixes.len() - fixes.len()
+    skipped :: if markers != "" -> 0 else -> all_fixes.len() - fixes.len()
     skips := [JetCLIFixSkip]{}
-    if !all {
+    if !all && markers == "" {
         loop fix in all_fixes {
             if jet_cli_safe_fixes([JetCLIFix]{fix}).len() == 0 -> jet_cli_fix_skip(&skips, fix, "needs review: `jet fix --all` applies it")
         }
     }
     rejected := [JetCLIFixSkip]{}
-    applied := jet_cli_fix_checked(file, before, fixes, baseline, &rejected)
-    count := applied.applied
-    round := 1
-    loop applied.deferred > 0 && round < 16 {
-        next_fixes :: if jet_cli_fix_collect(file, applied.source, all) == {
-            .Fixes(found, _) -> found
-            .Refused(output) -> { return output }
+    applied := JetCLIFixApply{source: before, applied: 0, deferred: 0}
+    count := 0
+    if markers != "" {
+        // The moved file must check no worse than the input.
+        applied = jet_cli_fix_markers(before, markers == "inside")
+        count = applied.applied
+        if applied.source != before && jet_cli_fix_errors(file, applied.source).len() > baseline.len() {
+            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
-        next_applied :: jet_cli_fix_checked(file, applied.source, next_fixes, baseline, &rejected)
-        if next_applied.source == applied.source -> break
-        count += next_applied.applied
-        applied = next_applied
-        round += 1
+    } else {
+        applied = jet_cli_fix_checked(file, before, fixes, baseline, &rejected)
+        count = applied.applied
+        round := 1
+        loop applied.deferred > 0 && round < 16 {
+            next_fixes :: if jet_cli_fix_collect(file, applied.source, all) == {
+                .Fixes(found, _) -> found
+                .Refused(output) -> { return output }
+            }
+            next_applied :: jet_cli_fix_checked(file, applied.source, next_fixes, baseline, &rejected)
+            if next_applied.source == applied.source -> break
+            count += next_applied.applied
+            applied = next_applied
+            round += 1
+        }
     }
     loop skip in rejected -> &skips.push(skip)
     // Each rolled-back fix, with the error its edit adds.

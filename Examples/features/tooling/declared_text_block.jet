@@ -1,16 +1,19 @@
 // D-META-DSL1=A: the library rule owns checking; Jet owns the braces.
+struct MissingGreeting {
+    impl Diagnostic {
+        fn what(self) -> String { "checked text does not contain the required phrase" }
+        fn why(self) -> String { "this block language requires its greeting" }
+        fn fix(self) -> String { "add `inside checked text` to the block" }
+    }
+}
+
 struct Checked {
     impl Marker {
         sites :: [.Block]
 
         fn expand(self, target: Target) {
             if !target.contains("inside checked text") {
-                reject(
-                    code: "E0927",
-                    what: "checked text does not contain the required phrase",
-                    why: "this block language requires its greeting",
-                    fix: "add `inside checked text` to the block"
-                )
+                reject(MissingGreeting{})
             }
             fn checked_value() -> String { "checked block" }
         }

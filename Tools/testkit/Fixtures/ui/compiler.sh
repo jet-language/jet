@@ -32,11 +32,11 @@ check)
     case "$file" in
     *lint*)
         if [ "$verbose" != 1 ]; then echo 'lint requires verbose' >&2; exit 9; fi
-        printf 'Warning [L0302]: lint\n\nok: `%s` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n' "$file" >&2
+        printf 'Warning [jet.SameEnumGuardTable]: lint\n\nok: `%s` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n' "$file" >&2
         ;;
     *clean*|*published*|*extension*|*.fixed.jet) ;;
     *)
-        printf 'Error [E0109]: mismatch\n\n1 problem found\nrun `jet explain E0109` to learn more\n' >&2
+        printf 'Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nrun `jet explain E0109` to learn more\n' >&2
         exit 1
         ;;
     esac
@@ -45,7 +45,7 @@ build)
     if [ ! -f "$file" ]; then echo 'fixed was not staged' >&2; exit 9; fi
     if [ "${2:-}" = --offline ]; then
         if [ "$file" != main.jet ] || [ ! -f package.jet ]; then echo 'unlocked fixture was not staged' >&2; exit 9; fi
-        printf 'Error [E1250]: unlocked toolchain\n' >&2
+        printf 'Error [jet.UnlockedToolchainChannel]: unlocked toolchain\n' >&2
         exit 1
     fi
     # A real build writes the entry's artifact under `.jet/build`, named for its stem.

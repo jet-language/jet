@@ -430,10 +430,22 @@ fn string_list(values: [String], context: String) -> String CoreRowsError! {
 
 fn bool_text(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
-// One row per `effect Name [$irreversible]` line, in source order.
+// One row per effect name the types of Effects.jet declare, in source order:
+// a type's own name, then each case of an enum family. The text is read in
+// its constrained form: `struct Name {` or `enum Name {`, case lines, and an
+// `impl Effect {}` block or one holding the one-line
+// `fn irreversible(self) -> Bool { … }` whose body is `true`, `false`,
+// `self == .Case` or an `||` of those. A family is irreversible when any of
+// its cases is.
 fn effect_rows(source: String) -> [EffectRow] CoreRowsError! {
     rows := [EffectRow]{}
     lines :: source.split("\n").to_list()
+    type_name := ""
+    family := false
+    cases := [String]{}
+    body := String?{None}
+    impl_seen := false
+    in_impl := false
     loop index in 0..<lines.len() {
         raw :: lines[index]
         comment :: raw.find("//")
@@ -441,15 +453,80 @@ fn effect_rows(source: String) -> [EffectRow] CoreRowsError! {
         if line == "" -> next
         fields :: words(line)
         place :: "{EFFECTS_PATH}:{index + 1}"
-        if fields[0] != "effect" || fields.len() < 2 || fields.len() > 3 -> return Err(rows_fail("{place}: expected `effect Name [$irreversible]`"))
-        if fields.len() == 3 && fields[2] != "$irreversible" -> return Err(rows_fail("{place}: unknown effect annotation {fields[2]}"))
-        loop seen in rows {
-            if seen.name == fields[1] -> return Err(rows_fail("{place}: duplicate effect {fields[1]}"))
+        if type_name == "" {
+            if fields.len() != 3 || (fields[0] != "struct" && fields[0] != "enum") || fields[2] != "{{" -> return Err(rows_fail("{place}: expected `struct Name {{` or `enum Name {{`"))
+            loop seen in rows {
+                if seen.name == fields[1] -> return Err(rows_fail("{place}: duplicate effect {fields[1]}"))
+            }
+            type_name = fields[1]
+            family = fields[0] == "enum"
+            cases = [String]{}
+            body = None
+            impl_seen = false
+            next
         }
-        &rows.push(EffectRow{name: fields[1], irreversible: fields.len() == 3})
+        if in_impl {
+            if line == "}}" {
+                in_impl = false
+                next
+            }
+            if body != None || !line.starts_with("fn irreversible(self) -> Bool {{ ") || !line.ends_with(" }}") -> return Err(rows_fail("{place}: expected one `fn irreversible(self) -> Bool {{ … }}` line in `impl Effect`"))
+            body = Val(byte_slice(line, "fn irreversible(self) -> Bool {{ ".len(), line.len() - 2).trim())
+            next
+        }
+        if line == "impl Effect {{}}" || line == "impl Effect {{" {
+            if impl_seen -> return Err(rows_fail("{place}: `{type_name}` has a second `impl Effect` block"))
+            impl_seen = true
+            in_impl = line == "impl Effect {{"
+            next
+        }
+        if line == "}}" {
+            if !impl_seen -> return Err(rows_fail("{place}: `{type_name}` has no `impl Effect` block"))
+            if family && cases.len() == 0 -> return Err(rows_fail("{place}: the effect family `{type_name}` has no cases"))
+            case_rows := [EffectRow]{}
+            any := false
+            loop member in cases {
+                irreversible :: effect_fact(body, cases, Val(member)) ?? return Err(rows_fail("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those"))
+                if irreversible -> any = true
+                &case_rows.push(EffectRow{name: "{type_name}.{member}", irreversible: irreversible})
+            }
+            root := any
+            if !family {
+                root = effect_fact(body, cases, None) ?? return Err(rows_fail("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`"))
+            }
+            &rows.push(EffectRow{name: type_name, irreversible: root})
+            loop row in case_rows -> &rows.push(row)
+            type_name = ""
+            next
+        }
+        if !family || fields.len() != 1 || impl_seen -> return Err(rows_fail("{place}: expected an effect family case name, `impl Effect` or `}}`"))
+        if cases.contains(line) -> return Err(rows_fail("{place}: duplicate effect {type_name}.{line}"))
+        &cases.push(line)
     }
+    if type_name != "" -> return Err(rows_fail("{EFFECTS_PATH}: `{type_name}` is not closed"))
     if rows.len() == 0 -> return Err(rows_fail("{EFFECTS_PATH} declares no effects"))
     Ok(rows)
+}
+
+// An `irreversible` body's value for one case (None for a struct), or None
+// when the body is not the effect fact form. No body is `false`.
+fn effect_fact(body: String?, cases: [String], member: String?) -> Bool? Never! {
+    written :: body ?? return Val(false)
+    holds := false
+    loop part in written.split("||") {
+        term :: part.trim()
+        if {
+            term == "true" -> holds = true
+            term == "false" -> {}
+            term.starts_with("self == .") -> {
+                named :: byte_slice(term, "self == .".len(), term.len())
+                if member == None || !cases.contains(named) -> return None
+                if member == .Val(case_name) && case_name == named -> holds = true
+            }
+            else -> return None
+        }
+    }
+    Val(holds)
 }
 
 // The effect names that are leaves (`Root.Member`) or, with `leaf` false, roots.
@@ -574,9 +651,16 @@ fn effect_rows_error(source: String) -> String Never! {
     assert_eq(snake_segment("HTTPServer"), "http_server")
     assert_eq(snake_segment("Utf8Bytes"), "utf8_bytes")
     assert_eq(jet_string_literal("a{{b}}\t\"\\", "test") ?? panic("literal refused"), "\"a{{{{b}}}}\\t\\\"\\\\\"")
-    assert(effect_rows_error("effect Net $irreversible\neffect FS\n") == "")
-    assert(effect_rows_error("effect Net $loud\n").contains("unknown effect annotation"))
-    assert(effect_rows_error("effect Net\neffect Net\n").contains("duplicate effect Net"))
-    assert(effect_rows_error("fact Net\n").contains("expected `effect Name"))
+    assert(effect_rows_error("struct Net {{\n    impl Effect {{\n        fn irreversible(self) -> Bool {{ true }}\n    }}\n}}\nenum FS {{\n    Read\n    Write\n\n    impl Effect {{\n        fn irreversible(self) -> Bool {{ self == .Write }}\n    }}\n}}\n") == "")
+    rows :: effect_rows("enum FS {{\n    Read\n    Write\n    impl Effect {{\n        fn irreversible(self) -> Bool {{ self == .Write }}\n    }}\n}}\nstruct IO {{\n    impl Effect {{}}\n}}\n") ?? panic("the family was refused: {err.message}")
+    assert_eq(rows.len(), 4)
+    assert(rows[0].name == "FS" && rows[0].irreversible)
+    assert(rows[1].name == "FS.Read" && !rows[1].irreversible)
+    assert(rows[2].name == "FS.Write" && rows[2].irreversible)
+    assert(rows[3].name == "IO" && !rows[3].irreversible)
+    assert(effect_rows_error("enum FS {{\n    Read\n    impl Effect {{\n        fn irreversible(self) -> Bool {{ self == .Gone }}\n    }}\n}}\n").contains("is not `true`, `false`"))
+    assert(effect_rows_error("struct Net {{\n    impl Effect {{}}\n}}\nstruct Net {{\n    impl Effect {{}}\n}}\n").contains("duplicate effect Net"))
+    assert(effect_rows_error("effect Net\n").contains("expected `struct Name {{`"))
+    assert(effect_rows_error("struct Net {{\n}}\n").contains("has no `impl Effect` block"))
     assert(effect_rows_error("// only a comment\n").contains("declares no effects"))
 }

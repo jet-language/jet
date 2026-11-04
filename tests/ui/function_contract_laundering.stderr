@@ -1,4 +1,4 @@
-Error [E0120]: `action` was not moved here, so it cannot be returned as-is
+Error [jet.ReadOnlyValueNotOwned]: `action` was not moved here, so it cannot be returned as-is
   --> tests/ui/function_contract_laundering.jet:3:56
     |
   3 | fn erase(action: fn(Bool) -> Int) -> fn(Bool) -> Int { action }
@@ -7,7 +7,7 @@ Error [E0120]: `action` was not moved here, so it cannot be returned as-is
  Fix: Return a copy: `return action.copy()` — or take ownership with the move marker `^`: `action: ^fn(Bool) -> Int`. To return borrowed data, declare `-> View<T> from action` and return a view derived from `action`
 More: jet-lang.dev/e/E0120
 
-Error [E0120]: `action` was not moved here, so it cannot be returned as-is
+Error [jet.ReadOnlyValueNotOwned]: `action` was not moved here, so it cannot be returned as-is
   --> tests/ui/function_contract_laundering.jet:5:79
     |
   5 | fn labelled(action: fn(*, force: Bool) -> Int) -> fn(*, force: Bool) -> Int { action }
@@ -16,7 +16,7 @@ Error [E0120]: `action` was not moved here, so it cannot be returned as-is
  Fix: Return a copy: `return action.copy()` — or take ownership with the move marker `^`: `action: ^fn(*, force: Bool) -> Int`. To return borrowed data, declare `-> View<T> from action` and return a view derived from `action`
 More: jet-lang.dev/e/E0120
 
-Error [E0771]: This needs fn(*, force: Bool) -> Int, but the function value is fn(Bool) -> Int
+Error [jet.FunctionValueLabelMismatch]: This needs fn(*, force: Bool) -> Int, but the function value is fn(Bool) -> Int
   --> tests/ui/function_contract_laundering.jet:10:29
     |
  10 |     plain :: erase(labelled(save))
@@ -25,7 +25,7 @@ Error [E0771]: This needs fn(*, force: Bool) -> Int, but the function value is f
  Fix: Use `fn(*, force: Bool) -> Int` here
 More: jet-lang.dev/e/E0771
 
-Error [E0771]: This needs fn(*, force: Bool) -> Int, but the function value is fn(Bool) -> Int
+Error [jet.FunctionValueLabelMismatch]: This needs fn(*, force: Bool) -> Int, but the function value is fn(Bool) -> Int
   --> tests/ui/function_contract_laundering.jet:11:20
     |
  11 |     _ :: use_label(plain)

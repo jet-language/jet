@@ -366,9 +366,30 @@ fn jfmt_fmt_statement_switch_attr(f: &JetFmt, marker: Marker, body: [Stmt]) {
 }
 
 fn jfmt_fmt_block_stmts(f: &JetFmt, body: [Stmt]) {
+    jfmt_fmt_block_lines(&f, body, [Marker]{})
+}
+
+// A block's statements and, for a function body, its `#X :: value` marker
+// lines, each printed where it was written.
+fn jfmt_fmt_block_lines(f: &JetFmt, body: [Stmt], markers: [Marker]) {
     index := 0
+    marker_index := 0
     previous_end := Int?{None}
-    loop index < body.len() {
+    loop index < body.len() || marker_index < markers.len() {
+        if marker_index < markers.len() && (index >= body.len() || markers[marker_index].span.start < jfmt_stmt_start(body[index])) {
+            marker :: markers[marker_index]
+            if previous_end == .Val(end) {
+                jfmt_newline(&f)
+                jfmt_emit_leading_statement_gap(&f, end, marker.span.start)
+            } else {
+                jfmt_emit_leading(&f, marker.span.start)
+            }
+            jfmt_fmt_inbody_marker(&f, marker)
+            jfmt_emit_trailing(&f, marker.span.end)
+            previous_end = Val(marker.span.end)
+            marker_index += 1
+            next
+        }
         stmt :: body[index]
         fence :: jfmt_fenced_statement_for(f, stmt)
         source_start :: if fence == .Val(fact) -> fact.span.start else -> jfmt_stmt_start(stmt)

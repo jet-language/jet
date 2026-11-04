@@ -15,7 +15,7 @@ exit: 1 # tests/encoding_edition.rs:179 is rejected
 stderr: ~ "`decode`" # tests/encoding_edition.rs:179 rendered diagnostic text
 step: jet check c3/run.jet
 exit: 0 # tests/encoding_edition.rs:194 compiles
-stderr: ~ "[L2001]" # release-policy.md:62-72 step 2: before removed_in the item still compiles and warns; tests/encoding_edition.rs:194 encoded the since-edition gate 7bef65ccd4 removed
-stderr: !~ "[E2002]" # tests/encoding_edition.rs:194 never reports E2002
+stderr: ~ "[jet.DeprecatedItem]" # release-policy.md:62-72 step 2: before removed_in the item still compiles and warns; tests/encoding_edition.rs:194 encoded the since-edition gate 7bef65ccd4 removed
+stderr: !~ "[jet.DeprecatedPastWindow]" # tests/encoding_edition.rs:194 never reports E2002
 stderr: ~ "L2001" # release-policy.md:62-72 step 2 (was absent under the removed since-edition gate)
 stderr: !~ "E2002" # tests/encoding_edition.rs:194 absent from the diagnostics

@@ -796,7 +796,7 @@ fn extract_inline_candidate(path: OSPath, src: String, inline_id: String, functi
     projection :: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
     inline :: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
     expr :: snippet(src, Span.new(inline.span.start, inline.span.end))
-    if expr.contains("#Unsafe") -> return .Err(edit_error("diagnostic", "Error [E2203]: Canvas extract cannot cross an unsafe source span"))
+    if expr.contains("#Unsafe") -> return .Err(edit_error("diagnostic", "Error [jet.DebuggerUnavailable]: Canvas extract cannot cross an unsafe source span"))
     params :: extract_params(projection.json, expr)
     signature :: params.iter().map(((_0: name, _1: ty)) -> "{name}: {ty}").collect().join(", ")
     args :: params.iter().map(((_0: name, _1: _)) -> name.copy()).collect().join(", ")

@@ -699,7 +699,7 @@ function stabilizeClock(text) {
     .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/gu, "<TS>");
 }
 
-const DIAGNOSTIC_HEADER = /^(Error|Warning|Note|Help|Info|Hint|Stop|Lint)\b[^[\n]*\[([A-Z][A-Za-z0-9-]*)\](?: \(([^)]*)\))?: ?(.*)$/u;
+const DIAGNOSTIC_HEADER = /^(Error|Warning|Note|Help|Info|Hint|Stop|Lint)\b[^[\n]*\[([A-Za-z][A-Za-z0-9_.-]*)\](?: \(([^)]*)\))?: ?(.*)$/u;
 const DIAGNOSTIC_SPAN = /^\s*-->\s*(\S+)$/u;
 
 export function parseDiagnostics(text) {

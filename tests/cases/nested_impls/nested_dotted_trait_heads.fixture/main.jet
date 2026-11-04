@@ -1,0 +1,32 @@
+// A trait block in a type body takes a dotted head: a literal capability
+// (`impl Literal.Int`) and a trait from another module (`impl far.Named`).
+// Operator heads keep their right-hand type and `#Commutative`.
+module far {
+    trait Named {
+        fn label(self) -> String
+    }
+}
+
+struct Meters {
+    v: Int
+
+    impl Literal.Int {
+        comptime fn from_literal(value: Int) -> Meters { Meters{v: value} }
+    }
+
+    impl far.Named {
+        fn label(self) -> String { "{self.v} m" }
+    }
+
+    impl Add(Int) #Commutative {
+        fn add(self, rhs: Int) -> Meters { Meters{v: self.v + rhs} }
+    }
+}
+
+fn show(value: Meters) -> String { value.label() }
+
+fn run() {
+    print(show(5))
+    print(show(Meters{v: 1} + 2))
+    print(show(3 + Meters{v: 1}))
+}

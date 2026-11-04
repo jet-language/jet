@@ -8,7 +8,7 @@ use {
     import_out_files :: core.files
     import_out_sys :: core.sys
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, DiagnosticMoment, EvidenceReport, diagnostic_from_registry, diagnostic_registry_row, evidence_producer_name, evidence_report_encode]
+    jet_foundation.[Diagnostic, DiagnosticMoment, EvidenceReport, diagnostic_display_name, diagnostic_from_registry, diagnostic_registry_row, evidence_producer_name, evidence_report_encode]
     jet_pkg_model.[ForeignBoundaryContract, ForeignBoundaryDisposition, ForeignSourceReceipt, WorkspaceDeclarationCache, pkg_foreign_boundary_capability]
 }
 
@@ -19,7 +19,7 @@ fn jet_cli_import_todo_diagnostic(todo: JetCLIImportTodo) -> Diagnostic Never! {
     row :: diagnostic_registry_row(JET_CLI_IMPORT_TODO_CODE) ?? panic("JT0101 is not registered")
     what :: row.what.replace("{{construct}}", todo.what).replace("{{source}}", todo.source)
     why :: row.why.replace("{{reason}}", todo.why)
-    fix :: row.fix.replace("{{fix}}", todo.fix).replace("{{target}}", todo.target)
+    fix :: row.fix.replace("{{fix_text}}", todo.fix).replace("{{target}}", todo.target)
     diagnostic_from_registry(JET_CLI_IMPORT_TODO_CODE, None, what, why, fix)
 }
 
@@ -44,7 +44,7 @@ fn jet_cli_import_operation_error(what: String, why: String, json: Bool) -> JetD
     row :: diagnostic_registry_row("JT0198") ?? panic("JT0198 is not registered")
     diagnostic :: diagnostic_from_registry("JT0198", None, row.what.replace("{{operation}}", what), row.why.replace("{{reason}}", why), row.fix)
     if json -> return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_import_output("", "error[{diagnostic.code}]: {diagnostic.what}\n  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_import_output("", "error[{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Rust `migration_source_conversion` / `migration_mode`.
@@ -214,7 +214,7 @@ fn jet_cli_import_apply(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bo
             paths :: jet_cli_status_texts(shown)
             return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)}, [JetCLIStatusField]{jet_cli_status_field("paths", paths)})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
         }
-        stderr := "error[{diagnostic.code}]: {diagnostic.what}\n"
+        stderr := "error[{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n"
         loop path in shown -> stderr = "{stderr}  {path}\n"
         return jet_cli_import_output("", "{stderr}  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
     }

@@ -34,7 +34,7 @@ exit: 0
 step: jet build --backtrace=full --debug-info=false main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]: `--backtrace=full` needs debug info, which `--debug-info=false` leaves out" # a written full backtrace needs DWARF
+stderr: ~ "Error [jet.InvalidCommandInput]: `--backtrace=full` needs debug info, which `--debug-info=false` leaves out" # a written full backtrace needs DWARF
 step: jet build --profile=refused main.jet
 cwd: open
 exit: 2
@@ -42,7 +42,7 @@ stderr: ~ "needs debug info, which `debug_info: false` in profile `refused` of p
 step: jet build --backtrace=sometimes main.jet
 cwd: open
 exit: 2
-stderr: ~ "Error [E2104]: `--backtrace=sometimes` isn't a value of `backtrace`" # full, brief or off
+stderr: ~ "Error [jet.InvalidCommandInput]: `--backtrace=sometimes` isn't a value of `backtrace`" # full, brief or off
 step: jet build main.jet
 cwd: dead
 exit: 0
