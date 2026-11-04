@@ -2655,9 +2655,10 @@ fn sema_expr_type_base_name(ty: Type) -> String? {
     }
 }
 
-fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, owner_type_args: [Type], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
+// The method candidates of `method` on `receiver_type` as module
+// `caller_module` sees them; generic parameters are `environment`'s.
+fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, caller_module: String, receiver_type: Type, method: String, owner_type_args: [Type], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     candidates := [SemaCallMethodCandidate]{}
-    caller_module := environment.module_identity
     caller_package := ""
     if sema_registration_module_index(graph, caller_module) == .Val(caller_index) -> caller_package = graph.modules[caller_index].package_identity
     trait_candidates := sema_call_trait_method_candidates(graph, receiver_type, method, type_args, caller_module, caller_package, environment.generic_params, span, &diagnostics)
@@ -3739,7 +3740,7 @@ fn sema_expr_check_declared_method(receiver: Expr, receiver_value: TExpr, method
     }
     if candidates.len() == 0 {
         candidates = if program.registration_graph == {
-            .Val(graph) -> sema_expr_registration_method_candidates(graph, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, program, &scopes, &diagnostics)
+            .Val(graph) -> sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, routed_method, owner_type_args, type_args, method_span, environment, program, &diagnostics)
             .None -> sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
         }
     }

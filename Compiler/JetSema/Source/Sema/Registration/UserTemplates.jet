@@ -225,7 +225,12 @@ fn sema_user_template_register(graph: &SemaRegistrationGraph, module_index: Int,
             }
         }
         impl_rows :: sema_registration_impl_rows(module_row)
-        loop item in generated -> sema_registration_add_impl(&module_row, item, impl_rows, &problems)
+        // The items move out of the row while sema_registration_add_impl
+        // writes it, so they are read in place.
+        items := ^module_row.program.items
+        module_row.program.items = [Item]{}
+        loop item in generated -> sema_registration_add_impl(&module_row, item, items, impl_rows, &problems)
+        module_row.program.items = ^items
         graph.modules[module_index] = module_row
         sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
     }

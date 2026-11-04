@@ -2850,6 +2850,8 @@ fn jet_driver_trace_lookup_counters(trace_sink: CompilerTraceSink?, phase: Strin
     if trace_sink == .Val(sink) {
         sink.progress("counters.{phase}.module_lookups", counts.module_lookups - since.module_lookups, -1)
         sink.progress("counters.{phase}.name_lookups", counts.name_lookups - since.name_lookups, -1)
+        sink.progress("counters.{phase}.scope_lookups", counts.scope_lookups - since.scope_lookups, -1)
+        sink.progress("counters.{phase}.scope_compares", counts.scope_compares - since.scope_compares, -1)
     }
 }
 
@@ -3516,7 +3518,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     loop diagnostic in sema_output_legacy_run_contract(registration_graph, output_intent) -> &load.diagnostics.push(diagnostic)
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
     register_lookups :: sema_registration_lookup_counts(registration_graph)
-    jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
+    jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
     registration_graph.plugin_facts = jet_driver_plugin_facts(request)
@@ -3580,6 +3582,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     )
     jet_driver_comptime_return_declared(&comptime_stage, &comptime_run)
     if request.trace_sink == .Val(sink) -> sink.end("comptime", comptime_run.values.len())
+    comptime_lookups := jet_driver_stage_lookup_counts(comptime_run.partial_graph, check_lookups)
+    comptime_lookups = jet_driver_stage_lookup_counts(comptime_run.graph, comptime_lookups)
+    jet_driver_trace_lookup_counters(request.trace_sink, "comptime", comptime_lookups, check_lookups)
     load.diagnostics = stage_diagnostics
     trace = comptime_run.trace
     if comptime_run.soft_stop {

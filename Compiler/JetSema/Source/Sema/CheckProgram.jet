@@ -986,8 +986,13 @@ fn sema_incremental_module_input(environment: SemaScopeEnvironment, program: Sem
     // has no exchange on a field of the write-borrowed `scopes`.
     location := scopes.location_function.copy()
     scopes.location_function = None
+    // copy: a handle copy (the graph's shared counters): a traced check keys
+    // the same memo as an untraced one, so the handle is out of the key.
+    counters := scopes.lookup_counters.copy()
+    scopes.lookup_counters = None
     input := "module={environment.module_identity:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={program.checked_types:Debug};type_rows={program.checked_type_rows:Debug};type_slots={program.checked_type_name_slots:Debug};type_names={program.checked_type_name_rows:Debug};boxed={program.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
     scopes.location_function = ^location
+    scopes.lookup_counters = ^counters
     ^input
 }
 
