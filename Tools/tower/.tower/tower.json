@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90446,
+    "rev": 90450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52040,6 +52040,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:27:54.576Z"
+        },
+        {
+          "n": 29,
+          "text": "D-MARKER-MOVE1 A, editor half (the CLI half landed in 37eae4f5d6): a JetLSP test asks for code actions on a struct and on a function, and gets both 'Write the markers above the declaration' and 'Write the markers inside the declaration's body'. Applying each edit gives the same text as jet fix --markers above|inside on that file.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:14:01.584Z"
         }
       ],
       "refs": [],
@@ -52052,7 +52061,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-04T18:09:44.498Z",
+      "updated": "2026-11-04T20:14:01.584Z",
       "updatedBy": "Main",
       "goals": [
         "G20"
@@ -58333,6 +58342,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "Main-13 scope note (Builder3, 2026-11-04): the seed compiles Core and the compiler, and it rejects wrapping(T{x}) with E1005, so Main-13 moves only the 33 runtime narrowing sites. The 10 Core sites stay plain T{x}. Each narrows a value that is masked or built to fit, so the new E3010 stop never fires and their meaning is unchanged. The census found no compiler sites. The Core sites move under c34, once the seed has rotated past Main-13."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The scratch patch lanes/Main/unitarg/Main-13-parked.patch now lives at Tools/tower/held/5971/."
         },
         {
@@ -58732,7 +58746,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-04T19:02:55.220Z",
+      "updated": "2026-11-04T20:10:46.261Z",
       "updatedBy": "Main",
       "goals": [
         "G21"
@@ -61871,6 +61885,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T20:05:25.268Z"
+        },
+        {
+          "n": 25,
+          "text": "D-EFFECT-PKGLEAF1 A (ratified 2026-11-04): a package effect is a struct that implements Effect and names its parent (struct Audit { impl Effect { parent :: Log } }). Allowing Log allows it and denying Log denies it; -[audit.Audit]> allows only that kind, and callers that allowed Log need no change. A function marked -[Audit]> that does more than Log permits is refused with a registered code and UI snapshot, and so is a parent that is not an open Prelude effect. The effect X.Y declaration is gone: jet fix rewrites Examples/features/effects/effect_declarations.jet, spec.md, the fmt case and the effect fixtures. The example has goldens on o0, o1 and o2, and the dependency-effect case passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:14:02.338Z"
         }
       ],
       "refs": [
@@ -61885,7 +61908,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-04T20:05:25.268Z",
+      "updated": "2026-11-04T20:14:02.338Z",
       "updatedBy": "Main",
       "goals": [
         "G17"
@@ -76173,6 +76196,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "D-MARKER-MOVE1 A (ratified 2026-11-04) is implemented in 37eae4f5d6: jet fix --markers inside|above (FixCommands.jet, InBodyMarkers.jet), and plain jet fix moves a mixed set above. Cases marker_inbody x6, including ui_fixes/marker_inbody_moves_whole_set, pass on 125e2e8f89 (Prep-2 check). The editor code actions have no test yet, tracked as #4917."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "Main 2026-11-04 (derived rule, recorded so the owner can overrule): in a FUNCTION body, # X :: lines are accepted only at the body's top statement level. Inside a nested block or a lambda they get E0355 (Block site), because a nested position would suggest a scope the marker does not have. In type, module and impl bodies they go anywhere among the members, per the owner's ANYWHERE."
         },
         {
@@ -76258,7 +76286,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T12:34:11.861Z",
-      "updated": "2026-11-04T18:22:57.806Z",
+      "updated": "2026-11-04T20:14:01.938Z",
       "updatedBy": "Main",
       "completedAt": "2026-11-04T18:22:57.806Z"
     },
@@ -157045,6 +157073,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T20:14:02.338Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#25 D-EFFECT-PKGLEAF1 A (ratified 2026-11-04): a package effect "
+    },
+    {
+      "at": "2026-11-04T20:14:01.938Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cwzm7q",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T20:14:01.584Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03183d1",
+      "note": "#29 D-MARKER-MOVE1 A, editor half (the CLI half landed in 37eae4"
+    },
+    {
+      "at": "2026-11-04T20:10:46.261Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-04T20:05:26.088Z",
       "by": "Main",
