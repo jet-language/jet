@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90400,
+    "rev": 90401,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76565,7 +76565,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T19:36:01.124Z",
-      "updated": "2026-11-04T19:36:09.832Z",
+      "updated": "2026-11-04T19:36:17.691Z",
       "updatedBy": "Main"
     }
   ],
@@ -154611,6 +154611,201 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-04T18:40:37.512Z"
+    },
+    {
+      "id": "D-PIPE1",
+      "cardId": "c09umw0r",
+      "group": "syntax",
+      "title": "How should Jet spell a pipe, so a flow of steps reads top to bottom?",
+      "situation": "Jet code often runs one value through several steps. When every step is a method, a dot chain reads in the order it runs. When a step is a function such as Int.parse, or takes the value second, the code nests inside out or names every step. A census found about 950 such places, and dots cannot fix most of them. The proposal is a pipe that writes the value as it, the word Jet already uses for the subject of an arm table or a bindingless loop. The owner asked for a single ASCII character and for a look at both directions. This ballot picks the spelling and the direction. Every option keeps the same meaning.",
+      "gist": "How should Jet spell a pipe, so each step reads top to bottom with the value written as it?",
+      "lesson": "A dot chain such as text.trim().len() reads in the order it runs. Many steps cannot be methods, such as Int.parse. Those flows nest inside out today. A pipe passes each value to the next line, where it is written as it. The question is which ASCII glyph marks a step, and whether steps may also run upward.",
+      "explainer": "",
+      "story": "Ana reads a port: bytes become text, text becomes a number, and each step can fail. Today she invents a name for every step or nests the calls. With a pipe she writes one step per line, each with its own fallback, and an error points at the exact line.",
+      "inWild": "Core/Web/Web.jet:374-380 names raw, text and port, each used once and each ending in ?? return fallback.\nJetpack/PackageModel/Source/Foreign/C/HeaderParser.jet:53 nests three calls, and the last takes the data as its second argument.\nCore/Crypto/Crypto.jet:360 is hex_encode(slice_u8(sha2_256(bytes, C_SHA224_IV), 0, 28)).\nCensus on dev 0d1ea12f79: 516 nested, 824 mixed and 1,850 named runs outside the runtime. About a third read better as a pipe.\nF#, OCaml, Elm, Elixir, Gleam, R, PHP 8.5 and the JavaScript proposal all spell the pipe |>. F# and Elm also have <|.",
+      "detail": "WHAT IS ALREADY RATIFIED\n\nD-SHAPE-PIPE1 (C, 2026-07-14) says bars mean alternatives only and Jet has no general flow operator. Every option here amends the second half. Its warning against tap, error, async and mutation variants stays.\n\nD-UFCS1 (B) refused a pipeline as a third call spelling. A topic pipe keeps one call spelling, f(it, 1). D-LOOP-SUBJECT1 (A) made the bindingless loop item the subject it. S6-R lets a leading operator continue the line above.\n\nTODAY\n\nThis program runs on the admitted compiler built from a32d3791 (probe p12). It prints 8080, then the digest.\n\n```jet\n// today (probe p12)\nSHA224_IV :: [U8]{\"iv\"}\n\nfn sha2_256(bytes: [U8], iv: [U8]) -> [U8] { bytes.map((b) -> b) }\nfn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] { bytes[start..<end] }\nfn hex_encode(bytes: [U8]) -> String { bytes.map((b) -> \"{b}\").join(\"\") }\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    text :: String.from_bytes(raw) ?? return fallback\n    port :: Int.parse(text.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    hex_encode(slice_u8(sha2_256(bytes, SHA224_IV), 0, 28))\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))\n    print(sha224([U8]{\"abcdefghijklmnopqrstuvwxyz0123\"}))\n}\n```\n\nJet has no shadowing, so x :: x.trim() is E0118 (probe p04). The census in Docs/research/2026-11-04-pipes.md finds that dots cannot reach 69% of the nested chains or 59% of the mixed ones.\n\nWHAT A PIPE MEANS\n\nA stage is a :: binding used by one line, written it. It lowers to that binding before type checking, so it costs nothing on any tier. The formatter turns a stage that only calls a method on it into a dot.\n\nit is already a keyword for the current subject. In if subject == { … } over a call, the arms read the subject as it. In a bindingless loop such as loop users -> .name, the item is it. No program can name its own it (E0003, probe p19).\n\nToday a table inside a table hides the outer it, and a bindingless loop where it is visible is E0118 (probes p16 to p20, on a32d3791 and 3993915aeb). A pipe stage takes the loop rule. A pipe where it is visible is E0118, and a table inside a stage hides the stage value as usual.\n\nOne existing rule looks like a bug. A table over a computed value inside a bindingless loop body gives its arms the loop item, not its subject (probe p16). It must be fixed before pipes ship.\n\nSPELLINGS TESTED, ASCII ONLY, ON 3993915aeb\n\nThe lexer gives a meaning to every printable ASCII punctuation character except backslash and backtick.\n\nA leading > compiles today as a comparison and prints false (probe g03), so valid code would change meaning.\n\nA backtick opens raw text (probe g05, E0002). A tilde still teaches two retired spellings (E0941 and E0325).\n\nA leading | already continues an or-pattern in an arm head (probe g11). One glyph would then mean \"or\" and \"then\" in the same table.\n\nBackslash is the only free character (probes g04 and g14, E0001). It is option B. Readers know it as an escape, a line continuation and a lambda.\n\n|> and <| are free as new tokens (probes g13 and g12, E0003 today). The word then is an ordinary name in 188 code lines, 154 of them .then(…) calls, so it stays a comparison only.\n\nDIRECTION\n\nA left push, f(it) <| x, puts the outer call first, which helps short flows such as hex_encode. Nesting already reads that way.\n\nTwo directions would give one meaning two orders. it would mean the line above in one and the line below in the other. Stages, breakpoints and per-step fallbacks would run upward in the left form.\n\nA formatter that rewrites <| to |> makes <| a hidden alias. A formatter that keeps both makes every reader learn both. Mixing directions in one pipe is an error under C.\n\nA sample error in the third stage, proposed:\n\n```text\nError [jet.BindingTypeMismatch]: This needs String, but `it` is [U8]\n  --> app.jet:4:18\n  4 |         |> Int.parse(it) ?? 0\n    |                      ^^ `it` here is the [U8] made by line 3\n Fix: add a stage such as `|> String.from_bytes(it) ?? return 0`\n```\n\nNOT PROPOSED\n\nNo non-ASCII glyph, no first-argument pipe, no composition operator, no partial application, no tap and no error pipe. A library apply helper fails: an untyped lambda is E0904, and return leaves only the lambda (probes p08 and p15).\n\nThe full design, the census, the subject rules and every spelling probe are in Docs/proposals/2026-11-04-pipes.md.",
+      "options": [
+        {
+          "key": "A",
+          "name": "|> in one direction",
+          "detail": "x |> f(it, 1) passes x to the next step, where it is written as it, in any position. Each stage goes on its own line, with |> leading. A step keeps its own fallback, such as ?? return fallback. <| is a teaching error that shows the |> form.",
+          "technical": "Lexer: |> is one token, registered in Compiler/JetFoundation/Data/Syntax. Today | followed by > is E0003 (probe g13). A lone | in a value gets the hint \"Did you mean |>?\".\n\nParser: |> is left-associative and binds loosest. A head and each stage end at the next |>. A pipe stands as a statement, a binding or assignment value, a return or break operand, or a block or lambda tail.\n\nFront end: each stage lowers to a hidden :: binding named it before type checking, so the IR equals the named form at O0, O1 and O2. A pipe where it is visible is E0118. A stage without it is an error.\n\nTools: the formatter joins method-only stages to the line above. The language server shows the type of it on hover. The debugger gives each stage a line-table row.",
+          "code": "// proposed A\nSHA224_IV :: [U8]{\"iv\"}\n\nfn sha2_256(bytes: [U8], iv: [U8]) -> [U8] { bytes.map((b) -> b) }\nfn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] { bytes[start..<end] }\nfn hex_encode(bytes: [U8]) -> String { bytes.map((b) -> \"{b}\").join(\"\") }\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    port :: raw\n        |> String.from_bytes(it) ?? return fallback\n        |> Int.parse(it.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    bytes\n        |> sha2_256(it, SHA224_IV)\n        |> slice_u8(it, 0, 28)\n        |> hex_encode(it)\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))\n    print(sha224([U8]{\"abcdefghijklmnopqrstuvwxyz0123\"}))\n}"
+        },
+        {
+          "key": "B",
+          "name": "Backslash, one ASCII character",
+          "detail": "x \\ f(it, 1) means the same as option A, spelled with the one ASCII character that is free today. Each stage line leads with a backslash. Inside strings, a backslash keeps its meaning as an escape.",
+          "technical": "Lexer: a backslash outside a string is E0001 today (probes g04 and g14); it becomes the stage token. Inside strings it stays the escape character.\n\nParser, front end and tools as in A. A backslash at the end of a line, the shell habit, needs its own teaching error. German and French keyboards type it with AltGr, as they do |.",
+          "code": "// proposed B\nSHA224_IV :: [U8]{\"iv\"}\n\nfn sha2_256(bytes: [U8], iv: [U8]) -> [U8] { bytes.map((b) -> b) }\nfn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] { bytes[start..<end] }\nfn hex_encode(bytes: [U8]) -> String { bytes.map((b) -> \"{b}\").join(\"\") }\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    port :: raw\n        \\ String.from_bytes(it) ?? return fallback\n        \\ Int.parse(it.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    bytes\n        \\ sha2_256(it, SHA224_IV)\n        \\ slice_u8(it, 0, 28)\n        \\ hex_encode(it)\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))\n    print(sha224([U8]{\"abcdefghijklmnopqrstuvwxyz0123\"}))\n}"
+        },
+        {
+          "key": "C",
+          "name": "|> and <| in both directions",
+          "detail": "Option A, plus a left push: f(it) <| x means the same as x |> f(it). The outer call can come first. One pipe may not mix the two directions. The formatter keeps the direction the author wrote.",
+          "technical": "Lexer: <| is a second token, free today (probe g12). Parser: <| is right-associative, so f(it) <| g(it) <| x means x |> g(it) |> f(it).\n\nFront end: the same lowering, read from the bottom up. it means the line below. Stages, breakpoints and fallbacks run upward. Mixing |> and <| in one pipe is an error.",
+          "code": "// proposed C\nSHA224_IV :: [U8]{\"iv\"}\n\nfn sha2_256(bytes: [U8], iv: [U8]) -> [U8] { bytes.map((b) -> b) }\nfn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] { bytes[start..<end] }\nfn hex_encode(bytes: [U8]) -> String { bytes.map((b) -> \"{b}\").join(\"\") }\n\nfn app_port(raw: [U8], fallback: Int) -> Int {\n    port :: raw\n        |> String.from_bytes(it) ?? return fallback\n        |> Int.parse(it.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    hex_encode(it)\n        <| slice_u8(it, 0, 28)\n        <| sha2_256(it, SHA224_IV)\n        <| bytes\n}\n\nfn run() {\n    print(app_port([U8]{\" 8080 \"}, 80))\n    print(sha224([U8]{\"abcdefghijklmnopqrstuvwxyz0123\"}))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript (proposal)",
+          "note": "The Stage 2 pipe writes the value as a placeholder, which must appear in every step. TC39 chose this over first-argument pipes in 2021.",
+          "code": "const id = bytes\n  |> sha256(%, IV)\n  |> %.slice(0, 28)\n  |> hexEncode(%);"
+        },
+        {
+          "lang": "F#",
+          "note": "F# has both directions. <| mostly saves parentheses around a last argument.",
+          "code": "let id = bytes |> sha256 |> hexEncode\nprintfn \"%s\" <| hexEncode bytes"
+        },
+        {
+          "lang": "Jet, the word then (comparison)",
+          "note": "Reads as English, but then is an ordinary name in 188 code lines today.",
+          "code": "// proposed, comparison only: the word then\nport :: raw\n    then String.from_bytes(it) ?? return fallback\n    then Int.parse(it.trim()) ?? return fallback"
+        },
+        {
+          "lang": "Jet, a leading bar (comparison)",
+          "note": "The bar already means \"or\" at the start of a line in a table (probe g11).",
+          "code": "// proposed, comparison only: a leading bar\nif c == {\n    .Red\n    | .Green -> color_name(c)\n        | upper(it)\n    else -> \"other\"\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "No single ASCII character is truly viable. Backslash is free but reads as an escape. |> is free, one token apart from |, and known from eight languages. One direction keeps one order for one meaning.",
+        "gains": [
+          "The spelling readers of eight languages already know.",
+          "it always means the line above, and stages run downward.",
+          "No new keyword, and no glyph that already means something."
+        ],
+        "losses": [
+          {
+            "loss": "Two keystrokes, not the one character the owner asked for.",
+            "mitigation": "Probes show the free single character, backslash, reads as an escape. Ligature fonts draw |> as one triangle."
+          },
+          {
+            "loss": "The outer call cannot come first in a pipe.",
+            "mitigation": "Nesting already reads outer call first, and stays legal for short flows."
+          },
+          {
+            "loss": "It amends the July ruling that bars mean alternatives only.",
+            "mitigation": "|> is one token, and a lone | in a value stays an error."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Backslash is free but says nothing about passing a value. In strings it already means escape."
+          },
+          {
+            "key": "C",
+            "reason": "Two directions give one meaning two orders. it would point up in one form and down in the other."
+          }
+        ],
+        "tradeoff": "One two-character token, in exchange for a spelling every pipe reader knows and one reading order."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Research's draft, because the owner caps agents at four. Findings were that the first draft called it a new word, now fixed with probed nesting rules, and a subject-table bug that must land first is filed as #6565 c1."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should Jet spell a pipe, so each step reads top to bottom with the value written as it?",
+        "lesson": "A dot chain such as text.trim().len() reads in order. Many steps cannot be methods, such as Int.parse, so flows nest inside out. A pipe passes each value to the next line, written as it. The question is which ASCII glyph marks a step, and in which direction.",
+        "trio": {
+          "current": {
+            "note": "Today the steps are named or nested inside out.",
+            "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    text :: String.from_bytes(raw) ?? return fallback\n    port :: Int.parse(text.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    hex_encode(slice_u8(sha2_256(bytes, SHA224_IV), 0, 28))\n}"
+          },
+          "wild": {
+            "lang": "JavaScript (Stage 2 proposal)",
+            "note": "The value is written as a placeholder in every step.",
+            "code": "const id = bytes\n  |> sha256(%, IV)\n  |> %.slice(0, 28)\n  |> hexEncode(%);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "|> in one direction",
+            "gist": "Each step starts with |>, and steps always run downward.",
+            "gains": [
+              "Known from F#, Elixir, R, PHP and others.",
+              "it always means the line above."
+            ],
+            "losses": [
+              "Two characters, not one."
+            ],
+            "proposed": {
+              "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    port :: raw\n        |> String.from_bytes(it) ?? return fallback\n        |> Int.parse(it.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    bytes\n        |> sha2_256(it, SHA224_IV)\n        |> slice_u8(it, 0, 28)\n        |> hex_encode(it)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Backslash",
+            "gist": "Each step starts with a backslash, the one free ASCII character.",
+            "gains": [
+              "One character, as the owner asked."
+            ],
+            "losses": [
+              "Readers know it as an escape, not a pipe.",
+              "No other language reads it this way."
+            ],
+            "proposed": {
+              "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    port :: raw\n        \\ String.from_bytes(it) ?? return fallback\n        \\ Int.parse(it.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    bytes\n        \\ sha2_256(it, SHA224_IV)\n        \\ slice_u8(it, 0, 28)\n        \\ hex_encode(it)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "|> and <|",
+            "gist": "Steps may run downward with |> or upward with <|.",
+            "gains": [
+              "The outer call can come first."
+            ],
+            "losses": [
+              "One meaning gets two orders.",
+              "it means the line above or below."
+            ],
+            "proposed": {
+              "code": "fn app_port(raw: [U8], fallback: Int) -> Int {\n    port :: raw\n        |> String.from_bytes(it) ?? return fallback\n        |> Int.parse(it.trim()) ?? return fallback\n    if port < 1 || port > 65535 -> fallback else -> port\n}\n\nfn sha224(bytes: [U8]) -> String {\n    hex_encode(it)\n        <| slice_u8(it, 0, 28)\n        <| sha2_256(it, SHA224_IV)\n        <| bytes\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "No single ASCII character works: backslash reads as an escape, and a leading bar already means \"or\". |> is free and widely known. One direction keeps one order.",
+          "gains": [
+            "A spelling most pipe readers already know.",
+            "Steps, errors and breakpoints always run downward."
+          ],
+          "losses": [
+            {
+              "loss": "Two keystrokes instead of one.",
+              "mitigation": "Ligature fonts draw |> as one triangle."
+            },
+            {
+              "loss": "The outer call cannot come first.",
+              "mitigation": "Nesting already reads outer call first."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A backslash says nothing about passing a value."
+            },
+            {
+              "key": "C",
+              "reason": "Two directions give one meaning two orders."
+            }
+          ],
+          "tradeoff": "One two-character token, for a familiar spelling and one reading order."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-04T19:36:17.691Z"
     }
   ],
   "questions": [
@@ -157202,6 +157397,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T19:36:17.691Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PIPE1",
+      "note": "How should Jet spell a pipe, so a flow of steps reads top to bottom?"
+    },
     {
       "at": "2026-11-04T19:36:10.259Z",
       "by": "Main",
