@@ -71,7 +71,7 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
 #Test("every_registered_lint_has_a_unique_snake_case_name") {
     registered := [String]{}
     loop row in diagnostic_registry_rows() {
-        if row.severity == DIAGNOSTIC_LINT -> &registered.push(row.code)
+        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> &registered.push(row.code)
     }
     names := [String]{}
     codes := [String]{}
@@ -105,7 +105,8 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
 }
 
 // Every stage column holds one value of the closed stage set: in the generated
-// rows, and in their Prelude source, which also keeps the retired rows.
+// rows, and in each Prelude diagnostic type's `stage` list, whose parts join
+// in the registered order (`[.Parse, .Sema]` is `parse/sema`).
 #Test("every_diagnostic_stage_is_in_the_closed_set") {
     unknown := [String]{}
     loop row in diagnostic_registry_rows() {
@@ -114,13 +115,12 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     source :: registry_coverage_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")
     count := 0
     loop line in source.split("\n") {
-        if !line.starts_with("diagnostic\t") -> next
-        fields :: line.split("\t").to_list()
-        assert(fields.len() > 2, "diagnostic row without a stage: {line}")
-        count += 1
-        if !diagnostic_stage_is_registered(fields[2]) -> &unknown.push("Prelude {fields[1]}: `{fields[2]}`")
+        if line == "    impl Diagnostic {{" -> count += 1
+        if !line.starts_with("        stage :: [") -> next
+        stage :: line.remove_prefix("        stage :: [").remove_suffix("]").replace(", .", "/").remove_prefix(".").lower()
+        if !diagnostic_stage_is_registered(stage) -> &unknown.push("Prelude impl {count}: `{stage}`")
     }
-    assert(count > 100, "the Prelude diagnostic rows must be readable")
+    assert(count > 100, "the Prelude diagnostic impls must be readable")
     assert_eq(unknown.join("\n"), "")
     loop stage in ["parser", "compiler", "type", "sema/parse", "loader/jet", "jit", "retired", ""] {
         assert(!diagnostic_stage_is_registered(stage), "`{stage}` must not be a registered stage")

@@ -662,6 +662,27 @@ markers use PascalCase and parenthesized arguments when needed. An explicit empt
 effect row is `-[]>`. Compile-time demand uses the prefix `@`; the retired `$`
 spelling is not an alias (D-ONCE-AT1=D).
 
+A declaration may instead write its markers inside its body, one per line, as
+`#X :: value`: anywhere directly in the body of a struct, enum, trait, impl,
+module, or function. `#X :: true` applies `#X` with no arguments, `#X :: false`
+is `#!X`, `#X :: v` passes one name path, string, or number, and
+`#X :: (args)` passes any other argument list; any other value is E0943, and a
+required Bool argument is written `#X :: (true)` (E0943). The line is the same
+marker as `#X(args)` above the declaration, checked at the same site; type
+facts such as `$layout` apply once the whole body is read, and a function's
+value line may come before its marker lines. One declaration writes its whole
+set in one place: markers above and inside together are E0942, whose fix
+moves the set above. A line inside a nested block or a lambda body, and a
+marker that decides how a function body is read (`#FFI`, `#Import(c)`), are
+E0355. `jet fix --markers inside FILE` and `jet fix --markers above FILE` move
+every declaration's set, and an editor offers both moves on the declaration
+under the cursor. `jet fmt` keeps the placement and prints one simple argument
+without parentheses; a module's markers above it go on its `module` line,
+since a lone `#Policy(…)` line is the file's policy (D-MARKER-INBODY1,
+D-MARKER-MOVE1). Markers above or inside a trait, impl, or module attach to
+that declaration's own site (`.Trait`, `.Impl`, `.Module`); no Prelude marker
+accepts `.Trait`, so a marker on a trait is E0355.
+
 `#Off <stmt>` parses and type-checks one statement but emits no code in any
 build. `#DebugOnly <stmt>` type-checks in every build and emits only in debug or
 dev builds. Names introduced inside either marker are scoped to that marker body.
@@ -1724,7 +1745,27 @@ bound on `FS` covers `FS.Read`. Foreign-language names such as `FFI.Go` and
 tree. The Prelude also registers common leaves such as `DB.Read`, `DB.Write`,
 `FS.Read`, `FS.Write`, and `Time.Wait` (D-CASING1, D-EFFTREE1).
 
-A package may declare a leaf at compile time:
+The Prelude writes each effect as a type implementing `Effect`, recognized by
+its in-body `impl Effect { … }` block. A struct is a root with no members; an
+enum is a closed family whose cases are its leaves. `fn irreversible(self) ->
+Bool` says which effects a `#Transact` rollback can't take back, per case
+(D-DECL-TYPES1):
+
+```jet
+enum FS {
+    Read
+    Write
+
+    impl Effect {
+        fn irreversible(self) -> Bool { self == .Write }
+    }
+}
+```
+
+An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
+The `effect` declaration word is retired for Prelude effects and bare roots
+(E0381; `jet fix` deletes a re-declared Prelude effect). A package may still
+declare a leaf beneath a Prelude root at compile time:
 
 ```jet
 effect Log.Audit
@@ -2055,10 +2096,12 @@ use site, and the owning policy file.
 
 These keys are package/organization settings, not source settings:
 `#Policy(lint_allow)` is E0355. Source writes the concrete gate instead. A
-lint exemption is `#allow(lint_name, "why this lint does not apply")`; its
-reason slot is optional, but omission emits `allow_reason` (L3103).
-`#allow(allow_reason)` cannot suppress that audit and is E0355. Reviewed
+lint exemption is `#Allow(jet.LintName, "why this lint does not apply")`,
+naming the lint by its diagnostic type path (`jet.UnitScalarRewrap`); its
+reason slot is optional, but omission emits `jet.AllowReason` (L3103).
+`#Allow(jet.AllowReason)` cannot suppress that audit and is E0355. Reviewed
 corpus exemptions keep reasons at these source sites, not in manifest rows.
+`jet fix` rewrites the retired `#allow(lint_name, …)` spelling to `#Allow`.
 
 `jet inspect gates` reports every kind, including lint allowances and their
 written reasons. Structure gates record deliberate suppressions such as

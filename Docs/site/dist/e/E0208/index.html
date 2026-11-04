@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0208 — Jet diagnostic</title>
-<meta name="description" content="Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9)">
+<meta name="description" content="Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of">
 <meta property="og:title" content="E0208 — Jet diagnostic">
-<meta property="og:description" content="Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9)">
+<meta property="og:description" content="Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0208</h1>
-<p>Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9)</p>
+<p>Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9)</p>
+<p class="diag-copy what" data-registry-field="what">Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Place the raw pointer operation inside an audited `#Unsafe` region.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0208</code>: <code>tests/ui/lowlevel_e3101.stderr</code>.</p>
-<pre class="diag">Error [E0208]: Taking a raw pointer requires `#Unsafe`
+<pre class="diag">Error [jet.RawPointerOutsideUnsafe]: Taking a raw pointer requires `#Unsafe`
   --&gt; tests/ui/lowlevel_e3101.jet:4:10
     |
   4 |     p :: *Int{*value}
@@ -46,7 +46,7 @@
  Fix: Wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }` — to dereference a pointer use postfix `p.*`
 More: jet-lang.dev/e/E0208
 
-Error [E0208]: Taking a raw pointer requires `#Unsafe`
+Error [jet.RawPointerOutsideUnsafe]: Taking a raw pointer requires `#Unsafe`
   --&gt; tests/ui/lowlevel_e3101.jet:4:15
     |
   4 |     p :: *Int{*value}
@@ -55,7 +55,7 @@ Error [E0208]: Taking a raw pointer requires `#Unsafe`
  Fix: Wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }` — to dereference a pointer use postfix `p.*`
 More: jet-lang.dev/e/E0208
 
-Error [E0208]: Reading through a raw pointer requires `#Unsafe`
+Error [jet.RawPointerOutsideUnsafe]: Reading through a raw pointer requires `#Unsafe`
   --&gt; tests/ui/lowlevel_e3101.jet:5:12
     |
   5 |     return p.*

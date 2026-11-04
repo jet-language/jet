@@ -6640,16 +6640,16 @@ fn run() {
   "failed-insert-shows-panel": async (ctx) => {
     const result = await failScratchLimit(ctx);
     const rendered = String(result.json && result.json.message || "");
-    if (!rendered.includes("Error [E0107]") || !rendered.includes("Why:") || !rendered.includes("Fix:")) {
+    if (!rendered.includes("Error [jet.UnknownName]") || !rendered.includes("Why:") || !rendered.includes("Fix:")) {
       throw new Error(`transaction did not return full Jet diagnostic: ${JSON.stringify(result.json)}`);
     }
     const before = await ctx.problems();
-    if (!before.length || !String(before[0].rendered || "").includes("Error [E0107]")) {
+    if (!before.length || !String(before[0].rendered || "").includes("Error [jet.UnknownName]")) {
       throw new Error(`problem panel missing rendered E-code: ${JSON.stringify(before)}`);
     }
     await sleep(5200);
     const after = await ctx.problems();
-    if (!after.length || !String(after[0].rendered || "").includes("Error [E0107]")) {
+    if (!after.length || !String(after[0].rendered || "").includes("Error [jet.UnknownName]")) {
       throw new Error(`problem panel did not persist past toast: ${JSON.stringify(after)}`);
     }
   },

@@ -1,0 +1,45 @@
+// A trait block in a struct or enum body gets the trait's default methods,
+// for a trait in the same module and for one in another module.
+trait Greet {
+    fn name(self) -> String
+    fn hello(self) -> String { "hello {self.name()}" }
+}
+
+module far {
+    trait Wave {
+        fn who(self) -> String
+        fn wave(self) -> String { "wave {self.who()}" }
+    }
+}
+
+struct Inner {
+    n: String
+
+    impl Greet {
+        fn name(self) -> String { self.n }
+    }
+
+    impl far.Wave {
+        fn who(self) -> String { self.n }
+    }
+}
+
+enum Pet {
+    Cat
+    Dog
+
+    impl Greet {
+        fn name(self) -> String { if self == .Cat -> "cat" else -> "dog" }
+    }
+
+    impl far.Wave {
+        fn who(self) -> String { self.name() }
+    }
+}
+
+fn run() {
+    print(Inner{n: "a"}.hello())
+    print(Inner{n: "b"}.wave())
+    print(Pet.Cat.hello())
+    print(Pet.Dog.wave())
+}

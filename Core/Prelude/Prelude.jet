@@ -109,6 +109,115 @@ fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
     }
 }
 
+// A refusal the compiler reports. An error type is a struct whose fields are
+// the holes of its texts; its impl gives each text as one string literal that
+// reads only `self` fields, so `jet explain` can print it without running code.
+// `reject(value)` raises one while compiling. The constants are the registry
+// columns, and each has a default.
+trait Diagnostic {
+    // The report's code. None: the type's path, such as `web.BadPath`.
+    code: String?{None}
+    severity: Severity{.Error}
+    // The name `#Allow` and lint policy use; a `.Lint` diagnostic needs one.
+    lint_name: String?{None}
+    // The pipeline stages that report it.
+    stage: [DiagnosticStage]{[.Sema]}
+    moment: DiagnosticMoment{.Compile}
+    status: DiagnosticStatus{.Active}
+    // A one-line summary. None: the `what` text.
+    meaning: String?{None}
+    // Whether `jet explain` prints the what, why and fix texts in full.
+    detail: Bool{false}
+    // The machine edit `jet fix` applies, if any.
+    edit: DiagnosticEdit?{None}
+    // The text an `.Remove` edit deletes, or a `.Replace` edit replaces.
+    edit_from: String?{None}
+    // The text a `.Replace` edit writes.
+    edit_to: String?{None}
+    // Why no machine edit can apply. None: an edit applies, or none is classified.
+    no_fix: DiagnosticNoFix?{.Design}
+    // The next step without a machine edit. None: the `fix` text.
+    fix_next: String?{None}
+    fix_safety: DiagnosticFixSafety?{None}
+    fn what(self) -> String
+    fn why(self) -> String
+    fn fix(self) -> String
+}
+
+// How a diagnostic stops the build. `.Warning` and `.Lint` reports don't, and
+// `#Allow(Type)` silences one.
+enum Severity {
+    Error
+    Warning
+    Lint
+}
+
+// A part of the toolchain that reports a diagnostic. A row lists every part
+// that does (`[.Parse, .Sema]`).
+enum DiagnosticStage {
+    Build
+    Compile
+    Comptime
+    Driver
+    Interp
+    Jet
+    Jetpack
+    Lex
+    Load
+    Parse
+    Repl
+    Runtime
+    Sema
+    Tooling
+}
+
+// When a diagnostic can fire.
+enum DiagnosticMoment {
+    Compile
+    Run
+    Test
+    Tool
+}
+
+// A retired code no longer fires; it stays so old logs remain explainable.
+// A reserved code holds its number for a rule not yet reported.
+enum DiagnosticStatus {
+    Active
+    Reserved
+    Retired
+}
+
+// The machine edit `jet fix` applies for a diagnostic.
+enum DiagnosticEdit {
+    SourceEdit
+    SuggestedSourceEdit
+    CryptoMisuse
+    Replace
+    Remove
+    GeneratedMarkerGroup
+    GeneratedMissingArms
+    GeneratedScriptRun
+    GeneratedCallValue
+    GeneratedRedundantTailReturn
+}
+
+// Why a diagnostic has no machine edit: the fix is a design choice, it would
+// change behavior, or more than one fix fits.
+enum DiagnosticNoFix {
+    Design
+    Behavior
+    Ambiguous
+}
+
+// How safe a machine edit is to apply without review.
+enum DiagnosticFixSafety {
+    Formatting
+    BehaviorPreserving
+    APIChanging
+    NeedsReview
+    TargetChanging
+}
+
 // Compiler-supplied #Receipt facts are not a user-constructible handle.
 // This private source target retains the typed payload and all three checked
 // metadata arguments; the raw store operation uses the existing encoder.

@@ -319,13 +319,13 @@ fn jet_cli_digest_structured_fix(fix: DiagnosticRegistryFix?) -> String Never! {
     }
 }
 
+// The current registry meaning: retired rows are never reported, so the
+// digest leaves them out.
 fn jet_cli_digest_diagnostic_text() -> String Never! {
     out := "code\tstatus\tstage\tseverity\tmoment\tmeaning\twhat\twhy\tfix\tdetail\tstructured-fix"
     loop row in diagnostic_registry_rows() {
-        status :: if row.status == {
-            .Active -> "active"
-            .Reserved -> "reserved"
-        }
+        if row.status == .Retired -> next
+        status :: if row.status == .Active -> "active" else -> "reserved"
         severity :: if row.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
         moment :: if row.moment == {
             .Compile -> "compile"
@@ -604,7 +604,7 @@ fn jet_cli_find_engine_binary(name: String) -[FS, Env]> String? Never! {
 
 // E1228 `engine-missing` (`missing_engine_message`).
 fn jet_cli_missing_engine_message(engine: String, verb: String) -> String Never! {
-    "Error [E1228]: `{verb}` needs the `{engine}` engine, which isn't installed\n Why: `{verb}` is a jetpack engine verb — {JET_CLI_BINARY} execs `{engine}` for it rather than building package-manager logic into the compiler\n Fix: install the matching Jet toolchain (the `{engine}` binary ships alongside `{JET_CLI_BINARY}`)\nMore: jet-lang.dev/e/E1228\n"
+    "Error [jet.MissingEngine]: `{verb}` needs the `{engine}` engine, which isn't installed\n Why: `{verb}` is a jetpack engine verb — {JET_CLI_BINARY} execs `{engine}` for it rather than building package-manager logic into the compiler\n Fix: install the matching Jet toolchain (the `{engine}` binary ships alongside `{JET_CLI_BINARY}`)\nMore: jet-lang.dev/e/E1228\n"
 }
 
 // E1227 `engine-version-skew` (`version_skew_message`); `engine_version` is
@@ -612,9 +612,9 @@ fn jet_cli_missing_engine_message(engine: String, verb: String) -> String Never!
 fn jet_cli_version_skew_message(engine: String, jet_version: String, engine_version: String?) -> String Never! {
     bin :: JET_CLI_BINARY
     if engine_version == .Val(version) {
-        return "Error [E1227]: `{bin}` {jet_version} and `{engine}` {version} disagree\n Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly, or the engine may not understand what `{bin}` sends it\n Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
+        return "Error [jet.EngineProtocolMismatch]: `{bin}` {jet_version} and `{engine}` {version} disagree\n Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly, or the engine may not understand what `{bin}` sends it\n Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
     }
-    "Error [E1227]: `{bin}` {jet_version} and `{engine}` disagree (no protocol reply)\n Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly; this `{engine}` didn't answer the version handshake, so it predates this protocol\n Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
+    "Error [jet.EngineProtocolMismatch]: `{bin}` {jet_version} and `{engine}` disagree (no protocol reply)\n Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly; this `{engine}` didn't answer the version handshake, so it predates this protocol\n Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both binaries come from the same release\n More: jet-lang.dev/e/E1227\n"
 }
 
 // `query_engine_protocol`: the trimmed stdout of `<engine> --engine-protocol`,

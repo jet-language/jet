@@ -46,7 +46,7 @@ fn kit_test_unblessed() -> KitBless {
 }
 
 #Test("diagnostic shrink counts only renderer headers") {
-    assert_eq(kit_expect_diagnostics("Error [E0001]: x\n Why: Error [E0002]\nWarning [L0001]: y\nStop [E3003]: z\n"), 3)
+    assert_eq(kit_expect_diagnostics("Error [jet.StrayCharacter]: x\n Why: Error [jet.UnterminatedText]\nWarning [L0001]: y\nStop [E3003]: z\n"), 3)
 }
 
 fn kit_test_core_scratch(label: String) -> String {
@@ -66,8 +66,8 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq(kit_expect_exact("second", second, Val("old second\n"), "new second\n", bless, false).status, "FAIL")
     assert_eq(files.read(first) ?? panic("first"), "new first\n")
     assert_eq(files.read(second) ?? panic("second"), "old second\n")
-    older :: "Error [E0001]: first\nError [E0002]: second\n"
-    newer :: "Error [E0001]: first\n"
+    older :: "Error [jet.StrayCharacter]: first\nError [jet.UnterminatedText]: second\n"
+    newer :: "Error [jet.StrayCharacter]: first\n"
     kit_exec_write(first, older)
     assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, (text: String) -[]> kit_expect_diagnostics(text)).status, "REFUSED")
     assert_eq(files.read(first) ?? panic("first"), older)

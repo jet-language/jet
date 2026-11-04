@@ -1,0 +1,24 @@
+struct BadPath {
+    name: String
+
+    impl Diagnostic {
+        fn what(self) -> String { "`{self.name}` serves no absolute path" }
+        fn why(self) -> String { "a route path starts at the site root" }
+        fn fix(self) -> String { "give `{self.name}` a path that starts with `/`" }
+    }
+}
+
+struct Served {
+    impl Marker {
+        sites :: [.Function]
+
+        fn expand(self, target: Target) {
+            reject(BadPath{name: target.name})
+        }
+    }
+}
+
+#Served
+fn serve() {}
+
+fn run() {}

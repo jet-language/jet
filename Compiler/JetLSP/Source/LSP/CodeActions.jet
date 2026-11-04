@@ -4,6 +4,7 @@
 use {
     core.encoding.[Dyn]
     jet_foundation.[Span, TextEdit, foundation_json_quote]
+    jet_parser.[parser_marker_placement_edit_at]
     lsp_action_path :: core.files.runtime.kernel_path_components
     lsp_action_fs :: core.files.host.retained_descriptor
 }
@@ -42,6 +43,9 @@ fn lsp_code_action_response(server: LSPServer, params: Dyn?, id: Dyn) -> String?
         actions := [String]{}
         loop fix in fixes -> &actions.push(lsp_code_action_json(uri, doc.version, doc.text, fix))
         loop action in refactors -> &actions.push(lsp_refactor_action_json(uri, doc.version, doc.text, action))
+        // A declaration under the cursor offers its marker set in either place.
+        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, false) == .Val(edit) -> &actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers above the declaration", "refactor.rewrite", [TextEdit]{edit}))
+        if parser_marker_placement_edit_at(doc.text.bytes(), requested.start, true) == .Val(edit) -> &actions.push(lsp_action_json(uri, doc.version, doc.text, "Write the markers inside the declaration's body", "refactor.rewrite", [TextEdit]{edit}))
         return Val(lsp_response(id, "[{actions.join(",")}]"))
     }
     None

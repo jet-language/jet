@@ -1,4 +1,4 @@
-Error [E2305]: a returned view cannot borrow from a temporary argument
+Error [jet.ViewOutlivesOwner]: a returned view cannot borrow from a temporary argument
   --> tests/ui/task_view_result.jet:4:20
     |
   4 |     t :: task peek([1, 2, 3])
@@ -7,7 +7,7 @@ Error [E2305]: a returned view cannot borrow from a temporary argument
  Fix: store the owner in a named binding first, then pass that binding to the view-returning call
 More: jet-lang.dev/e/E2305
 
-Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
+Error [jet.ValueNotSendable]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
   --> tests/ui/task_view_result.jet:4:15
     |
   4 |     t :: task peek([1, 2, 3])
@@ -16,7 +16,7 @@ Error [E1102]: this task returns a view that cannot be shared — it does not li
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
-Error [E2402]: this implicit fallible call can't convert `TaskFailure` into `Err` — no declared conversion exists
+Error [jet.MissingErrorConversion]: this implicit fallible call can't convert `TaskFailure` into `Err` — no declared conversion exists
   --> tests/ui/task_view_result.jet:5:12
     |
   5 |     _ :: t.join()

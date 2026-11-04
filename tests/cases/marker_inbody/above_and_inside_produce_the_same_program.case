@@ -1,0 +1,21 @@
+# A marker written as a `#X :: value` line anywhere in a declaration's body is
+# the marker written above it: both files check, run and print the same, and
+# a `#MustUse` written either way rejects the same discarded call.
+fixture: above_and_inside_produce_the_same_program.fixture
+env: NO_COLOR=1
+step: jet check above.jet
+exit: 0
+step: jet check inside.jet
+exit: 0
+step: jet run above.jet
+exit: 0
+stdout: = above_and_inside_produce_the_same_program.out
+step: jet run inside.jet
+exit: 0
+stdout: = above_and_inside_produce_the_same_program.out
+step: jet check discard_above.jet
+exit: 1
+stderr: ~ "E0419" # the above-written #MustUse rejects the discarded call
+step: jet check discard_inside.jet
+exit: 1
+stderr: ~ "E0419" # the inside-written #MustUse rejects the same discarded call

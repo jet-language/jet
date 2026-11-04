@@ -1,4 +1,4 @@
-Error [E0740]: `env_only` uses the effect `FS.Read`, which its signature doesn't allow
+Error [jet.EffectBoundExceeded]: `env_only` uses the effect `FS.Read`, which its signature doesn't allow
   --> tests/ui/time_zone_effects.jet:5:29
     |
   5 | fn env_only(name: String) -[Env]> Zone TimeError! { time.zone(name) }
@@ -9,7 +9,7 @@ Error [E0740]: `env_only` uses the effect `FS.Read`, which its signature doesn't
  Call chain: env_only
 More: jet-lang.dev/e/E0740
 
-Error [E0740]: `read_only` uses the effect `Env`, which its signature doesn't allow
+Error [jet.EffectBoundExceeded]: `read_only` uses the effect `Env`, which its signature doesn't allow
   --> tests/ui/time_zone_effects.jet:6:30
     |
   6 | fn read_only(name: String) -[FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
@@ -20,7 +20,7 @@ Error [E0740]: `read_only` uses the effect `Env`, which its signature doesn't al
  Call chain: read_only
 More: jet-lang.dev/e/E0740
 
-Error [E3401]: `pure` calls the impure function `time.zone`
+Error [jet.ImpureCallInPureContext]: `pure` calls the impure function `time.zone`
   --> tests/ui/time_zone_effects.jet:4:51
     |
   4 | fn pure(name: String) -[]> Zone TimeError! { time.zone(name) }

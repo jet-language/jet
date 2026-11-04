@@ -9,6 +9,7 @@ use {
         DiagnosticFixSafety,
         ElseArmSpan,
         Expr,
+        Marker,
         PolicyDeclaration,
         Span,
         Stmt,
@@ -132,6 +133,10 @@ struct JetParserState {
     // number. A nested state numbers on from its parent's count.
     node_base: Int{0}
     next_node: Int{0}
+    // The block depth of the function body whose own lines may be
+    // `#X :: value` markers (-1 = none), and the markers read there so far.
+    inbody_marker_depth: Int{-1}
+    inbody_markers: [Marker]{[Marker]{}}
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,

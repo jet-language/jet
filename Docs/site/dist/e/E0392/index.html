@@ -32,12 +32,12 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`{pattern}` wraps a state that `{type}` names directly.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A `T? E!` value has three states, matched as `.Val(x)`, `.None` and `.Err(e)`; the nested `.Ok(…)` layer is retired (D-OUTCOME-SHAPE1=A).</p>
+<p class="diag-copy why" data-registry-field="why">A `T? E!` value has three states, matched as `.Val(x)`, `.None` and `.Err(e)`.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write `{state}`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0392</code>: <code>tests/ui/outcome_nested_ok_retired.stderr</code>.</p>
-<pre class="diag">Error [E0392]: `.Ok(.Val(user))` wraps a state that `User? DBError!` names directly
+<pre class="diag">Error [jet.NestedFalliblePattern]: `.Ok(.Val(user))` wraps a state that `User? DBError!` names directly
   --&gt; tests/ui/outcome_nested_ok_retired.jet:21:9
     |
  21 |         .Ok(.Val(user)) -&gt; print(user.name)
@@ -46,7 +46,7 @@
  Fix: Write `.Val(user)`
 More: jet-lang.dev/e/E0392
 
-Error [E0392]: `.Ok(.None)` wraps a state that `User? DBError!` names directly
+Error [jet.NestedFalliblePattern]: `.Ok(.None)` wraps a state that `User? DBError!` names directly
   --&gt; tests/ui/outcome_nested_ok_retired.jet:22:9
     |
  22 |         .Ok(.None) -&gt; print(&quot;no such user&quot;)

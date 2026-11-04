@@ -3,7 +3,7 @@
 #Test("semindex_bypass_codec_keeps_audit_categories_empty_reason_and_byte_span") {
     kinds :: [BypassKind]{BypassKind.UnsafeRegion, BypassKind.UnsafeFn, BypassKind.ExplicitDrop, BypassKind.LintAllow}
     human :: loop kind in kinds -> semindex_bypass_kind_text(kind)
-    assert_eq(human, [String]{"#Unsafe region", "#Unsafe fn", ".drop(reason)", "#[allow(lint)]"})
+    assert_eq(human, [String]{"#Unsafe region", "#Unsafe fn", ".drop(reason)", "#Allow(lint)"})
     empty :: BypassFact{kind: BypassKind.ExplicitDrop, site: "other", detail: "", module_path: "mód.jet", span: SourceSpan{start: 3, end: 7}}
     assert_eq(semindex_json_bypass(empty), `{"kind":"explicit_drop","site":"other","detail":"","module_path":"mód.jet","span":{"start":3,"end":7}}`)
     quoted :: BypassFact{kind: BypassKind.LintAllow, site: "q\"", detail: "reason\n\\", module_path: "", span: SourceSpan{start: 4294967296, end: 4294967297}}
@@ -49,7 +49,7 @@ fn semindex_dossier_edge_empty() -> TypeDossier Never! {
         {kind: BypassKind.UnsafeFn, site: "unrelated", detail: "", module_path: "other.jet", span: SourceSpan{start: 7, end: 11}},
         {kind: BypassKind.LintAllow, site: "price", detail: "float_money", module_path: "other.jet", span: SourceSpan{start: 12, end: 19}},
     }
-    expected :: "dossier `Token` (schema v20)\nsummary\n  defined: main.jet:2..9\nnominal type\n  distinct Int\ntrait contracts\n  implements Iter\n    type Item\n    type Item = Int\n    fn next() -> Int?\n    fn next() -> Int?\neffect roles\n  required effects: Net, Net, IO; granted effects: none; denied effects: Net; authority: package\nmembers\n  method fn next() -> Int? (impl Iter) @ z.jet:30..40\nstate graphs\n  Token @ states.jet\n    state Closed (nonterminal; reachability unknown) @ states.jet:1..2\n    state Open (terminal; reachable) @ states.jet:3..4\n    state Lost (nonterminal; unreachable) @ states.jet:5..6\n    transition new: _ -> Closed\n    transition close:  -> Closed\nreferences\n  count: 1\n  z.jet:10..15\nbypass facts\n  count: 2\n  #Unsafe fn at `unrelated` ((no reason given)) @ other.jet:7..11\n  #[allow(lint)] at `price` (float_money) @ other.jet:12..19\n"
+    expected :: "dossier `Token` (schema v20)\nsummary\n  defined: main.jet:2..9\nnominal type\n  distinct Int\ntrait contracts\n  implements Iter\n    type Item\n    type Item = Int\n    fn next() -> Int?\n    fn next() -> Int?\neffect roles\n  required effects: Net, Net, IO; granted effects: none; denied effects: Net; authority: package\nmembers\n  method fn next() -> Int? (impl Iter) @ z.jet:30..40\nstate graphs\n  Token @ states.jet\n    state Closed (nonterminal; reachability unknown) @ states.jet:1..2\n    state Open (terminal; reachable) @ states.jet:3..4\n    state Lost (nonterminal; unreachable) @ states.jet:5..6\n    transition new: _ -> Closed\n    transition close:  -> Closed\nreferences\n  count: 1\n  z.jet:10..15\nbypass facts\n  count: 2\n  #Unsafe fn at `unrelated` ((no reason given)) @ other.jet:7..11\n  #Allow(lint) at `price` (float_money) @ other.jet:12..19\n"
     assert_eq(dossier.render_text(), expected)
     wire :: dossier.to_json()
     assert(wire.contains(`"metadata_declaration_identity":{"status":"unavailable","required_stage":"Resolved","reason":"no declaration handle"}`))

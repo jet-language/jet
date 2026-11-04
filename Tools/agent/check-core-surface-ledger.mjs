@@ -2278,7 +2278,7 @@ function parseCoreSource(source, root = ROOT) {
     // A type alias is `Name :: Type` or `Name<T> :: Type<T>`; a column-0
     // constant matches too, which only widens this existence check.
     const sourceTypes = new Set(Array.from(
-      readSource(sourceModule.path).matchAll(/^(?:(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\s*::)/gm),
+      readSource(sourceModule.path).matchAll(/^(?:(?:struct|enum|trait)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\s*::)/gm),
     ).map(function (match) { return match[1] ?? match[2]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {
@@ -4479,19 +4479,19 @@ function validateCoreApiSyntaxCoverage() {
   if (hover.includes("=>") || !hover.includes("-[IO]>")) {
     throw new Error("hover fixture teaches a retired arrow or misses `-[IO]>`");
   }
-  for (const [path, code] of [
-    ["tests/ui/variadic_not_last.stderr", "E1310"],
-    ["tests/ui/spread_bad_call.stderr", "E1312"],
-    ["tests/ui/yield_type_mismatch.stderr", "E0807"],
-    ["tests/ui/user_policy_bad_args.stderr", "E0104"],
+  for (const [path, name] of [
+    ["tests/ui/variadic_not_last.stderr", "jet.MisplacedVariadicParameter"],
+    ["tests/ui/spread_bad_call.stderr", "jet.SpreadWithoutVariadic"],
+    ["tests/ui/yield_type_mismatch.stderr", "jet.YieldTypeMismatch"],
+    ["tests/ui/user_policy_bad_args.stderr", "jet.ArgumentCountMismatch"],
   ]) {
     const diagnostics = read(path);
     const report = diagnostics.split(/\n\s*\n/).find(function (entry) {
-      return entry.startsWith("Error [" + code + "]: ");
+      return entry.startsWith("Error [" + name + "]: ");
     });
-    if (!report || !/^Error \[[A-Z]\d+\]: \S.+/m.test(report) ||
+    if (!report || !/^Error \[jet\.[A-Z]\w+\]: \S.+/m.test(report) ||
         !/^\s*Why: \S.+/m.test(report) || !/^\s*Fix: \S.+/m.test(report)) {
-      throw new Error("diagnostic coverage lacks a complete registered report: " + path + " " + code);
+      throw new Error("diagnostic coverage lacks a complete registered report: " + path + " " + name);
     }
   }
 }

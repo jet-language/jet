@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Pass an owned `copy`, or a `Shared&lt;T&gt;` handle, to the task instead of a `view`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1106</code>: <code>tests/ui/task_detach_view_capture.stderr</code>.</p>
-<pre class="diag">Error [E2305]: a returned view cannot borrow from a temporary argument
+<pre class="diag">Error [jet.ViewOutlivesOwner]: a returned view cannot borrow from a temporary argument
   --&gt; tests/ui/task_detach_view_capture.jet:6:20
     |
   6 |     t :: task peek([1, 2, 3])
@@ -46,7 +46,7 @@
  Fix: store the owner in a named binding first, then pass that binding to the view-returning call
 More: jet-lang.dev/e/E2305
 
-Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
+Error [jet.ValueNotSendable]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
   --&gt; tests/ui/task_detach_view_capture.jet:6:15
     |
   6 |     t :: task peek([1, 2, 3])
@@ -55,7 +55,7 @@ Error [E1102]: this task returns a view that cannot be shared — it does not li
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
-Error [E1106]: can&#39;t detach task `t` — it captured a `view` borrow that may not live long enough
+Error [jet.DetachWithView]: can&#39;t detach task `t` — it captured a `view` borrow that may not live long enough
   --&gt; tests/ui/task_detach_view_capture.jet:7:7
     |
   7 |     t.detach()

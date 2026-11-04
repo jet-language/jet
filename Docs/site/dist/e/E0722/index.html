@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0722</code>: <code>tests/ui/taint/auth_token_keeps_credential_leak_protection.stderr</code>.</p>
-<pre class="diag">Error [E2402]: This implicit fallible call can&#39;t convert `AuthError` into `Err` — no declared conversion exists
+<pre class="diag">Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `AuthError` into `Err` — no declared conversion exists
   --&gt; auth_token_keeps_credential_leak_protection.jet:7:15
     |
   7 |     _ := auth.verify_jwt(token, key: key, audience: &quot;gateway&quot;)
@@ -46,7 +46,7 @@
  Fix: Handle this call locally with `??`, add `impl AuthError -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
-Error [E0722]: A `Credential` value is denied at `print`
+Error [jet.CredentialValueDenied]: A `Credential` value is denied at `print`
   --&gt; tests/ui/taint/auth_token_keeps_credential_leak_protection.jet:8:5
     |
   8 |     print(token)

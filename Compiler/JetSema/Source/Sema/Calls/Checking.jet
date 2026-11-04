@@ -826,7 +826,7 @@ fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offer
             if bound.cut_last("::") == .Val(parts) -> bound = parts.after
             name :: type_name(offered)
             row :: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
-            return sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why}}", "`{name}` would need to implement `{bound}` before it can be used here"), row.fix.replace("{{fix}}", "write `impl {name}.{bound} {{ … }}` with every required method"))
+            return sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", "`{name}` would need to implement `{bound}` before it can be used here"), row.fix.replace("{{fix_text}}", "write `impl {name}.{bound} {{ … }}` with every required method"))
         }
     }
     sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))

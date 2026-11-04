@@ -6,7 +6,7 @@ use {
         EnvModelEvalError, EnvPlan, EnvironmentIntegration, EvaluatedModule, FleetPlan, IntegrationKind,
         PackageProfilePlan, envmodel_evaluate_env, envmodel_evaluate_source,
     ]
-    jet_foundation.[Diagnostic, diagnostic_render_all]
+    jet_foundation.[Diagnostic, diagnostic_display_name, diagnostic_render_all]
 }
 
 // Rust `std::env::temp_dir()`: the evaluation base for sources that read no
@@ -87,7 +87,7 @@ fn envmodel_test_redact_dir(rendered: String, dir: String, slug: String) -> Stri
 // Compare a rendered diagnostic with its pinned snapshot; `UPDATE_EXPECT`
 // rewrites the snapshot first.
 fn envmodel_test_check_snapshot(code: String, rendered: String) -[FS, Env]> {
-    assert(rendered.starts_with("Error [{code}]:"))
+    assert(rendered.starts_with("Error [{diagnostic_display_name(code)}]:"))
     assert(rendered.contains("\n Why: "))
     assert(rendered.contains("\n Fix: "))
     path :: files.join(envmodel_test_repo_root(), "tests/fixtures/module-eval-diagnostics/{code}.stderr")

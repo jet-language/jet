@@ -1207,9 +1207,16 @@ fn policy_has_raw_process_boundary(program: Program) -> Bool {
     found
 }
 fn policy_guidance_lint(name: String) -> Bool {
-    name == "message_text" || name == "redundant_fixed_cleanup" ||
-    name == "unit_scalar_rewrap" || name == "path_containment_string_prefix" ||
-    name == "complete_ascii_case_ladder" || name == "walk_files_filter"
+    name == "jet.MessageText" || name == "jet.RedundantFixedCleanup" ||
+    name == "jet.UnitScalarRewrap" || name == "jet.PathContainmentStringPrefix" ||
+    name == "jet.CompleteAsciiCaseLadder" || name == "jet.WalkFilesFilter"
+}
+// The lint type path an `#Allow` names (`jet.UnitScalarRewrap`).
+fn policy_allow_lint(expression: Expr) -> String? {
+    if expression == .Field(base, member, _, _) {
+        if base == .Ident(package, _, _) -> return Val("{package}.{member}")
+    }
+    None
 }
 fn policy_marker_expression(marker: Marker, index: Int) -> Expr? {
     if index < 0 || index >= marker.args.len() -> return None
@@ -1220,9 +1227,9 @@ fn policy_validate_lint_allows(path: String, row: PolicySourceRow, program: Prog
     if row.role != "canonical-teaching" && row.role != "expert-lesson" -> return Ok()
     loop application in program.rule_facts {
         marker :: application.marker
-        if marker.name != "allow" -> next
+        if marker.name != "Allow" -> next
         first :: policy_marker_expression(marker, 0) ?? next
-        if first == .Ident(rule, _, _) {
+        if policy_allow_lint(first) == .Val(rule) {
             if !policy_guidance_lint(rule) -> next
             explained := false
             if policy_marker_expression(marker, 1) == .Val(reason) {
@@ -1236,7 +1243,7 @@ fn policy_validate_lint_allows(path: String, row: PolicySourceRow, program: Prog
                     }
                 }
             }
-            if !explained -> return Err(PolicyError{message: "file={path}; rule={rule}; site={marker.span.start}..{marker.span.end}; why=maintained #allow needs a reason at its source site; replacement=write #allow({rule}, \"why this lint does not apply\")"})
+            if !explained -> return Err(PolicyError{message: "file={path}; rule={rule}; site={marker.span.start}..{marker.span.end}; why=maintained #Allow needs a reason at its source site; replacement=write #Allow({rule}, \"why this lint does not apply\")"})
         }
     }
     Ok()
@@ -1619,12 +1626,12 @@ fn policy_ast_test_cli_boundaries() PolicyError! {
 fn policy_ast_test_allow_source_reason() PolicyError! {
     manifest :: policy_manifest()
     error := ""
-    if policy_evaluate_source(manifest, "Examples/features/text/unreviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap) print(\"kept\") }}") == {
+    if policy_evaluate_source(manifest, "Examples/features/text/unreviewed_allow.jet", "fn run() {{ #Allow(jet.UnitScalarRewrap) print(\"kept\") }}") == {
         .Err(failure) -> error = failure.message
         .Ok(_) -> panic("maintained guidance allowance must explain itself")
     }
     assert(error.contains("reason at its source site"), error)
-    policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
+    policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "fn run() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
     Ok()
 }
 #Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() ?? panic("{err.message}") }

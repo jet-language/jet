@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Use `ok` or `err` only inside a fallible function or expression.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0404</code>: <code>tests/ui/enum_pattern_needs_dot_payload.stderr</code>.</p>
-<pre class="diag">Error [E0367]: Pattern `Fade` needs a leading `.`
+<pre class="diag">Error [jet.BareCasePattern]: Pattern `Fade` needs a leading `.`
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:8:9
     |
   8 |         Fade(n) -&gt; { print(n) }
@@ -46,7 +46,7 @@
  Fix: Write `.Fade(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: Pattern `Ok` needs a leading `.`
+Error [jet.BareCasePattern]: Pattern `Ok` needs a leading `.`
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:11:9
     |
  11 |         Ok(n) -&gt; { print(n) }
@@ -55,7 +55,7 @@ Error [E0367]: Pattern `Ok` needs a leading `.`
  Fix: Write `.Ok(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: Pattern `Err` needs a leading `.`
+Error [jet.BareCasePattern]: Pattern `Err` needs a leading `.`
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:12:9
     |
  12 |         Err(e) -&gt; { print(e) }
@@ -64,7 +64,7 @@ Error [E0367]: Pattern `Err` needs a leading `.`
  Fix: Write `.Err(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: Pattern `Int` needs a leading `.`
+Error [jet.BareCasePattern]: Pattern `Int` needs a leading `.`
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:15:9
     |
  15 |         Int(n) -&gt; { print(n) }
@@ -73,7 +73,7 @@ Error [E0367]: Pattern `Int` needs a leading `.`
  Fix: Write `.Int(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E0367]: Pattern `String` needs a leading `.`
+Error [jet.BareCasePattern]: Pattern `String` needs a leading `.`
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:16:9
     |
  16 |         String(s) -&gt; { print(s) }
@@ -82,7 +82,7 @@ Error [E0367]: Pattern `String` needs a leading `.`
  Fix: Write `.String(…)`
 More: jet-lang.dev/e/E0367
 
-Error [E2417]: Explicit failure domain `String (text)` is not an Error type
+Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:6:31
     |
   6 | fn show(light: Light, result: Int !String, value: Int | String) {
@@ -91,7 +91,7 @@ Error [E2417]: Explicit failure domain `String (text)` is not an Error type
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [E0404]: `Ok(...)` only fits where a fallible result is expected
+Error [jet.OkErrOutsideFallible]: `Ok(...)` only fits where a fallible result is expected
   --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:21:25
     |
  21 |     show(Light.Fade(1), Ok(1), 2)

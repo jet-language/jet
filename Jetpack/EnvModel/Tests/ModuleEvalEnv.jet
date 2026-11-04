@@ -318,7 +318,7 @@ use {
     diagnostic :: envmodel_merge_error_to_diagnostic(merge_error).diagnostic
     assert_eq(diagnostic.code, "E3521")
     rendered :: envmodel_test_render("env.jet", src, diagnostic)
-    assert(rendered.contains("Error [E3521]: Fact `prompt` has conflicting values"))
+    assert(rendered.contains("Error [jet.BuildFactConflict]: Fact `prompt` has conflicting values"))
     assert(rendered.contains("a.dev.prompt"))
     assert(rendered.contains("b.dev.prompt"))
     assert(rendered.contains("\"one\""))
@@ -345,7 +345,7 @@ use {
     assert_eq(error.code, "E0970")
     // The span points at the `find(…)` call in the root file.
     rendered :: envmodel_test_render("env.jet", src, error)
-    assert(rendered.contains("Error [E0970]:"))
+    assert(rendered.contains("Error [jet.ImportsDirectoryNotFound]:"))
     assert(rendered.contains("3 |     imports: find(\"./nope\")"))
     envmodel_test_check_snapshot("E0970", envmodel_test_redact_dir(rendered, dir, "find-missing"))
     files.remove_all(dir) ?? return
@@ -565,7 +565,7 @@ use {
     error :: envmodel_test_env_error(envmodel_evaluate_env(src, dir))
     assert_eq(error.code, "E0971")
     rendered :: envmodel_test_render("env.jet", src, error)
-    assert(rendered.contains("Error [E0971]:"))
+    assert(rendered.contains("Error [jet.NestedDiscoveredImports]:"))
     assert(rendered.contains("liftability law"))
     envmodel_test_check_snapshot("E0971", envmodel_test_redact_dir(rendered, dir, "find-liftability"))
     files.remove_all(dir) ?? return

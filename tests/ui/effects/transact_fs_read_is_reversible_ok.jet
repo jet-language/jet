@@ -1,0 +1,10 @@
+// Irreversibility belongs to each effect case: `FS.Write` can't be rolled
+// back, but `FS.Read` changes nothing outside, so a read inside a
+// `#Transact` block is allowed.
+use fs :: core.files
+fn run() {
+    #Transact {
+        text :: fs.read("x") ?? ""
+        print(text)
+    }
+}

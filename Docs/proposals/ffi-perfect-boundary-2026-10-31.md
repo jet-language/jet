@@ -239,7 +239,7 @@ fn first_two(db: sql.Database) -> String sql.SqliteError! {
 
 ```text
 $ jet check mistake.jet
-Error [E0204]: `stmt` is written by `&stmt.step()` while `first` still borrows it.
+Error [jet.UseWhileWriteActive]: `stmt` is written by `&stmt.step()` while `first` still borrows it.
   --> mistake.jet:6:10
     |
   5 |     first :: stmt.column_text(0)
@@ -454,7 +454,7 @@ PROPOSED in ballot D-FFI-CALLBACK3, which amends D-CABI-CALLBACK1.
 Today the same program is rejected, from `tests/ui/cffi_callback_capture.stderr`:
 
 ```text
-Error [E3203]: `fn(I32) I32 -[]>` is not a C-compatible type for a foreign function parameter or return.
+Error [jet.NonCAbiType]: `fn(I32) I32 -[]>` is not a C-compatible type for a foreign function parameter or return.
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 ```
@@ -594,7 +594,7 @@ fn leak_rows() -> View<U8> {
 ```
 
 ```text
-Error [E0120]: `image.rows()` borrows `image`, which closes when `leak_rows` returns.
+Error [jet.ReadOnlyValueNotOwned]: `image.rows()` borrows `image`, which closes when `leak_rows` returns.
   --> leak.jet:3:5
  Why: the rows belong to libpng's decoder [pack c/libpng@1.6: rows valid while decoder lives].
  Fix: Return an owned copy, `image.rows().copy()`, or return the `Image` itself.
@@ -1286,7 +1286,7 @@ $ jet run popcount.jet
 If the signature and the C disagree, the error names both sides:
 
 ```text
-Error [E3222]: `#FFI(c)` body defines `int32_t bits_c(uint32_t)` but the Jet signature says `U64`.
+Error [jet.InlineForeignBuildFailed]: `#FFI(c)` body defines `int32_t bits_c(uint32_t)` but the Jet signature says `U64`.
   --> popcount.jet:8:4
  Why: inline foreign contracts are ABI boundaries; the binder read the body with the pinned clang.
  Fix: Change the parameter to `U32`, or the C parameter to `uint64_t`.
@@ -1641,7 +1641,7 @@ Error [E3231]: `rl.DrawText` must run on the main thread [pack c/raylib@5.5: thr
   --> dodge/run.jet:44:9
  Fix: Draw from `run()`, or send the text to the main loop through a channel.
 
-Error [E0121]: `ship` is used after it was moved by `rl.UnloadTexture(^ship)`.
+Error [jet.UseAfterMove]: `ship` is used after it was moved by `rl.UnloadTexture(^ship)`.
  Fix: Let `ship` close at scope end, or stop using it after unloading.
 ```
 

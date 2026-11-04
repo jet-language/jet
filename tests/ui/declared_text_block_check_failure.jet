@@ -1,15 +1,19 @@
+struct MissingPhrase {
+    impl Diagnostic {
+        code :: "E0927"
+        fn what(self) -> String { "checked text is missing the required phrase" }
+        fn why(self) -> String { "this block language requires its greeting" }
+        fn fix(self) -> String { "add `required phrase` to the block" }
+    }
+}
+
 struct Checked {
     impl Marker {
         sites :: [.Block]
 
         fn expand(self, target: Target) {
             if !target.contains("required phrase") {
-                reject(
-                    code: "E0927",
-                    what: "checked text is missing the required phrase",
-                    why: "this block language requires its greeting",
-                    fix: "add `required phrase` to the block"
-                )
+                reject(MissingPhrase{})
             }
         }
     }

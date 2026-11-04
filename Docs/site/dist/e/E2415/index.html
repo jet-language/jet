@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E2415 — Jet diagnostic</title>
-<meta name="description" content="Union `{Union}` can&#39;t be decoded — `{A}` and `{B}` share wire shape `{shape}`.">
+<meta name="description" content="Union `{union}` can&#39;t be decoded — `{a}` and `{b}` share wire shape `{shape}`.">
 <meta property="og:title" content="E2415 — Jet diagnostic">
-<meta property="og:description" content="Union `{Union}` can&#39;t be decoded — `{A}` and `{B}` share wire shape `{shape}`.">
+<meta property="og:description" content="Union `{union}` can&#39;t be decoded — `{a}` and `{b}` share wire shape `{shape}`.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E2415</h1>
-<p>Union `{Union}` can&#39;t be decoded — `{A}` and `{B}` share wire shape `{shape}`.</p>
+<p>Union `{union}` can&#39;t be decoded — `{a}` and `{b}` share wire shape `{shape}`.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Union `{Union}` can&#39;t be decoded — `{A}` and `{B}` share wire shape `{shape}`.</p>
+<p class="diag-copy what" data-registry-field="what">Union `{union}` can&#39;t be decoded — `{a}` and `{b}` share wire shape `{shape}`.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order.</p>
+<p class="diag-copy why" data-registry-field="why">Anonymous-union decode picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a named enum with an explicit tag, or change the members so each has a distinct wire shape.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2415</code>: <code>tests/ui/union_codable_ambiguous.stderr</code>.</p>
-<pre class="diag">Error [E2415]: Union `Char | String` can&#39;t be decoded — `Char (one character)` and `String (text)` share wire shape `Text`
+<pre class="diag">Error [jet.AmbiguousUnionShape]: Union `Char | String` can&#39;t be decoded — `Char (one character)` and `String (text)` share wire shape `Text`
   --&gt; tests/ui/union_codable_ambiguous.jet:6:5
     |
   6 |     value: String | Char

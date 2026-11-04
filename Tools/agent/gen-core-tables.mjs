@@ -54,41 +54,36 @@ function fail(message) {
   throw new Error(message);
 }
 
+// Effects.jet declares each effect as a type: `struct Name {` or `enum Name {`
+// heads an effect root, and a type whose `fn irreversible` body is not
+// `false` holds an effect a rollback can't take back. Tools/agent/CoreSourceRows.jet
+// reads the full rows; this checks the roots the build and policy tables name.
 function parseEffects(source) {
-  const declarations = [];
-  const names = new Set();
+  const roots = [];
+  const irreversible = [];
+  let current = null;
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.replace(/\/\/.*$/, "").trim();
     if (!line) continue;
-    const fields = line.split(/\s+/);
-    if (fields[0] !== "effect") {
-      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: expected an effect declaration`);
+    const head = /^(struct|enum) ([A-Z][A-Za-z0-9]*) \{$/.exec(line);
+    if (head) {
+      if (current !== null) fail(`${EFFECT_SOURCE_PATH}:${index + 1}: ${current} is not closed`);
+      if (roots.includes(head[2])) {
+        fail(`${EFFECT_SOURCE_PATH}:${index + 1}: duplicate effect declaration ${head[2]}`);
+      }
+      current = head[2];
+      roots.push(current);
+      continue;
     }
-    if (fields.length < 2 || fields.length > 3) {
-      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: malformed effect declaration`);
+    if (current === null) {
+      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: expected an effect type declaration`);
     }
-    const name = fields[1];
-    if (!/^[A-Z][A-Za-z0-9]*(?:\.[A-Z][A-Za-z0-9]*)*$/.test(name)) {
-      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: invalid effect name ${name}`);
-    }
-    if (names.has(name)) {
-      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: duplicate effect declaration ${name}`);
-    }
-    const irreversible = fields.length === 3;
-    if (irreversible && fields[2] !== "$irreversible") {
-      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: unknown effect annotation ${fields[2]}`);
-    }
-    if (name.includes(".") && !names.has(name.split(".", 1)[0])) {
-      fail(`${EFFECT_SOURCE_PATH}:${index + 1}: effect leaf ${name} has no declared root`);
-    }
-    names.add(name);
-    declarations.push({ name, irreversible });
+    const fact = /^fn irreversible\(self\) -> Bool \{ (.*) \}$/.exec(line);
+    if (fact && fact[1] !== "false") irreversible.push(current);
+    if (raw === "}") current = null;
   }
-  if (!declarations.length) fail(`${EFFECT_SOURCE_PATH}: no effect declarations`);
+  if (!roots.length) fail(`${EFFECT_SOURCE_PATH}: no effect declarations`);
 
-  const roots = declarations
-    .filter((declaration) => !declaration.name.includes("."))
-    .map((declaration) => declaration.name);
   const rootSet = new Set(roots);
   for (const denyOnly of DENY_ONLY_ROOT_NAMES) {
     if (!rootSet.has(denyOnly)) {
@@ -100,15 +95,12 @@ function parseEffects(source) {
       fail(`${EFFECT_SOURCE_PATH}: build effect ${build} has no declared root`);
     }
   }
-  const irreversible = declarations
-    .filter((declaration) => declaration.irreversible)
-    .map((declaration) => declaration.name);
-  const expectedIrreversible = new Set(["FS.Write", "Net", "Exec", "FFI"]);
+  const expectedIrreversible = new Set(["Net", "FS", "Exec", "FFI"]);
   if (irreversible.length !== expectedIrreversible.size ||
       irreversible.some((name) => !expectedIrreversible.has(name))) {
-    fail(`${EFFECT_SOURCE_PATH}: irreversible declarations must be FS.Write, Net, Exec, and FFI`);
+    fail(`${EFFECT_SOURCE_PATH}: the irreversible effect types must be Net, FS, Exec, and FFI`);
   }
-  return { declarations, roots };
+  return { roots };
 }
 
 function replaceSection(source, begin, end, replacement, rel) {

@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Move the `Shared` clone before the loop, or replace the loop with a blocking `Condition` wait.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0202</code>: <code>tests/ui_lint/ownership/shared_auto_clone_in_loop_is_lint.warn</code>.</p>
-<pre class="diag">Warning [L0102] (unused_parameter): Parameter `h` is never used.
+<pre class="diag">Warning [jet.UnusedParameter]: Parameter `h` is never used.
   --&gt; shared_auto_clone_in_loop_is_lint.jet:2:9
     |
   2 | fn noop(h: Shared&lt;Int&gt;) {
@@ -46,7 +46,7 @@
  Fix: Use `h`, rename it to `_h` when it is intentionally unused, or remove it from the function contract.
 More: jet-lang.dev/e/L0102
 
-Warning [L0202] (shared_auto_clone): Auto-cloned `h` inside a loop; consider hoisting or caching
+Warning [jet.SharedAutoClone]: Auto-cloned `h` inside a loop; consider hoisting or caching
   --&gt; shared_auto_clone_in_loop_is_lint.jet:8:14
     |
   8 |         noop(h)
@@ -55,7 +55,7 @@ Warning [L0202] (shared_auto_clone): Auto-cloned `h` inside a loop; consider hoi
  Fix: Hoist `h` before the loop, or clone once outside
 More: jet-lang.dev/e/L0202
 
-Warning [L0104] (unused_private_fn): Private function `loop_user` is never called or used as a value.
+Warning [jet.UnusedPrivateFn]: Private function `loop_user` is never called or used as a value.
   --&gt; shared_auto_clone_in_loop_is_lint.jet:6:4
     |
   6 | fn loop_user(h: Shared&lt;Int&gt;) {

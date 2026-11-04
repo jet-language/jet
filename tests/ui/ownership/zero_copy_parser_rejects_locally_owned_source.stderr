@@ -1,4 +1,4 @@
-Error [E2307]: `text` cannot be stored in a struct field without an owning copy
+Error [jet.StringViewOutlivesOwner]: `text` cannot be stored in a struct field without an owning copy
   --> zero_copy_parser_rejects_locally_owned_source.jet:11:25
     |
  11 |     return Token{ text: text, rest: rest }
@@ -7,7 +7,7 @@ Error [E2307]: `text` cannot be stored in a struct field without an owning copy
  Fix: Write `text.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 
-Error [E2307]: `rest` cannot be stored in a struct field without an owning copy
+Error [jet.StringViewOutlivesOwner]: `rest` cannot be stored in a struct field without an owning copy
   --> zero_copy_parser_rejects_locally_owned_source.jet:11:37
     |
  11 |     return Token{ text: text, rest: rest }
@@ -16,7 +16,7 @@ Error [E2307]: `rest` cannot be stored in a struct field without an owning copy
  Fix: Write `rest.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 
-Error [E2305]: This view points into `source`, which this function owns
+Error [jet.ViewOutlivesOwner]: This view points into `source`, which this function owns
   --> zero_copy_parser_rejects_locally_owned_source.jet:11:25
     |
  11 |     return Token{ text: text, rest: rest }
@@ -25,7 +25,7 @@ Error [E2305]: This view points into `source`, which this function owns
  Fix: Return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it
 More: jet-lang.dev/e/E2305
 
-Error [E2305]: This view points into `source`, which this function owns
+Error [jet.ViewOutlivesOwner]: This view points into `source`, which this function owns
   --> zero_copy_parser_rejects_locally_owned_source.jet:11:37
     |
  11 |     return Token{ text: text, rest: rest }

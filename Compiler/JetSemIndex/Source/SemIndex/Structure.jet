@@ -340,10 +340,12 @@ fn semindex_record_func_type_nodes(db: &SymbolDB, ctx: &WalkCtx, function: Func,
 
 fn semindex_collect_allow_markers(db: &SymbolDB, markers: [Marker], site: String, mp: String) Never! {
     loop marker in markers {
-        if marker.name != "allow" -> next
+        if marker.name != "Allow" -> next
         loop arg in marker.args {
             if arg == .Expr(expr) {
-                if expr == .Ident(lint_name, _, _) -> &db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: lint_name, module_path: mp, span: semindex_source_span(marker.span)})
+                if expr == .Field(base, member, _, _) {
+                    if base == .Ident(package, _, _) -> &db.bypasses.push(BypassFact{kind: BypassKind.LintAllow, site: site, detail: "{package}.{member}", module_path: mp, span: semindex_source_span(marker.span)})
+                }
             }
         }
     }

@@ -385,7 +385,7 @@ export function withoutWarningDiagnostics(stderr) {
   const output = [];
   let skippingWarning = false;
   for (const line of stderr.replaceAll("\r\n", "\n").split("\n")) {
-    if (line.startsWith("Warning [L")) {
+    if (line.startsWith("Warning [")) {
       skippingWarning = true;
       continue;
     }
@@ -402,7 +402,7 @@ export function withoutWarningDiagnostics(stderr) {
 }
 
 export function warningOnlyStderr(stderr) {
-  return stderr.split("\n").some((line) => line.startsWith("Warning [L"))
+  return stderr.split("\n").some((line) => line.startsWith("Warning ["))
     && withoutWarningDiagnostics(stderr).trim() === "";
 }
 

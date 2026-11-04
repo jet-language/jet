@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Use a value-producing call here, or discard the valueless call as a statement.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0116</code>: <code>tests/ui/cffi_abi_function_value.stderr</code>.</p>
-<pre class="diag">Error [E3203]: `fn(I32) I32` is not a C-compatible type for a foreign function parameter or return.
+<pre class="diag">Error [jet.NonCAbiType]: `fn(I32) I32` is not a C-compatible type for a foreign function parameter or return.
   --&gt; tests/ui/cffi_abi_function_value.jet:8:19
     |
   8 |     callback :: c.ping
@@ -46,7 +46,7 @@
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 More: jet-lang.dev/e/E3203
 
-Error [E0116]: `callback` doesn&#39;t hand back a value
+Error [jet.ValuelessCallUsedAsValue]: `callback` doesn&#39;t hand back a value
   --&gt; tests/ui/cffi_abi_function_value.jet:9:11
     |
   9 |     print(callback(1))

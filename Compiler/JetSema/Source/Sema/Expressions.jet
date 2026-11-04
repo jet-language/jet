@@ -3552,6 +3552,15 @@ fn sema_expr_function_field(receiver: Type, name: String, method_name: String, e
                     if method.declaration.name == method_name && (implementation.delegation_field != None || method.declaration.default_body != None) -> return false
                 }
             }
+            if nominal.source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    trait_row :: sema_checked_trait_nominal_row(graph, nominal.symbol.module_name, block.trait_name) ?? next
+                    trait_nominal :: graph.modules[trait_row.module_index].nominals[trait_row.row]
+                    loop method in trait_nominal.trait_methods {
+                        if method.declaration.name == method_name && (block.delegation_field != None || method.declaration.default_body != None) -> return false
+                    }
+                }
+            }
         }
     } else {
         loop declaration_index in 0..<environment.declarations.len() {
@@ -4920,7 +4929,8 @@ fn sema_expr_contextual_literal(expr: Expr, expected: Type?, environment: SemaSc
 }
 
 // A `impl T.Literal.Int` / `impl T.Literal.Float` capability of the nominal
-// `ty`, read off the registered impls by their written trait name.
+// `ty`, or an `impl Literal.Int` block in its body, read by the written
+// trait name.
 fn sema_expr_has_literal_hook(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, capability: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         row :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
@@ -4929,6 +4939,11 @@ fn sema_expr_has_literal_hook(environment: SemaScopeEnvironment, program: SemaPr
             loop impl_index in 0..<graph.modules[module_index].impls.len() {
                 if graph.modules[module_index].impls[impl_index].target_identity_key != key -> next
                 if (graph.modules[module_index].impls[impl_index].declaration.trait_name ?? "") == capability -> return true
+            }
+        }
+        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+            loop block in sema_registration_item_trait_blocks(item) {
+                if block.trait_name == capability -> return true
             }
         }
     }

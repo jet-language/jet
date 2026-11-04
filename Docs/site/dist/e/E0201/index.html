@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Add the move marker `^` at the consuming call site.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0201</code>: <code>tests/ui/close_value_stored_then_used.stderr</code>.</p>
-<pre class="diag">Error [E0121]: `a.id` was consumed by the struct literal, so it can&#39;t be used here
+<pre class="diag">Error [jet.UseAfterMove]: `a.id` was consumed by the struct literal, so it can&#39;t be used here
   --&gt; close_value_stored_then_used.jet:22:13
     |
  22 |     print(a.id)
@@ -50,7 +50,7 @@
  Fix: Stop using `a.id` after the move, or give the struct literal a copy with `a.id.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 
-Error [E0121]: `a` was consumed by the struct literal, so it can&#39;t be used here
+Error [jet.UseAfterMove]: `a` was consumed by the struct literal, so it can&#39;t be used here
   --&gt; close_value_stored_then_used.jet:29:11
     |
  29 |     print(a.len())
@@ -63,7 +63,7 @@ Error [E0121]: `a` was consumed by the struct literal, so it can&#39;t be used h
  Fix: Stop using `a` after the move, or give the struct literal a copy with `a.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 
-Error [E0121]: `a.id` was consumed by the variant payload, so it can&#39;t be used here
+Error [jet.UseAfterMove]: `a.id` was consumed by the variant payload, so it can&#39;t be used here
   --&gt; close_value_stored_then_used.jet:36:13
     |
  36 |     print(a.id)
@@ -76,7 +76,7 @@ Error [E0121]: `a.id` was consumed by the variant payload, so it can&#39;t be us
  Fix: Stop using `a.id` after the move, or give the variant payload a copy with `a.id.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 
-Error [E0121]: `a.id` was consumed by `.push()`, so it can&#39;t be used here
+Error [jet.UseAfterMove]: `a.id` was consumed by `.push()`, so it can&#39;t be used here
   --&gt; close_value_stored_then_used.jet:44:13
     |
  44 |     print(a.id)
@@ -89,7 +89,7 @@ Error [E0121]: `a.id` was consumed by `.push()`, so it can&#39;t be used here
  Fix: Stop using `a.id` after the move, or give `.push()` a copy with `a.id.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 
-Error [E0201]: `r` cannot be moved from borrowed storage
+Error [jet.MissingMoveMarker]: `r` cannot be moved from borrowed storage
   --&gt; close_value_stored_then_used.jet:49:18
     |
  49 |     Holder{item: r}

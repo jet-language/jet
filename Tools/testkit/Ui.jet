@@ -290,22 +290,48 @@ fn kit_ui_outcomes(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
 
 
 
-// The typed rows from their one home, Compiler/Prelude/Diagnostics.jet
-// (D-REPORT-HOME1=A): tab-separated `diagnostic CODE stage severity moment
-// status meaning what why fix detail structured-fix …`. Field 11 is `-`, a
-// structured-fix marker, or `reason:<kind>|<next action>`. A crypto misuse row
-// carries typed evidence and a reviewed next action, not a source edit, so it
-// counts as reason-covered.
+// The typed rows from their one home, the diagnostic types in
+// Compiler/Prelude/Diagnostics.jet: each `struct X {` whose last member is its
+// `impl Diagnostic` block. A row's report header names it by its type path,
+// `jet.X`. A row's plane is its `stage` list joined lowercase with `/`
+// (default `sema`). It is edit-covered by a structured `edit`, and
+// reason-covered by a `no_fix` reason (`.Design` unless written `None`). A
+// crypto misuse row carries typed evidence and a reviewed next action, not a
+// source edit, so it counts as reason-covered.
 fn kit_ui_registry(text: String) -> [KitUIRegistryRow] {
     rows := [KitUIRegistryRow]{}
+    row := KitUIRegistryRow{code: "", name: "", plane: "", active: false, edit: false, reason: false}
+    name := ""
+    open := false
+    crypto := false
+    no_fix := true
     loop line in text.split("\n") {
-        if !line.starts_with("diagnostic\t") -> next
-        fields :: line.split("\t").to_list()
-        if fields.len() < 12 -> next
-        fix :: fields[11]
-        &rows.push(KitUIRegistryRow{code: fields[1].copy(), plane: fields[2].copy(), active: fields[5] == "active",
-            edit: fix != "-" && !fix.starts_with("reason:") && fix != "crypto_misuse",
-            reason: fix.starts_with("reason:") || fix == "crypto_misuse"})
+        if line.starts_with("struct ") && line.ends_with(" {{") {
+            name = kit_steps_byte_slice(line, 7, line.count_bytes() - 2)
+        } else if line == "    impl Diagnostic {{" {
+            row = KitUIRegistryRow{code: "", name: "jet.{name}", plane: "sema", active: true, edit: false, reason: false}
+            open = true
+            crypto = false
+            no_fix = true
+        } else if !open {
+            next
+        } else if line.starts_with("        code :: \"") && line.ends_with("\"") {
+            row.code = kit_steps_byte_slice(line, 17, line.count_bytes() - 1)
+        } else if line.starts_with("        stage :: [.") && line.ends_with("]") {
+            stages :: kit_steps_byte_slice(line, 19, line.count_bytes() - 1).split(", .").to_list()
+            row.plane = stages.map(stage -> stage.lower()).join("/")
+        } else if line.starts_with("        status :: .") {
+            row.active = line == "        status :: .Active"
+        } else if line.starts_with("        edit :: .") {
+            crypto = line == "        edit :: .CryptoMisuse"
+            row.edit = !crypto
+        } else if line == "        no_fix :: None" {
+            no_fix = false
+        } else if line == "    }}" {
+            row.reason = crypto || no_fix
+            &rows.push(row.copy())
+            open = false
+        }
     }
     rows
 }
@@ -376,15 +402,23 @@ fn kit_ui_emitted(root: String, directory: String, codes: &[String]) {
     }
 }
 
-fn kit_ui_extract_reports(text: String) -> [String] {
+// The registered codes the report headers in `text` name. A header names a
+// registered row by its type path (`Error [jet.UnknownName]`) or names a code.
+fn kit_ui_extract_reports(text: String, rows: [KitUIRegistryRow]) -> [String] {
     codes := [String]{}
     loop line in text.split("\n") {
         loop prefix in ["Error [", "Warning [", "Stop [", "Lint ["] {
             if !line.starts_with(prefix) -> next
             end :: line.index("]") ?? -1
             if end < prefix.count_bytes() -> next
-            code :: kit_steps_byte_slice(line, prefix.count_bytes(), end)
-            if kit_ui_report_code(code) -> kit_ui_add_code(&codes, code)
+            token :: kit_steps_byte_slice(line, prefix.count_bytes(), end)
+            if token.starts_with("jet.") {
+                loop row in rows {
+                    if row.name == token -> kit_ui_add_code(&codes, row.code)
+                }
+            } else if kit_ui_report_code(token) {
+                kit_ui_add_code(&codes, token)
+            }
             break
         }
     }
@@ -507,7 +541,7 @@ fn kit_ui_coverage(root: String) -> KitVerdict {
     rendered := [String]{}
     loop path in snapshots {
         if kit_exec_optional(path) == .Val(text) {
-            loop code in kit_ui_extract_reports(text) -> kit_ui_add_code(&rendered, code)
+            loop code in kit_ui_extract_reports(text, rows) -> kit_ui_add_code(&rendered, code)
         }
     }
     codes :: kit_ui_set_coverage(rows, emitted, rendered, allowance)

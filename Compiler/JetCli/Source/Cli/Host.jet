@@ -2538,6 +2538,15 @@ fn jet_cli_policy_explain_host(key: PolicyKey, file: String, site: String?, line
     }
 }
 
+// `jet explain web.BadPath [file]`: the library diagnostic type's texts over
+// the authorized load-only request of `file`.
+fn jet_cli_diagnostic_type_explain_host(name: String, file: String, color: Bool, json: Bool) -> JetCLIPlan {
+    if jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc) == {
+        .Refused(output) -> return JetCLIPlan.Done{output: output}
+        .Prepared(request, _) -> return jet_cli_explain_loaded_diagnostic_type(name, jet_driver_source_query(request), color, json)
+    }
+}
+
 // CmdGates.rs `run`/`append_external_writers`: the authorized load-only
 // request of `file`, its external gate rows extended by the canonical writers
 // (the entry package's and lock's authority rows, the actual trust store's
@@ -2719,9 +2728,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         }
         .Fmt(request) -> output = jet_cli_format_run(request, request.json)
         .FmtLang(argv, color) -> output = jet_cli_external_fmt(argv, color)
-        .Fix(file, dry_run, all, color, quiet, json, notice) -> {
+        .Fix(file, dry_run, all, markers, color, quiet, json, notice) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_fix_run(file, dry_run, all, color, quiet, json)
+            output = jet_cli_fix_run(file, dry_run, all, markers, color, quiet, json)
         }
         .Inspect(job) -> output = jet_cli_inspect_host(job)
         .InspectB(inspect_plan) -> output = jet_cli_inspect_b_host(inspect_plan)
@@ -2740,6 +2749,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Schema(action, root, before, color, json) -> output = jet_cli_schema_host(action, root, before, color, json)
         .Codemod(action, path, yes, color, json) -> output = jet_cli_codemod_host(action, path, yes, color, json)
         .PolicyExplain(key, file, site, line, color, json) -> output = jet_cli_execute(jet_cli_policy_explain_host(key, file, site, line, color, json))
+        .DiagnosticTypeExplain(name, file, color, json) -> output = jet_cli_execute(jet_cli_diagnostic_type_explain_host(name, file, color, json))
         .Gates(file, gate_args, color, json, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_gates_run(file, gate_args, color, json)

@@ -118,11 +118,11 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     // A rejected build fails until a `.err.out` expects the rejection.
     kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_REJECT=1\n")
     loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "FAIL")
-    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [E0001]: rejected\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [jet.StrayCharacter]: rejected\n")
     rejected :: kit_golden_run_suite(entry, context)
     assert_eq(rejected[0].verdict.status, "PASS")
     assert_eq(rejected[1].verdict.status, "FAIL")
-    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [E0001]: other\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [jet.StrayCharacter]: other\n")
     assert_eq(kit_golden_run_suite(entry, context)[0].verdict.status, "FAIL")
     files.remove_all(root) ?? panic("remove tier-expected scratch")
 }

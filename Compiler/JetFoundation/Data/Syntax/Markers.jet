@@ -14,6 +14,15 @@
 /// constant). Keeps all three jobs on one token.
 RULE_PREFIX :: "#"
 
+/// Writes one of a declaration's markers as a line inside its body:
+/// `#X :: value`, alone on its line, directly in the body of a struct, enum,
+/// trait, impl, module or function. `#X :: true` applies `#X` with no
+/// arguments, `#X :: false` is `#!X`, `#X :: v` passes one simple argument
+/// (a name path, string or number) and `#X :: (args)` passes any other list.
+/// The line is the same marker as `#X(args)` above the declaration; one
+/// declaration writes its whole set in one place.
+MARKER_INBODY_SEPARATOR :: "::"
+
 /// Precondition contract on a function
 /// signature — `#Pre(cond, "msg")`. The condition is a pure expression (same
 /// checker as `#Pure`). Checked in every build by default; per-module
@@ -113,14 +122,12 @@ MARKER_UNDO :: "Undo"
 MARKER_CLOSE :: "Close"
 
 /// Per-site lint-suppression marker —
-/// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
-/// silences the default-on `float_money` lint). Deliberately lowercase: it
-/// names a lint, not a declaration-shaped feature, so it does not
-/// follow the PascalCase marker convention. Struct/field site collection:
-/// `collect_allow_markers` in `crates/jet-semindex/src/Build.rs`; the
-/// float-money check itself: `allows_float_money` in
-/// `crates/jet-foundation/src/Numeric.rs`.
-MARKER_ALLOW :: "allow"
+/// `#Allow(jet.FloatMoney, "why")` on a declaration, field or statement
+/// silences that one lint there. The lint is named by its diagnostic type
+/// path. Site collection: `semindex_collect_allow_markers` in
+/// `JetSemIndex/Source/SemIndex/Structure.jet`; the allowance itself:
+/// `JetSema/Source/Sema/LintAllowances.jet`.
+MARKER_ALLOW :: "Allow"
 
 /// (ratified 2026-08-19): any package may mark a public item
 /// as retiring with `#Deprecated(since: ..., use: ..., removed_in: ...)`.

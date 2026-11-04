@@ -83,7 +83,7 @@ than invented. The `E2940` contract is:
 For example, the ratified render remains:
 
 ```text
-Error [E2940]: required proof evidence is unavailable
+Error [jet.MissingProofEvidence]: required proof evidence is unavailable
 Why: the complete_required policy needs statistical budget checkout-p95, but no matching baseline exists
 Fix: run jet test --measure src/payments.jet on the pinned profile to record the baseline
 ```
@@ -422,7 +422,7 @@ replay record; those belong to card #441 and `.jettrace`.
 The non-interactive sensitive boundary is observable as:
 
 ```text
-Error [E3627]: replay capture refused sensitive data
+Error [jet.ReplaySensitiveData]: replay capture refused sensitive data
  Why: non-interactive `--capture-sensitive` cannot collect TTY consent for raw Rand/IO/Net values
  Fix: run from a TTY and type `capture sensitive`, or use safe `--capture` for Time-only roots
 More: jet-lang.dev/e/E3627
@@ -597,7 +597,7 @@ precedence. The owner copy remains verbatim:
 The exact ratified render remains:
 
 ```text
-Error [E2950]: solver found a counterexample to function postcondition add_fee
+Error [jet.SolverCounterexample]: solver found a counterexample to function postcondition add_fee
 Why: cents = 1 and result = 1 satisfy the precondition but make result > cents false
 Fix: change add_fee so every return is greater than cents, or correct the #Post claim
 ```
@@ -694,7 +694,7 @@ new machine schema from growing out of display spelling.
 The executable snapshot is:
 
 ```text
-Error [E2941]: Unknown proof lens `test`
+Error [jet.UnknownProofLens]: Unknown proof lens `test`
  Why: `jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver
  Fix: Try `jet prove plain.jet --lens tests`
 More: jet-lang.dev/e/E2941

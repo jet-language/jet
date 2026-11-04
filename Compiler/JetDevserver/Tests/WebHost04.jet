@@ -264,12 +264,12 @@ fn bind_web_canvas_options_for_test(file: String, verbose: Bool, fallback_port: 
     assert_eq(status.revision_facts(), DevRevisionFacts(accepted: .None, candidate: .Val(1), diagnostic: .None))
     status.mark_ready(10, false); status.mark_building(); status.mark_ready(10, true)
     assert_eq(status.version.load(Ordering.SeqCst), 2)
-    status.mark_building(); status.mark_error("E0003", "Error [E0003]: bad", true)
+    status.mark_building(); status.mark_error("E0003", "Error [jet.InvalidStatement]: bad", true)
     failed :: status.json()
     assert(failed.contains("\"version\":2,"), failed); assert(failed.contains("\"candidate\":3,"), failed)
     assert(failed.contains("\"diagnostic_revision\":3,"), failed); assert(failed.contains("\"accepted_revision\":2,"), failed)
     assert(failed.contains("\"last_good_revision\":2}}"), failed)
-    status.mark_building(); status.mark_error("E0003", "Error [E0003]: bad", true)
+    status.mark_building(); status.mark_error("E0003", "Error [jet.InvalidStatement]: bad", true)
     assert_eq(status.revision_facts(), DevRevisionFacts(accepted: .Val(2), candidate: .Val(3), diagnostic: .Val(3)))
     status.mark_building(); status.mark_ready(10, true)
     recovered :: status.json()
@@ -282,9 +282,9 @@ fn bind_web_canvas_options_for_test(file: String, verbose: Bool, fallback_port: 
     ready :: status.json(); assert(ready.contains("\"state\":\"reconnecting\"")); assert(ready.contains("\"last_build_ms\":425"))
     status.mark_building()
     building :: status.json(); assert(building.contains("\"state\":\"reconnecting\"")); assert(building.contains("\"last_build_ms\":425"))
-    status.mark_error("E0102", "Error [E0102]: missing", true)
+    status.mark_error("E0102", "Error [jet.UnknownFunction]: missing", true)
     error :: status.json(); assert(error.contains("\"state\":\"reconnecting\"")); assert(error.contains("\"code\":\"E0102\""))
-    assert(error.contains("Error [E0102]: missing")); assert(error.contains("\"last_build_ms\":425"))
+    assert(error.contains("Error [jet.UnknownFunction]: missing")); assert(error.contains("\"last_build_ms\":425"))
     status.reconnecting.store(false, Ordering.SeqCst)
     recovered :: status.json(); assert(recovered.contains("\"state\":\"error\"")); assert(recovered.contains("\"code\":\"E0102\""))
 }
@@ -343,7 +343,7 @@ fn bind_web_canvas_options_for_test(file: String, verbose: Bool, fallback_port: 
 }
 // Rust: crates/jet-devserver/src/WebHost.rs:7325
 #Test("frame_lines_keeps_diagnostic_words_verbatim") {
-    diagnostic :: "Error [E0102]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
+    diagnostic :: "Error [jet.UnknownFunction]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
     framed :: frame_lines("E0102", diagnostic)
     loop line in diagnostic.lines() -> assert(framed.iter().any((f) -> f == "│ {line}"), "missing verbatim line {line} in {framed}")
     assert(framed.first().unwrap().starts_with("┌ E0102 ")); assert(framed.last().unwrap().starts_with('└'))

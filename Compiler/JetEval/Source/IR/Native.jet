@@ -769,7 +769,7 @@ fn jet_eval_ir_effect_refused(s: &JetEvalIRState, what: String, nondeterministic
     }
     if nondeterministic {
         entry :: diagnostic_registry_row("E3403") ?? panic("E3403 has no registry row")
-        refusal :: diagnostic_from_registry("E3403", Val(s.span), entry.what.replace("{{what}}", what), entry.why, entry.fix)
+        refusal :: diagnostic_from_registry("E3403", Val(s.span), entry.what.replace("{{what_text}}", what), entry.why, entry.fix)
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{what}, [String]{}, None)})
         return
     }

@@ -19,16 +19,16 @@ test("the probe imports exactly one module", () => {
 
 test("a check counts every error header and names the first", () => {
   const output = [
-    "Error [E0204]: `tree` is being changed in this call, so it can't be used again here",
+    "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here",
     "  --> <corelib>/Core/Service/Service.jet:920:98",
     "    |",
-    "Warning [L0103] (unused_import): Import `service` is never used.",
-    "Error [E0204]: `tree` is being changed in this call, so it can't be used again here",
+    "Warning [jet.UnusedImport]: Import `service` is never used.",
+    "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here",
     "  --> <corelib>/Core/Service/Service.jet:964:98",
   ].join("\n");
   assert.deepEqual(checkSummary(output, 1), {
     errors: 2,
-    first: "Error [E0204]: `tree` is being changed in this call, so it can't be used again here --> <corelib>/Core/Service/Service.jet:920:98",
+    first: "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here --> <corelib>/Core/Service/Service.jet:920:98",
   });
   assert.deepEqual(checkSummary("ok: `x.jet` has no errors\n", 0), { errors: 0, first: "" });
   assert.equal(checkSummary("thread panicked\n", 134).errors, 1);

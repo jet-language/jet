@@ -32,7 +32,7 @@ refused: hangar-verified-fixture
 #     let failed = build();
 #     assert!(!failed.status.success());
 #     let stderr = String::from_utf8_lossy(&failed.stderr);
-#     assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
+#     assert!(stderr.contains("Error [jet.HangarIngestFailed]:"), "stderr: {stderr}");
 #     assert!(stderr.contains("does not exist"), "stderr: {stderr}");
 #     assert_no_hangar_entry(&root.path, "greet-");
 #     let listed = jetpack()
@@ -58,6 +58,6 @@ mkdir: fixtures
 env: JETPACK_FIXTURES={work}/fixtures
 step: jetpack use --prep greet@jetpack --no-color --offline
 exit: nonzero
-stderr: ~ "Error [E1315]:" # original contains predicate
+stderr: ~ "Error [jet.HangarIngestFailed]:" # original contains predicate
 stderr: ~ "does not exist" # original contains predicate
 

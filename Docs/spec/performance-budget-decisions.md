@@ -802,7 +802,7 @@ changing the diagnostic contract:
 
 ```text
 jet budget check
-# Error [E2907]: performance budget readiness regressed
+# Error [jet.PerformanceRegression]: performance budget readiness regressed
 #   --> <workspace>/run.jet:<line>:<column>
 #  Why: the selected estimator exceeds its AtMost limit using the pinned baseline.
 #  Fix: improve readiness, inspect `jet budget check --verbose`, or accept explicitly with

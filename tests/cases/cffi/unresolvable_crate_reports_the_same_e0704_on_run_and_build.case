@@ -11,9 +11,9 @@ mkdir: ffi-cache
 step run: jet run main.jet
 exit: nonzero
 stderr: !~ E0956 # original predicate
-stderr.filter(^= "Error [E0704]" " Why:" " Fix:"): ^= "Error [E0704]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`" # original predicate
+stderr.filter(^= "Error [jet.ForeignCrateBuildFailed]" " Why:" " Fix:"): ^= "Error [jet.ForeignCrateBuildFailed]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`" # original predicate
 step build: jet build main.jet
 exit: nonzero
 stderr: !~ E0956 # original predicate
-stderr.filter(^= "Error [E0704]" " Why:" " Fix:"): ^= "Error [E0704]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`" # original predicate
-stderr.filter(^= "Error [E0704]" " Why:" " Fix:"): == run # original predicate
+stderr.filter(^= "Error [jet.ForeignCrateBuildFailed]" " Why:" " Fix:"): ^= "Error [jet.ForeignCrateBuildFailed]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`" # original predicate
+stderr.filter(^= "Error [jet.ForeignCrateBuildFailed]" " Why:" " Fix:"): == run # original predicate

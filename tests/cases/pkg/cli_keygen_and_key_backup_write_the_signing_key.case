@@ -11,7 +11,7 @@ env: JET_KEYS_DIR={work}/keys
 step: jet registry key backup
 cwd: project
 exit: 1
-stderr: ~ "Error [E2105]: No signing key for registry `jet` — run `jet registry keygen` first" # the E2105 headline; Why/Fix are the shared E2105 copy
+stderr: ~ "Error [jet.DriverOperationFailed]: No signing key for registry `jet` — run `jet registry keygen` first" # the E2105 headline; Why/Fix are the shared E2105 copy
 file: project/jet-signing-key.backup absent
 file: keys absent
 step: jet registry keygen
@@ -27,7 +27,7 @@ step: jet registry keygen
 cwd: project
 exit: 1
 stdout: empty
-stderr: ~ "Error [E1248]: `jet registry keygen` refused: a signing key already exists at `" # the headline names the existing seed path
+stderr: ~ "Error [jet.SigningKeyExists]: `jet registry keygen` refused: a signing key already exists at `" # the headline names the existing seed path
 step: jet registry keygen --force
 cwd: project
 exit: 0
@@ -44,7 +44,7 @@ exit: 0
 step: jet registry key backup other.key --registry other
 cwd: project
 exit: 1
-stderr: ~ "Error [E2105]: No signing key for registry `other`" # the E2105 headline for the named registry
+stderr: ~ "Error [jet.DriverOperationFailed]: No signing key for registry `other`" # the E2105 headline for the named registry
 file: project/other.key absent
 step: jet registry keygen --registry=other
 cwd: project
@@ -60,4 +60,4 @@ exit: 0
 step: jet registry key rotate
 cwd: project
 exit: 1
-stderr: ~ "Error [E2101]: Unknown `jet registry key` subcommand `rotate` — did you mean `jet registry key backup`?" # the E2101 headline; Why/Fix are the shared E2101 copy
+stderr: ~ "Error [jet.UnknownCommand]: Unknown `jet registry key` subcommand `rotate` — did you mean `jet registry key backup`?" # the E2101 headline; Why/Fix are the shared E2101 copy

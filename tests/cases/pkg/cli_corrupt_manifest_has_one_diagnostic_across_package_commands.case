@@ -8,10 +8,10 @@ copy: {root}/tests/cases/pkg/fixtures/sources/hi.txt run.jet
 copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/package.jet mylib/package.jet
 step fetch: jet fetch
 exit: nonzero
-stderr: line ^= "Error [E1206]:" # original predicate: some line starts with "Error [E1206]:"
+stderr: line ^= "Error [jet.LintSelectorIsCode]:" # original predicate: some line starts with "Error [jet.LintSelectorIsCode]:"
 step: jet build run.jet
 exit: nonzero
-stderr.filter(^= "Error [E1206]:").line(0): == fetch # original predicate: first line starting with "Error [E1206]:" equals fetch's
+stderr.filter(^= "Error [jet.LintSelectorIsCode]:").line(0): == fetch # original predicate: first line starting with "Error [jet.LintSelectorIsCode]:" equals fetch's
 step: jet add mylib --path ./mylib
 exit: nonzero
-stderr.filter(^= "Error [E1206]:").line(0): == fetch # original predicate: first line starting with "Error [E1206]:" equals fetch's
+stderr.filter(^= "Error [jet.LintSelectorIsCode]:").line(0): == fetch # original predicate: first line starting with "Error [jet.LintSelectorIsCode]:" equals fetch's

@@ -29,7 +29,7 @@ import {
 } from "./run-feature-examples.mjs";
 
 test("warning-only stderr is non-fatal", () => {
-  const warning = "Warning [L0103] (unused_import): Import is never used.\n  --> example.jet:1:1\n\n";
+  const warning = "Warning [jet.UnusedImport]: Import is never used.\n  --> example.jet:1:1\n\n";
   assert.equal(warningOnlyStderr(warning), true);
   assert.equal(withoutWarningDiagnostics(warning).trim(), "");
   assert.equal(classifyRun({
@@ -68,9 +68,9 @@ test("emit tier goldens compare exact stdout and exit", () => {
 });
 
 test("warning plus a compiler error remains a failure", () => {
-  const stderr = "Warning [L0103] (unused_import): Import is never used.\n\nError [E0003]: bad syntax\n";
+  const stderr = "Warning [jet.UnusedImport]: Import is never used.\n\nError [jet.InvalidStatement]: bad syntax\n";
   assert.equal(warningOnlyStderr(stderr), false);
-  assert.match(withoutWarningDiagnostics(stderr), /Error \[E0003\]/u);
+  assert.match(withoutWarningDiagnostics(stderr), /Error \[jet\.InvalidStatement\]/u);
   assert.equal(classifyRun({
     code: 1,
     stdout: "",
@@ -81,8 +81,8 @@ test("warning plus a compiler error remains a failure", () => {
 });
 
 test("expected failure comparison ignores warning blocks", () => {
-  const expected = "Error [E0003]: bad syntax\n";
-  const actual = "Warning [L0103] (unused_import): Import is never used.\n\nError [E0003]: bad syntax\n";
+  const expected = "Error [jet.InvalidStatement]: bad syntax\n";
+  const actual = "Warning [jet.UnusedImport]: Import is never used.\n\nError [jet.InvalidStatement]: bad syntax\n";
   assert.equal(classifyRun({
     code: 1,
     stdout: "",
@@ -147,8 +147,8 @@ test("a case's own `jet run` step runs from the example's directory", () => {
 
 test("a refused run's full file paths compare relative to the example's directory, or as {work} for a case step", () => {
   const entry = { stem: "safety/v_failure_cases/null_field", shown: "Examples/features/safety/v_failure_cases/null_field.jet", path: "/repo/Examples/features/safety/v_failure_cases/null_field.jet" };
-  const report = "Error [E0303]: missing\n  --> /stage/Examples/features/safety/v_failure_cases/null_field.jet:10:16\n";
-  assert.equal(withoutExampleDirectory(report, entry, null, "/stage"), "Error [E0303]: missing\n  --> null_field.jet:10:16\n");
+  const report = "Error [jet.InvalidConstructionField]: missing\n  --> /stage/Examples/features/safety/v_failure_cases/null_field.jet:10:16\n";
+  assert.equal(withoutExampleDirectory(report, entry, null, "/stage"), "Error [jet.InvalidConstructionField]: missing\n  --> null_field.jet:10:16\n");
   const stepped = { stem: "effects/authority_denied", shown: "Examples/features/effects/authority_denied.jet", path: "/repo/Examples/features/effects/authority_denied.jet" };
   const caseText = "step: jet run authority_denied.jet\n";
   const cwd = runCwd(stepped, caseText, "/stage");
@@ -187,7 +187,7 @@ test("the build tier builds with the case's run flags", () => {
 });
 
 test("the build tier compares compile-time diagnostics with the `jet run` command word", () => {
-  const fix = (command) => `Error [E1803]: Application authority is undecided for \`FS\`\n Fix: run \`${command} --allow=FS example.jet\` to allow it for this run\n`;
+  const fix = (command) => `Error [jet.ApplicationAuthorityDenied]: Application authority is undecided for \`FS\`\n Fix: run \`${command} --allow=FS example.jet\` to allow it for this run\n`;
   assert.equal(asRunCommand(fix("jet build")), fix("jet run"));
   const built = { code: 1, stdout: "", stderr: fix("jet build"), timedOut: false, timeoutSec: 60 };
   const expected = { out: null, err: fix("jet run"), stderrOut: null };

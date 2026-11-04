@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Render the generated lexical sections of the editor grammars.
 //
-// Highlights.jet (JET_HIGHLIGHT_TOKENS) and Prelude/Markers.jet (its marker
-// structs) are the authority. This tool reads their Jet text and
-// replaces the BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS block in each grammar;
-// it keeps no second token inventory. Which words tree-sitter parses as
-// anonymous literals comes from the generated src/node-types.json.
+// Highlights.jet (JET_HIGHLIGHT_TOKENS), Markers.jet (MARKER_INBODY_SEPARATOR)
+// and Prelude/Markers.jet (its marker structs) are the authority. This tool
+// reads their Jet text and replaces the BEGIN/END GENERATED JET SYNTAX
+// HIGHLIGHTS block in each grammar; it keeps no second token inventory. Which
+// words tree-sitter parses as anonymous literals comes from the generated
+// src/node-types.json.
 //
 // Usage: node Tools/agent/editor-grammars.mjs [--check|--write]
 
@@ -192,6 +193,13 @@ export function readHighlightTokens(root = ROOT) {
   return tokens;
 }
 
+// The separator of a `#X :: value` marker line written inside a body.
+export function readInbodySeparator(root = ROOT) {
+  const constant = readSyntaxConstants(root).get("MARKER_INBODY_SEPARATOR");
+  if (!constant) fail(`missing MARKER_INBODY_SEPARATOR in ${SYNTAX_DIR}`);
+  return constant.value;
+}
+
 // Zed validates query string literals against anonymous tree-sitter tokens;
 // words parsed inside a named node (such as the `keyword` token) would make the
 // whole language fail to load. The anonymous node types tree-sitter generated
@@ -267,11 +275,13 @@ export function renderVscode(tokens) {
   return `      "comment": "${START}",\n      "patterns": [\n${patterns.join(",\n")}\n      ],\n      "endComment": "${END}"\n`;
 }
 
-export function renderTreeSitter(tokens) {
+export function renderTreeSitter(tokens, _anonymous, separator) {
+  if (typeof separator !== "string" || separator === "") fail("renderTreeSitter needs the in-body marker separator");
   let out = `// ${START}\n`;
   for (const cls of EMIT_ORDER) {
     out += `const ${TREE_SITTER_CONST[cls]} = [${classTexts(tokens, cls).map((s) => JSON.stringify(s)).join(", ")}];\n`;
   }
+  out += `const JET_MARKER_INBODY_SEPARATOR = ${JSON.stringify(separator)};\n`;
   return `${out}// ${END}\n`;
 }
 
@@ -329,9 +339,11 @@ export function main(argv = process.argv.slice(2), root = ROOT) {
   }
   let tokens;
   let anonymous;
+  let separator;
   try {
     tokens = readHighlightTokens(root);
     anonymous = readAnonymousTokens(root);
+    separator = readInbodySeparator(root);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return 1;
@@ -343,7 +355,7 @@ export function main(argv = process.argv.slice(2), root = ROOT) {
     let next;
     try {
       current = readFileSync(file, "utf8");
-      next = replaceSection(current, target.render(tokens, anonymous), target.path);
+      next = replaceSection(current, target.render(tokens, anonymous, separator), target.path);
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       return 1;

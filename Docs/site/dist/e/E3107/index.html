@@ -34,10 +34,10 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Effective `.Obligations` policy requires a typed proof immediately after each low-level operation.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E3107</code>: <code>tests/ui/unsafe_obligation_missing.stderr</code>.</p>
-<pre class="diag">Error [E3107]: `raw_pointer` is missing unsafe obligations: no_alias
+<pre class="diag">Error [jet.MissingUnsafeObligation]: `raw_pointer` is missing unsafe obligations: no_alias
   --&gt; tests/ui/unsafe_obligation_missing.jet:6:20
     |
   6 |         pointer :: *Int{*value}
@@ -46,7 +46,7 @@
  Fix: Add `assert no_alias` immediately after this operation
 More: jet-lang.dev/e/E3107
 
-Error [E3107]: `raw_pointer` is missing unsafe obligations: no_alias
+Error [jet.MissingUnsafeObligation]: `raw_pointer` is missing unsafe obligations: no_alias
   --&gt; tests/ui/unsafe_obligation_missing.jet:6:25
     |
   6 |         pointer :: *Int{*value}
@@ -55,7 +55,7 @@ Error [E3107]: `raw_pointer` is missing unsafe obligations: no_alias
  Fix: Add `assert no_alias` immediately after this operation
 More: jet-lang.dev/e/E3107
 
-Error [E3107]: `dereference` is missing unsafe obligations: valid_ptr, aligned
+Error [jet.MissingUnsafeObligation]: `dereference` is missing unsafe obligations: valid_ptr, aligned
   --&gt; tests/ui/unsafe_obligation_missing.jet:7:15
     |
   7 |         print(pointer.*)

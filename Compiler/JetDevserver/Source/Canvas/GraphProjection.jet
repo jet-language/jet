@@ -432,9 +432,10 @@ fn impl_fact_json(i: AST.ImplDef, type_path: String, trait_path: String) -> Stri
 fn inline_trait_impl_fact_json(type_path: String, trait_path: String, block: &AST.TraitImplBlock) -> String {
     methods := block.methods.iter().map((m) -> json_str(m.name)).collect().join(",")
     associated_types := block.assoc_type_impls.iter().map((entry) -> json_str(entry._0)).collect().join(",")
+    delegation := block.delegation_field.as_deref().map(json_str).unwrap_or_else(() -> "null".to_string())
     trait_name := trait_path.rsplit_once('.').map_or(trait_path, (parts) -> parts._1)
     scope := trait_path.rsplit_once('.').map_or("", (parts) -> parts._0)
-    "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"methods\":[{methods}],\"associated_types\":[{associated_types}],\"delegation_field\":null,\"source_span\":{span_json(block.trait_span.into())},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
+    "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"methods\":[{methods}],\"associated_types\":[{associated_types}],\"delegation_field\":{delegation},\"source_span\":{span_json(block.trait_span.into())},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
 }
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1254
 fn trait_method_signature(src: String, m: &AST.TraitMethodSig) -> String {

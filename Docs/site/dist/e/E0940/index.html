@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0940 — Jet diagnostic</title>
-<meta name="description" content="`#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A)">
+<meta name="description" content="`#Memo` cannot cache a lazy `Iter` value">
 <meta property="og:title" content="E0940 — Jet diagnostic">
-<meta property="og:description" content="`#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A)">
+<meta property="og:description" content="`#Memo` cannot cache a lazy `Iter` value">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0940</h1>
-<p>`#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A)</p>
+<p>`#Memo` cannot cache a lazy `Iter` value</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`#Memo` cannot cache a lazy `Iter` value (D-MEMO1=A)</p>
+<p class="diag-copy what" data-registry-field="what">`#Memo` cannot cache a lazy `Iter` value</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Materialize the value or remove `#Memo` from the lazy `Iter`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0940</code>: <code>tests/ui/memo_lazy_iter_arg_e0940.stderr</code>.</p>
-<pre class="diag">Error [E0119]: There&#39;s no type called `Iter`
+<pre class="diag">Error [jet.UnknownType]: There&#39;s no type called `Iter`
   --&gt; tests/ui/memo_lazy_iter_arg_e0940.jet:2:27
     |
   2 | #Memo fn lazy_arg(values: Iter&lt;Int&gt;) -[]&gt; Int { 1 }
@@ -46,7 +46,7 @@
  Fix: Check the spelling, or define the type first
 More: jet-lang.dev/e/E0119
 
-Error [E0119]: `Iter` isn&#39;t generic
+Error [jet.UnknownType]: `Iter` isn&#39;t generic
   --&gt; tests/ui/memo_lazy_iter_arg_e0940.jet:2:27
     |
   2 | #Memo fn lazy_arg(values: Iter&lt;Int&gt;) -[]&gt; Int { 1 }
@@ -55,7 +55,7 @@ Error [E0119]: `Iter` isn&#39;t generic
  Fix: Use `Iter` without type arguments
 More: jet-lang.dev/e/E0119
 
-Error [E0940]: `#Memo` cannot cache lazy `Iter` values
+Error [jet.MemoLazyIter]: `#Memo` cannot cache lazy `Iter` values
   --&gt; tests/ui/memo_lazy_iter_arg_e0940.jet:2:1
     |
   2 | #Memo fn lazy_arg(values: Iter&lt;Int&gt;) -[]&gt; Int { 1 }

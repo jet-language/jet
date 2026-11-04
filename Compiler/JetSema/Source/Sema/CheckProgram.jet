@@ -754,7 +754,8 @@ fn sema_incremental_trait_impl_headers(blocks: [TraitImplBlock]) -> [TraitImplBl
         trait_name: block.trait_name, trait_span: block.trait_span,
         operator_rhs: block.operator_rhs, operator_marker: block.operator_marker,
         methods: sema_incremental_function_headers(block.methods),
-        compiler_generated: block.compiler_generated, assoc_type_impls: block.assoc_type_impls, constants: block.constants,
+        compiler_generated: block.compiler_generated, assoc_type_impls: block.assoc_type_impls, constants: block.constants, delegation_field: block.delegation_field,
+        markers: block.markers, span: block.span,
     }
 }
 
@@ -768,6 +769,7 @@ fn sema_incremental_impl_header(implementation: ImplDef) -> ImplDef Never! {
         delegation_field: implementation.delegation_field,
         assoc_type_impls: implementation.assoc_type_impls, constants: implementation.constants,
         is_generated_serde: implementation.is_generated_serde, os_target: implementation.os_target,
+        markers: implementation.markers,
     }
 }
 
@@ -811,7 +813,7 @@ fn sema_incremental_item_header(item: Item) -> Item Never! {
                 name: definition.name, name_span: definition.name_span,
                 is_pub: definition.is_pub, is_package_pub: definition.is_package_pub,
                 body: ^body, imports: definition.imports, web_target: definition.web_target,
-                instance_identity: definition.instance_identity, span: definition.span,
+                instance_identity: definition.instance_identity, span: definition.span, markers: definition.markers,
             }}
         }
         // Defaults, validation/templates and other registration inputs remain
@@ -2294,7 +2296,7 @@ fn check_program(input: Program, module_name: String, source_file: String, sourc
     exact_int_reachable := false
     copy_events := [SemaCopyEvent]{}
     memory_plan := sema_function_memory_plan_for_program(source_program, module_name, "")
-    // User policies are materialized above and `#allow` is validated, so only
+    // User policies are materialized above and `#Allow` is validated, so only
     // other rule applications leave the slice incomplete.
     complete := source_program.script_body.len() == 0 && source_program.imports.len() == 0 && source_program.block_spans.len() == 0 && source_program.web_target_ceiling == None && !source_program.no_prelude && source_program.html_path == None && !sema_function_memory_has_unsupported_policies(source_program.policy_declarations) && !sema_policy_has_unsupported_applications(source_program)
     item_index := 0
@@ -8944,7 +8946,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     // Core modules are checked in the same bundle so their errors keep the
     // program honest, but Core is library source: its lints are not the
     // user's to act on and never reach user output. A lint inside a site
-    // `#allow` for it is the author's recorded decision (LintAllowances.jet).
+    // `#Allow` for it is the author's recorded decision (LintAllowances.jet).
     allowances := [SemaLintAllowance]{}
     loop source_module in final_graph.modules -> sema_lint_allowances(source_module.program, source_module.source_segments, &allowances)
     reported := [Diagnostic]{}

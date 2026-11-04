@@ -1,4 +1,4 @@
-Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
+Error [jet.ValueNotSendable]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
   --> local_cell_crossing.jet:4:20
     |
   4 |     worker :: task {
@@ -7,7 +7,7 @@ Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
  Fix: Create the `Cell<T>` inside the task, or use `Shared<T>` for synchronized state
 More: jet-lang.dev/e/E1102
 
-Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
+Error [jet.ValueNotSendable]: `Cell`<Int> cannot be stored in `Shared<T>`
   --> local_cell_crossing.jet:11:17
     |
  11 |     _ :: shared cell
@@ -16,7 +16,7 @@ Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
  Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
 More: jet-lang.dev/e/E1102
 
-Error [E1102]: `LocalCache` cannot be stored in `Shared<T>`
+Error [jet.ValueNotSendable]: `LocalCache` cannot be stored in `Shared<T>`
   --> local_cell_crossing.jet:19:17
     |
  19 |     _ :: shared cache
@@ -25,7 +25,7 @@ Error [E1102]: `LocalCache` cannot be stored in `Shared<T>`
  Fix: Store the value itself in `Shared<T>`, then read and write its fields directly
 More: jet-lang.dev/e/E1102
 
-Error [E1102]: `cell` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
+Error [jet.ValueNotSendable]: `cell` can't be captured by an HTTP handler because `Cell<Int>` isn't sendable
   --> local_cell_crossing.jet:25:18
     |
  25 |     mux.get("/", (req: HTTPRequest) -> {

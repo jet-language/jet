@@ -2093,7 +2093,7 @@ fn sema_checked_validate_struct_field(definition: StructDef, field: Field, diagn
         &diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "`#Layout(c)` struct `{definition.name}` has a growable field `{field.name}` ({type_name(field.ty)})", "growable types (`[T]`, `Map`, `String`) don't have a stable C layout", "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`"))
     }
     if sema_checked_type_is_float(field.ty) && sema_checked_money_like_name(field.name) && !sema_checked_allows_float_money(field.serde_markers) && !sema_checked_allows_float_money(definition.serde_markers) {
-        &diagnostics.push(sema_lint("L0504", field.name_span, "field `{field.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money, or suppress with `#[allow(float_money)]` on the field"))
+        &diagnostics.push(sema_lint("L0504", field.name_span, "field `{field.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money, or suppress with `#Allow(jet.FloatMoney, \"why\")` on the field"))
     }
 }
 
@@ -2120,12 +2120,7 @@ fn sema_checked_money_like_name(name: String) -> Bool Never! {
 
 fn sema_checked_allows_float_money(markers: [Marker]) -> Bool Never! {
     loop marker in markers {
-        if marker.name != "allow" -> next
-        loop argument in marker.args {
-            if argument == .Expr(value) {
-                if value == .Ident(name, _, _) && name == "float_money" -> return true
-            }
-        }
+        if (sema_lint_allowance_name(marker) ?? next) == "jet.FloatMoney" -> return true
     }
     false
 }
@@ -2944,17 +2939,39 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         }
         else -> {}
     }
+    forwards :: implementation.declaration.delegation_field != None || implementation.declaration.is_generated_serde
+    sema_checked_validate_trait_contract(graph, module_row, implementation.target_type, trait_name, implementation.methods, implementation.associated_type_impls, forwards, implementation.declaration.type_span, &diagnostics)
+}
+
+// The trait contract an `impl Trait` block in a struct or enum body meets,
+// checked as sema_checked_validate_impl checks a top-level impl. The block's
+// methods registered on the nominal; they are the rows at the block's
+// method spans.
+fn sema_checked_validate_nested_impl(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, block: TraitImplBlock, diagnostics: &[Diagnostic]) {
+    methods := [SemaRegistrationFunction]{}
+    loop method in block.methods {
+        loop registered in nominal.methods {
+            if registered.declaration.name_span == method.name_span && registered.declaration.name == method.name {
+                &methods.push(registered)
+                break
+            }
+        }
+    }
+    sema_checked_validate_trait_contract(graph, module_row, nominal.ty, block.trait_name, methods, block.assoc_type_impls, block.delegation_field != None || block.compiler_generated, block.trait_span, &diagnostics)
+}
+
+fn sema_checked_validate_trait_contract(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, target_type: Type, trait_name: String, methods: [SemaRegistrationFunction], associated_type_impls: [NamedType], forwards: Bool, span: Span, diagnostics: &[Diagnostic]) {
     trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
     // Rust `validate_trait_impl` (E0906): every trait method without a default
     // body appears in the impl. A `using` delegation forwards them instead, and
     // a generated codec writes its own.
-    if implementation.declaration.delegation_field == None && !implementation.declaration.is_generated_serde {
+    if !forwards {
         missing := [String]{}
         loop required_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
             if graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.default_body != None -> next
             required_name :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.name
             provided := false
-            loop actual in implementation.methods {
+            loop actual in methods {
                 if actual.declaration.name == required_name {
                     provided = true
                     break
@@ -2964,19 +2981,19 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         }
         if missing.len() > 0 {
             listed :: missing.join(", ")
-            &diagnostics.push(sema_error("E0906", implementation.declaration.type_span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
+            &diagnostics.push(sema_error("E0906", span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
         }
     }
     // The trait writes its associated types abstractly (`-> Elem`) and its
     // implementer as `Self`; the impl writes the concrete types it binds
     // (`type Elem = Int`, `-> Int`) and its own type.
-    associated_names := loop associated in implementation.associated_types -> associated.symbol.name
-    associated_types := loop associated in implementation.associated_types -> associated.ty.copy()
+    associated_names := loop associated in associated_type_impls -> associated.name
+    associated_types := loop associated in associated_type_impls -> associated.ty.copy()
     &associated_names.push("Self")
-    &associated_types.push(implementation.target_type.copy())
+    &associated_types.push(target_type.copy())
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
-        loop actual in implementation.methods {
+        loop actual in methods {
             if actual.declaration.name == graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration.name {
                 found = Val(actual)
                 break
@@ -2996,10 +3013,10 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             &diagnostics.push(sema_error("E0907", actual.declaration.name_span, "`{actual.declaration.name}` doesn't match the `{trait_name}` contract", "a trait implementation must use the trait method's receiver, parameters, return type, and effects", "write `{written}`, matching the `{trait_name}` declaration exactly, including `self`, types, labels, return type, and effects"))
         }
     }
-    loop associated in implementation.associated_types {
-        resolved :: sema_type_associated(graph, implementation.target_type, trait_name, associated.symbol.name, module_row.module_identity)
+    loop associated in associated_type_impls {
+        resolved :: sema_type_associated(graph, target_type, trait_name, associated.name, module_row.module_identity)
         if resolved == None && graph.complete {
-            &diagnostics.push(sema_error("E0913", associated.symbol.span, "associated type `{associated.symbol.name}` is not resolved for this impl", "associated types are checked against one trait implementation", "declare the associated type in the trait and provide one concrete value"))
+            &diagnostics.push(sema_error("E0913", associated.span, "associated type `{associated.name}` is not resolved for this impl", "associated types are checked against one trait implementation", "declare the associated type in the trait and provide one concrete value"))
         }
     }
 }
@@ -3288,6 +3305,14 @@ fn sema_checked_coherence_derives(state: SemaCheckedCoherence, derives: [NamedSp
 
 fn sema_checked_coherence_blocks(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, blocks: [TraitImplBlock], state: &SemaCheckedCoherence, diagnostics: &[Diagnostic]) {
     loop block in blocks {
+        if block.delegation_field != None {
+            state.trait_keys["{owner_name}::{block.trait_name}"] = true
+            if sema_checked_coherence_arithmetic(block.trait_name) {
+                rhs :: block.operator_rhs ?? sema_checked_coherence_owner_type(state, owner_name)
+                sema_checked_coherence_add_operator(&state, owner_name, block.trait_name, rhs)
+            }
+            next
+        }
         sema_checked_coherence_register(graph, module_row, owner_name, block.trait_name, block.operator_rhs, block.operator_marker, block.methods, true, block.trait_span, &state, &diagnostics)
     }
 }
@@ -3300,19 +3325,32 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
     field_name :: definition.delegation_field ?? return
     owner_module :: implementation.target_module_identity ?? return
     owner_index :: sema_registration_module_index(graph, owner_module) ?? return
+    sema_checked_validate_delegation_field(graph, module_row, owner_index, definition.type_name, trait_name, field_name, definition.type_span, &diagnostics)
+}
+
+// The same E2401 check for an `impl Trait using field` block in a struct body.
+fn sema_checked_validate_block_delegations(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, blocks: [TraitImplBlock], diagnostics: &[Diagnostic]) {
+    owner_index :: sema_registration_module_index(graph, module_row.module_identity) ?? return
+    loop block in blocks {
+        field_name :: block.delegation_field ?? next
+        sema_checked_validate_delegation_field(graph, module_row, owner_index, owner_name, block.trait_name, field_name, block.trait_span, &diagnostics)
+    }
+}
+
+fn sema_checked_validate_delegation_field(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_index: Int, type_name_text: String, trait_name: String, field_name: String, span: Span, diagnostics: &[Diagnostic]) {
     loop nominal_index in 0..<graph.modules[owner_index].nominals.len() {
         // Read in place: binding the row copied every nominal of the module.
-        if graph.modules[owner_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Struct || graph.modules[owner_index].nominals[nominal_index].symbol.name != definition.type_name -> next
+        if graph.modules[owner_index].nominals[nominal_index].kind != SemaRegistrationNominalKind.Struct || graph.modules[owner_index].nominals[nominal_index].symbol.name != type_name_text -> next
         loop field_index in 0..<graph.modules[owner_index].nominals[nominal_index].fields.len() {
             if graph.modules[owner_index].nominals[nominal_index].fields[field_index].symbol.name != field_name -> next
             field_type_name :: type_name(graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty)
             satisfied :: sema_type_bound_satisfied(graph, graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty, trait_name, module_row.module_identity) ?? true
             if !satisfied {
-                &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}.{trait_name}` on the field's type, or choose a different field"))
+                &diagnostics.push(sema_error("E2401", span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {type_name_text}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}.{trait_name}` on the field's type, or choose a different field"))
             }
             return
         }
-        &diagnostics.push(sema_error("E2401", definition.type_span, "`{definition.type_name}` has no field `{field_name}`", "`impl {definition.type_name}.{trait_name} using {field_name}` needs `{definition.type_name}` to have a field named `{field_name}`", "add `{field_name}: Type` to `struct {definition.type_name}`"))
+        &diagnostics.push(sema_error("E2401", span, "`{type_name_text}` has no field `{field_name}`", "`impl {type_name_text}.{trait_name} using {field_name}` needs `{type_name_text}` to have a field named `{field_name}`", "add `{field_name}: Type` to `struct {type_name_text}`"))
         return
     }
 }
@@ -3384,6 +3422,11 @@ fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaReg
         }
     }
     loop implementation_index in 0..<module_row.impls.len() -> sema_checked_validate_delegation(graph, module_row, module_row.impls[implementation_index], &diagnostics)
+    loop nominal_index in 0..<module_row.nominals.len() {
+        if module_row.nominals[nominal_index].source == .SourceAST(item) {
+            if item == .Struct(value) -> sema_checked_validate_block_delegations(graph, module_row, value.name, value.trait_impls, &diagnostics)
+        }
+    }
 }
 
 fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, block: TraitImplBlock, constants: [TTraitConstantValue]) -> TImplDef Never! {
@@ -3410,7 +3453,7 @@ fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRe
         associated_types: associated,
         constants: constants,
         methods: methods,
-        delegation_field: None,
+        delegation_field: block.delegation_field,
         compiler_generated: block.compiler_generated,
         serde: sema_checked_serde_codec(Val(block.trait_name)),
         operator_rhs: sema_checked_qualify_optional_type(graph, block.operator_rhs, module_row.module_identity),
@@ -3905,6 +3948,7 @@ fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: In
             if item == .UnitFamily(value) -> sema_checked_standard_unit_defs(module_row, value, &type_defs)
             if item == .Trait(value) -> sema_trait_constants_check_trait(graph, module_row.module_identity, value, &diagnostics)
             sema_checked_add_nested_impls(graph, module_row, item, &impls, &diagnostics)
+            loop block in sema_registration_item_trait_blocks(item) -> sema_checked_validate_nested_impl(graph, module_row, nominal, block, &diagnostics)
         }
     }
     sema_checked_impl_coherence(graph, module_row, &diagnostics)

@@ -120,6 +120,7 @@ enum RuleSite {
     Expression
     Type
     Impl
+    Trait
     Declaration
     Constant
     Field
@@ -232,6 +233,16 @@ struct EffectDecl {
     span: Span
 }
 
+// A type's `impl Effect { … }` block: where it starts, the written
+// `fn irreversible(self) -> Bool` body, and the effect names the type
+// declares (the type itself, then each case of an enum family).
+struct EffectImpl {
+    span: Span
+    irreversible: Expr?
+    method_span: Span?
+    decls: [EffectDecl]
+}
+
 struct MarkerDecl {
     name: String
     name_span: Span
@@ -269,6 +280,9 @@ struct CodeModule {
     instance_identity: ModuleInstanceIdentity?
     span: Span
     cap: ModuleCap?{None}
+    // The markers written above `module` and as `#X :: value` lines in its
+    // body, in source order. `#FX` is the cap, not a marker.
+    markers: [Marker]{[Marker]{}}
 }
 
 // A module's `#FX(…)` cap. Its plain entries are the ceiling and its `!`
@@ -577,6 +591,8 @@ struct TraitDef {
     // or `severity: Severity{.Error}` with a default.
     constants: [TraitConstDecl]
     methods: [TraitMethodSig]
+    // The markers written above `trait` and as lines in its body.
+    markers: [Marker]{[Marker]{}}
 }
 
 // One trait constant requirement. `ty` is written in the trait's module;
@@ -684,6 +700,11 @@ struct TraitImplBlock {
     compiler_generated: Bool
     assoc_type_impls: [NamedType]
     constants: [ImplConstValue]
+    delegation_field: String?{None}
+    // The block's markers: those above `impl`, then its `#X :: value` lines.
+    markers: [Marker]{[Marker]{}}
+    // From `impl` through the block's end; None for a generated block.
+    span: Span?{None}
 }
 
 enum OperatorMarker {
@@ -989,6 +1010,7 @@ struct StructDef {
     marker: MarkerDecl?{None}
     marker_span: Span?{None}
     marker_expand_span: Span?{None}
+    effect_impl: EffectImpl?{None}
 }
 
 struct CLICommandBinding {
@@ -1163,6 +1185,7 @@ struct EnumDef {
     serde_markers: [Marker]
     type_markers: [Marker]
     groups: [EnumGroup]
+    effect_impl: EffectImpl?{None}
 }
 
 struct EnumGroup {
@@ -1206,6 +1229,8 @@ struct ImplDef {
     constants: [ImplConstValue]
     is_generated_serde: Bool
     os_target: String?
+    // The markers written above `impl` and as lines in its body.
+    markers: [Marker]{[Marker]{}}
 }
 
 struct Field {

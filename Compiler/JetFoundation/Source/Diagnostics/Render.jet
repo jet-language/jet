@@ -326,15 +326,8 @@ fn diagnostic_render_with(diagnostic: Diagnostic, file: String, source: String, 
     why :: diagnostic_escape_terminal_text(diagnostic.why)
     fix :: diagnostic_escape_terminal_text(diagnostic.fix)
     label :: if diagnostic.severity == DIAGNOSTIC_LINT -> diagnostic_theme_severity(color, diagnostic.severity, "Warning") else -> diagnostic_theme_severity(color, diagnostic.severity, "Error")
-    lint_name := String?{None}
-    if diagnostic_registry_row(diagnostic.code) == .Val(row) {
-        if row.severity == DIAGNOSTIC_LINT -> lint_name = row.lint_name
-    }
     out := [U8]{}
-    if {
-        lint_name == .Val(name) -> diagnostic_push_text(&out, "{label} [{diagnostic.code}] ({name}): {what}\n")
-        else -> diagnostic_push_text(&out, "{label} [{diagnostic.code}]: {what}\n")
-    }
+    diagnostic_push_text(&out, "{label} [{diagnostic_display_name(diagnostic.code)}]: {what}\n")
     if diagnostic.span != None || diagnostic.labels.len() > 0 {
         position :: diagnostic_source_position(&sources, diagnostic.origin, source)
         if diagnostic.span == .Val(span) -> diagnostic_push_snippet(&out, diagnostic, color, display, sources.texts[position], span, None)
@@ -359,7 +352,8 @@ fn diagnostic_render_with(diagnostic: Diagnostic, file: String, source: String, 
         if diagnostic.scope_chain.len() > 0 -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Scope chain:")} {diagnostic_join_escaped(diagnostic.scope_chain, " → ")}\n")
         if diagnostic.nearest_granting_scope == .Val(scope) -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
     }
-    diagnostic_push_text(&out, "More: jet-lang.dev/e/{diagnostic.code}\n")
+    // Jet's own codes have a reference page; a library diagnostic's code is its type path.
+    if !diagnostic.code.contains(".") -> diagnostic_push_text(&out, "More: jet-lang.dev/e/{diagnostic.code}\n")
     String.from_bytes(out) ?? ""
 }
 

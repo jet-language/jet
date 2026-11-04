@@ -25,19 +25,19 @@ stderr: ~ "note: --optimize=basic replaces b.optimize(.Full) at build.jet:3 for 
 step: jet build --optimize
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: `--optimize` needs a value" # the rest of the report is the registered E2104 row
+stderr: ~ "Error [jet.InvalidCommandInput]: `--optimize` needs a value" # the rest of the report is the registered E2104 row
 step: jet build --optimize=fast
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: `--optimize=fast` isn't a value of `optimize`" # the rest of the report is the registered E2104 row
+stderr: ~ "Error [jet.InvalidCommandInput]: `--optimize=fast` isn't a value of `optimize`" # the rest of the report is the registered E2104 row
 step: jet build --optimize=full --optimize=none
 cwd: set
 exit: 2
-stderr: ~ "Error [E2104]: `--optimize=full` and `--optimize=none` disagree" # the rest of the report is the registered E2104 row
+stderr: ~ "Error [jet.InvalidCommandInput]: `--optimize=full` and `--optimize=none` disagree" # the rest of the report is the registered E2104 row
 step: jet run --profile=nope main.jet
 cwd: set
 exit: 2
-stderr: ~ "Error [E1219]: `--profile=nope` is not a defined build profile." # the rest of the report is the registered E1219 row (DiagnosticRows.jet:10067)
+stderr: ~ "Error [jet.UnknownProfile]: `--profile=nope` is not a defined build profile." # the rest of the report is the registered E1219 row (DiagnosticRows.jet:10067)
 step: jet build --optimize=full
 cwd: pinned
 exit: 0

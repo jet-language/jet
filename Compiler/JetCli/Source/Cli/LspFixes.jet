@@ -26,6 +26,8 @@ struct JetCLIFixSkip {
     reason: String
 }
 
+// `jet fix` applies a diagnostic's primary edit; its alternative edits are
+// the other choices an editor offers as code actions.
 fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {
     fixes := [JetCLIFix]{}
     loop diagnostic in diagnostics {
@@ -33,11 +35,6 @@ fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Neve
         safety :: diagnostic.safety ?? next
         if diagnostic.edit == .Val(edit) {
             &fixes.push(JetCLIFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
-        }
-        if diagnostic.structured == .Val(.SuggestedEdits(edits)) {
-            loop edit in edits {
-                &fixes.push(JetCLIFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
-            }
         }
     }
     fixes

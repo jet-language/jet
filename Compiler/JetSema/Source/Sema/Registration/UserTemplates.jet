@@ -34,6 +34,7 @@ use jet_foundation.[
     TAppliedRuleCatalog,
     TComptimeKey,
     TComptimeValue,
+    TraitImplBlock,
     diagnostic_with_detail,
     expr_span,
 ]
@@ -350,10 +351,51 @@ fn sema_user_derive_expand_module(graph: &SemaRegistrationGraph, module_index: I
 // or the function's FunctionInfo. A generated impl may add members but never
 // change or shadow a written (or earlier generated) member.
 
-fn sema_user_rule_body(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> [DeriveBodyItem]? {
+// A marker application's rule body, with the `Diagnostic` impls of the rule's
+// declaring module that its `reject(value)` may raise.
+struct SemaUserRule {
+    body: [DeriveBodyItem]
+    reports: [SemaDeriveReport]
+}
+
+fn sema_user_rule_body(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaUserRule? {
     resolved :: sema_marker_module_resolve_application(graph, module_identity, marker)
     declaration :: resolved.declaration ?? return None
-    declaration.body
+    body :: declaration.body ?? return None
+    reports := [SemaDeriveReport]{}
+    if sema_registration_module_index(graph, resolved.declaring_module_identity) == .Val(index) {
+        module_name :: graph.modules[index].module_name
+        loop item in graph.modules[index].program.items {
+            if item == {
+                .Impl(definition) -> {
+                    if definition.trait_name == .Val(trait_name) {
+                        if trait_name == "Diagnostic" -> &reports.push(SemaDeriveReport{module_name: module_name, definition: definition})
+                    }
+                }
+                .Struct(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, &reports)
+                .Enum(definition) -> sema_user_rule_nested_reports(module_name, definition.name, definition.name_span, definition.trait_impls, &reports)
+                else -> {}
+            }
+        }
+    }
+    Val(SemaUserRule{body: body, reports: reports})
+}
+
+// A struct's or enum's `impl Diagnostic { … }` written inside its body is the
+// same report as a top-level `impl Name.Diagnostic { … }`.
+fn sema_user_rule_nested_reports(module_name: String, owner: String, owner_span: Span, blocks: [TraitImplBlock], reports: &[SemaDeriveReport]) Never! {
+    loop block in blocks {
+        if block.trait_name != "Diagnostic" -> next
+        definition :: ImplDef{
+            span: block.span ?? owner_span, type_name: owner.copy(), type_span: owner_span,
+            trait_name: Val(block.trait_name), trait_span: Val(block.trait_span),
+            operator_rhs: block.operator_rhs, operator_marker: block.operator_marker,
+            methods: block.methods, delegation_field: block.delegation_field,
+            assoc_type_impls: block.assoc_type_impls, constants: block.constants,
+            is_generated_serde: false, os_target: None, markers: block.markers,
+        }
+        &reports.push(SemaDeriveReport{module_name: module_name.copy(), definition: definition})
+    }
 }
 
 fn sema_user_rule_existing_span(items: [Item], owner: String, member: String) -> Span? Never! {
@@ -422,10 +464,10 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
             type_info := CtValue?{None}
             loop marker in definition.type_markers {
                 if marker.negated -> next
-                body :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+                rule :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 if type_info == None -> type_info = sema_user_template_type_info(graph, module_index, definition.name)
                 info :: type_info ?? next
-                expanded :: sema_derive_expand_provider_body(body, "target", info, &diagnostics) ?? next
+                expanded :: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), &diagnostics) ?? next
                 sema_user_rule_accept(items, marker.name, expanded, &generated, &diagnostics)
             }
         }
@@ -435,9 +477,9 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
         if item == .Func(function) {
             loop marker in function.markers {
                 if marker.negated -> next
-                body :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+                rule :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
                 info :: sema_user_template_function_info(function) ?? next
-                expanded :: sema_derive_expand_provider_body(body, "target", info, &diagnostics) ?? next
+                expanded :: sema_derive_expand_rule_body(rule.body, "target", info, rule.reports, Val(marker.span), &diagnostics) ?? next
                 loop expanded_item in expanded -> &generated.push(expanded_item)
             }
         }
@@ -452,8 +494,8 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
     loop item in items -> sema_user_text_blocks_in_item(item, source, block_spans, &blocks)
     loop block in blocks {
         marker :: Marker{name: block.name, negated: false, name_span: block.span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: block.span, ct: None}
-        body :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
-        expanded :: sema_derive_expand_provider_body(body, "target", CtValue.Str{value: block.text}, &diagnostics) ?? next
+        rule :: sema_user_rule_body(graph, graph.modules[module_index].module_identity, marker) ?? next
+        expanded :: sema_derive_expand_rule_body(rule.body, "target", CtValue.Str{value: block.text}, rule.reports, Val(block.site), &diagnostics) ?? next
         loop expanded_item in expanded -> &generated.push(expanded_item)
     }
 }
@@ -462,10 +504,13 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
 // Declared text blocks (Rust `Bundle/Pipeline.rs` `block_source`,
 // `collect_declared_text_blocks`, `collect_item_declared_text_blocks`).
 
+// `span` covers the whole block, `site` its `#Name` use site, where a
+// rejection reports.
 struct SemaUserTextBlock {
     name: String
     text: String
     span: Span
+    site: Span
 }
 
 // Rust `LValue::span`.
@@ -541,8 +586,8 @@ fn sema_user_text_statement_bodies(statement: Stmt) -> [[Stmt]] Never! {
 
 fn sema_user_text_blocks_in(statements: [Stmt], source: String, block_spans: [Span], blocks: &[SemaUserTextBlock]) {
     loop statement in statements {
-        if statement == .ScopeMember(name, _, _, _, body, dsl, _, span) {
-            if dsl -> &blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span})
+        if statement == .ScopeMember(name, name_span, _, _, body, dsl, hash_span, span) {
+            if dsl -> &blocks.push(SemaUserTextBlock{name: name, text: sema_user_text_block_source(source, body, block_spans, span), span: span, site: Span{start: hash_span.start, end: name_span.end}})
         }
         loop child in sema_user_text_statement_bodies(statement) -> sema_user_text_blocks_in(child, source, block_spans, &blocks)
     }
@@ -604,5 +649,6 @@ fn sema_registration_expand_user_templates(graph: &SemaRegistrationGraph) {
         if providers.len() > 0 -> sema_user_derive_expand_module(&graph, module_index, providers, entry_index)
         if has_any_rule_body -> sema_user_rule_expand_module(&graph, module_index)
     }
-    graph.complete = graph.diagnostics.len() == 0
+    // A rule's warning-severity `reject` reports without failing the graph.
+    graph.complete = !sema_has_error_since(graph.diagnostics, 0)
 }

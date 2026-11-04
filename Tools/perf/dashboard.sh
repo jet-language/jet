@@ -1493,7 +1493,7 @@ parity_check_diagnostic() {
         [ "$parity_status" -ne 0 ] || { echo "diagnostic unexpectedly passed: $parity_tier" >&2; exit 1; }
         [ ! -s "$parity_root/$parity_tier.stdout" ] || { echo "diagnostic leaked to stdout: $parity_tier" >&2; exit 1; }
         parity_compare_snapshot_prefix "$parity_snapshot" "$parity_root/$parity_tier.stderr" "$parity_id/$parity_tier"
-        for parity_field in 'Error [E0112]' ' Why:' ' Fix:'; do
+        for parity_field in 'Error [jet.ValueTypeMismatch]' ' Why:' ' Fix:'; do
             grep -Fq "$parity_field" "$parity_root/$parity_tier.stderr" || {
                 echo "diagnostic field missing: $parity_tier/$parity_field" >&2
                 exit 1

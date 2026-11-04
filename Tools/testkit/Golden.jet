@@ -134,9 +134,9 @@ fn kit_golden_build(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv, 
         .Val(value) -> return KitOutcome{verdict: value, run: result}
         .None -> {}
     }
-    if result.stderr.contains("Warning [L0507]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.stderr.contains("Warning [jet.BranchArmTable]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
     if result.code != 0 {
-        unsupported :: result.stderr.contains("Error [E2104]")
+        unsupported :: result.stderr.contains("Error [jet.InvalidCommandInput]")
         verdict :: kit_expect_verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
         return KitOutcome{verdict: verdict, run: result}
     }
@@ -221,7 +221,7 @@ fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previo
 
 fn kit_golden_step_check(step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
     golden :: context.golden ?? panic("golden step context required")
-    if state.last.stderr.contains("Warning [L0507]") -> return kit_expect_verdict("FAIL", "feature example emitted L0507")
+    if state.last.stderr.contains("Warning [jet.BranchArmTable]") -> return kit_expect_verdict("FAIL", "feature example emitted L0507")
     checked := step
     if step.argv[0] != "build" && index == context.plan.steps.len() - 1 && !golden.last_explicit {
         normalized :: kit_expect_named(context.plan.normalize, "argv0")

@@ -68,8 +68,8 @@ test("interactive answers come from the example .stdin goldens", () => {
 test("the most specific differing field is reported first", () => {
   const reference = observed({
     status: "exit 1",
-    diagnostics: parseDiagnostics("Error [E0109]: Text values aren't joined\n  --> a.jet:4:14\n"),
-    stderr: "Error [E0109]: Text values aren't joined\n  --> a.jet:4:14\n",
+    diagnostics: parseDiagnostics("Error [jet.OperatorTypeMismatch]: Text values aren't joined\n  --> a.jet:4:14\n"),
+    stderr: "Error [jet.OperatorTypeMismatch]: Text values aren't joined\n  --> a.jet:4:14\n",
   });
   const candidate = observed({
     status: "exit 101",
@@ -118,7 +118,7 @@ test("a compiler that fails the readiness probe is unavailable, never a match", 
   mkdirSync(base, { recursive: true });
   const dir = mkdtempSync(join(base, "compiler-diff-test-"));
   try {
-    const compilers = fakeCompilers(dir, 'echo "Error [E2105]: JET_TOOLCHAIN_ROOT is not set" >&2\nexit 1\n');
+    const compilers = fakeCompilers(dir, 'echo "Error [jet.DriverOperationFailed]: JET_TOOLCHAIN_ROOT is not set" >&2\nexit 1\n');
     const run = spawnSync(process.execPath, [
       fileURLToPath(new URL("./compiler-diff.mjs", import.meta.url)),
       "--reference", compilers[0],

@@ -1200,17 +1200,17 @@ fn jet_cli_inspect_register_trait(owner: String, trait_name: String, methods: [F
 }
 
 // Traits.rs `register_impl`: a field-delegated arithmetic hook results in
-// its owner; every other impl is validated as written.
-fn jet_cli_inspect_register_impl(definition: ImplDef, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
-    trait_name :: definition.trait_name ?? return
-    if definition.delegation_field != None {
+// its owner; every other impl is validated as written. A top-level impl and
+// a trait block in a type body register the same way.
+fn jet_cli_inspect_register_impl(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, delegation: String?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
+    if delegation != None {
         if jet_cli_inspect_operator_method(trait_name) == "" -> return
-        owner_type :: jet_cli_inspect_owner_type(definition.type_name, params)
-        rhs_type :: definition.operator_rhs ?? owner_type
-        &impls.push(JetCLIOperatorImpl{left: definition.type_name, trait_name: trait_name, rhs: type_name(rhs_type), result: type_name(owner_type), explicit_rhs: definition.operator_rhs != None})
+        owner_type :: jet_cli_inspect_owner_type(owner, params)
+        rhs_type :: operator_rhs ?? owner_type
+        &impls.push(JetCLIOperatorImpl{left: owner, trait_name: trait_name, rhs: type_name(rhs_type), result: type_name(owner_type), explicit_rhs: operator_rhs != None})
         return
     }
-    jet_cli_inspect_register_trait(definition.type_name, trait_name, definition.methods, definition.operator_rhs, local, params, &impls)
+    jet_cli_inspect_register_trait(owner, trait_name, methods, operator_rhs, local, params, &impls)
 }
 
 // Traits.rs `register_synthetic_operators`: Core's typed vector/scalar hook
@@ -1246,17 +1246,19 @@ fn jet_cli_inspect_operator_impls(program: Program) -> [JetCLIOperatorImpl] Neve
             .TypeAlias(value) -> {
                 if value.type_params.len() > 0 -> params[value.name] = value.type_params
             }
-            .Impl(value) -> jet_cli_inspect_register_impl(value, local, params, &impls)
+            .Impl(value) -> {
+                if value.trait_name == .Val(trait_name) -> jet_cli_inspect_register_impl(value.type_name, trait_name, value.methods, value.operator_rhs, value.delegation_field, local, params, &impls)
+            }
             else -> {}
         }
     }
     loop item in program.items {
         if item == {
             .Struct(value) -> {
-                loop block in value.trait_impls -> jet_cli_inspect_register_trait(value.name, block.trait_name, block.methods, block.operator_rhs, local, params, &impls)
+                loop block in value.trait_impls -> jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, &impls)
             }
             .Enum(value) -> {
-                loop block in value.trait_impls -> jet_cli_inspect_register_trait(value.name, block.trait_name, block.methods, block.operator_rhs, local, params, &impls)
+                loop block in value.trait_impls -> jet_cli_inspect_register_impl(value.name, block.trait_name, block.methods, block.operator_rhs, block.delegation_field, local, params, &impls)
             }
             else -> {}
         }

@@ -390,7 +390,7 @@ fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity
                     &diagnostics.push(error)
                     next
                 }
-                forbidden := member.negated || member.name == "Unsafe" || member.name == "Impure" || member.name == "Nondeterministic" || member.name == "allow" || member.name == "Scrub" || member.name == "FX"
+                forbidden := member.negated || member.name == "Unsafe" || member.name == "Impure" || member.name == "Nondeterministic" || member.name == "Allow" || member.name == "Scrub" || member.name == "FX"
                 builtin :: sema_marker_rules_catalog_rule_index(catalog.applied_rules, member.name)
                 if builtin == None {
                     resolved :: sema_marker_module_resolve_scoped(graph, module_identity, member.name, scope)
@@ -546,7 +546,7 @@ fn sema_marker_module_check_builtin_sites(catalog: SemaScopeMembersMarkerRegistr
         site :: application.site ?? next
         // A lint allowance is placed by its own check
         // (sema_marker_rules_validate_allow), not by its registry row.
-        if application.marker.name == "allow" -> next
+        if application.marker.name == "Allow" -> next
         index :: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
         key :: sema_marker_rules_application_key(application)
         if reported.get(key) != None -> next

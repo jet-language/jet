@@ -34,10 +34,10 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect. Other `core.net` methods are not planned for comptime access. A `jet build` or `jet run` run reports this comptime-tier diagnostic.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">use `core.net.fetch(url, sha256: &quot;…&quot;)` for content-hash-pinned downloads.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use `core.net.fetch(url, sha256: &quot;…&quot;)` for content-hash-pinned downloads.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E3412</code>: <code>tests/ui/impure_net_stub.stderr</code>.</p>
-<pre class="diag">Error [E3412]: `core.net.tcp_connect()` is not available at comptime
+<pre class="diag">Error [jet.ComptimeNetUnavailable]: `core.net.tcp_connect()` is not available at comptime
   --&gt; tests/ui/impure_net_stub.jet:6:22
     |
   6 |         @conn :: net.tcp_connect(&quot;build.example.com:443&quot;)
@@ -46,7 +46,7 @@
  Fix: Use `core.net.fetch(url, sha256: &quot;&lt;hash&gt;&quot;)` for content-hash-pinned downloads
 More: jet-lang.dev/e/E3412
 
-Error [E0107]: Nothing named `@conn` exists here
+Error [jet.UnknownName]: Nothing named `@conn` exists here
   --&gt; tests/ui/impure_net_stub.jet:7:28
     |
   7 |         print(&quot;connected: {@conn}&quot;)

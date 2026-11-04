@@ -1693,5 +1693,17 @@ fn sema_type_associated_nominal(graph: SemaRegistrationGraph, nominal: SemaRegis
             }
         }
     }
+    // An `impl Trait` block in the nominal's own body binds the same way.
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            trait_row :: sema_checked_trait_nominal_row(graph, nominal.symbol.module_name, block.trait_name) ?? next
+            if graph.modules[trait_row.module_index].nominals[trait_row.row].symbol.id.key != trait_symbol.id.key -> next
+            loop associated in block.assoc_type_impls {
+                if associated.name != associated_name -> next
+                if resolved_type != None -> return None
+                resolved_type = Val(sema_type_resolve_declared(graph, associated.ty, nominal.symbol.module_name))
+            }
+        }
+    }
     resolved_type
 }

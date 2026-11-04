@@ -1,6 +1,6 @@
 use {
-    jet_foundation.[MARKER_SOURCE_SITES, MarkerDecl, Span]
-    jet_parser.[jet_format_source, jfmt_check_parse_accepts]
+    jet_foundation.[DiagnosticStructured, MARKER_SOURCE_SITES, Marker, MarkerDecl, Span, TextEdit, expr_span]
+    jet_parser.[jet_format_source, jfmt_check_parse_accepts, parser_marker_placement_edits]
 }
 
 fn marker_test_decl(source: String) -> MarkerDecl {
@@ -121,7 +121,7 @@ fn run() {}
         } else { assert(param.ty != None) }
     }
     assert(!decl.params[0].variadic && decl.params[1].value != None && decl.params[2].variadic)
-    assert_eq(MARKER_SOURCE_SITES.len(), 18)
+    assert_eq(MARKER_SOURCE_SITES.len(), 19)
 }
 
 #Test("a_marker_struct_holds_a_group_or_a_template") {
@@ -158,9 +158,9 @@ fn run() {}
     assert_eq(diagnostics.len(), 2)
     loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E0381")
     rule :: diagnostics[0].edit ?? panic("the parameter form carries its rewrite")
-    assert_eq(rule.new_text, "struct Pre {\n    condition: String\n\n    impl Marker {\n        sites :: [.Function]\n        repeatable :: true\n    }\n}")
+    assert_eq(rule.new_text, "struct Pre {{\n    condition: String\n\n    impl Marker {{\n        sites :: [.Function]\n        repeatable :: true\n    }}\n}}")
     group :: diagnostics[1].edit ?? panic("the group form carries its rewrite")
-    assert_eq(group.new_text, "struct Fast {\n    impl Marker {\n        group :: #[Inline(.Always), Scalar]\n    }\n}")
+    assert_eq(group.new_text, "struct Fast {{\n    impl Marker {{\n        group :: #[Inline(.Always), Scalar]\n    }}\n}}")
 }
 
 // Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1078
@@ -301,4 +301,182 @@ fn run() {}
         assert_eq(declaration.type_markers.len(), 1)
         assert_eq(declaration.type_markers[0].name, "Numeric")
     }
+}
+
+#Test("trait_blocks_in_a_type_body_read_dotted_using_and_operator_heads") {
+    source :: `struct Meters {
+    v: Int
+
+    impl Literal.Int {
+        comptime fn from_literal(value: Int) -> Meters { Meters{v: value} }
+    }
+
+    impl far.Named using inner
+
+    impl Add(Int) #Commutative {
+        fn add(self, rhs: Int) -> Meters { Meters{v: self.v + rhs} }
+    }
+}
+`
+    program :: parser_test_program(source)
+    program.items[0] == .Struct(definition) ?? panic("struct")
+    assert_eq(definition.trait_impls.len(), 3)
+    literal :: definition.trait_impls[0]
+    assert_eq(literal.trait_name, "Literal.Int")
+    assert_eq(literal.trait_span, Span{start: parser_test_find(source, "Literal.Int"), end: parser_test_find(source, "Literal.Int") + 11})
+    assert_eq(literal.methods.len(), 1)
+    assert(literal.delegation_field == None)
+    named :: definition.trait_impls[1]
+    assert_eq(named.trait_name, "far.Named")
+    assert_eq(named.delegation_field, Val("inner"))
+    assert(named.methods.is_empty())
+    operator :: definition.trait_impls[2]
+    assert_eq(operator.trait_name, "Add")
+    assert(operator.operator_rhs != None)
+    assert(operator.operator_marker != None)
+    formatted :: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.text, source)
+}
+
+// Each marker as `name(args)`, its arguments as written in `source`.
+fn inbody_test_markers(source: String, markers: [Marker]) -> String {
+    rows := [String]{}
+    loop marker in markers {
+        args := [String]{}
+        loop arg in marker.args {
+            if arg == .Expr(value) {
+                span :: expr_span(value)
+                &args.push(source.slice(span.start..<span.end))
+            }
+        }
+        &rows.push("{if marker.negated -> "!" else -> ""}{marker.name}({args.join(", ")})")
+    }
+    rows.join(" ")
+}
+
+// `edits` are in source order and do not overlap, so they apply from the last.
+fn inbody_test_apply(source: String, edits: [TextEdit]) -> String {
+    text := source
+    loop index in 0..<edits.len() {
+        edit :: edits[edits.len() - 1 - index]
+        text = "{text.slice(0..<edit.span.start)}{edit.new_text}{text.slice(edit.span.end..<text.count_bytes())}"
+    }
+    text
+}
+
+#Test("marker_lines_inside_a_body_are_the_markers_above_it") {
+    above :: `#[Layout(c), Deprecated("x"), Codable, !Debug]
+struct Pixel {
+    r: Int
+}
+
+#[MustUse, Inline]
+fn area() -> Int { 1 }
+`
+    inside :: `struct Pixel {
+    r: Int
+    #Layout :: c
+    #Deprecated :: "x"
+    #Codable :: true
+    #Debug :: false
+}
+
+fn area() -> Int {
+    #MustUse :: true
+    1
+    #Inline :: true
+}
+`
+    written :: parser_test_program(above)
+    lines :: parser_test_program(inside)
+    written.items[0] == .Struct(written_struct) ?? panic("struct above")
+    lines.items[0] == .Struct(lines_struct) ?? panic("struct inside")
+    assert_eq(inbody_test_markers(above, written_struct.type_markers), "Layout(c) Deprecated(\"x\") Codable() !Debug()")
+    assert_eq(inbody_test_markers(inside, lines_struct.type_markers), inbody_test_markers(above, written_struct.type_markers))
+    loop marker in lines_struct.type_markers -> assert(marker.inside)
+    loop marker in written_struct.type_markers -> assert(!marker.inside)
+    written_area :: parser_test_function(written, "area")
+    lines_area :: parser_test_function(lines, "area")
+    assert_eq(inbody_test_markers(inside, lines_area.markers), "MustUse() Inline()")
+    assert_eq(inbody_test_markers(inside, lines_area.markers), inbody_test_markers(above, written_area.markers))
+    // The marker lines are not statements: the body keeps its one tail value.
+    assert_eq(lines_area.body.len(), written_area.body.len())
+    assert_eq(parser_test_stable(inside), inside)
+}
+
+#Test("moving_a_marker_set_above_and_back_inside_restores_the_body") {
+    inside :: `struct Pixel {
+    r: Int
+    #Layout :: c
+    #Codable :: true
+}
+
+fn area() -> Int {
+    1
+    #MustUse :: true
+}
+`
+    moved :: inbody_test_apply(inside, parser_marker_placement_edits(inside.bytes(), false))
+    assert_eq(moved, `#[Layout(c), Codable]
+struct Pixel {
+    r: Int
+}
+
+#MustUse
+fn area() -> Int {
+    1
+}
+`)
+    assert(parser_marker_placement_edits(moved.bytes(), false).is_empty())
+    assert_eq(inbody_test_apply(moved, parser_marker_placement_edits(moved.bytes(), true)), inside)
+    assert(parser_marker_placement_edits(inside.bytes(), true).is_empty())
+}
+
+#Test("markers_above_and_inside_are_e0942_with_a_move_either_way") {
+    source :: `#Codable
+struct Pixel {
+    r: Int
+    #Layout :: c
+}
+`
+    diagnostic :: parser_test_diagnostic(parser_test_errors(source), "E0942")
+    upward :: diagnostic.edit ?? panic("E0942 moves the set above")
+    assert_eq(inbody_test_apply(source, [TextEdit]{upward}), `#[Codable, Layout(c)]
+struct Pixel {
+    r: Int
+}
+`)
+    diagnostic.structured == .Val(.SuggestedEdits(alternatives)) ?? panic("E0942 offers the move into the body")
+    assert_eq(alternatives.len(), 1)
+    assert_eq(inbody_test_apply(source, alternatives), `struct Pixel {
+    r: Int
+    #Codable :: true
+    #Layout :: c
+}
+`)
+}
+
+#Test("a_marker_line_in_a_nested_block_or_shaping_a_body_is_e0355") {
+    nested :: parser_test_diagnostic(parser_test_errors(`fn run() {
+    if true {
+        #Inline :: true
+    }
+}
+`), "E0355")
+    assert(nested.what.contains("Block"))
+    shaping :: parser_test_diagnostic(parser_test_errors(`fn put() {
+    #FFI :: true
+}
+`), "E0355")
+    assert(shaping.what.contains("inside the body it shapes"))
+}
+
+#Test("a_marker_line_value_must_be_simple_or_parenthesized") {
+    diagnostic :: parser_test_diagnostic(parser_test_errors(`struct Pixel {
+    r: Int
+    #Deprecated :: since: "1"
+}
+`), "E0943")
+    assert(diagnostic.edit != None)
 }

@@ -55,8 +55,8 @@ use jet_foundation.[
         .Ok(denied) -> assert(denied == [String]?{None})
         .Err(error) -> panic("no policy: {error.message()}")
     }
-    assert(lint_selection_code_error("float_money", "`#allow(...)`", None) == None)
-    refusal :: lint_selection_code_error("L9999", "`#allow(...)`", None) ?? panic("a code-shaped selector is refused")
+    assert(lint_selection_code_error("float_money", "`policy.lints.deny`", None) == None)
+    refusal :: lint_selection_code_error("L9999", "`policy.lints.deny`", None) ?? panic("a code-shaped selector is refused")
     assert_eq(refusal.code, "E0927")
 }
 

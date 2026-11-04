@@ -37,7 +37,7 @@
 <p class="diag-copy fix" data-registry-field="fix">Rename the constant so its name names one thing</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0937</code>: <code>tests/ui/marker_impl_rejected_members.stderr</code>.</p>
-<pre class="diag">Error [E0937]: The `impl Marker` block gives `sites` twice
+<pre class="diag">Error [jet.AmbiguousTraitConstant]: The `impl Marker` block gives `sites` twice
   --&gt; tests/ui/marker_impl_rejected_members.jet:9:9
     |
   9 |         sites :: [.Method]
@@ -46,7 +46,7 @@
  Fix: Remove one `sites :: …`
 More: jet-lang.dev/e/E0937
 
-Error [E0936]: `colour` is not a setting of `Marker`
+Error [jet.UnknownTraitConstant]: `colour` is not a setting of `Marker`
   --&gt; tests/ui/marker_impl_rejected_members.jet:10:9
     |
  10 |         colour :: .Red
@@ -55,7 +55,7 @@ Error [E0936]: `colour` is not a setting of `Marker`
  Fix: Remove `colour`, or write one of the marker settings
 More: jet-lang.dev/e/E0936
 
-Error [E0105]: `fn expand` is defined twice in `impl Marker`
+Error [jet.DuplicateDefinition]: `fn expand` is defined twice in `impl Marker`
   --&gt; tests/ui/marker_impl_rejected_members.jet:15:12
     |
  15 |         fn expand(self, target: Target) {}
@@ -64,7 +64,7 @@ Error [E0105]: `fn expand` is defined twice in `impl Marker`
  Fix: Remove one of the definitions
 More: jet-lang.dev/e/E0105
 
-Error [E0907]: `render` is not a method of `Marker`
+Error [jet.TraitMethodMismatch]: `render` is not a method of `Marker`
   --&gt; tests/ui/marker_impl_rejected_members.jet:17:9
     |
  17 |         fn render(self) {}
@@ -73,7 +73,7 @@ Error [E0907]: `render` is not a method of `Marker`
  Fix: Write `fn expand(self, target: Target) { … }`
 More: jet-lang.dev/e/E0907
 
-Error [E0908]: `Traced` has a second `impl Marker` block
+Error [jet.DuplicateTraitImpl]: `Traced` has a second `impl Marker` block
   --&gt; tests/ui/marker_impl_rejected_members.jet:20:5
     |
  20 |     impl Marker {
@@ -82,7 +82,7 @@ Error [E0908]: `Traced` has a second `impl Marker` block
  Fix: Move these members into the first `impl Marker` block
 More: jet-lang.dev/e/E0908
 
-Error [E0999]: The marker group `Traced` has fields, settings or a template
+Error [jet.StackedRuleLines]: The marker group `Traced` has fields, settings or a template
   --&gt; tests/ui/marker_impl_rejected_members.jet:4:8
     |
   4 | struct Traced {

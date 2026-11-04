@@ -20,9 +20,10 @@ const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program",
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", "::", ":=", ":>", "<:", "^"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "||"];
+const JET_MARKER_INBODY_SEPARATOR = "::";
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
 
@@ -106,6 +107,7 @@ module.exports = grammar({
         $.module_def,
         $.decl_head,
         $.binding,
+        $.inbody_marker,
         $.label,
         $.call_expr,
         $.constructor,
@@ -273,6 +275,11 @@ module.exports = grammar({
           choice("::", ":="),
         ),
       ),
+
+    // `#X :: value` written inside a declaration's body: one of that
+    // declaration's markers, the same as `#X(value)` above it.
+    inbody_marker: ($) =>
+      prec(PREC.binding, seq(field("name", $.attribute), JET_MARKER_INBODY_SEPARATOR)),
 
     // `field: Type`, `key: value`, named arguments and manifest keys.
     label: ($) => prec(PREC.label, seq(field("name", $._label_name), ":")),

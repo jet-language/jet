@@ -35,8 +35,9 @@ graph gesture. The coverage labels mean:
 - [Item::UnitFamily] status=readonly unit-family facts, source edits.
 - [Item::Trait] status=readonly interface facts, source edits.
 - [Item::Tag] status=readonly marker facts, source edits.
-- [Item::EffectDecl] status=source effect declaration through Code lens and
-  source transactions; no dedicated graph projection.
+- [Item::EffectDecl] status=source effect declaration (an effect type's
+  `impl Effect` names, or a package `effect Root.Leaf` line) through Code lens
+  and source transactions; no dedicated graph projection.
 - [Item::Impl] status=readonly method and implementation facts, source edits.
 - [Item::Const] status=readonly symbol facts, source edits.
 - [Item::Test] status=readonly test scope, source edits.

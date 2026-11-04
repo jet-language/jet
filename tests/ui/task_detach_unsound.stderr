@@ -1,4 +1,4 @@
-Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned task
+Error [jet.ReadOnlyValueNotOwned]: `greet` was not moved here, so it cannot be captured by a spawned task
   --> tests/ui/task_detach_unsound.jet:5:15
     |
   5 |     t :: task greet
@@ -7,7 +7,7 @@ Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned
  Fix: make the parameter owned with the move marker `^`: `greet: ^fn()`
 More: jet-lang.dev/e/E0120
 
-Error [E1102]: this task returns `fn()`, which isn't sendable
+Error [jet.ValueNotSendable]: this task returns `fn()`, which isn't sendable
   --> tests/ui/task_detach_unsound.jet:5:15
     |
   5 |     t :: task greet
@@ -16,7 +16,7 @@ Error [E1102]: this task returns `fn()`, which isn't sendable
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
 
-Error [E1103]: can't detach task `t` — it captured a value that can't cross a thread boundary
+Error [jet.DetachUnsendableTask]: can't detach task `t` — it captured a value that can't cross a thread boundary
   --> tests/ui/task_detach_unsound.jet:6:7
     |
   6 |     t.detach()

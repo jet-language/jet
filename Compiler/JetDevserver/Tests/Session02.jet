@@ -52,7 +52,7 @@ use {
     session.remember_last_good_view("debugger", "", "good-revision", "debug-good")
     session.remember_last_good_view("runtime", "", "good-revision", "runtime-good")
     session.observe_source("broken-revision")
-    session.mark_error("E0102", "Error [E0102]: missing name")
+    session.mark_error("E0102", "Error [jet.UnknownFunction]: missing name")
     json :: session.json()
     loop expected in [
         "\"source_revision\":\"broken-revision\"",
@@ -63,7 +63,7 @@ use {
         "\"diagnostic_revision\":\"broken-revision\"",
         "\"state\":\"error\"",
         "\"diagnostic_code\":\"E0102\"",
-        "Error [E0102]: missing name"
+        "Error [jet.UnknownFunction]: missing name"
     ] -> assert(json.contains(expected), "session lost {expected}: {json}")
 }
 // Rust: crates/jet-devserver/src/Session.rs:2846

@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0913 — Jet diagnostic</title>
-<meta name="description" content="trait impl missing associated type (D-LIB2)">
+<meta name="description" content="Trait impl missing associated type">
 <meta property="og:title" content="E0913 — Jet diagnostic">
-<meta property="og:description" content="trait impl missing associated type (D-LIB2)">
+<meta property="og:description" content="Trait impl missing associated type">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,19 +25,19 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0913</h1>
-<p>trait impl missing associated type (D-LIB2)</p>
+<p>Trait impl missing associated type</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">trait impl missing associated type (D-LIB2)</p>
+<p class="diag-copy what" data-registry-field="what">Trait impl missing associated type</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Add the missing associated type to the trait implementation.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0913</code>: <code>tests/ui/missing_assoc_type.stderr</code>.</p>
-<pre class="diag">Error [E0106]: The name `Tally` is built in and can&#39;t be redefined
+<pre class="diag">Error [jet.BuiltinRedefined]: The name `Tally` is built in and can&#39;t be redefined
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -46,7 +46,7 @@
  Fix: Choose a different name for this struct
 More: jet-lang.dev/e/E0106
 
-Error [E0301]: `impl Tally.Container` needs a user-defined type
+Error [jet.ImplOnBuiltinType]: `impl Tally.Container` needs a user-defined type
   --&gt; tests/ui/missing_assoc_type.jet:10:6
     |
  10 | impl Tally.Container {
@@ -55,7 +55,7 @@ Error [E0301]: `impl Tally.Container` needs a user-defined type
  Fix: Implement `Container` on a struct or distinct type of your own, or wrap `Tally` in one
 More: jet-lang.dev/e/E0301
 
-Error [E0913]: `impl …: Container` doesn&#39;t set `type Item`
+Error [jet.MissingAssociatedType]: `impl …: Container` doesn&#39;t set `type Item`
   --&gt; tests/ui/missing_assoc_type.jet:10:6
     |
  10 | impl Tally.Container {
@@ -64,7 +64,7 @@ Error [E0913]: `impl …: Container` doesn&#39;t set `type Item`
  Fix: Add `type Item = …` inside the impl block
 More: jet-lang.dev/e/E0913
 
-Error [E0119]: There&#39;s no type called `Tally`
+Error [jet.UnknownType]: There&#39;s no type called `Tally`
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -73,7 +73,7 @@ Error [E0119]: There&#39;s no type called `Tally`
  Fix: Check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -82,7 +82,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -91,7 +91,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -100,7 +100,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -109,7 +109,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -118,7 +118,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -127,7 +127,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:11:32
     |
  11 |     fn first(self) Int -&gt; self.vals[0]
@@ -136,7 +136,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:11:32
     |
  11 |     fn first(self) Int -&gt; self.vals[0]
@@ -145,7 +145,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [jet.UnknownField]: `.vals` only works on struct and tuple values
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
@@ -154,7 +154,7 @@ Error [E0302]: `.vals` only works on struct and tuple values
  Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0119]: There&#39;s no type called `Tally`
+Error [jet.UnknownType]: There&#39;s no type called `Tally`
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {

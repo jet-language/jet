@@ -125,7 +125,7 @@ try {
   }))()`);
   const status = await fetch(`http://127.0.0.1:${port}/__jet_dev_status`, { cache: "no-store" }).then((response) => response.json());
   assert(overlay.body === status.diagnostic, "browser overlay changed the registered diagnostic");
-  assert(overlay.body.includes("Error [E0102]"), `diagnostic code missing: ${overlay.body}`);
+  assert(overlay.body.includes("Error [jet.UnknownFunction]"), `diagnostic code missing: ${overlay.body}`);
   assert(overlay.body.includes("Why:"), `diagnostic why missing: ${overlay.body}`);
   assert(overlay.body.includes("Fix:"), `diagnostic fix missing: ${overlay.body}`);
   assert(overlay.title.includes("Build failed"), `diagnostic overlay title missing: ${overlay.title}`);

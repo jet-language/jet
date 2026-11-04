@@ -2494,19 +2494,29 @@ fn jet_driver_canonical_effect_segments(path: String, source: String) -> [SemaSo
     }]
 }
 
+// The canonical effect module holds only the effect names its types declare
+// (their `.EffectDecl` companions): registration sees the vocabulary, and no
+// Prelude effect type enters a program's scope as a type.
 fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleInput? {
     if source.len() == 0 -> return None
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> return None
-    declaration_count := 0
-    unexpected_item := false
+    declarations := [Item]{}
     loop item in parsed.program.items {
         if item == {
-            .EffectDecl(_) -> declaration_count += 1
-            else -> unexpected_item = true
+            .EffectDecl(_) -> &declarations.push(item)
+            .Struct(definition) -> {
+                if definition.effect_impl == None -> return None
+            }
+            .Enum(definition) -> {
+                if definition.effect_impl == None -> return None
+            }
+            else -> return None
         }
     }
-    if unexpected_item || declaration_count == 0 -> return None
+    if declarations.len() == 0 -> return None
+    program := parsed.program
+    program.items = declarations
     source_file := "jet:canonical-prelude/Prelude/Effects.jet"
     package_identity := JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
     module_path := JET_CANONICAL_EFFECT_MODULE_PATH
@@ -2520,7 +2530,7 @@ fn jet_driver_canonical_effect_module(source: String) -> SemaRegistrationModuleI
         source_file: source_file,
         source_segments: jet_driver_canonical_effect_segments(source_file, source),
         source_origin: SemaSourceOrigin.CompilerGenerated,
-        program: ^parsed.program,
+        program: ^program,
         foreign_handles: [SemaRegistrationForeignHandleFacts]{},
     })
 }

@@ -325,6 +325,13 @@ fn parser_parse_body_lines(state: &JetParserState, value_tail: Bool) -> ParsedBl
         // An abort still pending here was raised by an enclosing construct;
         // its recovery rescans from the error, so reading on is wasted work.
         if parser_aborting(&state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(&state).span), statements: statements, tail: None}
+        // A `#X :: value` line directly in a function's body is one of the
+        // function's markers, not a statement.
+        if state.block_depth == state.inbody_marker_depth && parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &state.inbody_markers.push(line)
+            parser_skip_semicolons(&state)
+            next
+        }
         before := state.position
         kind :: parser_current_kind(&state)
         statement :: if {
@@ -364,7 +371,7 @@ fn parser_parse_tail_loop(state: &JetParserState) -> Stmt {
     saved_blocks :: state.block_spans.len()
     saved_else_arms :: state.else_arms.len()
     parsed :: parser_parse_expression(&state, 1, 0)
-    at_tail :: parser_current_kind(&state) == TOKEN_RBRACE || (parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
+    at_tail :: parser_at_body_close(&state)
     if at_tail && parser_expression_is_collecting_loop(parsed.expr) -> return Stmt.Expr{expr: parsed.expr}
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     parser_parse_statement(&state)
@@ -380,7 +387,7 @@ fn parser_parse_tail_if(state: &JetParserState) -> Stmt {
     saved_blocks :: state.block_spans.len()
     saved_else_arms :: state.else_arms.len()
     parsed :: parser_parse_expression(&state, 1, 0)
-    at_tail :: parser_current_kind(&state) == TOKEN_RBRACE || (parser_current_kind(&state) == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
+    at_tail :: parser_at_body_close(&state)
     if at_tail && !parser_error_since(state, saved_diagnostics) -> return Stmt.Expr{expr: parsed.expr}
     value_errors :: state.diagnostics.len() - saved_diagnostics
     parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
@@ -1837,8 +1844,16 @@ fn parser_marked_line_does_work(state: &JetParserState, expr: Expr, start_kind: 
 // The line ends the innermost callable body (before its `}`).
 fn parser_at_callable_tail(state: &JetParserState) -> Bool Never! {
     if state.callable_tail_depth != state.block_depth -> return false
-    kind :: parser_current_kind(&state)
-    kind == TOKEN_RBRACE || (kind == TOKEN_SEMI && parser_kind_at(&state, 1) == TOKEN_RBRACE)
+    parser_at_body_close(&state)
+}
+
+// The cursor ends its block: at the `}`, or at one line end before it. The
+// `#X :: value` lines a function body ends with are not lines of it, so the
+// value line before them is still the body's last.
+fn parser_at_body_close(state: &JetParserState) -> Bool Never! {
+    offset := if parser_current_kind(&state) == TOKEN_SEMI -> 1 else -> 0
+    if state.inbody_marker_depth == state.block_depth -> offset = parser_skip_inbody_marker_lines(&state, offset)
+    parser_kind_at(&state, offset) == TOKEN_RBRACE
 }
 
 // Rust `is_result_handler_expr`: `value ? ok -> … ! err -> …` is the one
@@ -1926,6 +1941,16 @@ fn parser_finish_statement(state: &JetParserState) {
 }
 
 fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
+    // A marker line belongs directly in a declaration's body; in any other
+    // block it would mark nothing.
+    if parser_inbody_marker_ahead(&state) {
+        start :: parser_current(&state).span
+        line :: parser_parse_inbody_marker(&state)
+        if line == .Val(marker) {
+            parser_add_error_code(&state, "E0355", marker.span, "`#{marker.name} :: …` cannot attach at the Block site", "a `#X :: value` line is a marker of the declaration whose body holds it directly; a nested block or a lambda body is not a declaration", "move the line directly into the function's body, or write `#{marker.name}` above the declaration")
+        }
+        return Stmt.Expr{expr: Expr.Unit{span: start, id: parser_node_id(&state)}}
+    }
     hash :: parser_bump(&state)
     negated := false
     if parser_current_kind(&state) == TOKEN_BANG {
@@ -1993,7 +2018,9 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     // S82: an allowance attaches to one ordinary statement,
     // not an invented block node. Its target stays for sema and gate audit.
-    if word == "allow" {
+    // The retired `#allow` spelling parses the same way so sema can refuse it
+    // with the `jet fix` edit to `#Allow`.
+    if word == "Allow" || word == "allow" {
         parser_skip_semicolons(&state)
         target_start :: parser_current(&state).span.start
         statement :: parser_parse_statement(&state)

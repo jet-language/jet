@@ -633,7 +633,7 @@ use {
 // Rust: tests/semindex.rs:1476
 #Test("semindex_dossier_bypass_facts") {
     // Every spelled bypass surfaces in the program-wide dossier.
-    src :: "\nstruct Invoice {{\n    #allow(float_money)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
+    src :: "\nstruct Invoice {{\n    #Allow(jet.FloatMoney)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
     path :: temp_fixture("dossier_bypass_facts.jet", src)
     idx :: open(path).expect("bypass-fact fixture indexes")
     dossier :: idx.dossier("run")
@@ -644,7 +644,7 @@ use {
     assert(kinds.contains("explicit_drop"), "expected an explicit_drop bypass fact, got: {kinds}")
     allow :: dossier.bypass_facts.iter().find(b -> b.kind == "lint_allow").expect("lint_allow fact present")
     assert_eq(allow.site, "price")
-    assert_eq(allow.detail, "float_money")
+    assert_eq(allow.detail, "jet.FloatMoney")
     dropped :: dossier.bypass_facts.iter().find(b -> b.kind == "explicit_drop").expect("explicit_drop fact present")
     assert_eq(dropped.detail, "telemetry only")
     json :: dossier.to_json()
@@ -652,7 +652,7 @@ use {
     assert(json.contains("\"lint_allow\""))
     text :: dossier.render_text()
     assert(text.contains("bypass facts"))
-    assert(text.contains("float_money"))
+    assert(text.contains("jet.FloatMoney"))
 }
 
 // Rust: tests/semindex.rs:1555
@@ -705,6 +705,6 @@ use {
         assert(stderr.contains(handler_text), "jet inspect {verb}: {stderr}")
         bare :: Command.new(bin).args([verb, "sentinel"]).output().unwrap()
         assert_eq(bare.status.code(), 2, "bare jet {verb}")
-        assert_eq(String.from_utf8(^bare.stderr).unwrap(), "Error [E2101]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n")
+        assert_eq(String.from_utf8(^bare.stderr).unwrap(), "Error [jet.UnknownCommand]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n")
     }
 }
