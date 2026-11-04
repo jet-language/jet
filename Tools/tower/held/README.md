@@ -21,12 +21,15 @@ this directory only after its landing commit. That commit deletes the item's
 files (and the directory with its last item) and adds a row to "Landed"
 below. The card then cites the landing commit, not this path.
 
-| Card | Directory | Items |
-|---|---|---|
-| #5910 | `5910/` | SP05b and SP05c: phase-arena work, with its proof logs (recovered 2026-11-04) |
-| #6442 | `6442/` | BugSweep 15n, 19, 20, 21 and 23: Jetpack and driver fixes |
-| #5971 | `5971/` | Main-13: checked fixed-width narrowing (parked: runtime recursion) |
-| #6497 | `6497/` | FFIDesign-1: the generated #CLI parser (pulled: Exec effect on help/version) |
+Owner and status are as of 2026-11-04 (dev f32195ac8c). The owner is the
+agent lane integrating the item. Update the row when either changes.
+
+| Card | Directory | Items | Owner | Status |
+|---|---|---|---|---|
+| #5910 | `5910/` | SP05b and SP05c: phase-arena work, with its proof logs (recovered 2026-11-04) | SelfMem | Ported onto dev a96f0867f1 as one 13-file patch: every SP05c hunk is ported, already on dev, or dropped with a reason. It reaches a fixed point and has its register + sema.check measurement. Not landed. That patch does not yet delete `5910/`; its landing must, with a Landed row |
+| #6442 | `6442/` | BugSweep 15n, 19, 20, 21 and 23: Jetpack and driver fixes | Builder3 | All five are combined in Batch7, with the Jetpack compiler slice and the bootstrap check fix (#3590 c59), on a2f1ef4d3c. It reaches a fixed point; its case runs are being finished. Not landed. Batch7 deletes `6442/` |
+| #5971 | `5971/` | Main-13: checked fixed-width narrowing (parked: runtime recursion) | Builder3 | Reworked: the runtime's 33 narrowing sites now use `wrapping(T{x})`, which removes the recursion. It reaches a fixed point on a2f1ef4d3c, and its suites are running. Not landed. The 10 Core sites follow in #5971 c34 |
+| #6497 | `6497/` | FFIDesign-1: the generated #CLI parser (pulled: Exec effect on help/version) | Builder3, after #5971 c34 | Queued; no rework is on dev. Help/version must not need `Exec`; then rebase the three hand-written files onto dev and regenerate the four tables. A 3-way apply conflicts on 348c3649f1 |
 
 ## Landed
 
