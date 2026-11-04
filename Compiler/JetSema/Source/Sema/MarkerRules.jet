@@ -1721,14 +1721,67 @@ fn sema_marker_rules_user_site_error(registry: SemaScopeMembersMarkerRegistry, a
     Val(sema_marker_rules_declared_site_error(application.marker, registry.marker_rules[user_index]))
 }
 
-// The site check of every source-declared marker applied in `program`.
+// The argument and site checks of every source-declared marker applied in
+// `program`.
 fn sema_marker_rules_validate_user_sites(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
     loop application in sema_marker_rules_applications(program) {
-        site :: application.site ?? next
         if sema_marker_rules_builtin_index(registry, application.marker) != None -> next
+        if sema_marker_rules_user_argument_error(registry, application.marker) == .Val(error) -> &diagnostics.push(error)
+        site :: application.site ?? next
         diagnostic :: sema_marker_rules_user_site_error(registry, application, site) ?? next
         &diagnostics.push(diagnostic)
     }
+}
+
+// A source-declared rule's arguments bind its declared signature (E0930). A
+// literal argument fails only when its own type contradicts the parameter's
+// declared type; names and calls stay open for ordinary inference.
+fn sema_marker_rules_user_argument_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic? {
+    user_index :: sema_marker_rules_user_rule_index(registry, marker) ?? return None
+    rule :: registry.marker_rules[user_index]
+    if rule.group -> return None
+    declared :: sema_marker_rules_declared_signature(rule)
+    bindings :: sema_marker_rules_marker_signature_bindings(marker, declared.signature) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+    loop binding in bindings {
+        argument :: sema_marker_rules_marker_expression(marker, binding.source_index) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+        expected := declared.variadic_expected_type.copy()
+        if binding.parameter_index == .Val(index) {
+            expected = if index < declared.expected_types.len() -> declared.expected_types[index] else -> None
+        }
+        actual :: sema_marker_rules_literal_kind(argument) ?? next
+        wanted :: sema_marker_rules_declared_kind(expected) ?? next
+        if actual != wanted -> return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+    }
+    None
+}
+
+fn sema_marker_rules_literal_kind(argument: Expr) -> String? Never! {
+    if argument == {
+        .Str(_, _, _) -> return Val("String")
+        .Int(_, _, _, _, _) -> return Val("Int")
+        .Float(_, _, _, _, _) -> return Val("Float")
+        .Bool(_, _, _) -> return Val("Bool")
+        .Char(_, _, _) -> return Val("Char")
+        .ListLit(_, _, _) -> return Val("List")
+        .MapLit(_, _, _) -> return Val("Map")
+        else -> {}
+    }
+    None
+}
+
+fn sema_marker_rules_declared_kind(ty: Type?) -> String? Never! {
+    declared :: ty ?? return None
+    if declared == {
+        .String -> return Val("String")
+        .Int -> return Val("Int")
+        .Float -> return Val("Float")
+        .Bool -> return Val("Bool")
+        .Char -> return Val("Char")
+        .List(_) -> return Val("List")
+        .Map(_, _, _) -> return Val("Map")
+        else -> {}
+    }
+    None
 }
 
 fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
