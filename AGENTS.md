@@ -226,6 +226,17 @@ task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
 `git restore .`, `git reset --hard`, or any equivalent broad operation. Never
 hand-edit `Tools/tower/.tower/`.
 
+Never delete work. Work means any file an agent or the owner made: patches,
+notes, held rows, briefs, ballots, research, scripts, logs and evidence,
+worktrees, and lane or scratch directories. Never `rm -rf`, `git clean`,
+remove a worktree or overwrite such a file. To retire something or free space,
+first save any commits and uncommitted changes it holds. Then move it under
+`/mnt/jetscratch/held/<date>/<original path>`, and add one line to
+`/mnt/jetscratch/held/LOG.tsv` with the date, path, size, owner, reason and
+the card or decision that allows it. Before you replace a file, copy it to
+`<name>.prev-<date>`. Only the owner empties `held/`. The one exemption is a
+temporary file a step created and removes itself.
+
 Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
 board and report any stale or duplicate server. Never touch the owner's
