@@ -14,6 +14,9 @@ use {
         DiagnosticCryptoMisuseReason,
         DiagnosticStructured,
         Expr,
+        Func,
+        Lambda,
+        Stmt,
         FunctionDefaultRef,
         CopyFact,
         Span,
@@ -23,6 +26,7 @@ use {
         TLetTy,
         Type,
         ast_empty_call_arg_flags,
+        ast_visit_expr,
         diagnostic_registry_row,
         expr_span,
         symbol_id,
@@ -299,6 +303,111 @@ fn sema_call_convention_diagnostic(callee: String, param: SemaCallParam, arg: Ca
     }
 }
 
+// Whether a callback argument at a C boundary is outside the C callback
+// subset, which accepts only function values. A name that is not a
+// registered function, and a module-qualified name, are left to the
+// ordinary argument check.
+fn sema_call_c_callback_unsafe(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    if argument == {
+        .Ident(name, _, _) -> {
+            function :: sema_http_route_find_function(environment, program, scopes, name) ?? return false
+            return !sema_call_foreign_thread_safe_func(function.declaration)
+        }
+        .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(lambda, scopes)
+        .Field(base, _, _, _) -> {
+            if base == .Ident(name, _, _) {
+                index :: sema_scope_resolve_index(scopes, name) ?? return false
+                kind :: scopes.bindings[index].symbol.kind
+                return kind != SymbolKind.Module && kind != SymbolKind.Import
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
+// A C callback lambda is capture-free: no name it reads, other than its own
+// parameters and bindings, may be a local of the enclosing function.
+fn sema_call_lambda_captures_local(lambda: Lambda, scopes: SemaScopeTable) -> Bool {
+    inner := (loop parameter in lambda.params -> parameter.name)
+    names := [String]{}
+    if lambda.body == {
+        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_call_note_ident(&names, expression))
+        .Block(body) -> {
+            loop statement in body {
+                if statement == {
+                    .Val(binding) -> {
+                        &inner.push(binding.name)
+                        ast_visit_expr(binding.init, (expression: Expr) -> sema_call_note_ident(&names, expression))
+                    }
+                    .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_call_note_ident(&names, expression))
+                    .Return(value, _) -> {
+                        if value == .Val(returned) -> ast_visit_expr(returned, (expression: Expr) -> sema_call_note_ident(&names, expression))
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    loop name in names {
+        if inner.contains(name) -> next
+        index :: sema_scope_resolve_index(scopes, name) ?? next
+        kind :: scopes.bindings[index].symbol.kind
+        if kind == SymbolKind.Local || kind == SymbolKind.Parameter -> return true
+    }
+    false
+}
+
+fn sema_call_note_ident(names: &[String], expression: Expr) {
+    if expression == .Ident(name, _, _) -> &names.push(name)
+}
+
+fn sema_call_foreign_thread_safe_func(func: Func) -> Bool Never! {
+    if !func.is_pure || func.type_params.len() > 0 || func.pre.len() > 0 || func.post.len() > 0 -> return false
+    loop statement in func.body {
+        if !sema_call_foreign_thread_safe_stmt(statement) -> return false
+    }
+    true
+}
+
+fn sema_call_foreign_thread_safe_lambda(lambda: Lambda) -> Bool Never! {
+    if lambda.take_names.len() > 0 || lambda.meta.mut_captures.len() > 0 || lambda.meta.cloned_captures.len() > 0 -> return false
+    if lambda.body == {
+        .Expr(value) -> return sema_call_foreign_thread_safe_expr(value)
+        .Block(body) -> {
+            loop statement in body {
+                if !sema_call_foreign_thread_safe_stmt(statement) -> return false
+            }
+            return true
+        }
+    }
+}
+
+fn sema_call_foreign_thread_safe_stmt(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Return(value, _) -> return if value == .Val(returned) -> sema_call_foreign_thread_safe_expr(returned) else -> true
+        .Expr(value) -> return sema_call_foreign_thread_safe_expr(value)
+        .Val(binding) -> return sema_call_foreign_thread_safe_expr(binding.init)
+        else -> return false
+    }
+}
+
+fn sema_call_foreign_thread_safe_expr(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Ident(_, _, _) -> return true
+        .Unary(_, operand, _, _) -> return sema_call_foreign_thread_safe_expr(operand)
+        .Copy(value, _, _) -> return sema_call_foreign_thread_safe_expr(value)
+        .Binary(_, left, right, _, _) -> return sema_call_foreign_thread_safe_expr(left) && sema_call_foreign_thread_safe_expr(right)
+        .CompareChain(operands, _, _, _, _) -> {
+            loop operand in operands {
+                if !sema_call_foreign_thread_safe_expr(operand) -> return false
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
 fn sema_call_lambda_escape_policy(parameter: SemaCallParam, abi: SemaRegistrationCallableABI?) -> Bool? {
     if parameter.convention == AccessConvention.Move -> return Val(true)
     callable_abi :: abi ?? return None
@@ -368,6 +477,14 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         unit_parameter :: sema_expr_unit_fact(required, environment, program) != None
         argument_expected := Type?{None}
         if !self_typed && !borrowed_trait && !unit_parameter -> argument_expected = Val(required)
+        // A C callback is a pure, monomorphic function or a capture-free
+        // lambda whose body is safe on a foreign thread; anything else is
+        // E3203, reported before the argument's own type check.
+        if !default_in_owner && abi == .Val(callable_abi) {
+            if sema_registration_callback_boundary_param(callable_abi, required_declared) && sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) {
+                &diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+            }
+        }
         diagnostic_start :: diagnostics.len()
         checked_argument :: if {
             default_in_owner -> sema_call_check_owner_default(^owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, &tail_store, &context, span, &binder_keys, &diagnostics)
