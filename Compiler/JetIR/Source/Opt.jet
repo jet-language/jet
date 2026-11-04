@@ -5,13 +5,17 @@
 // frame storage their callers pass (`retslot`,
 // OptReturnSlot.jet), hoists calls making a list's buffer its own out of
 // Loops and, for a `&` parameter only direct calls reach, into the callers
-// (`unique`, OptUnique.jet), puts each call of a
-// recursive function that starts by testing its parameters and returning
-// behind that test (`entry`, OptEntry.jet), inlines small direct
-// callees bottom-up over the call graph (drop glue too, `glue`), simplifies
-// every function, turns the small boxes that never leave their function
-// into frame storage (`localbox`, OptLocalBox.jet; simplifying again when
-// one moved), replaces frame aggregates by their fields (`scalar`),
+// (`unique`, OptUnique.jet), turns a recursive function that ends by
+// combining its own call with a value through an associative operation,
+// and steps a parameter toward a test that ends it, into a loop carrying an
+// accumulator (`accumulate`, OptAccumulate.jet), puts
+// each call of a recursive function that starts by testing its parameters
+// and returning behind that test (`entry`, OptEntry.jet), inlines small
+// direct callees bottom-up over the call graph (drop glue too, `glue`),
+// simplifies every function, turns the small boxes that never leave their
+// function into frame storage (`localbox`, OptLocalBox.jet; simplifying
+// again when one moved), replaces frame aggregates by their fields
+// (`scalar`),
 // simplifies again, copies small counted loops behind a test of their Int
 // bound and other small Int loops behind IntBig guards, in the functions
 // that are not cold (`version`, OptVersion.jet; ir_opt_mark_cold), runs each
@@ -50,9 +54,9 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
-// a difference to one pass: "retslot", "unique", "entry", "once", "localbox",
-// "scalar", "promote", "version", "range", "ssa", "stops", "fold", "glue",
-// "split", "reduce", "sink"), whether
+// a difference to one pass: "retslot", "unique", "accumulate", "entry",
+// "once", "localbox", "scalar", "promote", "version", "range", "ssa",
+// "stops", "fold", "glue", "split", "reduce", "sink"), whether
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
@@ -239,7 +243,10 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     calls := OptCalls{start: [Int]{}, to: [Int]{}}
     report.direct_calls += ir_opt_prepare(&functions, weights, ^glue, threads, &calls)
     order :: ir_opt_bottom_up(calls)
-    // The call graph stays: a guarded call is still the same call.
+    // Before `entry`, whose guard then stays in front of the loop. The call
+    // graph stays: a function this rewrites stays recursive, and a guarded
+    // call is still the same call.
+    if ir_opt_enabled(options, "accumulate") -> ir_opt_accumulate(&m, &functions, order.recursive, keys)
     if options.inline == .Auto && ir_opt_enabled(options, "entry") -> ir_opt_entry(m, &functions, order.recursive, keys)
     sites :: ir_opt_call_sites(calls)
     if level >= 1 -> ir_opt_mark_cold(&functions, calls)
