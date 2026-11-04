@@ -84,10 +84,10 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
         if sema_http_route_find_struct(environment, program, value_ty, environment.module_identity) == .Val(definition) {
             if program.registration_graph == .Val(graph) {
             nominal_row :: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? panic("mount has no nominal row")
-            method_environment :: sema_http_route_environment_for_module(environment, program, graph.modules[nominal_row.module_index].module_identity)
+            method_module :: graph.modules[nominal_row.module_index].module_identity
             loop method in definition.methods {
                 loop marker in method.markers {
-                    verb :: sema_http_route_marker_verb(marker, graph, method_environment.module_identity) ?? next
+                    verb :: sema_http_route_marker_verb(marker, graph, method_module) ?? next
                     if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
                         &diagnostics.push(sema_error("E2805", marker.span, "HTTP route method `{method.name}` needs read-only self and a concrete signature", "mounted handlers retain shared state and are called on request workers", "write `fn {method.name}(self, ...)` without method type parameters; use Shared<T> for mutable shared state"))
                         next
@@ -97,7 +97,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                         params := [LambdaParam]{}
                         call_args := [CallArg]{}
                         loop index in 1..<method.params.len() {
-                            parameter_ty :: sema_type_resolve_declared(graph, method.params[index].ty, method_environment.module_identity)
+                            parameter_ty :: sema_type_resolve_declared(graph, method.params[index].ty, method_module)
                             &params.push(LambdaParam{name: method.params[index].name, name_span: method.params[index].name_span, ty: Val(parameter_ty), ty_span: None})
                             argument := sema_http_mount_arg(Expr.Ident{name: method.params[index].name, span: method.params[index].name_span, id: AST_NODE_GENERATED}, method.params[index].name_span)
                             argument.convention = method.params[index].convention

@@ -24,10 +24,15 @@ fn sema_serde_named_leaf(name: String) -> String Never! {
 }
 
 fn sema_serde_type_definition(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> TTypeDef? {
+    sema_serde_type_definition_in(environment, program, environment.module_identity, name)
+}
+
+// The checked declaration `name` names as module `module_identity` reads it.
+fn sema_serde_type_definition_in(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> TTypeDef? {
     if program.registration_graph == .Val(graph) {
         // A resolved type carries its canonical identity (`module::Name`),
         // which the graph lookup resolves in its declaring module.
-        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
+        resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
         row :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
         return Val(program.checked_types[row])
     }
@@ -135,21 +140,21 @@ fn sema_serde_definition_reaches_parameter(definition: TTypeDef, param: String) 
     false
 }
 
-fn sema_serde_apply_head(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String, args: [Type], direction: SemaSerdeDirection) -> Bool Never! {
-    definition :: sema_serde_type_definition(environment, program, name) ?? return false
+fn sema_serde_apply_head(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String, args: [Type], direction: SemaSerdeDirection) -> Bool Never! {
+    definition :: sema_serde_type_definition_in(environment, program, module_identity, name) ?? return false
     if !sema_serde_implementation(environment, program, definition, direction) -> return false
     if definition.generic_params.len() == 0 -> return args.len() == 0
     if args.len() != definition.generic_params.len() -> return false
     loop (index, parameter) in definition.generic_params {
-        if sema_serde_definition_reaches_parameter(definition, parameter.name) && !sema_serde_type_is_admissible(environment, program, args[index], direction) -> return false
+        if sema_serde_definition_reaches_parameter(definition, parameter.name) && !sema_serde_type_is_admissible_in(environment, program, module_identity, args[index], direction) -> return false
     }
     true
 }
 
-fn sema_serde_core_data_name(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String, direction: SemaSerdeDirection) -> Bool Never! {
+fn sema_serde_core_data_name(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String, direction: SemaSerdeDirection) -> Bool Never! {
     if name != "Dyn" && name != "JSON" && name != "TOML" && name != "YAML" && name != "CSV" -> return false
     if direction == SemaSerdeDirection.Decode && name != "Dyn" -> return false
-    definition :: sema_serde_type_definition(environment, program, name) ?? return true
+    definition :: sema_serde_type_definition_in(environment, program, module_identity, name) ?? return true
     if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, definition.module_identity) ?? return false
         return graph.modules[module_index].module_name == "core.data" || graph.modules[module_index].module_name == "core.encoding"
@@ -158,20 +163,26 @@ fn sema_serde_core_data_name(environment: SemaScopeEnvironment, program: SemaPro
 }
 
 fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
+    sema_serde_type_is_admissible_in(environment, program, environment.module_identity, ty, direction)
+}
+
+// Whether `ty`, as module `module_identity` names it, has the `direction`
+// codec; generic parameters are `environment`'s.
+fn sema_serde_type_is_admissible_in(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, ty: Type, direction: SemaSerdeDirection) -> Bool Never! {
     resolved := ty
     if program.registration_graph == .Val(graph) {
-        resolved = sema_type_resolve_declared_with_generics(graph, ty, environment.module_identity, environment.generic_params)
+        resolved = sema_type_resolve_declared_with_generics(graph, ty, module_identity, environment.generic_params)
         // Demand: a data codec call requires the codecs of the
         // types it encodes or decodes.
         sema_codec_demand_type(graph, sema_serde_codec_name(direction), resolved)
     }
     return if resolved == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
-        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_type_is_admissible(environment, program, inner, direction)
-        .Map(key, _, value) -> key == Type.String && sema_serde_type_is_admissible(environment, program, value, direction)
+        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_serde_type_is_admissible_in(environment, program, module_identity, inner, direction)
+        .Map(key, _, value) -> key == Type.String && sema_serde_type_is_admissible_in(environment, program, module_identity, value, direction)
         .Union(members) -> {
             loop member in members {
-                if !sema_serde_type_is_admissible(environment, program, member, direction) -> return false
+                if !sema_serde_type_is_admissible_in(environment, program, module_identity, member, direction) -> return false
             }
             true
         }
@@ -181,13 +192,13 @@ fn sema_serde_type_is_admissible(environment: SemaScopeEnvironment, program: Sem
             // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the
             // `Dyn.DateTime` payload, a built-in codec with no source impl.
             if sema_serde_named_leaf(name) == "ZonedDateTime" && (name == "ZonedDateTime" || core_identity_in_module(name, "core.time")) -> return true
-            if sema_serde_core_data_name(environment, program, name, direction) -> return true
+            if sema_serde_core_data_name(environment, program, module_identity, name, direction) -> return true
             if direction == SemaSerdeDirection.Decode && name == "Secret" -> return true
             if sema_serde_generic_bound(environment, program, name, direction) -> return true
-            definition :: sema_serde_type_definition(environment, program, name) ?? return false
+            definition :: sema_serde_type_definition_in(environment, program, module_identity, name) ?? return false
             sema_serde_implementation(environment, program, definition, direction)
         }
-        .Apply(name, args) -> sema_serde_apply_head(environment, program, name, args, direction)
+        .Apply(name, args) -> sema_serde_apply_head(environment, program, module_identity, name, args, direction)
         else -> false
     }
 }

@@ -773,6 +773,22 @@ struct SemaScopeTable {
     // checked again at each call site, whose spans name another place, so
     // its names resolve without the declared-before-use position rule.
     position_free: Bool{false}
+    // The registration graph's counters (SemaLookupCounters) while it
+    // counts: each resolution adds one lookup and the binding rows it
+    // examined. None for an uncounted table.
+    lookup_counters: SemaScopeLookupCounters?{None}
+}
+
+// A scope table's handle on the graph's counters. It shows as its name:
+// the counts are not part of the table's facts.
+struct SemaScopeLookupCounters {
+    counters: Shared<SemaLookupCounters>
+}
+
+impl SemaScopeLookupCounters.Debug {
+    fn debug(self) -> String {
+        "SemaScopeLookupCounters"
+    }
 }
 
 struct SemaScopeBindingUndo {
@@ -1469,6 +1485,7 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         location_function: source.location_function,
         light_types: source.light_types.copy(),
         position_free: source.position_free,
+        lookup_counters: source.lookup_counters,
     }
 }
 
@@ -1910,19 +1927,33 @@ fn sema_scope_name_slot(table: SemaScopeTable, name: String) -> Int? Never! {
     name_rows_get_text(table.name_slots, name)
 }
 
+// Counts one resolution that examined `compares` binding rows when the table
+// counts, and returns `found`.
+fn sema_scope_counted(table: SemaScopeTable, compares: Int, found: ^Int?) -> Int? {
+    if table.lookup_counters == .Val(handle) {
+        counters := handle.counters
+        permit :: counters.guard_edit()
+        permit.value.scope_lookups += 1
+        permit.value.scope_compares += compares
+    }
+    found
+}
+
 fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
-    slot :: sema_scope_name_slot(table, name) ?? return None
+    slot :: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+    compares := 0
     frame := table.current
     loop frame >= 0 {
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
+            compares += 1
             index :: table.name_positions[slot][cursor]
-            if table.bindings[index].frame == frame -> return Val(index)
+            if table.bindings[index].frame == frame -> return sema_scope_counted(table, compares, Val(index))
             cursor -= 1
         }
         frame = table.frames[frame].parent
     }
-    None
+    sema_scope_counted(table, compares, None)
 }
 
 // The visible binding name nearest `name`, for an unknown name's fix: at most
@@ -1955,21 +1986,23 @@ fn sema_scope_closest_visible_name(table: SemaScopeTable, name: String) -> Strin
 // or staged symbol's span may come from another file, so position never
 // hides them.
 fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
-    slot :: sema_scope_name_slot(table, name) ?? return None
+    slot :: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
+    compares := 0
     frame := table.current
     loop frame >= 0 {
         module_frame :: table.frames[frame].parent < 0
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
+            compares += 1
             index :: table.name_positions[slot][cursor]
             // Read the row through its place: binding it copied the whole row
             // (its Symbol's Strings) for every candidate.
-            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) -> return Val(index)
+            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) -> return sema_scope_counted(table, compares, Val(index))
             cursor -= 1
         }
         frame = table.frames[frame].parent
     }
-    None
+    sema_scope_counted(table, compares, None)
 }
 
 // The visible symbol of `name`, for its name, kind, identity and span. On a
@@ -2044,6 +2077,7 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
         open_marks: source.open_marks,
         location_function: source.location_function,
         light_types: ^light,
+        lookup_counters: source.lookup_counters,
     }
 }
 

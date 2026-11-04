@@ -672,12 +672,16 @@ fn sema_build_facts_reject_debug_traces(facts: SemaBuildFacts) -> Bool Never! {
 }
 
 // #4319 scaling counters (Tools/perf/scaling) of the graph's lookups: module
-// rows by identity and names in a module's namespace. One counter set is
-// shared by every copy of a graph; it counts only when the graph's
-// `counting` is set, so an uncounted lookup costs one flag test.
+// rows by identity and names in a module's namespace, and of the scope
+// tables built from its module rows: name resolutions and the binding rows
+// they examine. One counter set is shared by every copy of a graph and by
+// those scope tables; it counts only when the graph's `counting` is set, so
+// an uncounted lookup costs one flag test.
 struct SemaLookupCounters {
     module_lookups: Int
     name_lookups: Int
+    scope_lookups: Int
+    scope_compares: Int
 }
 
 struct SemaRegistrationGraph {
@@ -2357,15 +2361,16 @@ fn sema_registration_impl(module_row: SemaRegistrationModule, definition: ImplDe
 }
 
 // `rows` indexes `module_row`'s nominals (sema_registration_impl_rows),
-// which no impl registration changes.
-fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) {
+// which no impl registration changes. `items` are the module's program items,
+// moved out of `module_row` while it is written.
+fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, items: [Item], rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) {
     if item == {
         .Impl(definition) -> {
             row := sema_registration_impl(module_row, definition, module_row, rows, rows, &diagnostics)
             // In a package, the type may be declared by a
             // sibling member; sema_registration_attach_namespace_impls owns
             // that impl's E0301 once every member is registered.
-            if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(module_row, definition) {
+            if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(items, definition) {
                 &diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
             &module_row.impls.push(row)
@@ -2443,7 +2448,8 @@ fn sema_registration_index_source_impls(graph: &SemaRegistrationGraph) Never! {
 // (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
 // type belongs to the package that declares the other operand, so
 // `impl Int.Mul(Price)` is legal when this module declares `Price`.
-fn sema_registration_opmix_builtin_impl(module_row: SemaRegistrationModule, definition: ImplDef) -> Bool {
+// `items` are the module's program items.
+fn sema_registration_opmix_builtin_impl(items: [Item], definition: ImplDef) -> Bool {
     if definition.type_name.contains(".") -> return false
     if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) -> return false
     trait_name :: definition.trait_name ?? return false
@@ -2451,8 +2457,8 @@ fn sema_registration_opmix_builtin_impl(module_row: SemaRegistrationModule, defi
     rhs :: definition.operator_rhs ?? return false
     if rhs == .Named(rhs_name) {
         if rhs_name == definition.type_name -> return false
-        loop item_index in 0..<module_row.program.items.len() {
-            if sema_registration_declared_type_name(module_row.program.items[item_index]) == rhs_name -> return true
+        loop item_index in 0..<items.len() {
+            if sema_registration_declared_type_name(items[item_index]) == rhs_name -> return true
         }
     }
     false
@@ -2498,7 +2504,7 @@ fn sema_registration_attach_namespace_impls(graph: &SemaRegistrationGraph) {
                 }
             }
             if owner_index < 0 {
-                if !sema_registration_opmix_builtin_impl(graph.modules[module_index], definition) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_registration_unknown_impl_target(definition))
+                if !sema_registration_opmix_builtin_impl(graph.modules[module_index].program.items, definition) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_registration_unknown_impl_target(definition))
                 next
             }
             // The first registration already reported the methods' own
@@ -2729,19 +2735,18 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
             module_row.nominals[nominal_index].source = SemaRegistrationNominalSource.ForeignHandle{value: updated_facts}
         }
     }
-    // Only impls register here; every other item is skipped without a copy.
-    // The nominal rows are indexed once: impls add methods to nominals, never
-    // nominals.
+    // Only impls register here; every other item is skipped. The items move
+    // out of the row for the walk and back after it, so each impl is read in
+    // place instead of copied while sema_registration_add_impl writes the
+    // row. The nominal rows are indexed once: impls add methods to nominals,
+    // never nominals.
     impl_rows :: sema_registration_impl_rows(module_row)
-    loop index in 0..<module_row.program.items.len() {
-        if module_row.program.items[index] == .Impl(_) {
-            // copy: sema_registration_add_impl writes module_row (`&`) and stores the impl rows,
-            // while the item stays in module_row.program.items. A view of that list would be live
-            // across the write.
-            item :: module_row.program.items[index].copy()
-            sema_registration_add_impl(&module_row, item, impl_rows, &diagnostics)
-        }
+    items = ^module_row.program.items
+    module_row.program.items = [Item]{}
+    loop index in 0..<items.len() {
+        if items[index] == .Impl(_) -> sema_registration_add_impl(&module_row, items[index], items, impl_rows, &diagnostics)
     }
+    module_row.program.items = ^items
     // Root exports are retained separately so private declarations never become
     // cross-module candidates merely because their name is known.
     loop symbol_index in 0..<module_row.symbols.len() {
@@ -3601,7 +3606,7 @@ fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String
 
 // The graph's lookup counts so far (SemaLookupCounters).
 fn sema_registration_lookup_counts(graph: SemaRegistrationGraph) -> SemaLookupCounters {
-    SemaLookupCounters{module_lookups: graph.lookup_counters.module_lookups, name_lookups: graph.lookup_counters.name_lookups}
+    SemaLookupCounters{module_lookups: graph.lookup_counters.module_lookups, name_lookups: graph.lookup_counters.name_lookups, scope_lookups: graph.lookup_counters.scope_lookups, scope_compares: graph.lookup_counters.scope_compares}
 }
 
 // The registered module NAME (`core.term`) of a module IDENTITY such as a
@@ -4186,7 +4191,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     if package_identity == "" || entry_module_identity == "" {
         &diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}, derive_demand: shared SemaDeriveDemand{keys: [String:Bool]{}}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: shared SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: shared SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}, derive_demand: shared SemaDeriveDemand{keys: [String:Bool]{}}}
     sema_registration_index_all_nominal_rows(&graph)
     sema_registration_index_source_impls(&graph)
     sema_serde_index_codec_methods(&graph)
@@ -4631,6 +4636,9 @@ fn sema_registration_apply_graph_module_rows(graph: SemaRegistrationGraph, modul
     module_index :: sema_registration_module_index(graph, module_identity) ?? return false
     module_row :: graph.modules[module_index]
     complete := true
+    // The table's name resolutions count into the graph's counters while it
+    // counts (SemaLookupCounters).
+    if graph.counting -> scopes.lookup_counters = Val(SemaScopeLookupCounters{counters: graph.lookup_counters})
     sema_scope_seed_unit_policy(&scopes, graph, module_identity)
     if !sema_scope_add_compiler_builtin(&scopes, graph) -> complete = false
     loop (position, symbol) in module_row.symbols {

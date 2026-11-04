@@ -248,6 +248,10 @@ fn sema_casing_acronym_word(word: String) -> String {
     letters := scalars.len()
     loop letters > 0 && sema_casing_is_digit(scalars[letters - 1]) -> letters -= 1
     if letters == 0 -> return word.copy()
+    // The longest lexicon acronyms (ASCII, JSONL) have five letters, and
+    // upper-casing never shortens text, so a longer head matches none of
+    // them. Raise this bound with the lexicon.
+    if letters > 5 -> return word.copy()
     head :: unicode.upper(sema_casing_join(scalars, 0, letters))
     loop acronym in SEMA_CASING_ACRONYMS {
         if acronym == head -> return "{head}{sema_casing_join(scalars, letters, scalars.len())}"
@@ -258,13 +262,30 @@ fn sema_casing_acronym_word(word: String) -> String {
 // Respell every word of a PascalCase name (`HttpUrlId` -> `HTTPURLID`).
 // ALL_CAPS and snake_case names are value-like and stay unchanged.
 fn sema_casing_acronym_name(name: String) -> String {
-    scalars :: unicode.scalars(name)
-    if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
+    // An ASCII name is classified from its bytes, without a string per
+    // scalar: only a name that starts upper-case and has a lower-case letter
+    // is respelled.
+    bytes :: name.bytes()
+    ascii := true
     has_lower := false
-    loop scalar in scalars {
-        if sema_casing_is_lower(scalar) -> has_lower = true
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if code >= 128 {
+            ascii = false
+            break
+        }
+        if code >= 97 && code <= 122 -> has_lower = true
     }
-    if !has_lower -> return name.copy()
+    if ascii {
+        if bytes.len() == 0 || Int.from_u8(bytes[0]) < 65 || Int.from_u8(bytes[0]) > 90 || !has_lower -> return name.copy()
+    } else {
+        scalars :: unicode.scalars(name)
+        if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
+        loop scalar in scalars {
+            if sema_casing_is_lower(scalar) -> has_lower = true
+        }
+        if !has_lower -> return name.copy()
+    }
     segments := [String]{}
     loop segment in name.split("_") {
         out := ""

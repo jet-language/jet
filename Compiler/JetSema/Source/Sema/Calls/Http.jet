@@ -150,9 +150,9 @@ fn sema_call_http_static_value(
 
 // Source-owned HTTP text carriers cross into native leaves through their
 // registered `to_string()` method; the leaf itself takes String.
-fn sema_call_http_source_text(value: ^TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_http_source_text(value: ^TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     if program.registration_graph == .Val(graph) {
-        candidates := sema_expr_registration_method_candidates(graph, value.ty, "to_string", [Type]{}, [Type]{}, span, environment, program, &scopes, &diagnostics)
+        candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, value.ty, "to_string", [Type]{}, [Type]{}, span, environment, program, &diagnostics)
         if candidates.len() != 1 -> return None
         candidate := &candidates.pop() ?? return None
         return Val(sema_tree_node(Type.String, TExprKind.MethodCall{receiver: ^value, method: ^candidate.method, type_args: [Type]{}, args: [TCallArg]{}}, span))
@@ -336,7 +336,7 @@ fn sema_call_try_http_static(
         // The text argument is the last value: take it out and push its
         // conversion back, instead of copying it out of its slot.
         source :: &values.pop() ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        &values.push(sema_call_http_source_text(^source, span, environment, program, &scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
+        &values.push(sema_call_http_source_text(^source, span, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None})
     }
     built := sema_call_http_static_value(target.type_name, method, rust_method, args, values, result_type, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, &diagnostics)}
@@ -484,7 +484,7 @@ fn sema_call_http_middleware(receiver: Expr, receiver_value: TExpr, args: [CallA
 // arguments carry their conventions.
 fn sema_call_http_mux_source_call(receiver_value: TExpr, method: String, args: [TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if program.registration_graph == .Val(graph) {
-        candidates := sema_expr_registration_method_candidates(graph, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, &scopes, &diagnostics)
+        candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, &diagnostics)
         candidate := &candidates.pop() ?? panic("HTTPMux.{method} is not registered")
         built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.MethodCall{receiver: receiver_value, method: ^candidate.method, type_args: [Type]{}, args: args}, span)
         sema_call_http_record_effect("Net", "HTTPMux.{method}", built.ty, span, environment, program, &scopes, &context, &diagnostics)
@@ -791,7 +791,7 @@ fn sema_call_http_transport(record: CoreCallRecord, args: [CallArg], type_args: 
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
             params[index].ty = Val(value.ty)
-            value = sema_call_http_source_text(^value, argument.span, environment, program, &scopes, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+            value = sema_call_http_source_text(^value, argument.span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         }
         &values.push(^value)
     }
