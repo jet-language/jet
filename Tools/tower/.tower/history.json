@@ -578016,6 +578016,58 @@
       "completedAt": "2026-11-01T19:33:58.635Z",
       "questions": [],
       "retiredAt": "2026-11-04T19:36:01.130Z"
+    },
+    {
+      "id": "c0cyx4u0",
+      "num": 6456,
+      "title": "Typed receipt sections: receipt.attach(evidence) gives E0107 and core.prelude.__receipt_attach has no runtime route",
+      "body": "Found by TestGreen-3 route-gap census, 2026-10-31. The ratified #Receipt typed-sections surface is used by Examples/features/foundations/receipts via receipt.attach(evidence), and the Prelude receipt.attach calls core.prelude.__receipt_attach. Today sema reports E0107 \"Nothing named receipt\" and the Core call has no runtime export or IR builder. TestGreen3-22 lists the row as unbuilt (E2104 citing this card). Done when receipt.attach resolves in sema, the route exists, and the receipts golden passes on O0/O1/O2 and build.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "receipt.attach resolves in sema (Calls/Receipts.jet emits the Core call core.prelude.__receipt_attach with the section name, type name and schema digest); the route jet_receipt_attach exists (RuntimeRoutes.jet) and its store is JetRuntime/Source/ReceiptSections.jet. With s1 (chain.sh s1, jet 5c5e6e1eef824553): `jet run --optimize=none|basic|full Examples/features/foundations/receipts/run.jet` matches Examples/features/expected/foundations/receipts.out on all three (cmp SAME); gold.sh foundations/receipts passes 1/1 on --tier run and 1/1 on --tier build. tests/cases/receipt_sections (2 cases) PASS on s1 and FAIL on base 1620f05362. Store: a run with JET_RECEIPT_DIR and a claim writes one record at staged/<claim>/<id>; schema c29a2d1b… = sha256(\"RegressionEvidence\\0slope:Float;…passed:Bool;\"). Landed in wave 30 as dev b044dcaa49 (IrTypes-52)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "GoldC-3 scoping 2026-11-01: feature-sized. The Prelude attach needs compiler-synthesized section/type/digest metadata from #Receipt(\"...\"); there is no compiler handling, spec text or runtime export. Not in GoldC-63. Needs a design pass (spec text + compiler synthesis + runtime export) before implementation."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "receipt.attach resolves in sema, the route exists, and the foundations/receipts golden passes on O0/O1/O2 and build.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in wave 30 at dev b044dcaa49 (IrTypes-52, lane-check CHECK OK). Wave 30 compares on bb770de593: goldens 1205→1206, with foundations/receipts newly passing; ui 0 lost; cases 2515→2521, 0 lost. receipt.attach resolves in sema (Calls/Receipts.jet emits core.prelude.__receipt_attach), and the route jet_receipt_attach exists (RuntimeRoutes.jet, store ReceiptSections.jet). foundations/receipts matches its golden on --optimize=none, basic and full and on --tier build, and tests/cases/receipt_sections passes 2/2.",
+          "at": "2026-11-01T19:54:39.873Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T17:43:00.256Z",
+      "updated": "2026-11-01T19:54:42.847Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-01T19:54:42.847Z",
+      "questions": [],
+      "retiredAt": "2026-11-04T19:56:38.120Z"
     }
   ],
   "events": [
