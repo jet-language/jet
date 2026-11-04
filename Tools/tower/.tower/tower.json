@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90441,
+    "rev": 90446,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34019,8 +34019,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-04T18:24:32.340Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-04T20:00:16.801Z",
+      "updatedBy": "owner",
       "goals": [
         "G17"
       ]
@@ -52677,91 +52677,6 @@
       "goals": []
     },
     {
-      "id": "c0s6ptoc",
-      "num": 4957,
-      "title": "Native port: services, workflows, HTTP server, WebSocket (D-NATIVE-SERVICES1=A)",
-      "body": "Ratified D-NATIVE-SERVICES1=A ports all these families to the native runtime. Includes app-route and HTTP parameter decoding, which must enter the text-cell scope (jet_rt_codec_text_cells_enter/leave, landed cfa29111a). Rust sources: App.rs, HTTPServer.rs. Not needed by the self-hosted compiler; needed for the native test suite. Scheduled after the native fixed point.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at undefined in GoldC-54 (patch row: criterion/count 4): GoldC-54: WsRoutes.jet ports core.net.ws (connect, upgrade, text frames, close) to the Jet runtime and WsConn/WsMessage methods lower through the general handle route table; on the wave-16 stack's s2 (chain FIXED_POINT dcbea905a88d0781) net/ws_echo prints echo:ping with no E2104 and ws_law accept_key, client_and_server_echo and hostile_handshake_missing_version pass in the FULL cases run (q/sg/cases-goldcw16.txt); hostile_url_controls exits 0 after the Ws.connect byte check; known-failing rows removed"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "Audit 2026-10-28 (CORE-03): raised P2 -> P0 with #3665 as one HTTP critical path; home epoch e3 (Product Pillars). Today Examples/features/net/http_server.jet stops at E2104 (HTTPRouterRegister / jet_http_mux_new, tracked by #5578)."
-        },
-        {
-          "at": "2026-10-17",
-          "by": "Main",
-          "text": "Absorbed duplicate #4950 (burn-down 2026-10-17): Duplicate of #4957. D-NATIVE-SERVICES1=A (ratified 2026-10-10) ports service authority, workflows, the HTTP server/mux and WebSocket together. #4957 is that port card, and this card's lastLog additions (HTTP mux, WebSocket) are in #4957's scope."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`jet run Examples/features/net/http_server.jet` builds with no E2104, listens, and answers a request from a test client with the expected body; golden on default `jet run` and AOT.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 86095cfe0b (KitSpeed-4957): Examples/features/net/http_server.jet builds with no E2104, binds 127.0.0.1:0, serves 3 connections from a task; its in-program client gets GET / -> 200 hello from mux, GET /ping -> 200 pong, POST /echo -> 200 say=hi. Golden PASS o0 (jet run), o1 and o2 (AOT) on dev 08f32b2d24 + patch.",
-          "at": "2026-10-29T08:40:30.762Z"
-        },
-        {
-          "n": 2,
-          "text": "The gauntlet HTTP-service cell is measured with the self-hosted server (not \"unmeasured\").",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Measured 2026-11-01 by IrTypes-3 on dev b044dcaa49 with the published base jet. Command: JET_TOOLCHAIN_ROOT=<b044 tree> node Tools/gauntlet/harness/run.mjs --entry http-service --jet-bin /mnt/jetscratch/discovery/base/b044dcaa49…/jet --runs 1. Result: http-service jet ok (build 4.28 s, startup 0.668 s, latency p50 0.358 ms / p99 18.12 ms, RSS 1492 KB, clean_exit), and all 5 probes pass. run.jet serves through the self-hosted core.http.server mux on net.tcp_listen. go, rust, python and node also ran ok in the same harness. The cell is measured, not 'unmeasured'. It does not yet beat rust on latency (rust 0.160/7.63 ms); that is perf-gate work, tracked separately.",
-          "at": "2026-11-01T20:01:04.674Z"
-        },
-        {
-          "n": 3,
-          "text": "Service calls name the file and wait effects they reach (D-SERVICE-EFFECTS1=A): __host_* file rows carry FS.Read/FS.Write, lock sleep carries Time.Wait, and callers infer them upward; a ui row proves the effect error on a denied program.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-SERVICE-EFFECTS1=A. The __host_* file rows carry FS.Read/FS.Write and __host_sleep_ns/__host_sleep_wait_ns carry Time.Wait (CoreCallRows regenerated from check-core-surface-ledger.mjs). Service calls checked into Jet source record the source function as callee, so callers infer the effects upward. `jet inspect rights --json` shows tree.start and workflow.sleep/activity/all inferring FS.Read, FS.Write and Time.Wait, while service.tree stays []. Denied programs: tests/ui/e1803_service_start_reaches_fs.jet (E1803 for `FS.Read, FS.Write` under the application default) and tests/ui/effects/service_start_outside_declared_row.jet (E0740: a `-[Time]>` function calling tree.start). Proof: `Tools/testkit run ui --filter service_` (both PASS) and `run cases --filter workflow_wait_methods_publish_typed_effects` (PASS). (LiveUI-7, landed on dev df84747616; wave 8 composed suites)",
-          "at": "2026-10-31T11:49:53.799Z"
-        },
-        {
-          "n": 4,
-          "text": "net/ws_echo (Examples/features/net/ws_echo.jet) passes its golden on the run and build tiers: core.net WebSocket upgrade, connect and frames work with no E2104, and its known-failing row is removed.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "GoldC-54: WsRoutes.jet ports core.net.ws (connect, upgrade, text frames, close) to the Jet runtime and WsConn/WsMessage methods lower through the general handle route table; on the wave-16 stack's s2 (chain FIXED_POINT dcbea905a88d0781) net/ws_echo prints echo:ping with no E2104 and ws_law accept_key, client_and_server_echo and hostile_handshake_missing_version pass in the FULL cases run (q/sg/cases-goldcw16.txt); hostile_url_controls exits 0 after the Ws.connect byte check; known-failing rows removed — landed on dev b1ebcb8a3b (wave 16+17; wave REPORT: goldens 1203/0 regressions, ui lost 0, cases lost 0)",
-          "at": "2026-10-31T23:49:57.975Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "audit-2026-10-28",
-        "wayfinder:task"
-      ],
-      "parentId": "c086hhzb",
-      "needsAcceptance": false,
-      "created": "2026-10-10T22:20:17.721Z",
-      "updated": "2026-11-01T20:01:08.078Z",
-      "updatedBy": "Main",
-      "goals": [],
-      "completedAt": "2026-11-01T20:01:08.078Z"
-    },
-    {
       "id": "c0acg7c2",
       "num": 5005,
       "title": "Close Jai's build-option families in the one option table",
@@ -61947,6 +61862,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T19:36:10.259Z"
+        },
+        {
+          "n": 24,
+          "text": "D-DIAG-HEADER1 A (ratified 2026-11-04): every diagnostic's header, More: link and closing hint show the type name (jet.ValueTypeMismatch), with the link at jet-lang.dev/e/<name>. The E-code stays the stable code: jet.report/v3 JSON carries both name and code, jet explain E0112 still works, and the site redirects old E-code pages. Runtime reports (TrapMessages.jet, ServicesMessages.jet, report.S) print the name too. D-DIAG-URL1 and D-DIAG-LIBLINK1 text is amended to match. Every UI snapshot is regenerated from real output, and goldens pass on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:05:25.268Z"
         }
       ],
       "refs": [
@@ -61961,7 +61885,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-04T19:36:10.259Z",
+      "updated": "2026-11-04T20:05:25.268Z",
       "updatedBy": "Main",
       "goals": [
         "G17"
@@ -62863,6 +62787,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T17:30:48.496Z"
+        },
+        {
+          "n": 14,
+          "text": "D-WRITE-TAKE1 A (ratified 2026-11-04): core.mem has swap<T> and replace<T> (-[!Panic]>), named by the prelude with no import, while a user swap or replace still wins; List and Map gain swap. Sema tracks each moved-out gap behind E0121: an exit or a call that can stop inside a gap is E0201, and its fix offers swap or replace. IR moves the value back on every stop path inside a gap. An example with goldens on o0, o1 and o2, and UI snapshots for E0201.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:05:26.088Z"
         }
       ],
       "refs": [
@@ -62876,7 +62809,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-04T18:09:37.848Z",
+      "updated": "2026-11-04T20:05:26.088Z",
       "updatedBy": "Main",
       "goals": [
         "G5",
@@ -65379,8 +65312,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-04T18:09:25.950Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-04T19:56:49.737Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0q31aks",
@@ -146758,200 +146691,6 @@
       "ratifiedAt": "2026-10-31"
     },
     {
-      "id": "D-SERVICE-EFFECTS1",
-      "cardId": "c0s6ptoc",
-      "group": "services",
-      "title": "Service calls name the file and wait effects they reach",
-      "situation": "The service runtime is moving from Rust into Jet. Its file and wait steps are effect-free today, so a tree writes its state store, rollout journal and delivery log with an empty effect row. A package that allows only reading files can therefore write them, and a function with an empty ceiling can start a tree. The vote decides whether service calls must name what they reach. We recommend they do.",
-      "gist": "Should a service call that writes files say FS in its signature?",
-      "lesson": "An effect row lists what a call may do, such as read files, write files or wait. The package grant and each function's ceiling are checked against those rows. A call with an empty row is trusted to do none of them. A row that hides a file write makes both checks pass when they should not.",
-      "explainer": "",
-      "story": "Ana's billing package allows FS.Read so it can load a price file. She adds a service tree with an event log. Today the tree writes the log and its rollout journal anyway, and no check notices. Under A, `jet run` stops with E1803 and asks her to allow FS.Write.",
-      "inWild": "// Deno: the grant is asked when the store opens\nconst kv = await Deno.openKv(\"./orders.db\");  // needs --allow-read --allow-write\nawait kv.set([\"order\", 1], \"paid\");          // asks nothing more",
-      "detail": "Today. The port keeps the user surface unchanged, so its file and wait steps are effect-free core.service rows. Only `service.state_store()` asks for anything, and it asks for FS.Read. Start, stop, durable sends, snapshots, events, rollouts and delivery calls read and write files with an empty row.\n\nWhat a tree touches. With a store at `orders.state`, a tree writes that file plus `orders.state.rollout`, `orders.state.workflows` and the delivery authority log. Every access also creates and removes a `.lock` file beside its target. While another process holds a lock, the call sleeps 1 ms at a time, for up to 30 s.\n\nProbes. A package that allows [IO, Mem.Alloc, Time.Wait] and calls `service.state_store()` stops with E1803 for FS.Read. A package that allows [FS.Read, IO, Mem.Alloc] and appends to a file stops with E1803 for FS.Write. A function `boot() -[IO]>` that reaches that append stops with E0740 naming FS.Write. A package that allows only [IO, Mem.Alloc] ran `time.sleep(1ms)` with no grant.\n\nWhat A does. The port's file steps flip from no effect to FS.Read or FS.Write, and the lock sleep to Time.Wait. Inference then carries those effects to every service call that reaches them. Calls that only touch memory keep an empty row: tree, worker, send, receive, show and observe. Each flip is one line in the effect table.\n\nWho changes under A. All four durable service examples already allow FS, so none changes. Up to four test programs start a tree with no store and no FS grant, and each adds one allow line. Time.Wait needs no grant, so it only matters to function ceilings.\n\nBeginner and expert paths under A. A beginner's lone file runs with `jet run --allow=FS run.jet`, and the E1803 fix line says how to keep that grant. An expert library writes `-[FS, Time.Wait]>` on its own service helpers. Helpers that only show or route, like `label`, keep `-[]>`.\n\nPrecedent. Core's file calls name their leaf even through a held handle. `Directory.remove` and `FileWriter.set_mode` both declare FS.Write. Under B the service store would be the one handle that does not.\n\nReview. Author: Claude (LiveUI lane). No fresh adversarial pass has run on this draft.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Each service call names the file and wait effects it reaches",
-          "detail": "A service call that can reach the state store says so: reads give FS.Read, writes and lock files give FS.Write, and lock waits give Time.Wait. Calls that only touch memory keep an empty row. The package grant and every function ceiling then see the real file writes.\n\nA tree with no store still asks for FS to start, because start writes the rollout journal when a store is set.",
-          "technical": "The port's core.service file rows (read, append, reserve, finish, rename, fsync, lstat, mkdirs) take FS.Read or FS.Write; the lock sleep row takes Time.Wait. Inference gives start, stop, send_durable, commit_snapshot, append_event, restore_snapshot, rollout and delivery calls FS plus Time.Wait. Status reads take the store lock, so they need FS.Write too. tree, worker, send, receive, show and observe stay `-[]>`.",
-          "code": "use core.service as service\n\nfn take_order() {}\n\nfn open_orders(store: String) -> ServiceTree ServiceError! {\n    tree := service.tree(\"orders\")\n    state :: service.state_store(store)\n    &tree.set_state_event_log(state, \"orders\", 1, \"reversible\")\n    &tree.worker(\"orders\", take_order, capacity: 8)\n    &tree.start()\n    tree\n}\n\n// A: each service call names what it reaches\nfn record(tree: &ServiceTree, event: String) ServiceError! -[FS, Time.Wait]> {\n    &tree.append_event(event)   // reads, locks and appends the event log\n}\n\nfn label(tree: ServiceTree) -[]> String {\n    tree.show()                 // memory only: still no effects\n}\n\nfn boot() -[IO]> {\n    open_orders(\"orders.state\") ?? panic(\"open\")\n}\n// error[E0740]: `boot` uses the effect `FS.Write`, which its signature doesn't allow\n\n// package.jet allows [FS.Read, IO, Mem.Alloc]\n$ jet run .\nerror[E1803]: Application authority is undecided for `FS.Write`"
-        },
-        {
-          "key": "B",
-          "name": "The store asks for all of FS once; tree calls stay effect-free",
-          "detail": "`service.state_store()` asks for FS, reading and writing, when the program opens the store. Every tree call keeps an empty row, because holding the store value already proves the grant.\n\nThis is how Deno KV works: permission is checked when the store opens, not on each write.",
-          "technical": "state_store's row widens from FS.Read to FS. The port's file rows stay effect-free. Package grants become honest, because no store can open without FS.Write. Function ceilings do not: a `-[]>` function handed a tree can still write its files.",
-          "code": "use core.service as service\n\nfn take_order() {}\n\nfn open_orders(store: String) -> ServiceTree ServiceError! {\n    tree := service.tree(\"orders\")\n    state :: service.state_store(store)\n    &tree.set_state_event_log(state, \"orders\", 1, \"reversible\")\n    &tree.worker(\"orders\", take_order, capacity: 8)\n    &tree.start()\n    tree\n}\n\n// B: the store asks for all of FS once; tree calls stay effect-free\nfn record(tree: &ServiceTree, event: String) ServiceError! -[]> {\n    &tree.append_event(event)   // still writes the event log\n}\n\n// package.jet allows [FS.Read, IO, Mem.Alloc]\n$ jet run .\nerror[E1803]: Application authority is undecided for `FS.Write`   // at state_store()"
-        },
-        {
-          "key": "C",
-          "name": "Keep the port's effect-free rows",
-          "detail": "Only `service.state_store()` asks for FS.Read, as today. Every tree call keeps an empty row, including the ones that write files.\n\nThis is what the port ships now, so it costs no change.",
-          "technical": "state_store stays `-[FS.Read]>`. Every core.service file and sleep row stays effect-free, as the Rust runtime rows were. A package that allows only FS.Read can write the state store, the rollout journal, the workflow store and the delivery log.",
-          "code": "use core.service as service\n\nfn take_order() {}\n\nfn open_orders(store: String) -> ServiceTree ServiceError! {\n    tree := service.tree(\"orders\")\n    state :: service.state_store(store)\n    &tree.set_state_event_log(state, \"orders\", 1, \"reversible\")\n    &tree.worker(\"orders\", take_order, capacity: 8)\n    &tree.start()\n    tree\n}\n\n// C: only state_store asks, and only for reading\nfn record(tree: &ServiceTree, event: String) ServiceError! -[]> {\n    &tree.append_event(event)   // writes the event log with an empty row\n}\n\n// package.jet allows [FS.Read, IO, Mem.Alloc]\n$ jet run .                     // runs, and writes four files"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Koka",
-          "note": "Effects are inferred into every function type; a function that touches the file system carries `fsys` all the way up. Source: koka-lang.github.io/koka/doc/book.html, effect types.",
-          "code": "fun save(p : path, s : string) : <fsys,exn> ()\n  write-text-file(p, s)"
-        },
-        {
-          "lang": "Deno",
-          "note": "Permission is checked when a KV store opens; later writes ask nothing. Source: docs.deno.com/runtime/fundamentals/security and docs.deno.com/deploy/kv/manual.",
-          "code": "const kv = await Deno.openKv(\"./orders.db\") // --allow-read --allow-write\nawait kv.set([\"order\", 1], \"paid\")"
-        },
-        {
-          "lang": "Erlang/OTP",
-          "note": "No effect system: a gen_server or dets table writes files with nothing in its type. Source: erlang.org/doc/apps/stdlib/dets.html.",
-          "code": "{ok, T} = dets:open_file(orders, [{file, \"orders.dets\"}]),\nok = dets:insert(T, {1, paid})."
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A makes the rows tell the truth. Today a package that may only read files can write the state store, and an empty ceiling can start a tree. A closes both, as Core's file calls already do.",
-        "gains": [
-          "Package grants match what the program writes.",
-          "Function ceilings hold for service calls.",
-          "Memory-only service calls stay effect-free."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B fixes the package grant but not ceilings: an empty-ceiling function can still write the store through a tree it was handed. Core's own file handles name FS.Write on each call."
-          },
-          {
-            "key": "C",
-            "reason": "C lets a package that allows only FS.Read write four files, and no function ceiling sees those writes."
-          }
-        ],
-        "tradeoff": "A store-less tree asks for FS to start. The port ships C now, and each A row is a later one-line flip."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Compiler /mnt/jetscratch/discovery/base/latest/jet (f3bfe8ca7b), NO_COLOR=1. Probes live in /mnt/jetscratch/lanes/LiveUI/p5. In effprobe, `jet run .` gives E1803 for FS.Read from state_store. In effprobe5, `jet run run.jet` gives E1803 for FS.Write. In effprobe4, `jet check run.jet` gives E0740 for FS.Write in boot. In effprobe2, `jet run .` sleeps with no Time.Wait grant. Rows: Core/Service/Service.jet:593 (state_store -[FS.Read]>), Core/Files/Files.jet:24-27 (one leaf per call).",
-      "surface": {
-        "gist": "Should a service call that writes files say FS in its signature?",
-        "lesson": "An effect row lists what a call may do, such as read files, write files or wait. The package grant and each function's ceiling are checked against those rows. A call with an empty row is trusted to do none of them. A row that hides a file write makes both checks pass when they should not.",
-        "trio": {
-          "current": {
-            "note": "Today only state_store asks for FS.Read; start and append_event write files with empty rows.",
-            "code": "// Today (and the port as it ships): only state_store asks for anything\nstate :: service.state_store(\"orders.state\")   // -[FS.Read]>\n&tree.set_state_event_log(state, \"orders\", 1, \"reversible\")\n&tree.start()                // writes orders.state.rollout: empty row\n&tree.append_event(\"paid\")   // appends to orders.state: empty row"
-          },
-          "wild": {
-            "lang": "Koka",
-            "note": "Koka infers the file effect into every caller's type, so a pure-typed function cannot write.",
-            "code": "fun record(p : path, e : string) : <fsys,exn> ()\n  append-text-file(p, e)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Each service call names the file and wait effects it reaches",
-            "gist": "Rows tell the truth; memory-only calls stay free.",
-            "gains": [
-              "The package grant matches what the program writes.",
-              "Function ceilings hold for service calls.",
-              "Memory-only calls keep an empty row."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "// A: each service call names what it reaches\nfn record(tree: &ServiceTree, event: String) ServiceError! -[FS, Time.Wait]> {\n    &tree.append_event(event)   // reads, locks and appends the event log\n}\n\nfn label(tree: ServiceTree) -[]> String {\n    tree.show()                 // memory only: still no effects\n}\n\nfn boot() -[IO]> {\n    open_orders(\"orders.state\") ?? panic(\"open\")\n}\n// error[E0740]: `boot` uses the effect `FS.Write`, which its signature doesn't allow"
-            }
-          },
-          {
-            "key": "B",
-            "name": "The store asks for all of FS once; tree calls stay effect-free",
-            "gist": "One grant at the store; ceilings stay blind.",
-            "gains": [
-              "The package grant covers every store write.",
-              "No tree call changes its row."
-            ],
-            "losses": [
-              "A function with an empty ceiling can still write the store.",
-              "The service store becomes the one Core handle whose writes are unnamed."
-            ],
-            "proposed": {
-              "code": "// B: the store asks for all of FS once; tree calls stay effect-free\nstate :: service.state_store(\"orders.state\")   // -[FS]>\n\nfn record(tree: &ServiceTree, event: String) ServiceError! -[]> {\n    &tree.append_event(event)   // still writes the event log\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep the port's effect-free rows",
-            "gist": "No change; reads are asked for, writes are not.",
-            "gains": [
-              "No program changes.",
-              "Matches the Rust runtime it replaces."
-            ],
-            "losses": [
-              "A package that allows only reading can write four files.",
-              "No function ceiling sees a service write."
-            ],
-            "proposed": {
-              "code": "// C: only state_store asks, and only for reading\nstate :: service.state_store(\"orders.state\")   // -[FS.Read]>\n\nfn record(tree: &ServiceTree, event: String) ServiceError! -[]> {\n    &tree.append_event(event)   // writes the event log with an empty row\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A makes the rows tell the truth. Today a package that may only read files can write the state store, and an empty ceiling can start a tree. A closes both, as Core's file calls already do.",
-          "gains": [
-            "Package grants match what the program writes.",
-            "Function ceilings hold for service calls.",
-            "Memory-only service calls stay effect-free."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B fixes the package grant but not ceilings: an empty-ceiling function can still write the store through a tree it was handed. Core's own file handles name FS.Write on each call."
-            },
-            {
-              "key": "C",
-              "reason": "C lets a package that allows only FS.Read write four files, and no function ceiling sees those writes."
-            }
-          ],
-          "tradeoff": "A store-less tree asks for FS to start. The port ships C now, and each A row is a later one-line flip."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "A tree with no store asks for FS to start or stop.",
-          "attempts": [
-            "A row that depends on whether a store is set: rejected, a row is fixed per function, not per value.",
-            "A separate durable tree type: rejected, every tree method would exist twice.",
-            "Leave start and stop effect-free: rejected, start writes the rollout journal."
-          ],
-          "result": "Real services keep state, and all four durable service examples already allow FS. Up to four test programs add one allow line, and E1803 names it."
-        },
-        {
-          "loss": "Read-only calls such as `delivery.status()` need FS.Write, not just FS.Read.",
-          "attempts": [
-            "Lock across processes without a file: rejected, the lock file is how a second process sees the lock."
-          ],
-          "result": "Status reads take the same lock as writes, so FS.Write is the honest row. The lock file is removed when the call returns."
-        },
-        {
-          "loss": "Lock waits add Time.Wait to many rows.",
-          "attempts": [
-            "Spin without sleeping: rejected, it burns a core for up to 30 s."
-          ],
-          "result": "Time.Wait needs no package grant; a probe package that allows only [IO, Mem.Alloc] sleeps freely. It shows up only in function ceilings, where it is true."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T23:52:59.399Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
       "id": "D-RT-DEFECT-REPORT1",
       "cardId": "c08r6ogl",
       "group": "runtime",
@@ -147338,149 +147077,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-10-31T01:21:47.454Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
-      "id": "D-SERVICE-SEND-STATUS1",
-      "cardId": "c0s6ptoc",
-      "group": "services",
-      "title": "The state a durable delivery reads right after send_durable",
-      "situation": "A durable send records the message, puts it in the worker's mailbox and returns a Delivery. The example golden says that Delivery reads Accepted. The runtime says Delivering, as the Rust runtime did. No spec line says which is right. The vote decides when a delivery becomes Delivering. We recommend the mailbox moment, as today.",
-      "gist": "After send_durable returns, is the delivery Accepted or Delivering?",
-      "lesson": "A durable delivery moves through states that are written to a log on disk. Accepted means the log has the message. Delivering means the worker has been handed it. Delivered means the worker committed it. A restarted program reads the log to know what to send again.",
-      "explainer": "",
-      "story": "Ben sends an order with send_durable and prints its status to check it worked. Under B he sees Accepted until his worker calls receive. Under A he sees Delivering at once, because the order is already in the worker's mailbox.",
-      "inWild": "// RabbitMQ: a publisher confirm means the broker has the message;\n// the consumer's ack is a separate, later step\nchannel.confirmSelect();\nchannel.basicPublish(\"\", \"orders\", props, body);\nchannel.waitForConfirms();   // stored, not yet consumed",
-      "detail": "Today. send_durable writes an acceptance record, puts the message in the worker's mailbox, then writes a Delivering record before it returns. The Rust runtime did the same: Services.rs 3215 calls mark_delivered, which appends Delivering (ServiceAuthority.rs 1862-1873). The base's Jet source keeps that order.\n\nThe golden. Examples/features/tooling/service_authority expects `first:accepted` and then `duplicate:delivering`. The duplicate send returns the same delivery, and nothing happens to it between the two prints. So the two lines cannot both hold under one rule. Line 1 was written by hand in 198561770c and never ran against this runtime.\n\nWhat Accepted means under each. Under A, Accepted marks a message that is recorded but not yet in any mailbox: a retried delivery, or one recovered after a restart, waiting for the next receive to admit it. Under B, Accepted also covers a message already sitting in the mailbox.\n\nWhat B costs. receive would write the Delivering record, so every durable receive adds one locked log append. send_durable would stop writing it. The receive path must also tell a first take from a re-take after a restart.\n\nWho changes. Under B, lines 1 and 2 of the golden read accepted, and the runtime moves its marker. Under A, only line 1 of the golden changes, to delivering. No other golden or test prints this state right after a send.\n\nReview. Author: Claude (LiveUI lane). No fresh adversarial pass has run on this draft.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Delivering starts when the message enters the worker's mailbox",
-          "detail": "send_durable writes Delivering as soon as the message is in the worker's mailbox, before it returns. A status read right after the send says Delivering, and so does the duplicate's. This is what the runtime does today.",
-          "technical": "No runtime change: send_durable and pending admission keep calling mark_delivered after the mailbox send. Golden line 1 becomes `first:delivering`; line 2 already says delivering.",
-          "code": "use core.service as service\nuse core.testing as testing\n\nfn orders_worker() {}\n\nfn label(delivery: ^Delivery) -> String {\n    state :: delivery.status() ?? panic(\"status\")\n    if state == {\n        .Accepted -> \"accepted\"\n        .Delivering -> \"delivering\"\n        else -> \"other\"\n    }\n}\n\nfn run() {\n    store :: Path.from(testing.temp_dir(\"orders\")).join(\"orders.log\").to_string()\n    tree := service.tree(\"orders\")\n    &tree.set_delivery(service.delivery_durable()) ?? panic(\"delivery\")\n    &tree.set_state_event_log(service.state_store(store) ?? panic(\"store\"), \"orders\", 1, \"reversible\") ?? panic(\"log\")\n    endpoint :: &tree.worker(\"orders\", orders_worker, capacity: 2) ?? panic(\"worker\")\n    &tree.start() ?? panic(\"start\")\n    first :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"first\")\n    print(\"first:{label(^first)}\")\n    duplicate :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"duplicate\")\n    print(\"duplicate:{label(^duplicate)}\")\n    print(\"delivered:{&tree.receive(endpoint) ?? panic(\"receive\")}\")\n}\n\n// A: Delivering starts when the message enters the worker's mailbox\n$ jet run run.jet\nfirst:delivering\nduplicate:delivering\ndelivered:order"
-        },
-        {
-          "key": "B",
-          "name": "Delivering starts when the worker takes the message",
-          "detail": "send_durable leaves the delivery Accepted. The first receive that hands the message to the worker writes Delivering. A status read right after the send says Accepted, and so does the duplicate send's status.",
-          "technical": "Move the mark_delivered append from send_durable and pending admission into receive. Every durable receive appends one E record under the store lock. Golden lines 1 and 2 become `first:accepted` and `duplicate:accepted`.",
-          "code": "use core.service as service\nuse core.testing as testing\n\nfn orders_worker() {}\n\nfn label(delivery: ^Delivery) -> String {\n    state :: delivery.status() ?? panic(\"status\")\n    if state == {\n        .Accepted -> \"accepted\"\n        .Delivering -> \"delivering\"\n        else -> \"other\"\n    }\n}\n\nfn run() {\n    store :: Path.from(testing.temp_dir(\"orders\")).join(\"orders.log\").to_string()\n    tree := service.tree(\"orders\")\n    &tree.set_delivery(service.delivery_durable()) ?? panic(\"delivery\")\n    &tree.set_state_event_log(service.state_store(store) ?? panic(\"store\"), \"orders\", 1, \"reversible\") ?? panic(\"log\")\n    endpoint :: &tree.worker(\"orders\", orders_worker, capacity: 2) ?? panic(\"worker\")\n    &tree.start() ?? panic(\"start\")\n    first :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"first\")\n    print(\"first:{label(^first)}\")\n    duplicate :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"duplicate\")\n    print(\"duplicate:{label(^duplicate)}\")\n    print(\"delivered:{&tree.receive(endpoint) ?? panic(\"receive\")}\")\n}\n\n// B: Delivering starts when the worker takes the message\n$ jet run run.jet\nfirst:accepted\nduplicate:accepted\ndelivered:order"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "RabbitMQ",
-          "note": "A publisher confirm says the broker stored the message; delivery to a consumer and its ack are later, separate events. Source: rabbitmq.com/docs/confirms.",
-          "code": "channel.confirmSelect();\nchannel.basicPublish(\"\", \"orders\", props, body);\nchannel.waitForConfirms();"
-        },
-        {
-          "lang": "Temporal",
-          "note": "An activity task is Scheduled when recorded and Started only when a worker polls it, which is a separate history event. Source: docs.temporal.io/activities, activity execution states.",
-          "code": "ActivityTaskScheduled  // recorded\nActivityTaskStarted    // a worker picked it up\nActivityTaskCompleted"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A keeps the runtime and the Rust behaviour it ports, and gives Accepted one meaning: recorded but not yet in a mailbox. B adds a locked write to every durable receive and changes both golden lines.",
-        "gains": [
-          "No runtime change and no extra write per receive.",
-          "Accepted keeps one meaning.",
-          "The golden's two lines agree."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B adds a locked log append to every durable receive. Its Accepted covers both a waiting retry and a message in the mailbox."
-          }
-        ],
-        "tradeoff": "Under A, golden line 1 changes from accepted to delivering. A reader who expects Accepted right after a send learns that the mailbox counts as handed over."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Compiler /mnt/jetscratch/lanes/LiveUI/t24/.chain/s1/jet with JET_TOOLCHAIN_ROOT=/mnt/jetscratch/lanes/LiveUI/t24, NO_COLOR=1. In Examples/features/tooling/service_authority, `jet run run.jet` prints first:delivering, duplicate:delivering, delivered:order, events:1, restarted:1. The .out says first:accepted. Rust: Services.rs 3127-3247 (send_durable) and ServiceAuthority.rs 1834-1878 (mark_delivered) in /mnt/jetscratch/lanes/LiveUI/ref. States: Docs/spec/reference/core-library.md, core.service, the delivery transition list.",
-      "surface": {
-        "gist": "After send_durable returns, is the delivery Accepted or Delivering?",
-        "lesson": "A durable delivery moves through states that are written to a log on disk. Accepted means the log has the message. Delivering means the worker has been handed it. Delivered means the worker committed it. A restarted program reads the log to know what to send again.",
-        "trio": {
-          "current": {
-            "note": "The golden says first:accepted; the runtime, like the Rust runtime, says first:delivering. Both say duplicate:delivering.",
-            "code": "// Today: the golden and the runtime disagree on line 1\nfirst :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"first\")\nprint(\"first:{label(^first)}\")          // golden: first:accepted, runtime: first:delivering\nduplicate :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"duplicate\")\nprint(\"duplicate:{label(^duplicate)}\")  // golden and runtime: duplicate:delivering"
-          },
-          "wild": {
-            "lang": "Temporal",
-            "note": "Temporal marks Started only when a worker takes the task, which is option B's moment.",
-            "code": "ActivityTaskScheduled  // recorded\nActivityTaskStarted    // a worker picked it up"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Delivering starts when the message enters the worker's mailbox",
-            "gist": "Delivering once it is in the mailbox.",
-            "gains": [
-              "No runtime change, and no extra write per receive.",
-              "Accepted keeps one meaning: recorded, not yet in a mailbox.",
-              "The golden's two lines agree."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "// A: Delivering starts when the message enters the worker's mailbox\nfirst :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"first\")\nfirst.status()        // Delivering: it is in the worker's mailbox\n// Accepted means recorded but not yet in a mailbox (a retry, or recovery after a restart)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Delivering starts when the worker takes the message",
-            "gist": "Accepted until the worker takes it.",
-            "gains": [
-              "Delivering means the worker really has the message."
-            ],
-            "losses": [
-              "Every durable receive adds a locked log append.",
-              "Accepted no longer tells a waiting retry from a message in the mailbox.",
-              "Golden line 2 also changes, to accepted."
-            ],
-            "proposed": {
-              "code": "// B: Delivering starts when the worker takes the message\nfirst :: &tree.send_durable(endpoint, \"order\", key: \"order-1\") ?? panic(\"first\")\nfirst.status()        // Accepted: it waits in the mailbox\n&tree.receive(endpoint)\nfirst.status()        // Delivering: the worker has it"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A keeps the runtime and the Rust behaviour it ports, and gives Accepted one meaning: recorded but not yet in a mailbox. B adds a locked write to every durable receive and changes both golden lines.",
-          "gains": [
-            "No runtime change and no extra write per receive.",
-            "Accepted keeps one meaning.",
-            "The golden's two lines agree."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B adds a locked log append to every durable receive. Its Accepted covers both a waiting retry and a message in the mailbox."
-            }
-          ],
-          "tradeoff": "Under A, golden line 1 changes from accepted to delivering. A reader who expects Accepted right after a send learns that the mailbox counts as handed over."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "A send's status no longer reads Accepted, which a reader may expect from the word.",
-          "attempts": [
-            "Return the status from before the mailbox step: rejected, status reads the log, and the log already says Delivering.",
-            "A new state between Accepted and Delivering: rejected, it adds a state that no caller acts on."
-          ],
-          "result": "The core-library state list already orders Accepted before Delivering. A makes the mailbox step the handover, and says so in one spec sentence."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-31T01:58:10.220Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-31"
     },
@@ -153170,8 +152766,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T15:49:11.804Z"
+      "status": "ratified",
+      "created": "2026-11-04T15:49:11.804Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     },
     {
       "id": "D-TASK-WINDOW1",
@@ -153952,8 +153550,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T18:22:22.906Z"
+      "status": "ratified",
+      "created": "2026-11-04T18:22:22.906Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     },
     {
       "id": "D-REFLECT-TYPEINFO1",
@@ -156567,6 +156167,28 @@
       "status": "open",
       "answer": "",
       "created": "2026-11-04T19:54:19.983Z"
+    },
+    {
+      "id": "q1vmvgyo",
+      "cardId": "c09kjhit",
+      "decisionId": "D-EFFTYPE-MODVALUE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "an even deeper extension of this idea, since markers and effects, etc  are all structs now (or at least planned), why not modules and packages? technically considered as structs? see what Im going for?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-04T19:56:49.737Z"
+    },
+    {
+      "id": "q203be9m",
+      "cardId": "c0yfcz0w",
+      "decisionId": "D-REFLECT-EDIT1",
+      "by": "owner",
+      "kind": "question",
+      "text": "A seems WAY worse than B from an ability to reason about code perspective, why the hell would I choose A over B other than the fact that B conflicts with a ratified rule? if it is a way better solution, then tell me so I can reconsider a potentially wrong earlier determination. Update accordingly",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-04T20:00:16.801Z"
     }
   ],
   "ideas": [
@@ -157423,6 +157045,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T20:05:26.088Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#14 D-WRITE-TAKE1 A (ratified 2026-11-04): core.mem has swap<T> "
+    },
+    {
+      "at": "2026-11-04T20:05:25.268Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#24 D-DIAG-HEADER1 A (ratified 2026-11-04): every diagnostic's h"
+    },
+    {
+      "at": "2026-11-04T20:00:16.801Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q203be9m",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T19:57:22.682Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-DIAG-HEADER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T19:57:22.682Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WRITE-TAKE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T19:56:49.737Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q1vmvgyo",
+      "note": ""
+    },
     {
       "at": "2026-11-04T19:56:38.118Z",
       "by": "Main",
