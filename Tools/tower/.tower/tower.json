@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6563,
-    "rev": 90143,
+    "nextNum": 6565,
+    "rev": 90175,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -33947,8 +33947,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-04T15:56:35.132Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-04T16:42:51.645Z",
+      "updatedBy": "owner",
       "goals": []
     },
     {
@@ -54738,6 +54738,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04: jet-env may stay a bash bootstrap only temporarily, for machines without jet. With a jet binary present every tool runs through jet directly, and the environment setup moves into jet as Jet replaces Nix (#6564 c6)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04: executed together with #6564 (fresh-clone hand-off). The lander, chain, suite, ballot validator and preflight move from out-of-repo .sh/.mjs straight into Tools/ as Jet programs."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "OWNER 2026-10-30 (verbatim): 'Javascript that runs in the browser is fine so long as we definitely plan to and will generate jets web backend from jet. Tools is in scope right now for perf gauntlet and tower. Rebuilding tower in jet rather than TS/JS will be the goal as a stress test for jet as a web domain language. the agent tooling should be converted to jet while ensuring that jet supports the needed functionality and builds it properly, cohesively and idiomatically where needed.' Browser JS generation is #5201's new criterion; the Tower rebuild has its own card; C7-C9 added here."
@@ -54880,7 +54890,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-10-31T08:45:40.683Z",
+      "updated": "2026-11-04T16:48:30.239Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -62343,6 +62353,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T15:49:25.979Z"
+        },
+        {
+          "n": 10,
+          "text": "(S1, I1 soundness) A refill write 'self.r = next(^self.r)' on a &self receiver, where next can stop (panic), never closes the moved value twice. Today both the callee frame and the caller's owner close it: probe /mnt/jetscratch/lanes/Main/prep/bal2/p/stop_refill.jet prints 'close a' twice before E3001 on -O0 and -O1 (refill-move path, Checking.jet:583-584). Rule: while a write place is empty, nothing that can stop may consume the moved value; sema rejects it or the place is refilled before any stop. The probe becomes a tests/cases case that closes once on O0/O1/O2, and the 8 repo sites of 'x.f = g(^x.f)' (CheckProgram.jet:5580/5581/6385/6529/7346, Host.jet:2553, Review.jet:282, Loops.jet:177) check clean or are migrated.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:53:26.337Z"
         }
       ],
       "refs": [
@@ -62356,7 +62375,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-04T15:49:25.979Z",
+      "updated": "2026-11-04T17:04:09.315Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -64306,6 +64325,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Defect found 2026-11-04 (Prep, /mnt/jetscratch/lanes/Main/prep/mv/m12b.jet): the ratified D-META-REFLECT2 ballot code '@FUNCTION(advance)?' is stale. A bare ? is E-ERR-PROPAGATE and @FUNCTION is E0102; the current reflection surface is T.reflect() and reflect.of(x). Any spec or example copying it must use the current surface."
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Merged #6137 \"Effects on types: library-defined effects built on kernel effects\" into this card (effects on types); its 8 open item(s) are carried as \"(was #6137)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
@@ -64762,6 +64786,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T15:56:39.411Z"
+        },
+        {
+          "n": 45,
+          "text": "(Defect, found 2026-11-04 on 52d3e9cf79; holds under every D-EFFTYPE-MODVALUE1 option) A generic module's #FX cap is checked. Today '#FX(!IO) module quiet<T>(...)' with a direct print passes (probe /mnt/jetscratch/lanes/Main/prep/mv/m3g_ctrl_gen.jet), while the same cap on a plain module is E0749 (m3f_ctrl). The cap also bounds what a module argument does inside the instance (m3c_cap). Each has a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:13:27.315Z"
+        },
+        {
+          "n": 46,
+          "text": "(Defect, found 2026-11-04; holds under every option) Diagnostics name source paths, not mangled symbols. E3401 today says '__jet_shouty_dbill calls the impure function __jet_loud_dtotal' (/mnt/jetscratch/lanes/Main/prep/mv/m3e_pure.jet). For billing<Int>, the error is reported at the instance line and names the missing function, not 'Nothing named R' in the template body (m3d). Each has a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:13:27.763Z"
+        },
+        {
+          "n": 47,
+          "text": "(Defect, found 2026-11-04) Module arguments to generic modules (billing<pricing>, /mnt/jetscratch/lanes/Main/prep/mv/m3b.jet) run today, but no decision admits them; D-GENMOD-VALUE1 admits only types and Tier-0 values. After D-EFFTYPE-MODVALUE1 is ratified they are either admitted per its outcome, with a case, or refused with a registered diagnostic and a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:13:28.261Z"
         }
       ],
       "refs": [],
@@ -64770,7 +64821,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-04T15:56:39.411Z",
+      "updated": "2026-11-04T17:13:28.747Z",
       "updatedBy": "Main"
     },
     {
@@ -71886,6 +71937,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "Recovered 2026-11-04 from session transcripts (table ~/.cache/jet-dev/recovered/6442.md; patches restored to /mnt/jetscratch/lanes/BugSweep/ and ~/.cache/jet-dev/recovered/patches/). BugSweep 15n, 18, 19, 20, 21 and 23 are rebuilt and byte-size-verified against the lane's own listing; all apply on df84747616. Against dev 45280941cf: 21 and 23 apply clean, not landed. 15n: only the WhyCommand.jet part is left (patches/BugSweep/head/BugSweep-15n.patch); its ReportJSON.jet part is superseded by CardClose-32. 18 (5/7 files), 19 (Loader use list) and 20 (Items.jet) need a hand rebase. BS22 is superseded by GoldC-56 c81961f6fd (#6434). ToolsJet SHORTROOTS is rebuilt but likely superseded by 7c67280960; confirm. The Foundation fails are superseded by CardClose-32 (92/92). The Engine rerun is unblocked (#6441's case is in UiGreen-35). Never written, so nothing to recover: the @nixpkgs hints, the Engine rerun and the BuildHTTPTransport loopback port (still missing at HEAD, tests.tsv:2146). Next: commit the patches into the repo under #6563 c2, then land 21, 23 and 15n and rebase 18, 19 and 20."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "Main 2026-11-04: the /mnt/jetscratch cleanup deleted lanes/BugSweep and lanes/ToolsJet, including HELD.md and their unverified patches, before I checked open cards for scratch references. That was my error. ext4 has no snapshots, so the patches are not recoverable. The rows listed in this card's body (BS15n, BS18-BS23, the @nixpkgs hint texts; SHORTROOTS, the Engine rerun, 3 Foundation runtime fails, the JetDriver loopback test port) are redone from those descriptions, or closed with a reason on their own card. The criterion stands."
         }
       ],
@@ -71906,7 +71962,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T12:35:05.769Z",
-      "updated": "2026-11-04T16:18:31.842Z",
+      "updated": "2026-11-04T16:45:11.093Z",
       "updatedBy": "Main"
     },
     {
@@ -75848,6 +75904,175 @@
       "created": "2026-11-04T12:34:11.861Z",
       "updated": "2026-11-04T14:02:08.399Z",
       "updatedBy": "owner"
+    },
+    {
+      "id": "c0n8pmxe",
+      "num": 6563,
+      "title": "Every closed card is durable: no work lives only on the scratch disk",
+      "body": "On 2026-11-04 Main's /mnt/jetscratch cleanup deleted lane work that open cards still cited (for example #6442's held patches). A closed card or met criterion is a promise that its change is on dev or master. Evidence that names only a scratch path, ~/.cache, /tmp or a commit outside dev/master/rust breaks that promise, and card merges carry such evidence forward unchecked. Owner order: durable work lives in the repo, and only throwaway output stays on disk.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "1) Audit every done card and met criterion, live and archived (audit-closures.mjs): DURABLE, SHA-NOT-IN-BRANCHES, SCRATCH-ONLY, NO-COMMIT. 2) Re-verify each non-durable code closure against dev content, and reopen any whose change is absent, with the reason. 3) Move durable out-of-repo work into the repo: unlanded patches under Tools/tower/held/<card>/ (base commit, state, next step), research and proposals into Docs/research and Docs/proposals, ballot drafts into Tower. 4) Tower refuses card close and criterion meet unless the evidence names a commit reachable from dev or master; scratch-only evidence is rejected. 5) Commit the board to master regularly.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The closure audit covers every done card and met criterion (live and archived). Each row is DURABLE, re-verified against dev content with the commit recorded, or reopened with its reason. The audit TSV is committed under Docs/audits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:33:48.413Z"
+        },
+        {
+          "n": 2,
+          "text": "Every unlanded patch that an open card depends on (including the #6442 held rows and all recovered lane patches) is either landed on dev or committed under Tools/tower/held/<card>/ with its base commit, state and next step, and the card cites the repo path. No open card cites a /mnt/jetscratch, ~/.cache or /tmp path as the only home of work.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:33:48.852Z"
+        },
+        {
+          "n": 3,
+          "text": "tower card criteria --meet and a card move to done fail with a registered error when the evidence names no commit reachable from dev or master (decision-only and duplicate closures declare their kind). A test proves both the refusal and the pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed d7579e3d72 (on dev and master 0aa0e392b8). Tools/tower/test/durable-evidence.test.mjs passes 8/8 (meet, verify and done refuse evidence with no commit on dev/master; non-code kinds declared; CLI E_EVIDENCE). The full Tower suite passes (423 tests, 422 pass, 0 fail). Main ran both in the master checkout.",
+          "at": "2026-11-04T16:55:42.387Z"
+        },
+        {
+          "n": 4,
+          "text": "Tools/tower/.tower/tower.json and history.json are committed whenever an agent finishes a card operation batch: a check shows the committed board within one batch of the working copy.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 0aa0e392b8 (dev = master). 'tower board commit/check' plus an auto-commit of tower.json and history.json to master every 25 writes; owner-scratch.md is never committed. test/board-commit.test.mjs passes 4/4. Live check: 'OK committed board rev 90143 at master 0aa0e392b8; working copy rev 90166: 23 writes behind (batch 25)'.",
+          "at": "2026-11-04T16:55:42.781Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T16:33:47.956Z",
+      "updated": "2026-11-04T16:55:42.782Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0rdxo6y",
+      "num": 6564,
+      "title": "Hand-off anywhere: a fresh clone is enough for any agent to continue work",
+      "body": "Owner order 2026-11-04: work must be able to move to another machine or a remote/cloud agent at once. Today, landing, building, suites, ballots and preflight depend on files outside the repo: the lander and queue (lanes/Main/q.mjs, stackcheck.sh, pareto-approved.txt, /tmp/tdev), the chain (chain.sh, chain-lib.mjs, build-slot.sh, publish-base.sh, publish-latest.sh, SeedRotate/norust.sh, gsel.mjs), the suites (q/sg/suite.sh, TestGreen/tk-build.sh), the ballot validator (lanes/Main/ballots/validate.mjs), the preflight (~/.cache/jet-dev/scratch/Main/preflight.mjs), ~/.cache/jet-dev/cheap.sh, and the admitted compilers in /mnt/jetscratch/discovery/base. Repo files also hard-code machine paths (Compiler/JetRuntime/Tests/check-runtime.mjs, CryptoEd25519SignatureFixtures.json, AGENTS.md, skills).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "1) Inventory every out-of-repo script, config and path that agent work relies on (briefs, skills, AGENTS.md, Tools, lane scripts). 2) Port each into Tools/ (agent/, ci/ and so on), with roots taken from environment variables (JET_SCRATCH_ROOT, JET_TARGET_ROOT, JET_SEED) and machine defaults set only in jet-env. 3) Make the seed path explicit: a fresh clone names where its admitted compiler comes from (D-SEED-DIST1), plus a bootstrap doc. 4) Prove it: a fresh clone in a new HOME with a new scratch root runs jet-env, builds, runs one suite slice, lands a trivial patch and runs the ballot validator.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04 on c6: environment setup may belong to Jetpack rather than the jet compiler; the line is blurry. Read c6 as: with a Jet toolchain present (jet + Jetpack), the environment comes from it, not Nix. Which component owns it follows the existing Jetpack environment work (D-DEPS-ENV1; #5969)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner answers 2026-11-04: (a) seeds are GitHub releases of each valid, proven latest compiler; (b) scrub personal info, no allowlist; (c) jet-env bash is temporary only; with jet present, jet is the environment, and Jet replaces Nix over time. Added as criteria c4-c6."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Handoff from the stopped Infra agent (2026-11-04). Inventory: Docs/audits/2026-11-04-handoff-inventory.md (70 rows: 47 external paths + 23 committed hard-code groups, ~270 files), queued as land job 1793810639-Infra. Working clone: ~/.cache/jet-dev/scratch/Infra/work (delivers patches through q.mjs, because the dev worktree is the lander's tree). Proposed: (1) preflight.mjs, preflight-gate.mjs and prepare-sharded-chain.mjs are dead Rust-era stage0 tooling (last receipt Oct 21): retire to held/, and AGENTS.md's preflight becomes Land.jet census + Chain.jet --dry-run. (2) One ballot gate, a read-only 'tower decision validate FILE' in Tower; both validate.mjs files retire. (3) cheap.sh is replaced by lane-check.sh slots. (4) Root variables with defaults only in jet-env: JET_STATE_ROOT, JET_SCRATCH_ROOT, JET_RUN_ROOT (default /tmp/tdev here), JET_BASE_ROOT, JET_TARGET_ROOT, JET_SEEDS/JET_SEED, JET_DEV_WORKTREE, JET_PACK_MUSL_LIB. (5) The only Core gap so far is #5072 c2 (worker pool); it blocks parallel prescreen and the sharded suite, which run serially until then. Open owner questions: (a) where the D-SEED-DIST1 seed is published (fetch command for the bootstrap doc); (b) leave recorded evidence paths (Tower json, agent-eval transcripts, gauntlet evidence json, proposal quotes) as written and allowlist them in the lane-check guard; (c) jet-env must stay a bash bootstrap (it enters the Nix shell that provides jet), which amends #5072 c9."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04: goes hand in hand with #5072 (Jet for all repo scripting). Tooling brought into the repo arrives as Jet programs in one cutover, per #5072 c9. A missing Core capability is built in Core as a #5072 gap."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An inventory lists every out-of-repo dependency of agent work, each mapped to its repo home or marked as rebuildable output. It is committed under Docs/audits.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed e837b797e7: Docs/audits/2026-11-04-handoff-inventory.md, 70 rows (47 out-of-repo paths, each with user, kind, Jet repo home and root variable; 23 committed hard-code groups, ~270 files) plus the Core gap table (#5072 c2). Main checked it covers the live lander (lander.sh, batch-land, prescreen, precommit, census-snap, unstick, publish-*, release-train), /tmp/tdev state, the chain (chain-lib, trapscan, build-slot, norust, gsel), the seeds, suite.sh, tk-build.sh and the ballot validator. Its evidence allowlist is superseded by c5 (owner: scrub, no allowlist).",
+          "at": "2026-11-04T16:55:55.950Z"
+        },
+        {
+          "n": 2,
+          "text": "The lander, chain, suite, ballot validator and preflight live under Tools/. No file outside Docs/audits and Docs/research hard-codes /mnt/jetscratch, ~/.cache/jet-dev or /tmp/tdev; a guard in Tools/agent/lane-check.sh fails on new ones.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:33:51.328Z"
+        },
+        {
+          "n": 3,
+          "text": "From a fresh clone with an empty HOME and scratch root (only a seed compiler supplied), one documented command sequence builds the compiler, runs a named suite slice, lands a patch on a scratch copy of dev and validates a ballot. The transcript of that run is the evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:33:51.778Z"
+        },
+        {
+          "n": 4,
+          "text": "Owner 2026-11-04 (a): every valid, proven latest compiler is published as a GitHub release, with its binary, IDENTITY and checksums as assets, by the same step that admits it. The bootstrap doc fetches the latest release with one command, and the fresh-clone proof uses that fetch, not a local copy. Shares the release path with #5950.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:48:28.735Z"
+        },
+        {
+          "n": 5,
+          "text": "Owner 2026-11-04 (b): no personal information in committed files. Home paths, usernames, host names, personal emails and machine-specific mounts in evidence, docs, fixtures and the Tower board are scrubbed to neutral placeholders ($HOME, $JET_SCRATCH_ROOT and similar) without changing their meaning. A Tools/agent/lane-check.sh guard fails on new ones, with no allowlist for recorded evidence. Rewriting already-published git history is a separate owner decision and is not done here.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:48:29.106Z"
+        },
+        {
+          "n": 6,
+          "text": "Owner 2026-11-04 (c): with a jet binary on PATH, every repo tool, gate and suite runs through jet directly, with no Nix and no jet-env. Tools/agent/jet-env stays only as the temporary bootstrap for a machine that has no jet yet, and its environment setup moves into jet itself as Jet replaces Nix (#3402, #6071).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T16:48:29.471Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T16:33:50.383Z",
+      "updated": "2026-11-04T16:55:55.950Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -152384,154 +152609,142 @@
       "id": "D-WRITE-TAKE1",
       "cardId": "c0r02x8n",
       "group": "other",
-      "title": "Can a function take a value out of a place it may write, and refill it?",
-      "situation": "A function that receives a place with & may change it, but today it cannot move the value out of it, even when the next line puts a new value back. So swapping two lists, or taking an optional field and leaving None, must copy the value first. The program is safe as long as nothing can see the empty place before it is refilled. The vote decides whether Jet lets the move happen, and how.",
-      "gist": "May a function move a value out of a place it can write, if it refills the place right away?",
-      "lesson": "A parameter marked & lends the caller's place to the function, which may change it. The caller still owns it. ^x moves a value: the old place has nothing left. Today ^ on a & parameter, or on one of its fields, is refused with E0201 unless it is a call argument.",
+      "title": "How should Jet offer both ways to take a value out of a place it writes?",
+      "situation": "Both of your answers are kept. The old manual option is now the manual form, and the old call option is now the beginner form. The new A and B only decide where the calls live. This revision makes the two forms one mechanism with two spellings. The beginner calls are written with the manual form, and one rule checks both. Only one choice is left: whether the beginner calls need an import.",
+      "gist": "Should swap and replace work with no import, or only after use core.mem?",
+      "lesson": "A parameter marked & lends the caller's place to the function, which may change it; the caller still owns it. ^x moves a value, leaving the old place empty. swap(&a, &b) exchanges two places, and replace(&place, value) puts in a new value and returns the old one.",
       "explainer": "",
-      "story": "Mia writes a deque with front and back lists and wants swap(&d.front, &d.back) without copying either list. She also wants pop_all(&self) to hand back the head list and leave None behind. Both are refused today, and the fix text tells her to copy.",
-      "inWild": "Compiler/JetSema/Source/Sema/Expressions/Places.jet:193-199 refuses ^ on every read or write parameter at a binding.\nCompiler/JetSema/Source/Sema/Calls/Checking.jet:583-590 lets a call argument ^self.head on a & receiver through and copies it unless a refill is proven.\nRust: std::mem::swap(&mut a, &mut b), std::mem::take(&mut self.head), Option::take.",
-      "detail": "WHAT IS ALREADY RATIFIED\n\nAn explicit ^ is an exact move and never lowers to a copy. A & parameter is a write window: the caller keeps ownership. A stop (panic) runs the lexical Close and deferred cleanup of every frame on the way out, so a place left empty across a stop would be cleaned up while empty.\n\n```jet\nfn swap(a: &[Int], b: &[Int]) {\n    t :: a.copy()   // today: copy, because ^a is E0201\n    a = b.copy()\n    b = t\n}\n```\n\nTHE QUESTION\n\nShould ^ on a & place be allowed when the function puts a value back, and what must happen between the move and the refill?",
+      "story": "Mia is new to Jet and writes swap(&d.front, &d.back) and replace(&self.head, None). Her teammate Raj writes the same moves by hand in a hot loop. Both compile to the same moves, and neither copies a list.",
+      "inWild": "Compiler/JetSema/Source/Sema/Expressions/Places.jet:193-199 refuses ^ on every read or write parameter at a binding (E0201).\nCompiler/JetSema/Source/Sema/Calls/Checking.jet:583-584 lets a write parameter's field move into a call whose result refills it. That path closes the value twice when the call stops (probe stop_refill.jet).\nCompiler/JetCli/Source/Cli/AdaptiveTable.jet:103-107 already refills before anything that may stop, by hand, on a local.\nDocs/spec/spec.md:1534-1535: Cell.replace(value) returns the old value, the spelling replace follows.\nRust: std::mem::swap, std::mem::replace, Option::take; the take_mut crate aborts the process on a panic inside the gap.",
+      "detail": "WHAT IS ALREADY RATIFIED\n\nThe mark ^place is the exact move, and any later use of the moved place is E0121. The same mark on borrowed storage is E0201 (D-COPY-DEFAULT1 A). &place is the exclusive write window, and the caller keeps ownership (D-SHAPE-PLACE1 A). The mark sits on the place, as in swap(&d.front, &d.back) and &s.pop_all() (D-CAP-RECEIVER1 D).\n\nA stop runs the cleanup of every frame it leaves (D-FAIL-EXIT1). A function can deny Panic with -[!Panic]> (D-NOPANIC1 D). A task's join can report that the task stopped, so code after the group still runs (D-TASK-WINDOW1 A).\n\n```jet\nstruct Deque {\n    front: [Int]\n    back: [Int]\n}\n\nfn flip(d: &Deque) {\n    t :: d.front.copy()      // today: a copy, because ^d.front is E0201\n    d.front = d.back.copy()\n    d.back = t\n}\n\nfn run() {\n    d := Deque{front: [1], back: [2, 3]}\n    flip(&d)\n    print(d.front.len())\n}\n```\n\nTHE OWNER'S ANSWER\n\nBoth forms are valid. The call is the beginner form, and the move and refill written out is the manual form.\n\nONE MECHANISM, TWO SPELLINGS\n\ncore.mem gains swap(&a, &b) and replace(&place, value), which returns the old value. Both are ordinary Jet functions whose bodies use the manual form, so a call and the hand-written moves are the same moves. The compiler checks one rule, for both.\n\n```jet\n// In Core (core.mem): the beginner calls are written with the manual form.\nfn swap<T>(a: &T, b: &T) -[!Panic]> {\n    t :: ^a\n    a = ^b\n    b = ^t\n}\n\nfn replace<T>(place: &T, value: ^T) -[!Panic]> T {\n    old :: ^place\n    place = ^value\n    old\n}\n```\n\nTHE RULE FOR THE MANUAL FORM\n\n^ on a & parameter, a field below one, or a named write window opens a gap. The function must put a value back before anything can see the gap. Inside the gap, a read of the place is E0121, as today.\n\nA return, break, next, ? or ?? exit inside the gap is E0201 at the exit, with a note at the move. Both arms of an if or match must refill, or neither. A loop body closes its own gap in the same pass.\n\nSTOPS INSIDE THE GAP\n\nA stop is a panic, a trap, or a cancellation at a wait. If one comes while the moved value is still whole in a local, the stop path moves it back first. Then the cleanup and any defer run, so the caller finds a whole value.\n\nIf the moved value is no longer whole in a local when something can stop, nothing is left to put back. That is E0201 at that point, as at a call that takes the value with ^. The fix offers two ways out. One is to put a stand-in first, as in old :: replace(&self.conn, .Idle). The other is to mark the callee -[!Panic]> with no wait in it.\n\nWHAT EACH FORM GUARANTEES\n\nThe call never leaves a place empty. The manual form copies nothing, and the compiler proves every exit is refilled. After a stop, the caller always holds a whole value.\n\nTHE BEGINNER FORM IS THE DEFAULT\n\nThe tour and jet explain E0201 teach the calls first. When the manual form is refused, the fix rewrites it to swap or replace. The manual form needs no opt-in line. The ^ mark is the explicit opt-in, at the exact place, as D-COPY-DEFAULT1 defines it. A gate would refuse a safe program, and the owner's #6066 direction says only #Unsafe opts out.\n\nPLACES THAT MIGHT OVERLAP\n\nswap needs two places that cannot be one place. Two fields, two locals, or two fixed list positions such as rows[0] and rows[1] work today. The same place twice, two list positions picked at run time, or two map keys are E0204.\n\nThe way out is the list's or map's own swap, which this ballot adds: &rows.swap(i, j) and &m.swap(a, b). They check at run time, and the same position twice does nothing. The E0204 fix writes that call. Lists have no swap method today (E0311).\n\nPINNED PLACES\n\nWhile a pin into node is live, swap(&node, &other) is E0220, and the fix says to go through the pin. A Pin<Node> is not a Node, so swap(&pinned, &other) is E0112. Fields still swap through a pin, as in swap(&pinned.payload, &other.payload), because the address stays put. The manual form ^node beside a live pin stays E0219. The rule changes none of these.\n\nWHY NOT METHODS\n\nA value method a.swap(&b) would have to exist on every type. A replace method would clash with the replace that String, Regex, LocalDate and Cell already have. Free functions keep one meaning per name.\n\nA BUG THIS RULE FIXES\n\nToday self.r = next(^self.r) on &self is accepted. If next stops, the value is closed twice (probe stop_refill.jet prints \"close a\" twice on O0 and O1; #6066 c10). The gap rule refuses it unless next cannot stop. A repo scan finds 8 sites of that shape to check.\n\nCOST\n\nThe normal path is unchanged: a call is the same moves, and at O0 it is one call. Only stop paths inside a gap gain a move back. Existing programs keep compiling, except the 8 sites above if their callee can stop.\n\nTHE QUESTION\n\nShould the beginner calls work with no import, as swap and replace, or only after use core.mem, as mem.swap and mem.replace?",
       "options": [
         {
           "key": "A",
-          "name": "Move, then refill before anything can see the hole",
-          "detail": "^ on a & parameter or one of its fields is an exact move when the same block refills the place first. The refill must come before any read of it, any return, and any call or operation that can stop. Otherwise it stays E0201, with a fix that names the missing refill. Callers do not change.",
-          "technical": "Sema records the moved write place in the moved-place state that already gives E0121. A read before the refill is E0121. The block's statements between the move and the refill may only bind, move and assign values built without calls that can fail or stop. A return, break, next or stop-capable expression while the place is empty is E0201 at the move with a note at the exit. IR moves the value and clears no caller flag, because the place is full again before control can leave.",
-          "code": "// A: take out, put back, no copy\nfn swap(a: &[Int], b: &[Int]) {\n    t :: ^a\n    a = ^b\n    b = t\n}\n\nimpl Stack {\n    fn pop_all(&self) -> [Int]? {\n        old :: ^self.head\n        self.head = None\n        old\n    }\n}\n\nfn run() {\n    front := [1]\n    back := [2, 3]\n    swap(&front, &back)\n    print(front.len())\n}"
+          "name": "swap and replace need no import",
+          "detail": "Both forms are valid. The beginner calls swap(&a, &b) and replace(&place, value) are ambient, with no import. They live in core.mem and the prelude names them, as it names read_file and channel. A user function named swap or replace still wins, so existing code keeps compiling.",
+          "technical": "core.mem gains swap<T> and replace<T>, both -[!Panic]>, with the manual form as their bodies. The prelude adds pub use core.mem.[swap, replace], two names on the closed list of D-PRELUDE-LAW1. #NoPrelude files write mem.swap after use core.mem. List and Map gain swap(i, j) and swap(a, b) as Core methods.\n\nSema tracks each gap in the moved-place state behind E0121. An exit inside a gap is E0201, and so is handing the value to a call that can stop. Each E0201 fix offers swap or replace. IR gives every stop path inside a gap a move back from the local that holds the value.",
+          "code": "// A: the calls need no import\nstruct Deque {\n    front: [Int]\n    back: [Int]\n}\n\nstruct Stack {\n    head: [Int]?\n}\n\nimpl Stack {\n    // Beginner form: one call, the place is never empty.\n    fn pop_all(&self) -> [Int]? {\n        replace(&self.head, None)\n    }\n\n    // Manual form: the same moves, written out.\n    fn pop_all_by_hand(&self) -> [Int]? {\n        old :: ^self.head\n        self.head = None\n        old\n    }\n}\n\nfn flip(d: &Deque) {\n    swap(&d.front, &d.back)\n}\n\nfn flip_by_hand(d: &Deque) {\n    t :: ^d.front\n    d.front = ^d.back\n    d.back = ^t\n}\n\nenum Conn {\n    Idle\n    Open(buf: [U8])\n}\n\n// next may stop (it is not marked -[!Panic]>).\nfn next(c: ^Conn) -> Conn {\n    if ^c == {\n        .Idle -> .Open(buf: [U8]{})\n        .Open(buf) -> .Idle\n    }\n}\n\nstruct Client {\n    conn: Conn\n}\n\nimpl Client {\n    fn step(&self) {\n        // The place holds a stand-in while next runs.\n        old :: replace(&self.conn, .Idle)\n        self.conn = next(^old)\n        // By hand, self.conn = next(^self.conn) is refused:\n        // a stop inside next would leave the caller an empty place.\n    }\n}\n\n// The caller's side is the same for both forms.\nfn run() {\n    d := Deque{front: [1], back: [2, 3]}\n    flip(&d)\n    flip_by_hand(&d)\n    print(d.front.len())\n    s := Stack{head: Val([1, 2])}\n    got :: &s.pop_all()\n    print((got ?? [Int]{}).len())\n    rows := [[1], [2, 3]]\n    was :: replace(&rows[1], [4, 5, 6])\n    print(was.len())\n    // Two positions picked at run time go to the list's own swap.\n    &rows.swap(0, 1)\n    c := Client{conn: .Idle}\n    &c.step()\n}"
         },
         {
           "key": "B",
-          "name": "Library calls swap and replace",
-          "detail": "^ on a & place stays E0201. core.mem gains swap(&a, &b) and replace(&place, value) -> T, which exchange the values in one step, so there is never an empty place. Code that moves and refills must be rewritten to these calls.",
-          "technical": "Two Core functions with write parameters, lowered as a header exchange. E0201's fix names mem.replace. No new sema state.",
-          "code": "// B: one call does the exchange\nuse core.mem\n\nfn swap(a: &[Int], b: &[Int]) {\n    mem.swap(&a, &b)\n}\n\nimpl Stack {\n    fn pop_all(&self) -> [Int]? {\n        mem.replace(&self.head, None)\n    }\n}"
-        },
-        {
-          "key": "C",
-          "name": "Keep copying",
-          "detail": "No change. A function that needs the value copies it with .copy().",
-          "technical": "No change.",
-          "code": "// C: today's form\nfn swap(a: &[Int], b: &[Int]) {\n    t :: a.copy()\n    a = b.copy()\n    b = t\n}"
+          "name": "swap and replace come from use core.mem",
+          "detail": "Both forms are valid, with the same rule and the same guarantees as A. The beginner calls are written mem.swap and mem.replace after use core.mem. The prelude does not change. The E0201 fix adds the import line when it is missing.",
+          "technical": "As A, without the prelude alias. core.mem is also the module behind the low-level rung, so the import puts a beginner one line from Ptr and the allocators. Ptr and the allocators still need #Unsafe for their operations (E3101).",
+          "code": "// B: the calls are imported from core.mem\nuse core.mem\n\nstruct Deque {\n    front: [Int]\n    back: [Int]\n}\n\nstruct Stack {\n    head: [Int]?\n}\n\nimpl Stack {\n    // Beginner form: one call, the place is never empty.\n    fn pop_all(&self) -> [Int]? {\n        mem.replace(&self.head, None)\n    }\n\n    // Manual form: the same moves, written out.\n    fn pop_all_by_hand(&self) -> [Int]? {\n        old :: ^self.head\n        self.head = None\n        old\n    }\n}\n\nfn flip(d: &Deque) {\n    mem.swap(&d.front, &d.back)\n}\n\nfn flip_by_hand(d: &Deque) {\n    t :: ^d.front\n    d.front = ^d.back\n    d.back = ^t\n}\n\nenum Conn {\n    Idle\n    Open(buf: [U8])\n}\n\n// next may stop (it is not marked -[!Panic]>).\nfn next(c: ^Conn) -> Conn {\n    if ^c == {\n        .Idle -> .Open(buf: [U8]{})\n        .Open(buf) -> .Idle\n    }\n}\n\nstruct Client {\n    conn: Conn\n}\n\nimpl Client {\n    fn step(&self) {\n        // The place holds a stand-in while next runs.\n        old :: mem.replace(&self.conn, .Idle)\n        self.conn = next(^old)\n        // By hand, self.conn = next(^self.conn) is refused:\n        // a stop inside next would leave the caller an empty place.\n    }\n}\n\n// The caller's side is the same for both forms.\nfn run() {\n    d := Deque{front: [1], back: [2, 3]}\n    flip(&d)\n    flip_by_hand(&d)\n    print(d.front.len())\n    s := Stack{head: Val([1, 2])}\n    got :: &s.pop_all()\n    print((got ?? [Int]{}).len())\n    rows := [[1], [2, 3]]\n    was :: mem.replace(&rows[1], [4, 5, 6])\n    print(was.len())\n    // Two positions picked at run time go to the list's own swap.\n    &rows.swap(0, 1)\n    c := Client{conn: .Idle}\n    &c.step()\n}"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A accepts the program people already write, with no new call to learn, and the rule that nothing may see the empty place keeps it sound across a stop. It reuses the moved-place check that already reports a use after a move.",
+        "why": "A gives the beginner form with no ceremony, which makes it the easy default. One rule checks both forms, because the calls are written with the manual form. It fixes today's double close too.",
         "gains": [
-          "swap and take patterns run without a copy.",
-          "No caller or library change; the E0201 fix points at the missing refill."
+          "A beginner swaps or takes with one call and no import, and never sees an empty place.",
+          "An expert writes the moves by hand with no copy, and the compiler proves every exit is refilled.",
+          "A stop inside a gap leaves the caller a whole value, which also fixes today's double close."
         ],
         "losses": [
           {
-            "loss": "A call between the move and the refill is refused even when it cannot really stop.",
-            "mitigation": "Move the call before the take or after the refill; the fix text says so."
+            "loss": "Two names join the ambient prelude.",
+            "mitigation": "A user function with the same name wins, so no existing program breaks. In such a file the E0201 fix writes mem.swap."
+          },
+          {
+            "loss": "Two list positions picked at run time cannot both go to swap, because they might be one place (E0204).",
+            "mitigation": "&rows.swap(i, j) checks at run time and does nothing when i equals j. The E0204 fix writes it."
+          },
+          {
+            "loss": "By hand, the moved value cannot go to a call that can stop while the place is empty.",
+            "mitigation": "This cannot be removed: the stop runs cleanup that can see the place, and nothing is left to put back. The fix writes a stand-in with replace, or the callee denies Panic."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B makes people rewrite a safe program into a library call."
-          },
-          {
-            "key": "C",
-            "reason": "C keeps a copy where nothing needs one."
+            "reason": "B makes the beginner form need an import from the low-level memory module, which works against it being the default."
           }
         ],
-        "tradeoff": "A narrow refill rule, in exchange for zero-copy takes in ordinary code."
+        "tradeoff": "Two ambient names, in exchange for a beginner form with no import beside an expert form with no copy."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main (separate from the author, Prep). Checked that a stop between the move and the refill cannot clean up an empty place: any call that can stop, a return or a read before the refill stays E0201."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Prep's draft, because the owner caps agents at three. Findings were E0204 for two elements of one list, unprobed pinned places, a stale probe compiler and the old-to-new option mapping, and all are fixed."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "May a function move a value out of a place it can write, if it refills the place right away?",
-        "lesson": "& lends a place to a function. ^ moves a value out. Today ^ on a & place is refused.",
+        "gist": "Should swap and replace work with no import, or only after use core.mem?",
+        "lesson": "& lends a place to a function. ^ moves a value out. Both forms are now valid: a call, or the moves written out.",
         "trio": {
           "current": {
             "note": "Today the value must be copied.",
-            "code": "fn swap(a: &[Int], b: &[Int]) {\n    t :: a.copy()\n    a = b.copy()\n    b = t\n}"
+            "code": "fn flip(d: &Deque) {\n    t :: d.front.copy()\n    d.front = d.back.copy()\n    d.back = t\n}"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Rust uses a library call, because a &mut place may never be empty.",
-            "code": "fn swap(a: &mut Vec<i64>, b: &mut Vec<i64>) {\n    std::mem::swap(a, b);\n}"
+            "note": "Rust offers only the calls, because a &mut place may never be empty.",
+            "code": "fn flip(d: &mut Deque) {\n    std::mem::swap(&mut d.front, &mut d.back);\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Move, then refill before anything can see the hole",
-            "gist": "^ on a & place works when the place is refilled at once.",
+            "name": "swap and replace need no import",
+            "gist": "The calls are ambient; the manual form is valid beside them.",
             "gains": [
-              "No copy, no new call."
+              "No import for the beginner form."
             ],
             "losses": [
-              "No call may sit between the move and the refill."
+              "Two new ambient names."
             ],
             "proposed": {
-              "code": "fn swap(a: &[Int], b: &[Int]) {\n    t :: ^a\n    a = ^b\n    b = t\n}"
+              "code": "fn flip(d: &Deque) {\n    swap(&d.front, &d.back)\n}\n\nfn flip_by_hand(d: &Deque) {\n    t :: ^d.front\n    d.front = ^d.back\n    d.back = ^t\n}"
             }
           },
           {
             "key": "B",
-            "name": "Library calls swap and replace",
-            "gist": "core.mem exchanges the values in one call.",
+            "name": "swap and replace come from use core.mem",
+            "gist": "The calls need use core.mem; the manual form is valid beside them.",
             "gains": [
-              "Never an empty place."
+              "The prelude does not change."
             ],
             "losses": [
-              "Safe code must be rewritten."
+              "The beginner form needs an import."
             ],
             "proposed": {
-              "code": "fn swap(a: &[Int], b: &[Int]) {\n    mem.swap(&a, &b)\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep copying",
-            "gist": "No change.",
-            "gains": [
-              "Nothing new."
-            ],
-            "losses": [
-              "A copy where none is needed."
-            ],
-            "proposed": {
-              "code": "t :: a.copy()"
+              "code": "use core.mem\n\nfn flip(d: &Deque) {\n    mem.swap(&d.front, &d.back)\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It accepts the natural program with no copy, and stays sound because nothing can see the empty place.",
+          "why": "The beginner form needs no ceremony, and one rule checks both forms.",
           "gains": [
-            "Zero-copy swap and take.",
-            "No caller change."
+            "One call, no import, never an empty place.",
+            "The manual form copies nothing."
           ],
           "losses": [
             {
-              "loss": "No call between move and refill.",
-              "mitigation": "The fix text says where to move the call."
+              "loss": "Two new ambient names.",
+              "mitigation": "A user function with the same name still wins."
+            },
+            {
+              "loss": "By hand, no call that can stop may take the moved value.",
+              "mitigation": "The fix writes a stand-in with replace."
+            },
+            {
+              "loss": "Two run-time list positions cannot both go to swap.",
+              "mitigation": "The list's own swap(i, j) checks at run time."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Rewrites safe code."
-            },
-            {
-              "key": "C",
-              "reason": "Keeps a needless copy."
+              "reason": "An import for the beginner form."
             }
           ],
-          "tradeoff": "A narrow refill rule for zero-copy takes."
+          "tradeoff": "Two ambient names for an import-free beginner form."
         }
       },
       "draft": false,
@@ -152663,8 +152876,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T15:49:12.688Z"
+      "status": "ratified",
+      "created": "2026-11-04T15:49:12.688Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     },
     {
       "id": "D-MAPSLOT-WINDOW1",
@@ -152791,8 +153006,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T15:49:13.370Z"
+      "status": "ratified",
+      "created": "2026-11-04T15:49:13.370Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     },
     {
       "id": "D-INDEX-COMPOUND1",
@@ -152949,8 +153166,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T15:49:14.024Z"
+      "status": "ratified",
+      "created": "2026-11-04T15:49:14.024Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     },
     {
       "id": "D-REFLECT-FIELDTYPE1",
@@ -153080,8 +153299,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T15:56:24.824Z"
+      "status": "ratified",
+      "created": "2026-11-04T15:56:24.824Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     }
   ],
   "questions": [
@@ -154791,6 +155012,30 @@
       "created": "2026-11-04T14:01:10.666Z",
       "answeredAt": "2026-11-04",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q0ckxpnq",
+      "cardId": "c0r02x8n",
+      "decisionId": "D-WRITE-TAKE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I think both a & b should be valid. a is the more manual version, b is the beginner friendly safer version. update accordingly",
+      "status": "answered",
+      "answer": "Both answers are kept. Your manual option is now the manual form, your call option is now the beginner form, and one rule checks both; the new A and B only decide whether swap and replace need 'use core.mem'. The ballot also adds List.swap(i, j) and Map.swap(a, b) for two elements of one collection (two windows into one list overlap, E0204). Updated ballot posted.",
+      "created": "2026-11-04T16:40:12.602Z",
+      "answeredAt": "2026-11-04",
+      "answeredBy": "Main"
+    },
+    {
+      "id": "q1pjj5iw",
+      "cardId": "c09kjhit",
+      "decisionId": "D-EFFTYPE-MODVALUE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "modules as values/data seems to be cohesive and idiomatic with jet. please further explore that concept, update this ballot accordingly, and present the implications of that perspective",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-04T16:40:56.921Z"
     }
   ],
   "ideas": [
@@ -155647,6 +155892,251 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T17:13:28.747Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09kjhit",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T17:13:28.261Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#47 (Defect, found 2026-11-04) Module arguments to generic modul"
+    },
+    {
+      "at": "2026-11-04T17:13:27.763Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#46 (Defect, found 2026-11-04; holds under every option) Diagnos"
+    },
+    {
+      "at": "2026-11-04T17:13:27.315Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#45 (Defect, found 2026-11-04 on 52d3e9cf79; holds under every D"
+    },
+    {
+      "at": "2026-11-04T17:04:09.315Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0ckxpnq",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T17:04:08.800Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-WRITE-TAKE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-04T16:55:55.950Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rdxo6y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-04T16:55:42.782Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n8pmxe",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-04T16:55:42.387Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n8pmxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-04T16:53:26.338Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#10 (S1, I1 soundness) A refill write 'self.r = next(^self.r)' o"
+    },
+    {
+      "at": "2026-11-04T16:51:35.061Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:48:30.239Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:48:29.852Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:48:29.471Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#6 Owner 2026-11-04 (c): with a jet binary on PATH, every repo "
+    },
+    {
+      "at": "2026-11-04T16:48:29.106Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#5 Owner 2026-11-04 (b): no personal information in committed f"
+    },
+    {
+      "at": "2026-11-04T16:48:28.735Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#4 Owner 2026-11-04 (a): every valid, proven latest compiler is"
+    },
+    {
+      "at": "2026-11-04T16:45:11.094Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aqrdp0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:44:36.350Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:42:51.645Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-REFLECT-FIELDTYPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T16:42:51.645Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-INDEX-COMPOUND1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T16:42:51.645Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MAPSLOT-WINDOW1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T16:42:51.645Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TASK-WINDOW1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T16:40:56.921Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q1pjj5iw",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T16:40:12.602Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0ckxpnq",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T16:36:55.523Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:36:55.005Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T16:33:51.778Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#3 From a fresh clone with an empty HOME and scratch root (only"
+    },
+    {
+      "at": "2026-11-04T16:33:51.329Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#2 The lander, chain, suite, ballot validator and preflight liv"
+    },
+    {
+      "at": "2026-11-04T16:33:50.832Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#1 An inventory lists every out-of-repo dependency of agent wor"
+    },
+    {
+      "at": "2026-11-04T16:33:50.384Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0rdxo6y",
+      "note": "Hand-off anywhere: a fresh clone is enough for any agent to continue work"
+    },
+    {
+      "at": "2026-11-04T16:33:49.753Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0n8pmxe",
+      "note": "#4 Tools/tower/.tower/tower.json and history.json are committed"
+    },
+    {
+      "at": "2026-11-04T16:33:49.318Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0n8pmxe",
+      "note": "#3 tower card criteria --meet and a card move to done fail with"
+    },
+    {
+      "at": "2026-11-04T16:33:48.852Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0n8pmxe",
+      "note": "#2 Every unlanded patch that an open card depends on (including"
+    },
+    {
+      "at": "2026-11-04T16:33:48.413Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0n8pmxe",
+      "note": "#1 The closure audit covers every done card and met criterion ("
+    },
+    {
+      "at": "2026-11-04T16:33:47.956Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0n8pmxe",
+      "note": "Every closed card is durable: no work lives only on the scratch disk"
+    },
     {
       "at": "2026-11-04T16:18:31.842Z",
       "by": "Main",
