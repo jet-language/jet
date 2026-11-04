@@ -113,7 +113,8 @@ function classify(text, kind, critText = '') {
   if (!text.trim()) return { cls: 'REOPEN', commit: '', detail: 'no evidence text' };
   return { cls: 'REOPEN', commit: '', detail: 'evidence names no commit, repo path, decision or card: ' + text.replace(/\s+/g, ' ').slice(0, 100) };
 }
-const clip = (s) => String(s || '').replace(/[\t\n\r]+/g, ' ');
+// One line per field; home-directory paths quoted from old evidence become ~ (#6564 c5), including clipped ones.
+const clip = (s) => String(s || '').replace(/[\t\n\r]+/g, ' ').replace(/\/home\/[^/\s]*/g, '~');
 const rows = [];
 const tally = {};
 // Last resort before REOPEN: a dev/master commit whose message names this card (or the card it was merged from).
