@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6565,
-    "rev": 90301,
+    "rev": 90320,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53239,6 +53239,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Root of the slow, memory-hungry test suites (P0, G14), tracked as a criterion on #6035: R2: the compiler leaks a temporary receiver of .copy(): raw.trim().copy() leaks ~430 KB per parse of known-failing.tsv on o0, o1 and o2, and the testkit grows to 0.9-1.9 GB. The temporary is freed, with a leak test on every tier. (Also #5014.)"
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Merged #5988 \"Map: Soundness: element views, aliasing and resource copies\" into this card (memory safety: no soundness defects outside #Unsafe); its 5 open item(s) are carried as \"(was #5988)\" criteria, and its 1 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
@@ -53530,7 +53535,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-04T18:09:38.537Z",
+      "updated": "2026-11-04T18:21:30.758Z",
       "updatedBy": "Main",
       "goals": [
         "G19"
@@ -56743,6 +56748,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Root of the slow, memory-hungry test suites (P0, G14), tracked as a criterion on #6035: R3: every compile parses and checks the whole Core closure (66 units, 0.8 s and 700 MiB per call; 72% of ui CPU and 97% of golden CPU). A resident checked Core, or lazy Core modules, make a use core.math check finish under 0.2 s and 150 MiB, with one meaning on every tier. (Also #5910.)"
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Merged #4999 \"Self-hosted compiler compile speed: road to 500k LOC/s\" into this card (self-hosted compiler speed and memory); its 1 open item(s) are carried as \"(was #4999)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
@@ -57294,7 +57304,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-04T18:09:55.655Z",
+      "updated": "2026-11-04T18:21:31.570Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -61352,6 +61362,69 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T17:28:33.481Z"
+        },
+        {
+          "n": 8,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R1: jet repl keeps every turn's compile in memory (Repl.jet:338-348): 773 MiB at 1 turn grows to 5.6 GiB at 9, and suite repl cases reach 4.7-8.3 GB. Per-turn memory stays flat: 9 turns of repl_core_data_query_plans_and_typed_joins under 1 GiB, with a test. (Also #6543.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:29.560Z"
+        },
+        {
+          "n": 9,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R2: the compiler leaks a temporary receiver of .copy(): raw.trim().copy() leaks ~430 KB per parse of known-failing.tsv on o0, o1 and o2, and the testkit grows to 0.9-1.9 GB. The temporary is freed, with a leak test on every tier. (Also #5014.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:30.341Z"
+        },
+        {
+          "n": 10,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R3: every compile parses and checks the whole Core closure (66 units, 0.8 s and 700 MiB per call; 72% of ui CPU and 97% of golden CPU). A resident checked Core, or lazy Core modules, make a use core.math check finish under 0.2 s and 150 MiB, with one meaning on every tier. (Also #5910.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:31.152Z"
+        },
+        {
+          "n": 11,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R4: ~270 MiB of each Core compile is Unicode and collation table literals. They become binary assets (embed_bytes relative to Core), with identical results on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:31.977Z"
+        },
+        {
+          "n": 12,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R5: each FFI build copies the 952 MB ~/.cargo/registry to the disk TMPDIR under the shared lock (RustForeign.jet:507, 523-530), costing 45-150 s per case (4.1 s on tmpfs vs 49.7 s on disk). FFI builds need no registry copy, hold a narrow publication lock, and run sema before cargo.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:32.383Z"
+        },
+        {
+          "n": 13,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R6: every loose ui compile snapshots the whole staged tests/ui tree (2,259 files, ~0.13 s per call). Staging is per entry.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:32.777Z"
+        },
+        {
+          "n": 14,
+          "text": "Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R7, testkit: the known-failing ledger is parsed once; results stream as they finish (the OOM run left an empty log); scheduling is longest-first with a memory-weighted pool and a default resident guard of the cgroup size divided by jobs (today a flat 2 GiB, run.jet:892, with an 8 GiB guard, run.jet:849); golden runs no redundant front ends; the FFI cache persists; the default step timeout is 30-60 s with explicit limit: time= exceptions, and KNOWN-FAILING \"never answers\" rows get a short deadline.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:21:33.403Z"
         }
       ],
       "refs": [
@@ -61367,7 +61440,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-04T18:09:21.554Z",
+      "updated": "2026-11-04T18:21:33.403Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -61627,6 +61700,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T17:47:19.110Z"
+        },
+        {
+          "n": 22,
+          "text": "Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). A user marker with sites :: [.Impl] whose expand calls reject(...) never fires at any impl site (top-level, in-struct or error conversion). reject fires at every impl site, with a UI snapshot for each.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:22:47.673Z"
         }
       ],
       "refs": [
@@ -61641,7 +61723,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-04T18:09:27.691Z",
+      "updated": "2026-11-04T18:22:47.673Z",
       "updatedBy": "Main",
       "goals": [
         "G17"
@@ -68076,6 +68158,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:38:35.649Z"
+        },
+        {
+          "n": 55,
+          "text": "Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). L0104 UnusedPrivateFn fires on every error conversion and names the internal routine errconv_X_to_Y (twice on Examples/features/errors/typed_error_families.jet, and on marker_inbody/error_conversion_keeps_above_markers): sema_liveness_is_root (Sema/Liveness.jet) does not exempt compiler-generated routines. No warning on any error conversion, with a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:22:46.367Z"
+        },
+        {
+          "n": 56,
+          "text": "Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). In an error conversion body, a struct-literal tail impl A -> B { B{code: self.code} } is E0003 (\"computes a value but doesn't do anything with it\"), while return B{...} is the L0530 RedundantFinalReturn warning, so each tells the user to write the other. The tail form is accepted as the conversion's value, with a case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:22:46.812Z"
+        },
+        {
+          "n": 57,
+          "text": "Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). E-OSTARGET-UNMATCHED-CALL (OsGatedTypeUngatedUse) has no self-hosted sema emitter. It is emitted where it applies, with a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T18:22:47.220Z"
         }
       ],
       "refs": [],
@@ -68086,7 +68195,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-04T18:09:31.059Z",
+      "updated": "2026-11-04T18:22:47.220Z",
       "updatedBy": "Main"
     },
     {
@@ -74931,7 +75040,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Root of the slow, memory-hungry test suites (P0, G14), tracked as a criterion on #6035: R1: jet repl keeps every turn's compile in memory (Repl.jet:338-348): 773 MiB at 1 turn grows to 5.6 GiB at 9, and suite repl cases reach 4.7-8.3 GB. Per-turn memory stays flat: 9 turns of repl_core_data_query_plans_and_typed_joins under 1 GiB, with a test. (Also #6543.)"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -74958,7 +75073,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:11:44.323Z",
-      "updated": "2026-11-01T13:11:54.902Z",
+      "updated": "2026-11-04T18:21:29.968Z",
       "updatedBy": "Main"
     },
     {
@@ -76084,7 +76199,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Parser: in every braced declaration body, a member starting with `#` Path followed by `::` is a marker line; parse the value with the marker argument parser (plus true/false); collect them and append to the declaration's marker list after the body. Move the parser-time type-marker facts (layout, derives, SingleUse, MustUse, enum markers) to after the body. 2. Sema: refuse mixing above and inside, a wrong site, `false` where `#!X` is not allowed, and an unparenthesized Bool. Each refusal is a registered code with what/why/fix and a UI snapshot. 3. jet fix: move a declaration's whole marker set inside or above. 4. Formatter: print the lines in place; one simple argument without parentheses. 5. Registry, editor grammars, highlight guard and docs. 6. Examples with goldens on every tier.",
       "checkSteps": null,
@@ -76108,11 +76223,11 @@
         {
           "n": 1,
           "text": "`#X :: value` lines parse anywhere inside struct, enum, trait, impl, inline module, function and method bodies, and produce exactly the marker list `#X(args)` above produces; a test compares the two forms' facts and output for at least Layout, Deprecated, Codable, Debug false, MustUse and Inline.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:46:48.533Z"
+          "evidence": "Landed 76b385b498 on dev (batch 3; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. marker_inbody/impl_and_module_markers_above_and_inside PASS: in-struct #Commutative above vs inside both print 3; an in-struct #Target(OS.Linux) impl gates and runs (linux: a), was E0355; a module declaration's #Deprecated above vs inside are both E0355 at the Module site, were silently dropped.",
+          "at": "2026-11-04T18:22:45.020Z"
         },
         {
           "n": 2,
@@ -76144,11 +76259,11 @@
         {
           "n": 5,
           "text": "jet fmt keeps placement, prints one simple argument without parentheses, and is idempotent; a fmt case covers it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:46:49.048Z"
+          "evidence": "Landed 76b385b498 on dev (batch 3; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. fmt/marker_inbody_keeps_placement PASS and idempotent (formatting twice): enum marker lines stay before the variant that follows; #MustUse above a trait signature and #Inline :: true in a trait default body are printed; above-markers of an error conversion and a module declaration are printed.",
+          "at": "2026-11-04T18:22:45.484Z"
         },
         {
           "n": 6,
@@ -76162,11 +76277,11 @@
         {
           "n": 7,
           "text": "ErrorConv impls keep their above-markers (dropped today, per the batch-2 receipt at 37eae4f5d6), with a case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:46:49.612Z"
+          "evidence": "Landed 76b385b498 on dev (batch 3; receipt /mnt/jetscratch/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. marker_inbody/error_conversion_keeps_above_markers PASS: user marker Audited (sites [.Impl]) above impl FileErr -> AppErr checks and the program runs (42, converted); #Deprecated(\"old\") there is E0355 at the Impl site.",
+          "at": "2026-11-04T18:22:45.927Z"
         }
       ],
       "refs": [],
@@ -76181,8 +76296,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T12:34:11.861Z",
-      "updated": "2026-11-04T18:09:28.357Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-04T18:22:57.806Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T18:22:57.806Z"
     },
     {
       "id": "c0n8pmxe",
@@ -153658,6 +153774,235 @@
       "created": "2026-11-04T15:56:24.824Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-04"
+    },
+    {
+      "id": "D-DIAG-HEADER1",
+      "cardId": "c03pi177",
+      "group": "other",
+      "title": "What the header of Jet's own errors names: the type, the E-code, or both",
+      "situation": "Every Jet error is now a type with a name, such as jet.ValueTypeMismatch, and a code, such as E0112 (D-DECL-TYPES1 rule 13). Batch 2 (37eae4f5d6) changed the first line of every Jet report from Error [E0112] to Error [jet.ValueTypeMismatch], about 2,700 snapshot headers. The rest of the report still uses the code: the More: link, the closing jet explain hint and the JSON code field. Library errors have only a name, and print it as Error [web.BadPath] (D-MARKER-DIAG1). No decision says what the header of Jet's own errors shows. The vote decides that, and whether the link and hint follow it.",
+      "gist": "Should a Jet error's first line name the error type, its E-code, or both?",
+      "lesson": "Each Jet error has two identifiers: a stable code like E0112 and a type name like jet.ValueTypeMismatch. The first line of a report shows one of them in brackets. You write the name in #Allow(jet.FloatMoney), and jet explain accepts either. Library errors have only a name.",
+      "explainer": "",
+      "story": "Mia gets Error [jet.ValueTypeMismatch] in her build log. The More: line under it says jet-lang.dev/e/E0112 and the last line says run jet explain E0112. She wonders whether these are three different errors. Later a warning tells her to write #Allow with a name, but the warning's link shows an L-code.",
+      "inWild": "Probe /mnt/jetscratch/lanes/Main/prep/hdr/hdr.jet on 37eae4f5d6: one jet check prints Error [E1003] and Error [jet.ValueTypeMismatch] together. More: shows E1003 and E0112, and the hint says run `jet explain E1003`.\nCompiler/JetFoundation/Source/Registry/Diagnostics.jet:363-368 diagnostic_display_name: a row with a runtime stage keeps its E-code in the header. That is 24 snapshot headers, E0123, E0128 and E1003 among them, even at compile time.\nCompiler/JetFoundation/Source/Diagnostics/Render.jet:330 header; :356 More: link by code, skipped for dotted library codes.\nCompiler/JetFoundation/Source/Registry/Explain.jet:29 jet explain accepts the code, then the name; its title line prints only the code.\njet check --json: \"code\":\"E1003\" and no name field.\ntests/ui/gate_law/allow_reason_cannot_suppress_itself.jet:1 #Allow(jet.AllowReason, ...); tests/ui_lint/*.warn headers are Warning [jet.X].\nCompiler/Prelude/Diagnostics.jet:4440-4446 a lint carries a third identifier: FloatMoney has code L0504 and lint_name float_money.\nDocs/site/dist/e/: 910 E-code pages, 65 L, 3 R, 27 legacy E-SLUG pages, none by name.\nrustc: error[E0308]: mismatched types; lints print a name: #[warn(unused_variables)] on by default.\nTypeScript: error TS2322. Clippy and ESLint name the rule: clippy::needless_return, no-unused-vars. Elm heads each error with a name: -- TYPE MISMATCH --.",
+      "detail": "WHAT IS ALREADY RATIFIED\n\nD-DECL-TYPES1 A rule 13: each Jet error type keeps code :: \"E0xxx\". D-MARKER-DIAG1 A: a library error's code is its type path by default. Its header shows Error [web.BadPath], #Allow(web.TrailingSlash) silences a lint by name, and jet explain web.BadPath works. D-DIAG-URL1 B: every error ends with a More: line, written as More: jet-lang.dev/e/<CODE>. D-DIAG-LIBLINK1 A: a library error prints More: <its link> (or: jet explain <name>), or More: jet explain <name> when it has no link. Jet's own errors keep the ratified line.\n\nWHAT IS TRUE TODAY (37eae4f5d6)\n\nThe header prints the name, except for the 24 rows the runtime can also raise, which print the code; one run can mix both. More:, the closing hint and JSON code all use the E-code. JSON has no name field, so a tool that reads JSON cannot write the #Allow name without calling jet explain. Names and codes are one to one: 1,006 rows give 1,006 codes and as many names. A name is about 23 characters long with jet. (36 at most); a code is 5.\n\nWHAT EACH OPTION COSTS IN SNAPSHOTS\n\nA: about 2,800 More: lines and 41 hints change, plus the runtime's report strings and the docs site's page names (old E-code addresses redirect). B: only the 24 mixed headers. C: about 2,700 headers return to codes. D and E: about 2,700 headers again, and E also changes the 2,800 More: lines. Every change is mechanical: a bless plus a generator rerun.\n\nSEARCH\n\nJet's E0001-E0799 overlap rustc's numbers, so a search for E0107 or E0308 finds Rust pages (rustc E0107 is a wrong count of generic arguments; Jet E0107 is an unknown name). A dotted name such as jet.UnknownName belongs to Jet alone.\n\nUNDER EVERY OPTION\n\nThe 24 runtime-stage rows follow the same rule as the rest. JSON reports gain a name field beside code, so agents can key on either. jet explain keeps accepting both.",
+      "options": [
+        {
+          "key": "A",
+          "name": "The name everywhere, with the code kept as an alias",
+          "detail": "The header, the More: link and the closing hint all show the type name. The link becomes jet-lang.dev/e/jet.ValueTypeMismatch, the same shape a library error's explain line uses. The E-code stays as the type's stable code: JSON carries both, jet explain E0112 still works, and the old E0112 address redirects. Runtime reports print the name as well.",
+          "technical": "diagnostic_display_name (Diagnostics.jet:363) returns row.name for every row, and the runtime-stage exception goes. Render.jet:356 links by name. The explain hint prints the name. jet.report/v3 gains name. Runtime report strings (TrapMessages.jet, ServicesMessages.jet, report.S) print names. The site generator writes /e/<name> pages and E-code redirects. This amends D-DIAG-URL1 B's line shape from <CODE> to <name>, and D-DIAG-LIBLINK1's sentence that Jet's codes keep the ratified line.",
+          "code": "// A: one identifier on every line\nError [jet.ValueTypeMismatch]: `twice` wants Int for argument 1, but this is String\n  --> hdr.jet:5:17\n Why: Every argument must match its parameter's type\n Fix: Use Int here\nMore: jet-lang.dev/e/jet.ValueTypeMismatch\n\nrun `jet explain jet.ValueTypeMismatch` to learn more\n// jet explain E0112 and jet-lang.dev/e/E0112 still work"
+        },
+        {
+          "key": "B",
+          "name": "The name in the header, the code in the link and hint (today)",
+          "detail": "Keep batch 2: the header shows the name, while the More: link and the jet explain hint keep the E-code. Only the 24 runtime-stage rows change, so that every header shows the name.",
+          "technical": "diagnostic_display_name drops the runtime-stage exception. Render.jet:356 and the hint are unchanged. JSON gains name. No ratified decision changes.",
+          "code": "// B: name on top, code below\nError [jet.ValueTypeMismatch]: `twice` wants Int for argument 1, but this is String\n  --> hdr.jet:5:17\n Why: Every argument must match its parameter's type\n Fix: Use Int here\nMore: jet-lang.dev/e/E0112\n\nrun `jet explain E0112` to learn more"
+        },
+        {
+          "key": "C",
+          "name": "The E-code only",
+          "detail": "Revert batch 2's header: Jet's errors print Error [E0112] and lints print their L-code, as rustc and TypeScript do. Library errors keep Error [web.BadPath], because their code is their name. The name appears only in jet explain, in JSON and where you write it in #Allow.",
+          "technical": "diagnostic_display_name returns the code for every Jet row. About 2,700 headers return to codes. #Allow still takes names (D-MARKER-DIAG1), so a lint's header shows L0504 while #Allow needs jet.FloatMoney.",
+          "code": "// C: the code on every line\nError [E0112]: `twice` wants Int for argument 1, but this is String\n  --> hdr.jet:5:17\n Why: Every argument must match its parameter's type\n Fix: Use Int here\nMore: jet-lang.dev/e/E0112\n\n// a lint: the header shows a code, but #Allow takes the name\nWarning [L0504]: Money-like name holds `Float` instead of `Decimal`\n#Allow(jet.FloatMoney, \"cents are tracked elsewhere\")"
+        },
+        {
+          "key": "D",
+          "name": "Both in the header",
+          "detail": "The header shows the code and the name together, as Error [E0112 jet.ValueTypeMismatch]. The link and hint keep the code. Library errors, which have no E-code, show only their name.",
+          "technical": "Render.jet:330 prints \"{code} {name}\" for Jet rows and the code alone for dotted library codes. About 2,700 headers change again.",
+          "code": "// D: both identifiers in the brackets\nError [E0112 jet.ValueTypeMismatch]: `twice` wants Int for argument 1, but this is String\n  --> hdr.jet:5:17\n Why: Every argument must match its parameter's type\n Fix: Use Int here\nMore: jet-lang.dev/e/E0112"
+        },
+        {
+          "key": "E",
+          "name": "The code in the header, the name on the More: line",
+          "detail": "The header shows Error [E0112], and the More: line adds the name, as More: jet-lang.dev/e/E0112 (jet explain jet.ValueTypeMismatch). This is the same shape as a library error's More: line, with a code in the header.",
+          "technical": "diagnostic_display_name returns the code. Render.jet:356 appends the explain name. About 2,700 headers and 2,800 More: lines change. This amends D-DIAG-URL1 B's line shape.",
+          "code": "// E: code on top, name at the bottom\nError [E0112]: `twice` wants Int for argument 1, but this is String\n  --> hdr.jet:5:17\n Why: Every argument must match its parameter's type\n Fix: Use Int here\nMore: jet-lang.dev/e/E0112  (or: jet explain jet.ValueTypeMismatch)"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A shows one identifier on every line of a report, and it is the one you write in #Allow and see on library errors. It cannot be confused with a rustc code in a search. The E-code keeps its role as a stable alias in JSON, jet explain and old links, so nothing that keys on codes breaks.",
+        "gains": [
+          "One identifier per error in the header, the link, the hint, #Allow and library errors.",
+          "A warning's header is the exact text #Allow needs.",
+          "Searches find Jet's page, not rustc's page for the same number."
+        ],
+        "losses": [
+          {
+            "loss": "The link and hint get longer: a name is about 23 characters, a code 5.",
+            "mitigation": "The longest link is about 60 characters and fits one terminal line. jet-lang.dev/e/E0112 still redirects for anyone who types the short form."
+          },
+          {
+            "loss": "About 2,800 More: lines and the runtime's report strings change, and the docs site is renamed.",
+            "mitigation": "All of it is generated or blessed mechanically in one cutover, and E-code addresses redirect."
+          },
+          {
+            "loss": "Renaming an error type now changes what users see and search for.",
+            "mitigation": "#Allow already depends on names, so names are already public. A rename keeps the code, and the code still resolves."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B shows two identifiers for one error, so a reader must learn that jet.ValueTypeMismatch and E0112 are the same thing."
+          },
+          {
+            "key": "C",
+            "reason": "C gives lints a header code that #Allow does not take, and Jet's numbers collide with rustc's in search."
+          },
+          {
+            "key": "D",
+            "reason": "D puts both identifiers in every header, and library errors differ in shape because they have no code."
+          },
+          {
+            "key": "E",
+            "reason": "E still shows two identifiers and changes the most lines of any option."
+          }
+        ],
+        "tradeoff": "A longer link and one large mechanical cutover, for one identifier on every line."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Prep's draft, because the owner caps agents at three. Findings were A's unstated snapshot cost, the D-DIAG-URL1 amendment, mixed runtime headers, the missing JSON name field, the rename risk and an overbroad rustc claim, and all are fixed."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a Jet error's first line name the error type, its E-code, or both?",
+        "lesson": "Each Jet error has a code like E0112 and a type name like jet.ValueTypeMismatch. You write the name in #Allow. Library errors have only a name.",
+        "trio": {
+          "current": {
+            "note": "Today the header shows the name, but the link and hint show the code.",
+            "code": "Error [jet.ValueTypeMismatch]: `twice` wants Int, but this is String\nMore: jet-lang.dev/e/E0112\nrun `jet explain E0112` to learn more"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "rustc heads errors with a code, but names its lints.",
+            "code": "error[E0308]: mismatched types\nwarning: unused variable: `x`\n  = note: `#[warn(unused_variables)]` on by default"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The name everywhere, with the code kept as an alias",
+            "gist": "The header, link and hint all show the name.",
+            "gains": [
+              "One identifier on every line."
+            ],
+            "losses": [
+              "Longer links; a large mechanical cutover."
+            ],
+            "proposed": {
+              "code": "Error [jet.ValueTypeMismatch]: `twice` wants Int, but this is String\nMore: jet-lang.dev/e/jet.ValueTypeMismatch"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The name in the header, the code below (today)",
+            "gist": "Keep batch 2 as it is.",
+            "gains": [
+              "Almost no churn."
+            ],
+            "losses": [
+              "Two identifiers for one error."
+            ],
+            "proposed": {
+              "code": "Error [jet.ValueTypeMismatch]: `twice` wants Int, but this is String\nMore: jet-lang.dev/e/E0112"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The E-code only",
+            "gist": "Go back to Error [E0112].",
+            "gains": [
+              "Short, and familiar from rustc and TypeScript."
+            ],
+            "losses": [
+              "A lint's header is not what #Allow takes."
+            ],
+            "proposed": {
+              "code": "Error [E0112]: `twice` wants Int, but this is String\nMore: jet-lang.dev/e/E0112"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Both in the header",
+            "gist": "Show the code and the name together.",
+            "gains": [
+              "Both identifiers on the first line."
+            ],
+            "losses": [
+              "A longer header on every error."
+            ],
+            "proposed": {
+              "code": "Error [E0112 jet.ValueTypeMismatch]: `twice` wants Int, but this is String\nMore: jet-lang.dev/e/E0112"
+            }
+          },
+          {
+            "key": "E",
+            "name": "The code on top, the name on the More: line",
+            "gist": "Show the code first and the name at the bottom.",
+            "gains": [
+              "The More: line matches library errors."
+            ],
+            "losses": [
+              "Two identifiers, and the most churn."
+            ],
+            "proposed": {
+              "code": "Error [E0112]: `twice` wants Int, but this is String\nMore: jet-lang.dev/e/E0112  (or: jet explain jet.ValueTypeMismatch)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One identifier on every line, the same one #Allow and library errors use.",
+          "gains": [
+            "One name per error everywhere.",
+            "A warning's header is what #Allow takes."
+          ],
+          "losses": [
+            {
+              "loss": "Longer links.",
+              "mitigation": "E-code links still redirect."
+            },
+            {
+              "loss": "A large mechanical cutover.",
+              "mitigation": "It is generated and blessed in one change."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two identifiers for one error."
+            },
+            {
+              "key": "C",
+              "reason": "A lint's header code is not what #Allow takes."
+            },
+            {
+              "key": "D",
+              "reason": "Every header carries both."
+            },
+            {
+              "key": "E",
+              "reason": "Two identifiers and the most churn."
+            }
+          ],
+          "tradeoff": "Longer links, for one name on every line."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-04T18:22:22.906Z"
     }
   ],
   "questions": [
@@ -156249,6 +156594,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T18:22:57.806Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cwzm7q",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-04T18:22:47.673Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#22 Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscr"
+    },
+    {
+      "at": "2026-11-04T18:22:47.220Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#57 Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscr"
+    },
+    {
+      "at": "2026-11-04T18:22:46.812Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#56 Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscr"
+    },
+    {
+      "at": "2026-11-04T18:22:46.367Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#55 Found by Builder in batch 3 (76b385b498; receipt /mnt/jetscr"
+    },
+    {
+      "at": "2026-11-04T18:22:45.927Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cwzm7q",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-04T18:22:45.484Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cwzm7q",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-04T18:22:45.020Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cwzm7q",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-04T18:22:22.906Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DIAG-HEADER1",
+      "note": "What the header of Jet's own errors names: the type, the E-code, or both"
+    },
+    {
+      "at": "2026-11-04T18:21:33.403Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#14 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
+    {
+      "at": "2026-11-04T18:21:32.778Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#13 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
+    {
+      "at": "2026-11-04T18:21:32.383Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#12 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
+    {
+      "at": "2026-11-04T18:21:31.977Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#11 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
+    {
+      "at": "2026-11-04T18:21:31.571Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T18:21:31.152Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#10 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
+    {
+      "at": "2026-11-04T18:21:30.758Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mj3ijb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T18:21:30.341Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#9 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
+    {
+      "at": "2026-11-04T18:21:29.968Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wtvbj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T18:21:29.560Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#8 Root found by Prep 2026-11-04 for c7 (report /mnt/jetscratch"
+    },
     {
       "at": "2026-11-04T18:13:16.055Z",
       "by": "Main",
@@ -159685,713 +160163,6 @@
       "action": "card.update",
       "ref": "c0j6lwuh",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-11-02T21:01:26.451Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-02T21:01:25.628Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-02T21:01:24.869Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-02T21:01:24.126Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-02T21:01:23.011Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T21:58:31.199Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-PARA-LIMIT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T21:58:25.167Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-PARA-LIMIT1",
-      "note": "Whether an explicit para_map limit may exceed host parallelism"
-    },
-    {
-      "at": "2026-11-01T21:57:20.491Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T21:57:19.051Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T21:57:17.928Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ccjkub",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T21:57:15.058Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ta538w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T21:39:59.948Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0e3wgi0",
-      "note": "#1 Native DispatchReport.trace() returns the ordered EventTrace"
-    },
-    {
-      "at": "2026-11-01T21:39:53.381Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0e3wgi0",
-      "note": "Native DispatchReport lacks trace() and failures() (D-EVENT2)"
-    },
-    {
-      "at": "2026-11-01T21:33:28.584Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tu4gvf",
-      "note": "#1 On a clean checkout, Tools/agent/RuntimeGenerators.jet --che"
-    },
-    {
-      "at": "2026-11-01T21:33:24.688Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0tu4gvf",
-      "note": "RuntimeGenerators.jet --check reports every runtime generator output stale, even untouched ones"
-    },
-    {
-      "at": "2026-11-01T21:21:43.110Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0zy9mhn",
-      "note": "#1 spec.md 'Captures and escaping lambdas' states the ratified "
-    },
-    {
-      "at": "2026-11-01T21:21:35.427Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0zy9mhn",
-      "note": "Function-value copy: does f.copy() of an escaping closure share its captured state, give an independent copy, or get refused?"
-    },
-    {
-      "at": "2026-11-01T21:14:33.422Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0u19cev",
-      "note": "#1 Default build: a loop's stop poll costs at most 2 hot instru"
-    },
-    {
-      "at": "2026-11-01T21:14:32.068Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0f1eda4",
-      "note": "#1 Default build: the crc16 fast loop, the regex DFA step loop "
-    },
-    {
-      "at": "2026-11-01T20:56:35.100Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wssehw",
-      "note": "#1 A constant Regex{\"…\"} evaluated 1000 times in a loop runs co"
-    },
-    {
-      "at": "2026-11-01T20:48:04.596Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-FAULT-REACH1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T20:48:02.484Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FAULT-REACH1",
-      "note": "Whether the fatal-signal report handler is linked only into programs that can fault"
-    },
-    {
-      "at": "2026-11-01T20:44:35.807Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T20:44:33.722Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-01T20:40:09.616Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T20:40:08.146Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-01T20:37:39.595Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T20:37:36.826Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-01T20:36:00.965Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T20:35:43.692Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-01T20:29:36.128Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-IMAGE-PACK1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T20:29:30.937Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-IMAGE-PACK1",
-      "note": "Whether a Jet executable's code may share file pages with its data, removing all page padding"
-    },
-    {
-      "at": "2026-11-01T20:20:48.644Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:20:20.927Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0awiifz",
-      "note": "#2 The help, refusal and EBADF/EPIPE outputs of #CLI programs ("
-    },
-    {
-      "at": "2026-11-01T20:20:16.154Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0awiifz",
-      "note": "#1 A #CLI struct Args{n: Int} program carries at most 16 KB of "
-    },
-    {
-      "at": "2026-11-01T20:20:14.587Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ewbdj1",
-      "note": "#2 In collatz, fib, isum and sieve, arbitrary-precision Int sym"
-    },
-    {
-      "at": "2026-11-01T20:20:12.861Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ewbdj1",
-      "note": "#1 An Int loop whose range facts prove no overflow (i := 0; loo"
-    },
-    {
-      "at": "2026-11-01T20:20:11.452Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nqr80d",
-      "note": "#3 The hello asm-parity cell image is at most 12288 B in releas"
-    },
-    {
-      "at": "2026-11-01T20:20:10.429Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nqr80d",
-      "note": "#2 The empty image links no allocator (jet_rt_alloc/free absent"
-    },
-    {
-      "at": "2026-11-01T20:20:09.001Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nqr80d",
-      "note": "#1 An empty program (fn run(){}) image is at most 8192 B in rel"
-    },
-    {
-      "at": "2026-11-01T20:15:13.666Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0j8ez91",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-01T20:14:55.602Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j8ez91",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:14:53.452Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:14:51.480Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:14:49.844Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rodlty",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:14:47.973Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:14:46.397Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:11:10.892Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hjv9e5",
-      "note": "#1 Examples/features/effects/authority_denied passes in both th"
-    },
-    {
-      "at": "2026-11-01T20:11:04.826Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0hjv9e5",
-      "note": "The authority_denied golden expects a root-relative path, but a refused jet run now prints the full path"
-    },
-    {
-      "at": "2026-11-01T20:09:06.788Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-01T20:09:06.788Z"
-    },
-    {
-      "at": "2026-11-01T20:08:46.944Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q258t08w",
-      "note": ""
-    },
-    {
-      "at": "2026-11-01T20:08:46.240Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q1tlcnr8",
-      "note": ""
-    },
-    {
-      "at": "2026-11-01T20:07:02.069Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rodlty",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T20:01:08.078Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0s6ptoc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-01T20:01:04.674Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0s6ptoc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-01T19:54:42.847Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cyx4u0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-01T19:54:39.873Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0cyx4u0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-01T19:54:28.651Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cyx4u0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:54:27.188Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:54:25.185Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:54:23.550Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:54:22.561Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:48:07.886Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ozzmvc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:42:00.528Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:35:00.914Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c055kwjg",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-01T19:34:56.462Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c055kwjg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-01T19:34:53.044Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c055kwjg",
-      "note": "#1 A foreign C host that links the Jet runtime object never run"
-    },
-    {
-      "at": "2026-11-01T19:34:01.583Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pd0x6j",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-01T19:33:58.635Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04jmyw7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-01T19:33:55.799Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ljn4r2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-01T19:33:45.398Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pd0x6j",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-01T19:33:43.450Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04jmyw7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-01T19:33:41.829Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ljn4r2",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-01T19:33:40.276Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ljn4r2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-01T19:33:12.425Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pd0x6j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:33:10.413Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04jmyw7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:33:08.334Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nqr80d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:33:06.763Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:33:04.883Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:33:02.447Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c055kwjg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:32:59.493Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ljn4r2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:32:57.259Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ljn4r2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:18:06.252Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-COMPTIME-USE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-01T19:18:06.252Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-USE-MEMBERS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-01T19:18:06.252Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rodlty",
-      "note": "#6 snapshots re-blessed"
-    },
-    {
-      "at": "2026-11-01T19:18:06.252Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rodlty",
-      "note": "#5 editor grammars regenerated (editor-grammars.mjs --write)"
-    },
-    {
-      "at": "2026-11-01T19:18:06.252Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rodlty",
-      "note": "#4 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-11-01T19:18:06.252Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0rodlty",
-      "note": "#3 Data/Syntax registry entry updated"
-    },
-    {
-      "at": "2026-11-01T19:18:06.250Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-INT-PARSE-STRICT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-01T19:18:06.245Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-WEB-CEILING1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-01T19:15:55.980Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:11:20.193Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pr2dsz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:05:15.898Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r8y1nt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T19:05:13.930Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0r8y1nt",
-      "note": "#5 Seam 5 has its home under the same mechanism: the compiler's"
-    },
-    {
-      "at": "2026-11-01T19:05:11.793Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0r8y1nt",
-      "note": "#4 Registry/spec/chain. Syntax-decisions S18 gains the `priv(to"
-    },
-    {
-      "at": "2026-11-01T19:05:09.189Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0r8y1nt",
-      "note": "#3 Compiler-generated calls pass. A call the compiler lowers in"
-    },
-    {
-      "at": "2026-11-01T19:05:07.574Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0r8y1nt",
-      "note": "#2 Seams 1 and 2 have their home. Core/Files gains `priv(toolch"
-    },
-    {
-      "at": "2026-11-01T19:05:04.514Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0r8y1nt",
-      "note": "#1 Mechanism (D-CORE-PRIVATE-SEAM1=A, ratified 2026-11-01). `pr"
-    },
-    {
-      "at": "2026-11-01T19:04:42.880Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-01T18:54:07.790Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-COMPTIME-USE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-01T18:54:06.494Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-USE-MEMBERS1",
-      "note": "marked ready"
     }
   ],
   "nextNum": 368,
