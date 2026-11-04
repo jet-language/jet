@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6565,
-    "rev": 90369,
+    "rev": 90375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37187,6 +37187,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "Correction to my two 2026-11-04 notes: /tmp/tdev/FoundFix/found.patch is RECOVERED (Prep-2 replayed the FoundFix agent transcript; diffstat identical, 5 files, 85+/37-; /mnt/jetscratch/lanes/Main/recovery/3595/ with SOURCES.md). It held test-side fixes in Jetpack/Foundation/Tests only, not the four bridges. Dev has since fixed the same roots its own way: c3b14a3ce9 (core.sys and core.process imports), baae89db6c (the Foundation tests build), 6e912387a9 (the Foundation tests pass, 92/92). It is not to be landed: it weakened the IOError exact-equality assertions. No criterion depended on it. Bridge state is unchanged: c7144386cc landed foundation_addresses_are_public and foundation_resolve_public_addresses; foundation_get_stream_pinned is retired by owner ruling 2026-10-29; foundation_fetch stays open under c6, blocked by #3665."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "Lost-work status (owner 2026-11-04: recover it, or record it as incomplete so it is never reported done): /tmp/tdev/FoundFix/found.patch is gone, and no copy is found in scratch, the rescued and recovered directories, or the agent transcripts so far; the search of git objects continues. It most likely implemented the four Jetpack/Foundation native bridges (foundation_addresses_are_public, foundation_resolve_public_addresses, foundation_fetch, foundation_get_stream_pinned). That work is incomplete and stays tracked by open criterion c6; no criterion was met by it."
         },
         {
@@ -37326,7 +37331,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.727Z",
-      "updated": "2026-11-04T18:36:00.277Z",
+      "updated": "2026-11-04T18:53:10.140Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -42014,8 +42019,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 run3 p/never4275b.jet (trait Stopper { fn stop(self) -> Never }; `fn pick(h: Halt, x: Int) -> Int { if x > 0 -> return x; h.stop() }`) checks and prints \"3 / 5 / 10\" exit 0 on o0/o1/o2; no E2425/E2423 (queue3.out)",
-          "at": "2026-10-31T16:48:48.905Z"
+          "evidence": "Probe Docs/audits/closure-audit-2026-11/probes/p4275a.jet (landed a32d379133): a trait method returning Never as the tail of an Int function prints 3, 5, 10 on jet run and jet run --release with no E2425/E2423 (probes/RESULTS.txt, compiler e07c1b85ae).",
+          "at": "2026-11-04T18:57:39.511Z"
         },
         {
           "n": 49,
@@ -42050,8 +42055,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 run3 p/okhandler4275b.jet: `if parse(\"7\") == .Ok(v) { print(\"got {v}\") }` prints \"got 7\", and `if parse(\"x\") == .Ok(w) {..} else { print(\"handled\") }` prints \"handled\" (no propagation), exit 0 on o0/o1/o2; no E0403/E2402 (queue3.out)",
-          "at": "2026-10-31T16:48:50.710Z"
+          "evidence": "Probe Docs/audits/closure-audit-2026-11/probes/p4275b.jet (landed a32d379133): if parse(\"7\") == .Ok(v) prints got 7, and the Err case takes else and prints handled, on jet run and jet run --release (probes/RESULTS.txt, compiler e07c1b85ae).",
+          "at": "2026-11-04T18:57:40.285Z"
         },
         {
           "n": 53,
@@ -42812,7 +42817,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:54.174Z",
-      "updated": "2026-11-04T18:09:34.765Z",
+      "updated": "2026-11-04T18:57:40.285Z",
       "updatedBy": "Main",
       "goals": [
         "G18"
@@ -61307,6 +61312,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c8 (repl memory) parked by Builder 2026-11-04 for the owner's reorder; findings at /mnt/jetscratch/lanes/Main/tmp/qc/repl/FINDINGS.md (to be committed with the fix). Per-turn RSS grows ~190-200 MB per turn already in the parse loop (jet_driver_load: L.preparse -> L.parsed, Loader.jet), plus ~450 MB per turn through comptime and ~670 MB per turn through a full compile. Ruled out: single-thread allocator reuse, task.group worker alloc and free, worker-alloc/main-free, match on a moved enum, partial field moves (all flat). Next: bisect inside the parse wave (jet_driver_parse_wave, parse_claimers, parse_claimed, Loader.jet ~3900) and the per-unit load body (~4364-4796); try one compiler thread to separate thread arenas from a parse leak. The c9 fix is written in tree lanes/Main/t6035 and is to be landed on its own."
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Landed on dev at 94dacfc354 in GoldC-32 (patch row: criterion/count 3): test_json_golden, test_json_result_unchanged, lint json_output: plain `jet test --json` prints the human report; only --measure renders JSON (Host.jet:1524-1526)"
@@ -61482,7 +61492,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-04T18:21:33.403Z",
+      "updated": "2026-11-04T18:47:33.282Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -68424,6 +68434,16 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "Update: the full original cache-control1-wip.patch is recovered (31 files, 71,012 bytes, the same size as the original): /mnt/jetscratch/lanes/Main/recovery/6312/cache-control1-wip.patch, with SOURCES.md. Recover integrates it under c5."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Recovered 2026-11-04 by Prep-2: the compiler half of cache-control1-wip was replayed from the MemDesign agent transcript (MemDesign.jsonl) with 0 mismatches; the Encoder file's blob hash matches the original. 24 hand-edited files plus the 3 tests: /mnt/jetscratch/lanes/Main/recovery/6312/cache-control1-hand-27files.patch. It applies to 67fd7fdc47 and conflicts in 7 files on dev; generated rows are to be regenerated. The Recover lane integrates it under c5, and its landing also corrects Tools/tower/held/6312/README.md, which still says the compiler half is gone."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "The 3 surviving cache-control test files are now in the repo at Tools/tower/held/6312/ (landed e07c1b85ae). c5 integrates them; the Recover lane is rebuilding the missing compiler half now."
         },
         {
@@ -68500,7 +68520,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-04T18:47:18.745Z",
+      "updated": "2026-11-04T18:53:10.709Z",
       "updatedBy": "Main"
     },
     {
@@ -157380,6 +157400,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T18:57:40.286Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jm0xjt",
+      "note": "#52"
+    },
+    {
+      "at": "2026-11-04T18:57:39.512Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jm0xjt",
+      "note": "#48"
+    },
+    {
+      "at": "2026-11-04T18:53:10.709Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9nq8j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T18:53:10.140Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0692z4s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T18:47:47.572Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9nq8j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T18:47:33.282Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-04T18:47:19.268Z",
       "by": "Main",
