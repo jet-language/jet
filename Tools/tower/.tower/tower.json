@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 91650,
+    "rev": 91675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61007,6 +61007,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:36:00.564Z"
+        },
+        {
+          "n": 88,
+          "text": "tests/cases/cffi/cffi_string_returns_are_borrowed_non_null_utf8_and_copied.case passes: a null or non-UTF-8 C String return stops with the asserted words (returned a null pointer / not valid UTF-8), and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:39.195Z"
         }
       ],
       "refs": [],
@@ -61016,7 +61025,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-04T23:36:01.350Z",
+      "updated": "2026-11-04T23:44:39.195Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -66459,6 +66468,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 14 criteria from archived #448, #1514, #1515, #2357, #3503: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
           "at": "2026-10-28",
           "by": "CardTrim",
           "text": "Folded #5814 \"Formatter cases: 9 fail only their stream predicates\" (CardTrim 2026-10-28: golden/test-gap step of map #6005). Body: Rust-test port SA5, tests/fmt.rs (kit on dev HEAD cc02218111; first errors /tmp/tdev/RustTestsA/SA5/firsterr-dev.tsv): fmt_layout_block_round_trips_byte_for_byte, fmt_arithmetic_policy_scope_is_canonical_and_idempotent, fmt_simplify_keeps_a_struct_literal_return_braced, fmt_simplify_keeps_a_routed_value_loop_binding, fmt_migrates_each_retired_print_spelling_to_one_canonical_job, fmt_still_canonicalizes_valid_codable_union, fmt_canonicalizes_skipped_decode_union, fmt_simplify_one_line_return_is_ast_equal_and_stable, fmt_map_type_spacing_is_canonical_and_value_spacing_stays. Formatter output differs from the ported expectation; triage each against tests/fmt.rs history before fixing."
@@ -66528,6 +66542,105 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:44:35.441Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #448 c4) Focused formatter test passes without weakening existing byte-stability or idempotence coverage [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:37.009Z"
+        },
+        {
+          "n": 8,
+          "text": "(was #1514 c4) tests/fmt.rs adds one AST-equality and second-pass stability case for every enabled simplify rewrite, and tests/fmt_project.rs adds simplify_mode_is_stable_across_a_project; cargo test --test fmt and cargo test --test fmt_project pass [precut audit: failing on 9c7ddf1359: C:fmt/fmt_simplify_one_line_return_is_ast_equal_and_stable KNOWN-FAILING #6005 expected output stream predicate not matched on HEAD (no replayable first error): literal stream differs (known-failing #6005: expected output stream predicate not matched on…]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:38.378Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #1514 c5) After the selected migration, rg over examples tests docs/reference for every retired before-form returns only explicit negative fixtures and decision history; a second jet fmt --simplify --check over the same corpus exits 0 and changes no bytes [precut audit: failing on 9c7ddf1359: C:fmt/fmt_simplify_one_line_return_is_ast_equal_and_stable KNOWN-FAILING #6005 expected output stream predicate not matched on HEAD (no replayable first error): literal stream differs (known-failing #6005: expected output stream predicate not matched on…]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:39.894Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #1515 c5) jet fmt emits [K:V] for map types in type position — tests/fmt.rs stability test extended and passing [precut audit: failing on 9c7ddf1359: C:fmt/fmt_map_type_spacing_is_canonical_and_value_spacing_stays KNOWN-FAILING #6005 expected output stream predicate not matched on HEAD (no replayable first error): stream predicate ~ failed (known-failing #6005: expected output stream predicate not matched…]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:41.098Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #2357 c1) `fmt` produces the canonical arrow-loop form and is idempotent [precut audit: failing on 9c7ddf1359: UL:arrow_loop_value_drop FAIL lint fixture must compile and emit a lint]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:42.504Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #2357 c2) `jet check dogfood/tower` reports no L0508 for the canonical source [precut audit: failing on 9c7ddf1359: UL:arrow_loop_value_drop FAIL lint fixture must compile and emit a lint]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:43.839Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #2357 c3) General regression tests pass without canary-specific handling or changes to decisions #1453 and #1454 [precut audit: failing on 9c7ddf1359: UL:arrow_loop_value_drop FAIL lint fixture must compile and emit a lint]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:44.665Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #3503 c5) Parser accepts String? and MyErr! in every applicable type/signature slot, requires -> or -[Effects]> before declared result facts (including error-only declarations), and rejects the old prefix/arrowless forms without fallback [precut audit: failing on 9c7ddf1359: C:fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow KNOWN-FAILING #6005 Error [E0081]: `fn fail` has no body: exit 2; expected 0 (known-failing #6005: Error [E0081]: `fn fail` has no body)]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:45.612Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #3503 c6) jet fmt and relevant code fixes emit suffix types, arrow-before-result signatures, one blank line between functions, and safe ordered-arm-table rewrites; formatting is idempotent and old spellings receive registered actionable diagnostics and UI snapshots [precut audit: failing on 9c7ddf1359: C:fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow KNOWN-FAILING #6005 Error [E0081]: `fn fail` has no body: exit 2; expected 0 (known-failing #6005: Error [E0081]: `fn fail` has no body)]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:46.447Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #3503 c7) All in-repository Core, examples, tests, tools, generated projections, editor grammars, and affected durable explanations use the one suffix-and-arrow spelling; no obsolete prefix/arrowless alias or dual parser remains [precut audit: failing on 9c7ddf1359: C:fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow KNOWN-FAILING #6005 Error [E0081]: `fn fail` has no body: exit 2; expected 0 (known-failing #6005: Error [E0081]: `fn fail` has no body)]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:47.131Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #3503 c8) Focused parser and formatter checks plus representative golden examples pass for default JIT, forced interpreter, and AOT with the same observable meaning after the integrated migration [precut audit: failing on 9c7ddf1359: C:fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow KNOWN-FAILING #6005 Error [E0081]: `fn fail` has no body: exit 2; expected 0 (known-failing #6005: Error [E0081]: `fn fail` has no body)]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:47.749Z"
         }
       ],
       "refs": [],
@@ -66538,7 +66651,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:16.618Z",
-      "updated": "2026-11-04T23:44:35.441Z",
+      "updated": "2026-11-04T23:44:48.415Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -71161,11 +71274,11 @@
         {
           "n": 49,
           "text": "ffi-runtime-stop-frame: 1 deleted Rust tests have a Jet test covering the same behavior (tests/diagnostics_coverage.rs::ffi_runtime_stop_keeps_one_jet_source_frame)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "246f568b8e: tests/cases/diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame.case (ported-failing #6366)",
+          "at": "2026-11-04T23:44:37.724Z"
         },
         {
           "n": 50,
@@ -71408,7 +71521,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-04T23:44:36.065Z",
+      "updated": "2026-11-04T23:44:37.724Z",
       "updatedBy": "Main"
     },
     {
@@ -75653,6 +75766,78 @@
           "verifiedBy": null,
           "evidence": "#6563 c1 closure audit (Prep, 2026-11-04; $JET_SCRATCH_ROOT/lanes/Main/briefs/6563-c1-dispositions.tsv). Re-proved on dev at cb59b8f072: tests/ui/shared_strong_cycle{,_cross_module/run,_guard,_push,_self}.jet PASS in the ui run on 52d3e9cf79 (the audit misread the brace path)",
           "at": "2026-11-04T18:38:06.389Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #658 c1) The gc package key and narrower @Policy(gc) use #657's common matrix with no GC-only inheritance or provenance path [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:49.081Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #658 c2) Sema performs automatic traced promotion only inside effective scope and preserves bare read, & write, ^ root transfer, ~ deep copy, and ownership-only escape rejection [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:49.769Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #658 c3) TIR, Rust emission, and jet dev use #646's private std collector as the sole backend with equivalent behavior and no external dependency [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:50.434Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #658 c4) Public core.gc/Gc<T> wrappers, aliases, adapters, examples, and docs retire; scoped automatic promotion is the only source mechanism [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:51.056Z"
+        },
+        {
+          "n": 8,
+          "text": "(was #658 c5) Registered diagnostics/UI snapshots and golden examples cover all four echelons, cycles, nested ownership neighbors, provenance, and wrapper migration [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:51.652Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #658 c6) No trace/report command lands here; targeted tests, docs, independent review, and full repository verification pass before handoff to #659 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:52.402Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #659 c1) Trace mode observes every #658 automatic promotion with stable span, effective scope/provenance, reason, identity, allocation count, and retained count without changing collector semantics [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:53.082Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #659 c2) Tracing is explicit, zero-cost when off, versioned and bounded when on, and equivalent across AOT and jet dev [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:53.765Z"
         }
       ],
       "refs": [],
@@ -75661,7 +75846,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T01:20:50.043Z",
-      "updated": "2026-11-04T18:38:06.389Z",
+      "updated": "2026-11-04T23:44:53.765Z",
       "updatedBy": "Main"
     },
     {
@@ -77998,6 +78183,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T15:57:00.582Z"
+        },
+        {
+          "n": 13,
+          "text": "tests/cases/cffi/cffi_named_pure_callback_has_stable_c_symbol.case passes (a named pure Jet fn and a lambda cross to C as int32_t(*)(int32_t), also from 4 threads, printing 42 10 40), and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:40.493Z"
+        },
+        {
+          "n": 14,
+          "text": "tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case passes: jet check loads the .jet/bindings/c cache so p.Point and p.echo resolve through one alias, and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:41.788Z"
+        },
+        {
+          "n": 15,
+          "text": "tests/cases/cffi/inline_ffi_pin_works_inside_manifest_project.case and tests/cases/diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame.case pass: extern rust builds inside a package (base64 prints aGk=) and a foreign panic stops exit 70 as Stop [E3014] --> ffi.jet:7 in run; their known-failing rows are removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:43.192Z"
         }
       ],
       "refs": [
@@ -78008,7 +78220,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-01T07:20:46.321Z",
+      "updated": "2026-11-04T23:44:43.192Z",
       "updatedBy": "Main"
     },
     {
@@ -167672,6 +167884,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T23:44:53.765Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#11 (was #659 c2) Tracing is explicit, zero-cost when off, versi"
+    },
+    {
+      "at": "2026-11-04T23:44:53.082Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#10 (was #659 c1) Trace mode observes every #658 automatic promo"
+    },
+    {
+      "at": "2026-11-04T23:44:52.402Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#9 (was #658 c6) No trace/report command lands here; targeted t"
+    },
+    {
+      "at": "2026-11-04T23:44:51.652Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#8 (was #658 c5) Registered diagnostics/UI snapshots and golden"
+    },
+    {
+      "at": "2026-11-04T23:44:51.056Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#7 (was #658 c4) Public core.gc/Gc<T> wrappers, aliases, adapte"
+    },
+    {
+      "at": "2026-11-04T23:44:50.434Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#6 (was #658 c3) TIR, Rust emission, and jet dev use #646's pri"
+    },
+    {
+      "at": "2026-11-04T23:44:49.769Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#5 (was #658 c2) Sema performs automatic traced promotion only "
+    },
+    {
+      "at": "2026-11-04T23:44:49.081Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kyjdtx",
+      "note": "#4 (was #658 c1) The gc package key and narrower @Policy(gc) us"
+    },
+    {
+      "at": "2026-11-04T23:44:48.415Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kob6cb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T23:44:47.749Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#17 (was #3503 c8) Focused parser and formatter checks plus repr"
+    },
+    {
+      "at": "2026-11-04T23:44:47.131Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#16 (was #3503 c7) All in-repository Core, examples, tests, tool"
+    },
+    {
+      "at": "2026-11-04T23:44:46.447Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#15 (was #3503 c6) jet fmt and relevant code fixes emit suffix t"
+    },
+    {
+      "at": "2026-11-04T23:44:45.612Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#14 (was #3503 c5) Parser accepts String? and MyErr! in every ap"
+    },
+    {
+      "at": "2026-11-04T23:44:44.665Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#13 (was #2357 c3) General regression tests pass without canary-"
+    },
+    {
+      "at": "2026-11-04T23:44:43.839Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#12 (was #2357 c2) `jet check dogfood/tower` reports no L0508 fo"
+    },
+    {
+      "at": "2026-11-04T23:44:43.192Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#15 tests/cases/cffi/inline_ffi_pin_works_inside_manifest_projec"
+    },
+    {
+      "at": "2026-11-04T23:44:42.504Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#11 (was #2357 c1) `fmt` produces the canonical arrow-loop form "
+    },
+    {
+      "at": "2026-11-04T23:44:41.788Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#14 tests/cases/cffi/generated_c_nominals_share_the_imported_sig"
+    },
+    {
+      "at": "2026-11-04T23:44:41.098Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#10 (was #1515 c5) jet fmt emits [K:V] for map types in type pos"
+    },
+    {
+      "at": "2026-11-04T23:44:40.493Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#13 tests/cases/cffi/cffi_named_pure_callback_has_stable_c_symbo"
+    },
+    {
+      "at": "2026-11-04T23:44:39.894Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#9 (was #1514 c5) After the selected migration, rg over example"
+    },
+    {
+      "at": "2026-11-04T23:44:39.195Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0h18kyi",
+      "note": "#88 tests/cases/cffi/cffi_string_returns_are_borrowed_non_null_u"
+    },
+    {
+      "at": "2026-11-04T23:44:38.378Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#8 (was #1514 c4) tests/fmt.rs adds one AST-equality and second"
+    },
+    {
+      "at": "2026-11-04T23:44:37.724Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#49"
+    },
+    {
+      "at": "2026-11-04T23:44:37.009Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#7 (was #448 c4) Focused formatter test passes without weakenin"
+    },
     {
       "at": "2026-11-04T23:44:36.065Z",
       "by": "Main",
