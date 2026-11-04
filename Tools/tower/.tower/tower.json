@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90489,
+    "rev": 90490,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61424,6 +61424,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "c18 root (Recover, 2026-11-04): not a regression. The 3 rows passed only in the UiGreen15 census, which ran with JET_KEEP_GOING=1. They fail in UiGreen12/14/16/17 and on the current base, and pass with JET_KEEP_GOING=1. Cause: JetDriver Pipeline.jet returns after the declaration stage when it has any error (since 02d733d118), so body checks never run after a validation-only declaration error (E0217 field/variant, E0151). That is a collect-all defect under AGENTS. Fix (Recover, after c17): validation-only declaration errors defer to the final result; errors that leave a declaration unusable gate only that item. Proof: a before/after ui census with each changed row reviewed."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "c15 progress (Prep-2 UiRegen): 15 rows regenerated from real output (7 trailing-blank, 7 registry-exact code swaps, 1 new stream e1803_script_spawn_needs_exec); full ui run on 639b94633a+patch: PASS 1944, FAIL 303, KNOWN-FAILING 114, REFUSED 33, ERROR 1 (runtime_e3014 ICE 101). Two left unwritten on purpose, as compiler gaps: web_environment_host_unsupported (jet build --target=web with --allow=Env exits 0, so env reads on a Web host aren't refused) and ui_lint/unreachable_else_enum (L0303 misses a statement-position if c == {...}, #6006)."
         },
         {
@@ -61653,7 +61658,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-04T20:43:31.874Z",
+      "updated": "2026-11-04T20:56:40.941Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -157187,6 +157192,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T20:56:40.942Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-04T20:49:54.403Z",
       "by": "Main",
