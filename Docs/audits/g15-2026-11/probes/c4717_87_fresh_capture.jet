@@ -1,0 +1,10 @@
+// #4717 c87: each loop iteration gets a fresh capture cell, so the lambdas print 0, 1, 2.
+fn run() {
+    fns := [fn() -> Int]{}
+    loop i in 0..<3 {
+        &fns.push(() -> i)
+    }
+    loop f in fns {
+        print(f())
+    }
+}
