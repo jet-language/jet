@@ -9,7 +9,7 @@ fn kit_test_steps_bless() -> KitBless {
 
 fn kit_test_steps_env() -> KitEnv {
     root :: sys.current_dir() ?? panic("step checkout root: {err}")
-    KitEnv{root: root, scratch: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
+    KitEnv{root: root, scratch: kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
 }
 
 #Test("step argv quoting preserves whitespace, escapes and empty arguments") {

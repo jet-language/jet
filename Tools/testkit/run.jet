@@ -809,6 +809,17 @@ fn kit_execution_refused(row: String) -> KitExecution {
     KitExecution{code: 2, failures: [row]}
 }
 
+// The disk-backed scratch directory a run uses without --scratch: JET_TEST_SCRATCH_DIR,
+// else <JET_SCRATCH_ROOT>/testkit, else Jet's user cache (<XDG_CACHE_HOME>/jet/testkit,
+// else ~/.cache/jet/testkit). None when not even HOME is set.
+fn kit_scratch_root() -> String? {
+    if sys.get("JET_TEST_SCRATCH_DIR") == .Val(dir) -> return Val(dir)
+    if sys.get("JET_SCRATCH_ROOT") == .Val(root) -> return Val(files.join(root, "testkit"))
+    if sys.get("XDG_CACHE_HOME") == .Val(cache) -> return Val(files.join(cache, "jet/testkit"))
+    home :: sys.get("HOME") ?? return None
+    Val(files.join(home, ".cache/jet/testkit"))
+}
+
 fn kit_case_blocks(status: String) -> Bool {
     kit_expect_named(["FAIL", "UNEXPECTED-PASS", "REFUSED", "ERROR", "TIMEOUT"], status)
 }
@@ -838,8 +849,7 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     if options.jet == "" -> return kit_execution_refused("ERROR\tselection\t\tJET must name the compiler under test")
     jet :: files.canonicalize(options.jet) ?? return kit_execution_refused("ERROR\tselection\t\tcompiler: {err}")
     jetpack :: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
-    home :: sys.get("HOME") ?? ""
-    base :: if options.scratch != "" -> options.scratch else -> sys.get("JET_TEST_SCRATCH_DIR") ?? files.join(home, ".cache/jet-dev/scratch")
+    base :: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set JET_TEST_SCRATCH_DIR or JET_SCRATCH_ROOT, or pass --scratch")
     files.create_dir_all(base) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     canonical :: files.canonicalize(base) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     if canonical == root || canonical.starts_with("{root}/") || canonical == "/tmp" || canonical.starts_with("/tmp/") {
@@ -993,10 +1003,10 @@ fn kit_gate_suite(suite: String) -> String {
     loop word in words -> &args.push(word)
     options := kit_parse_options(args)
     if options.error != "" -> return "REFUSED\tselection\t\t{options.error}"
-    // The compiler under test is $JET, as Tools/agent/jet-env resolves it, or
-    // TESTKIT_ARGS --jet; without one a suite cannot run on this host.
+    // The compiler under test is $JET or TESTKIT_ARGS --jet; without one a
+    // suite cannot run on this host.
     if options.jet == "" && !options.list {
-        print("SKIP-HOST\tselection\t\tsuite {suite}: JET is unset; run `JET=<compiler> Tools/agent/jet-env jet test Tools/testkit`")
+        print("SKIP-HOST\tselection\t\tsuite {suite}: JET is unset; run `JET=<compiler> jet test Tools/testkit`")
         return ""
     }
     options.opt_in = true
@@ -1013,7 +1023,8 @@ fn kit_gate_suite(suite: String) -> String {
 //                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --shard I/N,
 //                        --scratch DIR, --jetpack BIN, --list, --coverage (ui), --bless ID,
 //                        --bless-all --reason "TEXT", --allow-shrink ID
-//   JET_TEST_SCRATCH_DIR disk-backed scratch outside the checkout (default ~/.cache/jet-dev/scratch)
+//   JET_TEST_SCRATCH_DIR disk-backed scratch outside the checkout (default: kit_scratch_root)
+//   JET_SCRATCH_ROOT     the scratch root: without JET_TEST_SCRATCH_DIR the kit uses <root>/testkit
 //   JET_CI_EVIDENCE_DIR  each suite writes its case verdicts to <dir>/<suite>.json
 fn test(t: Test) {
     // The harness reports every test's verdict; the failure count adds nothing to it.
