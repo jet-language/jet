@@ -124,7 +124,7 @@ fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]
             next
         }
         jet_cli_receipt_frame(&tools, path.bytes())
-        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error("JET_COMPILER_IDENTITY is unset, so this compiler has no identity")) else -> {
+        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error(jet_cli_identity_missing().what)) else -> {
             if cli_files.read_bytes(path) == {
                 .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
                 .Err(_) -> "unreadable"

@@ -53,6 +53,8 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
         name == "CLICOLOR" -> Val("0")
         name == "TERM" -> Val("dumb")
         name == "JET_REPL_HISTORY" -> Val("off")
+        // Cases run outside the checkout: the compiler under test reads this checkout's Core.
+        name == "JET_TOOLCHAIN_ROOT" -> Val(sys.get(name) ?? env.root)
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
         name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else -> Val(files.join(env.scratch, "ffi"))
         name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
@@ -91,6 +93,7 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
             .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
             .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
             .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
+            .env("JET_TOOLCHAIN_ROOT", kit_exec_base_value("JET_TOOLCHAIN_ROOT", env, scratch) ?? "")
     }
     if env.memory_limit > 0 -> spec = spec.memory_limit(env.memory_limit)
     loop variable in overlay {

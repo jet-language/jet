@@ -642,7 +642,10 @@ fn jet_cli_inspect_coverage(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Neve
         .Invalid(message) -> return JetCLIPlan.Done{output: jet_cli_ice("registered diagnostic coverage rows must be valid: {message}")}
         .Facts(found) -> facts = found
     }
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return jet_cli_fail("E2105", "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the diagnostic coverage baseline can't be found", jet_cli_why("E2105"), "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `tests/`", color, JET_DRIVER_EXIT_USER_ERROR)
+    toolchain :: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+        .Found(root) -> root
+        .Missing(what, fix) -> { return jet_cli_fail("E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR) }
+    }
     baseline_path :: "{toolchain}/tests/diagnostics_coverage_baseline.txt"
     text :: cli_files.read(baseline_path) ?? return jet_cli_fail("E2105", "can't read the diagnostic coverage baseline `{baseline_path}`", jet_cli_why("E2105"), "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `tests/`", color, JET_DRIVER_EXIT_USER_ERROR)
     baseline := [JetCLICoverageBaselineRow]{}

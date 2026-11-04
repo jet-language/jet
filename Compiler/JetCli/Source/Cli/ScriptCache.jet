@@ -64,12 +64,15 @@ struct JetCLIScriptToolchain {
 }
 
 // The toolchain a kept program was built with, or None when this compiler
-// has no toolchain root or its Core sources or runtime can't be read. The
+// has no toolchain root for `entry` (jet_cli_toolchain_root) or its Core sources or runtime can't be read. The
 // Core files and the runtime pack are named by their file identities (size,
 // modification time, device, inode), as `make` names its inputs. They are
 // not hashed: a rerun compares them with the record's.
-fn jet_cli_script_toolchain(identity: String, options: BuildOptions) -> JetCLIScriptToolchain? {
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
+fn jet_cli_script_toolchain(identity: String, options: BuildOptions, entry: String) -> JetCLIScriptToolchain? {
+    toolchain :: if jet_cli_toolchain_root(entry) == {
+        .Found(root) -> root
+        .Missing(_, _) -> { return None }
+    }
     runtime_dir :: jet_cli_runtime_dir()
     runtime_key :: jet_cli_runtime_key(runtime_dir) ?? return None
     pack :: "{runtime_dir}/{runtime_key}/{JET_CLI_RUNTIME_PACK_FILE}"
@@ -276,7 +279,7 @@ fn jet_cli_script_trim(directory: String) {
 // compiler identity, or a toolchain that can't be read).
 fn jet_cli_script_keeper(entered: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIScriptKeep? {
     identity :: jet_cli_compiler_identity() ?? return None
-    toolchain :: jet_cli_script_toolchain(identity, options) ?? return None
+    toolchain :: jet_cli_script_toolchain(identity, options, snapshot.entry_path) ?? return None
     Val(JetCLIScriptKeep{
         slot: jet_cli_script_slot(options, snapshot.entry_path),
         toolchain: toolchain.rows,

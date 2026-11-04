@@ -1,0 +1,14 @@
+# Docs/spec/reference/environment.md: with `JET_TOOLCHAIN_ROOT` unset and no checkout at or
+# above the input, the toolchain root is the directory of the running `jet` when it holds
+# `Core/` and `Compiler/Prelude/`.
+env: NO_COLOR=1
+requires: os:unix
+copy: {jet} tool/jet
+chmod: tool/jet 0755
+copy: {root}/Core tool/Core
+copy: {root}/Compiler/Prelude tool/Compiler/Prelude
+copy: {root}/Examples/features/basics/hello.jet app/hello.jet
+step: {work}/tool/jet check app/hello.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout+stderr: ~ "has no problems" # the check's verdict line; the path varies with the work directory

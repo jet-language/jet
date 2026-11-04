@@ -564,8 +564,10 @@ root: the nearest directory at or above the file that holds `package.jet`, or
 the file's own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
 generated C/C++ binding caches. The Core library bodies are read from the Jet
-toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
-`Core/`); the Core row table and the canonical effect source are generated
+toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
+`JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
+input, else `jet`'s own directory when it holds both (see
+[Environment variables](environment.md)); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
 by `jet Tools/agent/CoreSourceRows.jet`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`

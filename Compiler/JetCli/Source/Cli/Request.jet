@@ -229,15 +229,65 @@ fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object:
 
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
+// Unset, the tree is found (jet_cli_toolchain_root).
 JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
-// This compiler's identity (`name@version#<source id>`). The toolchain launcher and every
-// chain stage set it; a compiler built by `jet build Compiler` carries no identity of its own.
+// This compiler's identity (`name@version#<source id>`). Unset, it is read from
+// the IDENTITY file beside the jet executable (jet_cli_compiler_identity).
 JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
+// Beside the jet executable: the file holding its identity on one line.
+JET_CLI_IDENTITY_FILE :: "IDENTITY"
 
-// The running compiler's identity: JET_COMPILER_IDENTITY; None when it is unset.
+// The directory holding the running jet executable.
+fn jet_cli_executable_dir() -[Env]> String Never! {
+    jet_cli_parent(cli_sys.executable()) ?? "/"
+}
+
+// The running compiler's identity: JET_COMPILER_IDENTITY, else the one line of
+// the IDENTITY file beside the executable; None when neither names one.
 fn jet_cli_compiler_identity() -> String? Never! {
     if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
-    None
+    text :: cli_files.read(jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)) ?? return None
+    identity :: text.trim()
+    if identity == "" || identity.contains("\n") -> return None
+    Val(identity)
+}
+
+// The refusal when this compiler has no identity, naming both places it looks.
+fn jet_cli_identity_missing() -> (what: String, fix: String) Never! {
+    file :: jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)
+    (what: "this compiler has no identity: `{JET_CLI_COMPILER_IDENTITY_ENV}` is not set and `{file}` names none", fix: "set `{JET_CLI_COMPILER_IDENTITY_ENV}` to the compiler's `name@version#build-id`, or write that one line to `{file}`")
+}
+
+// Whether `directory` holds a Jet toolchain: the Core library and the
+// compiler prelude.
+fn jet_cli_is_toolchain(directory: String) -[FS]> Bool Never! {
+    cli_files.is_dir(jet_cli_authority_path(directory, "Core")) && cli_files.is_dir(jet_cli_authority_path(directory, "Compiler/Prelude"))
+}
+
+// Where the toolchain sources a request for `input` (a file or directory) come from.
+enum JetCLIToolchainRoot {
+    Found(root: String)
+    Missing(what: String, fix: String)
+}
+
+// The toolchain source tree: JET_TOOLCHAIN_ROOT, else the nearest directory at or
+// above `input` that holds a toolchain (a Jet checkout), else the toolchain
+// installed beside the jet executable. Missing names all three places.
+fn jet_cli_toolchain_root(input: String) -> JetCLIToolchainRoot Never! {
+    if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) -> return JetCLIToolchainRoot.Found{root: root}
+    start :: cli_files.realpath(input) ?? input
+    current := start
+    loop {
+        if jet_cli_is_toolchain(current) -> return JetCLIToolchainRoot.Found{root: current}
+        if current == "/" -> break
+        current = jet_cli_parent(current) ?? break
+    }
+    installed :: jet_cli_executable_dir()
+    if jet_cli_is_toolchain(installed) -> return JetCLIToolchainRoot.Found{root: installed}
+    JetCLIToolchainRoot.Missing{
+        what: "can't find the Jet toolchain sources: `{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, no directory at or above `{start}` holds `Core/` and `Compiler/Prelude/`, and `{installed}` beside jet holds no installed toolchain",
+        fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, run jet on a file inside a Jet checkout, or install the toolchain beside jet",
+    }
 }
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
@@ -605,7 +655,7 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
             if dependencies[name] == .Registry(source) {
                 // No battery leaves the dependency unbound: the driver emits
                 // E0603 at the declaration.
-                battery :: jet_cli_first_party_battery(name, source) ?? next
+                battery :: jet_cli_first_party_battery(name, source, entry) ?? next
                 if jet_cli_authorize_dependency_root(&roots, battery, color) == .Val(refusal) -> return Val(refusal)
                 next
             }
@@ -637,12 +687,15 @@ JET_CLI_BATTERIES_DIR :: "Jetpack/Provider/Batteries"
 // (`source`, its selector) names, or None. Like the Rust jetpack's embedded
 // batteries registry (crates/jetpack/build.rs generated
 // batteries_registry.rs from crates/jetpack/batteries/*), the toolchain
-// ships the batteries: `$JET_TOOLCHAIN_ROOT/Jetpack/Provider/Batteries/<name>`
-// resolves only when its package.jet declares that name and a version the
-// selector matches.
-fn jet_cli_first_party_battery(name: String, source: String) -[FS, Env]> String? Never! {
+// ships the batteries: `<toolchain root>/Jetpack/Provider/Batteries/<name>`
+// (jet_cli_toolchain_root of `entry`, the entry root) resolves only when its
+// package.jet declares that name and a version the selector matches.
+fn jet_cli_first_party_battery(name: String, source: String, entry: String) -[FS, Env]> String? Never! {
     selector :: jet_driver_dependency_selector(source, name) ?? return None
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
+    toolchain :: if jet_cli_toolchain_root(entry) == {
+        .Found(root) -> root
+        .Missing(_, _) -> { return None }
+    }
     directory :: jet_cli_authority_path(toolchain, "{JET_CLI_BATTERIES_DIR}/{name}")
     manifest_path :: jet_cli_authority_path(directory, "package.jet")
     text :: cli_files.read(manifest_path) ?? return None
@@ -823,20 +876,28 @@ fn jet_cli_threads_left(physical: Int, logical: Int, online: Int, stat: String) 
     physical
 }
 
-// The Core library rows of the toolchain tree that `JET_TOOLCHAIN_ROOT`
-// names, or the refusal that stops the request. Each body is read when the
+// The Core library rows of the toolchain tree (jet_cli_toolchain_root of
+// `input`, the entry), or the refusal that stops the request. Each body is read when the
 // compile first schedules its row (jet_driver_core_text_file), so a compile
 // reads only the Core files its imports reach; every file is checked to be
 // present here, so a missing one still refuses the request up front.
 // `checked` says the caller already found every row a regular file (the
-// `jet run` keeper's toolchain read), so they aren't checked twice.
+// `jet run` keeper's toolchain read), so they aren't checked twice. Every
+// compile also needs this compiler's identity, so its absence refuses here too.
 enum JetCLICoreSources {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
 }
 
-fn jet_cli_core_sources(checked: Bool) -> JetCLICoreSources Never! {
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+fn jet_cli_core_sources(input: String, checked: Bool) -> JetCLICoreSources Never! {
+    if jet_cli_compiler_identity() == None {
+        missing :: jet_cli_identity_missing()
+        return JetCLICoreSources.Missing{what: missing.what, fix: missing.fix}
+    }
+    toolchain :: if jet_cli_toolchain_root(input) == {
+        .Found(root) -> root
+        .Missing(what, fix) -> { return JetCLICoreSources.Missing{what: what, fix: fix} }
+    }
     core_sources := [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
@@ -1365,7 +1426,7 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
 // The request that compiles `snapshot` against the Core sources of this
 // toolchain; `core_checked` as jet_cli_core_sources's `checked`.
 fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool) -> JetCLIPrepared {
-    core_sources :: if jet_cli_core_sources(core_checked) == {
+    core_sources :: if jet_cli_core_sources(snapshot.entry_path, core_checked) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }
