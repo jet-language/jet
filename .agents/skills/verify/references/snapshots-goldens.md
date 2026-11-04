@@ -22,11 +22,9 @@ source and the complete diff; blessing is not a way to hide a red behavior.
 For example, a single UI fixture uses its repository-relative filter:
 
 ```sh
-Tools/agent/jet-env node Tools/testkit/run.mjs ui --jet "$JET" \
-  --filter tests/ui/arg_type_mismatch.jet
-Tools/agent/jet-env node Tools/testkit/run.mjs ui --jet "$JET" \
-  --filter tests/ui/arg_type_mismatch.jet \
-  --bless tests/ui/arg_type_mismatch.jet --reason "<commit or ratified decision>"
+TESTKIT_ARGS='--filter tests/ui/arg_type_mismatch.jet' jet test Tools/testkit "suite ui"
+TESTKIT_ARGS='--filter tests/ui/arg_type_mismatch.jet --bless tests/ui/arg_type_mismatch.jet --reason "<commit or ratified decision>"' \
+  jet test Tools/testkit "suite ui"
 ```
 
 Use the admitted native compiler named by `JET` before any `jet explain`,

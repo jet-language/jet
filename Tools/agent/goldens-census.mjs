@@ -33,7 +33,9 @@ if (process.env.JET_CENSUS_SCOPED !== '1') {
     if (scoped.error) throw scoped.error;
     process.exit(scoped.status ?? 2);
 }
-const base = resolve(options.scratch ?? join(homedir(), '.cache/jet-dev/scratch/GoldensCensus'));
+// Scratch as the testkit's (Tools/testkit/run.jet kit_scratch_root): JET_SCRATCH_ROOT, else Jet's user cache.
+const defaultBase = process.env.JET_SCRATCH_ROOT ? join(process.env.JET_SCRATCH_ROOT, 'goldens-census') : join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'jet/goldens-census');
+const base = resolve(options.scratch ?? defaultBase);
 mkdirSync(base, { recursive: true });
 const inside = (parent, path) => { const part = relative(parent, path); return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith(`..${sep}`)); };
 if (inside(source, realpathSync(base)) || inside('/tmp', realpathSync(base))) throw Error('census scratch must be external and disk-backed');

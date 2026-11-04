@@ -3,10 +3,9 @@
 This page collects reusable verification traps for contributors and agents. It
 is not a capability inventory or a work queue. [`AGENTS.md`](../../../AGENTS.md)
 owns project policy, Tower owns work state, and the relevant source, executable
-example, or test owns behavior. Use [`jet-env`](../../../Tools/agent/jet-env)
-for isolated repository commands and the
-[verification skill](../../../.agents/skills/verify/SKILL.md) for the required
-proof tier.
+example, or test owns behavior. Run repository commands with `jet` directly,
+and use the [verification skill](../../../.agents/skills/verify/SKILL.md) for
+the required proof tier.
 
 ## Exercise the compiled source
 

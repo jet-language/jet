@@ -168,15 +168,17 @@ invariants every change must keep, and how work is proven. Plans, decisions,
 and status live in [Tower](Tools/tower/skills/tower/SKILL.md), the
 project board, not in documentation.
 
-Run repository commands through the pinned contributor environment:
+Run repository commands with an admitted `jet` on `PATH`; no Nix, no
+wrapper and no environment variables are needed.
+[Rebuilding Jet](Docs/spec/contributing/bootstrap.md#from-a-fresh-clone) builds
+one from a fresh clone and a released seed.
 
 ```sh
-export JET=/absolute/path/to/admitted/jet
-Tools/agent/jet-env "$JET" run Examples/features/basics/hello.jet
-Tools/agent/jet-env "$JET" check Examples/features/basics/functions.jet
+jet run Examples/features/basics/hello.jet
+jet check Examples/features/basics/functions.jet
 
 # Check one example against its golden output
-TESTKIT_ARGS="--filter Examples/features/basics/hello.jet" Tools/agent/jet-env "$JET" test Tools/testkit "suite golden"
+TESTKIT_ARGS="--filter Examples/features/basics/hello.jet" JET=$(command -v jet) jet test Tools/testkit "suite golden"
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and

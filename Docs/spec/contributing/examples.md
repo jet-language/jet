@@ -216,8 +216,8 @@ instead of the admitted-pack witness's local C helpers; exact witness output
 and zero exit remain required. The default pack witness and its typed-field
 case are unchanged. An unexecuted recipe or missing pack is never a pass.
 
-Evidence goes into a unique `census-*` directory below
-`~/.cache/jet-dev/scratch/GoldensCensus` (or `--scratch DIR`). `census.tsv` records
+Evidence goes into a unique `census-*` directory below `--scratch DIR`, else
+`$JET_SCRATCH_ROOT/goldens-census`, else `~/.cache/jet/goldens-census`. `census.tsv` records
 the test, kind, pass/fail/skip, and first diff/error lines; JSON retains raw
 statuses, tiers, repro commands and complete log paths. Native testkit result
 records retain their diff alongside the existing detail and exit fields.

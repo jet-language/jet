@@ -220,8 +220,8 @@ Never create any other branch, a worktree, or any other ref (`refs/keep`,
 candidates, measurements, and proofs included. To build or measure an
 uncommitted change,
 apply a scratch patch to a temporary `git archive` export outside the
-repository. Use checkout-owned external targets configured through
-`jet-env` (see the orchestration resource reference). Never overwrite another
+repository. Use checkout-owned external targets (see the orchestration
+resource reference). Never overwrite another
 task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
 `git restore .`, `git reset --hard`, or any equivalent broad operation. Never
 hand-edit `Tools/tower/.tower/`.
@@ -354,7 +354,7 @@ in one pass:
 
 ## Environment and proof
 
-Run repository commands through `Tools/agent/jet-env`; `JET` names the admitted
+Run repository commands with `jet` directly; `JET` names the admitted
 native compiler (the stage-2 output of `jet build Compiler`) for
 every tool and gate. Keep scratch and logs on disk and build output outside the
 repository. Follow the orchestration resource reference for bounded,
