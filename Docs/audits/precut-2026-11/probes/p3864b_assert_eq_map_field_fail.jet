@@ -1,0 +1,14 @@
+// cards: 3864
+// claim: a failing assert_eq on structs with a map field reports the values, not an ICE
+// mode: same
+// stderr-has: items
+struct Bag {
+    items: [String:Int]
+}
+
+fn run() {
+    a :: Bag{items: [String:Int]{"x": 1}}
+    b :: Bag{items: [String:Int]{"x": 2}}
+    assert_eq(a, b)
+    print("unreachable")
+}

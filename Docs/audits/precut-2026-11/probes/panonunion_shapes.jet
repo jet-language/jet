@@ -1,0 +1,41 @@
+// cards:
+// claim: all anonymous-union shapes in one program (field, payload, argument, constant); the per-card probes are pu1-pu4 and p3478
+// note: the compiler refuses a parameterless type alias (`Value :: Int | String`, jet.AliasWithoutParameters), so the union is written inline
+// mode: run
+struct Box {
+    value: Int | String
+}
+
+enum Slot {
+    Filled(Int | String)
+    Empty
+}
+
+START :: Box{value: "z"}
+FULL :: Slot.Filled(9)
+
+fn show(v: Int | String) -> String {
+    if v == {
+        .Int(n) -> "int {n}"
+        .String(s) -> "text {s}"
+    }
+}
+
+fn run() {
+    print(show(3))
+    print(show("x"))
+    c :: Box{value: "y"}
+    print(show(c.value))
+    slot :: Slot.Filled(5)
+    if slot == {
+        .Filled(v) -> print(show(v))
+        .Empty -> print("empty")
+    }
+    d :: Box{value: 5}
+    print(show(d.value))
+    print(show(START.value))
+    if FULL == {
+        .Filled(v) -> print(show(v))
+        .Empty -> print("empty")
+    }
+}

@@ -1,0 +1,19 @@
+// cards: 3013
+// claim: comptime map min, max and top_n use numeric order and agree with run time
+// mode: run
+fn scores() -> [String:Int] {
+    table := [String:Int]{}
+    table["a"] = 2
+    table["b"] = 10
+    table
+}
+
+LOW :: comptime { scores().min() ?? -1 }
+HIGH :: comptime { scores().max() ?? -1 }
+TOP :: comptime { scores().top_n(1)[0].value }
+
+fn run() {
+    print("comptime {LOW} {HIGH} {TOP}")
+    table :: scores()
+    print("run {table.min() ?? -1} {table.max() ?? -1} {table.top_n(1)[0].value}")
+}

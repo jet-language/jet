@@ -1,0 +1,30 @@
+// cards: 4368
+// claim: inside a generic fn a ?? fallback block that matches err and returns lowers and runs
+// mode: run
+#Error
+enum HostError {
+    NotFound
+    Other(String)
+}
+
+fn lookup(path: String) -> Int HostError! {
+    if path == "missing" -> return Err(.NotFound)
+    if path == "bad" -> return Err(.Other("bad path"))
+    Ok(path.len())
+}
+
+fn size<T>(tag: T, path: String) -> Int HostError! {
+    found :: lookup(path) ?? {
+        if err == {
+            .NotFound -> return Ok(0)
+            .Other(m) -> return Err(.Other("{m}"))
+        }
+    }
+    Ok(found)
+}
+
+fn run() {
+    print(size(1, "abc") ?? -1)
+    print(size("t", "missing") ?? -1)
+    print(size(true, "bad") ?? -2)
+}

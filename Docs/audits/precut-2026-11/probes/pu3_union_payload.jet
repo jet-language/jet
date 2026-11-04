@@ -1,0 +1,24 @@
+// cards: 3475 3476 3477
+// claim: an anonymous union works as an enum payload, built and matched, on every tier
+// mode: run
+enum Slot {
+    Filled(Int | String)
+    Empty
+}
+
+fn show(v: Int | String) -> String {
+    if v == {
+        .Int(n) -> "int {n}"
+        .String(s) -> "text {s}"
+    }
+}
+
+fn run() {
+    slots :: [Slot]{Slot.Filled(5), Slot.Filled("w"), Slot.Empty}
+    loop slot in slots {
+        if slot == {
+            .Filled(v) -> print(show(v))
+            .Empty -> print("empty")
+        }
+    }
+}

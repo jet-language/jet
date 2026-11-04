@@ -1,0 +1,26 @@
+// cards: 3845
+// claim: a value with a Close impl cannot be placed into two struct literals
+// mode: check-text
+// has: Error [
+struct Handle {
+    id: Int
+}
+
+impl Handle.Close {
+    fn close(^self) { print("close {self.id}") }
+}
+
+struct First {
+    h: Handle
+}
+
+struct Second {
+    h: Handle
+}
+
+fn run() {
+    h :: Handle{id: 1}
+    a :: First{h: h}
+    b :: Second{h: h}
+    print(a.h.id + b.h.id)
+}
