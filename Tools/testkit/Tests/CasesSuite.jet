@@ -6,7 +6,7 @@ use {
 }
 
 fn cases_test_root(label: String) -> String {
-    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-cases-{process.current_pid()}-{label}")
+    path :: files.join(kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), "testkit-cases-{process.current_pid()}-{label}")
     files.create_dir_all(path) ?? panic("case test scratch: {err}")
     path
 }

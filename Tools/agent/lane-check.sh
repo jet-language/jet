@@ -38,7 +38,7 @@ if [ "${1:-}" = "--runtime-generators" ]; then
   fi
   code=0
   for gen in trap-messages lifecycle stop-exports host-errors observe-messages scheduler-messages services-messages test-messages; do
-    Tools/agent/jet-env node "Tools/agent/gen-runtime-$gen.mjs" --check || code=1
+    node "Tools/agent/gen-runtime-$gen.mjs" --check || code=1
   done
   if [ "$code" -eq 0 ]; then echo "CHECK OK"
   else echo "CHECK FAILED — a runtime generator reported stale output"
@@ -55,11 +55,15 @@ if [ -z "${JET:-}" ] || [ ! -x "$JET" ]; then
   exit 64
 fi
 
-# /tmp is RAM-backed here: keep scratch, the assembled unit and logs on disk.
-scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-dev/scratch}"
+# Keep scratch, the assembled unit and logs on disk, never on a RAM-backed /tmp:
+# JET_TEST_SCRATCH, else <JET_SCRATCH_ROOT>/lane-check, else Jet's user cache.
+user_cache="${XDG_CACHE_HOME:-$HOME/.cache}/jet"
+if [ -n "${JET_TEST_SCRATCH:-}" ]; then scratch="$JET_TEST_SCRATCH"
+elif [ -n "${JET_SCRATCH_ROOT:-}" ]; then scratch="$JET_SCRATCH_ROOT/lane-check"
+else scratch="$user_cache/lane-check"
+fi
 mkdir -p "$scratch"
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
-export JET_NIX_TMP_CLEANED=1
 # The checkout under review supplies Core and the toolchain sources the compiler reads.
 export JET_TOOLCHAIN_ROOT="${JET_TOOLCHAIN_ROOT:-$repo}"
 tmp="$(mktemp "$scratch/jet-lane-check.XXXXXX")"
@@ -80,7 +84,8 @@ check_dir="$repo"
 # session (hosted CI) sets JET_CHECK_MEM=off and relies on its own VM limit.
 floor_mb="${JET_MIN_FREE_MB:-8000}"
 slots="${JET_CHECK_SLOTS:-2}"
-lockdir="${TMPDIR}/jet-check-slots"
+# The slot locks are per user, wherever each caller's scratch lives.
+lockdir="$user_cache/lane-check-slots"
 mkdir -p "$lockdir"
 
 run_check() {
@@ -94,7 +99,7 @@ run_check() {
   [ "${JET_CHECK_MEM:-}" = off ] && scope=()
   (
     cd "$check_dir" || exit 1
-    JET_KEEP_GOING=1 timeout 1800 "${scope[@]}" "$repo/Tools/agent/jet-env" jet check "$target"
+    JET_KEEP_GOING=1 timeout 1800 "${scope[@]}" "$JET" check "$target"
   ) >"$tmp" 2>&1
 }
 

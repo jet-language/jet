@@ -18,7 +18,7 @@ fn kit_test_golden_fixture(name: String) -> String {
 }
 
 fn kit_test_golden_scratch(label: String) -> String {
-    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-{process.current_pid()}-{label}")
+    path :: files.join(kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), "testkit-{process.current_pid()}-{label}")
     files.create_dir_all(path) ?? panic("self-test scratch: {err}")
     path
 }

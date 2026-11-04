@@ -5,7 +5,7 @@ use {
 }
 
 fn kit_ui_test_scratch(label: String) -> String {
-    root :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-ui-{process.current_pid()}-{label}")
+    root :: files.join(kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), "testkit-ui-{process.current_pid()}-{label}")
     files.create_dir_all(root) ?? panic("UI self-test scratch: {err}")
     root
 }

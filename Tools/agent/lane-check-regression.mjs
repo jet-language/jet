@@ -15,16 +15,8 @@ const root = fs.mkdtempSync(path.join(parent, 'jet-lane-regression.'));
 const repo = path.join(root, 'repo');
 const bin = path.join(root, 'bin');
 fs.mkdirSync(path.join(repo, 'Tools/agent'), {recursive: true});
-fs.mkdirSync(path.join(repo, 'Compiler/Bootstrap'), {recursive: true});
 fs.mkdirSync(bin);
 fs.copyFileSync(source, path.join(repo, 'Tools/agent/lane-check.sh'));
-fs.writeFileSync(path.join(repo, 'Tools/agent/jet-env'), '#!/usr/bin/env bash\nif [ "$1" = jet ]; then shift; set -- "$JET" "$@"; fi\nexec "$@"\n', {mode: 0o755});
-// The fixture assembler writes the unit where the real one does, under HOME.
-fs.writeFileSync(path.join(repo, 'Compiler/Bootstrap/assemble.mjs'), `import fs from 'node:fs';
-const dir = process.env.HOME + '/.cache/jet-luna/compiler-bootstrap/project/src';
-fs.mkdirSync(dir, {recursive: true});
-fs.writeFileSync(dir + '/compiler.jet', '');
-`);
 // The memory-capped scope is a pass-through here: drop systemd-run's options.
 fs.writeFileSync(path.join(bin, 'systemd-run'), '#!/usr/bin/env bash\nwhile [ "$#" -gt 0 ]; do case "$1" in -p) shift 2 ;; -*) shift ;; *) break ;; esac; done\nexec "$@"\n', {mode: 0o755});
 fs.writeFileSync(path.join(bin, 'jet'), `#!/usr/bin/env bash
@@ -58,7 +50,7 @@ for (const [name, mode, args, expected] of [
 ]) {
   const scratch = path.join(root, name);
   fs.mkdirSync(scratch);
-  const env = {...process.env, PATH: `${bin}:${process.env.PATH}`, JET_TEST_SCRATCH: scratch,
+  const env = {...process.env, PATH: `${bin}:${process.env.PATH}`, JET_TEST_SCRATCH: scratch, XDG_CACHE_HOME: path.join(root, 'cache'),
     JET: path.join(bin, 'jet'), JET_MIN_FREE_MB: '0', JET_CHECK_SLOTS: '1', LANE_FIXTURE: mode,
     LANE_ARGS_PATH: path.join(scratch, 'args.txt')};
   const command = name === 'interrupted' ? 'timeout' : 'bash';
@@ -83,7 +75,7 @@ for (const [name, mode, args, expected] of [
   const actualArgs = fs.readFileSync(env.LANE_ARGS_PATH, 'utf8').trim().split('\n');
   assert.equal(actualArgs[0], '1', `${name}: keep-going collects every error`);
   assert.equal(actualArgs[1], 'check');
-  if (args.length === 0) assert(actualArgs[2].endsWith(`${logs[0]}.work/home/.cache/jet-luna/compiler-bootstrap/project/src/compiler.jet`));
+  if (args.length === 0) assert.equal(actualArgs[2], path.join(repo, 'Compiler'));
   else assert.equal(actualArgs[2], path.join(repo, 'focused.jet'));
   if (expected === 0) {
     assert.equal(result.stdout, 'CHECK OK\n');
