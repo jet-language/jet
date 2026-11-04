@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90490,
+    "rev": 90492,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55035,6 +55035,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-30T13:26:01.871Z"
+        },
+        {
+          "n": 11,
+          "text": "The runtime pack builds with jet alone: prebuild-runtime.mjs is a Jet program that needs no node, cc, ar, nm or Nix-built musl/libgcc. It reuses the seed's foreign archives or builds them through Jet's own toolchain, and a fresh clone with only a seed jet rebuilds the pack when its recipe changes (found by SelfMem's #6564 census, 2026-11-04: G3).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:57:22.796Z"
         }
       ],
       "refs": [],
@@ -55047,7 +55056,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-04T20:38:07.337Z",
+      "updated": "2026-11-04T20:57:22.796Z",
       "updatedBy": "Main",
       "goals": [
         "G22"
@@ -76527,6 +76536,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "c3/c6 census (SelfMem, 2026-11-04): fresh clone of 449551c501 with env -i, an empty HOME and only the a0_025 seed. jet build Compiler, a ui test and hello all pass once JET_TOOLCHAIN_ROOT and JET_COMPILER_IDENTITY are exported. Gaps: G1/G2, jet requires both variables (ruling: jet defaults them, env > the input's Jet-checkout ancestor > the install beside the binary; identity from IDENTITY beside the binary); G3, s1 reuses the seed runtime pack (ruling: reuse when the recipe hash matches, else a registered error; the Jet port of prebuild is on #5072); G4 testkit scratch under HOME; G5 lane-check via jet-env; G6 verify-full is node and hard-codes the scratch mount; G7 docs route through jet-env/Nix."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "Owner 2026-11-04 on c6: environment setup may belong to Jetpack rather than the jet compiler; the line is blurry. Read c6 as: with a Jet toolchain present (jet + Jetpack), the environment comes from it, not Nix. Which component owns it follows the existing Jetpack environment work (D-DEPS-ENV1; #5969)."
         },
         {
@@ -76618,7 +76632,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-04T20:41:29.754Z",
+      "updated": "2026-11-04T20:57:23.345Z",
       "updatedBy": "Main"
     },
     {
@@ -157192,6 +157206,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T20:57:23.346Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T20:57:22.796Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#11 The runtime pack builds with jet alone: prebuild-runtime.mjs"
+    },
     {
       "at": "2026-11-04T20:56:40.942Z",
       "by": "Main",
