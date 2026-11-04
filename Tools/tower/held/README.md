@@ -24,7 +24,6 @@ below. The card then cites the landing commit, not this path.
 | Card | Directory | Items |
 |---|---|---|
 | #5910 | `5910/` | SP05b and SP05c: phase-arena work, with its proof logs (recovered 2026-11-04) |
-| #6414 | `6414/` | OptAccumulate: an unwired O2 accumulator pass (recovered 2026-11-04) |
 | #6442 | `6442/` | BugSweep 15n, 19, 20, 21 and 23: Jetpack and driver fixes |
 | #5971 | `5971/` | Main-13: checked fixed-width narrowing (parked: runtime recursion) |
 | #6497 | `6497/` | FFIDesign-1: the generated #CLI parser (pulled: Exec effect on help/version) |
@@ -37,6 +36,7 @@ finds the commit that landed a directory's items.
 | Card | Item | Landed by |
 |---|---|---|
 | #6312 | D-CACHE-CONTROL1=A (#6312 c5): the three held tests, with the compiler half recovered from a rescued copy of MemDesign's `cache-control1-wip.patch` and integrated: `mem.stream_store` (IR StreamStore, x64 `movnti` plus `sfence`), `$build.cpu.cache_line` (also in `#Layout(c, align(…))`), E1105 text, docs rows, and golden output for both examples | the commit that deleted `6312/` |
+| #6414 | OptAccumulate (#6414 c37): the recovered recognizer reworked into the general associative-operation tail-accumulation pass (`Compiler/JetIR/Source/OptAccumulate.jet`, pass `accumulate`, on at O1 and O2): exact Int `+`, `*`, `bit_and`, `bit_or` and `bit_xor`, wrapping word `+` and `*`, word `bit_or` and `bit_xor`, signed-word `bit_and`; either operand order, the other operand computed before or after the call; only a recursion whose head test its step provably reaches; a #Test per shape and refusal, the `math/accumulating_recursion` golden on every tier, and a same-run measurement against `JET_OPT_DISABLE=accumulate` | the commit that deleted `6414/` |
 
 ## Held work that was lost
 
@@ -44,8 +44,8 @@ The 2026-11-04 scratch cleanup deleted these before they were copied here.
 They could not be recovered. Each card keeps its description of the work, so
 the work can be redone from that description. The SP05c patch (#5910),
 OptAccumulate.jet (#6414) and the #6312 compiler half, first listed here, were
-later found in rescued copies; the first two are held above and #6312 has
-landed.
+later found in rescued copies; the first is held above, and #6414 and #6312
+have landed.
 
 | Card | What was held | Where the description is |
 |---|---|---|
