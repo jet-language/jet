@@ -135,8 +135,8 @@ outputs: .{
     dev: Environment{ name: "dev", tools: [ripgrep] }               // NEW: D-ECO-OUTPUT-KINDS1
     image: Image{ name: "todo", from: cli, kind: .Oci }
     all: Bundle{ name: "todo-release", members: [cli, image] }
-    host: System{ name: "halcyon", target: linux.x64, packages: [cli] } // NEW: D-ECO-OUTPUT-KINDS1
-    prod: Fleet{ name: "prod", hosts: .{ halcyon: "system.halcyon" } }  // NEW: D-ECO-OUTPUT-KINDS1
+    host: System{ name: "devhost", target: linux.x64, packages: [cli] } // NEW: D-ECO-OUTPUT-KINDS1
+    prod: Fleet{ name: "prod", hosts: .{ devhost: "system.devhost" } }  // NEW: D-ECO-OUTPUT-KINDS1
 }
 ```
 
@@ -207,7 +207,7 @@ the realization action identity.
   successful merge edges with source spans
   receipt refs:
     build todo.cli -> receipt sha256:4ae2…
-    system halcyon/gen-42 -> receipt sha256:91b8…
+    system devhost/gen-42 -> receipt sha256:91b8…
 
 Hangar receipt sha256:91b8…
   locked inputs sha256:20f1…
@@ -937,34 +937,34 @@ Under D-ECO-JETOS2, `profiles:`, `themes:`, the VM `checks:` entry, and `filesys
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-name: "halcyon"
+name: "devhost"
 imports: find("./system")
 options: laptop_options
-themes: .{ halcyon: halcyon_theme }
-profiles: .{ nate: .{ packages: [fish, helix, git] } }
+themes: .{ devhost: halcyon_theme }
+profiles: .{ user: .{ packages: [fish, helix, git] } }
 systems: .{
-    halcyon: System{
-        name: "halcyon"
+    devhost: System{
+        name: "devhost"
         target: linux.x64
         packages: [firefox, ghostty, helix, git, ripgrep, btop]
         users: .{
-            nate: .{ shell: fish, groups: [wheel], profile: profiles.nate }
+            user: .{ shell: fish, groups: [wheel], profile: profiles.user }
         }
         filesystem: .{
             root: .{ device: "/dev/disk/by-label/jetos", type: .Ext4 }
         }
-        hardware: hardware.halcyon
+        hardware: hardware.devhost
         variants: .{
             rescue: .{ services: .{ desktop: .{ enable: false } }, boot: .{ target: .Rescue } }
         }
-        network: .{ hostName: "halcyon", firewall: .{ allowedTcpPorts: [22] } }
+        network: .{ hostName: "devhost", firewall: .{ allowedTcpPorts: [22] } }
         services: .{
             desktop: .{ environment: .Kde }
             audio: .{ pipewire: true }
             openssh: .{ enable: false }
         }
         apps: .{ flatpak: [.{ ref: "org.mozilla.firefox" }] } // NEW: D-ECO-JETOS2
-        theme: themes.halcyon
+        theme: themes.devhost
         files: .{
             issue: .{ path: "/etc/issue", text: "jetos 26.10 (Apex)\n", mode: 0o644 }
             sysctl: generated_sysctl
@@ -974,14 +974,14 @@ systems: .{
 }
 images: .{
     installer: Image{
-        name: "halcyon-installer"
-        from: systems.halcyon
+        name: "devhost-installer"
+        from: systems.devhost
         kind: .Iso
         installer: .{ mode: .Guided, desktop: .Kde, storage: .FromSystem }
     }
 }
 checks: .{
-    vm: Check{ name: "halcyon-vm", entry: verify_halcyon_vm }
+    vm: Check{ name: "devhost-vm", entry: verify_halcyon_vm }
 }
 ```
 
@@ -1021,7 +1021,7 @@ halcyon_theme :: Theme{             // D-JOS-THEME1; unified placement: D-ECO-JE
 ```jet
 halcyon_hardware :: Config{         // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     hardware: .{
-        halcyon: .{
+        devhost: .{
             cpu: .Amd64
             graphics: .Amd
             storage: [nvme]
@@ -1056,7 +1056,7 @@ generated_sysctl :: File{           // NEW: D-ECO-JETOS2
 }
 
 ghostty_config :: File{             // NEW: D-ECO-JETOS2
-    path: "/home/nate/.config/ghostty/config"
+    path: "$HOME/.config/ghostty/config"
     source: path("home/ghostty/config")
     mode: 0o644
     replace: .Backup
@@ -1068,10 +1068,10 @@ ghostty_config :: File{             // NEW: D-ECO-JETOS2
 ```jet
 laptop :: Config{                   // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     systems: .{
-        halcyon: .{ services: .{ power: .{ profile: .Balanced } } }
+        devhost: .{ services: .{ power: .{ profile: .Balanced } } }
     }
     profiles: .{
-        nate: .{ packages: [brightnessctl], files: [ghostty_config] }
+        user: .{ packages: [brightnessctl], files: [ghostty_config] }
     }
 }
 ```
@@ -1080,13 +1080,13 @@ laptop :: Config{                   // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETO
 
 ```jet
 fn verify_halcyon_vm() ? {
-    host :: vm.host(systems.halcyon)
+    host :: vm.host(systems.devhost)
     host.install(images.installer)?
     host.reboot()?
     host.wait_for_boot(90s)?
     host.assert_unit_active("display-manager.service")?
     host.assert_desktop(.Kde)?
-    host.assert_user_login("nate")?
+    host.assert_user_login("user")?
     host.assert_generation_switch()?
     host.assert_rollback()?
 }
@@ -1096,15 +1096,15 @@ fn verify_halcyon_vm() ? {
 
 ```jet
 nvidia :: Config{                   // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
-    systems: .{ halcyon: .{ kernel: .{ drivers: [nvidia] } } }
+    systems: .{ devhost: .{ kernel: .{ drivers: [nvidia] } } }
 }
 ```
 
 Beginner path uses only ratified JetOS verbs:
 
 ```text
-$ jet os plan halcyon
-Plan halcyon from generation gen-41
+$ jet os plan devhost
+Plan devhost from generation gen-41
   ~ desktop Gnome -> Kde
   + 14 packages
   + display-manager.service
@@ -1114,25 +1114,25 @@ Plan halcyon from generation gen-41
 Rollback point: gen-41
 No files or services changed.
 
-$ jet os build halcyon
+$ jet os build devhost
 Built generation gen-42.
 Readiness: 12/12 checks passed.
 
-$ jet os image halcyon
-Built hybrid installer image `halcyon-installer.iso`.
-Guided install: KDE; storage facts from System `halcyon`.
+$ jet os image devhost
+Built hybrid installer image `devhost-installer.iso`.
+Guided install: KDE; storage facts from System `devhost`.
 VM install/reboot proof: passed.
 
-$ jet os switch halcyon
-Switch halcyon: gen-41 -> gen-42? [y/N] y
+$ jet os switch devhost
+Switch devhost: gen-41 -> gen-42? [y/N] y
 Activated gen-42.
 Observed healthy for 30s.
 
-$ jet os generations halcyon
+$ jet os generations devhost
 * gen-42  26.10 Apex  healthy  parent gen-41
   gen-41  26.10 Apex  healthy  parent gen-40
 
-$ jet os rollback halcyon
+$ jet os rollback devhost
 Activated gen-41.
 ```
 
@@ -1146,14 +1146,14 @@ services.desktop.environment = Kde
 Derived display manager: Sddm
 Rejected contenders: none
 
-$ jet inspect system halcyon --files /etc/sysctl.d/90-jetos.conf # NEW: D-ECO-JETOS2
+$ jet inspect system devhost --files /etc/sysctl.d/90-jetos.conf # NEW: D-ECO-JETOS2
 Source: system/files.jet:1
 Mode: 0644
 Write: atomic generation projection
 Content sha256:660d…
 
-$ jet os proof halcyon --name gen-42
-Proof: halcyon generation gen-42
+$ jet os proof devhost --name gen-42
+Proof: devhost generation gen-42
 baseline: gen-41
   ~ services.desktop.environment Gnome -> Kde
   + package plasma-desktop#6.3.5
@@ -1182,18 +1182,18 @@ NixOS may need fewer lines when a module already packages the exact laptop polic
 
 ### Transition S7 -> S8 — one host becomes a fleet
 
-`jet split hosts halcyon` extracts the existing System into a host map and creates a sole-host Fleet without changing the System or building anything (`NEW: D-ECO-TRANSITION1`).
+`jet split hosts devhost` extracts the existing System into a host map and creates a sole-host Fleet without changing the System or building anything (`NEW: D-ECO-TRANSITION1`).
 
 ```text
-$ jet split hosts halcyon --check
-Would keep: outputs.halcyon (System)
-Would add: outputs.home (Fleet), with hosts.halcyon -> system.halcyon
+$ jet split hosts devhost --check
+Would keep: outputs.devhost (System)
+Would add: outputs.home (Fleet), with hosts.devhost -> system.devhost
 Would create: package/fleet.jet::home
 System graph before: sha256:7780…
 System graph after:  sha256:7780…
 No files changed.
 
-$ jet split hosts halcyon
+$ jet split hosts devhost
 Created package/fleet.jet.
 System graph unchanged: sha256:7780…
 ```
@@ -1205,7 +1205,7 @@ home :: Config{                     // NEW: D-ECO-SLICENAME1
     outputs: .{
         home: Fleet{                    // NEW: D-ECO-OUTPUT-KINDS1
             name: "home"
-            hosts: .{ halcyon: system.halcyon }
+            hosts: .{ devhost: system.devhost }
         }
     }
 }

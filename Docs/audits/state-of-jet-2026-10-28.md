@@ -6,7 +6,7 @@ sources), self-hosted `jet@0.0.1#2698c35b`. Date: 2026-10-28. Tower snapshot: 4,
 
 Method: I worked as four personas (beginner, scripter, monorepo team, systems/unsafe expert).
 For each, I ran real commands from fresh scratch projects, traced each failure to code, and
-searched Tower for every finding. All evidence is reproducible from `/mnt/jetscratch/lanes/Audit`:
+searched Tower for every finding. All evidence is reproducible from `$JET_SCRATCH_ROOT/lanes/Audit`:
 - `env.sh`, `census_cmds.sh`, `mk_mono.sh`, `mono_probe.sh`;
 - `mk_probes*.sh`, `run_probes.sh`, `perf_tiers.sh`, `fmt_probe.sh`, `doc_blocks.sh`;
 - `diag_cov.py`, `tower_health.mjs`, `tq.sh`.

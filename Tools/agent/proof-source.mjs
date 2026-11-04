@@ -2,14 +2,16 @@
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const candidates = '/mnt/jetscratch/candidates';
+const scratchRoot = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
+const candidates = join(scratchRoot, 'candidates');
 
 export function proofTargetDirectory(commit) {
     if (!/^[a-f0-9]{40}$/.test(commit)) throw Error('proof targets require a full commit SHA');
-    return `/mnt/jetscratch/targets/source-${commit}`;
+    return join(scratchRoot, 'targets', `source-${commit}`);
 }
 
 function blobHash(path, mode) {

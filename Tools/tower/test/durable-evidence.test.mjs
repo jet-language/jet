@@ -49,12 +49,13 @@ const refused = (pattern) => (e) => e instanceof TowerError && e.code === 'E_EVI
 test('meet refuses evidence without a durable commit and accepts a commit on dev or master', () => {
   const { st, onMaster, onDev, unlanded } = project();
   assert.throws(() => meet(st, 'ran the tests, all green'), refused(/names no commit on dev or master/));
-  assert.throws(() => meet(st, 'patch at /mnt/jetscratch/lanes/X/fix.patch'), refused(/only scratch output/));
+  assert.throws(() => meet(st, 'patch at $JET_SCRATCH_ROOT/lanes/X/fix.patch'), refused(/only scratch output/));
+  assert.throws(() => meet(st, 'patch at /mnt/scratch/lanes/X/fix.patch'), refused(/only scratch output/));
   assert.throws(() => meet(st, 'log in ~/.cache/jet-dev/scratch/X/run.log'), refused(/only scratch output/));
   assert.throws(() => meet(st, `built ${unlanded.slice(0, 10)}`), refused(new RegExp(`${unlanded.slice(0, 10)} is not on dev or master`)));
   assert.equal(st.load().cards[0].criteria[0].status, 'open', 'a refused meet changes nothing');
 
-  meet(st, `landed ${onDev.slice(0, 10)}; log at /mnt/jetscratch/lanes/X/run.log`);
+  meet(st, `landed ${onDev.slice(0, 10)}; log at $JET_SCRATCH_ROOT/lanes/X/run.log`);
   assert.equal(st.load().cards[0].criteria[0].status, 'met');
   const { result } = st.mutate((s, cfg, history) =>
     db.verifyCriterion(s, '#1', 1, { evidence: `reviewed ${onMaster}`, by: 'reviewer' }, cfg, history));

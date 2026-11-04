@@ -20,7 +20,7 @@
     root :: files.tmpdir("jetos-identity-") ?? panic("identity scratch")
     generation :: files.join(root, "generation")
     installer :: files.join(root, "installer/current-system")
-    system :: SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{OptionPlan{key: "hardware.halcyon.specialisation.plasmaBeta", value: "true"}}}
+    system :: SystemPlan{name: "devhost", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: [OptionPlan]{OptionPlan{key: "hardware.devhost.specialisation.plasmaBeta", value: "true"}}}
     files.create_dir_all(generation) ?? panic("generation directory")
     jetos_write_etc_tree(generation, system) ?? panic("generation etc")
     jetos_write_hardware_facts(generation, system) ?? panic("generation hardware")
@@ -35,9 +35,9 @@
     assert_eq(os_release, jetos_render_jetos_os_release(false))
     assert_eq(usr_os_release, os_release)
     assert_eq(wallpaper, JETOS_WALLPAPER_SVG)
-    assert(specialisation.contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"))
-    assert(installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"))
-    assert(installer_limine.contains("/Install jetos 26.10 (Apex) — halcyon"))
+    assert(specialisation.contains("title jetos 26.10 (Apex) — devhost (plasmaBeta)"))
+    assert(installed_limine.contains("/jetos 26.10 (Apex) — devhost verify"))
+    assert(installer_limine.contains("/Install jetos 26.10 (Apex) — devhost"))
     assert_eq(files.read(files.join(installer, "etc/os-release")) ?? panic("installer os release"), os_release)
     assert_eq(files.read(files.join(installer, "usr/lib/os-release")) ?? panic("installer usr os release"), usr_os_release)
     assert_eq(files.read(files.join(installer, "share/backgrounds/jetos/apex.svg")) ?? panic("installer wallpaper"), wallpaper)

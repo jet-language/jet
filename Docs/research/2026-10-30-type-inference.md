@@ -1,7 +1,7 @@
 # Type inference: where Jet works out a type today
 
 Date: 2026-10-30. Card #6325. Probes live in
-`/mnt/jetscratch/lanes/SurfaceDesign/probes/` (`m6325`, `m6325b`, `m6325c`).
+`$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/` (`m6325`, `m6325b`, `m6325c`).
 Every probe printed the same output on o0, o1 and o2 with the base compiler at
 bd83fe6361.
 

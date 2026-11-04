@@ -44,7 +44,7 @@ rewritten to follow it.
 
 ## 2. What happens today
 
-Probes live in `/mnt/jetscratch/lanes/SurfaceDesign/probes/m-decl`. Each ran
+Probes live in `$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/m-decl`. Each ran
 with the dev jet at `--optimize=none` and `full`, and d8 and d10 also at
 `basic`.
 
@@ -88,12 +88,12 @@ function value that may not. `fn` remains only in function types.
 
 D-DECL-BINDING1 also shows Odin's form, `square :: fn(n: Int) -> Int { … }`,
 and keeping the words. D-LAMBDA-SHAPE1 v2 shows keeping a short arrow beside
-the value form. Ballots: `/mnt/jetscratch/lanes/SurfaceDesign/ballot/`
+the value form. Ballots: `$JET_SCRATCH_ROOT/lanes/SurfaceDesign/ballot/`
 `D-DECL-BINDING1.json` and `D-LAMBDA-SHAPE1.json`.
 
 ## 4. Size of the change
 
-`/mnt/jetscratch/lanes/SurfaceDesign/b2/census-decl.mjs` over a dev export of 17,636 `.jet` files counted:
+`$JET_SCRATCH_ROOT/lanes/SurfaceDesign/b2/census-decl.mjs` over a dev export of 17,636 `.jet` files counted:
 
 | site | count | under A |
 |---|---|---|
@@ -107,7 +107,7 @@ the value form. Ballots: `/mnt/jetscratch/lanes/SurfaceDesign/ballot/`
 | `fn(` function types | 773 | unchanged |
 | markers before a function | 4,808 | unchanged, above the binding |
 
-Main's lambda census (`/mnt/jetscratch/lanes/Main/q/b4/lam/census.mjs`), rerun
+Main's lambda census (`$JET_SCRATCH_ROOT/lanes/Main/q/b4/lam/census.mjs`), rerun
 on the same export, counts 4,812 lambdas in 1,197 files. Of these, 3,842 have
 an expression body, 888 a bare parameter, and 220 are stored in a binding.
 Version 1's `fn(…) { … }` form adds 12,437 characters. The bound-value form

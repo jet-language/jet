@@ -11,10 +11,10 @@ on Tower cards #3645 (memory model), #4249 (ownership checker gaps) and #4619
 drafts under `~/.cache/jet-dev/ballots/READY/`; section 6 lists them.
 
 Evidence. Every "Jet today" verdict below comes from `jet check` on the
-candidate binary `/mnt/jetscratch/candidates/dev-05ea86f65/jet` (Jet 0.0.1,
+candidate binary `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` (Jet 0.0.1,
 built 2026-10-05 14:16), run over the 64-case Rust-borrow-checker acceptance
 corpus that the agent MemEvidence wrote at
-`/mnt/jetscratch/scratch/memcorpus/cases/` (outputs in `out/`). Case numbers
+`$JET_SCRATCH_ROOT/scratch/memcorpus/cases/` (outputs in `out/`). Case numbers
 such as **C14** refer to that corpus. A `jet check` pass is a sema verdict, not
 proof that the program runs on every tier. Ratified law is quoted from Tower
 (`tower decision show <ID>`). Claims about other languages cite primary
@@ -444,8 +444,8 @@ does not pay. The rule this proposal sets is:
 
 Everything below checks Jet against this rule. The rows come from the
 agent MemEvidence's interim audit: `jet emit --rust` on the corpus cases,
-reading the generated Rust (`/mnt/jetscratch/scratch/memcorpus/out/<case>.rs`).
-Its full report will be `/mnt/jetscratch/scratch/memcorpus/AUDIT.md`. The same
+reading the generated Rust (`$JET_SCRATCH_ROOT/scratch/memcorpus/out/<case>.rs`).
+Its full report will be `$JET_SCRATCH_ROOT/scratch/memcorpus/AUDIT.md`. The same
 audit confirms four places that already match Rust: a disjoint field call
 becomes a real `&`/`&mut` split (C07), returned views are real Rust references
 (C27, C28), last-use moves are moves (C47), and `task ^x` moves.
@@ -865,4 +865,4 @@ Cited from the literature, not re-fetched for this note:
 Jet sources: `Docs/spec/spec.md` (Ownership and borrowing; Expert memory tier;
 Concurrency), `Docs/spec/architecture.md` (Concurrency boundary safety),
 Tower decisions named inline, cards #3645, #4249,
-#4392, #4619, and the corpus at `/mnt/jetscratch/scratch/memcorpus/`.
+#4392, #4619, and the corpus at `$JET_SCRATCH_ROOT/scratch/memcorpus/`.

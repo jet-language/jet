@@ -77,7 +77,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     artifacts: process.env.SAFETY_ARTIFACTS ?? join(home, ".cache/jet-dev/dev-artifacts.json"),
     stateDir: process.env.SAFETY_STATE ?? join(home, ".cache/jet-dev/scratch/SafetyNet8/standing"),
     queueRoot: process.env.PQ_ROOT ?? join(home, ".cache/jet-dev/proofq"),
-    scratchRoot: process.env.SAFETY_SCRATCH ?? "/mnt/jetscratch/candidates/SafetyNet8",
+    scratchRoot: process.env.SAFETY_SCRATCH ?? join(process.env.JET_SCRATCH_ROOT || join(home, ".cache/jet-dev/scratch"), "candidates/SafetyNet8"),
     preflight: join(home, ".cache/jet-dev/proofq/bin/pq-preflight.mjs"),
     cheap: join(home, ".cache/jet-dev/cheap.sh"),
     count: Number(process.env.SAFETY_COUNT ?? 50),

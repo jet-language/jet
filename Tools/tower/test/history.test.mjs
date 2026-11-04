@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, copyFileSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { openStore, empty, normalize, project, findInHistory, restoreFromHistory, TowerError } from '../app/store.mjs';
 import { writeJSON, historyFile, today, now } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
@@ -240,7 +241,7 @@ test('events beyond the newest 500 archive to history.events in batches of 100',
 
 // ---- 7. real-board-copy migration test ----------------------------------------
 
-const REAL_BOARD = '/home/nate/Projects/Github/jet/.tower/tower.json';
+const REAL_BOARD = fileURLToPath(new URL('../../../.tower/tower.json', import.meta.url));
 
 test('migration on a copy of the real board: retire pass shrinks tower.json, integrity holds', { skip: !existsSync(REAL_BOARD) }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'tower-realcopy-'));

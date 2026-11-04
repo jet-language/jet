@@ -7,13 +7,13 @@ write: tools/limine os_vm_prove_rejects_incomplete_guest_proof.limine.template
 chmod: tools/limine 0755
 env: JETPACK_ROOT={work}/package-root
 env: PATH={work}/tools
-step: jet os vm prove halcyon --disk halcyon.qcow2 --name vm-proof --no-color --offline
+step: jet os vm prove devhost --disk devhost.qcow2 --name vm-proof --no-color --offline
 cwd: project
 exit: 2
 step: jet run prepare-guest.jet
 exit: 0
-step: jet os vm prove halcyon --disk halcyon.qcow2 --name vm-proof --no-color --offline
+step: jet os vm prove devhost --disk devhost.qcow2 --name vm-proof --no-color --offline
 cwd: project
 exit: 2
 stderr: ~ "guest assertions did not match" # original incomplete guest diagnostic
-file: package-root/systems/vm-proofs/halcyon-vm-proof-vm-proof.json ~ "\"state\":\"harness-ready\"" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-proof-vm-proof.json ~ "\"state\":\"harness-ready\"" # original predicate

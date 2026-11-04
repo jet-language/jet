@@ -517,7 +517,7 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-jet-comptime = { path = "/home/nate/Projects/Github/jet/crates/jet-comptime" }
+jet-comptime = { path = "$HOME/Projects/Github/jet/crates/jet-comptime" }
 
 [[bin]]
 name = "jet-mine-comptime-map-probe"

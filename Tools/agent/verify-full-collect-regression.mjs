@@ -22,7 +22,7 @@ try {
     put('Tools/agent/proof-source.mjs', `import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 export function assertPinnedSource(source, commit) {if(existsSync(source+'/.corrupted'))throw Error('pinned source changed');return {commit};}
-export function proofTargetDirectory(commit) {return '/mnt/jetscratch/targets/source-'+commit;}
+export function proofTargetDirectory(commit) {return ${JSON.stringify(container)}+'/targets/source-'+commit;}
 if(process.argv[1]===fileURLToPath(import.meta.url))console.log(process.argv[3]);
 `);
     // The fake compiler answers only the Jet gates (`jet <dir>/Tools/agent/<Gate>.jet ...`, which

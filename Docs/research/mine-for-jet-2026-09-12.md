@@ -52108,7 +52108,7 @@ fn letter(score: Int, offset: Int) String -> {
 
 **Identity:** recorded UTF-8 bytes `136`; SHA-256 `a29493ef3c2b69e37ec33fe3c67e28fd86754b6b86c17a58f6a1912a66de3da4`; encoding `UTF-8`; line ending `LF`; final-newline rule: exactly one trailing LF; body hash/byte count verified against the retained digest. **Used by:** [BIG-lsp-frozen](#probe-bigcode-big-lsp-frozen).
 
-**Original path(s) as provenance:** `file:///home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/scoring.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline/scoring.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/scoring.jet`.
+**Original path(s) as provenance:** `file://$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/scoring.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline/scoring.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/scoring.jet`.
 
 **Complete literal input:**
 
@@ -52130,7 +52130,7 @@ fn letter(score: Int) String -> {
 
 **Identity:** recorded UTF-8 bytes `52`; SHA-256 `807da7c7f8f8d51992b13c6f89f2737139206630fa7cc388f9563765f2917d59`; encoding `UTF-8`; line ending `LF`; final-newline rule: exactly one trailing LF; body hash/byte count verified against the retained digest. **Used by:** [BIG-lsp-frozen](#probe-bigcode-big-lsp-frozen).
 
-**Original path(s) as provenance:** `file:///home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/util.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/util.jet`.
+**Original path(s) as provenance:** `file://$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/util.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/util.jet`.
 
 **Complete literal input:**
 
@@ -52146,7 +52146,7 @@ fn letter(value: Int) String -> "other:{value}"
 
 **Identity:** recorded UTF-8 bytes `101`; SHA-256 `e98e3d358e946102e65ff0dc413e3679b7900bfd5a79a8d9699c592d680210ff`; encoding `UTF-8`; line ending `LF`; final-newline rule: exactly one trailing LF; body hash/byte count verified against the retained digest. **Used by:** [BIG-lsp-frozen](#probe-bigcode-big-lsp-frozen), [BIG-rename-check](#probe-bigcode-big-rename-check).
 
-**Original path(s) as provenance:** `file:///home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/run.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/run.jet`.
+**Original path(s) as provenance:** `file://$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/run.jet`, `target-mine-playlist-20260911/analyses/bigcode/probe-inputs/rename/run.jet`.
 
 **Complete literal input:**
 
@@ -52507,12 +52507,12 @@ hello!
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::scoring.jet::letter tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::util.jet::shout tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::run.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::scoring.jet::letter tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::util.jet::shout tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::run.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::scoring.jet::letter tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::util.jet::shout tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::run.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::scoring.jet::letter tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::util.jet::shout tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/baseline::run.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -52746,7 +52746,7 @@ run `jet explain E0107` to learn more
 
 **Receipt identity:** source `coordination/probe-receipts/BIG-lsp-frozen.json`; recorded bytes `11200`; file SHA-256 `cd1ecabfb2f13e214df1bab5c15342634d74437bdf34b89eef55a6cf5e15d587`; command `scripts/agent/jet-env` → `target-mine-playlist-20260911/coordination/jet-probe` → `self` → `lsp`.
 
-**Executable identity:** binary SHA-256 `e841150f5a02f14a7b6b19003a7b8dd32d1fd95b4aa8d7bb4d34e30d376bee3e`; cwd `/home/nate/Projects/Github/jet`; source limit `Available executable snapshot; no current-source equivalence. See coordination/frozen-binary-provenance.json.`; supervision `{'name': 'mine-bigcode-lsp-frozen', 'pid': 3085889, 'pty': False, 'readiness': 'initialize id1 result observed before initialized/didOpen/query frames were sent', 'exit': 0}`.
+**Executable identity:** binary SHA-256 `e841150f5a02f14a7b6b19003a7b8dd32d1fd95b4aa8d7bb4d34e30d376bee3e`; cwd `$HOME/Projects/Github/jet`; source limit `Available executable snapshot; no current-source equivalence. See coordination/frozen-binary-provenance.json.`; supervision `{'name': 'mine-bigcode-lsp-frozen', 'pid': 3085889, 'pty': False, 'readiness': 'initialize id1 result observed before initialized/didOpen/query frames were sent', 'exit': 0}`.
 
 **Protocol boundary:** recorded request/response session with `8` request(s), `7` response(s), mutation `Rename preview only. No returned edit applied.`, shutdown `params:{} returned id4 result:null; supervised process exited0. Earlier separate unbound session used params:null and received Invalid Request, then was stopped; do not conflate.`. Full transport wrapper is intentionally not duplicated; semantic LSP outcomes are qualified in Appendix F.
 
@@ -52952,12 +52952,12 @@ hello!
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::scoring.jet::letter tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::run.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::util.jet::shout tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::scoring.jet::letter tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::run.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::util.jet::shout tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::scoring.jet::letter tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::run.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::util.jet::shout tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::scoring.jet::letter tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::run.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/bigcode/probe-inputs/repaired::util.jet::shout tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -53151,18 +53151,18 @@ duplicate:accepted:3
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Comparable::compare<CountRecord> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::inspect tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Decode::decode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Equatable::equal<CountRecord> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Encode::encode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Comparable::compare<CountRecord> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::inspect tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Decode::decode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Equatable::equal<CountRecord> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Encode::encode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Comparable::compare<CountRecord> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::inspect tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Decode::decode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Equatable::equal<CountRecord> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Encode::encode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Comparable::compare<CountRecord> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::inspect tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Decode::decode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Equatable::equal<CountRecord> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::CountRecord::Encode::encode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/corelib/probe-inputs::json-deny-unknown.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -53513,14 +53513,14 @@ duplicate:accepted:3
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@90..107 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::plus_four tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@124..146 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@90..107 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::plus_four tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@124..146 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@90..107 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::plus_four tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@124..146 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@90..107 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::plus_four tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run::lambda@124..146 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::callable-capture.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -53648,18 +53648,18 @@ run `jet explain E0307` to learn more
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Decode::decode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Encode::encode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::code tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Equatable::equal<Decision> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Comparable::compare<Decision> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Decode::decode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Encode::encode tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::code tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Equatable::equal<Decision> tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Comparable::compare<Decision> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Decode::decode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Encode::encode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::code tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Equatable::equal<Decision> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Comparable::compare<Decision> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Decode::decode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Encode::encode tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::code tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Equatable::equal<Decision> tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/enums/probe-inputs::repeated-payload.jet::Decision::Comparable::compare<Decision> tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -53718,10 +53718,10 @@ cpu-only:first=1 last=769 len=257
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::affine tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::affine tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::affine tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/gpu/probe-inputs::affine_cpu.jet::affine tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -54355,15 +54355,15 @@ run `jet explain E2102` to learn more
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@504..521 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@315..325 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@602..619 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@504..521 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@315..325 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@602..619 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run tier1 native (0.000ms)
-internal compiler error: Cranelift cannot execute MIR function `/home/nate/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run`: resolved MIR Prelude symbol `jet_list_sum` is not registered
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@504..521 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@315..325 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@602..619 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@504..521 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@315..325 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run::lambda@602..619 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run tier1 native (0.000ms)
+internal compiler error: Cranelift cannot execute MIR function `$HOME/Projects/Github/jet/examples/features/collections::lazy_iter.jet::run`: resolved MIR Prelude symbol `jet_list_sum` is not registered
 This is a bug in jet, NOT in your program. Please report it,
 attaching your source file.
 ```
@@ -54481,10 +54481,10 @@ run `jet explain E0121` to learn more
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-short.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -54512,10 +54512,10 @@ run `jet explain E0121` to learn more
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run::lambda@15..19::zip-0 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::zip-strict.jet::run tier1 native (0.000ms)
 Stop [E3001]: `panic: zip length mismatch`
   --> <core.collections>:0
  Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
@@ -54550,8 +54550,8 @@ More: jet-lang.dev/e/E3001
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::cycle-bounded.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::cycle-bounded.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::cycle-bounded.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::cycle-bounded.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -54935,8 +54935,8 @@ attaching your source file.
 internal compiler error: the generated Rust did not compile.
 This is a bug in jet, NOT in your program. Please report it,
 attaching your source file and the generated file below.
-  generated: /home/nate/Projects/Github/jet/build/lazy_iter.rs
-  rustc log: /home/nate/Projects/Github/jet/build/lazy_iter.rustc.log
+  generated: $HOME/Projects/Github/jet/build/lazy_iter.rs
+  rustc log: $HOME/Projects/Github/jet/build/lazy_iter.rustc.log
   rustc error:
 error[E0277]: a value of type `jet_foundation_numeric::JetInt` cannot be made by summing an iterator over elements of type `jet_foundation_numeric::JetInt`
       --> /jet/build/lazy_iter.rs:119876:94
@@ -55038,12 +55038,12 @@ visit=oops
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::parse_int tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run::lambda@269..293 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::parse_int tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run::lambda@269..293 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::parse_int tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run::lambda@269..293 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::parse_int tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-tail.jet::run::lambda@269..293 tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -55115,8 +55115,8 @@ run `jet explain E0956` to learn more
 internal compiler error: the generated Rust did not compile.
 This is a bug in jet, NOT in your program. Please report it,
 attaching your source file and the generated file below.
-  generated: /home/nate/Projects/Github/jet/build/fallible-lazy-prefix-repaired.rs
-  rustc log: /home/nate/Projects/Github/jet/build/fallible-lazy-prefix-repaired.rustc.log
+  generated: $HOME/Projects/Github/jet/build/fallible-lazy-prefix-repaired.rs
+  rustc log: $HOME/Projects/Github/jet/build/fallible-lazy-prefix-repaired.rustc.log
   rustc error:
 error[E0308]: mismatched types
       --> /jet/build/fallible-lazy-prefix-repaired.rs:119799:53
@@ -55167,12 +55167,12 @@ visit=1
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run::lambda@265..289 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::parse_int tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run::lambda@265..289 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::parse_int tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run::lambda@265..289 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::parse_int tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::run::lambda@265..289 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/iterators/probe-inputs::fallible-lazy-prefix-repaired.jet::parse_int tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -55682,18 +55682,18 @@ run `jet explain L0103` to learn more
 effect roles
   required effects: IO; granted effects: Env, FS, IO, Mem.Alloc, Time.Wait; denied effects: none; authority: package.jet authority.holds
 effects — resolved function effect rows (D-EFF1 / D-SEMINDEX1) (20 facts)
-  /home/nate/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:338:349: resolved=[IO]
-  /home/nate/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:390:401: resolved=[IO]
-  /home/nate/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:541:552: resolved=[IO]
+  $HOME/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:338:349: resolved=[IO]
+  $HOME/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:390:401: resolved=[IO]
+  $HOME/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:541:552: resolved=[IO]
   Fail::compare: resolved=[]
   Fail::decode: resolved=[Mem.Alloc]
   Fail::encode: resolved=[]
   Fail::equal: resolved=[]
   question_path: resolved=[IO]
   run: resolved=[IO]
-  scope_guard::/home/nate/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:338:349: resolved=[IO]
-  scope_guard::/home/nate/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:390:401: resolved=[IO]
-  scope_guard::/home/nate/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:541:552: resolved=[IO]
+  scope_guard::$HOME/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:338:349: resolved=[IO]
+  scope_guard::$HOME/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:390:401: resolved=[IO]
+  scope_guard::$HOME/Projects/Github/jet/examples/features/io::scope_guard.jet::lambda:541:552: resolved=[IO]
   scope_guard::Fail::compare: resolved=[]
   scope_guard::Fail::decode: resolved=[Mem.Alloc]
   scope_guard::Fail::encode: resolved=[]
@@ -55702,7 +55702,7 @@ effects — resolved function effect rows (D-EFF1 / D-SEMINDEX1) (20 facts)
   scope_guard::run: resolved=[IO]
   scope_guard::with_guards: resolved=[IO]
   with_guards: resolved=[IO]
-check: passed (source=/home/nate/Projects/Github/jet/examples/features/io/scope_guard.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=407, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=1)
+check: passed (source=$HOME/Projects/Github/jet/examples/features/io/scope_guard.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=407, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=1)
 proof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)
 proof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)
 proof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)
@@ -55744,7 +55744,7 @@ callable-signature — complete checked callable signatures and policy chains (D
   question_path [fn:module:scope_guard::question_path] () effects=[IO] errors=[Fail] failure=Int !Fail (explicit !Fail) views=[] policies=[]
   run [fn:module:scope_guard::run] () effects=[IO] errors=[Err] failure=!Err (explicit !Err) views=[] policies=[]
   compare [method:module:scope_guard::Fail.compare] (rhs: rhs: Fail [either]) effects=[] errors=[Err] failure=Ordering (implicit default !Err) views=[] policies=[]
-check: passed (source=/home/nate/Projects/Github/jet/examples/features/io/scope_guard.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=400, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=1)
+check: passed (source=$HOME/Projects/Github/jet/examples/features/io/scope_guard.jet, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms=400, front_end=Driver::check_file_with_effect_facts_profile, programmable_build=not-selected, diagnostics=1)
 proof: output=not-applicable entry resolution [not applicable] explicit-file checks resolve only the named source file (diagnostic=E2389)
 proof: output=not-applicable module graph [not applicable] explicit-file checks keep semantic scope and do not promise a project graph (diagnostic=E2390)
 proof: output=not-applicable Core closure [not applicable] explicit-file checks keep semantic scope and do not promise project Core closure (diagnostic=E2391)
@@ -55783,10 +55783,10 @@ proof: output=not-applicable tier lowering [not applicable] explicit-file checks
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::positive tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::positive tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::positive tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::positive tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::direct-filter-loop-next.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -55890,14 +55890,14 @@ after
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@132..143 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@66..77 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@132..143 tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@66..77 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@132..143 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@66..77 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@132..143 tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/readability/probe-inputs::guard-order.jet::guarded::lambda@66..77 tier1 native (0.000ms)
 Warning [L0103] (unused_import): Import `scope` is never used.
   --> target-mine-playlist-20260911/analyses/readability/probe-inputs/guard-order.jet:1:23
     |
@@ -56143,8 +56143,8 @@ script:42
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-run.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-run.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-run.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-run.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.
@@ -56233,8 +56233,8 @@ script:42
 **stderr — exact recorded text:**
 
 ```text
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-script.jet::run tier1 native (0.000ms)
-/home/nate/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-script.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-script.jet::run tier1 native (0.000ms)
+$HOME/Projects/Github/jet/target-mine-playlist-20260911/analyses/scripting/probe-inputs::entry-script.jet::run tier1 native (0.000ms)
 ```
 
 **Conclusion and limit:** This is the outcome of this separately recorded command, input linkage and executable identity only. A non-zero exit is retained as a diagnostic/failure observation, not converted into a missing feature claim; a zero exit is not implementation-completion proof.

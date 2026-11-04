@@ -6,7 +6,7 @@ Date: 2026-09-29. Author: Closer12. No code change. Transcripts are under
 ## Identity header (`logs/00-identity.txt`)
 
 ```
-binary: /home/nate/.cache/jet-test-scratch/jet-debug-snapshot14
+binary: $HOME/.cache/jet-test-scratch/jet-debug-snapshot14
 binary_sha256: 00b1e35e25ed941cdecb248ec8ffbfde0c1d5b48b563177443436288af2ad3fd
 source_rev: e9c708fa7102d3e923a26e9ea432a52c34cf991d   (44 uncommitted paths in the shared checkout)
 jet version: Jet 0.1.0, prerelease, editions 2026-2028, registry protocol v1

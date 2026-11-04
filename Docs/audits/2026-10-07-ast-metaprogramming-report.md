@@ -3,7 +3,7 @@
 Research report for the owner. Read-only investigation, 2026-10-07. Nothing in
 the repository or Tower was changed. Probes ran in
 `~/.cache/jet-dev/scratch/AstResearch1/probe/` against the shared candidate
-`/mnt/jetscratch/candidates/dev-595e0dca3/jet`.
+`$JET_SCRATCH_ROOT/candidates/dev-595e0dca3/jet`.
 
 Evidence labels: **[OBSERVED]** means I ran it. **[SOURCE]** means a cited
 file, decision record or external document says it. **[INFERENCE]** means my

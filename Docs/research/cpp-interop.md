@@ -171,17 +171,17 @@ The binder's C++ shim allocates `Counter` in the generated constructor, clears t
 Each requested native command was attempted against the same fixture:
 
 ```text
-scripts/agent/jet-env full jet check /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
-scripts/agent/jet-env full jet run /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
-scripts/agent/jet-env full jet run --interpret /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
-scripts/agent/jet-env full jet build --profile=debug /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet check $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet run $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet run --interpret $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet build --profile=debug $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
 ```
 
 All four exited 1 before executing the C++ call. The common diagnostic was:
 
 ```text
 Error [E0320]: Struct construction uses `Counter{…}`, not `Counter.[…]`
-  --> /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet:21:1
+  --> $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet:21:1
     |
  21 |
     | ^

@@ -1,7 +1,7 @@
 # Terminal control API: what Core has and what other libraries offer
 
 Date: 2026-10-30. Card #6315. Dev base abab9666d8, probes run with the
-prebuilt dev compiler on o0, o1 and o2 (`/mnt/jetscratch/lanes/SurfaceDesign/probes/m6315`,
+prebuilt dev compiler on o0, o1 and o2 (`$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/m6315`,
 `m6315b`, `m6315r`).
 
 The owner asked for terminal "commands" that read like

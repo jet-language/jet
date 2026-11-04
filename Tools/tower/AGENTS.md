@@ -172,7 +172,7 @@ name a commit reachable from `dev` or `master` (`durableRefs` in config), or
 the row declares a non-code closure with `--kind`: `decision` (names the
 ratified `D-…` that settles it), `duplicate` (names the `#N` it duplicates or
 merged into) or `obsolete` (the evidence is the reason). Evidence that cites
-only scratch output (`/mnt/jetscratch`, `~/.cache`, `/tmp`) is refused, and
+only scratch output (`$JET_SCRATCH_ROOT`, `~/.cache`, `/tmp`) is refused, and
 `--phase done` re-checks every row (`E_EVIDENCE`). The guard applies when the
 project root is a git work tree holding one of those branches.
 

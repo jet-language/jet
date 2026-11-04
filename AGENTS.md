@@ -231,8 +231,8 @@ notes, held rows, briefs, ballots, research, scripts, logs and evidence,
 worktrees, and lane or scratch directories. Never `rm -rf`, `git clean`,
 remove a worktree or overwrite such a file. To retire something or free space,
 first save any commits and uncommitted changes it holds. Then move it under
-`/mnt/jetscratch/held/<date>/<original path>`, and add one line to
-`/mnt/jetscratch/held/LOG.tsv` with the date, path, size, owner, reason and
+`$JET_SCRATCH_ROOT/held/<date>/<original path>`, and add one line to
+`$JET_SCRATCH_ROOT/held/LOG.tsv` with the date, path, size, owner, reason and
 the card or decision that allows it. Before you replace a file, copy it to
 `<name>.prev-<date>`. Only the owner empties `held/`. The one exemption is a
 temporary file a step created and removes itself.
@@ -241,6 +241,12 @@ Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
 board and report any stale or duplicate server. Never touch the owner's
 personal notes or scratch files.
+
+Committed files carry no personal or machine information: no home paths, user
+or host names, personal emails or machine mounts. Write a placeholder instead,
+such as `$HOME`, `$USER`, `$JET_SCRATCH_ROOT` or `$JET_STATE_ROOT`; fixtures
+use the example account `user` on `devhost`. This holds for recorded evidence
+too (#6564 c5).
 
 ## Adversarial design review
 

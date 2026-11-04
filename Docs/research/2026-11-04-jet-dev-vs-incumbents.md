@@ -6,7 +6,7 @@ functionality, visuals, what info is shown in the cli, what is not shown."
 
 Repo measured: dev HEAD `6c0d4b4e32`. Compiler: the admitted base
 `7c672809607d`. Method: the mine-for-jet-v2 skill. The run directory is
-`/mnt/jetscratch/lanes/Main/research/mine/jetdev-vs-incumbents-2026-11-04/` (called RUN below).
+`$JET_SCRATCH_ROOT/lanes/Main/research/mine/jetdev-vs-incumbents-2026-11-04/` (called RUN below).
 It holds every raw capture, the probe harness and the source text.
 The ledger has 18 sources, 42 segments and 154 claims, and `check_coverage` passes.
 Screenshots and terminal renders are in
@@ -552,11 +552,11 @@ Not worth a card now, because no first session needs them:
    The ratified dashboard has tabs poll `/__jet_dev_status` with a short lease. The option it came from names 400 ms.
    #2756 c1 asks Jet to beat Vite, and Vite updated the page 41 ms after the save. A 400 ms poll adds 200 ms on average before the tab knows.
    Every incumbent pushes over one WebSocket per tab. The recommended option A pushes the same snapshot down a socket and keeps the poll as the fallback while reconnecting. No user code changes.
-   File: `/mnt/jetscratch/lanes/Main/ballots/D-FE-DEVPUSH1.json` (validator OK).
+   File: `$JET_SCRATCH_ROOT/lanes/Main/ballots/D-FE-DEVPUSH1.json` (validator OK).
 2. **D-DEV-KEYS1: who gets a key when the program reads the keyboard.**
    D-RUN-SESSION1 ratified single keys, but #2756 c3 says ordinary keys are never stolen (Ctrl+]).
    The recommended option A keeps single keys unless the checked program can read the keyboard. In that case jet dev's keys wait behind Ctrl+], and the status line says so.
-   File: `/mnt/jetscratch/lanes/Main/ballots/D-DEV-KEYS1.json` (validator OK).
+   File: `$JET_SCRATCH_ROOT/lanes/Main/ballots/D-DEV-KEYS1.json` (validator OK).
 
 Note: D-FE-DEVSRV1, D-RUN-SESSION1 and D-WEBAPP-SERVE1 are archived in Tower with their finished cards, but they are still ratified, and the spec carries the dashboard text.
 

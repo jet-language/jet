@@ -10,7 +10,7 @@ How to read each section:
 
 - **Today in Jet** lists facts. Each fact cites a ratified decision (D-…), a spec
   section, a source file, or a probe I ran. Probes ran with the shared release
-  `jet` (`/mnt/jetscratch/candidates/dev-595e0dca3/jet`); the probe files are in
+  `jet` (`$JET_SCRATCH_ROOT/candidates/dev-595e0dca3/jet`); the probe files are in
   `~/.cache/jet-dev/scratch/OwnerNotes1/probe/`. A claim I did not observe is
   marked [INFERENCE].
 - **Gap** says what is missing or broken.

@@ -1,7 +1,7 @@
 # Name overlap: parameters and locals that reuse a module-level name
 
 Date: 2026-10-30. Card #6316. Probes live in
-`/mnt/jetscratch/lanes/SurfaceDesign/probes/m6316` (120 programs) and
+`$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/m6316` (120 programs) and
 `probes/m6316b` (1 program), with results in `m6316.results/`. Each probe ran
 with `jet run` at `--optimize=none`, `basic` and `full` using the dev compiler at
 abab9666d8. Every probe printed the same output and exit status on all three

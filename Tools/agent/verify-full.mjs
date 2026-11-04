@@ -69,7 +69,7 @@ if (!checkPin('source-integrity-before')) process.exit(1);
 const commit = sourcePin;
 env.JET_TOOLCHAIN_ROOT = repo;
 env.CARGO_TARGET_DIR = proofTargetDirectory(commit);
-env.JET_SCRATCH_ROOT = '/mnt/jetscratch';
+env.JET_SCRATCH_ROOT = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
 if (process.env.JET_NATIVE_TRACE_LOG) {
     env.JET_NATIVE_TRACE_NODE = process.execPath;
     env.JET_NATIVE_TRACE_CACHE_ROOT = join(evidence, 'native-ffi-cache');

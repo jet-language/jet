@@ -125,7 +125,7 @@ declaration or type position gets E0358 with a `jet fix` edit (markers:
 E0927).
 
 **S84 — Hyphens in package/module/system/image/env names**: kebab-case allowed
-in these *name* positions (`image.halcyon-iso`, `module web-app`). Grammar:
+in these *name* positions (`image.devhost-iso`, `module web-app`). Grammar:
 dashed name `ident (-ident)*`, `-` joins only when span-adjacent on both sides,
 so spaced `a - b` stays subtraction — parser-level (`expect_dashed_name`), no
 lexer change. No leading/trailing/doubled hyphen. Code identifiers stay plain

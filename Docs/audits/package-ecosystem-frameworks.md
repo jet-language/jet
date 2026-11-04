@@ -397,7 +397,7 @@ module system.build-box {
         filesystem.timeZone:  "Europe/London",
         packages.shell:       pkgs.fish,
         boot.loader:          limine,
-        users.nate:           { groups: [wheel], shell: pkgs.fish },
+        users.user:           { groups: [wheel], shell: pkgs.fish },
     ]
 }
 
@@ -412,9 +412,9 @@ module image.server {
 }
 
 // + a fleet (new — D-ECO15). No flake anchor exists; the acceptance fixture is
-//   the owner's ~/nixos halcyon host (card #337 parity matrix):
+//   the owner's ~/nixos devhost host (card #337 parity matrix):
 module fleet.prod {
-    hosts:   [ build-box: system.build-box, halcyon: system.halcyon ]
+    hosts:   [ build-box: system.build-box, devhost: system.devhost ]
     rollout: Rollout.{ strategy: .Rolling, batch: 1 }
     health:  "curl -sf http://127.0.0.1:8080/health"   // gate before next batch
     proof:   .Vm                                        // D-WD8 risk-class proof
@@ -761,4 +761,4 @@ silently settle them.
 D-ECO15/16 flag that giving fleet and system equal depth (owner scope ruling)
 re-opens surface frozen by D-JETOS-FREEZE1 — a real ballot, not a silent
 inclusion. Fleet has no flake anchor; its acceptance fixture is the owner's
-~/nixos halcyon host (card #337 parity matrix).
+~/nixos devhost host (card #337 parity matrix).

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createDriver } from "./driver.mjs";
 
@@ -1897,7 +1898,7 @@ export const scenarios = {
           env: {
             ...process.env,
             JET_ROOT: projectRoot,
-            TMPDIR: process.env.TMPDIR || "/home/nate/.cache/jet-dev/scratch",
+            TMPDIR: process.env.TMPDIR || join(homedir(), ".cache/jet-dev/scratch"),
           },
           maxBuffer: 2 * 1024 * 1024,
         });
@@ -1961,7 +1962,7 @@ export const scenarios = {
 
     const custom = spawn(process.env.NODE || "node", ["custom-server.mjs"], {
       cwd: projectRoot,
-      env: { ...process.env, TMPDIR: process.env.TMPDIR || "/home/nate/.cache/jet-dev/scratch" },
+      env: { ...process.env, TMPDIR: process.env.TMPDIR || join(homedir(), ".cache/jet-dev/scratch") },
       stdio: ["ignore", "pipe", "pipe"],
     });
     try {

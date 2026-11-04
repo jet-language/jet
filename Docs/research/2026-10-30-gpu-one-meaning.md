@@ -1,9 +1,9 @@
 # GPU work in Jet: one way in, one meaning on every device
 
 Date: 2026-10-30. Card #6344, criteria 1 to 3. Author: MemDesign-2 lane
-(design only). Probes live in `/mnt/jetscratch/lanes/MemDesign-2/probes/`
+(design only). Probes live in `$JET_SCRATCH_ROOT/lanes/MemDesign-2/probes/`
 (`g/` for GPU and facts, `perf/` for the timing cell) and ran with
-`/mnt/jetscratch/discovery/base/latest/jet` (commit 4e514f96e1) against a
+`$JET_SCRATCH_ROOT/discovery/base/latest/jet` (commit 4e514f96e1) against a
 `git archive` export of dev 4e514f96e1. Every probe ran with `jet run
 --optimize=none|basic|full` (o0, o1, o2) through `probes/tiers.sh`; outputs are
 in `probes/out/<name>.<tier>.{out,err,rc}`. Unless a row says otherwise, all
@@ -350,4 +350,4 @@ F32 loop that kernels lower from is today 29x slower than C at o2.
 - `D-GPU-DEVICE-OPS1`: how expert kernels reach a chip's matrix units with one
   meaning. Options: A, library operations with a plain meaning (recommended);
   B, kernels branch on the device being compiled, as Mojo does; C, raw vendor
-  code only. Builder and JSON in `/mnt/jetscratch/lanes/MemDesign-2/ballot/`.
+  code only. Builder and JSON in `$JET_SCRATCH_ROOT/lanes/MemDesign-2/ballot/`.

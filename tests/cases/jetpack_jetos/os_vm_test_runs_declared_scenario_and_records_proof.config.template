@@ -8,13 +8,13 @@
 // `System` named `<host>` and realizes it into a system generation.
 //
 // Packages here come from a first-party `core` source (a local repo carrying a
-// `package.jet`), so `jet os build halcyon` realizes the whole machine
+// `package.jet`), so `jet os build devhost` realizes the whole machine
 // offline with no Nix.
-module halcyon {
+module devhost {
     sources: {
         mine: ./jet-pkgs,
     }
-    system.halcyon: {
+    system.devhost: {
         target: linux.x64,
         packages: [mine.hello, mine.btop],
         services: {
@@ -23,7 +23,7 @@ module halcyon {
             metrics: { enable: true, exec: "/run/current-system/sw/bin/btop", socket: "127.0.0.1:9999" },
         },
         options: [
-            network.hostName: halcyon,
+            network.hostName: devhost,
             network.interface: "enp0s1",
             network.address: "192.0.2.10/24",
             network.gateway: "192.0.2.1",
@@ -33,13 +33,13 @@ module halcyon {
             filesystem.timeZone: "Europe/London",
             filesystem.swap.fast.device: "/dev/disk/by-label/swap",
             filesystem.swap.fast.priority: 5,
-            users.nate.normal: true,
-            users.nate.home: "/home/nate",
-            users.nate.shell: packages.hello,
-            user.nate.packages: [packages.hello, packages.btop],
-            user.nate.services: ["syncthing"],
-            user.nate.files.ghosttyConfig: "home/ghostty/config",
-            groups.wheel.members: [users.nate],
+            users.user.normal: true,
+            users.user.home: "/home/user",
+            users.user.shell: packages.hello,
+            user.user.packages: [packages.hello, packages.btop],
+            user.user.services: ["syncthing"],
+            user.user.files.ghosttyConfig: "home/ghostty/config",
+            groups.wheel.members: [users.user],
             secrets.wifi.source: "secrets/wifi.age",
             storage.disk.main.device: "/dev/sda",
             storage.disk.main.table: .GPT,
@@ -47,7 +47,7 @@ module halcyon {
             storage.disk.main.partitions.root.size: "rest",
             storage.filesystem.root.type: .Btrfs,
             storage.ephemeralRoot: true,
-            storage.persist.home.path: "/home/nate",
+            storage.persist.home.path: "/home/user",
             storage.persist.varLib.path: "/var/lib",
             boot.loader: .Limine,
             boot.kernel: .CachyOS,
@@ -60,8 +60,8 @@ module halcyon {
             boot.loader.efi.canTouchVariables: false,
             kernel.firmware: ["iwlwifi"],
             kernel.drivers: ["amdgpu", "nvme"],
-            hardware.halcyon.profile: "framework-13-amd",
-            hardware.halcyon.specialisation.plasmaBeta: true,
+            hardware.devhost.profile: "framework-13-amd",
+            hardware.devhost.specialisation.plasmaBeta: true,
             performance.profile: .Gaming,
             performance.sysctl.vm.swappiness: 10,
             performance.zram.memoryPercent: 50,
@@ -92,7 +92,7 @@ module halcyon {
             packages.specialArgs.hostClass: "workstation",
             packages.disabledModules: ["stylix.kmscon"],
             packages.channel: "stable",
-            theme.name: "halcyon",
+            theme.name: "devhost",
             theme.polarity: .Dark,
             theme.wallpaper: "wallpapers/forest.png",
             theme.fonts.ui: "Inter",
@@ -103,16 +103,16 @@ module halcyon {
             apps.flatpak.app.discord.permissions.filesystem: .Downloads,
             apps.appimage.app.obsidian.path: "/opt/apps/Obsidian.AppImage",
             apps.appimage.app.obsidian.integrate: true,
-            apps.program.git.userName: "Nate",
-            apps.program.git.userEmail: "nate@example.test",
+            apps.program.git.userName: "User",
+            apps.program.git.userEmail: "user@example.test",
             apps.program.git.signingKey: "ABC123",
-            apps.program.ghostty.theme: "halcyon",
-            apps.program.helix.theme: "halcyon",
+            apps.program.ghostty.theme: "devhost",
+            apps.program.helix.theme: "devhost",
             apps.program.vscode.extensions: ["rust-lang.rust-analyzer", "jet.jet"],
             apps.program.vscode.settings.editorFontFamily: "Inter",
             apps.program.cursor.extensions: ["jet.jet"],
             apps.program.discord.source: apps.flatpak.app.discord,
-            apps.program.spicetify.theme: "halcyon",
+            apps.program.spicetify.theme: "devhost",
             apps.program.browser.zen.policy.DisableTelemetry: true,
             workload.web.backend: .Container,
             workload.web.image: "ghcr.io/example/web",
@@ -129,33 +129,33 @@ module halcyon {
             workload.sandbox.microvm.memory: "2048M",
             workload.sandbox.microvm.cpus: 2,
             workload.sandbox.health.command: "true",
-            deploy.host.halcyon.pushCommand: "echo push >> $JETOS_DEPLOY_LOG",
-            deploy.host.halcyon.proofCommand: "echo proof >> $JETOS_DEPLOY_LOG",
-            deploy.host.halcyon.switchCommand: "echo switch >> $JETOS_DEPLOY_LOG",
-            deploy.host.halcyon.healthCommand: "echo health >> $JETOS_DEPLOY_LOG",
-            deploy.host.halcyon.rollbackCommand: "echo rollback >> $JETOS_DEPLOY_LOG",
+            deploy.host.devhost.pushCommand: "echo push >> $JETOS_DEPLOY_LOG",
+            deploy.host.devhost.proofCommand: "echo proof >> $JETOS_DEPLOY_LOG",
+            deploy.host.devhost.switchCommand: "echo switch >> $JETOS_DEPLOY_LOG",
+            deploy.host.devhost.healthCommand: "echo health >> $JETOS_DEPLOY_LOG",
+            deploy.host.devhost.rollbackCommand: "echo rollback >> $JETOS_DEPLOY_LOG",
             deploy.generations.keep: 2,
             deploy.autoUpgrade.enable: true,
             deploy.autoUpgrade.schedule: "daily",
         ],
     }
     image.installer: {
-        from: system.halcyon,
+        from: system.devhost,
         format: iso,
     }
     fleet.home: {
         hosts: {
-            halcyon: system.halcyon,
+            devhost: system.devhost,
         },
     }
 }
 
 
 module vmtest.ssh-smoke {
-    hosts: { halcyon: system.halcyon }
+    hosts: { devhost: system.devhost }
     run: test {
-        halcyon.wait_for_boot()
-        halcyon.assert_unit_active(.openssh)
-        halcyon.assert_port_open(22)
+        devhost.wait_for_boot()
+        devhost.assert_unit_active(.openssh)
+        devhost.assert_port_open(22)
     }
 }

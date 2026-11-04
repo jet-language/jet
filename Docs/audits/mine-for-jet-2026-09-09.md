@@ -2008,7 +2008,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
 
 ```json
 {
-  "progress-count-receipt.rs": "#[path = \"/home/nate/Projects/Github/jet/crates/jet-cli/src/AdaptiveTable.rs\"]\nmod AdaptiveTable;\n#[path = \"/home/nate/Projects/Github/jet/crates/jet-cli/src/OutputProfile.rs\"]\nmod OutputProfile;\n#[path = \"/home/nate/Projects/Github/jet/crates/jet-cli/src/MultiProgress.rs\"]\nmod MultiProgress;\nfn main() {\n    let profile = OutputProfile::OutputProfile::select(OutputProfile::OutputFacts::default()).unwrap();\n    let mut over = MultiProgress::MultiProgress::new(&profile);\n    let id = over.add_known(\"Download\", 10).unwrap();\n    over.increment(id, 12).unwrap();\n    println!(\"overrun={:?}\", over.facts());\n    let mut early = MultiProgress::MultiProgress::new(&profile);\n    let id = early.add_known(\"Download\", 10).unwrap();\n    early.increment(id, 2).unwrap();\n    early.finish(id).unwrap();\n    println!(\"early_finish={:?}\", early.facts());\n    let mut revise = MultiProgress::MultiProgress::new(&profile);\n    let id = revise.add_known(\"Download\", 10).unwrap();\n    revise.increment(id, 2).unwrap();\n    revise.set_total(id, Some(1)).unwrap();\n    println!(\"smaller_total={:?}\", revise.facts());\n}\n",
+  "progress-count-receipt.rs": "#[path = \"$HOME/Projects/Github/jet/crates/jet-cli/src/AdaptiveTable.rs\"]\nmod AdaptiveTable;\n#[path = \"$HOME/Projects/Github/jet/crates/jet-cli/src/OutputProfile.rs\"]\nmod OutputProfile;\n#[path = \"$HOME/Projects/Github/jet/crates/jet-cli/src/MultiProgress.rs\"]\nmod MultiProgress;\nfn main() {\n    let profile = OutputProfile::OutputProfile::select(OutputProfile::OutputFacts::default()).unwrap();\n    let mut over = MultiProgress::MultiProgress::new(&profile);\n    let id = over.add_known(\"Download\", 10).unwrap();\n    over.increment(id, 12).unwrap();\n    println!(\"overrun={:?}\", over.facts());\n    let mut early = MultiProgress::MultiProgress::new(&profile);\n    let id = early.add_known(\"Download\", 10).unwrap();\n    early.increment(id, 2).unwrap();\n    early.finish(id).unwrap();\n    println!(\"early_finish={:?}\", early.facts());\n    let mut revise = MultiProgress::MultiProgress::new(&profile);\n    let id = revise.add_known(\"Download\", 10).unwrap();\n    revise.increment(id, 2).unwrap();\n    revise.set_total(id, Some(1)).unwrap();\n    println!(\"smaller_total={:?}\", revise.facts());\n}\n",
   "package.jet": "name: \"playlist_mining_probes\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
   "GnAwY55hux0/static-guard.cpp": "#include <atomic>\n#include <iostream>\n#include <stdexcept>\n#include <thread>\n#include <vector>\n\nstd::atomic<int> attempts{0};\nint initialize() {\n    if (++attempts == 1) throw std::runtime_error(\"retry\");\n    return 42;\n}\nextern \"C\" int dynamic_cached() {\n    static const int value = initialize();\n    return value;\n}\nextern \"C\" int constant_cached() {\n    static const int value = 42;\n    return value;\n}\nint main() {\n    try { dynamic_cached(); } catch (const std::runtime_error&) {}\n    std::atomic<int> total{0};\n    std::vector<std::thread> threads;\n    for (int i = 0; i < 8; ++i) threads.emplace_back([&] { total += dynamic_cached(); });\n    for (auto& thread : threads) thread.join();\n    std::cout << \"attempts=\" << attempts << \" total=\" << total\n              << \" constant=\" << constant_cached() << '\\n';\n}\n",
   "3MP8D-mdheA/duplicate-policy.jet": "fn optimistic_rank(after: Int) Int -> after + 1\nfn persisted_rank(after: Int) Int -> after + 2\nfn run() -> print(optimistic_rank(10) == persisted_rank(10))\n",
@@ -2167,11 +2167,11 @@ Claims are dated observations, not a live feature inventory or a replacement for
         "target/debug/jet",
         "lint",
         "--complexity",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet",
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet",
         "--json"
       ],
       "exit": 0,
-      "stdout": "[{\"file\":\"/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet\",\"fn\":\"optimistic_rank\",\"line\":1,\"score\":0,\"budget\":null,\"over\":false},{\"file\":\"/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet\",\"fn\":\"persisted_rank\",\"line\":2,\"score\":0,\"budget\":null,\"over\":false},{\"file\":\"/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet\",\"fn\":\"run\",\"line\":3,\"score\":0,\"budget\":null,\"over\":false}]\n",
+      "stdout": "[{\"file\":\"$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet\",\"fn\":\"optimistic_rank\",\"line\":1,\"score\":0,\"budget\":null,\"over\":false},{\"file\":\"$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet\",\"fn\":\"persisted_rank\",\"line\":2,\"score\":0,\"budget\":null,\"over\":false},{\"file\":\"$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet\",\"fn\":\"run\",\"line\":3,\"score\":0,\"budget\":null,\"over\":false}]\n",
       "stderr": "",
       "binary_sha256": "ef7c0fcc8a697038a42558272a015fbb104915fa4bc347234f78a94207de182a",
       "freshness": "Previous successfully built binary. Latest rebuild failed; not current-source proof."
@@ -2180,7 +2180,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
       "args": [
         "target/debug/jet",
         "run",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet"
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet"
       ],
       "exit": 0,
       "stdout": "false\n",
@@ -2192,7 +2192,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
       "args": [
         "target/debug/jet",
         "run",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet",
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/duplicate-policy.jet",
         "--interpret"
       ],
       "exit": 0,
@@ -2209,9 +2209,9 @@ Claims are dated observations, not a live feature inventory or a replacement for
         "-std=c++20",
         "-O2",
         "-pthread",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard.cpp",
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard.cpp",
         "-o",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
       ],
       "exit": 0,
       "stdout": "",
@@ -2219,7 +2219,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     },
     {
       "args": [
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
       ],
       "exit": 0,
       "stdout": "attempts=2 total=336 constant=42\n",
@@ -2230,10 +2230,10 @@ Claims are dated observations, not a live feature inventory or a replacement for
         "objdump",
         "-d",
         "--disassemble=constant_cached",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
       ],
       "exit": 0,
-      "stdout": "\n/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard:     file format elf64-x86-64\n\n\nDisassembly of section .init:\n\nDisassembly of section .plt:\n\nDisassembly of section .plt.got:\n\nDisassembly of section .text:\n\n00000000000027a0 <constant_cached>:\n    27a0:\tb8 2a 00 00 00       \tmov    $0x2a,%eax\n    27a5:\tc3                   \tret\n\nDisassembly of section .fini:\n",
+      "stdout": "\n$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard:     file format elf64-x86-64\n\n\nDisassembly of section .init:\n\nDisassembly of section .plt:\n\nDisassembly of section .plt.got:\n\nDisassembly of section .text:\n\n00000000000027a0 <constant_cached>:\n    27a0:\tb8 2a 00 00 00       \tmov    $0x2a,%eax\n    27a5:\tc3                   \tret\n\nDisassembly of section .fini:\n",
       "stderr": ""
     },
     {
@@ -2241,16 +2241,16 @@ Claims are dated observations, not a live feature inventory or a replacement for
         "objdump",
         "-d",
         "--disassemble=dynamic_cached",
-        "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
+        "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard"
       ],
       "exit": 0,
-      "stdout": "\n/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard:     file format elf64-x86-64\n\n\nDisassembly of section .init:\n\nDisassembly of section .plt:\n\nDisassembly of section .plt.got:\n\nDisassembly of section .text:\n\n0000000000002700 <dynamic_cached>:\n    2700:\t0f b6 05 29 29 00 00 \tmovzbl 0x2929(%rip),%eax        # 5030 <_ZGVZ14dynamic_cachedE5value>\n    2707:\t84 c0                \ttest   %al,%al\n    2709:\t74 0d                \tje     2718 <dynamic_cached+0x18>\n    270b:\t8b 05 27 29 00 00    \tmov    0x2927(%rip),%eax        # 5038 <_ZZ14dynamic_cachedE5value>\n    2711:\t31 ff                \txor    %edi,%edi\n    2713:\tc3                   \tret\n    2714:\t0f 1f 40 00          \tnopl   0x0(%rax)\n    2718:\t55                   \tpush   %rbp\n    2719:\t48 8d 3d 10 29 00 00 \tlea    0x2910(%rip),%rdi        # 5030 <_ZGVZ14dynamic_cachedE5value>\n    2720:\t48 89 e5             \tmov    %rsp,%rbp\n    2723:\t53                   \tpush   %rbx\n    2724:\t48 83 ec 08          \tsub    $0x8,%rsp\n    2728:\te8 53 fa ff ff       \tcall   2180 <__cxa_guard_acquire@plt>\n    272d:\t85 c0                \ttest   %eax,%eax\n    272f:\t75 0f                \tjne    2740 <dynamic_cached+0x40>\n    2731:\t8b 05 01 29 00 00    \tmov    0x2901(%rip),%eax        # 5038 <_ZZ14dynamic_cachedE5value>\n    2737:\t48 8b 5d f8          \tmov    -0x8(%rbp),%rbx\n    273b:\tc9                   \tleave\n    273c:\t31 ff                \txor    %edi,%edi\n    273e:\tc3                   \tret\n    273f:\t90                   \tnop\n    2740:\te8 8b ff ff ff       \tcall   26d0 <_Z10initializev>\n    2745:\t48 8d 3d e4 28 00 00 \tlea    0x28e4(%rip),%rdi        # 5030 <_ZGVZ14dynamic_cachedE5value>\n    274c:\t89 05 e6 28 00 00    \tmov    %eax,0x28e6(%rip)        # 5038 <_ZZ14dynamic_cachedE5value>\n    2752:\te8 59 f9 ff ff       \tcall   20b0 <__cxa_guard_release@plt>\n    2757:\t8b 05 db 28 00 00    \tmov    0x28db(%rip),%eax        # 5038 <_ZZ14dynamic_cachedE5value>\n    275d:\t48 8b 5d f8          \tmov    -0x8(%rbp),%rbx\n    2761:\tc9                   \tleave\n    2762:\t31 ff                \txor    %edi,%edi\n    2764:\tc3                   \tret\n    2765:\t48 89 c3             \tmov    %rax,%rbx\n    2768:\te9 7f fa ff ff       \tjmp    21ec <dynamic_cached.cold>\n\nDisassembly of section .fini:\n",
+      "stdout": "\n$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/GnAwY55hux0/static-guard:     file format elf64-x86-64\n\n\nDisassembly of section .init:\n\nDisassembly of section .plt:\n\nDisassembly of section .plt.got:\n\nDisassembly of section .text:\n\n0000000000002700 <dynamic_cached>:\n    2700:\t0f b6 05 29 29 00 00 \tmovzbl 0x2929(%rip),%eax        # 5030 <_ZGVZ14dynamic_cachedE5value>\n    2707:\t84 c0                \ttest   %al,%al\n    2709:\t74 0d                \tje     2718 <dynamic_cached+0x18>\n    270b:\t8b 05 27 29 00 00    \tmov    0x2927(%rip),%eax        # 5038 <_ZZ14dynamic_cachedE5value>\n    2711:\t31 ff                \txor    %edi,%edi\n    2713:\tc3                   \tret\n    2714:\t0f 1f 40 00          \tnopl   0x0(%rax)\n    2718:\t55                   \tpush   %rbp\n    2719:\t48 8d 3d 10 29 00 00 \tlea    0x2910(%rip),%rdi        # 5030 <_ZGVZ14dynamic_cachedE5value>\n    2720:\t48 89 e5             \tmov    %rsp,%rbp\n    2723:\t53                   \tpush   %rbx\n    2724:\t48 83 ec 08          \tsub    $0x8,%rsp\n    2728:\te8 53 fa ff ff       \tcall   2180 <__cxa_guard_acquire@plt>\n    272d:\t85 c0                \ttest   %eax,%eax\n    272f:\t75 0f                \tjne    2740 <dynamic_cached+0x40>\n    2731:\t8b 05 01 29 00 00    \tmov    0x2901(%rip),%eax        # 5038 <_ZZ14dynamic_cachedE5value>\n    2737:\t48 8b 5d f8          \tmov    -0x8(%rbp),%rbx\n    273b:\tc9                   \tleave\n    273c:\t31 ff                \txor    %edi,%edi\n    273e:\tc3                   \tret\n    273f:\t90                   \tnop\n    2740:\te8 8b ff ff ff       \tcall   26d0 <_Z10initializev>\n    2745:\t48 8d 3d e4 28 00 00 \tlea    0x28e4(%rip),%rdi        # 5030 <_ZGVZ14dynamic_cachedE5value>\n    274c:\t89 05 e6 28 00 00    \tmov    %eax,0x28e6(%rip)        # 5038 <_ZZ14dynamic_cachedE5value>\n    2752:\te8 59 f9 ff ff       \tcall   20b0 <__cxa_guard_release@plt>\n    2757:\t8b 05 db 28 00 00    \tmov    0x28db(%rip),%eax        # 5038 <_ZZ14dynamic_cachedE5value>\n    275d:\t48 8b 5d f8          \tmov    -0x8(%rbp),%rbx\n    2761:\tc9                   \tleave\n    2762:\t31 ff                \txor    %edi,%edi\n    2764:\tc3                   \tret\n    2765:\t48 89 c3             \tmov    %rax,%rbx\n    2768:\te9 7f fa ff ff       \tjmp    21ec <dynamic_cached.cold>\n\nDisassembly of section .fini:\n",
       "stderr": ""
     }
   ],
   "progress-count-receipt.json": {
     "args": [
-      "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/progress-count-receipt"
+      "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/progress-count-receipt"
     ],
     "exit": 0,
     "stdout": "overrun=[ProgressFact { id: TaskId(0), label: \"Download\", completed: 10, total: Known(10), state: Finished, transient: false, columns: [], message: None }]\nearly_finish=[ProgressFact { id: TaskId(0), label: \"Download\", completed: 10, total: Known(10), state: Finished, transient: false, columns: [], message: None }]\nsmaller_total=[ProgressFact { id: TaskId(0), label: \"Download\", completed: 1, total: Known(1), state: Finished, transient: false, columns: [], message: None }]\n",
@@ -2320,7 +2320,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "args": [
       "jet",
       "run",
-      "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/clock-seam.jet"
+      "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/clock-seam.jet"
     ],
     "stdout": "",
     "stderr": "internal compiler error: checked TIR cannot lower to MIR at 92..95: run: Clock.new without a resolved return type (source bytes 92..95)\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file.\n  at Source/lib.rs:186:33\n",
@@ -2330,7 +2330,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "args": [
       "jet",
       "run",
-      "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/clock-seam.jet"
+      "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/clock-seam.jet"
     ],
     "stdout": "",
     "stderr": "Error [E1803]: Application authority is undecided for `IO`\n Why: required_effects=IO; granted_effects=; denied_effects=; denied_required_effects=none; undecided_effects=IO; authority=package.jet authority.holds\n Fix: Add `allow: [IO]` under `authority.holds` in `package.jet`; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal\n Denial: authority\n Scope chain: package.jet authority.holds\nMore: jet-lang.dev/e/E1803\n\n1 problem found\nrun `jet explain E1803` to learn more\n",
@@ -2351,11 +2351,11 @@ Claims are dated observations, not a live feature inventory or a replacement for
       "jet",
       "lint",
       "--complexity",
-      "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet",
+      "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet",
       "--max=3"
     ],
-    "stdout": "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet:1 fn tangled — score 4 (budget 3)\n/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet:10 fn run — score 0 (budget 3)\n",
-    "stderr": "Warning [L2902] (cognitive_complexity): Function `tangled` has cognitive complexity 4 above budget 3\n  --> /home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet:1:1\n    |\n  1 | fn tangled(n: Int) Int -> {\n    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n Why: The function's control flow is harder to read and maintain than the selected budget allows\n Fix: Split the function, reduce nesting, or replace mixed control flow with a focused helper\nMore: jet-lang.dev/e/L2902\n",
+    "stdout": "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet:1 fn tangled — score 4 (budget 3)\n$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet:10 fn run — score 0 (budget 3)\n",
+    "stderr": "Warning [L2902] (cognitive_complexity): Function `tangled` has cognitive complexity 4 above budget 3\n  --> $HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet:1:1\n    |\n  1 | fn tangled(n: Int) Int -> {\n    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n Why: The function's control flow is harder to read and maintain than the selected budget allows\n Fix: Split the function, reduce nesting, or replace mixed control flow with a focused helper\nMore: jet-lang.dev/e/L2902\n",
     "exit": 1
   },
   "3MP8D-mdheA/probe-complexity-current.json": {
@@ -2363,11 +2363,11 @@ Claims are dated observations, not a live feature inventory or a replacement for
       "jet",
       "lint",
       "--complexity",
-      "/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet",
+      "$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet",
       "--max=3",
       "--json"
     ],
-    "stdout": "{\"schema\":\"jet.status/v1\",\"action\":\"diagnostics\",\"ok\":false,\"reports\":[{\"schema\":\"jet.report/v2\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E1334\",\"what\":\"Authority path `/home/nate/.cache/jet-test-scratch/bounced-visual-2026-09-08T15-30-05-392Z/brave/SingletonLock` is a symlink\",\"why\":\"Authority metadata is opened without following links\",\"fix\":\"Replace the symlink with the expected regular file or directory\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":\"/home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet\",\"line\":null,\"col\":null,\"span\":null,\"no_fix_reason\":{\"kind\":\"behavior\",\"next\":\"Create `package.jet`, correct the path, or use `find(\\\"./packages\\\")`.\"},\"cause\":[],\"clears\":0}]}\n",
+    "stdout": "{\"schema\":\"jet.status/v1\",\"action\":\"diagnostics\",\"ok\":false,\"reports\":[{\"schema\":\"jet.report/v2\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E1334\",\"what\":\"Authority path `$HOME/.cache/jet-test-scratch/bounced-visual-2026-09-08T15-30-05-392Z/brave/SingletonLock` is a symlink\",\"why\":\"Authority metadata is opened without following links\",\"fix\":\"Replace the symlink with the expected regular file or directory\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":\"$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/3MP8D-mdheA/complexity-current.jet\",\"line\":null,\"col\":null,\"span\":null,\"no_fix_reason\":{\"kind\":\"behavior\",\"next\":\"Create `package.jet`, correct the path, or use `find(\\\"./packages\\\")`.\"},\"cause\":[],\"clears\":0}]}\n",
     "stderr": "",
     "exit": 1
   },
@@ -2380,7 +2380,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
       "--max=3",
       "--json"
     ],
-    "stdout": "{\"schema\":\"jet.status/v1\",\"action\":\"diagnostics\",\"ok\":false,\"reports\":[{\"schema\":\"jet.report/v2\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E0080\",\"what\":\"A braced callable with a non-unit success result needs `->` before its body.\",\"why\":\"The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.\",\"fix\":\"Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` bare for a unit result.\",\"applicability\":\"safe\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":\"/home/nate/Projects/Github/jet/tests/ui/lint_cognitive_complexity.jet\",\"line\":2,\"col\":24,\"span\":{\"start\":49,\"end\":50},\"fix_edits\":[{\"file\":\"/home/nate/Projects/Github/jet/tests/ui/lint_cognitive_complexity.jet\",\"span\":{\"start\":49,\"end\":49},\"new_text\":\"-> \",\"safety\":\"formatting\"}],\"cause\":[],\"clears\":0}]}\n",
+    "stdout": "{\"schema\":\"jet.status/v1\",\"action\":\"diagnostics\",\"ok\":false,\"reports\":[{\"schema\":\"jet.report/v2\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E0080\",\"what\":\"A braced callable with a non-unit success result needs `->` before its body.\",\"why\":\"The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.\",\"fix\":\"Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` bare for a unit result.\",\"applicability\":\"safe\",\"detail\":null,\"denial_kind\":null,\"call_chain\":[],\"scope_chain\":[],\"nearest_granting_scope\":null,\"file\":\"$HOME/Projects/Github/jet/tests/ui/lint_cognitive_complexity.jet\",\"line\":2,\"col\":24,\"span\":{\"start\":49,\"end\":50},\"fix_edits\":[{\"file\":\"$HOME/Projects/Github/jet/tests/ui/lint_cognitive_complexity.jet\",\"span\":{\"start\":49,\"end\":49},\"new_text\":\"-> \",\"safety\":\"formatting\"}],\"cause\":[],\"clears\":0}]}\n",
     "stderr": "",
     "exit": 1
   },
@@ -5942,7 +5942,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "confidence": "medium",
     "stance": "supports",
     "correction": "Engine-specific limitation; audience offers replacement-state workarounds.",
-    "jet_evidence": "Existing local gap evidence `/home/nate/.cache/jet-luna/dx3/area-games/gaps.json` records no texture/atlas/sprite operation in the checked Core surface; c9q0534j D-GAME-ASSET1 ratifies typed scene asset handles, not a second sprite API.",
+    "jet_evidence": "Existing local gap evidence `$HOME/.cache/jet-luna/dx3/area-games/gaps.json` records no texture/atlas/sprite operation in the checked Core surface; c9q0534j D-GAME-ASSET1 ratifies typed scene asset handles, not a second sprite API.",
     "classification": "real-gap",
     "owner": "#3001",
     "action": "reproduce headless asset lifecycle and either document replacement through existing scene identity or record the precise missing primitive.",
@@ -10881,7 +10881,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "micro_categories": [
       "Naming"
     ],
-    "capture_locator": "local:///home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/comments.json"
+    "capture_locator": "local://$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/comments.json"
   },
   {
     "topic": "audience-anecdote-not-proof",
@@ -10904,7 +10904,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "micro_categories": [
       "UX and DX"
     ],
-    "capture_locator": "local:///home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/audience-sample.json"
+    "capture_locator": "local://$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/audience-sample.json"
   },
   {
     "topic": "visual-frame-evidence-pending",
@@ -10951,7 +10951,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "micro_categories": [
       "UX and DX"
     ],
-    "capture_locator": "local:///home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/comments.json"
+    "capture_locator": "local://$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/comments.json"
   },
   {
     "topic": "audience-probe-candidates",
@@ -10974,7 +10974,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "micro_categories": [
       "Ergonomics"
     ],
-    "capture_locator": "local:///home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/audience-sample.json"
+    "capture_locator": "local://$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/audience-sample.json"
   },
   {
     "topic": "audience-discoverability-not-corroboration",
@@ -10998,7 +10998,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "micro_categories": [
       "Tooling and CLI shape"
     ],
-    "capture_locator": "local:///home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/comments.json"
+    "capture_locator": "local://$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/comments.json"
   },
   {
     "topic": "audience-anonymity-provenance",
@@ -11022,7 +11022,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "micro_categories": [
       "Naming"
     ],
-    "capture_locator": "local:///home/nate/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/audience-sample.json"
+    "capture_locator": "local://$HOME/.cache/jet-test-scratch/mine-playlist-2026-09-09/hpj6r6CjJf8/audience-sample.json"
   },
   {
     "topic": "perf-command-suite",

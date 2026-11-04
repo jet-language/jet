@@ -37,7 +37,7 @@ the identical command to resume without retrying completed rungs (including
 failures); changed options or compilers require a new work directory.
 `--work-dir` contains evidence only (receipts, reports, traces and logs).
 Generated projects, compiler stores/output and `perf.data` go under
-`--build-root` (default `/mnt/jetscratch/scaling-gate`), keyed by evidence
+`--build-root` (default `$JET_SCRATCH_ROOT/scaling-gate`), keyed by evidence
 directory; each point records its `build_dir` for artifact cleanup after landing.
 Re-render a profile with `node Tools/perf/scaling/profile.mjs BUILD_DIR TRACE_FILE PHASE...`,
 passing the recorded build directory and the evidence directory's `trace.json`.

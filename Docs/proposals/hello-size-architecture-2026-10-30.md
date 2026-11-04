@@ -361,7 +361,7 @@ its prototype) runs the corpus cells in `cells.json`:
 
 ## 7. Evidence and reproduction
 
-All under `/mnt/jetscratch/lanes/IR/IrTypes/c6328/`:
+All under `$JET_SCRATCH_ROOT/lanes/IR/IrTypes/c6328/`:
 
 - `asm-floor.mjs floor`: writes `floor-hello` (197 B), `floor-nosigpipe`,
   `floor-pause`.
@@ -381,7 +381,7 @@ All under `/mnt/jetscratch/lanes/IR/IrTypes/c6328/`:
 ## 8. Owner ballot: D-RT-DEFECT-REPORT1
 
 The revised JSON is in
-`/mnt/jetscratch/lanes/Main/q/ballot/overnight/rev/D-RT-DEFECT-REPORT1.json`.
+`$JET_SCRATCH_ROOT/lanes/Main/q/ballot/overnight/rev/D-RT-DEFECT-REPORT1.json`.
 The owner asked to keep the full report and make it small instead of cutting
 it, so the vote now recommends keeping it in every program, and we expect to
 withdraw it.

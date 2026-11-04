@@ -3,11 +3,13 @@
 // receive byte-identical task wording apart from the language and filename.
 // No reference adapter source is ever shown to the candidate.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO = "/home/nate/Projects/Github/jet";
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const CORP = path.join(REPO, "tests/agent_workloads");
-const OUT = "/home/nate/.cache/jet-dev/x1876";
+const OUT = path.join(os.homedir(), ".cache/jet-dev/x1876");
 
 const rows = fs.readFileSync(path.join(CORP, "manifest.tsv"), "utf8").trim().split("\n");
 const hdr = rows[0].split("\t");

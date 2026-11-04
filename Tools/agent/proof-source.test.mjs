@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { assertPinnedSource, proofTargetDirectory } from './proof-source.mjs';
+
+const scratchRoot = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
 
 function fixture(t) {
     const directory = mkdtempSync(join(tmpdir(), 'jet-proof-source-'));
@@ -61,7 +63,7 @@ test('manifest guard rejects missing tracked files', (t) => {
 
 test('proof targets use the full immutable commit rather than a moving branch', () => {
     const commit = 'a'.repeat(40);
-    assert.equal(proofTargetDirectory(commit), `/mnt/jetscratch/targets/source-${commit}`);
+    assert.equal(proofTargetDirectory(commit), join(scratchRoot, 'targets', `source-${commit}`));
     assert.throws(() => proofTargetDirectory('dev'), /full commit SHA/);
     assert.throws(() => proofTargetDirectory(commit.slice(0, 9)), /full commit SHA/);
 });
@@ -70,7 +72,7 @@ test('export extracts a completed tar file and publishes once with no archive le
     // A command fixture avoids creating any Git branch/ref for this proof.
     const fixture = mkdtempSync(join(tmpdir(), 'jet-proof-archive-'));
     const commit = randomBytes(20).toString('hex'), tree = 'c'.repeat(40);
-    const destination = `/mnt/jetscratch/candidates/source-${commit}`;
+    const destination = join(scratchRoot, 'candidates', `source-${commit}`);
     const target = proofTargetDirectory(commit);
     assert.equal(existsSync(destination), false);
     assert.equal(existsSync(target), false);

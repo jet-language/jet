@@ -3,6 +3,7 @@
 // of the compiler or generated Rust backend is performed by this proof.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { options, run } from './harness.mjs';
@@ -14,7 +15,7 @@ const compiler=path.resolve(flags['--compiler']);
 const compilerSha256=createHash('sha256').update(fs.readFileSync(compiler)).digest('hex');
 const sizes=[128,256,512,1024];
 const metric='counter.sema.check.module_lookups';
-const config=options(['--compiler',`candidate=bootstrap:${compiler}`,'--shape','comptime','--ladder',`comptime=${sizes.join(',')}`,'--mode','counters','--jobs','1','--layout','files','--seed','1','--memory-max','8G','--timeout','60','--work-dir',root,'--build-root',path.join(process.env.JET_SCRATCH_ROOT??'/mnt/jetscratch','scaling-module-lookups',path.basename(root))]);
+const config=options(['--compiler',`candidate=bootstrap:${compiler}`,'--shape','comptime','--ladder',`comptime=${sizes.join(',')}`,'--mode','counters','--jobs','1','--layout','files','--seed','1','--memory-max','8G','--timeout','60','--work-dir',root,'--build-root',path.join(process.env.JET_SCRATCH_ROOT||path.join(os.homedir(),'.cache/jet-dev/scratch'),'scaling-module-lookups',path.basename(root))]);
 const receipt=await run(config);
 const series=receipt.series[0];
 const counts=series?.points.map(point=>({n:point.n,ok:point.ok,lookups:point.metrics[metric]}))??[];

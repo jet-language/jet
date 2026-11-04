@@ -19,7 +19,7 @@ integrated them:
 
 Evidence base. The repository at master on 2026-10-05; Tower decisions, read
 only; about 40 live probes on the dev candidate
-`/mnt/jetscratch/candidates/dev-05ea86f65/jet`, each under a 1 GB cap; and
+`$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet`, each under a 1 GB cap; and
 comment- and string-stripped censuses of `Examples/`, `Core/` and `Compiler/`
 (287,354 code lines). Primary sources are cited in each part. Claims not
 re-read this session are marked `[INFERENCE]` or `[approx]`. Scripts, probes
@@ -187,7 +187,7 @@ D-DEADLINE-ONE1, D-HOOK-RUNTIME1 and D-IMAGE-ENCODE1.
 
 Author: FeedbackSigils. Evidence gathered 2026-10-05 from the repository at
 master, Tower decisions (read-only), the dev candidate
-`/mnt/jetscratch/candidates/dev-05ea86f65/jet` (`jet check`, 1 GB cap), and
+`$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` (`jet check`, 1 GB cap), and
 primary sources cited inline. Census scripts:
 `~/.cache/jet-dev/scratch/OwnerFeedback/sigil-metrics.mjs` (token census with
 comments and strings stripped) and `tilde-classify.mjs` (copy-site
@@ -557,7 +557,7 @@ Research only; no Tower writes, no repository edits.
 
 Evidence base:
 
-- **Live probes.** 25 programs on the dev release `/mnt/jetscratch/candidates/dev-05ea86f65/jet`,
+- **Live probes.** 25 programs on the dev release `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet`,
   each run under a 1 GB cgroup. Sources and runner:
   `~/.cache/jet-dev/scratch/OwnerFeedback/sem-probes/` (`run.sh`, `p01`–`p36`,
   plus emitted Rust `p01.rs` and `p04.rs`).
@@ -1019,7 +1019,7 @@ examples.
 
 Evidence conventions:
 - *Code fact*: checked in the main checkout on 2026-10-05, with a file:line reference.
-- *Probe*: run with the dev release `/mnt/jetscratch/candidates/dev-05ea86f65/jet` under a 1.2 GB memory cap. Probe files are in `~/.cache/jet-dev/scratch/OwnerFeedback/mech-probes/`.
+- *Probe*: run with the dev release `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` under a 1.2 GB memory cap. Probe files are in `~/.cache/jet-dev/scratch/OwnerFeedback/mech-probes/`.
 - *Metric*: produced by `~/.cache/jet-dev/scratch/OwnerFeedback/mech-tools/metrics.mjs` over Examples/ + Core/ + Compiler/ (1,660 `.jet` files, 328,724 lines).
 - *External*: a primary source named inline. `[approx]` marks figures quoted from memory of the documentation that should be re-checked before anything is published.
 

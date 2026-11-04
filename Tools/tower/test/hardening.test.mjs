@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const TOWER = join(ROOT, 'Tools/tower/tower.mjs');
-const SCRATCH_ROOT = process.env.JET_TEST_SCRATCH || '/home/nate/.cache/jet-dev/scratch';
+const SCRATCH_ROOT = process.env.JET_TEST_SCRATCH || join(homedir(), '.cache/jet-dev/scratch');
 mkdirSync(SCRATCH_ROOT, { recursive: true });
 
 function board(name) {

@@ -20,7 +20,7 @@ I built one file-backed backend package in `pkg/`: typed JSON HTTP routes, check
 Final release run command:
 
 ```text
-scripts/agent/jet-env jet run --release /home/nate/.cache/jet-luna/dx3/area-backend/pkg
+scripts/agent/jet-env jet run --release $HOME/.cache/jet-luna/dx3/area-backend/pkg
 ```
 
 Final release output:

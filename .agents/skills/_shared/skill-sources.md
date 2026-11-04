@@ -8,9 +8,9 @@ Source keys:
 
 - `R` — `.agents/skills/<name>/SKILL.md`.
 - `T` — `Tools/tower/skills/<name>/SKILL.md`.
-- `M` — `/home/nate/.omp/agent/managed-skills/<name>/SKILL.md`.
+- `M` — `$HOME/.omp/agent/managed-skills/<name>/SKILL.md`.
 - `H` — host plugin or cache copy under `$HOME/.claude` or `$HOME/.codex`.
-- `G` — `/home/nate/.agents/skills/<name>/SKILL.md`.
+- `G` — `$HOME/.agents/skills/<name>/SKILL.md`.
 - `A` — advertised in the audited runtime catalog, not proof of current invocation behavior; `F` — filesystem-backed entry.
 
 ### Entry map

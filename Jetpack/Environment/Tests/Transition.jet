@@ -23,7 +23,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
 
 #Test("hosts split binds the checked System name and fold restores exact root") {
     root :: env_transition_test_root("hosts")
-    original :: "name: \"demo\"\noutputs: {{ server: System{{ name: \"halcyon\", target: linux.x64 }} }}\n"
+    original :: "name: \"demo\"\noutputs: {{ server: System{{ name: \"devhost\", target: linux.x64 }} }}\n"
     env_transition_test_write(root, TRANSITION_PACKAGE_FILE, original)
     preview :: env_transition_split(root, SplitTarget.Hosts("server"), true) ?? panic("preview hosts")
     assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), original)
@@ -31,7 +31,7 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
     result :: env_transition_split(root, SplitTarget.Hosts("server"), false) ?? panic("split hosts")
     assert_eq(result.summary.before_fingerprint, result.summary.after_fingerprint)
     assert_eq(result.summary.before_fingerprint, preview.summary.before_fingerprint)
-    expected :: "home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ server: system.halcyon }}\n        }}\n    }}\n}}\n"
+    expected :: "home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ server: system.devhost }}\n        }}\n    }}\n}}\n"
     assert_eq(env_transition_test_read(root, "package/fleet.jet"), expected)
     env_transition_fold(root, "package/fleet.jet", false) ?? panic("fold hosts")
     assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), original)

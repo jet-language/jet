@@ -6,7 +6,7 @@ use {
 fn run() {
     trace :: files.read("trace.log") ?? panic("read original syscall trace")
     lines :: trace.lines()
-    marker :: "/.nixos-comparison-publish-halcyon-gnome-"
+    marker :: "/.nixos-comparison-publish-devhost-gnome-"
     mkdir := -1
     first_input := -1
     first_output := -1
@@ -18,7 +18,7 @@ fn run() {
         if !line.contains(marker) -> next
         if mkdir < 0 && line.contains("mkdir(") && line.contains("0700") -> mkdir = i
         if first_input < 0 && (line.contains("/flake.nix") || line.contains("/configuration.nix") || line.contains("/input-facts.json")) -> first_input = i
-        if first_output < 0 && line.contains("/nixos/halcyon-gnome/system.qcow2") -> first_output = i
+        if first_output < 0 && line.contains("/nixos/devhost-gnome/system.qcow2") -> first_output = i
         if (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|")) && !line.contains("S_IFDIR|0700") -> insecure = true
         if line.contains("mkdir(") && line.contains("0700") && line.contains("EEXIST") -> collision = true
     }

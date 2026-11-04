@@ -22,7 +22,7 @@ cycles:u,instructions:u`, and the tables keep the minimum of each.
 Instruction counts are exact; cycle counts still carry some noise from the
 shared caches.
 
-- Jet kernels: `/mnt/jetscratch/lanes/SurfaceDesign/probes/k6343/*.jet`,
+- Jet kernels: `$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/k6343/*.jet`,
   built at `--optimize=none`, `basic` and `full` (O0, O1, O2) with the dev
   compiler, toolchain root an export of 4e514f96e1.
 - Rust peers: `probes/r6343/kernels.rs`, one binary, the kernel picked by

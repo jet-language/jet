@@ -1427,7 +1427,7 @@ zero-copy view into the receiver's buffer when sema proves the binding cannot
 outlive its owner. The Jet-level type remains `String`.
 
 ```jet
-padded := "  nate@jet-lang.dev  "
+padded := "  user@jet-lang.dev  "
 email :: padded.trim()
 domain :: email.after("@")
 print("padded still readable: {padded}")
@@ -2440,7 +2440,7 @@ dashed-name  = ident { "-" ident } ;
 ```
 
 Package, module, image, and environment names may use kebab case, for example
-`module web-app`, `env.web-tools`, and `image.halcyon-oci`. A hyphen joins
+`module web-app`, `env.web-tools`, and `image.devhost-oci`. A hyphen joins
 segments only when it is adjacent to both; `a - b` remains subtraction. Code
 identifiers—variables, fields, types, and functions—remain plain identifiers.
 Leading, trailing, and doubled hyphens are invalid (S84).

@@ -456,7 +456,7 @@ const USAGE = `Usage: node harness.mjs --compiler LABEL=KIND:PATH [--compiler ..
   --profile              perf-profile the top rung of every failing series (profile.mjs)
   --layout files|single  repeatable; default both (a multi-file failure is a gate failure)
   --work-dir DIR  --receipt FILE  --seed S
-  --build-root DIR       projects/stores/compiler outputs/perf.data (default /mnt/jetscratch/scaling-gate)
+  --build-root DIR       projects/stores/compiler outputs/perf.data (default $JET_SCRATCH_ROOT/scaling-gate)
   --mode timing|counters counter-only mode gates deterministic work, not time/RSS/floors
   --jobs N              parallel counter-mode compiles (default 1); timing stays serial
 Receipts checkpoint every baseline, rung and profile compile; rerunning the same
@@ -465,7 +465,7 @@ Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.`;
 
 export function options(args) {
   const config = { compilers: [], shapes: [], bases: {}, ladders: {}, steps: 4, domainLadder: [...DOMAIN_LADDER], memoryMax: '20G', timeoutS: 1800,
-    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: '/mnt/jetscratch/scaling-gate', mode: 'timing', jobs: 1,
+    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: path.join(process.env.JET_SCRATCH_ROOT || path.join(os.homedir(), '.cache/jet-dev/scratch'), 'scaling-gate'), mode: 'timing', jobs: 1,
     workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/scaling-gate', new Date().toISOString().replace(/[:.]/g, '-')) };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];

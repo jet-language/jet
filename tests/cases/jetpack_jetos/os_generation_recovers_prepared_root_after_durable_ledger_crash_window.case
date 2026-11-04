@@ -3,49 +3,49 @@ opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run d
 fixture: os_generation_recovers_prepared_root_after_durable_ledger_crash_window.fixture
 mkdir: package-root
 copy: {root}/tests/fixtures/jetpack-config project
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 env: JET_TEST_GENERATION_FAILPOINT=after-root-prepare
 exit: 2
 file: package-root/systems/generations/root-recovery/generation-root.json is-file
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 env: JET_TEST_GENERATION_FAILPOINT=after-ledger-partial
 exit: 2
 file: package-root/systems/generations/root-recovery/generation-root.json is-file
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 env: JET_TEST_GENERATION_FAILPOINT=after-ledger-append
 exit: 2
 file: package-root/systems/generations/root-recovery/generation-root.json is-file
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 env: JET_TEST_GENERATION_FAILPOINT=after-ledger-durable
 exit: 2
 file: package-root/systems/generations/root-recovery/generation-root.json is-file
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 env: JET_TEST_GENERATION_FAILPOINT=after-ledger
 exit: 2
 file: package-root/systems/generations/root-recovery/generation-root.json is-file
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 env: JET_TEST_GENERATION_FAILPOINT=after-commit
 exit: 2
 file: package-root/systems/generations/root-recovery/generation-root.json is-file
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
@@ -61,7 +61,7 @@ exit: 0
 json: stdout doc $ == expected
 copy: project/config.jet original-source
 concat: project/config.jet original-source changed-source
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
@@ -70,7 +70,7 @@ stderr: ~ "already published" # original immutable source refusal
 copy: original-source project/config.jet
 copy: package-root/systems/generations/root-recovery/proof.txt original-proof.txt
 copy: tampered package-root/systems/generations/root-recovery/proof.txt
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
@@ -78,7 +78,7 @@ exit: 2
 file: package-root/systems/generations/root-recovery/proof.txt = "tampered\n"
 copy: original-proof.txt package-root/systems/generations/root-recovery/proof.txt
 copy: extra package-root/systems/generations/root-recovery/unproved-extra
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
@@ -86,14 +86,14 @@ exit: 2
 remove: package-root/systems/generations/root-recovery/unproved-extra
 copy: package-root/systems/generations/root-recovery/generation-files.proof original-generation-files.proof
 copy: tampered-proof package-root/systems/generations/root-recovery/generation-files.proof
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
 exit: 2
 copy: original-generation-files.proof package-root/systems/generations/root-recovery/generation-files.proof
 inventory before: package-root/hangar/lifecycle-db/journal
-step: jet os build halcyon --name root-recovery --no-color --offline
+step: jet os build devhost --name root-recovery --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin

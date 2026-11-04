@@ -6,11 +6,11 @@ It owns no plan or status: work lives on the Tower cards and ballots linked
 below, and none of the findings proves how Jet behaves after that day.
 
 - Playlist: <https://youtube.com/playlist?list=PLXgiJybdlzvk&si=NPuWg6a16_fUmzt8>
-- Sources: 50 videos, 134,288 s (37.3 h), listed in `/mnt/jetscratch/mine/new.tsv`.
-- Scratch record (not committed): batch reports `/mnt/jetscratch/mine/reports/*/report.md`,
-  deep re-mines `/mnt/jetscratch/mine/v3/*/report.md`, distill output
-  `/mnt/jetscratch/mine/distill/{POST-PLAN.json,FINAL-LEDGER.tsv,post-state.json}`,
-  and the fresh-context review `/mnt/jetscratch/mine/distill/review/AUDIT.md`.
+- Sources: 50 videos, 134,288 s (37.3 h), listed in `$JET_SCRATCH_ROOT/mine/new.tsv`.
+- Scratch record (not committed): batch reports `$JET_SCRATCH_ROOT/mine/reports/*/report.md`,
+  deep re-mines `$JET_SCRATCH_ROOT/mine/v3/*/report.md`, distill output
+  `$JET_SCRATCH_ROOT/mine/distill/{POST-PLAN.json,FINAL-LEDGER.tsv,post-state.json}`,
+  and the fresh-context review `$JET_SCRATCH_ROOT/mine/distill/review/AUDIT.md`.
 
 ## Method
 
@@ -26,7 +26,7 @@ The run went through four stages.
 2. **Depth gate.** The v2 skill's checker (`check_coverage.mjs`) requires
    5-minute segments, a ledger of every concept read (about 1.4–2.4 items per
    minute in the passing runs), schema-valid claims, and a per-segment floor.
-   All six first-pass batches failed it (`/mnt/jetscratch/mine/checks/batches.md`).
+   All six first-pass batches failed it (`$JET_SCRATCH_ROOT/mine/checks/batches.md`).
    The failures were mostly schema errors (enum values, missing `segment`,
    `scale`, `incremental_contribution`), and the first pass kept no concept
    ledger.

@@ -39,7 +39,7 @@ The rest is non-gated work under ratified law, filed as cards.
 ## 1. Method
 
 - **Inventory.** Prelude markers (`Compiler/Prelude/Markers.jet`), the compiler's closed menus (`Core/Compiler/Lang.jet`), every Core module that a domain touches, the Jetpack manifest readers, the embedded battery, and the diagnostics registry.
-- **Decisions.** Ratified and open decisions were read from the Tower board on 2026-10-31. The FFI v3 design is `/mnt/jetscratch/lanes/FFIDesign/v3/ffi-v3.md`. Two earlier notes were read: `Docs/research/2026-10-29-extensibility-every-layer.md` (closed lists) and `Docs/research/2026-10-30-project-package-config-today.md` (manifests).
+- **Decisions.** Ratified and open decisions were read from the Tower board on 2026-10-31. The FFI v3 design is `$JET_SCRATCH_ROOT/lanes/FFIDesign/v3/ffi-v3.md`. Two earlier notes were read: `Docs/research/2026-10-29-extensibility-every-layer.md` (closed lists) and `Docs/research/2026-10-30-project-package-config-today.md` (manifests).
 - **Counts.** These come from `git grep` at `68c87ae07b`. The diagnostics registry has 874 rows with a `code:` field. 80 have a structured fix and 71 name a lint (`Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet`).
 - **No builds.** This is a research pass. Nothing was compiled or run.
 
@@ -714,14 +714,14 @@ These are the extensibility note's rules (§3 there), applied here:
 
 ## 6. Ballots and cards proposed
 
-Ballots, all `short`, in `/mnt/jetscratch/lanes/Gold/GoldC/declarative/ballots/`:
+Ballots, all `short`, in `$JET_SCRATCH_ROOT/lanes/Gold/GoldC/declarative/ballots/`:
 
 - `D-DECLARE-MODEL1`: one model for every declared thing (values, traits, markers, `prep`), or a `declare` keyword, or per-domain files.
 - `D-HW-DECLARE1`: chips, boards, registers and interrupts as typed Jet values with SVD/devicetree binders, or kept as records plus hand-written structs, or devicetree files.
 - `D-DB-SCHEMA1`: the record is the table, with derived and reviewed migrations, or SQL-first with typed results, or kept as SQL steps.
 - `D-UI-VIEW1`: a view is a function from state to a node value and the runtime owns mounting, or effects call `mount`, or an Elm-style message loop.
 
-Cards, as JSON for `tower card add --file`, in `/mnt/jetscratch/lanes/Gold/GoldC/declarative/cards/`:
+Cards, as JSON for `tower card add --file`, in `$JET_SCRATCH_ROOT/lanes/Gold/GoldC/declarative/cards/`:
 
 1. Build `trait Language` and retire `FFILanguage`/`ForeignLanguage`.
 2. `ffi.binder` kit: declared type maps, handles, errors and refusals.

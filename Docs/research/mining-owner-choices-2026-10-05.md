@@ -155,8 +155,8 @@ Seven API-comparison miners (APICompSystems, APICompLangA, APICompLangB,
 APICompPython, APICompLearn, APICompCraft, APICompWeb) compared every API named
 in the 50 sources with Jet's counterpart. The full 400 rows, one per API, with
 source locator, Jet counterpart, verdict, concrete action and probe evidence,
-are in `/mnt/jetscratch/mine/apicomp/<Name>.tsv`, with probes under
-`/mnt/jetscratch/mine/apicomp/probes/`.
+are in `$JET_SCRATCH_ROOT/mine/apicomp/<Name>.tsv`, with probes under
+`$JET_SCRATCH_ROOT/mine/apicomp/probes/`.
 
 | Verdict | Rows |
 |---|---|

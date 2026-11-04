@@ -1,9 +1,9 @@
 # Defined behavior: Jet against Odin, C, Zig and Rust
 
 Date: 2026-10-30. Card #6323, criteria 1 and 2. Probes live in
-`/mnt/jetscratch/lanes/MemDesign/probes/ub/` (written by `gen.mjs`), with
+`$JET_SCRATCH_ROOT/lanes/MemDesign/probes/ub/` (written by `gen.mjs`), with
 outputs in `probes/out/<name>.<tier>.{out,err,rc}`. They ran with
-`/mnt/jetscratch/discovery/base/latest/jet` (bd83fe6361) on o0, o1 and o2.
+`$JET_SCRATCH_ROOT/discovery/base/latest/jet` (bd83fe6361) on o0, o1 and o2.
 Release binaries were built with `jet build --profile=release` and run
 directly (`probes/ub/release.sh`). Helpers `r(n)` and `rf(x)` hide values
 from compile-time folding.

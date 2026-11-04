@@ -5,7 +5,7 @@
 - Lens: pillar 4 "Ladders, Not Cliffs", tempered by pillar 2 (easy to reason about) and pragmatism.
   A missing rung counts as a finding only when real programs need it. An extra rung counts only when it hides which rung is in force.
 - Evidence rules: code (`Compiler/`, `Core/`, `Jetpack/`), executable examples, probe runs, and ratified rows in `Docs/spec/syntax-decisions.md` (cited as `SD:<line>`). Prose alone proves nothing. Claims that were not executed are marked `[INFERENCE]`.
-- Probes: copies under `/mnt/jetscratch/lanes/Audit/ladder/probes/`, run with `ladder/go.sh <dir> <timeout> <jet args>`. The jet binary is `/mnt/jetscratch/discovery/base/latest/jet`, built from the same commit, with an isolated `HOME`. Nothing ran inside the repo.
+- Probes: copies under `$JET_SCRATCH_ROOT/lanes/Audit/ladder/probes/`, run with `ladder/go.sh <dir> <timeout> <jet args>`. The jet binary is `$JET_SCRATCH_ROOT/discovery/base/latest/jet`, built from the same commit, with an isolated `HOME`. Nothing ran inside the repo.
 
 ## Probe ledger
 

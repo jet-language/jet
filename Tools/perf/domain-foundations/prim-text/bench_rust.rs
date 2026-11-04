@@ -21,7 +21,7 @@ fn merge_sequence(sequence: &[String], best: &(String, String)) -> Vec<String> {
 }
 
 fn main() {
-    let root = "/home/nate/.cache/jet-dev/dx3/prim-text";
+    let root = format!("{}/.cache/jet-dev/dx3/prim-text", std::env::var("HOME").unwrap());
     let corpus_path = format!("{root}/fixtures/corpus_1m.txt");
     let log_path = format!("{root}/fixtures/logs_100m.txt");
     let corpus = fs::read_to_string(&corpus_path).expect("read corpus");

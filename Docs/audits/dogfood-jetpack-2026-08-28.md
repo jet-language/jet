@@ -84,7 +84,7 @@ The shipped Rust behavior spans broader modules, and no honest same-functionalit
 
 | Integration point | Command | Result | State |
 | --- | --- | --- | --- |
-| `eb576ea03` | `/home/nate/Projects/Github/jet/scripts/agent/jet-env /home/nate/Projects/Github/jet/target/debug/jet check dogfood/jetpack` | Exit 0 with `runner.jet has no problems`. This evidence predates the current harness-only correction. | `measured before correction` |
+| `eb576ea03` | `$HOME/Projects/Github/jet/scripts/agent/jet-env $HOME/Projects/Github/jet/target/debug/jet check dogfood/jetpack` | Exit 0 with `runner.jet has no problems`. This evidence predates the current harness-only correction. | `measured before correction` |
 
 The semantic check does not make Phase 1 parity green. The default Phase-1 run remains blocked by the findings below.
 

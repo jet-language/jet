@@ -38,7 +38,7 @@ static void *worker(void *arg){uintptr_t i=(uintptr_t)arg;jet_rt_thread_attach()
 static Text text(const char *s){Text t={(unsigned char *)(uintptr_t)s,(int64_t)strlen(s),(int64_t)strlen(s)};return t;}
 static void errors(void){
     const char *expected[]={"seal: key must be exactly 32; got 31","PasswordHash.parse: PHC string is not canonical","PasswordHash.parse: version 16 is not supported","PasswordHash.parse: algorithm argon2i is not supported","encrypted data could not be opened","X25519 peer key does not contribute to a shared secret","hkdf_sha256: output length must be 0..8160; got 8161","password hash is outside Jet's accepted policy","the operating system could not provide cryptographic randomness","Argon2 worker pool is unavailable for this cryptographic operation","Jet could not preserve a cryptographic invariant; incident crypto-17"};
-    Text seal=text("seal"),key=text("key"),exact=text("exactly 32"),phc=text("PasswordHash.parse"),kind=text("PHC string"),algorithm=text("argon2i"),hkdf=text("hkdf_sha256"),resource=text("Argon2 worker pool"),incident=text("crypto-17"),poison=text("hunter2 plaintext sentinel ciphertext sentinel /home/nate");
+    Text seal=text("seal"),key=text("key"),exact=text("exactly 32"),phc=text("PasswordHash.parse"),kind=text("PHC string"),algorithm=text("argon2i"),hkdf=text("hkdf_sha256"),resource=text("Argon2 worker pool"),incident=text("crypto-17"),poison=text("hunter2 plaintext sentinel ciphertext sentinel /home/user");
     for(int64_t tag=0;tag<11;++tag){
         Error e={tag,&poison,&poison,&poison,0,&poison,0,0};
         if(tag==0){e.operation=&seal;e.parameter=&key;e.expected=&exact;e.actual=31;}
@@ -51,7 +51,7 @@ static void errors(void){
         Text *s=jet_rt_entropy_fixture_error(&e);assert(s->length==(int64_t)strlen(expected[tag]));assert(memcmp(s->data,expected[tag],(size_t)s->length)==0);
         // A bounded copy checks redaction; no returned text need have a NUL.
         char rendered[160];assert(s->length<(int64_t)sizeof rendered);memcpy(rendered,s->data,(size_t)s->length);rendered[s->length]=0;
-        const char *forbidden[]={"hunter2","plaintext sentinel","ciphertext sentinel","/home/nate"};for(size_t i=0;i<4;++i)assert(strstr(rendered,forbidden[i])==NULL);
+        const char *forbidden[]={"hunter2","plaintext sentinel","ciphertext sentinel","/home/user"};for(size_t i=0;i<4;++i)assert(strstr(rendered,forbidden[i])==NULL);
         puts(rendered);jet_rt_string_drop(s);
     }
     // UTF-8 metadata passes through byte-identically, not byte-as-codepoint.

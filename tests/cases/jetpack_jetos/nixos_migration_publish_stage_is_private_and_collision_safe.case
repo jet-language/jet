@@ -18,20 +18,20 @@ exit: 0
 hardlink: tools/migration-tool tools/nix
 hardlink: tools/migration-tool tools/qemu-system-x86_64
 hardlink: tools/migration-tool tools/qemu-img
-step: strace -f -s 4096 -o {work}/publish-success.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/published --no-color --offline
+step: strace -f -s 4096 -o {work}/publish-success.trace -e trace=%file -- {jet} os migrate compare-nixos devhost-gnome --out {work}/published --no-color --offline
 cwd: project
 env: PATH={work}/tools:{env:PATH|}
 exit: 0
-stdout: ~ "{work}/published/nixos/halcyon-gnome/system.qcow2" # original published path predicate
-file: published/nixos/halcyon-gnome/system.qcow2 is-file
-stdout: ~ "{work}/published/nixos/halcyon-gnome/proof.json" # original published path predicate
-file: published/nixos/halcyon-gnome/proof.json is-file
-stdout: ~ "{work}/published/nixos/halcyon-gnome/receipt.json" # original published path predicate
-file: published/nixos/halcyon-gnome/receipt.json is-file
+stdout: ~ "{work}/published/nixos/devhost-gnome/system.qcow2" # original published path predicate
+file: published/nixos/devhost-gnome/system.qcow2 is-file
+stdout: ~ "{work}/published/nixos/devhost-gnome/proof.json" # original published path predicate
+file: published/nixos/devhost-gnome/proof.json is-file
+stdout: ~ "{work}/published/nixos/devhost-gnome/receipt.json" # original published path predicate
+file: published/nixos/devhost-gnome/receipt.json is-file
 when os unix: file: published mode = 0700
-file: published/nixos/halcyon-gnome/proof.json ~ "\"image\":\"system.qcow2\"" # original contains predicate
-file: published/nixos/halcyon-gnome/receipt.json ~ "\"boot_proof\":\"proof.json\"" # original contains predicate
-file: published/nixos/halcyon-gnome/build-boot-plan.json count "\"--offline\"" = 2 # original count predicate
+file: published/nixos/devhost-gnome/proof.json ~ "\"image\":\"system.qcow2\"" # original contains predicate
+file: published/nixos/devhost-gnome/receipt.json ~ "\"boot_proof\":\"proof.json\"" # original contains predicate
+file: published/nixos/devhost-gnome/build-boot-plan.json count "\"--offline\"" = 2 # original count predicate
 copy: publish-success.trace trace.log
 step: jet run observe/trace.jet
 exit: 0
@@ -42,12 +42,12 @@ capture: mkdir stdout doc $.mkdir
 capture: first_output stdout doc $.first_output
 json: stdout doc $.protected[0] > {cap:mkdir}
 json: stdout doc $.protected[0] < {cap:first_output}
-step: strace -f -s 4096 -o {work}/publish-json.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/json-output --no-color --offline --json
+step: strace -f -s 4096 -o {work}/publish-json.trace -e trace=%file -- {jet} os migrate compare-nixos devhost-gnome --out {work}/json-output --no-color --offline --json
 cwd: project
 env: PATH={work}/tools:{env:PATH|}
 exit: 0
-stdout: = "{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"halcyon-gnome\",\"image\":\"{work}/json-output/nixos/halcyon-gnome/system.qcow2\",\"proof\":\"{work}/json-output/nixos/halcyon-gnome/proof.json\",\"receipt\":\"{work}/json-output/nixos/halcyon-gnome/receipt.json\"}\n" # original format literal3684
-step: strace -f -s 4096 -o {work}/publish-collision.trace -e trace=%file -- {jet} os migrate compare-nixos halcyon-gnome --out {work}/collision-output --no-color --offline
+stdout: = "{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"devhost-gnome\",\"image\":\"{work}/json-output/nixos/devhost-gnome/system.qcow2\",\"proof\":\"{work}/json-output/nixos/devhost-gnome/proof.json\",\"receipt\":\"{work}/json-output/nixos/devhost-gnome/receipt.json\"}\n" # original format literal3684
+step: strace -f -s 4096 -o {work}/publish-collision.trace -e trace=%file -- {jet} os migrate compare-nixos devhost-gnome --out {work}/collision-output --no-color --offline
 cwd: project
 env: PATH={work}/tools:{env:PATH|}
 env: JET_TEST_COLLIDE_PUBLISH={work}
