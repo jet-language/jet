@@ -1611,6 +1611,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .ExplicitCopy(value) | .Clone(value, _) -> {
             slot :: ir_expr(&m, p, &b, value)
             if ir_failed(b) || slot < 0 -> return slot
+            // A fresh temporary (`raw.trim().copy()`) has no other owner, so
+            // it is the copy: cloning it would leave the temporary undropped.
+            if b.fresh[slot] -> return slot
             return ir_copy_value(&m, p, &b, slot, span)
         }
         .MaterializeView(value) -> return ir_materialize_view(&m, p, &b, expression_ty, value, span)

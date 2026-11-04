@@ -1,0 +1,58 @@
+// `.copy()` of a call's result (`raw.trim().copy()`) frees that result. Each
+// scenario copies 400,000 temporary Strings of about 40 bytes. A leaked
+// temporary keeps about 50 MB resident, so the resident set may grow by at
+// most 8 MB across a scenario.
+package {
+    name: "copy_of_a_temporary_frees_the_temporary"
+    authority: { allow: [FS.Read] }
+}
+
+use files :: core.files
+
+LINES :: 2000
+ROUNDS :: 200
+GROWTH_LIMIT_KB :: 8192
+
+fn status_kb(field: String) -> Int {
+    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+fn trimmed(text: String) -> Int {
+    count := 0
+    loop raw in text.split("\n") {
+        line :: raw.trim().copy()
+        count += line.count_bytes()
+    }
+    count
+}
+
+fn lowered(text: String) -> Int {
+    count := 0
+    loop raw in text.split("\n") {
+        count += raw.to_lower().copy().count_bytes()
+    }
+    count
+}
+
+fn measure(name: String, text: String, scenario: fn(String) -> Int) {
+    total := scenario(text)
+    start :: status_kb("VmRSS:")
+    loop _ in 1..<ROUNDS -> total += scenario(text)
+    grown :: status_kb("VmRSS:") - start
+    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    print("{name}: {total} bytes copied, the temporaries freed")
+}
+
+fn run() {
+    text := ""
+    loop i in 0..<LINES -> text = "{text}  Line Number {i} With Some Padding  \n"
+    measure("trim", text, trimmed)
+    measure("to_lower", text, lowered)
+}

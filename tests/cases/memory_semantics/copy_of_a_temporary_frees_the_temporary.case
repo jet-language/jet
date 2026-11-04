@@ -1,0 +1,28 @@
+# `.copy()` of a call's result frees that result. Before the fix,
+# `raw.trim().copy()` and `raw.to_lower().copy()` leaked every temporary they
+# copied: about 50 MB over the fixture's 400,000 copies, on O0, O1, O2, the
+# default run and a built binary.
+fixture: copy_of_a_temporary_frees_the_temporary.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+limit: time=120
+exit: 0
+stdout: = copy_of_a_temporary_frees_the_temporary.out
+step: jet run --optimize=basic main.jet
+limit: time=120
+exit: 0
+stdout: = copy_of_a_temporary_frees_the_temporary.out
+step: jet run --optimize=full main.jet
+limit: time=120
+exit: 0
+stdout: = copy_of_a_temporary_frees_the_temporary.out
+step: jet run main.jet
+limit: time=120
+exit: 0
+stdout: = copy_of_a_temporary_frees_the_temporary.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+limit: time=120
+exit: 0
+stdout: = copy_of_a_temporary_frees_the_temporary.out
