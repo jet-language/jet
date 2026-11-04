@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import * as db from './store.mjs';
-import { historyFile } from './paths.mjs';
+import { historyKey } from './history-shards.mjs';
 import { diffIndex } from './ui/live-delta.js';
 
 const RING = 64;
@@ -48,7 +48,6 @@ export function encodeBody(value, key = 'body') {
 
 export function createLiveBoard(store, { decorate = (index) => index } = {}) {
   const liveFile = join(store.dataDir, 'tower.json');
-  const archiveFile = historyFile(store.dataDir);
   let liveKey = null;
   let state = null;
   let index = null;          // { rev, value, body }
@@ -102,9 +101,9 @@ export function createLiveBoard(store, { decorate = (index) => index } = {}) {
   }
 
   // The archive changes rarely (retire passes, restores); read it alone
-  // when its file changes.
+  // when its files change (history.json, plus history/ when sharded).
   function loadArchive() {
-    const key = fileKey(archiveFile);
+    const key = historyKey(store.dataDir);
     if (archive && key === archiveKey) return archive;
     const next = db.loadHistoryRaw(store.dataDir);
     archiveKey = key;

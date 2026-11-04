@@ -1,10 +1,10 @@
 // #6563 c4: the board is durable only once it is committed. Every
-// config.boardBatch-th write commits tower.json and history.json (and nothing
-// else: never the owner's scratch notes) to config.boardBranch, so the
-// committed board is never more than one batch behind the working copy.
-// `tower board check` proves that bound; `tower board commit` closes a batch
-// early. Boards that git does not track, or a checkout on another branch,
-// are left alone.
+// config.boardBatch-th write commits tower.json and history.json, with the
+// shards of a sharded archive (history-shards.mjs), and nothing else (never
+// the owner's scratch notes) to config.boardBranch, so the committed board is
+// never more than one batch behind the working copy. `tower board check`
+// proves that bound; `tower board commit` closes a batch early. Boards that
+// git does not track, or a checkout on another branch, are left alone.
 import { spawnSync } from 'node:child_process';
 import { relative } from 'node:path';
 
@@ -18,6 +18,9 @@ const gitEnv = () => {
 const runGit = (cwd, args) => spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: gitEnv(), maxBuffer: 1 << 30 });
 
 // Where the board commits go, or { skip } saying why it is not committed.
+// files is [tower.json, history.json, ...history shards]. Shards git does not
+// track yet are listed in `added` when history.json is tracked, so the
+// commit that first holds a shard adds it.
 export function boardTarget(dataDir, files, config) {
   const top = runGit(dataDir, ['rev-parse', '--show-toplevel']);
   if (top.status !== 0) return { skip: 'the board is not in a git work tree' };
@@ -28,7 +31,8 @@ export function boardTarget(dataDir, files, config) {
   const paths = files.map(file => relative(root, file));
   const tracked = paths.filter(path => runGit(root, ['ls-files', '--error-unmatch', '--', path]).status === 0);
   if (!tracked.includes(paths[0])) return { skip: `${paths[0]} is not tracked by git` };
-  return { root, branch, paths: tracked };
+  const added = tracked.includes(paths[1]) ? paths.slice(2).filter(path => !tracked.includes(path)) : [];
+  return { root, branch, paths: [...tracked, ...added], added };
 }
 
 // Commit the tracked board files as they are now. The caller holds the store
@@ -36,10 +40,14 @@ export function boardTarget(dataDir, files, config) {
 export function commitBoard(dataDir, files, config, { rev, by }) {
   const target = boardTarget(dataDir, files, config);
   if (target.skip) return { committed: null, reason: target.skip };
-  const { root, branch, paths } = target;
+  const { root, branch, paths, added } = target;
   const dirty = runGit(root, ['status', '--porcelain', '--', ...paths]);
   if (dirty.status !== 0) return { committed: null, reason: dirty.stderr.trim() };
   if (!dirty.stdout.trim()) return { committed: null, reason: 'the committed board is current' };
+  if (added.length) {
+    const add = runGit(root, ['add', '--', ...added]);
+    if (add.status !== 0) return { committed: null, reason: (add.stderr || add.stdout).trim() };
+  }
   const message = `tower: board at rev ${rev}${by ? ` (${by})` : ''}`;
   // Hooks stay off: this commit is board data, and the card-link hook would
   // re-enter the store this process holds locked.

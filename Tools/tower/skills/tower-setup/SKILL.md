@@ -50,8 +50,8 @@ than guessing a subcommand.
 `init` creates `Tools/tower/.tower/tower.json`, public `config.json`, and a
 `.gitignore` for `backups/`, `secrets.json`, and crash-residue
 `.secrets.json.tmp-*`. Commit the data directory so the team shares the board,
-including `history.json` after it appears; history is not a cache and is not
-gitignored.
+including `history.json` after it appears, and `history/` once the archive is
+sharded (`tower archive shard`); history is not a cache and is not gitignored.
 
 ## Configuration inspection
 
@@ -75,7 +75,8 @@ report only facts relevant to the request. All fields are optional:
 
 `port` is shared by CLI and UI; if another local service owns 7878, the owner
 may choose another value. `retireAfterDays` is the walk-back buffer before a
-done card or ratified decision moves to `history.json`. Do not add removed
+done card or ratified decision moves to the archive (`history.json`, plus
+`history/` once sharded). Do not add removed
 authentication or push fields. Do not treat configuration inspection as
 permission to edit board state or project policy.
 

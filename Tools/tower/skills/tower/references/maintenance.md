@@ -32,11 +32,20 @@ history matters:
 tower archive status
 tower archive show <id>
 tower archive restore <id>
+tower archive shard
 ```
 
 `card show` and `decision show` fall through to history after retirement. A
 live ratified decision still prevents `card delete`; restore and detach it, or
 let it retire naturally.
+
+A large archive is sharded once with `tower archive shard --apply --by <agent>`
+(without `--apply` it only reports the plan). `history.json` then becomes a
+manifest and the records live in `Tools/tower/.tower/history/<kind>-NNN.json`,
+each at most 8 MiB. Read and change them only through Tower; commit
+`history.json` and `history/` together. A shard that does not match
+`history.json` is refused with `E_INVALID`; check both out from one board
+commit.
 
 ## Lint
 

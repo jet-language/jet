@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { readHistoryDoc } from '../../../Tools/tower/app/store.mjs';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const DIR = process.argv[2] || HERE;
@@ -13,7 +14,8 @@ const REPO = path.dirname(execFileSync('git', ['rev-parse', '--path-format=absol
 const TOWER = process.env.TOWER_DIR || `${REPO}/Tools/tower/.tower`;
 const CUT = Date.parse('2026-10-23T07:18:29Z');
 const live = JSON.parse(fs.readFileSync(`${TOWER}/tower.json`, 'utf8'));
-const hist = JSON.parse(fs.readFileSync(`${TOWER}/history.json`, 'utf8'));
+// The archive may be sharded (Tower #6564 c7); Tower's reader assembles it.
+const hist = readHistoryDoc(TOWER) ?? {};
 const byNum = new Map();
 for (const c of [...(hist.cards || []), ...live.cards]) byNum.set(c.num, c);
 

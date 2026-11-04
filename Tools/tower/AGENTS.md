@@ -272,10 +272,24 @@ how old. Nothing about this needs an explicit command — it happens inside
 every write (`store.mutate`'s retire pass).
 
 ```
-tower archive status                # counts + sizes of history.json
+tower archive status                # counts + sizes of the archive
 tower archive show <id>             # an archived card or decision
 tower archive restore <id> --by owner   # bring one back to the live board
+tower archive shard [--apply --by X]    # move the archive into shards (dry run without --apply)
 ```
+
+GitHub warns about a file over 50 MB and refuses one over 100 MB, so a large
+archive is sharded (#6564 c7). `tower archive shard --apply` turns
+`history.json` into a small manifest and moves the records into
+`history/<kind>-NNN.json` files, each at most 8 MiB. Tower reads the shards
+back as one history; every reader and writer goes through
+`app/history-shards.mjs`, never the files directly. The manifest records each
+shard's item count, size and sha256, and a shard that does not match is
+refused (`E_INVALID`), never read as part of a history. A shard can be
+emptied but is never removed, and only the shards whose records changed are
+rewritten. Backups and the repair journal hold the archive's single-file
+text. A Tower older than the cutover refuses the sharded `history.json`
+(`history store.decisions must be an array`) rather than reading it as empty.
 
 `card show '#N'` / `decision show <id>` fall through to history
 automatically once something isn't live any more (the result carries
@@ -363,9 +377,11 @@ blocks the same as an unfinished card.
 ## Committing the board (#6563 c4)
 
 The board is durable only once git has it. Every `config.boardBatch`-th write
-(default 25) commits `tower.json` and `history.json`, and nothing else, to
+(default 25) commits `tower.json` and `history.json`, with the shards under
+`history/` once the archive is sharded, and nothing else, to
 `config.boardBranch` (default `master`) while the write lock still holds the
-pair. The owner's `scratch/owner-scratch.md` is never committed. A board git
+pair. A shard git does not track yet is added by the commit that first holds
+it. The owner's `scratch/owner-scratch.md` is never committed. A board git
 does not track, or a checkout on another branch, is left alone. A failed
 commit never fails the write; the next batch retries.
 

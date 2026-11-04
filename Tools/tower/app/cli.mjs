@@ -10,7 +10,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
-import { DOCS_DIR, findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON, historyFile } from './paths.mjs';
+import { DOCS_DIR, findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON } from './paths.mjs';
+import { SHARD_BYTES, historyFiles, planShards } from './history-shards.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
@@ -153,6 +154,7 @@ const COMMAND_FLAGS = {
     status: [],
     show: [],
     restore: by(),
+    shard: by('apply', 'expectRev'),
   }},
   repair: { verbs: {
     apply: by('manifest', 'dryRun', 'expectRev'),
@@ -1202,19 +1204,30 @@ function cmdVerdict(store, { pos, flags }) {
   return out(flags, `verdict ${result.id} recorded on card #${result.cardNum} → ${result.outcome}`, result);
 }
 
-// #461 — tower archive status|show|restore. Cards/decisions retire to
+// #461 — tower archive status|show|restore|shard. Cards/decisions retire to
 // history.json on their own (store.mutate's chokepoint); this surface reads
-// it back and lets the owner walk one back.
+// it back and lets the owner walk one back. `shard` (#6564 c7) moves the
+// archive into size-bounded files once (history-shards.mjs); without --apply
+// it is a dry run that writes nothing.
 function cmdArchive(store, { pos, flags }) {
   const [verb, ref] = pos;
+  const mib = (bytes) => `${(bytes / 1048576).toFixed(1)} MiB`;
+  const shardLines = (shards) => shards.map(shard => `  history/${shard.file}: ${shard.items} items, ${mib(shard.bytes)}`);
+  const largest = (shards) => Math.max(0, ...shards.map(shard => shard.bytes));
   switch (verb) {
     case 'status': {
       const h = store.loadHistory();
-      const hf = historyFile(store.dataDir);
-      const historyBytes = existsSync(hf) ? statSync(hf).size : 0;
+      const files = historyFiles(store.dataDir);
+      const historyBytes = files.bytes;
       const liveBytes = existsSync(store.file) ? statSync(store.file).size : 0;
-      const info = { cards: h.cards.length, decisions: h.decisions.length, events: h.events.length, historyBytes, liveBytes };
-      return out(flags, `history: ${info.cards} cards, ${info.decisions} decisions, ${info.events} events — ${(historyBytes / 1024).toFixed(1)} KB (live tower.json ${(liveBytes / 1024).toFixed(1)} KB)`, info);
+      const info = {
+        cards: h.cards.length, decisions: h.decisions.length, events: h.events.length, historyBytes, liveBytes,
+        layout: files.layout, shards: files.shards.length, largestShardBytes: largest(files.shards),
+      };
+      const where = files.layout === 'shards'
+        ? ` in ${info.shards} shards under history/ (largest ${(info.largestShardBytes / 1024).toFixed(1)} KB)`
+        : '';
+      return out(flags, `history: ${info.cards} cards, ${info.decisions} decisions, ${info.events} events — ${(historyBytes / 1024).toFixed(1)} KB${where} (live tower.json ${(liveBytes / 1024).toFixed(1)} KB)`, info);
     }
     case 'show': {
       const h = store.loadHistory();
@@ -1228,7 +1241,33 @@ function cmdArchive(store, { pos, flags }) {
       const { result } = store.restoreArchived(ref, flags.by);
       return out(flags, `restored ${result.kind} ${result.id}${result.num ? ` (#${result.num})` : ''} from archive`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown archive verb "${verb}" — status/show/restore`);
+    case 'shard': {
+      const files = historyFiles(store.dataDir);
+      if (files.layout === 'shards')
+        return out(flags, [
+          `history is already sharded: ${files.shards.length} shards under history/, ${mib(files.bytes)} in all, largest ${mib(largest(files.shards))}`,
+          ...shardLines(files.shards),
+        ].join('\n'), { applied: false, layout: 'shards', bytes: files.bytes, shards: files.shards });
+      if (!flags.apply) {
+        const plan = planShards(store.loadPair().history);
+        const shards = plan.files.map(({ kind, file, items, bytes, sha256 }) => ({ kind, file, items, bytes, sha256 }));
+        return out(flags, [
+          `dry run: history.json (${mib(files.bytes)}) would become a manifest and ${shards.length} shards under history/, each at most ${mib(SHARD_BYTES)} (largest ${mib(largest(shards))}); rerun with --apply --by X to write`,
+          ...shardLines(shards),
+        ].join('\n'), { applied: false, layout: files.layout, bytes: files.bytes, bound: SHARD_BYTES, shards });
+      }
+      if (!flags.by || flags.by === true) throw new TowerError('E_USAGE', 'archive shard --apply needs --by <agent>');
+      const { state } = store.mutate((s) => db.logEvent(s, {
+        by: flags.by, action: 'archive.shard', ref: 'history.json',
+        note: `the archive moved from history.json to shards under history/, each at most ${mib(SHARD_BYTES)}`,
+      }), { expectRev: flags.expectRev, historyLayout: 'shards' });
+      const after = historyFiles(store.dataDir);
+      return out(flags, [
+        `sharded at rev ${state.meta.rev}: ${after.shards.length} shards under history/, ${mib(after.bytes)} in all, largest ${mib(largest(after.shards))}`,
+        ...shardLines(after.shards),
+      ].join('\n'), { applied: true, rev: state.meta.rev, layout: after.layout, bytes: after.bytes, shards: after.shards });
+    }
+    default: throw new TowerError('E_USAGE', `unknown archive verb "${verb}" — status/show/restore/shard`);
   }
 }
 

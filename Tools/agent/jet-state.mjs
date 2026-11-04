@@ -5,8 +5,9 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { canonicalDataDir, dataFile, findDataDir, historyFile, readJSON } from '../tower/app/paths.mjs';
-import { clearanceOf, laneOf, normalize, validateStoredHistory } from '../tower/app/store.mjs';
+import { canonicalDataDir, dataFile, findDataDir, readJSON } from '../tower/app/paths.mjs';
+import { clearanceOf, laneOf, normalize, readHistoryDoc, validateStoredHistory } from '../tower/app/store.mjs';
+import { historyKey } from '../tower/app/history-shards.mjs';
 import { hasPendingRepair } from '../tower/app/repair-journal.mjs';
 import { readLedger, SYNTAX } from './lexical-ledger.mjs';
 
@@ -19,6 +20,10 @@ const provider = (status, detail = null) => ({ status, detail });
 function stamp(path) {
   try { const s = statSync(path, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
   catch { return null; }
+}
+// The archive's identity: history.json plus its shards when sharded.
+function archiveStamp(dir) {
+  try { return historyKey(dir); } catch { return null; }
 }
 function git(root, args) {
   return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
@@ -301,9 +306,9 @@ export function collectDigest({ root = ROOT, subject, devRef = 'dev', baseRef = 
     boardPath = resolve(dir, basename(dataFile(found)));
     towerPending = hasPendingRepair(dir);
     if (towerPending) throw new Error('Tower pair transaction pending; read-only digest will not repair or consume it');
-    boardBefore = stamp(boardPath); historyBefore = stamp(historyFile(dir));
+    boardBefore = stamp(boardPath); historyBefore = archiveStamp(dir);
     const raw = readJSON(boardPath, null); if (!raw) throw new Error('live Tower board missing');
-    history = readJSON(historyFile(dir), { cards: [], decisions: [], events: [] }); validateStoredHistory(history);
+    history = readHistoryDoc(dir) ?? { cards: [], decisions: [], events: [] }; validateStoredHistory(history);
     state = normalize(raw, history.cards, false);
     inputs.push({ path: relative(root, boardPath), sha256: hash(JSON.stringify(raw)), identity_kind: 'normalized-json' });
     inputs.push({ path: relative(root, resolve(dirname(boardPath), 'history.json')),
@@ -353,7 +358,7 @@ export function collectDigest({ root = ROOT, subject, devRef = 'dev', baseRef = 
     || inputs.some(input => input.observed_stamp && stamp(resolve(root, input.path)) !== input.observed_stamp)) {
     consistency.push('Source/registry/receipt identity changed during collection');
   }
-  if (boardPath && (stamp(boardPath) !== boardBefore || stamp(resolve(dirname(boardPath), 'history.json')) !== historyBefore)) consistency.push('Tower changed during collection');
+  if (boardPath && (stamp(boardPath) !== boardBefore || archiveStamp(boardDir) !== historyBefore)) consistency.push('Tower changed during collection');
   try {
     if (towerPending || (boardDir && hasPendingRepair(boardDir))) consistency.push('Tower pair transaction pending; fresh read required');
   } catch (error) { consistency.push(`Tower transaction freshness unknown: ${errorText(error)}`); }

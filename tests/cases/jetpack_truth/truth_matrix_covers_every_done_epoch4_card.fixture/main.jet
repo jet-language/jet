@@ -103,6 +103,17 @@ fn truth_ingest_card(cards: &[Int: TruthCardState], card: Dyn, prefer_existing: 
 fn truth_board_limits() -> truth_encoding.EncodingLimits {
     truth_encoding.EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 1073741824, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
 }
+fn truth_ingest_shard(cards: &[Int: TruthCardState], board: String, shard: Dyn) {
+    name := ""
+    if shard.field("file") == .Ok(file) -> name = file.text() ?? ""
+    raw :: truth_files.read(truth_files.join(truth_files.join(board, "history"), name)) ?? panic("read Tower history shard {name}")
+    part :: truth_json.parse_with_limits(raw, truth_board_limits()) ?? panic("parse Tower history shard {name}: {err.reason}")
+    if part.field("cards") == .Ok(field) {
+        if field == .Array(entries) {
+            loop card in entries -> truth_ingest_card(&cards, card, true)
+        }
+    }
+}
 fn truth_tower_cards(root: String) -> [Int: TruthCardState] {
     cards := [Int: TruthCardState]{}
     board :: truth_files.join(root, "Tools/tower/.tower")
@@ -117,11 +128,18 @@ fn truth_tower_cards(root: String) -> [Int: TruthCardState] {
     }
     // Original missing/unreadable history is optional; malformed readable JSON
     // is not. A non-array/missing `cards` field contributes no historical cards.
+    // A sharded archive (Tower #6564 c7) lists its card shards under
+    // `cards.shards`; each shard file under history/ holds a `cards` array.
     if truth_files.read(truth_files.join(board, "history.json")) == .Ok(raw) {
         hist :: truth_json.parse_with_limits(raw, truth_board_limits()) ?? panic("parse Tower history: {err.reason}")
         if hist.field("cards") == .Ok(field) {
             if field == .Array(entries) {
                 loop card in entries -> truth_ingest_card(&cards, card, true)
+            }
+            if field.field("shards") == .Ok(shards) {
+                if shards == .Array(listed) {
+                    loop shard in listed -> truth_ingest_shard(&cards, board, shard)
+                }
             }
         }
     }

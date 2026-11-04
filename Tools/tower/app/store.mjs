@@ -18,9 +18,12 @@
 // the owner's only confirmation mechanism is ratifying a decision ballot.
 import { basename, join } from 'node:path';
 import {
-  backupRequiredAt, dataFile, historyFile, projectRoot,
-  readJSON, withDirectoryAuthority, writeJSON, newId, today, now,
+  backupBytesAt, backupRequiredAt, dataFile, historyFile, projectRoot,
+  withDirectoryAuthority, newId, today, now,
 } from './paths.mjs';
+import {
+  fileKey, historyKeyAt, historyShardPaths, readHistoryAt, tornMessage, writeHistoryAt,
+} from './history-shards.mjs';
 import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
@@ -77,12 +80,11 @@ function writeJSONHeld(root, name, value) {
   root.writeAtomic(name, JSON.stringify(value, null, 2) + '\n');
 }
 
-// history.json is only ever replaced by an atomic rename, so while the file
-// and the newest history backup this process made both keep their identity,
-// that backup still holds the exact pre-write bytes. Most writes never touch
+// The archive is only ever replaced by atomic renames, so while its files
+// and the newest history backup this process made all keep their identity,
+// that backup still holds the exact pre-write text. Most writes never touch
 // the archive, so they reuse it instead of copying the whole archive again.
 let reusableHistoryBackup = null; // { dir, source, name, backup }
-const fileKey = (st) => st ? `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` : null;
 
 // A fresh process (every CLI write) has no identity to compare, but it has
 // just read the archive bytes under the lock. When the newest history backup
@@ -97,8 +99,11 @@ function identicalNewestBackup(backups, prefix, bytes) {
   return held.equals(bytes) ? newest : null;
 }
 
+// The backup holds the archive's single-file text, which a sharded archive
+// assembles from its shards (history-shards.mjs), so recovery and undo read
+// one file either way.
 function historyBackupAt(root, archive, keep, backups, currentBytes = null) {
-  const source = fileKey(root.tryStat('history.json'));
+  const source = historyKeyAt(root);
   const last = reusableHistoryBackup;
   if (last && source && last.dir === root.expectedPath && last.source === source) {
     const st = backups.tryStat(last.name);
@@ -106,8 +111,15 @@ function historyBackupAt(root, archive, keep, backups, currentBytes = null) {
       return join(root.expectedPath, 'backups', last.name);
   }
   reusableHistoryBackup = null;
-  const reused = currentBytes ? identicalNewestBackup(backups, 'history-', currentBytes) : null;
-  const path = reused ? join(root.expectedPath, 'backups', reused) : backupRequiredAt(root, archive, keep, backups);
+  let bytes = currentBytes;
+  if (!bytes) {
+    const read = readHistoryAt(root, { parse: false });
+    if (read.torn) fail('E_INVALID', tornMessage(read.torn));
+    if (!read.bytes) throw new Error(`cannot back up missing file ${archive}`);
+    bytes = read.bytes;
+  }
+  const reused = identicalNewestBackup(backups, 'history-', bytes);
+  const path = reused ? join(root.expectedPath, 'backups', reused) : backupBytesAt(root, archive, bytes, keep, backups);
   const name = basename(path);
   reusableHistoryBackup = { dir: root.expectedPath, source, name, backup: fileKey(backups.tryStat(name)) };
   return path;
@@ -129,6 +141,7 @@ function withStorePairTransaction(dataDir, liveFile, config, work, prepare = nul
       beginRepairTransaction(dataDir, {
         liveBackup,
         historyBackup,
+        historyLayout: prepared?.historyLayout,
         manifestHash: `store:${process.pid}:${Date.now()}`,
       }, root, backupAuthority);
       const result = work(root, prepared);
@@ -197,18 +210,27 @@ export function openStore(dataDir) {
   };
   const sameBytes = (left, right) => (left === null && right === null)
     || (!!left && !!right && left.equals(right));
-  // The parsed history.json this process last read or committed, keyed by the
-  // file's identity. Every history write is an atomic rename (a new inode), so
-  // an unchanged key under the store lock means unchanged bytes. A transaction
-  // takes the cached object (fn may mutate it); only a committed mutate puts it
-  // back, so a failed or foreign write can never leave a stale copy behind.
+  // The archive as one history (history-shards.mjs): bytes are its
+  // single-file text, layout says how it is stored, and torn names a shard
+  // that does not match history.json.
+  const historySnapshotAt = (root, parse) => {
+    const read = readHistoryAt(root, { parse });
+    const missing = read.bytes === null && !read.torn;
+    return { bytes: read.bytes, value: missing ? emptyHistory() : read.value, layout: read.layout, torn: read.torn };
+  };
+  // The parsed archive this process last read or committed, keyed by the
+  // identity of its files. Every history write is an atomic rename (a new
+  // inode), so an unchanged key under the store lock means unchanged bytes. A
+  // transaction takes the cached object (fn may mutate it); only a committed
+  // mutate puts it back, so a failed or foreign write can never leave a stale
+  // copy behind.
   let historyCache = null;
   const pairSnapshotAt = (root, heldBackups = null, parse = true, cachedHistory = null) => {
     const pendingBefore = hasPendingRepairAt(root, heldBackups);
     const live = snapshotAt(root, 'tower.json', empty(config.project), 'live store', parse);
     const history = cachedHistory
-      ? { bytes: null, value: cachedHistory.value, cached: true }
-      : snapshotAt(root, 'history.json', emptyHistory(), 'history store', parse);
+      ? { bytes: null, value: cachedHistory.value, layout: cachedHistory.layout, cached: true }
+      : historySnapshotAt(root, parse);
     const pendingAfter = hasPendingRepairAt(root, heldBackups);
     root.guard('read board pair');
     return { pending: pendingBefore || pendingAfter, live, history };
@@ -216,15 +238,17 @@ export function openStore(dataDir) {
   const preparedPairAt = (root, heldBackups = null) => {
     const cached = historyCache;
     historyCache = null;
-    const key = fileKey(root.tryStat('history.json'));
+    const key = historyKeyAt(root);
     const pair = pairSnapshotAt(root, heldBackups, true, cached && key && cached.key === key ? cached : null);
     if (pair.pending) fail('E_CONFLICT', 'repair transaction is still pending; retry the operation');
+    if (pair.history.torn) fail('E_INVALID', tornMessage(pair.history.torn));
     validateStoredState(pair.live.value, 'live store');
+    const historyLayout = pair.history.layout;
     if (pair.history.cached) {
       // Already validated and migrated when it was read or written.
       const state = normalize(pair.live.value, null, false);
       syncMilestones(state, undefined, pair.history.value.cards);
-      return { state, history: pair.history.value, historyMigrated: false, historyCached: true };
+      return { state, history: pair.history.value, historyLayout, historyMigrated: false, historyCached: true };
     }
     validateStoredHistory(pair.history.value, 'history store');
     const history = { ...emptyHistory(), ...pair.history.value };
@@ -233,16 +257,17 @@ export function openStore(dataDir) {
       historyMigrated = migrateRecommendationLosses(decision) || historyMigrated;
     return {
       state: normalize(pair.live.value, pair.history.value.cards),
-      history, historyMigrated, historyBytes: pair.history.bytes,
+      history, historyLayout, historyMigrated, historyBytes: pair.history.bytes,
     };
   };
   let liveCache = null;
-  // Every store write is an atomic rename (a new inode), so a pair whose two
-  // file identities match before and after one snapshot was read whole from
-  // one committed version; reading both files a second time to compare bytes
+  // Every store write is an atomic rename (a new inode), so a pair whose file
+  // identities match before and after one snapshot was read whole from one
+  // committed version; reading the files a second time to compare bytes
   // only doubled the cost of every CLI read.
-  const pairKeyAt = root => `${fileKey(root.tryStat('tower.json'))}|${fileKey(root.tryStat('history.json'))}`;
+  const pairKeyAt = root => `${fileKey(root.tryStat('tower.json'))}|${historyKeyAt(root)}`;
   const readConsistentPair = () => {
+    let torn = null;
     for (let attempt = 0; attempt < 8; attempt++) {
       const { first, before, after } = withDirectoryAuthority(dataDir, root => {
         const backupAuthority = root.tryStat('backups') ? root.child('backups') : null;
@@ -259,6 +284,10 @@ export function openStore(dataDir) {
         continue;
       }
       if (before !== after) continue;
+      // A shard that does not match history.json with no write in flight is
+      // a mixed checkout, not a race; it is reported once retries run out.
+      torn = first.history.torn ?? null;
+      if (torn) continue;
       validateStoredState(first.live.value, 'live store');
       validateStoredHistory(first.history.value, 'history store');
       for (const decision of first.history.value.decisions || [])
@@ -268,8 +297,10 @@ export function openStore(dataDir) {
       return {
         state,
         history: { ...emptyHistory(), ...first.history.value },
+        historyLayout: first.history.layout,
       };
     }
+    if (torn) fail('E_INVALID', tornMessage(torn));
     fail('E_CONFLICT', 'board changed during read; retry the operation');
   };
   const readConsistentLive = () => {
@@ -312,7 +343,10 @@ export function openStore(dataDir) {
 
   // Read-modify-write under the cross-process lock; rev bumps on every write.
   // `expectRev` (optional) enables optimistic concurrency for API callers.
-  const mutateLocked = (fn, { expectRev } = {}) => {
+  // `historyLayout: 'shards'` writes the archive sharded from this write on
+  // (`tower archive shard --apply`, #6564 c7), in shards of at most
+  // `historyShardBytes` (default SHARD_BYTES); otherwise it keeps its layout.
+  const mutateLocked = (fn, { expectRev, historyLayout, historyShardBytes } = {}) => {
     recoverPendingRepairLocked(dataDir);
     let committedHistory = null;
     const out = withStorePairTransaction(dataDir, file, config, (root, pair) => {
@@ -335,17 +369,19 @@ export function openStore(dataDir) {
       const result = fn(s, config, historyView);
       const personalIssue = personalBefore && personalInfoAdded(personal, personalBefore, s);
       if (personalIssue) fail('E_PERSONAL_INFO', personalIssue);
-      let historyWritten = pair.historyMigrated || (historyBefore !== null && JSON.stringify(history) !== historyBefore);
-      if (historyWritten) writeJSONHeld(root, 'history.json', history);
+      const layout = historyLayout ?? pair.historyLayout;
+      let historyWritten = layout !== pair.historyLayout || pair.historyMigrated
+        || (historyBefore !== null && JSON.stringify(history) !== historyBefore);
+      if (historyWritten) writeHistoryAt(root, history, layout, { bound: historyShardBytes });
       // #461: single chokepoint — every write gets a chance to retire aged-out
       // cards/decisions/events to history.json before tower.json is persisted.
       syncMilestones(s, undefined, history.cards);
-      historyWritten = retire(s, config, dataDir, history, root) || historyWritten;
+      historyWritten = retire(s, config, history, root, layout) || historyWritten;
       validateStoredState(s, 'live store');
       if (historyWritten || !pair.historyCached) validateStoredHistory(history, 'history store');
       s.meta.rev += 1;
       writeJSONHeld(root, 'tower.json', s);
-      committedHistory = { key: fileKey(root.tryStat('history.json')), value: history };
+      committedHistory = { key: historyKeyAt(root), value: history, layout };
       return { result, state: s };
     }, preparedPairAt);
     if (committedHistory?.key) historyCache = committedHistory;
@@ -354,7 +390,7 @@ export function openStore(dataDir) {
   // #6563 c4 (board-git.mjs): every boardBatch-th write commits the board pair
   // while the lock still holds it. A failed commit never fails the write; the
   // next batch retries and `tower board check` reports the lag.
-  const boardFiles = () => [file, historyFile(dataDir)];
+  const boardFiles = () => [file, historyFile(dataDir), ...historyShardPaths(dataDir)];
   const commitBoardLocked = (by) => commitBoard(dataDir, boardFiles(), config, { rev: readConsistentLive().meta.rev, by });
   const afterWrite = (out) => {
     const rev = out?.state?.meta?.rev;
@@ -408,7 +444,7 @@ export function openStore(dataDir) {
       syncMilestones(s, undefined, h.cards);
       s.meta.rev += 1;
       writeJSONHeld(root, 'tower.json', s);
-      writeJSONHeld(root, 'history.json', h);
+      writeHistoryAt(root, h, pair.historyLayout);
       return { result, state: s };
     }, preparedPairAt);
   });
@@ -655,10 +691,25 @@ export function validateStoredHistory(history, source = 'history store') {
   return history;
 }
 
-// One read of history.json alone (no live-board pair check). Read-only
-// archive views use this; writes go through the locked pair transaction.
+// One read of the archive alone (no live-board pair check): the parsed
+// history, or null when there is none. Read-only archive views use this;
+// writes go through the locked pair transaction. A shard that does not match
+// history.json is retried while a write may be in flight, then reported.
+export function readHistoryDoc(dataDir) {
+  let torn = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (attempt) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    let read;
+    try { read = withDirectoryAuthority(dataDir, root => readHistoryAt(root)); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    if (!read.torn) return read.value;
+    torn = read.torn;
+  }
+  fail('E_INVALID', tornMessage(torn));
+}
+
 export function loadHistoryRaw(dataDir) {
-  const raw = readJSON(historyFile(dataDir), null);
+  const raw = readHistoryDoc(dataDir);
   if (raw == null) return emptyHistory();
   validateStoredHistory(raw);
   for (const decision of raw.decisions || []) migrateRecommendationLosses(decision);
@@ -687,8 +738,9 @@ function hasUnclearedCompletion(card, cursor) {
 }
 
 const LIVE_EVENTS = 500;
-// Archiving rewrites all of history.json, so overflow moves in batches rather
-// than one event per write.
+// Archiving rewrites the archive (a single-file history.json whole, a sharded
+// one its last events shard), so overflow moves in batches rather than one
+// event per write.
 const EVENT_ARCHIVE_BATCH = 100;
 
 // The one retirement chokepoint (called only from `mutate`, right after the
@@ -696,9 +748,8 @@ const EVENT_ARCHIVE_BATCH = 100;
 // in history.json is removed from live without a duplicate append — undo
 // can reintroduce a stale live copy of something already retired (history is
 // never rolled back), and this is how that self-heals on the next write.
-function retire(s, config, dataDir, history = null, root = null) {
+function retire(s, config, h, root, layout) {
   const days = config.retireAfterDays ?? 3;
-  const h = history || loadHistoryRaw(dataDir);
   let cardIds = null, decisionIds = null;
   const hasCard = (id) => (cardIds ||= new Set(h.cards.map(x => x.id))).has(id);
   const hasDecision = (id) => (decisionIds ||= new Set(h.decisions.map(x => x.id))).has(id);
@@ -756,10 +807,7 @@ function retire(s, config, dataDir, history = null, root = null) {
     dirty = true;
   }
 
-  if (dirty) {
-    if (root) writeJSONHeld(root, 'history.json', h);
-    else writeJSON(historyFile(dataDir), h);
-  }
+  if (dirty) writeHistoryAt(root, h, layout);
   return dirty;
 }
 

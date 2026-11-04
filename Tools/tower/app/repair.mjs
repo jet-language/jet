@@ -5,9 +5,10 @@ import {
 import { join } from 'node:path';
 import { withLock } from './lock.mjs';
 import {
-  MAX_JSON_BYTES, backupRequiredAt, now, syncDir, withDirectoryAuthority,
+  MAX_JSON_BYTES, backupBytesAt, backupRequiredAt, now, syncDir, withDirectoryAuthority,
 } from './paths.mjs';
 import { TowerError, validateStoredHistory, validateStoredState } from './store.mjs';
+import { readHistoryAt, tornMessage, writeHistoryAt } from './history-shards.mjs';
 import {
   beginRepairTransaction, finishRepairTransaction, recoverPendingRepairLocked,
 } from './repair-journal.mjs';
@@ -318,6 +319,29 @@ export function commitRepairPair({
   return heldRoot ? commit(heldRoot) : withDirectoryAuthority(dataDir, commit);
 }
 
+// A sharded archive is many files, so it cannot take the two staged renames
+// above. It commits the way store writes do: the journal names both backups,
+// the files are replaced, and a failure rolls both stores back from them.
+function commitShardedRepair({ dataDir, root, backups, live, history, liveBackup, historyBackup, manifestHash }) {
+  try {
+    beginRepairTransaction(dataDir, { liveBackup, historyBackup, historyLayout: 'shards', manifestHash }, root, backups);
+  } catch (error) {
+    fail('E_REPAIR_IO', `repair journal failed; stores unchanged: ${error.message}`);
+  }
+  try {
+    root.writeAtomic('tower.json', `${JSON.stringify(live, null, 2)}\n`);
+    writeHistoryAt(root, history, 'shards');
+    root.sync();
+    finishRepairTransaction(dataDir, root, backups);
+  } catch (error) {
+    try { recoverPendingRepairLocked(dataDir, root, backups); }
+    catch (rollbackError) {
+      fail('E_REPAIR_IO', `repair commit failed and rollback failed: ${error.message}; ${rollbackError.message}`);
+    }
+    fail('E_REPAIR_IO', `repair commit failed; both stores rolled back: ${error.message}`);
+  }
+}
+
 export function applyRepairManifest(dataDir, manifest, {
   expectRev, by, dryRun = false, backups = 20,
 } = {}) {
@@ -340,7 +364,11 @@ export function applyRepairManifest(dataDir, manifest, {
     }
     return withDirectoryAuthority(dataDir, root => {
       const originalLive = root.read('tower.json', MAX_JSON_BYTES, `repair source is unsafe: ${liveFile}`).toString('utf8');
-      const originalHistory = root.read('history.json', MAX_JSON_BYTES, `repair source is unsafe: ${historyFile}`).toString('utf8');
+      // A sharded archive (history-shards.mjs) is patched as its single-file text.
+      const archive = readHistoryAt(root, { parse: false });
+      if (archive.torn) fail('E_INVALID', tornMessage(archive.torn));
+      if (!archive.bytes) fail('E_REPAIR_IO', `repair source is missing: ${historyFile}`);
+      const originalHistory = archive.bytes.toString('utf8');
       const live = JSON.parse(originalLive);
       const history = JSON.parse(originalHistory);
       if (live.meta?.rev !== expected)
@@ -377,9 +405,16 @@ export function applyRepairManifest(dataDir, manifest, {
         let historyBackup;
         try {
           liveBackup = backupRequiredAt(root, liveFile, keep, backupAuthority);
-          historyBackup = backupRequiredAt(root, historyFile, keep, backupAuthority);
+          historyBackup = backupBytesAt(root, historyFile, archive.bytes, keep, backupAuthority);
         } catch (error) {
           fail('E_REPAIR_IO', `repair backup failed; stores unchanged: ${error.message}`);
+        }
+        if (archive.layout === 'shards') {
+          commitShardedRepair({
+            dataDir, root, backups: backupAuthority, live, history,
+            liveBackup, historyBackup, manifestHash: checked.hash,
+          });
+          return result;
         }
         commitRepairPair({
           dataDir, liveFile, historyFile, live, history, originalLive, originalHistory,
