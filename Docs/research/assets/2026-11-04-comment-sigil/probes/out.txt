@@ -1,0 +1,198 @@
+===== jet run c01_today_forms.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+4
+3.5
+a // inside text is text, # too
+https://example.com/a#frag
+===== jet run c02_hashhash_today.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.InvalidStatement]: Expected a name after `#` in a statement marker, found `#`
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c02_hashhash_today.jet:3:6
+    |
+  3 |     ## proposed comment text
+    |      ^
+ Why: Names start with a letter or `_`
+ Fix: e.g. `main`, `count`, `_tmp`
+More: jet-lang.dev/e/E0003
+
+1 problem found
+run `jet explain E0003` to learn more
+===== jet run c03_hash_today.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.InvalidStatement]: This line computes a value but doesn't do anything with it
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c03_hash_today.jet:3:9
+    |
+  3 |     # a python style comment
+    |         ^^^^^^
+ Why: Only calls, bindings, assignments, and `return` are allowed here
+ Fix: Use the value, e.g. `x :: ...` or `print(...)`
+More: jet-lang.dev/e/E0003
+
+1 problem found
+run `jet explain E0003` to learn more
+===== jet run c04_shebang.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.MisplacedShebang]: A shebang line is only recognized at the very start of the file
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c04_shebang.jet:6:1
+    |
+  6 | #!/not/allowed/here
+    | ^^
+ Why: The operating system reads launch metadata only from byte 0; Jet does not treat another `#!` as a launch line
+ Fix: Move `#!...` to line 1, or delete it
+More: jet-lang.dev/e/E0042
+
+1 problem found
+run `jet explain E0042` to learn more
+===== jet run c05_hash_sites.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.UnknownAppliedRule]: `#line` isn't a known applied rule
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c05_hash_sites.jet:14:12
+    |
+ 14 |     print(#line)
+    |            ^^^^
+ Why: `line` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: Check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list.
+More: jet-lang.dev/e/E0927
+
+1 problem found
+run `jet explain E0927` to learn more
+===== jet run c06_doc_heading.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.RetiredPub]: `pub` was removed: everything is public by default
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c06_doc_heading.jet:11:1
+    |
+ 11 | pub fn add_one(x: Int) -> Int { x + 1 }
+    | ^^^
+ Why: Privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields
+ Fix: Delete `pub`
+More: jet-lang.dev/e/E0411
+
+1 problem found
+run `jet explain E0411` to learn more
+===== jet run c07_unclosed_block.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.UnterminatedText]: This `/*` comment never gets a closing `*/`
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c07_unclosed_block.jet:5:1
+    |
+  5 | /* outer /* inner */ never closed
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A block comment starts with `/*` and runs until a matching `*/`
+ Fix: Add a `*/` to close the comment
+More: jet-lang.dev/e/E0002
+
+1 problem found
+run `jet explain E0002` to learn more
+===== jet run c05_hash_sites.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+6
+3
+===== jet run c05b_hash_line.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.UnknownAppliedRule]: `#line` isn't a known applied rule
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c05b_hash_line.jet:3:12
+    |
+  3 |     print(#line)
+    |            ^^^^
+ Why: `line` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: Check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list.
+More: jet-lang.dev/e/E0927
+
+1 problem found
+run `jet explain E0927` to learn more
+===== jet run c06_doc_heading.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+2
+===== jet run c08_slash_uses.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+8
+4.25
+4
+12
+===== jet doc c06_doc_heading.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+doc: generated ./docs
+===== jet fmt --check c01_today_forms.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+c01_today_forms.jet
+===== jet fmt --check --diff c01_today_forms.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+c01_today_forms.jet
+--- c01_today_forms.jet
++++ c01_today_forms.jet
+@@ -2,1 +2,0 @@
+-
+@@ -6,14 +5,13 @@
+-    (total + size - 1) /% size   // `/%` is whole-number division
+-}
+-
+-/* a block comment /* nested inside */ still closed */
+-
+-fn run() {
+-    // a full-line comment
+-    print(pages(10, 3))                    // trailing comment
+-    print(7 / 2)
+-    print("a // inside text is text, # too")
+-    print("https://example.com/a#frag")
+-    //// four slashes are a plain comment
+-    // #Unsafe("a commented-out marker") stays a comment
+-}
++    (total + size - 1) /% size  // `/%` is whole-number division
++}
++
++/* a block comment /* nested inside */ still closed */
++fn run() {
++    // a full-line comment
++    print(pages(10, 3))  // trailing comment
++    print(7 / 2)
++    print("a // inside text is text, # too")
++    print("https://example.com/a#frag")
++}
++//// four slashes are a plain comment
++// #Unsafe("a commented-out marker") stays a comment
+===== jet fmt --check --diff c09_fmt_last_comment.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+c09_fmt_last_comment.jet
+--- c09_fmt_last_comment.jet
++++ c09_fmt_last_comment.jet
+@@ -4,1 +4,0 @@
+-    // last line of the body
+@@ -6,0 +5,1 @@
++// last line of the body
+===== jet fmt --check --diff c10_fmt_block_comment_gap.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+c10_fmt_block_comment_gap.jet
+--- c10_fmt_block_comment_gap.jet
++++ c10_fmt_block_comment_gap.jet
+@@ -5,4 +5,1 @@
+-
+-fn run() {
+-    print(one())
+-}
++fn run() { print(one()) }
+===== jet run c11_python_floor_div.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+7
+===== jet run c12_hash_typo_marker.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+Error [jet.InvalidStatement]: Expected a name after `#` in a statement marker, found `#`
+  --> $JET_SCRATCH_ROOT/lanes/Research/comments/probes/c12_hash_typo_marker.jet:3:2
+    |
+  3 | ##Pre(x > 0, "x must be positive")
+    |  ^
+ Why: Names start with a letter or `_`
+ Fix: e.g. `main`, `count`, `_tmp`
+More: jet-lang.dev/e/E0003
+
+1 problem found
+run `jet explain E0003` to learn more
+===== jet run c13_ballot_program.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+333
+===== jet fmt --check c13_ballot_program.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+c13_ballot_program.jet
+===== jet fmt --check --diff c13_ballot_program.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 1
+c13_ballot_program.jet
+--- c13_ballot_program.jet
++++ c13_ballot_program.jet
+@@ -3,1 +3,0 @@
+-
+@@ -5,9 +4,6 @@
+-#Inline
+-fn share(total: Int, people: Int) -> Int {
+-    // whole-number division drops the cents
+-    total /% people  // #4828: round up later
+-}
+-
+-fn run() {
+-    print(share(1000, 3))
+-}
++#Inline fn share(total: Int, people: Int) -> Int {
++    // whole-number division drops the cents
++    total /% people  // #4828: round up later
++}
++
++fn run() { print(share(1000, 3)) }
+===== jet run c14_ballot_program_fmt.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
+333
+===== jet fmt --check c14_ballot_program_fmt.jet (compiler 1f70b8d4bd91cb88f4eda995388d67e288aac8df, base/latest) -> exit 0
