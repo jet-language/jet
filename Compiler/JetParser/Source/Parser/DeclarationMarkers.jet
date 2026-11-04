@@ -1,6 +1,7 @@
 // Shared marker projection bodies for declaration parsers. Keep the original
 // marker list on each AST node and return its newly computed typed projections.
 use jet_foundation.[
+    COMPILER_BUILD_CPU_CACHE_LINE_GENERIC,
     Call,
     CallLabel,
     EnumDef,
@@ -121,13 +122,13 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
                 has_alignment = true
                 alignment_target = call.args.len() == 2
                 argument :: call.args[if alignment_target -> 1 else -> 0].expr
-                if argument == .Int(number, number_span, _, _, _) && number >= 0 {
+                if parser_layout_align_bytes(argument) == .Val(number) {
                     alignment = Val(number)
-                    alignment_span = Val(number_span)
+                    alignment_span = Val(expr_span(argument))
                 } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
                     alignment_span = Val(expr_span(argument))
                 } else {
-                    parser_add_fatal_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `target, N`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
+                    parser_add_fatal_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value or `$build.cpu.cache_line` (or `target, N`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align($build.cpu.cache_line)` or `align(target, 2097152)`")
                     return None
                 }
             } else {
@@ -235,11 +236,11 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
                 has_alignment = true
                 alignment_target = call.args.len() == 2
                 argument :: call.args[if alignment_target -> 1 else -> 0].expr
-                if argument == .Int(number, _, _, _, _) && number >= 0 {
+                if parser_layout_align_bytes(argument) == .Val(number) {
                     alignment = Val(number)
                 } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
                 } else {
-                    parser_add_error_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
+                    parser_add_error_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value or `$build.cpu.cache_line` (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)`, `align($build.cpu.cache_line)` or `align(target, 2097152)`")
                 }
             } else if value == .Ident(name, name_span, _) {
                 parser_layout_struct_bare_argument(&state, name, name_span, marker.span, false)
@@ -261,6 +262,19 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
                 }
                 return None
             }
+        }
+    }
+    None
+}
+
+// An `align(…)` byte value: a non-negative integer literal, or the build fact
+// `$build.cpu.cache_line` (D-CACHE-CONTROL1=A). Jet has no CPU selection, so
+// the fact is the generic cache-line size on every target, as sema reads it.
+fn parser_layout_align_bytes(argument: Expr) -> Int? {
+    if argument == .Int(number, _, _, _, _) && number >= 0 -> return Val(number)
+    if argument == .Field(base, member, _, _) && member == "cache_line" {
+        if base == .Field(root, group, _, _) && group == "cpu" {
+            if root == .Ident(name, _, _) && name == "$build" -> return Val(COMPILER_BUILD_CPU_CACHE_LINE_GENERIC)
         }
     }
     None

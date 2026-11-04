@@ -39,7 +39,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
 | `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
 | `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
-| `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*` | `D-BUILD-FACT3=A` |
+| `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) | `D-BUILD-FACT3=A; D-CACHE-CONTROL1=A` |
 | `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
 | `$phase` | total evaluation-site phase fact | `D-PREP-SURFACE2=A; D-META-ROOT3=A` |
 | `$program` | authorized checked-program fact root | `D-META-REFLECT2=A; D-META-ROOT3=A` |

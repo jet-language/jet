@@ -1,0 +1,8 @@
+Error [jet.ReservedPackedLayout]: `align` requires one integer byte value or `$build.cpu.cache_line` (or `align(target, N)`)
+  --> tests/ui/layout_align_not_bytes_grouped.jet:1:19
+    |
+  1 | #[Layout(c, align(line)), Codable]
+    |                   ^^^^
+ Why: `#Layout(c, align(N))` is compiler-owned ABI metadata
+ Fix: Write `align(64)`, `align($build.cpu.cache_line)` or `align(target, 2097152)`
+More: jet-lang.dev/e/E1105

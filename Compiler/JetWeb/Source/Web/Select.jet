@@ -362,7 +362,8 @@ fn web_select(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables:
             web_store(&e, dst)
         }
         .Load -> web_load_op(&e, m, f, at)
-        .Store -> web_store_op(&e, m, f, at)
+        // Wasm has no non-temporal store: a StreamStore is the ordinary one.
+        .Store | .StreamStore -> web_store_op(&e, m, f, at)
         .StackAddress -> {
             area :: e.areas[at]
             web_frame_address(&e, area)

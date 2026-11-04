@@ -947,7 +947,7 @@ fn ir_opt_rename_reads(f: &IRFunction, at: Int, replace: [Int]) Never! {
             f.a[at] = ir_opt_renamed(replace, f.a[at])
             f.b[at] = ir_opt_renamed(replace, f.b[at])
         }
-        .Store -> {
+        .Store | .StreamStore -> {
             f.a[at] = ir_opt_renamed(replace, f.a[at])
             f.c[at] = ir_opt_renamed(replace, f.c[at])
         }
@@ -1058,7 +1058,7 @@ fn ir_opt_addresses(f: &IRFunction, facts: OptFacts) -> Int Never! {
     changed := 0
     loop at in 0..<f.op.len() {
         op :: f.op[at]
-        if op == .Offset || op == .Load || op == .Store {
+        if op == .Offset || op == .Load || op == .Store || op == .StreamStore {
             def :: ir_opt_address_def(f, facts, f.a[at], at)
             if def < 0 -> next
             f.b[at] = f.b[at] + f.b[def]
@@ -1198,7 +1198,7 @@ fn ir_opt_addresses_at(keys: [String], f: IRFunction, op: IROp, slot: Int, k: In
 // The address slot memory access `k` reads, else -1.
 fn ir_opt_access_address(keys: [String], f: IRFunction, k: Int) -> Int Never! {
     op :: f.op[k]
-    if op == .Load || op == .Store -> return f.a[k]
+    if op == .Load || op == .Store || op == .StreamStore -> return f.a[k]
     if ir_opt_template_call(keys, f, k) && f.c[k] >= 1 -> return f.args[f.b[k]]
     return -1
 }

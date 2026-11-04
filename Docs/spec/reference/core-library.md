@@ -3947,12 +3947,22 @@ fn run() {
 | `from_addr<T>(address: Int) -> *T` | pointer | `#Unsafe` function: reconstitute a pointer; every call sits in an audited `#Unsafe` region. |
 | `volatile_read<T>(pointer: *T) -> T` | value | `#Unsafe` function: perform a volatile read; every call sits in an audited `#Unsafe` region. |
 | `volatile_write<T>(pointer: *T, value: T)` | — | `#Unsafe` function: perform a volatile write; every call sits in an audited `#Unsafe` region. |
+| `stream_store<T>(dst: &T, value: T)` | — | `dst = value`, written without filling the cache (a non-temporal store) where the target has one for the value's width, else an ordinary store. Safe. |
 
 `Fixed` never grows or falls back to the heap. It reserves allocation and
 reverse-drop space from opposite ends of its buffer and fails before moving a
 cursor when they would collide. `reset` is rejected while allocation views are
 live; after a valid reset, the same bytes can be reused. Fixed handles and
 views cannot be returned, captured, stored, or sent across a task boundary.
+
+`stream_store` is for a large output written once and not read again soon:
+the writes skip the cache, so they do not evict data the program still needs.
+On x86-64 a value of four or eight bytes is written with `movnti`; narrower
+values and aggregates use an ordinary store. A function that streams fences
+those writes (`sfence`) before each call and at its return, so callers,
+callees and other threads see them in program order. Pad hot fields to the
+cache line with `#Layout(c, align($build.cpu.cache_line))`; the fact is 64 on
+every target until Jet selects CPUs (D-CACHE-CONTROL1).
 
 ### `core.text.parse` — text parsing and scanning
 

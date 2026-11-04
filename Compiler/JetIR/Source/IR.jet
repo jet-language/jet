@@ -52,6 +52,15 @@
 //   DataAddress  dst  a=data row
 //   Load         dst  a=base pointer slot b=byte offset
 //   Store        a=base pointer slot b=byte offset c=value slot
+//   StreamStore  a=base pointer slot b=byte offset c=value slot
+//                                              Store's write without filling the
+//                                              cache (non-temporal) where the
+//                                              target has such a store for the
+//                                              value's width, else a Store. Every
+//                                              function holding one fences those
+//                                              writes before each call and its
+//                                              return, so no other code observes
+//                                              them out of order
 //   StackAddress dst  a=size b=align           frame storage, live to return
 //                                              (one area per instruction)
 //   Offset       dst  a=pointer slot b=bytes   the address a + b
@@ -132,6 +141,7 @@ enum IROp {
     Unreachable
     Sqrt
     IntBig
+    StreamStore
 }
 
 // Overflow policy of an arithmetic op on a fixed-width integer (`c`).
@@ -631,6 +641,7 @@ fn ir_op_name(op: IROp) -> String Never! {
         .Unreachable -> "unreachable"
         .Sqrt -> "sqrt"
         .IntBig -> "int_big"
+        .StreamStore -> "stream_store"
     }
 }
 
@@ -688,6 +699,7 @@ fn ir_op_code(op: IROp) -> Int Never! {
         .Unreachable -> 48
         .Sqrt -> 49
         .IntBig -> 50
+        .StreamStore -> 51
     }
 }
 
