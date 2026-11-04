@@ -1,0 +1,14 @@
+# tests/cffi.rs::cffi_named_pure_callback_has_stable_c_symbol at tests/cffi.rs:1928; hand-port
+# Claim: a named pure Jet function and a pure lambda pass to C as `int32_t (*)(int32_t)` callbacks, C calls them (also from four threads), and the results come back exact (tests/cffi.rs:2015)
+# Fixture migrated: the Examples/features/lowlevel/native_c shape (deps cb: c@"c", C source in c/cb.c, `use c :: c.cb`); the cc/ar steps and -lpthread are dropped because jet build compiles and links c/
+# Not ported: the generated-Rust symbol asserts (`extern "C" fn __jet_increment`, `extern "C" fn(i32) -> i32`, `extern "C" fn __jet_c_callback_`), tests/cffi.rs:1994-1996; they read Rust output the native backend does not produce
+requires: tool:cc|gcc|clang
+fixture: cffi_named_pure_callback_has_stable_c_symbol.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # tests/cffi.rs:1988 compile_with_path succeeds; tests/cffi.rs:2009 the link succeeds
+step: built
+exit: 0
+stdout: = "42\\n10\\n40\\n" # tests/cffi.rs:2015 assert_eq!(stdout, "42\n10\n40\n")
