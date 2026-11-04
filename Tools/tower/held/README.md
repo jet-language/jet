@@ -24,7 +24,6 @@ below. The card then cites the landing commit, not this path.
 | Card | Directory | Items |
 |---|---|---|
 | #5910 | `5910/` | SP05b and SP05c: phase-arena work, with its proof logs (recovered 2026-11-04) |
-| #6312 | `6312/` | D-CACHE-CONTROL1=A: the three surviving tests (the compiler half is lost) |
 | #6414 | `6414/` | OptAccumulate: an unwired O2 accumulator pass (recovered 2026-11-04) |
 | #6442 | `6442/` | BugSweep 15n, 19, 20, 21 and 23: Jetpack and driver fixes |
 | #5971 | `5971/` | Main-13: checked fixed-width narrowing (parked: runtime recursion) |
@@ -32,20 +31,25 @@ below. The card then cites the landing commit, not this path.
 
 ## Landed
 
-No held item has landed yet.
+A landing commit cannot name itself; `git log --diff-filter=D -- Tools/tower/held/<card>`
+finds the commit that landed a directory's items.
+
+| Card | Item | Landed by |
+|---|---|---|
+| #6312 | D-CACHE-CONTROL1=A (#6312 c5): the three held tests, with the compiler half recovered from a rescued copy of MemDesign's `cache-control1-wip.patch` and integrated: `mem.stream_store` (IR StreamStore, x64 `movnti` plus `sfence`), `$build.cpu.cache_line` (also in `#Layout(c, align(…))`), E1105 text, docs rows, and golden output for both examples | the commit that deleted `6312/` |
 
 ## Held work that was lost
 
 The 2026-11-04 scratch cleanup deleted these before they were copied here.
 They could not be recovered. Each card keeps its description of the work, so
-the work can be redone from that description. The SP05c patch (#5910) and
-OptAccumulate.jet (#6414), first listed here, were later found in rescued
-copies and are now held above.
+the work can be redone from that description. The SP05c patch (#5910),
+OptAccumulate.jet (#6414) and the #6312 compiler half, first listed here, were
+later found in rescued copies; the first two are held above and #6312 has
+landed.
 
 | Card | What was held | Where the description is |
 |---|---|---|
 | #3595 | Fixes for three Jetpack/Foundation test roots: missing core.sys/core.process uses, the TreeHashPublication fs effects, and the ReportJSON Dyn assert (`found.patch`) | #3595 log, 2026-10-23 |
-| #6312 | D-CACHE-CONTROL1=A, part-built: `mem.stream_store` (x64 `movnti`, IR StreamStore), `$build.cpu.cache_line`, docs rows, a conformance test and two examples. 31 files on base 67fd7fdc47 (`cache-control1-wip.patch`). The conformance test and the two examples survived and are held in `6312/` | #6312 logs 0 and 1 |
 
 ## Superseded, not held
 

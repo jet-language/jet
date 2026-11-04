@@ -7,6 +7,7 @@
 // `reflected_fact_type`, `Comptime::reflected_fact_field` and the reflection
 // rows of `CheckerCoreLib::core_struct_field`.
 use jet_foundation.[
+    COMPILER_BUILD_CPU_CACHE_LINE_GENERIC,
     Diagnostic,
     EnumLitArg,
     Expr,
@@ -645,6 +646,7 @@ fn sema_fact_build_value(path: String, facts: SemaBuildFacts) -> SemaFactReadVal
         path == "$build.stamp.dirty" -> Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: facts.stamp_dirty}})
         path == "$build.stamp.toolchain" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_toolchain}})
         path == "$build.stamp.at" -> Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: facts.stamp_at}})
+        path == "$build.cpu.cache_line" -> Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: COMPILER_BUILD_CPU_CACHE_LINE_GENERIC}})
         else -> None
     }
 }

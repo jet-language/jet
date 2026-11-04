@@ -32,6 +32,7 @@ REGISTRATION_FACT_ROWS :: [RegistrationFactRow]{
     {name: "Build.Stamp.Dirty", target: RegistrationFactTarget.Build, identity_bearing: false, safe_direction: "gain", gates: [String]{}, published_by: None},
     {name: "Build.Stamp.Toolchain", target: RegistrationFactTarget.Build, identity_bearing: false, safe_direction: "gain", gates: [String]{}, published_by: None},
     {name: "Build.Stamp.At", target: RegistrationFactTarget.Build, identity_bearing: false, safe_direction: "gain", gates: [String]{}, published_by: None},
+    {name: "Build.Cpu.CacheLine", target: RegistrationFactTarget.Build, identity_bearing: false, safe_direction: "gain", gates: [String]{}, published_by: None},
     {name: "Effects", target: RegistrationFactTarget.Value, identity_bearing: false, safe_direction: "gain", gates: [String]{}, published_by: None},
     {name: "States", target: RegistrationFactTarget.Value, identity_bearing: false, safe_direction: "gain", gates: [String]{}, published_by: None},
     {name: "Sendability", target: RegistrationFactTarget.Value, identity_bearing: false, safe_direction: "none", gates: [String]{}, published_by: Val("ownership")},
@@ -59,3 +60,9 @@ REGISTRATION_FACT_ROWS :: [RegistrationFactRow]{
     {name: "Rand.Entropy", target: RegistrationFactTarget.Build, identity_bearing: false, safe_direction: "gain", gates: [String]{"provider", "digest"}, published_by: None},
     {name: "Target.Scheduler", target: RegistrationFactTarget.Build, identity_bearing: false, safe_direction: "gain", gates: [String]{"provider", "digest"}, published_by: None},
 }
+
+// D-CACHE-CONTROL1=A: `$build.cpu.cache_line`, the selected CPU's cache-line
+// size in bytes. Jet has no CPU selection, so every target is generic and
+// reads this value: sema for the fact read, the parser for
+// `#Layout(c, align($build.cpu.cache_line))`.
+COMPILER_BUILD_CPU_CACHE_LINE_GENERIC :: 64

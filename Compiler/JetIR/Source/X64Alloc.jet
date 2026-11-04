@@ -146,7 +146,7 @@ fn ir_x64_read_form(op: IROp) -> Int Never! {
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> IR_X64_READS_AB
         .Call | .CallRuntime -> IR_X64_READS_ARGS
         .CallIndirect -> IR_X64_READS_A_ARGS
-        .Store -> IR_X64_READS_AC
+        .Store | .StreamStore -> IR_X64_READS_AC
         .Return -> IR_X64_READS_RESULT
         else -> IR_X64_READS_NONE
     }
@@ -171,7 +171,7 @@ fn ir_x64_reads_into(f: IRFunction, at: Int, reads: &[Int]) Never! {
 // The slot instruction `at` writes, or -1.
 fn ir_x64_write(f: IRFunction, at: Int) -> Int Never! {
     if f.op[at] == {
-        .Drop | .Close | .Store | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Nop -> -1
+        .Drop | .Close | .Store | .StreamStore | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Nop -> -1
         else -> f.dst[at]
     }
 }
@@ -239,7 +239,7 @@ fn ir_x64_leaf(m: IRModule, f: IRFunction, classes: [IRX64Class], consts: [Bool]
     if general > 4 -> return false
     loop at in 0..<f.op.len() {
         quiet :: if f.op[at] == {
-            .Nop | .Const | .Load | .Store | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
+            .Nop | .Const | .Load | .Store | .StreamStore | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
             .Return -> f.b[at] != IR_TAIL_JUMP
             else -> ir_x64_quiet(m, f, consts, values, at)
         }

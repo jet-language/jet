@@ -5044,6 +5044,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if canonical.module_name == "core.mem" && (canonical.member == "volatile_read" || canonical.member == "volatile_write") {
         return ir_core_volatile(&m, p, &b, canonical.member, args, type_args, span)
     }
+    if canonical.module_name == "core.mem" && canonical.member == "stream_store" -> return ir_core_stream_store(&m, p, &b, args, type_args, span)
     // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
     // only, the compiler answers it (ir_host_method `compiler.member`).
     if canonical.module_name == "core.compiler" -> return ir_host_method(&m, p, &b, ty, "compiler.{canonical.member}", args, span)
@@ -5098,6 +5099,39 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     labels :: core_call_native_return_labels(canonical.module_name, canonical.member)
     ir_route_labeled(&m, p, &b, symbol, slots, borrow_mask, result, labels, span)
+}
+
+// `core.mem.stream_store<T>(&dst, value)`: `dst = value`, the value written
+// with one StreamStore (non-temporal where the target has a store of its
+// width, IR.jet). As an assignment's, the new value is owned before the old
+// one ends (`stream_store(&name, name)` keeps it alive); an aggregate's bytes
+// are copied as any write's.
+fn ir_core_stream_store(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    if type_args.len() != 1 || args.len() != 2 -> return ir_fail_slot(&b, span, "core.mem.stream_store without its checked element type and arguments")
+    element_ty :: type_args[0].copy()
+    row :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
+    value :: ir_expr(&m, p, &b, args[1])
+    if ir_failed(b) -> return -1
+    backs := [IRWriteBack]{}
+    address :: ir_place_address(&m, p, &b, args[0], &backs, span)
+    if ir_failed(b) || address < 0 -> return -1
+    kind :: if value >= 0 -> ir_kind_of(m, b, value) else -> IRTypeKind.Unit
+    if kind != .Unit {
+        ir_close_disarm(&b, value)
+        owned :: ir_own(&m, p, &b, value)
+        if m.types[row].drop != "" {
+            old :: ir_load_at(&m, &b, address, 0, row)
+            ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+        }
+        if kind == .Aggregate {
+            ir_store_at(&m, p, &b, address, 0, owned)
+        } else {
+            ir_emit(&b.f, IROp.StreamStore, -1, address, 0, owned, b.line)
+            b.fresh[owned] = false
+        }
+    }
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    return -1
 }
 
 // `vault.current<T>(name)`: route jet_vault_current_impl takes the concrete

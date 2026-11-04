@@ -191,7 +191,7 @@ fn ir_opt_reshares(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], 
                 if ir_opt_buffer_reader(m, f, at) -> next
                 if op == .CallRuntime -> return "the Loop hands the buffer to a runtime route that may keep it"
                 if op == .Call || op == .CallIndirect || op == .Move || op == .Copy -> return "the Loop hands the buffer on by its {ir_op_name(op)}"
-                if op == .Store && f.c[at] == slot -> return "the Loop stores the buffer"
+                if (op == .Store || op == .StreamStore) && f.c[at] == slot -> return "the Loop stores the buffer"
             }
         }
         written :: ir_x64_write(f, at)

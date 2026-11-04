@@ -101,6 +101,7 @@ use {
         x64_mov_ri,
         x64_mov_rr,
         x64_movaps,
+        x64_movnti,
         x64_movq_from_xmm,
         x64_movq_to_xmm,
         x64_movzx_r8,
@@ -113,6 +114,7 @@ use {
         x64_rep_movsb,
         x64_ret,
         x64_setcc,
+        x64_sfence,
         x64_shift_cl,
         x64_shift_ri,
         x64_store,
@@ -242,6 +244,12 @@ struct IRX64Emitter {
     // now (-1 none).
     picks: [Int]
     select: Int
+    // Whether the function holds a StreamStore: its non-temporal stores
+    // are fenced (sfence) before each call but a stop poll's, an in-place
+    // template, a tail jump and the epilogue, so a callee, a caller or
+    // another thread they publish to sees them in program order with the
+    // plain stores after them.
+    streams: Bool
 }
 
 // One compiled function and the debug variables its ranges refer to.
@@ -482,6 +490,7 @@ fn ir_x64_call_out(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloca
     keeps := false
     if !indirect && target == .Function(id) -> keeps = ir_x64_is_poll(m, id.value)
     if !keeps -> ir_x64_keep_xmms(&e, f, al, true)
+    if e.streams && !keeps -> x64_sfence(&e.code)
     if indirect {
         x64_call_reg(&e.code, X64_R10)
     } else {
@@ -602,6 +611,7 @@ fn ir_x64_tail_jump(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
         ir_x64_load(&e, m, f, al, slot, IR_X64_ARGUMENT_REGISTERS[general])
         general += 1
     }
+    if e.streams -> x64_sfence(&e.code)
     if al.frame_bytes > 0 -> x64_lea(&e.code, X64_RSP, X64_RBP, 0 - 8 * al.saved.len())
     index := al.saved.len() - 1
     loop index >= 0 {
@@ -626,6 +636,7 @@ fn ir_x64_asm_inline(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     // for ir_x64_call.
     loop position in 0..<count -> ir_x64_load(&e, m, f, al, args[start + position], leaf.regs[position])
     ir_x64_keep_xmms(&e, f, al, true)
+    if e.streams -> x64_sfence(&e.code)
     &e.code.extend(leaf.code)
     ir_x64_keep_xmms(&e, f, al, false)
     if dst < 0 -> return true
@@ -2447,7 +2458,7 @@ struct IRX64Access {
 
 fn ir_x64_access(m: IRModule, f: IRFunction, at: Int) -> IRX64Access? Never! {
     if f.op[at] == .Load -> return Val(IRX64Access{address: f.a[at], value: f.dst[at], load: true, disp: f.b[at], width: 0})
-    if f.op[at] == .Store -> return Val(IRX64Access{address: f.a[at], value: f.c[at], load: false, disp: f.b[at], width: 0})
+    if f.op[at] == .Store || f.op[at] == .StreamStore -> return Val(IRX64Access{address: f.a[at], value: f.c[at], load: false, disp: f.b[at], width: 0})
     width :: ir_x64_asm_access_size(m, f, at)
     if width == 0 -> return None
     start :: f.b[at]
@@ -2570,6 +2581,17 @@ fn ir_x64_memory(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             ir_x64_narrow(&e, reg, true, 8 * width)
         }
         return ir_x64_store(&e, m, f, al, value, reg)
+    }
+    // movnti stores a general register of four or eight bytes; a narrower
+    // value is an ordinary store.
+    if f.op[at] == .StreamStore && (width == 4 || width == 8) {
+        source := X64_RAX
+        if al.xmms[value] >= 0 {
+            x64_movq_from_xmm(&e.code, ty.kind == .Float32, X64_RAX, al.xmms[value])
+        } else {
+            source = ir_x64_use(&e, m, f, al, value, X64_RAX)
+        }
+        return x64_movnti(&e.code, base, index, folded.scale, offset, source, width)
     }
     if al.xmms[value] >= 0 -> return x64_float_store(&e.code, ty.kind == .Float32, base, offset, al.xmms[value])
     // A constant fitting the store's immediate is stored directly.
@@ -2820,7 +2842,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             ir_x64_lea_data(&e, reg, f.a[at])
             ir_x64_store(&e, m, f, al, dst, reg)
         }
-        .Load | .Store -> ir_x64_memory(&e, m, f, al, at)
+        .Load | .Store | .StreamStore -> ir_x64_memory(&e, m, f, al, at)
         .Offset -> ir_x64_offset(&e, m, f, al, at)
         .CopyBytes -> ir_x64_copy(&e, m, f, al, at)
         .StackAddress -> {
@@ -3277,7 +3299,7 @@ fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, 
                         &out.push(b)
                         &out.push(c)
                     }
-                    .Store -> &out.push(b)
+                    .Store | .StreamStore -> &out.push(b)
                     .Return -> {}
                     else -> {
                         &out.push(a)
@@ -3676,7 +3698,7 @@ fn ir_x64_wrap_return(e: &IRX64Emitter, m: IRModule, f: IRFunction, fast: IRX64A
 // Function row `row` (`f`, borrowed from `m`).
 fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al :: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1}
+    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, streams: f.op.contains(IROp.StreamStore)}
     loop _ in 0..<f.op.len() {
         &e.end_of.push(-1)
         &e.pad_label.push(-1)
@@ -3799,6 +3821,7 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     &e.code.push(0x31)
     &e.code.push(0xd2)
     restore :: e.code.len()
+    if e.streams -> x64_sfence(&e.code)
     if al.frame_bytes > 0 -> x64_lea(&e.code, X64_RSP, X64_RBP, 0 - 8 * al.saved.len())
     pops :: e.code.len()
     index := al.saved.len() - 1
@@ -3825,6 +3848,7 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         if al.frame_bytes > 0 {
             ir_x64_jump_to(&e, restore)
         } else {
+            if e.streams -> x64_sfence(&e.code)
             x64_lea(&e.code, X64_RSP, X64_RBP, 0 - 8 * al.saved.len())
             ir_x64_jump_to(&e, pops)
         }
@@ -4048,6 +4072,61 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         }
         assert(found)
     }
+}
+
+// Where `want` starts in `code` at or after `from`, or -1.
+fn ir_x64_code_find(code: [U8], want: [U8], from: Int) -> Int Never! {
+    if code.len() < want.len() -> return -1
+    loop start in from..<(code.len() - want.len() + 1) {
+        same := true
+        loop k in 0..<want.len() {
+            if code[start + k] != want[k] {
+                same = false
+                break
+            }
+        }
+        if same -> return start
+    }
+    -1
+}
+
+// D-CACHE-CONTROL1=A: an eight-byte StreamStore is one `movnti` (0F C3,
+// REX.W), a two-byte one an ordinary store, and the function fences its
+// non-temporal stores (sfence, 0F AE F8) before it returns.
+#Test("A StreamStore of eight bytes is movnti, fenced before the return") {
+    probe := [U8]{}
+    x64_movnti(&probe, X64_RCX, -1, 1, 8, X64_RAX, 8)
+    assert(probe == [U8]{0x48, 0x0f, 0xc3, 0x41, 0x08})
+    probe = [U8]{}
+    x64_movnti(&probe, X64_R10, X64_R11, 8, 0, X64_RDX, 4)
+    assert(probe == [U8]{0x43, 0x0f, 0xc3, 0x14, 0xda})
+    m := ir_module_new()
+    word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    half :: ir_type_row(&m, Type.IntN{signed: false, bits: 16}) ?? panic("no U16 row")
+    f := ir_function_new("stream", "test:stream.jet::stream", "", "stream.jet", 1)
+    data :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "data"), 1)
+    value :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "value"), 1)
+    f.result = word
+    narrow :: ir_slot(&f, half, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.StreamStore, -1, data, 8, value, 2)
+    _ := ir_emit(&f, IROp.Const, narrow, 3, -1, -1, 3)
+    _ := ir_emit(&f, IROp.StreamStore, -1, data, 16, narrow, 3)
+    _ := ir_emit(&f, IROp.Return, -1, data, -1, -1, 4)
+    &m.functions.push(f)
+    al :: ir_x64_allocate(m, m.functions[0])
+    assert(al.consts[narrow])
+    code :: ir_x64_compile_function(m, ir_x64_tables(m), 0).function.code
+    base :: if al.regs[data] >= 0 -> al.regs[data] else -> X64_R10
+    source :: if al.regs[value] >= 0 -> al.regs[value] else -> X64_RAX
+    wide := [U8]{}
+    x64_movnti(&wide, base, -1, 1, 8, source, 8)
+    movnti :: ir_x64_code_find(code, wide, 0)
+    assert(movnti >= 0)
+    plain := [U8]{}
+    x64_store_indexed_imm(&plain, base, -1, 1, 16, 3, 2)
+    assert(ir_x64_code_find(code, plain, movnti) > movnti)
+    fence :: ir_x64_code_find(code, [U8]{0x0f, 0xae, 0xf8}, 0)
+    assert(fence > movnti && fence < ir_x64_code_find(code, [U8]{0xc3}, fence))
 }
 
 // The leaf of `source` assembled for operands `names`.

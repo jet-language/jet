@@ -629,6 +629,11 @@ COMPILER_BUILD_FACT_STAMP_TOOLCHAIN :: "$build.stamp.toolchain"
 
 COMPILER_BUILD_FACT_STAMP_AT :: "$build.stamp.at"
 
+/// D-CACHE-CONTROL1=A: the selected CPU's cache-line size in bytes (an `Int`).
+/// Jet has no CPU selection, so every target is generic and reads 64
+/// (`COMPILER_BUILD_CPU_CACHE_LINE_GENERIC`, Registry/RegistrationFacts.jet).
+COMPILER_BUILD_FACT_CPU_CACHE_LINE :: "$build.cpu.cache_line"
+
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
 /// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
 FOREIGN_UNSAFE :: "unsafe"
@@ -703,6 +708,11 @@ MEM_VOLATILE_READ :: "volatile_read"
 /// volatile/MMIO write.
 MEM_VOLATILE_WRITE :: "volatile_write"
 
+/// D-CACHE-CONTROL1=A: `mem.stream_store(&dst, value)` — `dst = value`
+/// written without filling the cache where the target has a non-temporal
+/// store, else an ordinary store. Safe; no `#Unsafe`.
+MEM_STREAM_STORE :: "stream_store"
+
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 MEM_ADDRESS_OF :: "address_of"
@@ -771,6 +781,7 @@ CORE_MEM_GATE_TIERS :: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: "__bytes_unpack", field_1: CoreMemGate.Audit),
     (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),
     (field_0: MEM_PIN, field_1: CoreMemGate.Import),
+    (field_0: MEM_STREAM_STORE, field_1: CoreMemGate.Import),
     (field_0: TYPE_PIN, field_1: CoreMemGate.Import),
     (field_0: MEM_ARENA, field_1: CoreMemGate.Import),
     (field_0: MEM_BUMP, field_1: CoreMemGate.Import),

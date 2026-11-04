@@ -147,11 +147,12 @@ fn ir_drop_plan(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan 
 }
 
 // Whether instruction `at`, reading a String, leaves nothing pointing into
-// it: it is not a Copy, Move, Store, Return, Load, Offset, CopyBytes or
-// indirect call, and its result is nothing, a plain value or a new String.
+// it: it is not a Copy, Move, Store, StreamStore, Return, Load, Offset,
+// CopyBytes or indirect call, and its result is nothing, a plain value or a
+// new String.
 fn ir_drop_borrows_only(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.op[at] == {
-        .Copy | .Move | .Store | .Return | .Load | .Offset | .CopyBytes | .CallIndirect -> return false
+        .Copy | .Move | .Store | .StreamStore | .Return | .Load | .Offset | .CopyBytes | .CallIndirect -> return false
         .Concat -> return true
         else -> {}
     }

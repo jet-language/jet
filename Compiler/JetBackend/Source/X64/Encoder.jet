@@ -297,6 +297,26 @@ fn x64_store_indexed_imm(code: &[U8], base: Int, index: Int, scale: Int, disp: I
     x64_u32(&code, value)
 }
 
+// movnti [base + index * scale + disp], src (0F C3 /r; REX.W for eight
+// bytes): a store of four or eight bytes that does not fill the cache
+// (non-temporal). Its order against later stores is set by the next sfence
+// or locked instruction.
+fn x64_movnti(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, src: Int, size: Int) Never! {
+    wide :: size == 8
+    if wide || src >= 8 || base >= 8 || index >= 8 -> x64_rex_indexed(&code, wide, src, base, index)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xc3)
+    x64_modrm_indexed(&code, src, base, index, scale, disp)
+}
+
+// sfence (0F AE F8): every store before it, non-temporal ones included, is
+// visible before any store after it.
+fn x64_sfence(code: &[U8]) Never! {
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0xae)
+    x64_byte(&code, 0xf8)
+}
+
 // lea dst, [base + disp] (REX.W 8D /r)
 fn x64_lea(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, true, dst, base)
