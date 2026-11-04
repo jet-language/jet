@@ -1,8 +1,8 @@
-Error [jet.BindingTypeMismatch]: This needs [String:fn(*, force: Bool) -> Int], but the value is [String:fn(Bool) -> Int]
-  --> nested_callable_containers_keep_required_public_labels.jet:4:17
+Error [jet.FunctionValueLabelMismatch]: This needs fn(*, force: Bool) -> Int, but the function value is fn(Bool) -> Int
+  --> tests/ui/language_features/nested_callable_containers_keep_required_public_labels.jet:4:61
     |
   4 |     handlers :: [String:fn(*, force: Bool) -> Int]{"plain": plain}
-    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: The value here does not have the type required by this declaration
- Fix: Use a value of the required type or convert it explicitly
-More: jet-lang.dev/e/E0108
+    |                                                             ^^^^^
+ Why: Public labels and parameter zones are part of a function's callable type
+ Fix: Use `fn(*, force: Bool) -> Int` here
+More: jet-lang.dev/e/E0771
