@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6565,
-    "rev": 90175,
+    "rev": 90200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -33569,6 +33569,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c25 amended 2026-11-04 (D-REFLECT-FIELDTYPE1 A): read \"a golden reads a field's type, default and offset\" as \"a golden reads field.type (a TypeId), default and offset\". The decision's \"#4276 [24] cutover\" means #4276 c22 (the proposal reflection-2026-11-04.md:141 numbers are one off from Tower); the rename itself is #3520 c29. Narrowing to the D-META-REFLECT2 records is not applied: the decision says parameters, settings and values, so CompilerParam, CompilerField and CompilerSymbolKind are included."
+        },
+        {
           "at": "2026-10-28",
           "by": "CardTrim",
           "text": "Folded #4760 \"All typed compiler, build and tool hook stages in the Jet sandbox\" (CardTrim 2026-10-28: single-root task step of map #3520 (Complete reflection and metaprogramming public contract); 1 criteria, 0 ratified decisions). Body: D-HOOK-STAGES1=A Compiler stage table, payload -> output. compiler.parsed(File): syntax -> findings. compiler.declared(Declaration): resolved signature/body/direct named calls/spans -> findings and added items. compiler.checked(CheckedProgram): validated program -> findings and proposed edits. compiler.emitted(Artifact): read-only artifact -> findings. Build/tool table. build.planned(BuildPlan): graph -> findings and asset requests. build.asset(Asset): original asset -> replacement or added assets. fmt.file(File): declared non-Jet kind -> formatted text. lsp.code_actions(ActionRequest) -> editor actions; lsp.hover(HoverRequest) -> notes. test.finished(TestReport) -> findings; doc.page(DocPag"
@@ -33925,6 +33930,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T15:56:35.132Z"
+        },
+        {
+          "n": 29,
+          "text": "D-REFLECT-FIELDTYPE1 A: every reflected record names its type `type`, never `ty`. That covers FieldInfo, MarkerArgInfo, LayoutField, CompilerParam, CompilerField and CompilerSymbolKind. - Rows to change: CoreRecordRows.jet:207,212,214,316,325,425; CompilerOwned.jet:163; Expressions/FactReads.jet:458; Comptime/Reflection.jet:322,657,811,1222; Registration/Derives.jet:1687,1730. - `field.ty` is E0302, and its fix names `field.type`, with a UI snapshot. - A golden reads `field.type` in a derive `expand` and through `T.reflect()` on O0, O1 and O2. - syntax-decisions.md:3488 (D-METAREFLECT1 `.ty`) and the `field.ty` mentions in D-META-HASH1 A and D-ENUM-CASEMETA1 A now read `field.type`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:30:48.865Z"
         }
       ],
       "refs": [
@@ -33947,8 +33961,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-04T16:42:51.645Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-04T17:30:50.346Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -39589,11 +39603,11 @@
         {
           "n": 4,
           "text": "(replaces C1: Tower's store quotes this card, so Tools/tower is excluded) git grep -nw -e mse_loss -e sgd_step -- ':!Docs/audits' ':!Docs/research' ':!Tools/tower' is empty.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T14:31:57.076Z"
+          "evidence": "Main 2026-11-04 at dev = master 0aa0e392b8: git grep -nw -e mse_loss -e sgd_step -- ':!Docs/audits' ':!Docs/research' ':!Tools/tower' gives 0 hits (same result at 45280941cf). The removal landed with CardClose-25.",
+          "at": "2026-11-04T17:26:14.291Z"
         }
       ],
       "refs": [],
@@ -39603,7 +39617,7 @@
       "parentId": "c00dtttx",
       "needsAcceptance": false,
       "created": "2026-09-30T16:14:24.984Z",
-      "updated": "2026-11-04T14:31:57.076Z",
+      "updated": "2026-11-04T17:26:14.291Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -42775,6 +42789,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Note 2026-11-04 for c22: c22 also requires that no reflected record keeps a ty field (D-REFLECT-FIELDTYPE1 A; the rename is #3520 c29)."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "D-META-HASH1 A ratified by the owner 2026-10-30. C22-C24 added."
@@ -43030,7 +43049,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-04T15:56:37.545Z",
+      "updated": "2026-11-04T17:30:50.717Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -55385,6 +55404,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Amendment 2026-11-04: D-INDEX-COMPOUND1 A (ratified 2026-11-04, #6066 c13) supersedes the D-SCRIPT-SLOTADD1 A clause \"a bare map slot keeps E0164, whose fix shows that form\": map[key] op= v is now allowed, with one lookup. D-MAP-SLOT1 counts[key, or: 0] += 1 stays the missing-key form. The list half of SLOTADD1 is delivered by #6066 c13. The syntax-decisions.md D-SCRIPT-SLOTADD1 entry gets this amendment note when #6066 c13 lands."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: items B1, B4 and B5 are already settled by ratified D-LIST-PLUS1, D-ONCE-PRINT1 and D-ENTRY-EXPLICIT2; the other items are ballot drafts."
@@ -55426,8 +55450,8 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-01T13:51:43.572Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-04T17:30:49.977Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -61236,6 +61260,15 @@
           "verifiedBy": null,
           "evidence": "tests/cases/prove/prove_caught_property_stop_does_not_capture_later_unit_panic.case passes on dev 190f826022 (base /mnt/jetscratch/discovery/base/190f826022, Jet-compiled, 2026-11-02): TESTKIT_ARGS=--filter tests/cases/prove/prove_caught_property jet test Tools/testkit 'suite cases' gives 1 passed, 0 failed, a plain PASS rather than UNEXPECTED-PASS, so no known-failing row remains.",
           "at": "2026-11-02T23:36:39.529Z"
+        },
+        {
+          "n": 7,
+          "text": "(Owner 2026-11-04: tests should take seconds, a minute at most for a few thousand, and must not run out of memory unless something leaks) The full ui, golden and cases suites, a few thousand tests, finish in at most about 60 s of wall time on the dev machine, and no test job is killed for memory. Today suite.sh gives each job 3 GiB because 2 GiB was memory-killed, allows a 6800 s timeout, and the cases runs take hours and were OOM-killed on 2026-11-04. Yet the compiler floor is small: jet check and jet run of a hello program take ~180 ms CPU and 15-19 MB peak (Main 2026-11-04, base 52d3e9cf79, systemd-run accounting). Proof: a per-test wall-time and peak-RSS table for every suite, from a testkit report; every outlier fixed at its root (leak, an unbounded fixture, durable-state fsync stalls, engine or jetpack spawn); and a timed full run that meets the budget.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:28:33.481Z"
         }
       ],
       "refs": [
@@ -61251,7 +61284,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-02T23:36:39.529Z",
+      "updated": "2026-11-04T17:28:33.481Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -61275,6 +61308,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "D-MARKER-INBODY1 A, owner 2026-11-04: markers may be ANYWHERE in the body, not only at the top. Text retargets for the syntax-decisions.md entry (whoever lands #6562 applies them): (1) \"The # lines may sit anywhere among the body's members. Position carries no meaning, and jet fmt keeps it.\" (2) Body members # Path :: value, anywhere in the body, are added to the declaration's marker list when the body closes. (3) The parser collects the # lines from the whole body and applies them when the body closes, where markers above apply today (Items.jet:1906-1909, :2043-2044); Layout, derives, SingleUse and MustUse take effect identically wherever the line sits (#6562 c2). (4) Markers added by tools or templates go right after the declaration's last inside # line when it has inside lines, and above otherwise."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -61477,6 +61515,25 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T15:56:36.968Z"
+        },
+        {
+          "n": 19,
+          "text": "D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the loan diagnostics (E0204/E0212). So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-11-04 paste error: c19 holds a copy of #6066 c11 (D-TASK-WINDOW1), which my script picked up by mistake. That work is owned and tracked by #6066 c11. The intended #6039 criterion is c20.",
+          "at": "2026-11-04T17:31:18.768Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "D-MARKER-INBODY1 A (ratified on this card; owner 2026-11-04: the lines may be anywhere in the body) is delivered by #6562. This card's cutovers (c10 marker structs, c14 jet fix) move no marker between above and inside. Every converted Prelude marker accepts both placements, and no marker opts in.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:31:18.381Z"
         }
       ],
       "refs": [
@@ -61491,7 +61548,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-04T15:56:36.968Z",
+      "updated": "2026-11-04T17:31:18.768Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -62362,6 +62419,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T16:53:26.337Z"
+        },
+        {
+          "n": 11,
+          "text": "Probes are under /mnt/jetscratch/lanes/Main/prep/ until they become repo cases. D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the loan diagnostics (E0204/E0212). So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:30:47.764Z"
+        },
+        {
+          "n": 12,
+          "text": "Probes are under /mnt/jetscratch/lanes/Main/prep/ until they become repo cases. D-MAPSLOT-WINDOW1 A: `&map[key]` at a `ViewMut<V>` destination is a one-value window over the entry's value, read as `w[0]`. IR builds the header from the entry's value address with length 1, as ir_list_window does. A missing key stops exactly as `map[key]` does. Adding or removing entries while the window lives is refused by the existing loan check (today that is E0220 at slot_grow.jet 8:5). Proof: prep/c6066/bal/slot_a.jet prints 1 on O0, O1 and O2; today it is E0108 at 2:5. prep/c6066/bal2/slot_grow.jet is refused at 8:5, with a UI snapshot. prep/c6066/bal2/slot_missing.jet stops with `the map has no entry for key \"z\"` on every tier. All three become cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:30:48.129Z"
+        },
+        {
+          "n": 13,
+          "text": "Probes are under /mnt/jetscratch/lanes/Main/prep/ until they become repo cases. D-INDEX-COMPOUND1 A: `xs[i] op= v` and `map[key] op= v` mean the long form, with one lookup. - E0164 is retired: Prelude/Diagnostics.jet:157 becomes a retired row, and the Statements.jet:5835 refusal is removed. The Dyn-path refusal at Statements.jet:5961, which shares the code, moves to its own registered code with the same text. - Proof: prep/c6066/bal/idx_a.jet prints 2 then 2 on O0, O1 and O2. - prep/c6066/bal2/idx_missing.jet stops with E3001 `the map has no entry for key \"z\"`. idx_range.jet stops with E3010 `the list has 2 items, so position 5 doesn't exist`. Both match their long forms, idx_long_missing.jet and idx_long_range.jet. - tests/ui/compound_index_target becomes a run case. - The E0164 text is amended in spec.md:1449-1452, syntax-decisions.md:264-265 (S17) and architecture.md:834-835. - The comments at Statements.jet:6158 and :6221 are corrected, and so is the fixture comment at tests/cases/l0503_behavior/…/prefer_compound_assign.jet:20. L0503 itself does not change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:30:48.496Z"
         }
       ],
       "refs": [
@@ -62375,7 +62459,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-04T17:04:09.315Z",
+      "updated": "2026-11-04T17:30:48.496Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -64813,6 +64897,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T17:13:28.261Z"
+        },
+        {
+          "n": 48,
+          "text": "(Defect, found 2026-11-04, effect soundness; breaks D-DET1) A function declared pure (-[]>) can write module state: a 'shared' and a '#Persist' module value are written from a -[]> function, which prints 1 then 2 (/mnt/jetscratch/lanes/Main/prep/mv/st/run.jet, run3.jet). Writing module state is an effect the row must show, or it is refused, with a UI snapshot and a case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:23:41.155Z"
+        },
+        {
+          "n": 49,
+          "text": "(Defect, found 2026-11-04) 'impl Trait { }' outside a type body is accepted, its method gives E0102, and calling it through the trait is an ICE (/mnt/jetscratch/lanes/Main/prep/mv/n11c.jet). It gets a meaning per the D-EFFTYPE-MODVALUE1 outcome or a registered diagnostic, never an ICE (I2), with a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:23:41.668Z"
+        },
+        {
+          "n": 50,
+          "text": "(Defect, found 2026-11-04) A constant in an inline module ('RATE :: 3') is E0107 inside that module's own function (/mnt/jetscratch/lanes/Main/prep/mv/n8.jet). It resolves, with a case on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:23:42.123Z"
+        },
+        {
+          "n": 51,
+          "text": "(Defect, found 2026-11-04) A parameter named self on a module function outside any impl is silently an ordinary parameter (/mnt/jetscratch/lanes/Main/prep/mv/n6.jet). It is refused with a registered diagnostic and a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:23:42.567Z"
         }
       ],
       "refs": [],
@@ -64821,7 +64941,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-04T17:13:28.747Z",
+      "updated": "2026-11-04T17:23:42.567Z",
       "updatedBy": "Main"
     },
     {
@@ -75796,6 +75916,25 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T13:55:02.685Z"
+        },
+        {
+          "n": 7,
+          "text": "D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the loan diagnostics (E0204/E0212). So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-11-04 paste error: c7 holds a copy of #6066 c11 (D-TASK-WINDOW1), which my script picked up by mistake. That work is owned and tracked by #6066 c11. The intended #6561 criterion is c8.",
+          "at": "2026-11-04T17:31:08.285Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "An inherent impl that carries its own markers is not flattened into the type body, because its markers would become the type's markers. This covers markers above the impl, and #X :: value lines inside it once #6562 lands. The lint's named exception rule (g) skips such an impl. A trait impl moves as a nested impl Trait { ... } that keeps its own markers where they were written, above it or inside it. A fixture covers both. Today the only marked impls are 18 #Target(OS.*) sites, already covered by exception rule (d); rule (g) applies to future code only. (D-MARKER-INBODY1 A, owner 2026-11-04: markers anywhere in the body.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T17:31:07.910Z"
         }
       ],
       "refs": [],
@@ -75809,7 +75948,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T11:57:35.608Z",
-      "updated": "2026-11-04T13:55:03.161Z",
+      "updated": "2026-11-04T17:31:08.285Z",
       "updatedBy": "Main"
     },
     {
@@ -75833,6 +75972,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "Main 2026-11-04 (derived rule, recorded so the owner can overrule): in a FUNCTION body, # X :: lines are accepted only at the body's top statement level. Inside a nested block or a lambda they get E0355 (Block site), because a nested position would suggest a scope the marker does not have. In type, module and impl bodies they go anywhere among the members, per the owner's ANYWHERE."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "Main 2026-11-04: Prep finding. Markers written above a trait, a top-level impl or an inline module are dropped silently today: no AST field holds them (probe /mnt/jetscratch/lanes/Main/prep/inbody_sites.jet). This card adds those carriers, and markers on those declarations are then checked (site errors) both above and inside. The jet fix move in both directions waits on ballot D-MARKER-MOVE1; every other criterion proceeds."
         }
       ],
@@ -75840,20 +75984,20 @@
         {
           "n": 1,
           "text": "`#X :: value` lines parse anywhere inside struct, enum, trait, impl, inline module, function and method bodies, and produce exactly the marker list `#X(args)` above produces; a test compares the two forms' facts and output for at least Layout, Deprecated, Codable, Debug false, MustUse and Inline.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T12:34:11.861Z"
+          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt /mnt/jetscratch/lanes/Main/land/Batch2.receipt.md). Proven on s1 jet 906f73d6451c5ab0 (= dev 0aa0e392b8 + batch 2): in-body # Path :: value marker lines parse anywhere in type, module and impl bodies; ui-b2q-ui 14/14 PASS.",
+          "at": "2026-11-04T17:46:16.088Z"
         },
         {
           "n": 2,
           "text": "Type-marker facts (layout, derives, SingleUse, MustUse, enum markers) take effect identically when the line is the last member of the body; a case proves it for #Layout(c) and a derive.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T12:34:11.861Z"
+          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt /mnt/jetscratch/lanes/Main/land/Batch2.receipt.md). Proven on s1 jet 906f73d6451c5ab0 (= dev 0aa0e392b8 + batch 2): body markers apply when the body closes, with the same effect as markers above; golden inbody_markers PASS on o0/o1/o2.",
+          "at": "2026-11-04T17:46:16.579Z"
         },
         {
           "n": 3,
@@ -75902,8 +76046,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T12:34:11.861Z",
-      "updated": "2026-11-04T14:02:08.399Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-04T17:46:16.579Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0n8pmxe",
@@ -152482,123 +152626,195 @@
       "cardId": "c09kjhit",
       "group": "other",
       "title": "Is a module a value you can pass around?",
-      "situation": "A module can now carry an effect limit on its module line, such as a pricing module that never touches the network or files. The effects-on-types proposal asks one open question about modules: should a module also be a value? Then a function could take a whole module as an argument, and the module's limit would travel with it. Today a module is only a name you call through. The vote decides whether that stays so. We recommend keeping modules as names, because a function value already carries a limit in its type.",
-      "gist": "Should a function be able to take a whole module as an argument?",
-      "lesson": "An effect is a kind of power, such as network or file access. A module's #FX(...) line limits what every function inside it may do. A function value such as fn(String) -[]> Int already says in its type what it may do.",
+      "situation": "You asked us to explore modules as values and show what follows. Review found that the last draft let a module fit a trait by shape alone, while a struct needs an impl. This revision recommends A: a module is a value of its own type, and it fits a trait only through impl inside its body, as a struct does. The old A, matching by shape, is now B. The record is now C, and keeping modules as names is now D.",
+      "gist": "Should a passed module be the module itself, fitting traits through impl or by shape, a record, or a name?",
+      "lesson": "A module groups functions under one name, such as pricing. Its #FX line limits what they may do. A trait lists functions a value must have, and a trait value picks the code while the program runs.",
       "explainer": "",
-      "story": "Mia keeps two pricing rule sets, pricing and discount, each in its own offline module. Her bill function should work with either one. Today she passes the one function it needs. She asks whether she could pass the whole module instead.",
-      "inWild": "tests/ui/effects/module_cap_denial_is_e0749.jet:3 #FX(!Net, !FS) module pricing {\ntests/cases/effects/module_cap_file_module_denial_is_e0749/input/run.jet:1 #FX(!Net, !FS) above module pricing\nOCaml: first-class modules are packed with (module M : S) and need a module type.\nZig: a file is a struct type, so a module can be passed as a comptime type parameter.",
-      "detail": "WHAT IS ALREADY RATIFIED\n\nA module takes #FX(...) on its module line, and the limit covers every function inside it. #FX above a struct, enum or trait limits everything done in that type's name. A function value carries its row in its type.\n\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -> Int { text.len() }\n}\n\nfn run() {\n    print(pricing.total(\"abc\"))\n}\n\nTHE QUESTION\n\nShould bill(pricing, \"abc\") be allowed, passing the whole module, or does a caller keep passing the one function it needs, bill(t -> pricing.total(t), \"abc\")?",
+      "story": "Mia keeps two offline rule sets, pricing and discount, each in its own module. Her bill function should take either, and her config picks one while the program runs. She wants to pass the whole module and keep its offline promise.",
+      "inWild": "prep/mv/m3b_two.jet runs today: a generic module billing<R> takes the module pricing and prints 3, though no decision admits module arguments.\nprep/mv/n4_nested_struct.jet: a struct fits a trait through impl PriceRules { ... } in its body and prints 3; n5_struct_shape.jet, the same struct without the impl, is E0905.\nDocs/proposals/effect-types-2026-10-29.md:260 says use sql binds a module value whose type is the package type.\nOCaml: first-class modules are packed against a module type and matched by shape.\nZig: a file is a struct type, passed as a comptime argument.",
+      "detail": "WHAT IS ALREADY RATIFIED\n\nA module caps every function inside it with #FX on its module line (D-EFFECT-RUNGS1 A). What a type parameter does belongs to the caller. It is checked where the instance is written (D-EFFTYPE-MODEL1 A).\n\nGeneric modules take types in <...> and fixed values in (...) (D-CONF-GENSPELL1 A, D-GENMOD-VALUE1 A). The same template with the same arguments is one instance (D-GENMOD-IDENTITY1 A).\n\nA struct implements a trait by writing impl Trait { ... } inside its own body (D-DECL-TYPES1 A). A trait value calls through the trait's row (E0743). Reflection reads T.reflect() while building and reflect.of(x) while running (D-META-REFLECT2 A).\n\nDeclarations are public. Privacy is per module: priv module and priv(package) module exist, and priv on a function is E0413 (D-VIS-MODULE1).\n\n```jet\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")     // runs today, prints 3\nmodule cut :: billing<discount>(\"d\")       // runs today, prints 2\n\nfn run() {\n    print(priced.bill(\"abc\"))\n    print(cut.bill(\"abc\"))\n    // rules :: pricing                    // E0107\n    // f :: pricing.total                  // E0107\n}\n```\n\nWHAT RUNS TODAY\n\nA module already works as a generic module's argument: billing<pricing> prints 3, and billing<discount> prints 2. No decision admits it. #FX(!IO) on a generic module is not checked at all, even for a direct print.\n\nA module used as a value fails with E0107, \"Nothing named pricing exists here\". So do pricing.total as a value and if R == { pricing -> ... }. billing<Int> fails with \"Nothing named R\". A bound <R: PriceRules> refuses every module (E0852).\n\nA struct fits a trait only through an impl. Flat with a matching total and no impl is E0905, whose fix writes the impl. Both impl PriceRules for pricing and module pricing: PriceRules are parse errors.\n\nToday impl PriceRules { ... } outside a type body is accepted as an impl on the trait itself. Its functions can never be called, and calling one through the trait crashes the compiler. No file in the repo writes it.\n\nTHE OWNER'S ASK\n\nYou asked to explore modules as values, update the ballot, and show the implications. The proposal already says that use sql binds a module value whose type is the package type (section 7.3). Packages are types, so a module that is a value of its own type is that same idea one level down.\n\nWHAT THE VALUE IS\n\nIn A and B, the value is the module itself. It holds no data, and its functions are its methods. So pricing.total(\"abc\") already reads as a method call on the value pricing. Its type is never written by name, so the casing law for types is untouched.\n\nIn C, the value is a record: one function pointer per function, copied wherever it goes. D keeps modules as names, and only their functions become values.\n\nHOW A MODULE FITS A TRAIT\n\nIn A, a module fits a trait only by saying so, the way a struct does. It writes impl PriceRules { ... } inside its body, and the trait's functions live in that block. In a file module, the block sits at the top level of the file.\n\nThat spelling has no working meaning today, so A gives it this one. A module that never writes the impl does not fit, so loud cannot pass as PriceRules by accident. The error names the missing impl, and its fix writes it, as E0905 does for a struct.\n\nIn B, a module fits any trait whose functions it has, matched by name, parameter types, result and row. Every function is public, so a helper that happens to match counts. A struct still needs its impl, so B has one rule for structs and another for modules.\n\nSELF\n\nInside a module's impl, self is the module itself. It holds no data, so a function may ignore it. The module's name is its only value, so pricing.total(\"abc\") passes pricing as self, and R.total(text) in billing does the same.\n\nOutside an impl, a module function has no self. Today a first parameter named self there is an ordinary parameter, so pricing.total(\"abc\") reports a missing text. A refuses it, and the fix moves the function into the impl or drops self.\n\nNo parameter can name a module's type, since it has no written name. A function that takes any module of a trait writes rules: PriceRules or <R: PriceRules>. In B, a plain module function matches a trait function by the parameters after self.\n\nSTATE\n\nAn inline module holds only items, so it has no state. A file module can hold globals. Its :: constants are computed while building or once at startup. Its := state must be shared or #Persist, or a write is E0111.\n\nThe value never holds any of it. Every copy of pricing reaches the one set of globals, exactly as pricing.total() does today, so the value stays zero-size. A generic instance's value arguments, such as \"p\", are evaluated while building and belong to the instance's identity (D-GENMOD-IDENTITY1). They are not stored in the value either.\n\nToday a -[]> function can write shared or #Persist state, so two calls print 1, then 2. That breaks the reproducible promise of -[]> (D-DET1) under every option, and it is filed as a defect. Once fixed, a pure trait row also rules out module state writes.\n\nVISIBILITY\n\nA priv module cannot be named outside its enclosing module (E0605), so its value cannot leave it either. A priv(package) module's value stays inside its package. In A, the impl decides which functions serve a trait, so visibility never decides a match. In B, every function of the module is a candidate.\n\nEFFECTS AND POWER\n\nA module value carries a ceiling, never power. Holding pricing grants nothing. Code that calls through it gains the module's row.\n\nIn A, the impl's functions are checked against the trait's row where the impl is written, as a struct's are. In B, the check runs where the module is passed. While building, the row is exact for each module, so bill_each(pricing, t) is pure. #FX(!IO) on billing refuses billing<loud> where the instance is written. While running, the trait's own row bounds every call (E0743).\n\nIDENTITY AND EQUALITY\n\nA module's identity is its declaration, and an instance's identity is its template plus its arguments (D-GENMOD-IDENTITY1). While building, if R == { pricing -> ... } compares modules, as D-TYPESWITCH1 compares types.\n\nWhile running, a trait value has no == today (E0312), and A and B keep that. A trait constant such as name gives each module a readable tag (D-DECL-TYPES1). In C, two records of one module are equal only if function values gain equality, which Jet does not define.\n\nCOMPILE TIME AND RUN TIME\n\nA and B keep both paths with today's machinery. With <R: PriceRules>, each module gets its own copy with direct calls. With rules: PriceRules, the program picks a module while running through the trait's table of functions, as structs already do. C is run time only: every pass builds or copies a record. D has no module path at run time.\n\nREFLECTION\n\nIn A and B, a module reads like any type. While building, pricing.reflect() lists its functions, their rows, its impls and its #FX. While running, reflect.of(rules) names the module behind a trait value.\n\nA marker on a module line receives that module as its target, so the published Marker.expand(self, target: Target) stays as #6129 c44 states. In C, reflection sees a record type, not the module. In D, there is nothing new to reflect.\n\nA FUNCTION NAMED REFLECT\n\nThe name reflect is the compiler's member on every type, and under A and B a module is a type. So a module or a type may not declare its own function named reflect, and the error's fix renames it. Today a struct's reflect method silently hides Rock.reflect(), and no file in the repo declares one.\n\nE0107 AND OTHER ERRORS\n\nUnder A, the E0107 cases above gain a meaning. bill(loud, t) names the missing impl, and billing<Int> names the missing function total at the instance line. E3401 today names the mangled __jet_shouty_dbill, and it must name shouty.bill and loud.total. The unchecked cap on generic modules is fixed under every option.\n\nRATIFIED DECISIONS IT TOUCHES\n\nA extends D-GENMOD-VALUE1 so that modules are admitted arguments, in <...> as today. It applies D-EFFTYPE-MODEL1 to module arguments and the in-body impl of D-DECL-TYPES1 to module bodies. It answers choice point C2 of the proposal: first-class, not named only. D-EFFECT-RUNGS1, D-GENMOD-IDENTITY1, D-IMPLDOT1, D-META-REFLECT2 and D-TYPESWITCH1 stay as they are.\n\nCOST\n\nA adds no runtime record. A module in a trait value should cost what a fieldless struct costs there today; that layout was not measured. The checker gains the module's type, impls in module bodies and generic functions taking modules. B swaps the impl for a shape match. C adds a type form, a parse rule, a runtime record and its errors. D costs only the function-value fix.\n\nBEGINNER AND EXPERT\n\nA beginner keeps writing pricing.total(\"abc\"). To pass a rule set, they add impl PriceRules { ... } to the module, the same step as for a struct, and write bill(pricing, \"abc\"). An expert adds <R: PriceRules> for one copy per module, or builds a module from a module. Then they reflect over either.\n\nTHE QUESTION\n\nShould a passed module be itself and fit traits through impl (A), be itself and fit by shape (B), become a record (C), or stay a name (D)?",
       "options": [
         {
           "key": "A",
-          "name": "Modules stay names",
-          "detail": "A module is a name you call through, as today. To choose code at run time, pass a module's function itself, as pricing.total. Its type already carries its limit. Today that spelling wrongly fails with E0107, and A fixes it, so no wrapper lambda is needed.",
-          "technical": "Module paths stay static. One fix: a module function used as a value, as pricing.total, works instead of failing with E0107. It keeps its inferred row, so a -[]> parameter refuses a function from a module that does more.",
-          "code": "// A: a module is a name; to choose code at run time, pass a value\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -> Int { text.len() - 1 }\n}\n\nfn bill(total: fn(String) -[]> Int, text: String) -[]> Int {\n    total(text)\n}\n\nfn run() {\n    print(bill(pricing.total, \"abc\"))\n    print(bill(discount.total, \"abc\"))\n}"
+          "name": "A module is a value and fits a trait through impl",
+          "detail": "A module is a value that holds no data, and its functions are its methods. It fits a trait by writing impl Trait { ... } in its body, as a struct does. Then it can be a generic argument while building or a trait value while running. Its row travels with it. Reflection reads it like a type.",
+          "technical": "Sema gives each module a fieldless nominal type, used in value and generic-argument positions. An impl Trait { ... } in a module body, inline or at a file's top level, registers the module as implementing Trait. It goes through the in-body impl path structs use, and self is the zero-size module. A module-to-trait value uses the existing trait table.\n\nGeneric modules admit module arguments under D-GENMOD-VALUE1, and generic functions infer them. Module rows join the instance's row per D-EFFTYPE-MODEL1. The #FX check on generic modules is fixed. A self parameter outside an impl in a module is refused with a move-into-impl fix. A function named reflect on a module or type is refused with a rename fix. E0107 for module values goes away; bill(loud, t) names the missing impl and billing<Int> the missing function.",
+          "code": "// A: a module is a value; it fits a trait through impl, as a struct does\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n#FX(!Net, !FS)\nmodule pricing {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() - 1 }\n    }\n}\n\n// This one prints, so it does IO. It never claims PriceRules.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\n// Beginner: any value whose type implements the trait, chosen at run time.\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: one copy per module, direct calls, the row of that module.\nfn bill_each<R: PriceRules>(rules: R, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: a module built from a module. The cap is checked per instance.\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: pricing is passed as self\n    all :: [PriceRules]{pricing, discount, Flat{}}    // modules and a struct in one list\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2, then 1\n    }\n    print(bill_each(discount, \"abc\"))                 // 2\n    print(priced.bill(\"abc\"))                         // 3\n    // bill(loud, \"abc\")    // refused: loud has no impl PriceRules; the fix adds one\n}"
         },
         {
           "key": "B",
-          "name": "Modules are values",
-          "detail": "A function may take a module whose shape lists the functions it needs. Any module with those functions can be passed, and its #FX line is checked against the parameter's row.",
-          "technical": "New type form module { fn … } and a module-to-value conversion. Each passed module is checked structurally against the shape, and its cap joins the call's row. It needs a new runtime record of function pointers per module value, a new parse rule and new diagnostics.",
-          "code": "// B: a module is a value whose shape lists its functions and whose row is its cap\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -> Int { text.len() - 1 }\n}\n\nfn bill(rules: module { fn total(text: String) -> Int }, text: String) -[]> Int {\n    rules.total(text)\n}\n\nfn run() {\n    print(bill(pricing, \"abc\"))\n    print(bill(discount, \"abc\"))\n}"
+          "name": "A module is a value and fits a trait by shape",
+          "detail": "The value is the same as in A. A module fits any trait whose functions it has, with the same names, parameter types, results and rows, and no impl is written. Structs still need their impl.",
+          "technical": "As A, without impls in module bodies. A module matches a trait by name, parameters after self, result and row, checked where it is passed. Every module function is a candidate, since every function is public. The self, reflect and generic-module rules are as in A.",
+          "code": "// B: a module is a value; it fits any trait whose functions it has\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\nfn bill_each<R: PriceRules>(rules: R, text: String) -[]> Int {\n    rules.total(text)\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: matched by shape here\n    all :: [PriceRules]{pricing, discount, Flat{}}\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2, then 1\n    }\n    print(bill_each(discount, \"abc\"))                 // 2\n    print(priced.bill(\"abc\"))                         // 3\n    f :: pricing.total                                // a function value\n    print(f(\"abc\"))                                   // 3\n    // bill(loud, \"abc\")    // refused here: loud.total does IO, the trait says -[]>\n}"
+        },
+        {
+          "key": "C",
+          "name": "A module passes as a record of its functions",
+          "detail": "A parameter can name a list of functions, as module { fn total(text: String) -[]> Int }. Passing pricing builds a record with one function pointer per listed function. The record's row is the union of its functions' rows.",
+          "technical": "New type form module { fn ... } in the parser, the syntax registry and sema. Structural check of each passed module against the form, and a runtime record of function pointers per pass. New errors for a missing or mismatched function. Reflection sees a record type. The generic-module path and its #FX fix are as in A.",
+          "code": "// C: a module passes as a record of its functions\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\nfn bill(rules: module { fn total(text: String) -[]> Int }, text: String) -[]> Int {\n    rules.total(text)\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: a record is built here\n    all :: [module { fn total(text: String) -[]> Int }]{pricing, discount}\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2\n    }\n    print(priced.bill(\"abc\"))                         // 3\n    f :: pricing.total\n    print(f(\"abc\"))                                   // 3\n    // bill(loud, \"abc\")    // refused: loud.total does IO\n}"
+        },
+        {
+          "key": "D",
+          "name": "A module stays a name",
+          "detail": "A module is a name you call through, as today. To pass behaviour, pass a module's function, as pricing.total, or a struct with function fields. This was the first recommendation.",
+          "technical": "Module paths stay static. A module function used as a value works instead of failing with E0107, and keeps its inferred row. Generic modules keep taking modules, as today, now admitted by D-GENMOD-VALUE1, with the #FX check fixed. A module in a value position keeps an error, rewritten to say that modules are not values.",
+          "code": "// D: a module stays a name; pass its functions\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\nfn bill(total: fn(String) -[]> Int, text: String) -[]> Int {\n    total(text)\n}\n\n// Several functions travel in a struct with function fields.\nstruct Rules {\n    total: fn(String) -[]> Int\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing.total, \"abc\"))                 // 3\n    all :: [Rules{total: pricing.total}, Rules{total: discount.total}]\n    loop rules in all {\n        print(bill(rules.total, \"abc\"))               // 3, then 2\n    }\n    print(priced.bill(\"abc\"))                         // 3\n    // rules :: pricing     // still an error: a module is not a value\n    // bill(loud.total, \"abc\")   // refused: loud.total does IO\n}"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A function value already carries its limit in its type, so passing one function covers the case with no new type form. A keeps modules as plain names, which is what every existing program does.",
+        "why": "A makes a module what pricing.total already suggests: a value with methods. It fits a trait the one way a struct does, by impl in its body. It reuses traits, generics and reflection, and its limit travels with it.",
         "gains": [
-          "No new type form or runtime record.",
-          "Every existing program keeps its meaning."
+          "A whole rule set passes as one argument and can be stored in a list.",
+          "Modules and structs fit a trait the same way, so nothing fits by accident.",
+          "Reflection, generics and trait values cover modules with no new query or type form."
         ],
         "losses": [
           {
-            "loss": "A caller that needs several functions from one module passes each one.",
-            "mitigation": "A struct with function fields groups them, and #FX above that struct limits them all."
+            "loss": "A module that serves a trait must write impl PriceRules { ... } in its body.",
+            "mitigation": "That is the same one step a struct takes, and the error's fix writes it."
+          },
+          {
+            "loss": "The checker gains a module type, impls in module bodies and generic functions taking modules.",
+            "mitigation": "No runtime record and no new syntax: the impl spelling already parses in a module body."
+          },
+          {
+            "loss": "A module or type can no longer declare its own function named reflect.",
+            "mitigation": "No file declares one today, and the error's fix renames it."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B adds a second way to pass behaviour, next to function values and trait values, with a new type form and runtime record."
+            "reason": "B fits modules by shape and structs by impl, two rules, and a helper can match by accident."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a type form and a runtime record per pass, and reflection would see a record instead of the module."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps modules out of data, so a rule set is split into function fields, and the limit has no single carrier."
           }
         ],
-        "tradeoff": "A few more arguments, in exchange for no new kind of value."
+        "tradeoff": "One impl block per module, for modules that fit wherever structs fit."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main (separate from the author, Prep). The pass found that A forced a wrapper lambda only because pricing.total as a value wrongly fails with E0107. A now fixes that bug and passes pricing.total directly."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Prep's draft, because the owner caps agents at three. It found that fitting a trait by shape was a second rule beside the struct's impl, and that state, self, visibility and a function named reflect were unsettled. All are fixed: A now fits through impl in the module body, the shape match is option B, and the detail settles the other four."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "Should a function be able to take a whole module as an argument?",
-        "lesson": "A module's #FX line limits what every function inside it may do. A function value already says in its type what it may do.",
+        "gist": "Should a passed module be itself and fit through impl or by shape, a record, or a name?",
+        "lesson": "A module groups functions, such as pricing. Its #FX line limits them. A trait lists functions a value must have.",
         "trio": {
           "current": {
-            "note": "Today a caller passes one function from a module.",
-            "code": "fn bill(total: fn(String) -[]> Int, text: String) -[]> Int {\n    total(text)\n}\n\nfn run() {\n    print(bill(t -> pricing.total(t), \"abc\"))\n}"
+            "note": "Today a module is only a name; using it as a value is E0107.",
+            "code": "fn run() {\n    print(pricing.total(\"abc\"))\n    // rules :: pricing     // E0107\n}"
           },
           "wild": {
             "lang": "OCaml",
-            "note": "A first-class module is packed against a module type.",
+            "note": "A first-class module is packed and matched by shape.",
             "code": "let bill (module R : RULES) text = R.total text\nlet () = print_int (bill (module Pricing) \"abc\")"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Modules stay names",
-            "gist": "Pass the function you need; its type carries its limit.",
+            "name": "Itself, through impl",
+            "gist": "A module is a value with methods and fits a trait by impl, as a struct does.",
             "gains": [
-              "Nothing new to learn."
+              "Modules work as data and as generic arguments."
             ],
             "losses": [
-              "Several functions mean several arguments."
+              "Each module writes its impl block."
             ],
             "proposed": {
-              "code": "print(bill(pricing.total, \"abc\"))"
+              "code": "module pricing {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))\nall :: [PriceRules]{pricing, discount, Flat{}}"
             }
           },
           {
             "key": "B",
-            "name": "Modules are values",
-            "gist": "Pass a whole module whose shape fits.",
+            "name": "Itself, by shape",
+            "gist": "A module is a value with methods and fits any trait whose functions it has.",
             "gains": [
-              "One argument for a whole rule set."
+              "No impl block to write."
             ],
             "losses": [
-              "A new type form and runtime record."
+              "A helper can match a trait by accident."
             ],
             "proposed": {
-              "code": "fn bill(rules: module { fn total(text: String) -> Int }, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))"
+              "code": "module pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))     // fits by shape"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A record of its functions",
+            "gist": "A parameter lists functions; a passed module becomes a record.",
+            "gains": [
+              "No trait needed for the shape."
+            ],
+            "losses": [
+              "A new type form and a runtime record."
+            ],
+            "proposed": {
+              "code": "fn bill(rules: module { fn total(text: String) -[]> Int }, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Modules stay names",
+            "gist": "Pass a module's functions, or a struct of them.",
+            "gains": [
+              "Nothing new to learn."
+            ],
+            "losses": [
+              "A rule set splits into function fields."
+            ],
+            "proposed": {
+              "code": "print(bill(pricing.total, \"abc\"))"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Function values already carry limits; modules stay plain names.",
+          "why": "A module becomes a value with methods and fits traits the way structs do.",
           "gains": [
-            "No new kind of value."
+            "One argument for a whole rule set.",
+            "One way to fit a trait, for modules and structs."
           ],
           "losses": [
             {
-              "loss": "More arguments for several functions.",
-              "mitigation": "Group them in a struct with function fields."
+              "loss": "Each module writes an impl block.",
+              "mitigation": "The same step as a struct; the fix writes it."
+            },
+            {
+              "loss": "More work in the checker.",
+              "mitigation": "No runtime record or new syntax."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A second way to pass behaviour, with new syntax."
+              "reason": "Two rules, and accidental matches."
+            },
+            {
+              "key": "C",
+              "reason": "A new type form and a runtime record."
+            },
+            {
+              "key": "D",
+              "reason": "Modules stay out of data."
             }
           ],
-          "tradeoff": "More arguments, no new value kind."
+          "tradeoff": "One impl block per module, for modules that fit wherever structs fit."
         }
       },
       "draft": false,
@@ -155033,9 +155249,11 @@
       "by": "owner",
       "kind": "question",
       "text": "modules as values/data seems to be cohesive and idiomatic with jet. please further explore that concept, update this ballot accordingly, and present the implications of that perspective",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-04T16:40:56.921Z"
+      "status": "answered",
+      "answer": "Updated after exploring it. Recommended (A): a module is a value of its own type, and it fits a trait the same way a struct does, by writing impl PriceRules { ... } in its body. It can then be passed as a trait value, stored in a list beside structs, or used as a generic argument; its #FX limit travels with it, and reflection reads it like a type. Fitting by shape alone is option B, a record of functions is C, and keeping modules as names is D. The detail covers module state, self, visibility, identity, run time vs build time, reflection, cost and the beginner/expert paths.",
+      "created": "2026-11-04T16:40:56.921Z",
+      "answeredAt": "2026-11-04",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -155892,6 +156110,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T17:46:16.579Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cwzm7q",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-04T17:46:16.089Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cwzm7q",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-04T17:31:18.768Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03pi177",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-04T17:31:18.381Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#20 D-MARKER-INBODY1 A (ratified on this card; owner 2026-11-04:"
+    },
+    {
+      "at": "2026-11-04T17:31:08.285Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ewbkcj",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-04T17:31:07.910Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbkcj",
+      "note": "#8 An inherent impl that carries its own markers is not flatten"
+    },
+    {
+      "at": "2026-11-04T17:30:51.446Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cwzm7q",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T17:30:51.074Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03pi177",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T17:30:50.717Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0699zei",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T17:30:50.346Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yfcz0w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T17:30:49.977Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T17:30:49.604Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ewbkcj",
+      "note": "#7 D-TASK-WINDOW1 A: a task in a `task.group` may capture a rea"
+    },
+    {
+      "at": "2026-11-04T17:30:49.234Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#19 D-TASK-WINDOW1 A: a task in a `task.group` may capture a rea"
+    },
+    {
+      "at": "2026-11-04T17:30:48.865Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfcz0w",
+      "note": "#29 D-REFLECT-FIELDTYPE1 A: every reflected record names its typ"
+    },
+    {
+      "at": "2026-11-04T17:30:48.496Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#13 Probes are under /mnt/jetscratch/lanes/Main/prep/ until they"
+    },
+    {
+      "at": "2026-11-04T17:30:48.129Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#12 Probes are under /mnt/jetscratch/lanes/Main/prep/ until they"
+    },
+    {
+      "at": "2026-11-04T17:30:47.765Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#11 Probes are under /mnt/jetscratch/lanes/Main/prep/ until they"
+    },
+    {
+      "at": "2026-11-04T17:28:33.481Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#7 (Owner 2026-11-04: tests should take seconds, a minute at mo"
+    },
+    {
+      "at": "2026-11-04T17:26:14.291Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n1stxi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-04T17:23:42.567Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#51 (Defect, found 2026-11-04) A parameter named self on a modul"
+    },
+    {
+      "at": "2026-11-04T17:23:42.123Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#50 (Defect, found 2026-11-04) A constant in an inline module ('"
+    },
+    {
+      "at": "2026-11-04T17:23:41.668Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#49 (Defect, found 2026-11-04) 'impl Trait { }' outside a type b"
+    },
+    {
+      "at": "2026-11-04T17:23:41.155Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09kjhit",
+      "note": "#48 (Defect, found 2026-11-04, effect soundness; breaks D-DET1) "
+    },
+    {
+      "at": "2026-11-04T17:23:40.624Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1pjj5iw",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T17:23:40.115Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EFFTYPE-MODVALUE1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-11-04T17:13:28.747Z",
       "by": "Main",
