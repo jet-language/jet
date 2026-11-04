@@ -36,7 +36,9 @@ passes and the candidate loses needs a line in `--dispositions` naming its card.
 It releases only with at least `--min-gains` (default 10) gained rows. On a pass
 it writes the next a0_NNN and prints the commands; Main runs them: `jet-use
 a0_NNN`, `git merge --no-ff -F a0_NNN/MERGE_MSG` on `master`, the annotated tag,
-and the push. The tool never moves `current`, merges, tags or pushes. `jet-use`
+the push, and `node Tools/agent/publish-release.mjs publish <seeds>/a0_NNN`, the
+one route to a GitHub release (jet, IDENTITY, checksums and the seed archive).
+The tool never moves `current`, merges, tags, pushes or publishes. `jet-use`
 also rolls back, but only to a release whose evidence passed; `jet-which` names
 the current one.
 

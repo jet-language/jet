@@ -25,11 +25,10 @@
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
 // Pass: writes SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
-// IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG,
-// evidence/ and the seed asset jet-a0_NNN-<platform>-<arch>.tar.gz (+ .sha256), then prints
-// the commands for Main: make it current (jet-use), merge it to master as
-// `Merge dev: a0_NNN <summary>`, tag it, push and publish the seed asset as the tag's GitHub
-// release (Docs/spec/contributing/bootstrap.md). Fail: SEEDS is unchanged; the evidence stays
+// IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and
+// evidence/, then prints the commands for Main: make it current (jet-use), merge it to master
+// as `Merge dev: a0_NNN <summary>`, tag it, push, and publish it as the tag's GitHub release
+// with `publish-release.mjs publish SEEDS/a0_NNN`. Fail: SEEDS is unchanged; the evidence stays
 // in the work directory. The tool never repoints `current`, merges, tags, pushes or
 // publishes. One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
@@ -112,6 +111,8 @@ export function seedAssetName(release, platform = process.platform, arch = proce
 // `jet c++`. They are hard links of `jet` (a real binary, not a wrapper); the CLI reads
 // argv[0] (JetCli Host.jet `jet_cli_alias_args`).
 export const COMPILER_ALIASES = ['jet-cc', 'jet-cxx', 'jet-c++'];
+// What a seed directory ships (SHA256SUMS covers them; jetpack is absent from some).
+export const SEED_FILES = ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY'];
 
 export function linkCompilerAliases(dir) {
     for (const alias of COMPILER_ALIASES) linkSync(join(dir, 'jet'), join(dir, alias));
@@ -603,6 +604,9 @@ function sumsOf(dir, names) {
     return `${lines.join('\n')}\n`;
 }
 
+// The chain and seed helpers publish-release.mjs shares.
+export { MUSL_DEFAULT, NORUST, STACK, fileHashes, sha256File, sumsOf };
+
 function assemble(ctx, gate, plan) {
     const { seeds, next, sha, candidate, release } = ctx;
     const gains = gainsOf(ctx);
@@ -639,12 +643,7 @@ function assemble(ctx, gate, plan) {
         merge: plan,
     }, null, 2)}\n`);
     writeFileSync(join(temp, 'RELEASE.md'), report(ctx, gate, 'PASS', plan));
-    writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY']));
-    const asset = seedAssetName(next);
-    const packed = spawnSync('tar', ['--sort=name', '--owner=0', '--group=0', '--numeric-owner', '--mtime=@0', '--use-compress-program=gzip -n', '-cf', asset,
-        ...['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY', 'SHA256SUMS'].filter(name => existsSync(join(temp, name)))], { cwd: temp, encoding: 'utf8' });
-    if (packed.status !== 0) throw Error(`packing ${asset} failed: ${packed.stderr}`);
-    writeFileSync(join(temp, `${asset}.sha256`), `${sha256File(join(temp, asset))}  ${asset}\n`);
+    writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, SEED_FILES));
     if (existsSync(dest)) throw Error(`${dest} appeared while assembling; ${temp} is left for inspection`);
     renameSync(temp, dest);
     return { dest, summary, scope };
@@ -665,9 +664,8 @@ function printCommands(ctx, released, plan) {
     }
     lines.push(`  git tag -a ${ctx.next} -F ${dest}/TAG_MSG ${ctx.sha}`);
     if (plan.fastForward) {
-        const asset = join(dest, seedAssetName(ctx.next));
         lines.push(`  git push origin master ${ctx.next}`);
-        lines.push(`  gh release create ${ctx.next} --verify-tag --title ${ctx.next} -F ${dest}/TAG_MSG ${asset} ${asset}.sha256`);
+        lines.push(`  node Tools/agent/publish-release.mjs publish ${dest}`);
     } else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
     process.stdout.write(`${lines.join('\n')}\n`);
 }
