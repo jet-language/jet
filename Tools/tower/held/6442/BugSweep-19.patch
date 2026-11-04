@@ -1,0 +1,32 @@
+diff --git a/Compiler/JetDriver/Source/Driver/Loader.jet b/Compiler/JetDriver/Source/Driver/Loader.jet
+index 0bc5106..d7f2bd5 100644
+--- a/Compiler/JetDriver/Source/Driver/Loader.jet
++++ b/Compiler/JetDriver/Source/Driver/Loader.jet
+@@ -109,6 +109,7 @@ use {
+         pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
+         pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
+     ]
++    jetpack_foundation.[DEFAULT_ENTRY_FILE]
+ }
+ 
+ // The one language edition (greenfield: one meaning, no edition-gated behaviour).
+@@ -988,8 +989,8 @@ struct JetDriverInlineCarrier {
+ }
+ 
+ // The entry root's inline Package carrier (Rust Loader `load_file`): the
+-// entry's own block, else the stock entry `main.jet` / `src/main.jet` that
+-// carries one (`find_inline_package_root_checked`). A structure failure
++// entry's own block, else the stock entry `run.jet` / `src/run.jet`
++// (DEFAULT_ENTRY_FILE) that carries one (`find_inline_package_root_checked`). A structure failure
+ // (E1360/E1361/E1362) or a carrier beside `package.jet` (E1363) is reported
+ // at the carrier's path and selects no carrier.
+ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, has_manifest: Bool, diagnostics: &[Diagnostic]) -> JetDriverInlineCarrier? {
+@@ -1003,7 +1004,7 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
+     }
+     candidates := [Int]{}
+     if entry_index >= 0 -> &candidates.push(entry_index)
+-    stock_entries :: [String]{"main.jet", "src/main.jet"}
++    stock_entries :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
+     loop stock in stock_entries {
+         loop (file_index, file) in root.files {
+             if file.relative_path == stock && file_index != entry_index -> &candidates.push(file_index)
