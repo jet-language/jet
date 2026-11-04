@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 90500,
+    "rev": 90501,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -76789,7 +76789,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-04T21:02:59.477Z",
+      "updated": "2026-11-04T21:03:16.039Z",
       "updatedBy": "Main"
     }
   ],
@@ -154672,6 +154672,179 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-04T19:36:17.691Z"
+    },
+    {
+      "id": "D-COMMENT-SIGIL1",
+      "cardId": "c0gelll3",
+      "group": "syntax",
+      "title": "Comment glyph: keep // or move comments to ##",
+      "situation": "Jet starts a comment with two slashes, and a doc comment, which tools show as help, with three. The owner asked whether two hash signs would be better, since that frees the slash and the hash already marks compile-time work. Nothing planned needs the double slash, but Python's 7 // 2 compiles today and silently keeps 7, while two hashes would sit beside markers and rewrite every comment. We recommend keeping two slashes and adding a warning that catches the Python habit.",
+      "gist": "Should Jet comments start with ## instead of //?",
+      "lesson": "A comment is text the compiler skips. Jet starts one with //, and a doc comment, shown as help, with ///. A single # marks places where the compiler acts, such as #Inline. The vote: move comments to ##, freeing //, or keep //.",
+      "explainer": "",
+      "story": "Mia learned Python first. She writes half :: 7 // 2, the program runs, and half is 7 instead of 3. Ben came from Rust and types // and /// without thinking. The owner wants # to feel like Jet's meta mark. This vote decides which glyph comments use, and how Mia is protected.",
+      "inWild": "// Odin, Swift, Rust, C, C# and Jai mark compiler work with # and keep // for comments.\nshare :: #force_inline proc(total, people: int) -> int { return total / people } // Odin\nprint(#file, #line) // Swift\n# Python, shell, Ruby, Nim and Nix use # for comments and nothing else.\nhalf = 7 // 2  # Python: // is floor division, so half is 3\n## Nim: a doc comment. In C macros, a ## b pastes two tokens.",
+      "detail": "WHAT IS ALREADY DECIDED\n\nS5 makes // the line comment and nested /* */ the block comment (ratified 2026-06-15). S49 makes /// the doc comment, which jet doc shows and jet test --docs runs. The registry rows are COMMENT_PREFIX and BLOCK_COMMENT_OPEN and BLOCK_COMMENT_CLOSE in Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:188-195.\n\nD-META-HASH1 A (2026-10-30) defines # as the one compile-time mark: markers such as #Inline, site values such as #line, and pastes such as #{x}. Its stated meaning is that the compiler acts here. D-PRE-COMPILE1 A (2026-10-31) rejected a doubled-hash form, ##Pre. Whole-number division was ratified as /% on 2026-08-05.\n\nTODAY\n\nProbes ran on the admitted compiler at commit 1f70b8d4. Probe c14 is the ballot program; it runs, prints 333 and passes jet fmt --check. Probe c11, half :: 7 // 2, prints 7 with no diagnostic. Probes c02 and c12 show that ## is an error today (E0003), so the glyph is free. Probe c04 shows a #! line after byte 0 is E0042.\n\nWHAT THE SLASH WOULD FREE\n\nThe single / is never a comment, so division and the positional-only parameter zone already use it (probe c08). Only // and /* are taken. Python's floor division is the one strong rival meaning for //, and Jet already spells it /% (1,057 uses). Regex is the typed literal Regex{\"...\"}, and paths are typed native values. No ratified or open decision needs //, /* or slash literals.\n\nCENSUS\n\nTracked .jet files under Compiler, Core, Examples, tests and Jetpack hold 94,746 comment tokens in 7,815 of 17,255 files. That is 90,855 full-line comments, 1,140 trailing comments and 2,698 doc lines. There are 17 block comments and 14,325 # tokens in code. 829 comments begin with #, mostly card references such as // #4828, and 28 are commented-out markers.\n\nEDGE CASES\n\nA commented-out marker stays readable either way: // #Inline or ## #Inline. A #{x} or #line inside a comment is plain text in both options (probe c13). The shebang rule does not change. Under B, a doc line that holds a markdown heading reads ### ## Examples; the corpus has none today. Nim's #[ ]# block form would collide with the #[A, B] marker list, so B drops block comments; only 17 exist.\n\nBEGINNER PATH\n\nA newcomer writes // for a note and /// above a function to document it, as in Rust, Swift, C# and Zig. A Python habit such as 7 // 2 gets a warning with the /% fix under A, or an error under B.\n\nEXPERT PATH\n\nExperts keep nested /* */ to fence off a region under A, or use the editor's toggle-comment key under B. Machine-read comments such as doctest // => lines keep working under A. Under B they are renamed to ## =>.\n\nNOT ON THE BALLOT\n\nSingle # comments, as in Python and shell, would need every marker, [T#N], pkg#1.2.0 and #!Name moved to another glyph. That reverses the owner's own # rulings, so the research note studies it but the ballot does not offer it. Spending a freed // on floor division would reopen /% and belongs to a later ballot if B wins.\n\nResearch note: Docs/research/2026-11-04-comment-sigil.md (drafted at /mnt/jetscratch/lanes/Research/comments/).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep //, and warn on Python's //",
+          "detail": "Comments stay as they are: // for a line, /// for a doc comment and nested /* */ for a block. One new warning catches the Python habit. It fires when the code before // ends a number expression and the comment text is itself a number expression whose names exist here. The fix shows /%.",
+          "technical": "Lexer, parser, registry and editors are unchanged. The warning lives where types and scope are known, after type checking. It needs three things on one line. A number-typed expression ends right before a line comment. The comment text parses as an expression of number type. Every name in it resolves in scope. The structured fix replaces // with /%.\n\nLexical rules are not enough. The census in floor-warn-census.mjs flags 367, 146 or 61 corpus lines under three lexical rules. All 61 lines under the tightest rule are labels, such as return false // WB3. Each fails the typed rule, because it ends in a Bool or a unit call, or because it names something not in scope.",
+          "code": "/// Splits a bill evenly.\n#Inline fn share(total: Int, people: Int) -> Int {\n    // whole-number division drops the cents\n    total /% people  // #4828: round up later\n}\n\nfn run() {\n    half :: 7 // 2\n    print(share(1000, 3))\n}\n\n// jet check (new warning):\n//   Warning: This \"//\" starts a comment, so half keeps only 7\n//     --> run.jet:8:15\n//   Fix: whole-number division is \"/%\": half :: 7 /% 2"
+        },
+        {
+          "key": "B",
+          "name": "Two hashes",
+          "detail": "A comment starts with ## and a space, and a doc comment with ### and a space. Four or more hashes make a plain divider comment. Block comments are removed, as in Python and Zig. A ## followed by a letter is an error, so ##Inline cannot silently drop a marker. // and /* become teaching errors, and a // b points to /%.",
+          "technical": "Lexer: ## followed by a space, a tab or the line end is a line comment. ### followed by the same is a doc comment. Four or more # make a plain comment. ## followed by anything else is a new error saying a marker uses one #. # stays one token everywhere else, so markers, [T#N], pkg#1.2.0, #line and #{x} keep working. The byte-zero shebang rule stays, and the config-file exception for :// is deleted.\n\nRegistry: COMMENT_PREFIX becomes ##, a doc row ### is added, and the block rows are removed. One lexer-driven jet fix rewrites 94,746 comment tokens in 7,815 files, 17 block comments and about 630 lines in 40 Markdown files.\n\nThe same cutover updates about 30 hand-written comment scanners, five machine-read comment forms, both TextMate grammars, the tree-sitter grammar, Zed and VS Code settings, and the self-host fixtures.",
+          "code": "### Splits a bill evenly.\n#Inline fn share(total: Int, people: Int) -> Int {\n    ## whole-number division drops the cents\n    total /% people  ## #4828: round up later\n}\n\nfn run() {\n    half :: 7 // 2\n    print(share(1000, 3))\n}\n\n## jet check:\n##   Error: Jet comments start with \"##\", not \"//\"\n##     --> run.jet:8:15\n##   Fix: whole-number division is \"/%\": half :: 7 /% 2\n##   (a \"##Inline\" with no space is also an error: a marker uses one \"#\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "Odin marks compiler directives with # and keeps // and nested /* */ for comments. Source: odin-lang.org/docs/overview.",
+          "code": "// Splits a bill evenly. (odin-lang.org/docs/overview)\nshare :: #force_inline proc(total, people: int) -> int {\n    // whole-number division drops the cents\n    return total / people\n}"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift uses # for compiler-supplied values and macros, and // and /// for comments.",
+          "code": "/// Splits a bill evenly.\nfunc share(_ total: Int, _ people: Int) -> Int {\n    print(#file, #line)  // # is compile time; // is a comment\n    return total / people\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust attributes start with #, and comments use // and ///. Its lexer must tell a #! shebang from a #![ attribute on the first line.",
+          "code": "#!/usr/bin/env rust-script\n#![allow(unused)]\n/// Splits a bill evenly.\n#[inline]\nfn share(total: i64, people: i64) -> i64 { total / people } // integer division"
+        },
+        {
+          "lang": "Nim",
+          "note": "Nim comments use #, doc comments ##, and nested blocks #[ ]#. Pragmas in {. .}, not #, mark compiler work. Source: nim-lang.org/docs/manual.html.",
+          "code": "proc share*(total, people: int): int {.inline.} =\n  ## Splits a bill evenly.\n  # whole-number division drops the cents\n  total div people"
+        },
+        {
+          "lang": "C",
+          "note": "In C macros, a doubled ## pastes two tokens. C readers know ## as paste, which Jet spells #{x}.",
+          "code": "#define FIELD(name) int field_ ## name;  // ## pastes tokens\nFIELD(total)  // expands to: int field_total;"
+        },
+        {
+          "lang": "Python and Nix",
+          "note": "Both use # for comments. That frees // for floor division in Python and for merging records in Nix. Neither uses # for anything else.",
+          "code": "half = 7 // 2              # Python: half is 3\ndefaults // { port = 8080; }  # Nix: merge two records"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Nothing planned needs //, because whole-number division is already /%. Keeping // matches every language that uses # for compiler work, and # keeps meaning that the compiler acts here.",
+        "gains": [
+          "No rewrite, and every editor already knows //.",
+          "Comments never look like markers."
+        ],
+        "losses": [
+          {
+            "loss": "Python's 7 // 2 compiles and keeps only 7.",
+            "mitigation": "A new warning fires when a number is followed by // and a number expression, and shows /%."
+          },
+          {
+            "loss": "On German and Nordic keyboards, / needs Shift.",
+            "mitigation": "Most of those keyboards need Shift or AltGr for # too, and editors toggle comments with one shortcut."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two hashes put comments beside markers and rewrite 95,000 lines to free a glyph nothing needs."
+          }
+        ],
+        "tradeoff": "Keep the familiar comment and one meaning for #, and give up the thematic fit of ##."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the Research3 draft under the four-agent cap. Findings were that the ballot is fair to B, and the answer wrongly said ##Pre would drop a check, so that was corrected."
+      },
+      "checkInstructions": "Use the jet from /mnt/jetscratch/discovery/base/latest, commit 1f70b8d4, with JET_TOOLCHAIN_ROOT set to the dev worktree. In /mnt/jetscratch/lanes/Research/comments/probes, jet run c11_python_floor_div.jet prints 7, and jet run c12_hash_typo_marker.jet is E0003. jet run c14_ballot_program_fmt.jet prints 333, and jet fmt --check passes on it.",
+      "surface": {
+        "gist": "Should Jet comments start with ## instead of //?",
+        "lesson": "A comment is text the compiler skips. Jet starts one with //, and a doc comment, shown as help, with ///. A single # marks places where the compiler acts, such as #Inline. The vote: move comments to ##, freeing //, or keep //.",
+        "trio": {
+          "current": {
+            "note": "Today // starts comments, and Python's 7 // 2 silently keeps 7.",
+            "code": "/// Splits a bill evenly.\n#Inline fn share(total: Int, people: Int) -> Int {\n    // whole-number division drops the cents\n    total /% people  // #4828: round up later\n}\nhalf :: 7 // 2   // runs today, and half is 7"
+          },
+          "wild": {
+            "lang": "Odin",
+            "note": "Odin marks compiler work with # and keeps // for comments.",
+            "code": "// Splits a bill evenly. (odin-lang.org/docs/overview)\nshare :: #force_inline proc(total, people: int) -> int {\n    // whole-number division drops the cents\n    return total / people\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Keep //, and warn on Python's //",
+            "gist": "Comments stay // and ///, and Python's 7 // 2 gets a warning.",
+            "gains": [
+              "Matches Rust, Swift, Odin and Jai, which use # for compiler work.",
+              "A # always means the compiler acts here."
+            ],
+            "losses": [
+              "On German and Nordic keyboards, / needs Shift."
+            ],
+            "proposed": {
+              "code": "/// Splits a bill evenly.\n#Inline fn share(total: Int, people: Int) -> Int {\n    // whole-number division drops the cents\n    total /% people  // #4828: round up later\n}\n// new: \"half :: 7 // 2\" warns \"did you mean 7 /% 2?\""
+            }
+          },
+          {
+            "key": "B",
+            "name": "Two hashes",
+            "gist": "Comments start with ##, doc comments with ###, and block comments go away.",
+            "gains": [
+              "One unshifted key on UK and German keyboards.",
+              "Frees // for a later use, such as Python-style division.",
+              "Familiar to Python, shell and Nim readers."
+            ],
+            "losses": [
+              "Comments and markers both start with #.",
+              "Rewrites 95,000 comment lines and every editor and tool.",
+              "A ### doc line looks like a markdown heading."
+            ],
+            "proposed": {
+              "code": "### Splits a bill evenly.\n#Inline fn share(total: Int, people: Int) -> Int {\n    ## whole-number division drops the cents\n    total /% people  ## #4828: round up later\n}\n## \"##Inline\" with no space is an error, not a comment"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Nothing planned needs //, because whole-number division is already /%. Keeping // matches every language that uses # for compiler work, and # keeps meaning that the compiler acts here.",
+          "gains": [
+            "No rewrite, and every editor already knows //.",
+            "Comments never look like markers."
+          ],
+          "losses": [
+            {
+              "loss": "Python's 7 // 2 compiles and keeps only 7.",
+              "mitigation": "A new warning fires when a number is followed by // and a number expression, and shows /%."
+            },
+            {
+              "loss": "On German and Nordic keyboards, / needs Shift.",
+              "mitigation": "Most of those keyboards need Shift or AltGr for # too, and editors toggle comments with one shortcut."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two hashes put comments beside markers and rewrite 95,000 lines to free a glyph nothing needs."
+            }
+          ],
+          "tradeoff": "Keep the familiar comment and one meaning for #, and give up the thematic fit of ##."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-04T21:03:16.039Z"
     }
   ],
   "questions": [
@@ -157302,6 +157475,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T21:03:16.039Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-COMMENT-SIGIL1",
+      "note": "Comment glyph: keep // or move comments to ##"
+    },
     {
       "at": "2026-11-04T21:02:59.477Z",
       "by": "Main",
