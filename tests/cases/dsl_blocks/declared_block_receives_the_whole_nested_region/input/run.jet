@@ -1,12 +1,18 @@
 
-marker Check($sites: [.Block]) {
-    if !target.contains("after") {
-        reject(
-            code: "E0927",
-            what: "the complete block text is required",
-            why: "the checker reads one lexical region",
-            fix: "keep the trailing statement inside the block"
-        )
+struct Check {
+    impl Marker {
+        sites :: [.Block]
+
+        fn expand(self, target: Target) {
+            if !target.contains("after") {
+                reject(
+                    code: "E0927",
+                    what: "the complete block text is required",
+                    why: "the checker reads one lexical region",
+                    fix: "keep the trailing statement inside the block"
+                )
+            }
+        }
     }
 }
 

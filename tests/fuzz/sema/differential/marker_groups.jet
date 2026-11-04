@@ -1,10 +1,24 @@
 // Shared native/Source compiler input: fixed arguments and nested lexical names.
-marker Fast = #[Inline(.Always), Scalar]
+struct Fast {
+    impl Marker {
+        group :: #[Inline(.Always), Scalar]
+    }
+}
 #Fast fn local(value: Int) -> Int { return value + 1 }
 
 module library {
-    marker Label(text: String, $sites: [.Function])
-    marker Traced = #[Label("fixed"), Inline]
+    struct Label {
+        text: String
+
+        impl Marker {
+            sites :: [.Function]
+        }
+    }
+    struct Traced {
+        impl Marker {
+            group :: #[Label("fixed"), Inline]
+        }
+    }
     #Traced fn work(value: Int) -> Int { return value * 2 }
 }
 

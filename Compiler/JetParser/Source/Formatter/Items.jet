@@ -82,6 +82,7 @@ JFMT_MEMBER_ASSOC_TYPE :: 6
 JFMT_MEMBER_IMPORT :: 7
 JFMT_MEMBER_ITEM :: 8
 JFMT_MEMBER_CONSTANT :: 9
+JFMT_MEMBER_MARKER_IMPL :: 10
 
 struct JetFmtMember {
     kind: Int
@@ -97,6 +98,8 @@ struct JetFmtTypeBody {
     trait_impls: [TraitImplBlock]
     methods: [Func]
     validate_body: [Stmt]
+    marker: MarkerDecl?{None}
+    marker_expand_span: Span?{None}
 }
 
 // Rust `TypeBodyMember::is_compact` / `ImplBodyMember::is_compact`: data
@@ -636,9 +639,9 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         // Tag declarations are emitted verbatim (non-destructive).
         .Tag(t) -> jfmt_write_verbatim(&f, t.span.start, t.span.end, true)
         .EffectDecl(declaration) -> jfmt_write_verbatim(&f, declaration.span.start, declaration.span.end, true)
-        // FORM1: declarations with typed bodies use the same
-        // item-template formatter as derives.
-        .MarkerDecl(declaration) -> jfmt_fmt_marker_decl(&f, declaration)
+        // A marker prints inside the struct that declares it
+        // (jfmt_fmt_marker_impl).
+        .MarkerDecl(_) -> {}
         // Fact declarations share marker parameter syntax, so
         // use the same source-aware comma-list formatter.
         .FactDecl(declaration) -> jfmt_fmt_fact_decl(&f, declaration)
@@ -720,33 +723,6 @@ fn jfmt_fmt_marker_decl_params(f: &JetFmt, params: [MarkerDeclParam], source_sta
         jfmt_comma_after(&f, multiline, param.name_span.end)
     }
     jfmt_comma_end(&f, multiline, source)
-}
-
-fn jfmt_fmt_marker_decl(f: &JetFmt, declaration: MarkerDecl) {
-    jfmt_write(&f, "marker ")
-    jfmt_write(&f, declaration.name)
-    // A group declaration `marker Name = #[A, B]` has members, not parameters.
-    if declaration.group == .Val(members) {
-        jfmt_write(&f, " = #[")
-        group_source :: if members.len() > 0 -> jfmt_source_marker_group_span(f, members[0].name_span.start) else -> JetFmtSourceList?{None}
-        jfmt_fmt_marker_list(&f, members, group_source)
-        jfmt_write(&f, "]")
-        jfmt_newline(&f)
-        return
-    }
-    jfmt_write(&f, "(")
-    jfmt_fmt_marker_decl_params(&f, declaration.params, declaration.name_span.end)
-    jfmt_write(&f, ")")
-    if declaration.body == .Val(body) {
-        jfmt_write(&f, " {{")
-        jfmt_newline(&f)
-        f.indent += 1
-        jfmt_fmt_derive_body_items(&f, body)
-        f.indent -= 1
-        jfmt_emit_leading(&f, declaration.span.end)
-        jfmt_end_template_block(&f)
-    }
-    jfmt_newline(&f)
 }
 
 fn jfmt_fmt_fact_decl(f: &JetFmt, declaration: FactDecl) {
@@ -889,7 +865,11 @@ fn jfmt_derive_body_item_end(f: JetFmt, body_item: DeriveBodyItem) -> Int {
 fn jfmt_fmt_module_body(f: &JetFmt, imports: [ImportDecl], items: [Item], span_end: Int) {
     entries := [JetFmtMember]{}
     loop index in 0..<imports.len() -> &entries.push(JetFmtMember{kind: JFMT_MEMBER_IMPORT, index: index, start: imports[index].span.start})
-    loop index in 0..<items.len() -> &entries.push(JetFmtMember{kind: JFMT_MEMBER_ITEM, index: index, start: jfmt_item_span_start(f, items[index])})
+    loop index in 0..<items.len() {
+        // A marker prints inside the struct that declares it.
+        if items[index] == .MarkerDecl(_) -> next
+        &entries.push(JetFmtMember{kind: JFMT_MEMBER_ITEM, index: index, start: jfmt_item_span_start(f, items[index])})
+    }
     sorted :: jfmt_sort_members(entries)
     position := 0
     loop position < sorted.len() {
@@ -1881,7 +1861,64 @@ fn jfmt_fmt_type_body_member(f: &JetFmt, member: JetFmtMember, body: JetFmtTypeB
         } else {
             jfmt_fmt_body(&f, body.validate_body)
         }
+    } else if member.kind == JFMT_MEMBER_MARKER_IMPL {
+        declaration :: body.marker ?? return
+        jfmt_fmt_marker_impl(&f, declaration, member.start, body.marker_expand_span)
     }
+}
+
+// `impl Marker { … }`: the settings stack on adjacent lines with the group,
+// and the `expand` template is set off by a blank line. The struct prints the
+// fields, so only the `$` settings of the declaration print here, without
+// their sigil.
+fn jfmt_fmt_marker_impl(f: &JetFmt, declaration: MarkerDecl, start: Int, expand: Span?) {
+    jfmt_emit_leading(&f, start)
+    settings := [MarkerDeclParam]{}
+    loop param in declaration.params {
+        if param.name.starts_with("$") && param.value != None -> &settings.push(param)
+    }
+    if settings.len() == 0 && declaration.group == None && declaration.body == None {
+        jfmt_write(&f, "impl Marker {{}}")
+        return
+    }
+    jfmt_write(&f, "impl Marker {{")
+    jfmt_newline(&f)
+    f.indent += 1
+    rows := 0
+    loop setting in settings {
+        value :: setting.value ?? next
+        if rows > 0 -> jfmt_newline(&f)
+        jfmt_emit_leading(&f, setting.name_span.start)
+        jfmt_write(&f, jfmt_bytes_text(setting.name.bytes(), 1, setting.name.bytes().len()))
+        jfmt_write(&f, " :: ")
+        jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
+        rows += 1
+    }
+    if declaration.group == .Val(members) {
+        if rows > 0 -> jfmt_newline(&f)
+        if members.len() > 0 -> jfmt_emit_leading(&f, members[0].span.start)
+        jfmt_write(&f, "group :: #[")
+        group_source :: if members.len() > 0 -> jfmt_source_marker_group_span(f, members[0].name_span.start) else -> JetFmtSourceList?{None}
+        jfmt_fmt_marker_list(&f, members, group_source)
+        jfmt_write(&f, "]")
+        rows += 1
+    }
+    if declaration.body == .Val(template) {
+        if rows > 0 {
+            jfmt_newline(&f)
+            jfmt_newline(&f)
+        }
+        if expand == .Val(span) -> jfmt_emit_leading(&f, span.start)
+        jfmt_write(&f, "fn expand(self, target: Target) {{")
+        jfmt_newline(&f)
+        f.indent += 1
+        jfmt_fmt_derive_body_items(&f, template)
+        f.indent -= 1
+        if expand == .Val(span) -> jfmt_emit_leading(&f, span.end)
+        jfmt_end_template_block(&f)
+    }
+    f.indent -= 1
+    jfmt_end_block(&f)
 }
 
 // Emit a source-ordered type-body member list. `preceded` says whether the
@@ -1921,7 +1958,8 @@ fn jfmt_fmt_struct(f: &JetFmt, s: StructDef) {
     // (card #506): `validate { … }` is one more body member,
     // printed where it was authored like every other one.
     if s.validate_span == .Val(span) -> &members.push(JetFmtMember{kind: JFMT_MEMBER_VALIDATE, index: 0, start: span.start})
-    body :: JetFmtTypeBody{state: s.state, fields: s.fields, cli_bindings: s.cli_bindings, trait_impls: s.trait_impls, methods: s.methods, validate_body: s.validate_block}
+    if s.marker_span == .Val(span) -> &members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER_IMPL, index: 0, start: span.start})
+    body :: JetFmtTypeBody{state: s.state, fields: s.fields, cli_bindings: s.cli_bindings, trait_impls: s.trait_impls, methods: s.methods, validate_body: s.validate_block, marker: s.marker, marker_expand_span: s.marker_expand_span}
     jfmt_fmt_type_body_members(&f, jfmt_sort_members(members), body, derives_decode, false)
     f.indent -= 1
     jfmt_end_block(&f)

@@ -18,11 +18,11 @@ use {
         Span,
         Type,
         builtin_static_rows,
-        expr_span,
         failure_contract_shown_return,
         failure_contract_shown_type,
         failure_contract_source,
         type_name,
+        marker_decl_signature,
         name_ledger_display_path,
         name_ledger_display_path_at,
         name_ledger_canonical_path,
@@ -631,37 +631,15 @@ fn jet_cli_symbol_shape(name: String, kind: JetCLISemKind, owner: String?) -> Je
     shape
 }
 
-// Symbols.rs `marker_expr_source`.
-fn jet_cli_symbol_expr_source(source: String, span: Span) -> String Never! {
-    bytes :: source.bytes()
-    if span.start < 0 || span.end > bytes.len() || span.start >= span.end -> return "…"
-    text :: jet_cli_doc_text(bytes, span.start, span.end).trim()
-    if text == "" -> return "…"
-    text
-}
-
-// Symbols.rs `marker_declaration_signature`.
+// Symbols.rs `marker_declaration_signature`. A marker struct and its rule
+// share one name span, so both definitions show the marker signature.
 fn jet_cli_symbol_marker_signature(modules: [JetDriverDocModule], def: JetCLISemDef) -> String? Never! {
-    if !def.identity.starts_with("rule:") -> return None
     loop doc_module in modules {
         if doc_module.path != def.module_path && doc_module.alias != def.module_path -> next
         loop item in doc_module.items {
             if item == .MarkerDecl(declaration) {
                 if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end -> next
-                params := [String]{}
-                loop parameter in declaration.params {
-                    if parameter.ty == .Val(ty) {
-                        variadic :: if parameter.variadic -> "..." else -> ""
-                        default := ""
-                        if parameter.value == .Val(value) -> default = "{{{jet_cli_symbol_expr_source(doc_module.source, expr_span(value))}}}"
-                        &params.push("{parameter.name}: {variadic}{type_name(ty)}{default}")
-                    } else {
-                        value := "…"
-                        if parameter.value == .Val(expression) -> value = jet_cli_symbol_expr_source(doc_module.source, expr_span(expression))
-                        &params.push("{parameter.name}: {value}")
-                    }
-                }
-                return Val("marker {declaration.name}({params.join(", ")})")
+                return Val(marker_decl_signature(declaration, doc_module.source))
             }
         }
         return None

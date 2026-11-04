@@ -1,43 +1,63 @@
 ====================
-Marker declarations use one parameter list
+Marker structs keep fields and settings in one body
 ====================
 
-marker Pattern(value: String, $sites: [], $repeatable: true)
+struct Pattern {
+    value: String
+
+    impl Marker {
+        sites :: []
+        repeatable :: true
+    }
+}
 
 ---
 
 (source_file
-  (decl_head
-    keyword: (identifier)
-    name: (type_identifier))
-  (paren_expr
-    (label
-      name: (identifier))
-    (primitive_type)
-    (meta_name)
-    (bracket_expr)
-    (meta_name)
-    (boolean)))
+  (struct_def
+    name: (type_identifier)
+    body: (block
+      (label
+        name: (identifier))
+      (primitive_type)
+      (impl_block
+        type: (type_identifier)
+        body: (block
+          (binding
+            name: (identifier))
+          (bracket_expr)
+          (binding
+            name: (identifier))
+          (boolean))))))
 
 ====================
 Public fixed groups preserve members and import-local qualification
 ====================
 
-pub marker Fast = #[library.Tag, Inline, Scalar]
+pub struct Fast {
+    impl Marker {
+        group :: #[library.Tag, Inline, Scalar]
+    }
+}
 #library.Fast fn helper() {}
 
 ---
 
 (source_file
-  (decl_head
-    keyword: (identifier)
-    name: (type_identifier))
-  (attribute_list
-    (identifier)
-    (variant
-      name: (type_identifier))
-    (type_identifier)
-    (type_identifier))
+  (struct_def
+    name: (type_identifier)
+    body: (block
+      (impl_block
+        type: (type_identifier)
+        body: (block
+          (binding
+            name: (identifier))
+          (attribute_list
+            (identifier)
+            (variant
+              name: (type_identifier))
+            (type_identifier)
+            (type_identifier))))))
   (attribute)
   (function_def
     name: (identifier)
@@ -49,8 +69,18 @@ Nested public marker groups
 ====================
 
 module inner {
-    marker Tag($sites: [])
-    marker Pair = #[Tag, Inline]
+    struct Tag {
+        impl Marker {
+            sites :: []
+        }
+    }
+
+    struct Pair {
+        impl Marker {
+            group :: #[Tag, Inline]
+        }
+    }
+
     #Pair fn helper() {}
 }
 
@@ -60,18 +90,26 @@ module inner {
   (module_def
     name: (identifier)
     body: (block
-      (decl_head
-        keyword: (identifier)
-        name: (type_identifier))
-      (paren_expr
-        (meta_name)
-        (bracket_expr))
-      (decl_head
-        keyword: (identifier)
-        name: (type_identifier))
-      (attribute_list
-        (type_identifier)
-        (type_identifier))
+      (struct_def
+        name: (type_identifier)
+        body: (block
+          (impl_block
+            type: (type_identifier)
+            body: (block
+              (binding
+                name: (identifier))
+              (bracket_expr)))))
+      (struct_def
+        name: (type_identifier)
+        body: (block
+          (impl_block
+            type: (type_identifier)
+            body: (block
+              (binding
+                name: (identifier))
+              (attribute_list
+                (type_identifier)
+                (type_identifier))))))
       (attribute)
       (function_def
         name: (identifier)

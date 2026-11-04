@@ -342,7 +342,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 // Named groups keep the original expansion rules while importing table-local
 // literal and interpolation IDs from independently lexed declarations.
 #Test("named_marker_groups_preserve_imported_literal_tables") {
-    declaration :: lex(`marker Pair = #[Label("value={inner}"), Count(7)]`.bytes())
+    declaration :: lex(`struct Pair { impl Marker { group :: #[Label("value={inner}"), Count(7)] } }`.bytes())
     assert(declaration.diagnostics.is_empty())
     groups :: named_marker_groups(declaration.tokens, declaration.tables)
     assert_eq(groups.len(), 1)

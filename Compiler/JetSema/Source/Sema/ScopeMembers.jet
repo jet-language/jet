@@ -309,7 +309,7 @@ fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry,
         diagnostics: [Diagnostic]{},
     }
     if !result.known {
-        &result.diagnostics.push(sema_error("E0927", args_span ?? span, "`#{name}` is not a declared checked text block", "checked text blocks come from the one library rule registry", "declare `marker {name}(…)` with `$sites: [.Block]` before using `#{name} {{ … }}"))
+        &result.diagnostics.push(sema_error("E0927", args_span ?? span, "`#{name}` is not a declared checked text block", "checked text blocks come from the one library rule registry", "declare `struct {name} {{ impl Marker {{ sites :: [.Block] }} }}` before using `#{name} {{ … }}"))
         return result
     }
     if !result.block_allowed {

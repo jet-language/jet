@@ -258,7 +258,7 @@ fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites
     Val([String]{})
 }
 
-// A declared `$companion` site; `site` is None when the rule declares none.
+// A declared `companion` setting; `site` is None when the rule declares none.
 struct SemaMarkerRulesCompanion {
     site: TAppliedRuleCompanionSite?
 }
@@ -323,6 +323,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     params := [TAppliedRuleParameter]{}
     variadic := TAppliedRuleArgKind?{None}
     variadic_source_type := String?{None}
+    variadic_name := String?{None}
     loop parameter_index in 0..<declaration.params.len() {
         if declaration.params[parameter_index].name.starts_with("$") {
             next
@@ -334,6 +335,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
             }
             variadic = Val(sema_marker_rules_type_kind(ty))
             variadic_source_type = Val(type_name(ty))
+            variadic_name = Val(declaration.params[parameter_index].name)
             next
         }
         applied_parameter :: sema_marker_rules_applied_parameter(declaration.params[parameter_index], source) ?? return None
@@ -341,7 +343,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     }
     Val(TAppliedRule{
         name: declaration.name,
-        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type},
+        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type, variadic_name: variadic_name},
         policy_scopes: scopes,
         sites: sites,
         repeatable: repeatable,
@@ -1714,7 +1716,7 @@ fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, pr
     }
 }
 
-// A source-declared marker rule names its legal sites (`$sites: [.Type]`).
+// A source-declared marker rule names its legal sites (`sites :: [.Type]`).
 fn sema_marker_rules_user_site_error(registry: SemaScopeMembersMarkerRegistry, application: AppliedRuleApplication, site: RuleSite) -> Diagnostic? {
     user_index :: sema_marker_rules_user_rule_index(registry, application.marker) ?? return None
     if registry.marker_rules[user_index].sites.contains(sema_marker_rules_site_name(site)) -> return None

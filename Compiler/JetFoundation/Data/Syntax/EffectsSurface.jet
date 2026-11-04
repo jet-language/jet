@@ -135,20 +135,15 @@ PROTO_CLIENT :: "client"
 
 PROTO_SERVER :: "server"
 
-/// The rule-declaration contextual keyword —
-/// `marker Name(params…)`. Declares one applied rule as
-/// an ordinary Jet declaration in Prelude (or, later, library) source; the
-/// rule's own arguments and facts about the rule (`$sites`, `$repeatable`, …)
-/// share one named-parameter list under the facts marked with
-/// the compile-time sigil. Contextual like `state`/`protocol`. Declaration-
-/// side parse only (card #1456); lowering the parsed declaration into the
-/// runtime registry row the rest of the compiler consumes is #1457's and
-/// #1458's job.
+/// The retired rule-declaration word. A marker is a struct with an
+/// `impl Marker { … }` block; the word is kept only so the parser can teach
+/// the struct form (E0381) where `marker Name(…)` or `marker Name = #[…]` is
+/// written. Not in `JET_KEYWORD_LIST`.
 KW_MARKER :: "marker"
 
 /// The one non-code fact declaration word —
-/// `fact Name($holds: …, $safe: …, …)`. It reuses the marker declaration
-/// parameter-list shape; the registry reads its rows from `Prelude/Facts.jet`.
+/// `fact Name($holds: …, $safe: …, …)`. Its settings are `$` parameters;
+/// the registry reads its rows from `Prelude/Facts.jet`.
 KW_FACT :: "fact"
 
 /// The entry-transition placeholder — `#Transition(_, Pending)` means

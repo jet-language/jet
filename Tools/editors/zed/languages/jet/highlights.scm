@@ -51,7 +51,7 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add as change client derive distinct effect enum extern fact fn impl marker migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
+; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add as change client derive distinct effect enum extern fact fn impl migration module policy priv protocol pub remove rename rust server state struct tag trait use validate via wrap
 [
   "derive"
   "enum"
@@ -132,7 +132,7 @@
   "}" @punctuation.special) @embedded
 
 ; Contextual declaration words directly before a type name
-; (`state Pending`, `protocol Checkout`, `marker Pattern`).
+; (`state Pending`, `protocol Checkout`, `fact Holds`).
 (decl_head keyword: (identifier) @keyword)
 
 ; Definitions

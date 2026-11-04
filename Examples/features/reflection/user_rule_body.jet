@@ -1,15 +1,25 @@
 // D-META-USER1=A: a source rule with a body adds an ordinary method. A
 // template binding is spliced with `$` (D-NAME-SPLICE1=B): `impl $tname`
 // names the target type and `$marker_count` reads the build-time value.
-marker Audited($sites: [.Type])
+struct Audited {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker AddGreeting($sites: [.Type]) {
-    tname :: target.name
-    marker_count :: target.markers.len()
-    impl $tname {
-        fn greeting(self) -> String { "hello" }
+struct AddGreeting {
+    impl Marker {
+        sites :: [.Type]
 
-        fn marker_count(self) -> Int { $marker_count }
+        fn expand(self, target: Target) {
+            tname :: target.name
+            marker_count :: target.markers.len()
+            impl $tname {
+                fn greeting(self) -> String { "hello" }
+
+                fn marker_count(self) -> Int { $marker_count }
+            }
+        }
     }
 }
 

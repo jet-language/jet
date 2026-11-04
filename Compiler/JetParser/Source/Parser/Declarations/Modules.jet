@@ -330,6 +330,7 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
         declaration :: parser_parse_item_or_import(&state)
         loop import in declaration.imports -> &imports.push(import)
         if declaration.item == .Val(value) -> &body.push(value)
+        if declaration.companion == .Val(companion) -> &body.push(companion)
         if !declaration.handled -> parser_report_module_member(&state)
         parser_recover_aborted_item(&state, before)
         if state.position == before {
@@ -607,6 +608,7 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
         declaration :: parser_parse_item_or_import(&state)
         loop import in declaration.imports -> &imports.push(import)
         if declaration.item == .Val(value) -> &body.push(value)
+        if declaration.companion == .Val(companion) -> &body.push(companion)
         if !declaration.handled -> parser_report_module_member(&state)
         parser_recover_aborted_item(&state, before)
         if state.position == before -> parser_bump(&state)

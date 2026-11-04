@@ -884,7 +884,10 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 loop import in declaration.imports -> &program.imports.push(import)
                 if declaration.imports.len() == 0 {
                     if declaration.item == {
-                        .Val(value) -> &program.items.push(value)
+                        .Val(value) -> {
+                            &program.items.push(value)
+                            if declaration.companion == .Val(companion) -> &program.items.push(companion)
+                        }
                         .None -> {
                             if !declaration.handled {
                                 parser_add_error_here(&state, "expected a declaration", "a declaration modifier must be followed by an item", "add an item declaration or remove the modifier")

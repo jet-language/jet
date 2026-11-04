@@ -16,7 +16,11 @@ struct NewJoke { text: String }
 
 struct JokeState { added: Int }
 
-marker ReadJoke = #[Server.Get("/jokes/:id"), Inline]
+struct ReadJoke {
+    impl Marker {
+        group :: #[Server.Get("/jokes/:id"), Inline]
+    }
+}
 
 struct Jokes {
     prefix: String

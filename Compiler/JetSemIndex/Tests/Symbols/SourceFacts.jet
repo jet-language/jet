@@ -1,3 +1,5 @@
+use jet_foundation.[Span, marker_decl_signature_source]
+
 // S15 independent algorithm claims, not checked-index/source-scope production.
 // S14 Tests/Symbols/Build.jet retains the COMPLETE original semindex52–362 /
 // 612–798 + REPL receiver-alias/binding-shadow fixtures unregistered until C4.
@@ -30,15 +32,15 @@
     assert_eq(semantic_source_docs(examples_only, examples_only.bytes().len() - 6).summary, "")
     assert_eq(semantic_source_docs(examples_only, examples_only.bytes().len() + 30).examples, [String]{"only()"})
 }
-#Test("semantic_marker_spelling_uses_utf8_byte_spans_and_trim") {
+#Test("marker_signature_spelling_uses_utf8_byte_spans_and_trim") {
     source :: "é😀 \t世界 \nrest"
-    assert_eq(semantic_marker_span_source(source, Span{start: 6, end: 16}), "世界")
-    assert_eq(semantic_marker_span_source(source, Span{start: 8, end: 14}), "世界")
-    assert_eq(semantic_marker_span_source(source, Span{start: 7, end: 8}), "…")
-    assert_eq(semantic_marker_span_source(source, Span{start: 6, end: 6}), "…")
-    assert_eq(semantic_marker_span_source(source, Span{start: 9, end: 14}), "…")
-    assert_eq(semantic_marker_span_source(source, Span{start: 14, end: 8}), "…")
-    assert_eq(semantic_marker_span_source(source, Span{start: 0, end: 100}), "…")
+    assert_eq(marker_decl_signature_source(source, Span{start: 6, end: 16}), "世界")
+    assert_eq(marker_decl_signature_source(source, Span{start: 8, end: 14}), "世界")
+    assert_eq(marker_decl_signature_source(source, Span{start: 7, end: 8}), "…")
+    assert_eq(marker_decl_signature_source(source, Span{start: 6, end: 6}), "…")
+    assert_eq(marker_decl_signature_source(source, Span{start: 9, end: 14}), "…")
+    assert_eq(marker_decl_signature_source(source, Span{start: 14, end: 8}), "…")
+    assert_eq(marker_decl_signature_source(source, Span{start: 0, end: 100}), "…")
 }
 #Test("semantic_checked_text_owner_leaf_preserves_qualified_and_empty_names") {
     assert_eq(semantic_type_leaf("api.Pattern"), "Pattern")

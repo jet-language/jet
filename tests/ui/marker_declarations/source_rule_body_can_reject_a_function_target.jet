@@ -1,11 +1,17 @@
 
-marker RejectsFunction($sites: [.Function]) {
-    reject(
-        code: "E0927",
-        what: "the function is not allowed",
-        why: "the test rule rejects this declaration",
-        fix: "remove the marker"
-    )
+struct RejectsFunction {
+    impl Marker {
+        sites :: [.Function]
+
+        fn expand(self, target: Target) {
+            reject(
+                code: "E0927",
+                what: "the function is not allowed",
+                why: "the test rule rejects this declaration",
+                fix: "remove the marker"
+            )
+        }
+    }
 }
 
 #RejectsFunction

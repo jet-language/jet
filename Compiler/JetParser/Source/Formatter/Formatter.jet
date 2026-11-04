@@ -1650,6 +1650,11 @@ fn jfmt_format_program_with_tokens(prog: Program, src: String, source_toks: [Tok
             item_i == prog.items.len() -> true
             else -> jfmt_stmt_span(prog.script_body[stmt_i]).start < jfmt_item_span_start(f, prog.items[item_i])
         }
+        // A marker prints inside the struct that declares it.
+        if !emit_stmt && prog.items[item_i] == .MarkerDecl(_) {
+            item_i += 1
+            next
+        }
         if !first {
             if emit_stmt && previous_was_script {
                 if !f.at_line_start -> jfmt_newline(&f)

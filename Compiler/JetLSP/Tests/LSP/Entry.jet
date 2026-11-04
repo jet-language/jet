@@ -127,13 +127,13 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
 
 // Rust: Source/LSP/mod.rs:252
 #Test("marker_hover_and_completion_show_one_canonical_parameter_list") {
-    src :: "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)\n#Needs(\"x\") fn work() {{}}\nfn run() {{\n    \n}}\n"
+    src :: "struct Needs {{\n    value: String\n\n    impl Marker {{\n        sites :: [.Function, .Method]\n        repeatable :: true\n    }}\n}}\n#Needs(\"x\") fn work() {{}}\nfn run() {{\n    \n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
     assert(diagnostics.iter().all((d) -> { d.severity != Severity.Error }), "marker declaration should check: {diagnostics:Debug}")
     db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
     (tokens, _) :: lex(src)
-    expected :: "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)"
-    name_offset :: (src.find("Needs(value") ?? panic("marker declaration")) + 1
+    expected :: "struct Needs {{ value: String, impl Marker {{ sites :: [.Function, .Method]; repeatable :: true }} }}"
+    name_offset :: (src.find("Needs {{") ?? panic("marker declaration")) + 1
     hover :: compute_hover(db, tokens, src, project.entry(), name_offset) ?? panic("marker hover")
     assert(hover.contains(expected), "{hover}")
     completion_offset :: (src.rfind("    \n") ?? panic("completion line")) + 4

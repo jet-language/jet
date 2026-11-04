@@ -94,16 +94,23 @@ fn gh_resolve(constants: [(name: String, value: String)], written: String) -> St
     panic("unresolved highlight text constant {written} in {GH_SYNTAX_DIR}")
 }
 
-// Active marker rule names (editor-grammars.mjs `readActiveMarkers`).
+// Active marker rule names (editor-grammars.mjs `readActiveMarkers`): every
+// top-level struct in the Prelude marker source with an `impl Marker` block.
 fn gh_active_markers() -> [String] {
     names := [String]{}
-    loop raw in gh_read("Compiler/Prelude/Markers.jet").split("\n") {
-        line :: raw.trim()
-        if !line.starts_with("marker ") || line.contains("$retired:") -> next
-        open :: line.index("(") ?? panic("marker declaration without a parameter list: {line}")
-        &names.push(gh_slice(line, 7, open).trim().copy())
+    current := String?{None}
+    loop line in gh_read("Compiler/Prelude/Markers.jet").split("\n") {
+        if line.starts_with("struct ") {
+            open :: line.index("{{") ?? panic("marker struct without a body: {line}")
+            current = Val(gh_slice(line, 7, open).trim().copy())
+        } else if line.starts_with("}}") {
+            current = None
+        } else if current == .Val(name) && line.trim().starts_with("impl Marker") {
+            &names.push(name.copy())
+            current = None
+        }
     }
-    assert(names.len() > 0, "no marker declarations in Compiler/Prelude/Markers.jet")
+    assert(names.len() > 0, "no marker structs in Compiler/Prelude/Markers.jet")
     names
 }
 

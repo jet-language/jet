@@ -139,6 +139,9 @@ struct ParsedItemOrImport {
     // One import for a `use` line, one per row for a `use { … }` block.
     imports: [ImportDecl]{[ImportDecl]{}}
     handled: Bool
+    // The marker a `struct Name { … impl Marker { … } }` declares, an item
+    // of its own beside the struct.
+    companion: Item?{None}
 }
 
 struct ParsedItemModifiers {
@@ -303,7 +306,9 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_STRUCT -> {
             value :: parser_parse_struct(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true}
+            companion := Item?{None}
+            if value.marker == .Val(declaration) -> companion = Val(Item.MarkerDecl{value: declaration})
+            return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companion: companion}
         }
         token.kind == TOKEN_KW_ENUM -> {
             value :: parser_parse_enum(&state, modifiers)
@@ -1949,12 +1954,18 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 method :: parser_parse_function(&state, member_modifiers, true)
                 &value.methods.push(method.value)
             }
-            TOKEN_KW_IMPL -> &value.trait_impls.push(parser_parse_trait_impl_block(&state))
+            TOKEN_KW_IMPL -> {
+                if parser_value_at(&state, 1) == "Marker" && parser_kind_at(&state, 2) == TOKEN_LBRACE {
+                    parser_parse_marker_impl(&state, &value)
+                } else {
+                    &value.trait_impls.push(parser_parse_trait_impl_block(&state))
+                }
+            }
             else -> {
                 field_markers := member_modifiers.markers
                 field_pub := member_modifiers.is_pub
                 field_package_pub := member_modifiers.is_package_pub
-                field_name :: parser_expect_name(&state, "in a struct field")
+                field_name :: parser_struct_field_name(&state)
                 parser_expect(&state, TOKEN_COLON, "`:` after a struct field name")
                 field_type :: parser_parse_type(&state, 0)
                 computed := Expr?{None}
@@ -2004,7 +2015,20 @@ fn parser_parse_struct(state: &JetParserState, modifiers: ParsedItemModifiers) -
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct fields")
     value.span = parser_cover(modifiers.start_span, close.span)
+    parser_finish_marker_struct(&state, &value)
     value
+}
+
+// A struct field name; a keyword followed by `:` names a field too (a
+// marker's `use` argument).
+fn parser_struct_field_name(state: &JetParserState) -> Token {
+    token :: parser_current(&state)
+    if token.kind != TOKEN_IDENT && token.kind != TOKEN_KW_TAG && parser_kind_at(&state, 1) == TOKEN_COLON && parser_is_keyword_token(state, token) {
+        parser_bump(&state)
+        spelling :: parser_text(state, token)
+        return parser_spelled_token(&state, TOKEN_IDENT, token.span, spelling)
+    }
+    parser_expect_name(&state, "in a struct field")
 }
 
 fn parser_parse_enum(state: &JetParserState, modifiers: ParsedItemModifiers) -> EnumDef {

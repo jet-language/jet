@@ -3,7 +3,7 @@
 # Claim: a single-member group is rejected with E0999 (tests/marker_groups_modules.rs:174)
 # Claim: group members of forbidden kinds (Unsafe, Impure, Nondeterministic, FX, Scrub, allow, !Debug, InlineAlways, unknown) are rejected with E0400 (tests/marker_groups_modules.rs:175-183)
 # Claim: a group whose member is another group is rejected with E0400, same-module and imported (tests/marker_groups_modules.rs:184-188)
-# Claim: a group declared with parameters is rejected (tests/marker_groups_modules.rs:189)
+# Claim: a group declared with fields is rejected with E0999 (tests/marker_groups_modules.rs:189)
 # Claim: a group member given arguments with the wrong shape (#Fast(1), #Fast()) is rejected with E0930 (tests/marker_groups_modules.rs:190)
 fixture: groups_require_two_members_no_parameters_and_no_hidden_forbidden_kinds.fixture
 env: NO_COLOR=1
@@ -63,7 +63,8 @@ exit: 1 # tests/marker_groups_modules.rs:187-188 imported group as member -> E04
 stderr: ~ "E0400" # tests/marker_groups_modules.rs:187-188 imported group as member -> E0400
 step: jet check main.jet
 cwd: g14
-exit: 1 # tests/marker_groups_modules.rs:189 group with parameters rejected (any diagnostic)
+exit: 1 # tests/marker_groups_modules.rs:189 group with fields rejected
+stderr: ~ "E0999" # tests/marker_groups_modules.rs:189 group with fields rejected
 step: jet check main.jet
 cwd: g15
 exit: 1 # tests/marker_groups_modules.rs:190 #Fast(1) with no parameters -> E0930

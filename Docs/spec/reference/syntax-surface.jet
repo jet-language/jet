@@ -414,10 +414,15 @@ fn typed_head_bodies() {
     regex :: Regex{"\d+{{2}}"}               // Regex still rejects holes
 }
 
-// Marker declarations use one named parameter list
-// (D-MARKER-SITES1=B). `$sites` is the legal-site metadata value, marked
-// with the compiler-fact sigil (D-DECL-META1=A).
-marker Selector($sites: [.Text], $repeatable: true)
+// A marker is a struct; its `impl Marker` block sets the rule's settings
+// (D-DECL-TYPES1=A). `sites` is the legal-site list, and a field would be an
+// argument the use site writes.
+struct Selector {
+    impl Marker {
+        sites :: [.Text]
+        repeatable :: true
+    }
+}
 
 
 // ============================================================================

@@ -7,12 +7,18 @@ derive T.FieldNames {
     }
 }
 
-marker AddMarkerFields($sites: [.Type]) {
-    type_name :: target.$name
-    comptime loop field in target.$fields {
-        method :: "marked_{field.$name}"
-        impl $type_name {
-            fn $method(self) -> String { field.$name }
+struct AddMarkerFields {
+    impl Marker {
+        sites :: [.Type]
+
+        fn expand(self, target: Target) {
+            type_name :: target.$name
+            comptime loop field in target.$fields {
+                method :: "marked_{field.$name}"
+                impl $type_name {
+                    fn $method(self) -> String { field.$name }
+                }
+            }
         }
     }
 }

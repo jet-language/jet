@@ -24,7 +24,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
-| `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
+| `struct Name { impl Marker { group :: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
 | `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration | `D-MARKER-MODULE1=A` |
 | `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules | `D-CODEGEN-HINTS1=A` |
 | `#DevPanel` | exported typed devtools panel marker | `D-DX-PLUGIN1=D` |
@@ -38,7 +38,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
 | `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
-| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
+| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
 | `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*` | `D-BUILD-FACT3=A` |
 | `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
 | `$phase` | total evaluation-site phase fact | `D-PREP-SURFACE2=A; D-META-ROOT3=A` |
@@ -2438,8 +2438,9 @@ share one `#[A, B]` list. A one-item list or adjacent bare stack is E0999 with
 the canonical rewrite. `jet fmt` performs that rewrite and preserves order.
 Scoped block rules do not stack.
 
-**D-MARKER-GROUP1=A — Fixed named marker groups**: `marker Fast =
-#[Inline(.Always), Scalar]` names two or more fixed applications. Use it as
+**D-MARKER-GROUP1=A — Fixed named marker groups**: a field-less marker struct
+whose `impl Marker` block sets `group :: #[Inline(.Always), Scalar]` (spelled
+`marker Fast = #[…]` before D-DECL-TYPES1=A) names two or more fixed applications. Use it as
 `#Fast` or as a member of an ordinary application list. A group has no
 parameters; its declaration is not a callable marker signature. Fewer than
 two members is E0999. Gates, refusals, retired markers, unknown members and
@@ -7588,12 +7589,11 @@ target.
 
 The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
-- `Compiler/Prelude/Markers.jet` holds one `marker Name(params…)`
-  declaration per rule, in the ratified D-META-FORM1=A / D-MARKER-SITES1=B
-  form, with D-DECL-META1=A's `$` metadata sigil. A plain parameter
-  is an argument the use site writes; a `$`-marked parameter is a fact about
-  the rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
-  `$scopes`, `$companion`, `$retired`.
+- `Compiler/Prelude/Markers.jet` holds one marker struct per rule, in the
+  D-DECL-TYPES1=A form: the struct's fields are the arguments the use site
+  writes, and its `impl Marker { … }` block holds the rule's settings as
+  `name :: value` lines: `sites`, `repeatable`, `owns_menu`, `inherits`,
+  `resolution`, `scopes` and `companion`.
 - `Compiler/Prelude/Effects.jet` holds one `effect Name`
   declaration per effect root.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer

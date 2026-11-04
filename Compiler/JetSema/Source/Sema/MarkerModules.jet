@@ -378,15 +378,12 @@ fn sema_marker_module_bindings(inputs: [SemaRegistrationModuleInput], edges: [Se
 }
 
 fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity: String, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {
-    names := [String]{}
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
             prefix :: if scope == "" -> code_module.name else -> "{scope}.{code_module.name}"
             sema_marker_module_check_groups(graph, module_identity, body, prefix, exported && code_module.is_pub, catalog, &diagnostics)
         }
         if item == .MarkerDecl(declaration) {
-            if names.contains(declaration.name) -> &diagnostics.push(sema_error("E0105", declaration.name_span, "marker `{declaration.name}` is declared twice in this module", "one (declaring module, marker name) key must have one declaration", "rename or remove one declaration"))
-            &names.push(declaration.name)
             members :: declaration.group ?? next
             loop member in members {
                 if sema_marker_module_case_error(member.name, member.span) == .Val(error) {

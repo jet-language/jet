@@ -86,13 +86,16 @@ vocabulary](vocabulary.md).
   `Sh.raw(text)` operation is the escape hatch. A bare string never silently
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
   D-UNIFYLIT1=A).
-- Marker rules use one named parameter list:
-  `marker Name(args..., $sites: [...], $repeatable: ..., ...)`. Ordinary
-  arguments and `$`-marked metadata share that list; checked-text marker
-  declarations are retired, so typed text heads do not introduce a second
-  rule form (D-META-FORM1, D-MARKER-SITES1, D-BOUND-SINK1=A).
-  A fixed named group instead writes `marker Fast = #[Inline, Scalar]`,
-  has at least two members and no parameters, and expands through the same
+- A marker is a struct whose fields are its arguments, with one
+  `impl Marker { … }` block in its body. The block's settings are written
+  `name :: value` (`sites :: [...]`, `repeatable :: true`, …) and its template
+  is `fn expand(self, target: Target) { … }`; the retired `marker Name(…)`
+  and `marker Name = #[…]` declarations are E0381 with the struct rewrite
+  (D-DECL-TYPES1=A, D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
+  takes its items as separate arguments at the use site.
+  A fixed named group instead is a field-less marker struct whose block sets
+  `group :: #[Inline, Scalar]`; it has at least two members and no parameters,
+  and expands through the same
   argument, site and duplicate checks as its written members. Gates, refusals,
   retired markers and other named groups cannot be hidden inside it
   (D-MARKER-GROUP1=A).

@@ -1,5 +1,21 @@
-marker First(value: String, $sites: [.Function])
-marker Second(value: Int, $sites: [.Function])
-marker Pair = #[First("fixed"), Second(7)]
+struct First {
+    value: String
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+struct Second {
+    value: Int
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+struct Pair {
+    impl Marker {
+        group :: #[First("fixed"), Second(7)]
+    }
+}
 #Pair fn helper() {}
 fn run() {}

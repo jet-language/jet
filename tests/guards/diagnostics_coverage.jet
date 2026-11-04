@@ -314,13 +314,12 @@ fn dc_marker_literal_offenders(sources: [(path: String, text: String)], names: [
     offenders
 }
 
-// The active marker rows, read from the one marker declaration source.
+// The active marker structs, read from the one marker declaration source.
 fn dc_marker_names() -> [String] {
     names := [String]{}
-    loop raw in dc_read("Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet").split("\n") {
-        line :: raw.trim()
-        if !line.starts_with("marker ") -> next
-        open :: line.index("(") ?? line.count_bytes()
+    loop line in dc_read("Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet").split("\n") {
+        if !line.starts_with("struct ") -> next
+        open :: line.index("{{") ?? line.count_bytes()
         &names.push(dc_slice(line, 7, open).trim().copy())
     }
     assert(names.len() > 20, "the marker declaration source must be readable")

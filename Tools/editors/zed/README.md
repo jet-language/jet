@@ -90,7 +90,7 @@ parsing; the compiler remains the only judge of validity. Keyword spellings
 come from the generated `BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS` sections,
 rendered from the syntax registry
 ([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
-and the active rows of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet))
+and the marker structs of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet))
 by `node Tools/agent/editor-grammars.mjs --write`. Every string in
 `highlights.scm` must be an anonymous grammar token. The LSP semantic overlay
 refines live coloring for
