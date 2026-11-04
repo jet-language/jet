@@ -1,4 +1,4 @@
-// TanStack Start reference loop: one typed application graph with one
+// Jet Web framework reference loop: one typed application graph with one
 // first-party Router/Query/Forms/Table/Virtual/Store state projection.
 //
 // The suite calls below are the ratified D-DX-SUITE1 surface.  The app builder
@@ -101,8 +101,10 @@ fn error_page() -> WebPage { web.page(
     "<main data-state=\"error\"><h1>Orders</h1><p>Orders could not be loaded.</p></main>"
 ) }
 
-fn add_order_to_cart(&cart: Cart) {
-    &cart.ids.push(41)
+fn add_order_to_cart(cart: Cart) -> Cart {
+    ids := cart.ids.copy()
+    &ids.push(41)
+    return Cart{ids: ids}
 }
 
 fn cart_seed(search: OrderSearch) -> Cart {
@@ -144,10 +146,10 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
 
     // Query.live seeds the cache with route data and reuses its loader for
     // refreshes. Invalidation exposes stale → fetching → fresh to the panel.
-    orders_query :: query.live("orders.list", "orders", json.to_string(loaded) ?? panic("JSON encode"), () -> {
+    orders_query := query.live<OrderError>("orders.list", "orders", json.to_string(loaded) ?? panic("JSON encode"), () -> {
         refreshed :: load_orders(route_search)
-        return Ok(json.to_string(refreshed) ?? return Err(err))
-    })
+        return Ok(json.to_string(refreshed) ?? return Err(OrderError{message: "orders do not encode as JSON"}))
+    }) ?? panic("orders query: {err.message}")
     stale_generation :: &orders_query.invalidate()
     query_state :: orders_query.state()
     query_text :: "{orders_query.show()} status={query_state.status}"
@@ -192,10 +194,11 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     server_page :: table.page_state(orders_table) ?? panic("server table page")
     pending_count :: server_page.total_rows
 
-    // A named store uses bounded history; transaction publishes one write and
-    // one typed diff that survives a compatible development reload.
+    // A named store uses bounded history; a write publishes one recorded
+    // transaction and one typed diff that survives a compatible development
+    // reload.
     cart := store.with_history("Cart", cart_seed(search), 8)
-    transaction :: store.transaction(&cart, "add-order", ["ids"], add_order_to_cart)
+    transaction :: &cart.set(add_order_to_cart(cart.value()))
     store_text :: cart.facts_json()
 
     search_link :: url.percent_encode(json.to_string(route_search) ?? panic("JSON encode"))

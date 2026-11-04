@@ -856,9 +856,12 @@ fn sema_web_form_method_member(method: String, arity: Int) -> String? Never! {
 
 // Only the native typed-model identity is routed here. Canonical source
 // forms records continue through ordinary source method/function checking.
+// The chain `form.validate(.field, on:, with:)` returns renders its result.
 fn sema_call_try_web_form_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if receiver_value.ty != (Type.Named{name: "WebFormTyped"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    member :: sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    chain :: receiver_value.ty == (Type.Named{name: "WebFormValidationChain"})
+    if !chain && receiver_value.ty != (Type.Named{name: "WebFormTyped"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if chain && (method != "render" || args.len() != 0) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    member :: if chain -> "typed_validation_render" else -> sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     updated_args := args
     // D-DX-FORM1=A: `form.validate(.field, on: timing, with: check)` binds its
     // two labels; the leading-dot field selector lowers to the ABI field name.

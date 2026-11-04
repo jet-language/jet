@@ -2,6 +2,10 @@
 // with their adapters; this stage only resolves the checked source collection.
 use {
     jet_foundation.[
+        AppRouteFile,
+        AppRouteRoot,
+        Expr,
+        ast_visit_body,
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
         CORE_BARE_SOURCE_MODULES,
@@ -4792,6 +4796,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     }
     jet_driver_expand_imported_cli_entry(&modules, source_units, entry_module_identity)
     modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, bare_modules)
+    jet_driver_attach_app_route_roots(&modules, source_units, request.authorized_sources)
     jet_driver_fill_line_starts(request, &source_units)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, generated_records)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
@@ -4872,4 +4877,91 @@ fn jet_driver_pascal_segment(part: String) -> String {
         out = "{out}{word.slice(0, 1).to_ascii_upper()}{word.slice(1, word.len())}"
     }
     out
+}
+
+// `.routes(from: "dir")` convention facts. The CLI's authorized snapshot
+// keeps every directory listing under the source root; each root a user
+// module names resolves against that module's directory, and the `.jet`
+// files below it, with whether each parses to a top-level `fn page`, go on
+// the module's Program for sema's App graph check. A file whose name starts
+// with `_` opts out of routing and is left out.
+fn jet_driver_attach_app_route_roots(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], snapshot: JetDriverAuthorizedSourceSnapshot) {
+    loop index in 0..<modules.len() {
+        unit_index :: modules[index].source_unit_index
+        if unit_index < 0 || unit_index >= source_units.len() -> next
+        unit :: source_units[unit_index]
+        if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() -> next
+        root :: snapshot.roots[unit.root_index]
+        if root.directories.len() == 0 || unit.file_index < 0 || unit.file_index >= root.files.len() -> next
+        names :: jet_driver_app_route_names(modules[index].program)
+        if names.len() == 0 -> next
+        directory :: jet_driver_parent_path(root.files[unit.file_index].path)
+        loop name in names -> &modules[index].program.app_route_roots.push(jet_driver_app_route_root(root, directory, name))
+    }
+}
+
+// The literal roots of every `.routes(from: "…")` call in the file, once each.
+fn jet_driver_app_route_names(program: Program) -> [String] {
+    names := [String]{}
+    loop item in program.items {
+        if item == .Func(function) -> ast_visit_body(function.body, (expression: Expr) -> jet_driver_note_app_route_name(&names, expression), false)
+    }
+    ast_visit_body(program.script_body, (expression: Expr) -> jet_driver_note_app_route_name(&names, expression), false)
+    names
+}
+
+fn jet_driver_note_app_route_name(names: &[String], expression: Expr) {
+    if expression == .MethodCall(_, method, _, _, _, args, _) {
+        if method != "routes" || args.len() != 1 -> return
+        if args[0].expr == .Str(parts, _, _) {
+            text := ""
+            loop part in parts {
+                if part == .Lit(value) { text = "{text}{value}" } else { return }
+            }
+            if !names.contains(text) -> &names.push(text)
+        }
+    }
+}
+
+fn jet_driver_app_route_root(root: JetDriverAuthorizedSourceRoot, directory: String, name: String) -> AppRouteRoot {
+    relative := name
+    if relative.starts_with("./") -> relative = relative.slice(2, relative.len())
+    if relative.ends_with("/") && relative.len() > 1 -> relative = relative.slice(0, relative.len() - 1)
+    target :: if relative.starts_with("/") -> relative else -> if directory == "/" -> "/{relative}" else -> "{directory}/{relative}"
+    files := [AppRouteFile]{}
+    found :: jet_driver_app_route_walk(root, target, "", &files)
+    &files.sort_by((left: AppRouteFile, right: AppRouteFile) -> left.path <=> right.path)
+    AppRouteRoot{root: name, found: found, files: files}
+}
+
+fn jet_driver_app_route_walk(root: JetDriverAuthorizedSourceRoot, directory: String, relative: String, files: &[AppRouteFile]) -> Bool {
+    loop listing in root.directories {
+        if listing.path != directory -> next
+        loop entry in listing.entries {
+            child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+            if entry.is_directory {
+                _ :: jet_driver_app_route_walk(root, entry.path, child, &files)
+                next
+            }
+            if !entry.name.ends_with(".jet") || (entry.name.starts_with("_") && entry.name_is_unicode) -> next
+            &files.push(AppRouteFile{path: child, has_page: jet_driver_app_route_has_page(root, entry.path)})
+        }
+        return true
+    }
+    false
+}
+
+// A page is the parsed top-level `fn page` declaration, never a text match,
+// so commented-out text does not count.
+fn jet_driver_app_route_has_page(root: JetDriverAuthorizedSourceRoot, path: String) -> Bool {
+    loop file in root.files {
+        if file.path != path -> next
+        parsed :: jet_driver_parse_user_source(file.source)
+        if jet_driver_has_errors(parsed.diagnostics) -> return false
+        loop item in parsed.program.items {
+            if item == .Func(function) && function.name == "page" -> return true
+        }
+        return false
+    }
+    false
 }
