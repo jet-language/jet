@@ -231,6 +231,30 @@ use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
 board and report any stale or duplicate server. Never touch the owner's
 personal notes or scratch files.
 
+## Adversarial design review
+
+This is a standing owner order. No design may be built, shipped, or described
+as better than existing solutions until an adversarial review has tried to
+break each of its claimed strengths. The review is a dated audit in
+`Docs/audits`. For every claim it:
+
+- names the strongest existing solutions and states their best case fairly,
+  with sources, including what they do that the design does not;
+- attacks the claim: hidden costs, cheating (an easier workload, a narrower
+  scope, a dropped feature, a deferred hard case), unhandled edge cases,
+  failure modes, tooling, migration and ecosystem gaps, and what the design
+  gives up;
+- checks the claim against code, a runnable probe, or a measurement wherever
+  one is possible, never prose alone;
+- ends with a verdict: holds, holds only within stated limits, or fails, and
+  puts every gap on a card or ballot.
+
+Missing context is a failed claim, not a pass. A design with a failed claim or
+an open gap stays unbuilt until it is redesigned and reviewed again. A ratified
+ballot authorizes the direction, not the claim; its build card names the
+passing review as its first criterion. Public text may call a design better
+only where a passing review backs that exact claim.
+
 ## Delegation
 
 Use the most specific agent available for each role. Workers do not spawn
