@@ -21,6 +21,8 @@ Tools/agent/jet-env jet run Tools/testkit -- cases --jet $JET --tier o0,o1 --fil
 | o1 | FAIL 17, KNOWN-FAILING 5, PASS 1545, REFUSED 2, SKIP-HOST 10, UNSUPPORTED 2 |
 | o2 | FAIL 20, KNOWN-FAILING 5, PASS 1542, REFUSED 2, SKIP-HOST 10, UNSUPPORTED 2 |
 
+Correction (2026-11-04, Docs/audits/ui-triage-2026-11): two of the o2 FAILs, memory/cache_line_padding and memory/stream_store, were mixed-tree artifacts: that o2 run read a source tree that did not match its compiler. On a git-archive export of 125e2e8f89 with the base compiler of that commit, both pass on o0, o1 and o2. errors/stack_overflow still fails at o2 (#6035 c17).
+
 ### Grouping table: every golden that does not pass on all tiers (#4599 c2)
 
 | test | o0 | o1 | o2 | first error | cause card |
@@ -42,8 +44,8 @@ Tools/agent/jet-env jet run Tools/testkit -- cases --jet $JET --tier o0,o1 --fil
 | lowlevel/ffi.jet | KNOWN-FAILING | KNOWN-FAILING | KNOWN-FAILING | #6366 ir.build unlowered: foreign import requires a checked direct C scalar signature (BuildForeign.jet:35); extern rust slot trampoline jet_ffi_<name>_cabi ... | #6366 |
 | lowlevel/opaque_handles/run.jet | FAIL | FAIL | FAIL | missing expected stream: Examples/features/expected/lowlevel/opaque_handles | none: no expected output is checked in |
 | lowlevel/polyglot_go/run.jet | KNOWN-FAILING | KNOWN-FAILING | KNOWN-FAILING | #6418 `jet inspect bind` reports E2104 not built yet; `use go.handles` reports E1002 (foreign root `go` reserved): exit 2; expected 0 | #6418 |
-| memory/cache_line_padding.jet | PASS | PASS | FAIL | Error [jet.ReservedPackedLayout]: `align` requires one integer byte value (or `target, N`) | none (new) |
-| memory/stream_store.jet | PASS | PASS | FAIL | Error [jet.UnknownCoreItem]: `core.mem` has no item `stream_store` | none (new) |
+| memory/cache_line_padding.jet | PASS | PASS | PASS | none: the o2 FAIL (jet.ReservedPackedLayout on `align`) was a mixed-tree artifact; passes on 125e2e8f89 | none |
+| memory/stream_store.jet | PASS | PASS | PASS | none: the o2 FAIL (jet.UnknownCoreItem `core.mem` has no item `stream_store`) was a mixed-tree artifact; passes on 125e2e8f89 | none |
 | net/backend_battery/run.jet | KNOWN-FAILING | KNOWN-FAILING | KNOWN-FAILING | #3173 ir.build unlowered: `jet run` is an internal compiler error (exit 101): the `HTTPRouterRegister` handle method and the `jet_http_router_dispatch`/`jet_... | #3173 |
 | packages/mod_load_errors.jet | KNOWN-FAILING | UNSUPPORTED | UNSUPPORTED | #4599 `mod.load` is not built yet (E2104): exit 1; expected 0 | #4599 |
 | serde/field_metadata_edges.jet | KNOWN-FAILING | KNOWN-FAILING | KNOWN-FAILING | expected `missing optional+default: {"name":"Ada","city":"Reno","zip":"89501","nickname":null,"visits":0}`, got `missing optional+default: {"name":"Ada","city":"Reno","zip":"89501","visits":0}` | #3236 |
@@ -570,8 +572,8 @@ PROBES.md lists every probe under `probes/` with its command, exit code and outp
 
 1. Use after free: `fn first_two(xs: [Int]) -> [Int] { xs[0..2] }` called on a temporary (`first_two([7, 8, 9])`) is accepted and prints a freed value, such as `[7, 1400…]`, on `jet run` and `--release` (probes/c4717_81_temporary_refused.jet).
 2. o2 only: errors/stack_overflow prints "Stop [E3012]: Stack overflow in `??`" and loses the `--> stack_overflow.jet:2 in recurse` frame.
-3. o2 only: memory/cache_line_padding stops with jet.ReservedPackedLayout (E1105) on `align($build.cpu.cache_line)`.
-4. o2 only: memory/stream_store stops with jet.UnknownCoreItem (E1004): "`core.mem` has no item `stream_store`".
+3. Withdrawn: memory/cache_line_padding failed at o2 only in a mixed-tree run; it passes on o0, o1 and o2 on 125e2e8f89.
+4. Withdrawn: memory/stream_store failed at o2 only in a mixed-tree run; it passes on o0, o1 and o2 on 125e2e8f89.
 5. Testkit: io/path fails on every tier because the testkit runs a staged copy, and `Path.from("Examples/features/io").walk()` is relative to the working directory. The discovery example run passes it.
 6. Testkit refuses tests/run/ownership/runtime_disjoint_proof_reports_bounds_and_duplicates_before_mutation.jet and its `_2` twin: "line 4: invalid stream assertion or missing partial reason".
 7. Writing a captured value after a copying lambda captured it gives no warning (probes/c4717_75_write_after_lambda_copy.jet): `jet check` is clean, and the run prints 1 then 2.
