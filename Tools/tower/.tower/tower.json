@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90450,
+    "rev": 90455,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34800,6 +34800,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T17:59:40.220Z"
+        },
+        {
+          "n": 16,
+          "text": "Tools/agent/check-core-surface-ledger.mjs reads the Tower board from both Tools/tower/.tower/tower.json and history.json (towerBoard, towerCards, validateOwners), so archived ratified decisions and archived done cards resolve. On dev, node Tools/agent/check-core-surface-ledger.mjs --check no longer stops with 'declined row names an unknown decision: D-STR-DECLINE1'. The rows declined under D-STR-DECLINE1, D-SET-DECLINE1 and D-CORESURF-SMALL1 validate, an archived done owner card counts as closed rather than missing, and --hostile-fixtures still rejects a declined row whose decision is open or absent from both files.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:14:03.325Z"
         }
       ],
       "refs": [],
@@ -34812,7 +34821,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-04T18:57:41.409Z",
+      "updated": "2026-11-04T20:14:03.325Z",
       "updatedBy": "Main",
       "claimedAt": "2026-10-28T11:33:29.844Z",
       "goals": []
@@ -61583,6 +61592,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T19:47:14.843Z"
+        },
+        {
+          "n": 18,
+          "text": "The three ui rows that passed and then failed are green again: cell_guard_storage (E0217 at 12:13 missing), typestate_unknown_state and typestate/unknown_state_in_marker_is_e0151 (E0150 missing after E0151). They passed in ui-UiGreen15 (2026-10-31 17:34Z) and failed from ui-UiGreen16 (17:58Z); the cause is bisected to its commit and fixed at the root (Prep-2 ui triage, 2026-11-04).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:14:03.786Z"
         }
       ],
       "refs": [
@@ -61598,7 +61616,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-04T19:56:38.117Z",
+      "updated": "2026-11-04T20:14:03.786Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -61894,6 +61912,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T20:14:02.338Z"
+        },
+        {
+          "n": 26,
+          "text": "D-DERIVE-PROVIDER1 A (ratified 2026-11-04; amends c12, depends on c10): a derive with no trait is a field-less marker struct with impl Marker { sites :: [.Type] } and an expand(self, target: Target) template that writes impl $target { ... }. Writing #DebugText on a type is unchanged. Every derive T.X provider in Examples, tests and Tools/perf (41 files today) is converted, and Examples/features/serde/user_derive.jet has goldens on o0, o1 and o2. jet fix picks the form by whether a trait of that name exists, with a ui_fixes case for both forms. The golden, UI and cases compares lose 0 rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T20:14:02.935Z"
         }
       ],
       "refs": [
@@ -61908,7 +61935,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-04T20:14:02.338Z",
+      "updated": "2026-11-04T20:14:02.935Z",
       "updatedBy": "Main",
       "goals": [
         "G17"
@@ -70799,6 +70826,11 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "I9 note (Main, 2026-11-04): with accumulate, a deep but finite recursion that the pass rewrites can finish at O1 and O2 where O0 stops with E3012 (stack exhausted). Main treats stack depth as a resource limit, not program meaning, because depth already differs by frame size per tier, so no depth bound was added. Raised with the owner, who may overrule it."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "The recovered OptAccumulate.jet is now in the repo at Tools/tower/held/6414/ (landed e07c1b85ae). c37 integrates it; the Recover lane takes it after #6312 c5."
         },
         {
@@ -71300,11 +71332,11 @@
         {
           "n": 37,
           "text": "The recovered OptAccumulate work (Tools/tower/held/6414/, an unwired recognizer that turns one recursion shape into an accumulator loop, with no tests or measurements) is integrated: reworked into the general associative-operation tail-accumulation pass the structural-codegen order requires, wired into O1/O2, with a #Test per shape and a same-run measurement against the plain recursion on the gauntlet cells it affects.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:35:59.139Z"
+          "evidence": "Landed c865bb06e2 on dev (Recover-accumulate; receipt /mnt/jetscratch/lanes/Main/land/Recover-accumulate.receipt.md). The recovered OptAccumulate is the general pass accumulate (exact Int + * and bit ops, wrapping word + *, word or/xor, signed-word and), wired after bottom_up in O1 and O2. It rewrites only recursions that provably end at a parameter test against a constant. Chain FIXED_POINT (974e8d07); jet test Compiler/JetIR 53/53 including 12 accumulate #Tests; Examples/features/math/accumulating_recursion passes on o0, o1 and o2; O0 golden census 0 lost (+1); O1 census identical with the pass on and off; cases identical; lane-check CHECK OK. Same-run measurement (median of 7, on versus JET_OPT_DISABLE=accumulate): all 58 gauntlet and asm-parity binaries are identical, so no cell is affected; triangle runs at 0.219x cycles at O1 and 0.243x at O2; fib is refused (two self calls). Tools/tower/held/6414/ is retired.",
+          "at": "2026-11-04T20:14:56.079Z"
         }
       ],
       "refs": [],
@@ -71316,7 +71348,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-04T18:47:19.268Z",
+      "updated": "2026-11-04T20:14:56.586Z",
       "updatedBy": "Main"
     },
     {
@@ -157073,6 +157105,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T20:14:56.586Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i891tv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T20:14:56.079Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-04T20:14:03.786Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#18 The three ui rows that passed and then failed are green agai"
+    },
+    {
+      "at": "2026-11-04T20:14:03.325Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03ai7mm",
+      "note": "#16 Tools/agent/check-core-surface-ledger.mjs reads the Tower bo"
+    },
+    {
+      "at": "2026-11-04T20:14:02.935Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03pi177",
+      "note": "#26 D-DERIVE-PROVIDER1 A (ratified 2026-11-04; amends c12, depen"
+    },
     {
       "at": "2026-11-04T20:14:02.338Z",
       "by": "Main",
