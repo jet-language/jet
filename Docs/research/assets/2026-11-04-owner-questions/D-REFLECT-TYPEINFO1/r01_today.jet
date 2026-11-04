@@ -1,0 +1,19 @@
+// Today's built reflection reads: a type while compiling, a value while running.
+use reflect :: core.reflect
+
+struct Rock {
+    size: Float{1.0}
+    hard: Bool{true}
+}
+
+ROCK_FIELDS :: comptime { Rock.$fields.len() }
+
+fn run() {
+    print("Rock has {ROCK_FIELDS} fields")
+    rock :: Rock{size: 1.5}
+    v :: reflect.of(rock)
+    print(v.type_name())
+    loop f in v.fields() -> print("{f.name()} = {f.value().display()}")
+    print(reflect.of(Rock{}).type_name())
+    print(reflect.of(Rock{}).display())
+}

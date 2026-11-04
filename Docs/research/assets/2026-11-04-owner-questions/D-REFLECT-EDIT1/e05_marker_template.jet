@@ -1,0 +1,38 @@
+// Option A's engine code, as written in the ballot, in one file.
+pub trait Edit {
+    fn set(&self, field: String, text: String) -> Bool
+}
+
+struct Entity {
+    impl Marker {
+        sites :: [.Type]
+        fn expand(self, target: Target) {
+            impl #{target}.Edit {
+                fn set(&self, field: String, text: String) -> Bool {
+                    loop f in target.fields {
+                        if field == f.name -> {
+                            self.#{f} = #{f.type}.parse(text) ?? return false
+                            return true
+                        }
+                    }
+                    false
+                }
+            }
+        }
+    }
+}
+
+#Entity
+struct Rock {
+    size: Float{1.0}
+}
+
+fn edit<T: Edit>(value: &T, field: String, text: String) -> Bool {
+    value.set(field, text)
+}
+
+fn run() {
+    rock := Rock{}
+    edit(&rock, "size", "2.0")
+    print(rock.size)
+}
