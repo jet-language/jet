@@ -84,23 +84,6 @@ fn host_stdout_flush_locked() -> I64 {
     }
 }
 
-fn host_stdout_byte_locked(byte: I64) -> I64 {
-    #Unsafe("the caller holds the output lock; each byte stays within the 8192-byte mapping-owned buffer") {
-        length :: os_load_i64(wrapping(host_root + I64{8}))
-        if (length == I64{8192}) {
-            failure :: host_stdout_flush_locked()
-            if (failure != I64{0}) { return failure }
-        }
-        used :: os_load_i64(wrapping(host_root + I64{8}))
-        os_store_u8(wrapping(host_root + I64{128} + used), byte)
-        os_store_i64(wrapping(host_root + I64{8}), wrapping(used + I64{1}))
-        if (used == I64{8191} || (byte == I64{10} && os_load_i64(wrapping(host_root + I64{16})) != I64{0})) {
-            return host_stdout_flush_locked()
-        }
-    }
-    I64{0}
-}
-
 // Bytes are borrowed, never copied into an intermediate String/line
 // allocation. They go into the 8192-byte buffer a run at a time (a word copy):
 // a full buffer is written out, and on a terminal so is each run that ends in
@@ -133,8 +116,25 @@ fn host_stdout_write(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
                 pending = os_load_i64(wrapping(host_root + I64{8}))
             }
         }
+        // print's LF joins the same pass: a full buffer is written out
+        // first, and the LF flushes on a terminal or when it fills the buffer.
+        if (failure == I64{0} && line) {
+            if (pending == I64{8192}) {
+                os_store_i64(wrapping(host_root + I64{8}), pending)
+                failure = host_stdout_flush_locked()
+                pending = os_load_i64(wrapping(host_root + I64{8}))
+            }
+            if (failure == I64{0}) {
+                os_store_u8(wrapping(host_root + I64{128} + pending), I64{10})
+                pending = wrapping(pending + I64{1})
+                if (pending == I64{8192} || tty) {
+                    os_store_i64(wrapping(host_root + I64{8}), pending)
+                    failure = host_stdout_flush_locked()
+                    pending = os_load_i64(wrapping(host_root + I64{8}))
+                }
+            }
+        }
         if (failure == I64{0}) { os_store_i64(wrapping(host_root + I64{8}), pending) }
-        if (failure == I64{0} && line) { failure = host_stdout_byte_locked(I64{10}) }
         if (failure == I64{0} && flush) { failure = host_stdout_flush_locked() }
     }
     sync_sole_exit(host_root, sole)
