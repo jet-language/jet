@@ -529,9 +529,11 @@ struct SemaRegistrationModuleInput {
     foreign_handles: [SemaRegistrationForeignHandleFacts]
     // Filled by the loader: the package namespace of a member
     // file ("" outside one), the names it contributes in declaration order,
-    // and the names of other members its source can reach.
+    // the names it keeps to itself (a named entry's or a command home's own
+    // command function), and the names of other members its source can reach.
     namespace: String{""}
     namespace_names: [String]{[String]{}}
+    namespace_private: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
     // The module's source text (Rust `Module::source`). A declared text block
     // hands the text inside its braces to its rule.
@@ -607,6 +609,7 @@ struct SemaRegistrationModule {
     namespace: String{""}
     namespace_slot: Int{-1}
     namespace_names: [String]{[String]{}}
+    namespace_private: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
     namespace_import_split: Int{-1}
     namespace_full: Bool{false}
@@ -2604,6 +2607,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
         declared_trait_impls: [String:Bool]{},
         namespace: owned.namespace,
         namespace_names: owned.namespace_names,
+        namespace_private: owned.namespace_private,
         namespace_refs: owned.namespace_refs,
         // Items expanded from a template declared in another module spell
         // names its own source never does: every namespace name binds.
@@ -3991,14 +3995,17 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
 // A package name binds after the module's own declarations
 // and the imports registered before the package names (`import_count` of
 // them), as Rust consults `namespace_owner` last. A name one of those already
-// binds stays theirs. A declaration of a package name is refused (E0105), and
-// so is an imported item of a package function's name unless it imports that
-// very function; a module alias or an imported type shadows the package name,
-// as in Rust.
+// binds stays theirs. A declaration of a package name is refused (E0105),
+// unless the module keeps that name to itself (`namespace_private`: a named
+// entry's or a command home's own command function, which the loader leaves
+// out of the namespace), and so is an imported item of a package function's
+// name unless it imports that very function; a module alias or an imported
+// type shadows the package name, as in Rust.
 fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_index: Int, import_count: Int) {
     if graph.modules[module_index].namespace_slot < 0 -> return
     loop position in 0..<graph.modules[module_index].symbols.len() {
         name :: graph.modules[module_index].symbols[position].name
+        if graph.modules[module_index].namespace_private.contains(name) -> next
         if sema_registration_namespace_owner(graph, module_index, name) == None -> next
         span :: graph.modules[module_index].symbols[position].span
         sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(name, "imported names share the module namespace", span))

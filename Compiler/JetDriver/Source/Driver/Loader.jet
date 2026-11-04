@@ -109,6 +109,7 @@ use {
         pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
         pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
     ]
+    jetpack_foundation.[DEFAULT_ENTRY_FILE]
 }
 
 // The one language edition (greenfield: one meaning, no edition-gated behaviour).
@@ -988,8 +989,8 @@ struct JetDriverInlineCarrier {
 }
 
 // The entry root's inline Package carrier (Rust Loader `load_file`): the
-// entry's own block, else the stock entry `main.jet` / `src/main.jet` that
-// carries one (`find_inline_package_root_checked`). A structure failure
+// entry's own block, else the stock entry `run.jet` / `src/run.jet`
+// (DEFAULT_ENTRY_FILE) that carries one (`find_inline_package_root_checked`). A structure failure
 // (E1360/E1361/E1362) or a carrier beside `package.jet` (E1363) is reported
 // at the carrier's path and selects no carrier.
 fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, root_index: Int, has_manifest: Bool, diagnostics: &[Diagnostic]) -> JetDriverInlineCarrier? {
@@ -1003,7 +1004,7 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
     }
     candidates := [Int]{}
     if entry_index >= 0 -> &candidates.push(entry_index)
-    stock_entries :: [String]{"main.jet", "src/main.jet"}
+    stock_entries :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
     loop stock in stock_entries {
         loop (file_index, file) in root.files {
             if file.relative_path == stock && file_index != entry_index -> &candidates.push(file_index)
@@ -1548,12 +1549,16 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
         root :: snapshot.roots[root_index]
         package :: packages[root_index]
         loop (file_index, file) in root.files {
-            // The explicitly selected entry is a source whatever its suffix
-            // (the CLI authorizes it by name); every other file must be `.jet`.
-            // A manifest-declared Config composes package facts and is never a
-            // source unit (Rust Package/mod.rs `source_files_checked`).
+            // The explicitly selected entry is a source whatever its name or
+            // suffix (the CLI authorizes it by name); every other file must be
+            // `.jet`. Project configuration (`package.jet`, `workspace.jet`,
+            // `env.jet`; spec "Project configuration") and a manifest-declared
+            // Config compose project facts and are never source units (Rust
+            // Package/mod.rs `source_files_checked`). A `package.jet` is
+            // manifest syntax, so it is no source even when selected.
             selected_entry :: root.identity == snapshot.entry_root_identity && file.path == snapshot.entry_path
-            if file.relative_path == "package.jet" || file.relative_path == "jet.toml" || package.configs.contains(file.relative_path) || (!file.relative_path.ends_with(".jet") && !selected_entry) -> next
+            configuration :: jet_driver_is_project_configuration(file.relative_path) && (!selected_entry || jet_driver_path_leaf(file.relative_path) == "package.jet")
+            if configuration || file.relative_path == "jet.toml" || package.configs.contains(file.relative_path) || (!file.relative_path.ends_with(".jet") && !selected_entry) -> next
             unit_path :: jet_driver_display_path(entry_root, file.path)
             &source_units.push(JetDriverSourceUnit{
                 root_index: root_index,
@@ -2216,13 +2221,22 @@ fn jet_driver_unit_is_loose(unit: JetDriverSourceUnit) -> Bool Never! {
 }
 
 // A package is one namespace. Every `.jet` source of a
-// manifest package belongs to it except the package's payload and workspace
-// modules; loose files and embedded Core modules have no namespace.
+// manifest package belongs to it except the package's payload module and its
+// project configuration; loose files and embedded Core modules have no namespace.
 fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never! {
     if !unit.in_namespace -> return false
     parts := unit.relative_path.split("/").to_list()
     file_name :: &parts.pop() ?? ""
-    file_name != "pkg.jet" && file_name != "workspace.jet"
+    file_name != "pkg.jet" && !jet_driver_is_project_configuration(unit.relative_path)
+}
+
+// The project configuration files (spec "Project configuration"): a
+// `package.jet`, `workspace.jet` or `env.jet` at any depth configures its
+// project, never as package source (Rust Package/mod.rs `source_files_checked`).
+fn jet_driver_is_project_configuration(relative_path: String) -> Bool Never! {
+    parts := relative_path.split("/").to_list()
+    file_name :: &parts.pop() ?? ""
+    file_name == "package.jet" || file_name == "workspace.jet" || file_name == "env.jet"
 }
 
 // A file with a top-level `module workspace` declaration is workspace
@@ -2624,8 +2638,10 @@ fn jet_driver_path_leaf(path: String) -> String Never! {
 
 // Make every package one namespace. A name declared in two
 // member files is E0624 and a library package declaring `fn run` is E0625.
-// Each member records its package (`namespace`) and the names it contributes
-// (`namespace_names`); semantic registration keeps ONE name -> declaring
+// Each member records its package (`namespace`), the names it contributes
+// (`namespace_names`) and the command functions it keeps to itself
+// (`namespace_private`, which sema doesn't refuse as E0105 against a
+// sibling's same name); semantic registration keeps ONE name -> declaring
 // member table per package and consults it after a module's own
 // declarations and imports (Rust `NameLedger::namespace_owner`). No member
 // receives import rows or edges for its siblings.
@@ -2669,11 +2685,16 @@ fn jet_driver_bind_package_namespaces(
                 else -> ""
             }
             member_names := [NamedSpan]{}
+            member_private := [String]{}
             loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
-                if (named_entry && declared.name == "run") || declared.name == role_command -> next
+                if (named_entry && declared.name == "run") || declared.name == role_command {
+                    &member_private.push(declared.name)
+                    next
+                }
                 &member_names.push(declared)
             }
             &names.push(member_names)
+            modules[module_index].namespace_private = member_private
         }
         owners := [String:Int]{}
         loop position in 0..<names.len() {

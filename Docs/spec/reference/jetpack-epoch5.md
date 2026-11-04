@@ -401,8 +401,8 @@ prerequisite stops the affected dependent graph.
 
 Built-in presets use one constructor registry for package reference,
 executable, port, argument vector, readiness, and state setup. For example,
-`postgres` uses `postgresql@nixpkgs`, `.jet/services/postgres/data`, loopback
-port 5432, and `pg_isready`; `redis` uses `redis@nixpkgs`,
+`postgres` uses `postgresql@jetpack`, `.jet/services/postgres/data`, loopback
+port 5432, and `pg_isready`; `redis` uses `redis@jetpack`,
 `.jet/services/redis/data`, loopback port 6379, and `redis-cli -p 6379 ping`.
 Explicit `ports`, `run`, or `ready` values override only the corresponding
 preset fact.

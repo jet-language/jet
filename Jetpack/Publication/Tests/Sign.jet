@@ -14,7 +14,10 @@ use {
     sys :: core.sys
 }
 
-PUBLICATION_SIGN_E1292_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr") }
+// The text of tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr,
+// which the CLI keygen cases compare their stderr with. It is written here because an
+// embed may not leave this package (E0957).
+PUBLICATION_SIGN_E1292_SNAPSHOT :: "Error [jet.MissingRandomness]: Jet could not create the package-signing key.\n Why: The operating system could not provide cryptographic randomness.\n Fix: Retry as a new operation on a supported host; no key files were created.\nMore: jet-lang.dev/e/E1292\n"
 
 #Test("publication sign hex_roundtrips") {
     data :: [U8]{0, 1, 2, 250, 255, 16, 128}
@@ -42,7 +45,7 @@ PUBLICATION_SIGN_E1292_SNAPSHOT :: comptime { embed_file("../../../tests/fixture
     assert_eq(actual, "/tmp/jet_keys_test_dir")
 }
 #Test("publication sign e1292_command_frame_is_exact") {
-    // The CLI keygen cases compare their stderr with this same fixture.
+    // The CLI keygen cases compare their stderr with the same text.
     assert_eq(diagnostic_render(publication_e1292(), "", "", false), PUBLICATION_SIGN_E1292_SNAPSHOT)
     assert_eq(publication_e1292().code, "E1292")
 }

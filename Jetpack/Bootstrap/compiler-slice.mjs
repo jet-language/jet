@@ -19,17 +19,67 @@ function listed(text) {
   return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !line.startsWith("#"));
 }
 
-// Code only: comments and string contents never name a dependency.
+// Code only: comments and the contents of string and raw string literals never
+// name a dependency. A run of N backticks opens a raw string and the next run of
+// exactly N closes it; a raw string's text keeps its quotes and slashes.
 function code(text) {
-  return text.replace(/\/\/[^\n]*/g, "").replace(/"""[\s\S]*?"""/g, '""').replace(/"(?:[^"\\\n]|\\.)*"/g, '""');
+  let out = "";
+  let at = 0;
+  const run = (from, mark) => { let end = from; while (text[end] === mark) end += 1; return end - from; };
+  while (at < text.length) {
+    if (text.startsWith("//", at)) {
+      const end = text.indexOf("\n", at);
+      at = end < 0 ? text.length : end;
+    } else if (text[at] === "`") {
+      const count = run(at, "`");
+      let close = at + count;
+      while (close < text.length && (text[close] !== "`" || run(close, "`") !== count)) close += text[close] === "`" ? run(close, "`") : 1;
+      out += '""';
+      at = Math.min(text.length, close + count);
+    } else if (text.startsWith('"""', at)) {
+      const end = text.indexOf('"""', at + 3);
+      out += '""';
+      at = end < 0 ? text.length : end + 3;
+    } else if (text[at] === '"') {
+      let end = at + 1;
+      while (end < text.length && text[end] !== '"' && text[end] !== "\n") end += text[end] === "\\" ? 2 : 1;
+      out += '""';
+      at = text[end] === '"' ? end + 1 : end;
+    } else {
+      out += text[at];
+      at += 1;
+    }
+  }
+  return out;
 }
 
 function declarations(text) {
   return [...code(text).matchAll(DECLARATION)].map((match) => ({ name: match[2] ?? match[3], fn: match[1] === "fn" }));
 }
 
+// An enum's variants: the names that open its body's top-level entries.
+function variants(source) {
+  const names = [];
+  for (const body of source.matchAll(/^(?:pub\s+)?enum\s+[A-Za-z_][A-Za-z0-9_]*[^{\n]*\{\n([\s\S]*?)^\}/gm)) {
+    let depth = 0;
+    let entry = true;
+    for (const token of body[1].matchAll(/[A-Za-z_][A-Za-z0-9_]*|[(){}[\],\n]/g)) {
+      const text = token[0];
+      if ("({[".includes(text)) depth += 1;
+      else if (")}]".includes(text)) depth -= 1;
+      else if (text === "," || text === "\n") entry = entry || depth === 0;
+      else if (entry && depth === 0) {
+        if (/^[A-Z]/.test(text)) names.push(text);
+        entry = false;
+      }
+    }
+  }
+  return names;
+}
+
+// The names a unit file declares: its top-level declarations and its enums' variants.
 function declared(text) {
-  return declarations(text).map((row) => row.name);
+  return [...declarations(text).map((row) => row.name), ...variants(code(text))];
 }
 
 // A function is used only when called; a same-named local binding is not a use.

@@ -1,5 +1,0 @@
-# #5971 held patch (Main-13)
-
-| Item | File | Base | State | Next step |
-|---|---|---|---|---|
-| Main-13 | `Main-13-parked.patch`, `Main-13-parked.msg` | 26fa6cd102 (applies to 348c3649f1) | Parked, not landable. Sema routes a fixed-to-fixed narrowing that the destination may not hold through the exact Int and CheckedIntToFixed, so it stops with E3010 as a narrowing from Int does. Wave 37 found 2 real regressions: `web_build/web_decimal_and_grouped_formatters_use_shared_helpers` and `checked_text/html_composition_matches_aot_jit_interpreter_and_web`. Root: Compiler/JetRuntime/Source/Int.jet:146 `int_fits` does `U64{int_limb(value, at)}`, which becomes checked, calls `jet_int_checked_fixed`, which calls `int_fits`. That is infinite recursion | Give the runtime its own raw cast: an owner-ratified spelling, or a sanctioned runtime-internal raw cast (#5971 c12). Then rerun the two cases, `numeric_widening/fixed_narrowing_stops_like_int` and the `math/fixed_narrowing_stop` golden on o0, o1 and o2 |

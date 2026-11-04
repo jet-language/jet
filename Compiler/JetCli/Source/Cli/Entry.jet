@@ -800,18 +800,15 @@ fn jet_cli_find_project_entry_at(root_path: String, command: String, color: Bool
         }
         // Without `run.jet`, the member declaring the
         // package's one `fn run` is the entry; a library package has none,
-        // and its first source file stands for the package.
+        // and its first source file (never project configuration such as
+        // `env.jet`) stands for the package.
         if !cli_files.is_file(jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)) {
             if run_member && jet_cli_package_run_member(root) == .Val(member) {
                 return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: member, callable: None}}
             }
             files := [JetDriverAuthorizedSourceFile]{}
-            if jet_cli_discover_sources(root, &files) == .None {
-                loop file in files {
-                    if jet_cli_file_name(file.relative_path) != JET_CLI_PACKAGE_FILE {
-                        return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: file.path, callable: None}}
-                    }
-                }
+            if jet_cli_package_sources(root, &files) == .None && files.len() > 0 {
+                return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: files[0].path, callable: None}}
             }
         }
     }

@@ -216,12 +216,10 @@ async function readManifest(name) {
 // Registration/inventory still sees the fixed entry in ordinary modes, but
 // only the internal publication artifact emits it.
 const registeredSources = await readManifest("sources.list");
-// The compiler slice is closed under the compiler's packages; a use that only an
-// unlisted slice-package member file declares fails the assembly.
+// The compiler slice is closed under the compiler's packages and reaches no
+// compiler package outside it; any drift fails the assembly.
 const sliceDrift = compilerSliceDrift(sourceRootDir);
-const sliceFailures = sliceDrift.filter((problem) => !problem.includes("outside the compiler slice"));
-if (sliceFailures.length > 0) fail(`the Jetpack compiler slice drifted from the compiler's packages:\n${sliceFailures.map((problem) => `  ${problem}`).join("\n")}`);
-for (const problem of sliceDrift.filter((problem) => problem.includes("outside the compiler slice"))) console.log(`note: ${problem}`);
+if (sliceDrift.length > 0) fail(`the Jetpack compiler slice drifted from the compiler's packages:\n${sliceDrift.map((problem) => `  ${problem}`).join("\n")}`);
 const sources = registeredSources.filter((entry) => mode === "publication" || entry.sourcePath !== PUBLICATION_ENTRY);
 if (mode === "publication" && registeredSources.filter((entry) => entry.sourcePath === PUBLICATION_ENTRY).length !== 1) {
   fail(`internal publication requires exactly one Engine registration of ${PUBLICATION_ENTRY}`);
