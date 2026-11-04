@@ -15,10 +15,12 @@
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
 // form; pretty JSON contains newlines and would break the line protocol.
-use core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
-use core.encoding.json as json
-use __core_encoding_stream as stream
-use core.files.[FileReader, FileWriter]
+use {
+    core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
+    json :: core.encoding.json
+    stream :: __core_encoding_stream
+    core.files.[FileReader, FileWriter]
+}
 
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
 struct JSONLWriter {

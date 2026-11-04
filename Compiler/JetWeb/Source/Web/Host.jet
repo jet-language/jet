@@ -252,6 +252,7 @@ class Host {
     this.files = new Map();
     this.lines = ["", "", ""];
     this.outcome = null;
+    this.dom = false;
     crypto.getRandomValues(new Uint8Array(this.memory.buffer, AUX_RANDOM, 16));
     this.u8().set(encoder.encode("name resolution is unavailable to a web program\0"), GAI_TEXT);
   }
@@ -263,6 +264,11 @@ class Host {
     host.rt = (await host.instantiate(new URL(host.runtime.module, base), {})).exports;
     host.app = (await host.instantiate(url, { rt: host.rt })).exports;
     host.enter(() => host.rt.jet_web_init());
+    // A page (or a DOM harness) shows the core.ui scene the program paints.
+    if (globalThis.document?.createElement && globalThis.document.body) {
+      host.dom = true;
+      host.enter(() => host.rt.jet_ui_web_attach());
+    }
     const [argc, argv, envp] = host.place(args, environment);
     host.enter(() => host.rt.jet_rt_host_arguments(BigInt(argc), BigInt(argv), BigInt(envp)));
     return host;
@@ -333,8 +339,74 @@ class Host {
       this.rt.jet_web_fini();
       this.flushLines();
       this.outcome = status;
+      this.paintScene();
     });
     return this.outcome;
+  }
+
+  // The scene the runtime's last core.ui paint recorded (UiBackends.jet), as
+  // the children of `#jet-app`: a button for a Button, an input for a
+  // TextInput, a span for a Text and a div for any other leaf, each placed
+  // at its frame. An element with a click slot runs its handler on click.
+  paintScene() {
+    if (!this.dom || this.rt.jet_ui_web_scene_take() === 0n) return;
+    const doc = globalThis.document;
+    let root = doc.getElementById("jet-app");
+    if (!root) {
+      root = doc.createElement("div");
+      root.id = "jet-app";
+      root.style.position = "relative";
+      doc.body.appendChild(root);
+    }
+    for (const child of Array.from(root.children)) child.remove();
+    const at = Number(this.rt.jet_ui_web_scene_data());
+    const bytes = this.u8().slice(at, at + Number(this.rt.jet_ui_web_scene_length()));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const fields = [];
+      while (fields.length < 8) {
+        const end = bytes.indexOf(9, offset);
+        fields.push(decoder.decode(bytes.subarray(offset, end)));
+        offset = end + 1;
+      }
+      const [kind, slot, x, y, width, height, color, length] = fields;
+      const label = decoder.decode(bytes.subarray(offset, offset + Number(length)));
+      offset += Number(length) + 1;
+      const tag = kind === "3" ? "button" : kind === "4" ? "input" : kind === "1" ? "span" : "div";
+      const element = doc.createElement(tag);
+      element.style.position = "absolute";
+      element.style.left = x + "px";
+      element.style.top = y + "px";
+      element.style.width = width + "px";
+      element.style.height = height + "px";
+      if (color !== "" && tag !== "span") element.style.background = color;
+      if (tag === "input") element.value = label;
+      else element.textContent = label;
+      const id = Number(slot);
+      if (id !== 0) element.addEventListener("click", () => this.click(id));
+      root.appendChild(element);
+    }
+  }
+
+  // A click on a scene element after the program's run returned 0: runs the
+  // element's handler, drains stdout, then shows the scene it painted.
+  click(id) {
+    if (this.outcome !== 0) return;
+    try {
+      this.rt.jet_ui_web_click(BigInt(id));
+      this.rt.jet_rt_stdout_flush();
+    } catch (error) {
+      this.flushLines();
+      if (error instanceof JetHostExit) {
+        this.outcome = error.status;
+        return;
+      }
+      this.outcome = TRAP_STATUS;
+      this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
+      throw this.error;
+    }
+    this.flushLines();
+    this.paintScene();
   }
 
   // The argument and environment strings and their pointer arrays at the top

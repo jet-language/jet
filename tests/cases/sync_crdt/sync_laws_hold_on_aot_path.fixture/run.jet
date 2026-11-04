@@ -1,6 +1,8 @@
 
-use core.sync as sync
-use app
+use {
+    sync :: core.sync
+    app
+}
 
 fn run() {
     // Three replicas edit one document while apart.  Comparing the two merge
@@ -47,17 +49,6 @@ fn run() {
     counter :: sync.counter_inc(counter0, "r1", 3)
     merged_counter :: sync.counter_merge(counter, counter)
     print("counter_idempotent:{sync.counter_value(merged_counter)}")
-
-    invalid :: sync.policy_new("tickets", "owner == admin")
-    if invalid == {
-        .Ok(_) -> { print("invalid_policy:accepted") }
-        .Err(_) -> { print("invalid_policy:rejected") }
-    }
-    policy :: sync.policy_new("tickets", "owner == user") ?? panic("policy")
-    print("owner_allowed:{sync.policy_allows(policy, "alice", "alice")}")
-    print("owner_denied:{sync.policy_allows(policy, "alice", "bob")}")
-    public :: sync.policy_new("public", "true") ?? panic("public policy")
-    print("public_allowed:{sync.policy_allows(public, "alice", "bob")}")
 
     invalid_text :: sync.text_new("", "x")
     print("invalid_text:{sync.text_show(invalid_text)}")

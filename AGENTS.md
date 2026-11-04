@@ -163,6 +163,12 @@ not a naive transliteration. A cell without a reference is uncovered and fails
 the gate, and a peer win never closes a cell whose ceiling is unmet. A better
 technique replaces the reference and raises the target.
 
+The ceiling delivers the same features as the Jet program. Where a Jet feature
+(diagnostics, safety checks, fault reports) physically costs bytes or cycles,
+the reference includes the smallest hand-written implementation of that
+feature. Jet minimizes each feature's cost and never removes a feature to meet
+the ceiling.
+
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
 area: web, games, CLI and scripts, data analysis, backend services, GUI
@@ -224,6 +230,33 @@ Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
 board and report any stale or duplicate server. Never touch the owner's
 personal notes or scratch files.
+
+## Adversarial design review
+
+This is a standing owner order. No design may be built, shipped, or described
+as better than existing solutions until an adversarial review has tried to
+break each of its claimed strengths. The review is a dated audit in
+`Docs/audits`. For every claim it:
+
+- names the strongest existing solutions and states their best case fairly,
+  with sources, including what they do that the design does not;
+- attacks the claim: hidden costs, cheating (an easier workload, a narrower
+  scope, a dropped feature, a deferred hard case), unhandled edge cases,
+  failure modes, tooling, migration and ecosystem gaps, and what the design
+  gives up;
+- checks the claim against code, a runnable probe, or a measurement wherever
+  one is possible, never prose alone;
+- ends with a verdict: holds, holds only within stated limits, or fails, and
+  puts every gap on a card or ballot.
+
+Missing context is a failed claim, not a pass. A design with a failed claim or
+an open gap stays unbuilt until it is redesigned and reviewed again. As with
+ballots, every downside the review finds is engineered away, and the redesign
+is reviewed again, before the design is presented to the owner as the
+solution; a downside that cannot be removed is named with its cost and its
+best mitigation. A ratified ballot authorizes the direction, not the claim;
+its build card names the passing review as its first criterion. Public text
+may call a design better only where a passing review backs that exact claim.
 
 ## Delegation
 

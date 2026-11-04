@@ -2,6 +2,17 @@
 // existing TLS owner: failNth0,allocationCount8,allocationActive16,injected24,
 // selectorCount32,owned [owned E4 selector,count] rows40,activeSelector48.
 // The allocation channel remains the final target; -1 is a clean pass.
+
+// The schedule's check (jet_rt_fault_check), installed by the first arming
+// (fault_schedule_ensure). Only a test fixture or harness arms a schedule, so
+// a program never armed keeps 0 here: each effect check then answers false
+// with one load, and the program links neither the check nor the schedule's
+// TLS state (FaultAllocation.jet).
+fault_check_code := I64{0}
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+fn rt_fault_check_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
 fn fault_schedule_release_selectors(state: I64) {
     count :: trap_word(wrapping(state + I64{32}))
     rows :: trap_word(wrapping(state + I64{40}))
@@ -17,6 +28,11 @@ fn fault_schedule_release_selectors(state: I64) {
 }
 
 fn fault_schedule_ensure() -> I64 {
+    if (fault_check_code == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            fault_check_code = rt_fault_check_address()
+        }
+    }
     state := fault_allocation_state()
     if (state == I64{0}) {
         state = jet_rt_alloc(I64{56}, I64{8})
@@ -57,9 +73,23 @@ fn fault_schedule_covers(bound: I64, observed: I64) -> Bool {
     observed_length == length || rt_text_byte(wrapping(rt_text_data(observed) + length)) == I64{46}
 }
 
+// Whether the armed schedule fails this `operation` (a selector text) now.
 #Export(c) fn jet_fault_should_fail(operation: I64) -> Bool {
+    code :: fault_check_code
+    if (code == I64{0}) -> return false
+    coll_call1(code, operation) != I64{0}
+}
+
+// The check behind fault_check_code: 1 when this thread's schedule fails
+// `operation` now, else 0. Operation 0 is the allocation channel
+// (fault_allocation_should_fail).
+#Export(c) fn jet_rt_fault_check(operation: I64) -> I64 {
+    if (operation == I64{0}) {
+        if fault_allocation_should_fail() -> return I64{1}
+        return I64{0}
+    }
     state :: fault_allocation_state()
-    if (state == I64{0}) -> return false
+    if (state == I64{0}) -> return I64{0}
     rows :: trap_word(wrapping(state + I64{40}))
     count :: trap_word(wrapping(state + I64{32}))
     fail_nth :: trap_word(state)
@@ -77,8 +107,9 @@ fn fault_schedule_covers(bound: I64, observed: I64) -> Bool {
         }
         at += I64{1}
     }
-    if injected -> trap_store(wrapping(state + I64{24}), I64{1})
-    injected
+    if !injected -> return I64{0}
+    trap_store(wrapping(state + I64{24}), I64{1})
+    I64{1}
 }
 
 #Export(c) fn jet_terminal8_fault(operation: I64) -> Bool { jet_fault_should_fail(operation) }

@@ -1,9 +1,13 @@
 
-use values
-use functions
-use functions as calls
-use functions.[apply as transform]
-use values.[Item as Weight, Pool as Store, BASE as OFFSET]
+use {
+    values
+    functions
+    calls :: functions
+    transform :: functions.apply
+    Weight :: values.Item
+    Store :: values.Pool
+    OFFSET :: values.BASE
+}
 fn run() {
     first :: transform(Weight{weight: OFFSET}, (item: Weight) -> Weight{weight: item.weight + 1})
     second :: calls.apply(first, (item: Weight) -> Weight{weight: item.weight + 2})

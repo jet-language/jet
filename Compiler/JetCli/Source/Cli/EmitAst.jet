@@ -3,45 +3,47 @@
 // with its written names, operators and types; children are its operands and
 // bodies in source order. Spans are not printed, so the output depends only
 // on the program's structure.
-use jet_foundation.[
-    BindName,
-    BindPattern,
-    Binding,
-    CallArg,
-    Expr,
-    ExprField,
-    ExprPair,
-    ExternFn,
-    Func,
-    ImportDecl,
-    ImportedItem,
-    Item,
-    LValue,
-    LambdaBody,
-    LambdaParam,
-    ListPatRest,
-    MapPatEntry,
-    MigrationOp,
-    NamedSpan,
-    OrFallback,
-    Param,
-    PatSlot,
-    Pattern,
-    PlaceAccess,
-    Program,
-    Stmt,
-    StrFormat,
-    StrPart,
-    StructPatField,
-    SwitchArm,
-    TupleField,
-    Type,
-    TypeParam,
-    UnOp,
-    access_sigil,
-    type_name,
-]
-use jet_parser.[jfmt_bin_op_spell, jfmt_compound_spell]
+use {
+    jet_foundation.[
+        BindName,
+        BindPattern,
+        Binding,
+        CallArg,
+        Expr,
+        ExprField,
+        ExprPair,
+        ExternFn,
+        Func,
+        ImportDecl,
+        ImportedItem,
+        Item,
+        LValue,
+        LambdaBody,
+        LambdaParam,
+        ListPatRest,
+        MapPatEntry,
+        MigrationOp,
+        NamedSpan,
+        OrFallback,
+        Param,
+        PatSlot,
+        Pattern,
+        PlaceAccess,
+        Program,
+        Stmt,
+        StrFormat,
+        StrPart,
+        StructPatField,
+        SwitchArm,
+        TupleField,
+        Type,
+        TypeParam,
+        UnOp,
+        access_sigil,
+        type_name,
+    ]
+    jet_parser.[jfmt_bin_op_spell, jfmt_compound_spell]
+}
 
 // The top-level nodes of `program`: its imports, then its items. With
 // `function`, only the functions of that name (top-level or methods).
@@ -82,6 +84,8 @@ fn jet_cli_emit_ast_find_methods(methods: [Func], name: String, found: &[JetCLIE
     }
 }
 
+// One `use` line in current syntax (#6542): a module or file alias prints as
+// `alias :: path`.
 fn jet_cli_emit_ast_import(import: ImportDecl) -> String Never! {
     target :: if import.kind == {
         .File(path, _) -> jet_cli_debug_quote(path)
@@ -93,7 +97,7 @@ fn jet_cli_emit_ast_import(import: ImportDecl) -> String Never! {
     }
     if import.kind == .Unqualified(_, _, _, _, _) -> return "use {target}"
     if import.alias == "" || import.alias == target -> return "use {target}"
-    "use {target} as {import.alias}"
+    "use {import.alias} :: {target}"
 }
 
 fn jet_cli_emit_ast_imported(item: ImportedItem) -> String Never! {

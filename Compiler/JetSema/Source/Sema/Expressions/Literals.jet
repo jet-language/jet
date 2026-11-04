@@ -248,7 +248,7 @@ fn sema_expression_list_mark_owned_value(value: Expr, state: &SemaOwnershipState
                 }
             }
             if !sema_ownership_type_is_copy(binding.symbol.ty ?? Type.Named{name: "Unit"}) {
-                origin :: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true)
+                origin :: sema_ownership_move_origin(value, binding.symbol.ty ?? Type.Named{name: "Unit"}, "the list literal", true, scopes.copies_explicit)
                 loop place in sema_ownership_moved_record_places(value, places, scopes, true) {
                     &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
                 }
@@ -782,13 +782,19 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         }
         return None
     }
-    named_mismatch :: named_position && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
+    // A `distinct Int(lo..hi)` position on a `[T#N]` indexes by its raw Int,
+    // and its declared range is the interval the bounds proof reads.
+    distinct_range :: if base_ty == .FixedList(_, _) -> sema_contract_distinct_range(inferred_index.ty, environment, program) else -> None
+    index_bounds := tree_expr_known_bounds(inferred_index)
+    if index_bounds == None && distinct_range == .Val(range) -> index_bounds = Val(TIntegerBounds{lo: range.lo, hi: range.hi})
+    named_mismatch :: named_position && distinct_range == None && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
     // copy: the named position keeps its own type for the report below.
     named_ty :: inferred_index.ty.copy()
     checked_index := if named_mismatch -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? {
         sema_expression_index_replace_mismatch(base_ty, named_ty, expr_span(index), index_start, &diagnostics)
         return None
     } else -> inferred_index
+    if distinct_range != None -> checked_index = sema_tree_node(Type.Int, TExprKind.DistinctRaw{value: checked_index}, checked_index.span)
     // A fixed-width position is the Int it names; one outside the list fails
     // the bounds check like any other position.
     if index_expected == (Val(Type.Int)) && sema_expr_unwrap_tag(checked_index.ty) == .IntN(_, _) {
@@ -865,7 +871,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                 &diagnostics.push(sema_error("E0965", expr_span(index), "a fixed-list length is not a checked integer measure", "fixed indexing needs a concrete list length", "use a literal fixed-list length"))
                 return None
             }
-            if tree_expr_known_bounds(checked_index) == {
+            if index_bounds == {
                 .Val(bounds) -> {
                     if bounds.lo < 0 || bounds.hi >= length {
                         &diagnostics.push(sema_error("E0965", expr_span(index), "index {if bounds.lo < 0 -> bounds.lo else -> bounds.hi} is out of range for a fixed-size list of {length} elements", "the valid indexes for `[T#N]` are 0 through N-1", "use an index between 0 and {length - 1}"))

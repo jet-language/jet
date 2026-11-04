@@ -1,0 +1,22 @@
+// Two retired marker declarations, written as they were before markers
+// became structs.
+struct Traced {
+    label: String
+
+    impl Marker {
+        sites :: [.Function]
+        repeatable :: true
+    }
+}
+
+struct Fast {
+    impl Marker {
+        group :: #[Inline(.Always), Scalar]
+    }
+}
+
+#Traced("helper") fn helper() -> Int { 41 }
+
+#Fast fn bump(value: Int) -> Int { value + 1 }
+
+fn run() { print(bump(helper())) }

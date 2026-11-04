@@ -12,7 +12,7 @@ source identity?
   grep `(?i)template|catalog|gettext` over
   `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet` found no match.
 - Ran the probe `~/.cache/jet-dev/scratch/Closer05/t3252/probe_catalog.jet`
-  (`use core.text.catalog as catalog`) on snapshot14. It fails with
+  (`use catalog :: core.text.catalog`) on snapshot14. It fails with
   `Error [E1001]: There is no core module 'core.text.catalog'`.
 - Read the owners: `Core/text/fmt.jet:24-27` `plural(n, singular, many)` (English two-form,
   `abs(n) == 1`), `Docs/spec/spec.md:62-67` (the one interpolation grammar `{expr}` with a

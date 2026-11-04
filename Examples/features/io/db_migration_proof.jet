@@ -8,8 +8,10 @@ package {
     authority: { allow: [DB, DB.Read, DB.Write, FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
-use core.db as db
-use core.files as fs
+use {
+    db :: core.db
+    fs :: core.files
+}
 
 fn count(scope: DBScope, sql: SQL) -[DB]> Int {
     row :: scope.query_one(sql) ?? return -1

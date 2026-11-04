@@ -9,10 +9,12 @@ package {
     authority: { allow: [DB, DB.Read, DB.Write, FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
-use core.db as db
-use core.http.client as http
-use core.http.server as server
-use core.net as net
+use {
+    db :: core.db
+    http :: core.http.client
+    server :: core.http.server
+    net :: core.net
+}
 
 fn post_order(addr: String, user: String) -> String Never! {
     if http.request("POST", "http://{addr}/order").header("x-user", user).send() == {

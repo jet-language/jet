@@ -36,7 +36,7 @@ const EXCLUSIONS = join(ROOT, "tests/conformance/exclusions.tsv");
 // this map, decides whether the rest of Core is covered.
 const RECIPES = new Map([
   ["core.math.sqrt", `// core-conformance: core.math.sqrt
-use core.math as math
+use math :: core.math
 
 fn run() {
     result :: math.sqrt(4.0)
@@ -44,7 +44,7 @@ fn run() {
 }
 `],
   ["core.math.round", `// core-conformance: core.math.round
-use core.math as math
+use math :: core.math
 
 fn run() {
     result :: math.round(2.5)
@@ -52,7 +52,7 @@ fn run() {
 }
 `],
   ["core.math.gcd", `// core-conformance: core.math.gcd
-use core.math as math
+use math :: core.math
 
 fn run() {
     result :: math.gcd(18, 12)
@@ -60,7 +60,7 @@ fn run() {
 }
 `],
   ["core.math.is_even", `// core-conformance: core.math.is_even
-use core.math as math
+use math :: core.math
 
 fn run() {
     result :: math.is_even(18)
@@ -68,7 +68,7 @@ fn run() {
 }
 `],
   ["core.text.lower", `// core-conformance: core.text.lower
-use core.text as text
+use text :: core.text
 
 fn run() {
     result :: text.lower("JET")
@@ -76,7 +76,7 @@ fn run() {
 }
 `],
   ["core.text.trim", `// core-conformance: core.text.trim
-use core.text as text
+use text :: core.text
 
 fn run() {
     result :: text.trim("  jet  ")
@@ -84,7 +84,7 @@ fn run() {
 }
 `],
   ["core.text.byte_count", `// core-conformance: core.text.byte_count
-use core.text as text
+use text :: core.text
 
 fn run() {
     result :: text.byte_count("jet")
@@ -92,7 +92,7 @@ fn run() {
 }
 `],
   ["core.text.fmt.grouped", `// core-conformance: core.text.fmt.grouped
-use core.text.fmt as fmt
+use fmt :: core.text.fmt
 
 fn run() {
     result :: fmt.grouped(Float{1234.5678}, 2)
@@ -100,7 +100,7 @@ fn run() {
 }
 `],
   ["core.args.spec", `// core-conformance: core.args.spec
-use core.args as args
+use args :: core.args
 
 fn run() {
     result :: args.spec()
@@ -108,7 +108,7 @@ fn run() {
 }
 `],
   ["core.crypto.uuid.v4", `// core-conformance: core.crypto.uuid.v4
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 
 fn run() {
     result :: uuid.v4()
@@ -116,7 +116,7 @@ fn run() {
 }
 `],
   ["core.time.parse_rfc3339", `// core-conformance: core.time.parse_rfc3339
-use core.time as time
+use time :: core.time
 
 fn run() {
     result :: time.parse_rfc3339("2024-03-01T12:00:00Z") ?? panic("parse")
@@ -124,70 +124,70 @@ fn run() {
 }
 `],
   ["core.math.random.choices", `// core-conformance: core.math.random.choices
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.choices([Int]{1, 2, 3}, 4))
 }
 `],
   ["core.math.random.triangular", `// core-conformance: core.math.random.triangular
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.triangular(0.0, 1.0, 0.5))
 }
 `],
   ["core.math.random.gammavariate", `// core-conformance: core.math.random.gammavariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.gammavariate(2.0, 1.0))
 }
 `],
   ["core.math.random.betavariate", `// core-conformance: core.math.random.betavariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.betavariate(2.0, 3.0))
 }
 `],
   ["core.math.random.lognormvariate", `// core-conformance: core.math.random.lognormvariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.lognormvariate(0.0, 1.0))
 }
 `],
   ["core.math.random.paretovariate", `// core-conformance: core.math.random.paretovariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.paretovariate(2.0))
 }
 `],
   ["core.math.random.weibullvariate", `// core-conformance: core.math.random.weibullvariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.weibullvariate(1.0, 2.0))
 }
 `],
   ["core.math.random.vonmisesvariate", `// core-conformance: core.math.random.vonmisesvariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.vonmisesvariate(0.0, 1.0))
 }
 `],
   ["core.math.random.binomialvariate", `// core-conformance: core.math.random.binomialvariate
-use core.math.random as random
+use random :: core.math.random
 
 fn run() {
     print(random.binomialvariate(4, 0.5))
 }
 `],
   ["core.encoding.json.dump", `// core-conformance: core.encoding.json.dump
-use core.encoding.json as json
+use json :: core.encoding.json
 
 fn run() {
     value :: json.loads(\`{"ok":true}\`) ?? panic("JSON parse")
@@ -195,49 +195,49 @@ fn run() {
 }
 `],
   ["core.encoding.json.dumps", `// core-conformance: core.encoding.json.dumps
-use core.encoding.json as api
+use api :: core.encoding.json
 
 fn run() {
     print(api.dumps(Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.jsonl.dumps", `// core-conformance: core.encoding.jsonl.dumps
-use core.encoding.jsonl as api
+use api :: core.encoding.jsonl
 
 fn run() {
     print(api.dumps([Dyn]{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.jsonl.append_line", `// core-conformance: core.encoding.jsonl.append_line
-use core.encoding.jsonl as api
+use api :: core.encoding.jsonl
 
 fn run() {
     print(api.append_line("jet", Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.json.load", `// core-conformance: core.encoding.json.load
-use core.encoding.json as json
+use json :: core.encoding.json
 
 fn run() {
     print(json.load("{\"ok\":true}"))
 }
 `],
   ["core.encoding.toml.loads", `// core-conformance: core.encoding.toml.loads
-use core.encoding.toml as toml
+use toml :: core.encoding.toml
 
 fn run() {
     print(toml.loads("ok = true"))
 }
 `],
   ["core.encoding.toml.load", `// core-conformance: core.encoding.toml.load
-use core.encoding.toml as toml
+use toml :: core.encoding.toml
 
 fn run() {
     print(toml.load("ok = true"))
 }
 `],
   ["core.net.tls.flags", `// core-conformance: core.net.tls.flags
-use core.net.tls as tls
+use tls :: core.net.tls
 
 fn run() {
     cfg :: tls.config("example.test")
@@ -245,7 +245,7 @@ fn run() {
 }
 `],
   ["core.net.tls.unwrap", `// core-conformance: core.net.tls.unwrap
-use core.net.tls as tls
+use tls :: core.net.tls
 
 fn run() -[Net]> {
     print(tls.unwrap(TLSStream{}) == .Err(_))
@@ -1404,7 +1404,7 @@ print(api.len(s))`,
     if (body === undefined) return null;
     const indented = body.split("\n").map((line) => `    ${line}`).join("\n");
     return `// core-conformance: ${key}
-use core.collections.set as api
+use api :: core.collections.set
 
 fn run() {
 ${indented}
@@ -1480,7 +1480,7 @@ print(api.chain_contains(c, "jet"))`,
   if (body === undefined) return null;
   const indented = body.split("\n").map((line) => `    ${line}`).join("\n");
   return `// core-conformance: ${key}
-use core.collections as api
+use api :: core.collections
 
 fn run() {
 ${indented}
@@ -1509,7 +1509,7 @@ function signatureDerivedRecipes(expected, exclusions) {
       .map(signatureArgument)
       .join(", ");
     generated.set(key, `// core-conformance: ${key}
-use ${module} as api
+use api :: ${module}
 
 fn run() {
     print(api.${name}(${args}))
@@ -1542,7 +1542,7 @@ function generate() {
     if (existsSync(path)) {
       const existing = readFileSync(path, "utf8");
       const oldDerivedPrefix = `${key}
-use ${module} as api
+use api :: ${module}
 
 fn run() {
     print(api.${name}(`;
@@ -1597,7 +1597,7 @@ function hostileFixtures() {
 
   const key = "core.crypto.uuid.v4";
   const valid = `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     result :: uuid.v4()
     print(result)
@@ -1607,7 +1607,7 @@ fn run() {
     [
       "bind-and-discard",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     _result :: uuid.v4()
     print("ok")
@@ -1618,7 +1618,7 @@ fn run() {
     [
       "observerless binding",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     result :: uuid.v4()
     sink(result)
@@ -1629,7 +1629,7 @@ fn run() {
     [
       "direct unobserved call",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     uuid.v4()
 }
@@ -1639,7 +1639,7 @@ fn run() {
     [
       "comment call ghost",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     // uuid.v4()
     print("ok")
@@ -1650,7 +1650,7 @@ fn run() {
     [
       "string call ghost",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     print("uuid.v4()")
 }
@@ -1660,7 +1660,7 @@ fn run() {
     [
       "comment observer ghost",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     result :: uuid.v4()
     /* print(result) */
@@ -1671,7 +1671,7 @@ fn run() {
     [
       "string observer ghost",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     result :: uuid.v4()
     print("result")
@@ -1682,7 +1682,7 @@ fn run() {
     [
       "malformed marker",
       `// core-conformance: ${key} extra
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     print(uuid.v4())
 }
@@ -1692,7 +1692,7 @@ fn run() {
     [
       "malformed call shape",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     print(uuid.v4)
 }
@@ -1702,7 +1702,7 @@ fn run() {
     [
       "unbalanced call",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     print(uuid.v4(}
 }
@@ -1712,7 +1712,7 @@ fn run() {
     [
       "duplicate call",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     print(uuid.v4())
     print(uuid.v4())
@@ -1723,7 +1723,7 @@ fn run() {
     [
       "direct Unit return propagation",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     uuid.v4() ?? return Err("uuid")
     print("ok")
@@ -1734,7 +1734,7 @@ fn run() {
     [
       "bound Unit return propagation",
       `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     result :: uuid.v4() ?? return Err("uuid")
     print(result)
@@ -1751,7 +1751,7 @@ fn run() {
   }
 
   const directPanic = `// core-conformance: ${key}
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 fn run() {
     uuid.v4() ?? panic("uuid")
     print("ok")
@@ -1772,7 +1772,7 @@ fn run() {
   }
 
   const generic = `// core-conformance: core.data.csv
-use core.data as data
+use data :: core.data
 fn run() {
     result :: data.csv<Ticket>("rows")
     print(result)
@@ -1802,7 +1802,7 @@ fn run() {
 
   const expectedRows = ["core.fake.one", "core.fake.two"];
   const witness = (row, path) => ({ key: row, path, source: `// core-conformance: ${row}
-use core.fake as fake
+use fake :: core.fake
 fn run() {
     print(fake.${row.slice(row.lastIndexOf(".") + 1)}())
 }

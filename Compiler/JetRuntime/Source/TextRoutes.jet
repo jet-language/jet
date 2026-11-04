@@ -43,14 +43,14 @@
     }
     if at < len {
         tail := I64{0}
+        // The 1..7 tail bytes, low first: len's low bits are their count.
         if (wrapping(data + at).bit_and(I64{7}) == I64{0}) {
-            tail = rt_text_word(wrapping(data + at)).bit_and((I64{1} << ((len - at) * I64{8})) - I64{1})
+            tail = rt_text_word(wrapping(data + at)).bit_and((I64{1} << (len.bit_and(I64{7}) * I64{8})) - I64{1})
         } else {
-            shift := I64{0}
-            loop at < len {
-                tail = tail.bit_or(rt_text_byte(wrapping(data + at)) << shift)
-                shift += I64{8}
-                at += I64{1}
+            end := len
+            loop end > at {
+                end = wrapping(end - I64{1})
+                tail = (tail << I64{8}).bit_or(rt_text_byte(wrapping(data + end)))
             }
         }
         hash = rt_text_hash_fold(hash, tail)

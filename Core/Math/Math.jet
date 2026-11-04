@@ -8,9 +8,11 @@ package {
         math: .Library{ entry: math }
     }
 }
-use core as core
-use core.math.random as ambient_random
-use core.prelude.[min, max, clamp]
+use {
+    core :: core
+    ambient_random :: core.math.random
+    core.prelude.[min, max, clamp]
+}
 fn abs(n: Int) -> Int Never! {
     if n < 0 -> return -n
     n
@@ -160,7 +162,7 @@ fn radians(n: Float) -> Float Never! { n * 0.017453292519943295 }
 fn lerp(a: Float, b: Float, t: Float) -> Float Never! { a + (b - a) * t }
 fn float32(n: Float) -> Float Never! { n }
 fn float64(n: Float) -> Float Never! { n }
-fn fabs(n: Float) -> Float Never! { from_bits(to_bits(n).bit_and(9223372036854775807)) }
+fn fabs(n: Float) -> Float Never! { core.math.fabs(n) }
 // `math.abs` on F32 and I64 (MathBuiltin `abs`): F32 negates exactly when the
 // sign bit is set, so -0.0 and a negative NaN lose their sign; I64 negation
 // stops at I64.MIN like any fixed-width overflow.
@@ -1100,7 +1102,8 @@ impl Decimal {
     fn to_string(self) -> String Never! { __decimal_to_string(self) }
 }
 // Decimal crosses Dyn exactly: it encodes as its scale-keeping text and
-// decodes from a number token or an Int (Rust EncodingTraits.rs JetDecimal).
+// decodes from a number token, an Int, or that same text (a CSV cell or its
+// own encoding), as the web tier's typed decimal decode does.
 impl Decimal.Encode {
     fn encode(self) -> Dyn { Dyn.Text(__decimal_to_string(self)) }
 }
@@ -1112,7 +1115,7 @@ impl Decimal.Decode {
             .Null -> __decimal_rejected("null")
             .Bool(_) -> __decimal_rejected("Bool")
             .Float(_) -> __decimal_rejected("Float")
-            .Text(_) -> __decimal_rejected("Text")
+            .Text(text) -> __decimal_decoded(text)
             .Bytes(_) -> __decimal_rejected("Bytes")
             .DateTime(_) -> __decimal_rejected("DateTime")
             .Array(_) -> __decimal_rejected("a list")
@@ -1551,6 +1554,14 @@ fn __decimal_round(value: Decimal) -> Decimal Never! {
     assert_eq(__decimal_div(left, right).numerator(), 4)
     assert_eq(__decimal_from_str("-0.00").scale, 2)
     assert(!__decimal_from_str("-0.00").negative)
+}
+
+#Test("Decimal decodes its own text encoding") {
+    price :: __decimal_from_str("166.20")
+    decoded :: Decimal.decode(price.encode()) ?? panic("Decimal text round trip")
+    assert(__decimal_equal(decoded, price))
+    assert_eq(decoded.scale, 2)
+    assert(Decimal.decode(Dyn.Text("1.2.3")) == .Err(_))
 }
 
 fn __decimal_from_fraction(value: Fraction) -> Decimal Never! {

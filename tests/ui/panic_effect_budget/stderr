@@ -1,8 +1,10 @@
-Error [E1220]: `panicdep` uses the `Panic` effect at `panicdep::parse_port`, which this package's budget doesn't allow
-  --> tests/ui/panic_effect_budget/run.jet:2:5
+Error [E0749]: `run` can stop, but the package denies Panic with `authority: { deny: [Panic] }`
+  --> tests/ui/panic_effect_budget/run.jet:4:4
     |
-  2 | use panicdep
-    |     ^^^^^^^^
- Why: The package denies stops from `panicdep::parse_port`; a dependency that can stop cannot cross this budget boundary
- Fix: Return a fallible result for expected failure, or add facts or a `#Pre`/refinement proof for a programmer-error stop; `Panic` is deny-only and cannot be allowed or granted
-More: jet-lang.dev/e/E1220
+  4 | fn run() {
+    |    ^^^
+ Why: `parse_port` can stop; every function in the package and every callee it can reach must not stop when Panic is denied
+ Fix: Return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `Panic` from `authority.deny`
+ Denial: invocation
+ Call chain: run → parse_port
+More: jet-lang.dev/e/E0749

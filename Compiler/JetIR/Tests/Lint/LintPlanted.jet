@@ -9,14 +9,16 @@
 //
 // With `-- --route-gaps <runtime.exports>` it prints the route lint's rows
 // instead (ir_lint_route_gaps): every R4 gap against that runtime's exports.
-use jet_ir.[
-    IRClass, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_LINT_OPS, IR_OVERFLOW_TRAP,
-    ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
-    ir_lint_text, ir_module_new, ir_op_code, ir_open, ir_open_if, ir_opt_lint, ir_opt_report, ir_slot,
-]
-use jet_foundation.[Type, compiler_threads_single, name_rows_set]
-use core.process as process
-use core.files as files
+use {
+    jet_ir.[
+        IRClass, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_LINT_OPS, IR_OVERFLOW_TRAP,
+        ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
+        ir_lint_text, ir_module_new, ir_op_code, ir_open, ir_open_if, ir_opt_lint, ir_opt_report, ir_slot,
+    ]
+    jet_foundation.[Type, compiler_threads_single, name_rows_set]
+    process :: core.process
+    files :: core.files
+}
 
 struct LPTypes {
     int: Int
@@ -366,7 +368,7 @@ fn lp_route_gaps(path: String) -> Int {
 }
 
 fn run() {
-    args :: process.argv()
-    if (args.get(1) ?? "") == "--route-gaps" -> process.exit(lp_route_gaps(args.get(2) ?? ""))
+    args :: process.args()
+    if (args.get(0) ?? "") == "--route-gaps" -> process.exit(lp_route_gaps(args.get(1) ?? ""))
     process.exit(lp_status())
 }

@@ -34,26 +34,27 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A typed `fn run(args: T)` entry only works when `T` is a `#CLI`-derived program struct.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Mark the program struct `#CLI`, or use a direct scalar-parameter `fn run` entry.</p>
+<p class="diag-copy fix" data-registry-field="fix">Mark the program struct `#CLI`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1308</code>: <code>tests/ui/retired_cli_marker.stderr</code>.</p>
-<pre class="diag">Error [E0927]: `#Cli` is retired
-  --&gt; tests/ui/retired_cli_marker.jet:1:1
-    |
-  1 | #Cli struct Args {
-    | ^^^^
- Why: The applied-rule registry owns retired spellings and replacements
- Fix: Write `#CLI`
-More: jet-lang.dev/e/E0927
-
-Error [E1308]: `run`&#39;s parameter isn&#39;t a CLI-derived type
+<pre class="diag">Error [E1308]: `run`&#39;s parameter isn&#39;t a CLI-derived type
   --&gt; tests/ui/retired_cli_marker.jet:5:14
     |
   5 | fn run(args: Args) {
     |              ^^^^
- Why: A typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived program struct.
- Fix: Mark the program struct `#[CLI]` (or `#CLI(Standard)` for the standard pack)
+ Why: A typed `fn run(args: T)` entry only works when `T` is a `#CLI`-derived program struct.
+ Fix: Mark the program struct `#CLI`.
 More: jet-lang.dev/e/E1308
+
+Error [E0927]: `#Cli` isn&#39;t a known applied rule
+  --&gt; tests/ui/retired_cli_marker.jet:1:2
+    |
+  1 | #Cli struct Args {
+    |  ^^^
+ Why: `Cli` isn&#39;t registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
+ Fix: Did you mean `#CLI`?
+More: jet-lang.dev/e/E0927
+
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

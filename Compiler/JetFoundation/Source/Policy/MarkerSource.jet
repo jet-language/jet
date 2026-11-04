@@ -1,9 +1,9 @@
 // The marker registry is read from Prelude Jet source
 // (crates/jet-foundation/src/Policy/MarkerSource.rs). `Prelude/Markers.jet`
-// holds one `marker Name(params…)` declaration per rule in the ratified
-// This rule form. This reader accepts that one
-// shape and nothing else; a malformed row is a bug in a file that ships with
-// the compiler, so it panics with the offending line.
+// declares each rule as a marker type: `struct Name { fields  impl Marker {
+// settings } }`. This reader accepts that one shape and nothing else; a
+// malformed row is a bug in a file that ships with the compiler, so it panics
+// with the offending declaration.
 
 // `RuleSite::ALL` names, in order.
 MARKER_SOURCE_SITES :: [String]{
@@ -199,14 +199,96 @@ fn marker_source_last_byte_index(text: String, byte: Int) -> Int? Never! {
     found
 }
 
-fn marker_source_declaration(line: String) -> TAppliedRule Never! {
-    rest :: marker_source_slice(line, 7, line.len()).trim()
-    open :: marker_source_byte_index(rest, 40) ?? panic("marker declaration without a parameter list: {line}")
-    close :: marker_source_last_byte_index(rest, 41) ?? panic("marker declaration without a closing `)`: {line}")
-    name :: marker_source_slice(rest, 0, open).trim()
-    params := [TAppliedRuleParameter]{}
-    variadic := TAppliedRuleArgKind?{None}
-    variadic_source_type := String?{None}
+// `source` without its `//` and `/* … */` comments; a comment opener inside
+// a string literal is text.
+fn marker_source_strip_comments(source: String) -> String Never! {
+    bytes :: source.bytes()
+    out := [U8]{}
+    in_string := false
+    escaped := false
+    index := 0
+    loop index < bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        following :: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+        if in_string {
+            if {
+                escaped -> escaped = false
+                byte == 92 -> escaped = true
+                byte == 34 -> in_string = false
+                else -> {}
+            }
+            &out.push(bytes[index])
+            index += 1
+            next
+        }
+        if byte == 47 && following == 47 {
+            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+            next
+        }
+        if byte == 47 && following == 42 {
+            index += 2
+            loop index + 1 < bytes.len() && !(Int.from_u8(bytes[index]) == 42 && Int.from_u8(bytes[index + 1]) == 47) -> index += 1
+            index += 2
+            next
+        }
+        if byte == 34 -> in_string = true
+        &out.push(bytes[index])
+        index += 1
+    }
+    String.from_bytes(out) ?? panic("the marker source is not UTF-8 once its comments are removed")
+}
+
+// The members of a declaration body: entries at nesting depth zero, outside
+// string literals, separated by line ends, commas or semicolons.
+fn marker_source_members(text: String) -> [String] Never! {
+    entries := [String]{}
+    start := 0
+    scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+    loop (index, byte) in text.bytes() {
+        value :: Int.from_u8(byte)
+        if marker_source_scan_step(&scan, value) && (value == 10 || value == 44 || value == 59) {
+            entry :: marker_source_slice(text, start, index).trim()
+            if entry.len() > 0 -> &entries.push(entry)
+            start = index + 1
+        }
+    }
+    last :: marker_source_slice(text, start, text.len()).trim()
+    if last.len() > 0 -> &entries.push(last)
+    entries
+}
+
+// The text between the first `{` and the last `}` of a member.
+fn marker_source_block(member: String, what: String) -> String Never! {
+    open :: marker_source_byte_index(member, 123) ?? panic("{what} without a `{{` body: {member}")
+    close :: marker_source_last_byte_index(member, 125) ?? panic("{what} without a closing `}}`: {member}")
+    marker_source_slice(member, open + 1, close)
+}
+
+// The offset of the first `::` in `text`.
+fn marker_source_setting_separator(text: String) -> Int? Never! {
+    bytes :: text.bytes()
+    loop index in 1..<bytes.len() {
+        if Int.from_u8(bytes[index - 1]) == 58 && Int.from_u8(bytes[index]) == 58 -> return Val(index - 1)
+    }
+    None
+}
+
+// One marker type: the fields are the rule's parameters and the
+// `impl Marker` settings are its facts. None for a struct that is not a
+// marker, or a marker that is a group rather than a rule.
+fn marker_source_declaration(name: String, body: String) -> TAppliedRule? Never! {
+    context :: "struct {name}"
+    fields := [String]{}
+    settings := String?{None}
+    loop member in marker_source_members(body) {
+        if member.starts_with("fn ") -> next
+        if member.starts_with("impl Marker") {
+            settings = Val(marker_source_block(member, "`impl Marker` in {context}"))
+            next
+        }
+        &fields.push(member)
+    }
+    block :: settings ?? return None
     sites := [String]{}
     scopes := [String]{}
     repeatable := false
@@ -214,38 +296,50 @@ fn marker_source_declaration(line: String) -> TAppliedRule Never! {
     inherits := false
     resolution := "SiteBound"
     companion_site := TAppliedRuleCompanionSite?{None}
-    loop entry in marker_source_split_top_level(marker_source_slice(rest, open + 1, close)) {
-        colon :: marker_source_byte_index(entry, 58) ?? panic("marker parameter without `:` in {line}: {entry}")
+    group := false
+    loop entry in marker_source_members(block) {
+        if entry.starts_with("fn ") -> next
+        separator :: marker_source_setting_separator(entry) ?? panic("a marker setting reads `name :: value`, found `{entry}` in {context}")
+        key :: marker_source_slice(entry, 0, separator).trim()
+        value :: marker_source_slice(entry, separator + 2, entry.len()).trim()
+        if key == {
+            "sites" -> sites = loop item in marker_source_list(value) -> marker_source_site(item, context)
+            "scopes" -> scopes = loop item in marker_source_list(value) -> marker_source_scope(item, context)
+            "repeatable" -> repeatable = marker_source_flag(value, context)
+            "owns_menu" -> owns_menu = marker_source_flag(value, context)
+            "inherits" -> inherits = marker_source_flag(value, context)
+            "resolution" -> resolution = marker_source_resolution(value, context)
+            "companion" -> {
+                parts :: marker_source_list(value)
+                if parts.len() != 2 -> panic("`companion` reads `[Rule, .Site]` in {context}")
+                companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], context)})
+            }
+            "group" -> group = true
+            else -> panic("unknown marker setting `{key}` in {context}")
+        }
+    }
+    if group -> return None
+    params := [TAppliedRuleParameter]{}
+    variadic := TAppliedRuleArgKind?{None}
+    variadic_source_type := String?{None}
+    variadic_name := String?{None}
+    loop index in 0..<fields.len() {
+        entry :: fields[index]
+        colon :: marker_source_byte_index(entry, 58) ?? panic("marker field without `:` in {context}: {entry}")
         label :: marker_source_slice(entry, 0, colon).trim()
         value :: marker_source_slice(entry, colon + 1, entry.len()).trim()
-        if label.starts_with("$") {
-            fact :: marker_source_slice(label, 1, label.len())
-            if fact == {
-                "sites" -> sites = loop item in marker_source_list(value) -> marker_source_site(item, line)
-                "scopes" -> scopes = loop item in marker_source_list(value) -> marker_source_scope(item, line)
-                "repeatable" -> repeatable = marker_source_flag(value, line)
-                "owns_menu" -> owns_menu = marker_source_flag(value, line)
-                "inherits" -> inherits = marker_source_flag(value, line)
-                "resolution" -> resolution = marker_source_resolution(value, line)
-                "companion" -> {
-                    parts :: marker_source_list(value)
-                    if parts.len() != 2 -> panic("`$companion` reads `[Rule, .Site]` in {line}")
-                    companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], line)})
-                }
-                else -> panic("unknown marker fact `{label}` in {line}")
-            }
-            next
-        }
         type_text := value
         default := String?{None}
         if marker_source_split_default(value) == .Val(split) {
             type_text = split.type_text
             default = Val(split.default)
         }
-        if type_text.starts_with("...") {
-            element :: marker_source_slice(type_text, 3, type_text.len()).trim()
+        // A last list field with no default takes the remaining arguments.
+        if index == fields.len() - 1 && default == None && type_text.starts_with("[") && type_text.ends_with("]") {
+            element :: marker_source_slice(type_text, 1, type_text.len() - 1).trim()
             variadic = Val(marker_source_arg_type(element))
             variadic_source_type = Val(element)
+            variadic_name = Val(label)
             next
         }
         &params.push(TAppliedRuleParameter{
@@ -255,9 +349,9 @@ fn marker_source_declaration(line: String) -> TAppliedRule Never! {
             default_source: default,
         })
     }
-    TAppliedRule{
+    Val(TAppliedRule{
         name: name,
-        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type},
+        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type, variadic_name: variadic_name},
         policy_scopes: scopes,
         sites: sites,
         repeatable: repeatable,
@@ -265,16 +359,18 @@ fn marker_source_declaration(line: String) -> TAppliedRule Never! {
         companion_site: companion_site,
         inherits: inherits,
         resolution: resolution,
-    }
+    })
 }
 
-// Every `marker` declaration in `source`, the text of Prelude/Markers.jet
+// Every marker type in `source`, the text of Prelude/Markers.jet
 // (MarkerSource.rs `read`), in source order.
 fn marker_source_read(source: String) -> [TAppliedRule] Never! {
     rows := [TAppliedRule]{}
-    loop raw in source.split("\n") {
-        line :: raw.trim()
-        if line.starts_with("marker ") -> &rows.push(marker_source_declaration(line))
+    loop member in marker_source_members(marker_source_strip_comments(source)) {
+        if !member.starts_with("struct ") -> next
+        open :: marker_source_byte_index(member, 123) ?? panic("marker struct without a body: {member}")
+        name :: marker_source_slice(member, 7, open).trim()
+        if marker_source_declaration(name, marker_source_block(member, "struct {name}")) == .Val(row) -> &rows.push(row)
     }
     rows
 }
@@ -290,6 +386,36 @@ fn applied_rule_signature_render(signature: TAppliedRuleSignature) -> String Nev
     "({parts.join(", ")})"
 }
 
+// A marker type on one line, as hover and symbol signatures show it: its
+// fields, then the `impl Marker` settings. `source` is the declaring file,
+// which spells the defaults and setting values.
+fn marker_decl_signature(declaration: MarkerDecl, source: String) -> String Never! {
+    parts := [String]{}
+    settings := [String]{}
+    loop parameter in declaration.params {
+        value :: if parameter.value == .Val(expression) -> marker_decl_signature_source(source, expr_span(expression)) else -> "…"
+        if parameter.ty == .Val(ty) {
+            shown :: if parameter.variadic -> "[{type_name(ty)}]" else -> type_name(ty)
+            default :: if parameter.value != None -> "{{{value}}}" else -> ""
+            &parts.push("{parameter.name}: {shown}{default}")
+        } else {
+            key :: if parameter.name.starts_with("$") -> marker_source_slice(parameter.name, 1, parameter.name.len()) else -> parameter.name.copy()
+            &settings.push("{key} :: {value}")
+        }
+    }
+    block :: if settings.len() == 0 -> "impl Marker {{}}" else -> "impl Marker {{ {settings.join("; ")} }}"
+    &parts.push(block)
+    "struct {declaration.name} {{ {parts.join(", ")} }}"
+}
+
+fn marker_decl_signature_source(source: String, span: Span) -> String Never! {
+    bytes :: source.bytes()
+    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return "…"
+    text :: (String.from_bytes(bytes[span.start..<span.end]) ?? return "…").trim()
+    if text == "" -> return "…"
+    text
+}
+
 // The registered signature `marker_argument_shape_error` (Policy.rs) names:
 // the rule row's rendered signature, `()` when no row has that name.
 fn marker_registered_signature(name: String) -> String Never! {
@@ -297,4 +423,13 @@ fn marker_registered_signature(name: String) -> String Never! {
         if rule.name == name -> return applied_rule_signature_render(rule.signature)
     }
     "()"
+}
+
+// Whether the shared registry has an applied rule row named `name`. Marker
+// declarations in scope are not visible here; sema resolves those.
+fn marker_registered(name: String) -> Bool Never! {
+    loop rule in marker_source_read(MARKER_SOURCE) {
+        if rule.name == name -> return true
+    }
+    false
 }

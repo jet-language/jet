@@ -1,55 +1,57 @@
 // Type grammar constructs JetFoundation Type variants directly. Type source
 // spans are returned separately because semantic Type intentionally carries no
 // parser locations.
-use jet_foundation.[
-    CallContractRow,
-    EffectRowEntry,
-    Measure,
-    MeasureRule,
-    ParamZone,
-    Span,
-    TagMarker,
-    TextEdit,
-    Type,
-    TypeTupleField,
-    diagnostic_from_registry,
-    diagnostic_with_edit,
-    type_tuple_fields_canonical,
-    type_name,
-    foundation_named_type,
-]
-use jet_lexer.[
-    TOKEN_BANG,
-    TOKEN_COLON,
-    TOKEN_COMMA,
-    TOKEN_DOT,
-    TOKEN_DOT_DOT,
-    TOKEN_EOF,
-    TOKEN_FLOAT,
-    TOKEN_GT,
-    TOKEN_HASH,
-    TOKEN_IDENT,
-    TOKEN_INT,
-    TOKEN_KW_FN,
-    TOKEN_KW_TAG,
-    TOKEN_LBRACE,
-    TOKEN_LBRACKET,
-    TOKEN_LPAREN,
-    TOKEN_LT,
-    TOKEN_MINUS,
-    TOKEN_PIPE,
-    TOKEN_PLUS,
-    TOKEN_QUESTION,
-    TOKEN_QUESTION_QUESTION,
-    TOKEN_RBRACE,
-    TOKEN_RBRACKET,
-    TOKEN_RPAREN,
-    TOKEN_SELF,
-    TOKEN_SEMI,
-    TOKEN_SHR,
-    TOKEN_SLASH,
-    TOKEN_STAR,
-]
+use {
+    jet_foundation.[
+        CallContractRow,
+        EffectRowEntry,
+        Measure,
+        MeasureRule,
+        ParamZone,
+        Span,
+        TagMarker,
+        TextEdit,
+        Type,
+        TypeTupleField,
+        diagnostic_from_registry,
+        diagnostic_with_edit,
+        type_tuple_fields_canonical,
+        type_name,
+        foundation_named_type,
+    ]
+    jet_lexer.[
+        TOKEN_BANG,
+        TOKEN_COLON,
+        TOKEN_COMMA,
+        TOKEN_DOT,
+        TOKEN_DOT_DOT,
+        TOKEN_EOF,
+        TOKEN_FLOAT,
+        TOKEN_GT,
+        TOKEN_HASH,
+        TOKEN_IDENT,
+        TOKEN_INT,
+        TOKEN_KW_FN,
+        TOKEN_KW_TAG,
+        TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_MINUS,
+        TOKEN_PIPE,
+        TOKEN_PLUS,
+        TOKEN_QUESTION,
+        TOKEN_QUESTION_QUESTION,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
+        TOKEN_RPAREN,
+        TOKEN_SELF,
+        TOKEN_SEMI,
+        TOKEN_SHR,
+        TOKEN_SLASH,
+        TOKEN_STAR,
+    ]
+}
 
 struct ParsedType {
     ty: Type
@@ -176,9 +178,28 @@ fn parser_parse_suffix_contract(state: &JetParserState, depth: Int) -> ParsedTyp
     span :: parser_cover(error_type.span, bang.span)
     if bare_union {
         text :: parser_tokens_text(state, first_index, end_index)
-        parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only its last member as the error contract", "the `!` mark follows one type, so a union of error types is grouped for the mark to cover every member", "write `({text})!`", "({text})!")
+        marked :: parser_tokens_text(state, parser_contract_last_member(state, first_index), end_index)
+        parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only `{marked}` as the error contract.", "The `!` mark follows one type, so a union of error types is grouped for the mark to cover every member.", "Write `({text})!`.", "({text})!")
     }
     ParsedType{ty: error_type.ty, span: ^span}
+}
+
+// The token where the last member of a bare `A | B` union starts: the one
+// member its `!` actually marks.
+fn parser_contract_last_member(state: JetParserState, first: Int) -> Int Never! {
+    start := first
+    index := first
+    loop {
+        index = parser_scan_contract_member(state, index)
+        if index < 0 -> return start
+        pipe :: parser_next_code_index(state, index)
+        if pipe < 0 || state.tokens[pipe].kind != TOKEN_PIPE -> return start
+        member :: parser_next_code_index(state, pipe + 1)
+        if member < 0 -> return start
+        start = member
+        index = member
+    }
+    start
 }
 
 fn parser_type_starts(kind: Int) -> Bool Never! {

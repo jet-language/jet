@@ -11,7 +11,9 @@ time_host_root := I64{0}
     // Registry creation is a startup fact; do not sample the host epoch until
     // the first host-monotonic call (provider setup must not move that origin).
     sync_store(wrapping(root + I64{24}), jet_rt_tls_key_new(I64{0}))
-    time_host_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        time_host_root = root
+    }
 }
 fn rt_time_monotonic_provider_get() -> I64 {
     jet_rt_tls_get(sync_load(wrapping(time_host_root + I64{24})))

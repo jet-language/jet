@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Run only against the native CLI with its admitted, Rust-free pack beside it.
-// TLS is refused during lowering; a retained non-native WS route is refused by
-// the production linker and both failures must use registered CLI E2104.
+// TLS is refused during lowering, and the refusal must use registered CLI
+// E2104.
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -17,7 +17,6 @@ assert.ok(key && key !== "." && key !== ".." && !key.includes("/"), "pack key mu
 assert.ok(existsSync(join(runtime, key, "jet_runtime.pack.o")), "native CLI must have its admitted pack");
 for (const [name, expected] of [
   ["native_tls_refusal", "TLS transport is not available in native builds until Jet's own TLS implementation lands (D-NATIVE-TLS1=B); use plain HTTP or TCP meanwhile"],
-  ["native_missing_ws_provider", "undefined symbol `jet_ws_connect`, referenced by"],
 ]) {
   const cwd = join(out, name); mkdirSync(cwd, {recursive: true});
   writeFileSync(join(cwd, "main.jet"), readFileSync(join(repo, "tests/fixtures", name + ".jet")));
@@ -29,4 +28,4 @@ for (const [name, expected] of [
   assert.match(result.stderr, /Error \[E2104\]/); assert.ok(result.stderr.includes(expected), result.stderr);
   assert.ok(!existsSync(join(cwd, "main")), "a refusal must not leave an executable");
 }
-console.log("native TLS and missing-provider E2104 refusals: passed");
+console.log("native TLS E2104 refusal: passed");

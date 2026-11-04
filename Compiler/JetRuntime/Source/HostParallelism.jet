@@ -522,7 +522,11 @@ fn cpu_available_parallelism(root: I64, root_len: I64) -> I64 {
 compute_simd_lanes_word := I64{0}
 
 #Export(c) fn jet_compute_simd_lanes() -> I64 {
-    if (compute_simd_lanes_word == I64{0}) -> compute_simd_lanes_word = compute_simd_lanes_probe()
+    if (compute_simd_lanes_word == I64{0}) {
+        #Unsafe("the probe answer is fixed for the process; a racing probe stores the same word") {
+            compute_simd_lanes_word = compute_simd_lanes_probe()
+        }
+    }
     jet_int_owned_from_i64(compute_simd_lanes_word)
 }
 

@@ -3,21 +3,23 @@
 // The query is parsed here; the host checks the entry (when there is one)
 // and searches its symbols (SemIndexSymbols.jet), else the language
 // catalog alone.
-use core.files as cli_files
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileMode,
-    JetDriverCompileResult,
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-    jet_driver_present_diagnostics,
-]
-use jet_foundation.[
-    diagnostic_render_all,
-    Effect,
-]
+use {
+    cli_files :: core.files
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_present_diagnostics,
+    ]
+    jet_foundation.[
+        diagnostic_render_all,
+        Effect,
+    ]
+}
 
 // CmdSemIndex.rs `TypeShape`.
 struct JetCLIFindShape {
@@ -543,7 +545,7 @@ fn jet_cli_find_result(file: String, query: String, mode: JetCLIFindMode, json: 
     if jet_cli_errors(result.diagnostics).len() > 0 {
         diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
         source :: cli_files.read(file) ?? ""
-        if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        if json -> return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_base(file), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)

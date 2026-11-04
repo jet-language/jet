@@ -1,8 +1,10 @@
-
-use core.http.client as http
-use core.time as time
+package { name: "http-get-expired-deadline" authority: { allow: [Net, Time] } }
+use {
+    http :: core.http.client
+    time :: core.time
+}
 fn run() {
-    #Context(deadline: time.now()) {
+    #Context(deadline: time.unix_ns() /% 1_000_000) {
         if http.get("http://{cap:addr}/expired") == {
             .Ok(_) -> print("ok")
             .Err(_) -> print("timeout")

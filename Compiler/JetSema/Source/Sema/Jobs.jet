@@ -1,24 +1,28 @@
-use core.math as math
-use jet_foundation.[
-    JET_CLI_COMMANDS,
-    Diagnostic,
-    EveryArg,
-    EverySchedule,
-    EveryScheduleError,
-    Expr,
-    Func,
-    Item,
-    JobScope,
-    Param,
-    Span,
-    SymbolKind,
-    TFunctionRef,
-    Type,
-    ast_job_metadata,
-    expr_span,
-    symbol_id,
-    type_name,
-]
+use {
+    math :: core.math
+    unicode :: core.text
+    jet_foundation.[
+        JET_CLI_COMMANDS,
+        Diagnostic,
+        EveryArg,
+        EverySchedule,
+        EveryScheduleError,
+        Expr,
+        Func,
+        Item,
+        JobScope,
+        Param,
+        Span,
+        SymbolKind,
+        TFunctionRef,
+        Type,
+        ast_job_metadata,
+        diagnostic_with_label,
+        expr_span,
+        symbol_id,
+        type_name,
+    ]
+}
 
 struct SemaJobScheduleResolution {
     schedule: EverySchedule?
@@ -198,10 +202,45 @@ fn sema_job_duplicate_error(name: String, scope: JobScope, span: Span) -> Diagno
     sema_error("E0928", span, "job `{name}` is declared more than once in scope .{scope_name}", "`jet {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes")
 }
 
-/// E0928: a `#Job fn` takes a reserved name, or two jobs share one name in
-/// the same scope of a module.
+fn sema_job_command_clash_error(name: String, span: Span, command_span: Span) -> Diagnostic {
+    diagnostic :: sema_error("E0928", span, "job `{name}` clashes with the `#CLI` command `{name}`", "`{name}` names both a job and a command of this program, so `jet {name}` cannot select exactly one function", "rename the job or the command; an `.Internal` job never clashes")
+    diagnostic_with_label(^diagnostic, command_span, "the `#CLI` command `{name}` is declared here")
+}
+
+// One command word of a `#CLI` struct and where it is written.
+struct SemaJobCommandWord {
+    name: String
+    span: Span
+}
+
+// The command words of the `#CLI` structs among `items`: each method that is
+// not a computed-field getter and each bound command, lowercased as the
+// command line reads them (CliEntry.jet `sema_cli_entry_spec`).
+fn sema_job_cli_commands(items: [Item]) -> [SemaJobCommandWord] {
+    words := [SemaJobCommandWord]{}
+    loop item in items {
+        if item == .Struct(definition) {
+            cli := false
+            loop derive_item in definition.derives {
+                if derive_item.name == "CLI" -> cli = true
+            }
+            if !cli -> next
+            loop function in definition.methods {
+                if function.name.starts_with("__computed_") -> next
+                &words.push(SemaJobCommandWord{name: unicode.lower(function.name), span: function.name_span})
+            }
+            loop binding in definition.cli_bindings -> &words.push(SemaJobCommandWord{name: unicode.lower(binding.name), span: binding.name_span})
+        }
+    }
+    words
+}
+
+/// E0928: a `#Job fn` takes a reserved name, shares its word with a `#CLI`
+/// command of the module (unless the job is `.Internal`), or two jobs share
+/// one name in the same scope of a module.
 fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
+    commands :: sema_job_cli_commands(items)
     seen_names := [String]{}
     seen_scopes := [JobScope]{}
     loop item in items {
@@ -215,6 +254,18 @@ fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
                 }
                 metadata := function.job_metadata ?? ast_job_metadata()
                 scope := metadata.scope
+                if scope != .Internal {
+                    word :: unicode.lower(function.name)
+                    clash := false
+                    loop command in commands {
+                        if command.name == word {
+                            &diagnostics.push(sema_job_command_clash_error(function.name, span, command.span))
+                            clash = true
+                            break
+                        }
+                    }
+                    if clash -> next
+                }
                 index := 0
                 duplicate := false
                 loop index < seen_names.len() {

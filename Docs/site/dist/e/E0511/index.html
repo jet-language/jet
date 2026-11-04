@@ -38,12 +38,12 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0511</code>: <code>tests/ui/expiring_force_unwrap.stderr</code>.</p>
 <pre class="diag">Error [E0511]: `ExpiringValue.force` bypasses expiry checking
-  --&gt; tests/ui/expiring_force_unwrap.jet:9:15
+  --&gt; tests/ui/expiring_force_unwrap.jet:11:16
     |
-  9 |     _ :: item.force(clk)
-    |               ^^^^^
+ 11 |     _ :: &amp;item.force(clk)
+    |                ^^^^^
  Why: TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly
- Fix: Use `match item.get(clock) { .Ok(v) -&gt; …; .Err(Expired) -&gt; … }` instead
+ Fix: Use `.get(clock)` and handle `Expired`
 More: jet-lang.dev/e/E0511
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

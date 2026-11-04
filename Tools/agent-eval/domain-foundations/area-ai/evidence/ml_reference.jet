@@ -1,12 +1,30 @@
-use core.compute as compute
+use compute :: core.compute
 
 fn predict(weight: Tensor, input: Tensor) -> Tensor {
     return compute.matmul(input, weight) ?? panic("predict")
 }
 
+// core.compute no longer ships a loss or an optimizer step
+// (D-COMPUTE-AUTODIFF-SCOPE1=B, #3955), so the model writes them from
+// elementwise ops.
+fn mean_squared_error(prediction: Tensor, target: Tensor) -> Tensor {
+    diff :: compute.sub(prediction, target) ?? panic("diff")
+    squares :: compute.mul(diff, diff) ?? panic("squares")
+    rows :: compute.sum_axis(squares, 0) ?? panic("rows")
+    total :: compute.sum_axis(rows, 0) ?? panic("total")
+    count :: compute.full([1], Float.from_int(compute.numel(diff))) ?? panic("count")
+    return compute.div(total, count) ?? panic("mean")
+}
+
+fn gradient_step(weight: Tensor, gradient: Tensor, rate: Float) -> Tensor {
+    scale :: compute.full(compute.shape(gradient), rate) ?? panic("rate")
+    delta :: compute.mul(gradient, scale) ?? panic("delta")
+    return compute.sub(weight, delta) ?? panic("step")
+}
+
 fn training_loss(weight: Tensor, input: Tensor, target: Tensor) -> Tensor {
     prediction :: predict(weight, input)
-    return compute.mse_loss(prediction, target) ?? panic("loss")
+    return mean_squared_error(prediction, target)
 }
 
 fn run() {
@@ -15,13 +33,13 @@ fn run() {
     target :: compute.ones([2, 2]) ?? panic("target")
     before :: predict(weight, input)
     print("before:{compute.to_list(before)}")
-    before_loss :: compute.mse_loss(before, target) ?? panic("before_loss")
+    before_loss :: mean_squared_error(before, target)
     print("loss:{compute.to_list(before_loss)}")
     gradients :: compute.gradient(training_loss, weight.copy(), input.copy(), target.copy(), wrt: [weight])
-    next :: compute.sgd_step(weight, gradients.weight, 0.5) ?? panic("sgd")
+    next :: gradient_step(weight, gradients.weight, 0.5)
     after :: predict(next, input)
     print("after:{compute.to_list(after)}")
-    after_loss :: compute.mse_loss(after, target) ?? panic("after_loss")
+    after_loss :: mean_squared_error(after, target)
     print("trained_loss:{compute.to_list(after_loss)}")
     wire :: compute.serialize(next) ?? panic("serialize")
     print("wire:{wire}")

@@ -1,5 +1,7 @@
-use jet_foundation.[MARKER_SOURCE_SITES, MarkerDecl, Span]
-use jet_parser.[jet_format_source, jfmt_check_parse_accepts]
+use {
+    jet_foundation.[MARKER_SOURCE_SITES, MarkerDecl, Span]
+    jet_parser.[jet_format_source, jfmt_check_parse_accepts]
+}
 
 fn marker_test_decl(source: String) -> MarkerDecl {
     program :: parser_test_program(source)
@@ -7,23 +9,40 @@ fn marker_test_decl(source: String) -> MarkerDecl {
     panic("expected marker declaration")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:897
-#Test("ratified_named_parameter_form_parses_with_an_at_marked_fact") {
-    decl :: marker_test_decl(`marker Inline(mode: InlineMode, $sites: [.Function, .Method, .Constant])
+#Test("a_marker_struct_reads_its_fields_and_settings") {
+    program :: parser_test_program(`struct Inline {
+    mode: InlineMode
+
+    impl Marker {
+        sites :: [.Function, .Method, .Constant]
+    }
+}
 fn run() {}
 `)
+    program.items[0] == .Struct(definition) ?? panic("the marker is a struct")
+    assert_eq(definition.fields.len(), 1)
+    decl :: definition.marker ?? panic("the struct declares a marker")
     assert_eq(decl.name, "Inline")
     assert_eq(decl.params.len(), 2)
     assert_eq(decl.params[0].name, "mode")
     assert_eq(decl.params[1].name, "$sites")
+    assert_eq(marker_test_decl(`struct Inline { impl Marker { sites :: [.Function] } }
+fn run() {}
+`).name, "Inline")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:919
-#Test("empty_and_every_published_site_value_parse_in_the_same_list") {
-    assert(marker_test_decl(`marker NoParameters()
+#Test("empty_and_every_published_site_value_parse_as_settings") {
+    assert(marker_test_decl(`struct NoParameters {
+    impl Marker {}
+}
 fn run() {}
 `).params.is_empty())
-    empty :: marker_test_decl(`marker Empty($sites: [], $repeatable: false)
+    empty :: marker_test_decl(`struct Empty {
+    impl Marker {
+        sites :: []
+        repeatable :: false
+    }
+}
 fn run() {}
 `)
     assert_eq(empty.params.len(), 2)
@@ -31,7 +50,15 @@ fn run() {}
         assert(param.ty == None)
         assert(param.value != None)
     }
-    many :: marker_test_decl(`marker Many($sites: [.Type, .Field], $repeatable: true, $inherits: false, $scopes: [.Type, .Field], $resolution: .Merge)
+    many :: marker_test_decl(`struct Many {
+    impl Marker {
+        sites :: [.Type, .Field]
+        repeatable :: true
+        inherits :: false
+        scopes :: [.Type, .Field]
+        resolution :: .Merge
+    }
+}
 fn run() {}
 `)
     assert_eq(many.params.len(), 5)
@@ -39,7 +66,7 @@ fn run() {}
         assert(param.ty == None)
         assert(param.value != None)
     }
-    loop site in MARKER_SOURCE_SITES -> _ :: marker_test_decl("marker Uses($sites: [.{site}])\nfn run() {{}}\n")
+    loop site in MARKER_SOURCE_SITES -> _ :: marker_test_decl("struct Uses {{ impl Marker {{ sites :: [.{site}] }} }}\nfn run() {{}}\n")
 }
 
 // Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:981
@@ -69,29 +96,75 @@ fn run() {}
     assert_eq(diagnostics.len(), 1)
     assert_eq(diagnostics[0].code, "E0381")
     assert(diagnostics[0].what.contains("retired"))
-    assert(diagnostics[0].fix.contains("$sites"))
+    assert(diagnostics[0].fix.contains("impl Marker"))
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1037 (stale on dev: Rust panics at1065 on $sites after the $ cutover)
-#Test("a_fact_about_the_rule_is_one_more_named_parameter") {
-    decl :: marker_test_decl(`marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)
+#Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
+    decl :: marker_test_decl(`struct Pre {
+    condition: String
+    message: String{"failed"}
+    tags: [String]
+
+    impl Marker {
+        sites :: [.Function, .Method]
+        repeatable :: true
+    }
+}
 fn run() {}
 `)
     names := [String]{}
     loop param in decl.params -> &names.push(param.name)
-    assert_eq(names, [String]{"condition", "message", "$sites", "$repeatable"})
+    assert_eq(names, [String]{"condition", "message", "tags", "$sites", "$repeatable"})
     loop param in decl.params {
-        // The Rust assertion still checks '@' after the '$' cutover. The law
-        // checks the metadata sigil actually used by this source.
         if param.name.starts_with("$") {
             assert(param.ty == None && param.value != None)
         } else { assert(param.ty != None) }
     }
+    assert(!decl.params[0].variadic && decl.params[1].value != None && decl.params[2].variadic)
     assert_eq(MARKER_SOURCE_SITES.len(), 18)
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1078 (stale on dev: Rust expects @ in a fix that actually teaches $sites)
-#Test("rejected_spellings_each_teach_the_ratified_named_parameter_form") {
+#Test("a_marker_struct_holds_a_group_or_a_template") {
+    group :: marker_test_decl(`struct Fast {
+    impl Marker {
+        group :: #[Inline(.Always), Scalar]
+    }
+}
+fn run() {}
+`)
+    members :: group.group ?? panic("the marker is a group")
+    assert_eq(members.len(), 2)
+    template :: marker_test_decl(`struct Logged {
+    impl Marker {
+        sites :: [.Function]
+
+        fn expand(self, target: Target) {
+            print("logged")
+        }
+    }
+}
+fn run() {}
+`)
+    assert(template.body != None)
+}
+
+#Test("retired_declarations_teach_the_struct_form_with_an_edit") {
+    diagnostics :: parser_test_errors(`marker Pre(condition: String, $sites: [.Function], $repeatable: true)
+
+marker Fast = #[Inline(.Always), Scalar]
+
+fn run() {}
+`)
+    assert_eq(diagnostics.len(), 2)
+    loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E0381")
+    rule :: diagnostics[0].edit ?? panic("the parameter form carries its rewrite")
+    assert_eq(rule.new_text, "struct Pre {\n    condition: String\n\n    impl Marker {\n        sites :: [.Function]\n        repeatable :: true\n    }\n}")
+    group :: diagnostics[1].edit ?? panic("the group form carries its rewrite")
+    assert_eq(group.new_text, "struct Fast {\n    impl Marker {\n        group :: #[Inline(.Always), Scalar]\n    }\n}")
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1078
+#Test("rejected_trailers_each_teach_the_struct_form") {
     diagnostics :: parser_test_errors(`
 marker Inline(mode: String) on [.Function]
 
@@ -102,8 +175,25 @@ fn run() {}
     assert_eq(diagnostics.len(), 2)
     loop diagnostic in diagnostics {
         assert_eq(diagnostic.code, "E0381")
-        assert(diagnostic.fix.contains("$"))
+        assert(diagnostic.fix.contains("impl Marker"))
+        assert(diagnostic.edit == None)
     }
+}
+
+#Test("impl_marker_rejects_what_a_marker_does_not_have") {
+    diagnostics :: parser_test_errors(`struct Bad {
+    impl Marker {
+        sites :: [.Function]
+        sites :: [.Method]
+        colour :: .Red
+        fn render(self) {}
+    }
+}
+fn run() {}
+`)
+    codes := [String]{}
+    loop diagnostic in diagnostics -> &codes.push(diagnostic.code)
+    assert_eq(codes, [String]{"E0937", "E0936", "E0907"})
 }
 
 // Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1108

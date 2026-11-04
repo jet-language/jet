@@ -3,10 +3,12 @@
 // one. Foundation owns held no-follow reads/publication. Native gates #3593,
 // InvalidData (CORE-GAPS 11); signed/TUF composition and entropy #3597/#4262.
 
-use jet_pkg_model.[pkg_sha256_hex]
-use jetpack_foundation.[FoundationPublicationPolicy, foundation_open_directory_authority, foundation_open_file_authority, foundation_write_file_nofollow_at_root]
-use core.files as files
-use core.sys as sys
+use {
+    jet_pkg_model.[pkg_sha256_hex]
+    jetpack_foundation.[FoundationPublicationPolicy, foundation_open_directory_authority, foundation_open_file_authority, foundation_write_file_nofollow_at_root]
+    files :: core.files
+    sys :: core.sys
+}
 
 fn publication_registry_root_key_path(registry_name: String) -[Env]> String Never! {
     publication_registry_trust_path(publication_keys_dir(), registry_name, "registry-roots", "pub")

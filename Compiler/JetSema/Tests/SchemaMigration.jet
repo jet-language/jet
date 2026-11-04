@@ -1,12 +1,14 @@
 // Production codec + E0910 pass. The diagnostic renderings are the unchanged
 // tests/ui/{published_schema_breaking,migration_add_needs_default,
 // migration_change_no_converter,published_schema_bracket_marker_migration}.stderr.
-use jet_parser.[parse_source]
-use jet_sema.[
-    SNAPSHOT_VERSION, SchemaSnapshot, SnapshotField, check_schema_migrations,
-    sema_program_tables_init, snapshot_from_struct,
-]
-use jet_foundation.[Diagnostic, Item, TTypeDef]
+use {
+    jet_parser.[parse_source]
+    jet_sema.[
+        SNAPSHOT_VERSION, SchemaSnapshot, SnapshotField, check_schema_migrations,
+        sema_program_tables_init, snapshot_from_struct,
+    ]
+    jet_foundation.[Diagnostic, Item, TTypeDef]
+}
 
 fn schema_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("SchemaMigration: {detail}")

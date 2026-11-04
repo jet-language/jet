@@ -1,6 +1,8 @@
-use jet_foundation.[Diagnostic, DiagnosticFixApplicability, Expr, Program, Span, TextEdit]
-use jet_lexer.[lex]
-use jet_parser.[parse_tokens]
+use {
+    jet_foundation.[Diagnostic, DiagnosticFixApplicability, Expr, Program, Span, TextEdit]
+    jet_lexer.[lex]
+    jet_parser.[parse_tokens]
+}
 
 // Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2097 (`Lexer::lex` inserts the
 // line terminators, as `lex` does)
@@ -282,4 +284,15 @@ fn arm_table_fix_all(source: String) -> String {
     assert(program.items.len() == 2 && program.script_body.len() == 0, "both bindings are declarations")
     assert(if program.items[0] == .Const(value) -> value.name == "LIMIT" else -> false, "the linted binding is kept")
     assert(if program.items[1] == .Const(value) -> value.name == "NEXT" else -> false, "the following binding is kept")
+}
+
+#Test("marked_result_handler_line_is_an_effect_statement") {
+    program :: value_block_parsed("\nfn run() {{\n    &writer.write(1) ? done -> print(done) ! err -> {{\n        print(err)\n    }}\n}}\n")
+    handler :: loop item in program.items {
+        if item == .Func(function) && function.name == "run" {
+            assert(function.body.len() == 1, "the handler is one statement")
+            if function.body[0] == .Expr(expr) -> break expr
+        }
+    } ?? panic("missing the marked handler statement")
+    assert(if handler == .If(_, _, _, _, _, _, _) -> true else -> false, "the marked line is the compact Result handler")
 }

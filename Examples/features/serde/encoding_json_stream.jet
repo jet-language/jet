@@ -4,10 +4,12 @@ package {
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
 }
 // D-ENCSTREAM-SURFACE1=A: bounded JSON reader/writer lifecycle.
-use core.encoding as encoding
-use core.encoding.json as json
-use core.files as files
-use core.testing as testing
+use {
+    encoding :: core.encoding
+    json :: core.encoding.json
+    files :: core.files
+    testing :: core.testing
+}
 
 fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     out :: files.create(path) ?? return Err(err)

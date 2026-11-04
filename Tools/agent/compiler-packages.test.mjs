@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compilerFixtureUnit, compilerInputRoots, compilerInputs, compilerPackages, compilerSourceIdentity, compilerSources, isCompilerInput } from './compiler-packages.mjs';
+import { compilerFixtureUnit, compilerInputRoots, compilerInputs, compilerPackages, compilerSourceIdentity, compilerSources, isCompilerInput, unblockUses } from './compiler-packages.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -93,20 +93,27 @@ test('a fixture unit blanks package imports and repeated Core imports in place a
     const root = tree({
         'Compiler/JetCli/package.jet': manifest('jet_cli', { jet_foundation: '../JetFoundation' }),
         'Compiler/JetCli/run.jet': 'fn run() {}\n',
-        'Compiler/JetCli/Source/Cli.jet': 'use jet_foundation.[found]\nuse core.files as files\nfn cli() { found() }\n',
+        'Compiler/JetCli/Source/Cli.jet': 'use jet_foundation.[found]\nuse files :: core.files\nfn cli() { found() }\n',
         'Compiler/JetFoundation/package.jet': manifest('jet_foundation'),
-        'Compiler/JetFoundation/Source/Found.jet': 'use core.files as files\nuse core.text.[Text, Rune]\nfn found() {}',
-        'Compiler/JetFoundation/Source/More.jet': 'use core.text.[Rune, Glyph]\nfn more() {}\n',
+        'Compiler/JetFoundation/Source/Found.jet': 'use files :: core.files\nuse core.text.[Text, Rune]\nfn found() {}',
+        'Compiler/JetFoundation/Source/More.jet': 'use {\n    core.text.[Rune, Glyph]\n    files :: core.files\n}\nfn more() {}\n',
     });
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const unit = compilerFixtureUnit(root);
     assert.ok(!unit.includes('fn run()'));
     assert.ok(!unit.includes('use jet_foundation'));
-    assert.equal(unit.match(/use core\.files as files/g).length, 1);
+    assert.equal(unit.match(/use files :: core\.files/g).length, 1);
     assert.ok(unit.includes('use core.text.[Text, Rune]'));
     assert.ok(unit.includes('use core.text.[      Glyph]'), 'a repeated grouped Core member is blanked in place');
     assert.ok(unit.indexOf('fn found()') < unit.indexOf('fn cli()'), 'dependencies come first');
     assert.equal(compilerFixtureUnit(root, ['Compiler/JetFoundation']).includes('fn cli()'), false);
+});
+
+test('unblockUses keeps every offset and leaves pub blocks', () => {
+    const source = 'use {\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs :: core.files\n}\npub use {\n    core.sys\n}\nmodule m {\n    use {\n        core.term\n    }\n}\n';
+    const flat = unblockUses(source);
+    assert.equal(flat.length, source.length);
+    assert.equal(flat, '     \nuse jet_lexer.[\n        lex,\n    ]\n    // note\nuse fs :: core.files\n \npub use {\n    core.sys\n}\nmodule m {\n         \n    use core.term\n     \n}\n');
 });
 
 test('the repository compiler closure is the CLI and its dependencies', () => {

@@ -652,6 +652,7 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
             if kind == "WsConn" {
                 if method == {
                     "send_text" -> return Val(ir_handle_h("ws.send_text", "jet_ws_send_text", [Bool]{true, true}, Val(Effect.Net)))
+                    "recv" -> return Val(ir_handle_h("ws.recv", "jet_ws_recv", [Bool]{true}, Val(Effect.Net)))
                     "send_bytes" -> return Val(ir_handle_h("ws.send_bytes", "jet_ws_send_binary", [Bool]{true, true}, Val(Effect.Net)))
                     "close" -> return Val(ir_handle_h("ws.close", "jet_ws_close", [Bool]{true, false, true}, Val(Effect.Net)))
                     else -> return None
@@ -662,6 +663,7 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
                     "is_text" -> return Val(ir_handle_h("ws.message_is_text", "jet_ws_message_is_text", [Bool]{true}, None))
                     "is_binary" -> return Val(ir_handle_h("ws.message_is_binary", "jet_ws_message_is_binary", [Bool]{true}, None))
                     "is_close" -> return Val(ir_handle_h("ws.message_is_close", "jet_ws_message_is_close", [Bool]{true}, None))
+                    "text" -> return Val(ir_handle_h("ws.message_text", "jet_ws_message_text", [Bool]{true}, None))
                     "bytes" -> return Val(ir_handle_h("ws.message_bytes", "jet_ws_message_bytes", [Bool]{true}, None))
                     else -> return None
                 }

@@ -1,202 +1,653 @@
 // The marker vocabulary is written here, not in Rust.
 //
-// This is ordinary Jet source in the ratified `marker Name(params…)` form
-// . One row per marker. The compiler reads
-// this file to build its registry, so a marker exists exactly when it is
-// written here (law zero).
+// This is ordinary Jet source: each marker is a struct with an
+// `impl Marker { … }` block. The compiler reads this file to build its
+// registry, so a marker exists exactly when it is written here (law zero).
 //
-// A plain parameter is an argument the use site writes: `name: Type` with an
-// optional `{default}`. A `$`-marked parameter is a fact about the rule
-// itself:
+// A field is an argument the use site writes: `name: Type` with an optional
+// `{default}`; a last list field with no default takes the remaining
+// arguments. The `impl Marker` settings are facts about the rule itself:
 //
-//   $sites        the attachment points the rule accepts, `[]` for none
-//   $repeatable   the rule may be written more than once on one target
-//   $owns_menu    the rule teaches its own argument menu in its own error
-//   $inherits     the rule takes part in lexical policy inheritance
-//   $resolution   how nested writings combine: .Override, .Merge, .Tighten
-//   $scopes       the policy scopes the rule may be written at
-//   $companion    `[Rule, .Site]` — one extra site a companion rule opens
+//   sites        the attachment points the rule accepts, `[]` for none
+//   repeatable   the rule may be written more than once on one target
+//   owns_menu    the rule teaches its own argument menu in its own error
+//   inherits     the rule takes part in lexical policy inheritance
+//   resolution   how nested writings combine: .Override, .Merge, .Tighten
+//   scopes       the policy scopes the rule may be written at
+//   companion    `[Rule, .Site]` — one extra site a companion rule opens
 //
-// `$sites` is the only public legal-site declaration form. Ordinary names
-// are typed use-site arguments; every `$` name is fixed declaration metadata.
+// `sites` is the only public legal-site declaration form. Fields are typed
+// use-site arguments; every setting is fixed declaration metadata.
 //
-marker Policy(settings: ...PolicySetting, $sites: [.Package, .Module, .Function, .Method, .Block], $inherits: true, $resolution: .Tighten, $scopes: [.Package, .Module, .Function, .Block])
+struct Policy {
+    settings: [PolicySetting]
 
-marker Arithmetic(mode: ArithmeticMode, $sites: [.Function, .Method, .Block])
+    impl Marker {
+        sites :: [.Package, .Module, .Function, .Method, .Block]
+        inherits :: true
+        resolution :: .Tighten
+        scopes :: [.Package, .Module, .Function, .Block]
+    }
+}
 
-marker Unsafe(reason: String, obligations: ObligationMode{.None}, $sites: [.Function, .Method, .Block, .Operation])
+struct Arithmetic {
+    mode: ArithmeticMode
 
-marker Scrub(tag: Ident, $sites: [.Function, .Method])
+    impl Marker {
+        sites :: [.Function, .Method, .Block]
+    }
+}
 
-marker Memo(bound: MemoBound{.Default}, $sites: [.Function, .Field])
+struct Unsafe {
+    reason: String
+    obligations: ObligationMode{.None}
 
-marker Pre(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
+    impl Marker {
+        sites :: [.Function, .Method, .Block, .Operation]
+    }
+}
 
-marker Post(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
+struct Scrub {
+    tag: Ident
+
+    impl Marker {
+        sites :: [.Function, .Method]
+    }
+}
+
+struct Memo {
+    bound: MemoBound{.Default}
+
+    impl Marker {
+        sites :: [.Function, .Field]
+    }
+}
+
+struct Pre {
+    condition: Value
+    message: String
+
+    impl Marker {
+        sites :: [.Function, .Method]
+        repeatable :: true
+    }
+}
+
+struct Post {
+    condition: Value
+    message: String
+
+    impl Marker {
+        sites :: [.Function, .Method]
+        repeatable :: true
+    }
+}
 
 // These rows stay separate. Kernel requests a checked
 // worker-boundary proof; Inline(Always) is a checked promise, not a hint.
-marker Kernel(mode: KernelMode, $sites: [.Function])
+struct Kernel {
+    mode: KernelMode
 
-marker Inline(mode: InlineMode{.Hint}, $sites: [.Function, .Method, .Constant])
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+
+struct Inline {
+    mode: InlineMode{.Hint}
+
+    impl Marker {
+        sites :: [.Function, .Method, .Constant]
+    }
+}
 
 // Native auto-vectorization is the safe default; this explicit
 // function/method marker keeps scalar codegen available for reproducibility or
 // a workload whose measured result favors scalar execution.
-marker Scalar($sites: [.Function, .Method])
+struct Scalar {
+    impl Marker {
+        sites :: [.Function, .Method]
+    }
+}
 // A typed Add/Mul impl may derive its reverse lookup.
-marker Commutative($sites: [.Impl])
+struct Commutative {
+    impl Marker {
+        sites :: [.Impl]
+    }
+}
 
-marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, after: Value{[]}, parallel: Value{none}, $sites: [.Function])
+struct Job {
+    scope: JobScope{.Dev}
+    packages: Value{[]}
+    cwd: Value{none}
+    inputs: Value{[]}
+    outputs: Value{[]}
+    skip: Value{none}
+    cache: Value{.Uncached}
+    limits: Value{none}
+    after: Value{[]}
+    parallel: Value{none}
 
-marker Every(schedule: Duration | String, $sites: [.Function])
+    impl Marker {
+        sites :: [.Function]
+    }
+}
 
-marker Replayable($sites: [.Function, .Method])
+struct Every {
+    schedule: Duration | String
 
-marker WasmExport($sites: [.Function])
+    impl Marker {
+        sites :: [.Function]
+    }
+}
 
-marker State(state: State, $sites: [.Function, .Method])
+struct Replayable {
+    impl Marker {
+        sites :: [.Function, .Method]
+    }
+}
 
-marker Transition(from: State, to: State, $sites: [.Function, .Method])
+struct WasmExport {
+    impl Marker {
+        sites :: [.Function]
+    }
+}
 
-marker FFI(language: FFILanguage, $sites: [.Function], $owns_menu: true)
+struct State {
+    state: State
 
-marker Undo(inverse: Ident, $sites: [.Function])
+    impl Marker {
+        sites :: [.Function, .Method]
+    }
+}
 
-marker Close(close: Ident, $sites: [.Function])
+struct Transition {
+    from: State
+    to: State
 
-marker ABI(name: ABI, $sites: [.Function])
+    impl Marker {
+        sites :: [.Function, .Method]
+    }
+}
 
-marker MustUse($sites: [.Function, .Method, .Type])
+struct FFI {
+    language: FFILanguage
 
-marker Error($sites: [.Type])
+    impl Marker {
+        sites :: [.Function]
+        owns_menu :: true
+    }
+}
+
+struct Undo {
+    inverse: Ident
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+
+struct Close {
+    close: Ident
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+
+struct ABI {
+    name: ABI
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+
+struct MustUse {
+    impl Marker {
+        sites :: [.Function, .Method, .Type]
+    }
+}
+
+struct Error {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
 // The one retiring lifecycle rung. `removed_in` is
 // optional until package editions own removal; before then it remains warn-only.
-marker Deprecated(since: String, use: String, removed_in: String{none}, $sites: [.Function, .Method, .Type])
+struct Deprecated {
+    since: String
+    use: String
+    removed_in: String{none}
 
-marker Codable($sites: [.Type])
+    impl Marker {
+        sites :: [.Function, .Method, .Type]
+    }
+}
+
+struct Codable {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
 // Named typed receipt section declaration.
-marker Receipt(name: String, $sites: [.Type])
+struct Receipt {
+    name: String
 
-marker Encode($sites: [.Type])
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Decode($sites: [.Type])
+struct Encode {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker PublishedSchema($sites: [.Type])
+struct Decode {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Comparable($sites: [.Type])
+struct PublishedSchema {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Equatable($sites: [.Type])
+struct Comparable {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Debug($sites: [.Type])
+struct Equatable {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Numeric($sites: [.Type])
+struct Debug {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Printable($sites: [.Type])
+struct Numeric {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker CodableAsBase($sites: [.Type])
+struct Printable {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker CLI(pack: Ident{none}, $sites: [.Type])
+struct CodableAsBase {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Patchable($sites: [.Type])
+struct CLI {
+    pack: Ident{none}
 
-marker UnitFamily(family: Ident, dimension: Value{nominal}, base: Ident{"first member when converting"}, $sites: [.Type])
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker SingleUse($sites: [.Type])
+struct Patchable {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
+
+struct UnitFamily {
+    family: Ident
+    dimension: Value{nominal}
+    base: Ident{"first member when converting"}
+
+    impl Marker {
+        sites :: [.Type]
+    }
+}
+
+struct SingleUse {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
 // Structs use the second argument for `align(N)`; enums retain
 // the legacy bare tag-width argument in this same registry slot.
 // The layout parser teaches the menu: `c`, `columnar`, and an enum's
 // backing width `U8` … `I64` (D-ENUM-BACKING1=A), with E1105 otherwise.
-marker Layout(kind: Layout, tag: Value{none}, $sites: [.Type], $owns_menu: true)
+struct Layout {
+    kind: Layout
+    tag: Value{none}
 
-marker RenameAll(case: NamingCase, $sites: [.Type], $owns_menu: true)
+    impl Marker {
+        sites :: [.Type]
+        owns_menu :: true
+    }
+}
 
-marker DenyUnknownFields($sites: [.Type])
+struct RenameAll {
+    case: NamingCase
 
-marker Discriminant(field: String, $sites: [.Type])
+    impl Marker {
+        sites :: [.Type]
+        owns_menu :: true
+    }
+}
 
-marker Untagged($sites: [.Type])
+struct DenyUnknownFields {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Redact($sites: [.Field])
+struct Discriminant {
+    field: String
 
-marker Rename(name: String, json: String{none}, cbor: String{none}, csv: String{none}, toml: String{none}, yaml: String{none}, xml: String{none}, args: String{none}, env: String{none}, db: String{none}, layout: String{none}, $sites: [.Field, .Variant])
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Skip($sites: [.Field])
+struct Untagged {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker Flatten($sites: [.Field])
+struct Redact {
+    impl Marker {
+        sites :: [.Field]
+    }
+}
 
-marker Doc(text: String, $sites: [.Field, .Type, .Variant, .Method], $companion: [Job, .Function])
+struct Rename {
+    name: String
+    json: String{none}
+    cbor: String{none}
+    csv: String{none}
+    toml: String{none}
+    yaml: String{none}
+    xml: String{none}
+    args: String{none}
+    env: String{none}
+    db: String{none}
+    layout: String{none}
 
-marker Flag($sites: [.Field])
+    impl Marker {
+        sites :: [.Field, .Variant]
+    }
+}
 
-marker Short(name: String, $sites: [.Field])
+struct Skip {
+    impl Marker {
+        sites :: [.Field]
+    }
+}
 
-marker Env(name: String, $sites: [.Field])
+struct Flatten {
+    impl Marker {
+        sites :: [.Field]
+    }
+}
 
-marker Persist($sites: [.Declaration])
+struct Doc {
+    text: String
 
-marker Track($sites: [.Declaration])
+    impl Marker {
+        sites :: [.Field, .Type, .Variant, .Method]
+        companion :: [Job, .Function]
+    }
+}
 
-marker Local($sites: [.Declaration])
+struct Flag {
+    impl Marker {
+        sites :: [.Field]
+    }
+}
 
-marker Shared($sites: [.Declaration])
+struct Short {
+    name: String
 
-marker Meta(category: String{""}, tunable: Bool{false}, maturity: Maturity{.Tested}, $sites: [.Function, .Method, .Declaration, .Constant])
+    impl Marker {
+        sites :: [.Field]
+    }
+}
+
+struct Env {
+    name: String
+
+    impl Marker {
+        sites :: [.Field]
+    }
+}
+
+struct Persist {
+    impl Marker {
+        sites :: [.Declaration]
+    }
+}
+
+struct Track {
+    impl Marker {
+        sites :: [.Declaration]
+    }
+}
+
+struct Local {
+    impl Marker {
+        sites :: [.Declaration]
+    }
+}
+
+struct Shared {
+    impl Marker {
+        sites :: [.Declaration]
+    }
+}
+
+struct Meta {
+    category: String{""}
+    tunable: Bool{false}
+    maturity: Maturity{.Tested}
+
+    impl Marker {
+        sites :: [.Function, .Method, .Declaration, .Constant]
+    }
+}
 // Exported devtools panels are discovered from one typed
 // function marker; no startup registration call or second metadata surface.
-marker DevPanel($sites: [.Function])
+struct DevPanel {
+    impl Marker {
+        sites :: [.Function]
+    }
+}
 
-marker Todo($sites: [.Expression])
+struct Todo {
+    impl Marker {
+        sites :: [.Expression]
+    }
+}
 
-marker Shield($sites: [.Block])
+struct Shield {
+    impl Marker {
+        sites :: [.Block]
+    }
+}
 
-marker Impure(reason: String{none}, $sites: [.Block])
+struct Impure {
+    reason: String{none}
 
-marker FX(grant: ...Effect, $sites: [.Block])
+    impl Marker {
+        sites :: [.Block]
+    }
+}
 
-marker Transact(name: Ident, $sites: [.Block])
+struct FX {
+    grant: [Effect]
 
-marker Region(name: Ident, $sites: [.Block])
+    impl Marker {
+        sites :: [.Block]
+    }
+}
 
-marker Live($sites: [.Block])
+struct Transact {
+    name: Ident
 
-marker Nondeterministic(reason: String, $sites: [.Block])
+    impl Marker {
+        sites :: [.Block]
+    }
+}
 
-marker Context(allocator: Value{default}, logger: Value{default}, deadline: Int{default}, $sites: [.Block])
+struct Region {
+    name: Ident
 
-marker Reactive($sites: [.Function, .Method, .Block])
+    impl Marker {
+        sites :: [.Block]
+    }
+}
 
-marker Off($sites: [.Statement, .Block])
+struct Live {
+    impl Marker {
+        sites :: [.Block]
+    }
+}
 
-marker DebugOnly($sites: [.Statement, .Block])
+struct Nondeterministic {
+    reason: String
+
+    impl Marker {
+        sites :: [.Block]
+    }
+}
+
+struct Context {
+    allocator: Value{default}
+    logger: Value{default}
+    deadline: Int{default}
+
+    impl Marker {
+        sites :: [.Block]
+    }
+}
+
+struct Reactive {
+    impl Marker {
+        sites :: [.Function, .Method, .Block]
+    }
+}
+
+struct Off {
+    impl Marker {
+        sites :: [.Statement, .Block]
+    }
+}
+
+struct DebugOnly {
+    impl Marker {
+        sites :: [.Statement, .Block]
+    }
+}
 
 // Test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
 // `.expect_fail([E30xx,] message: "text")` checks a
 // region's raw stop message. Whole-test expected_fail remains the known-bug mark.
-marker Test(name: String{"function name"}, faults: [Effect]{[]}, expected_fail: Bool{false}, $sites: [.Test])
+struct Test {
+    name: String{"function name"}
+    faults: [Effect]{[]}
+    expected_fail: Bool{false}
 
-marker Target(target: Target, $sites: [.File, .Module, .Function])
+    impl Marker {
+        sites :: [.Test]
+    }
+}
+
+struct Target {
+    target: Target
+
+    impl Marker {
+        sites :: [.File, .Module, .Function]
+    }
+}
 // #2793: target interrupt vector plus bounded effect row.
-marker Interrupt(vector: Ident, effects: [Effect], $sites: [.Function])
+struct Interrupt {
+    vector: Ident
+    effects: [Effect]
 
-marker Root($sites: [.Parameter])
+    impl Marker {
+        sites :: [.Function]
+    }
+}
 
-marker HTML(page: Path, $sites: [.File, .Block])
+struct Root {
+    impl Marker {
+        sites :: [.Parameter]
+    }
+}
 
-marker NoPrelude($sites: [.File])
+struct HTML {
+    page: Path
 
-marker SQL(row: Type{none}, $sites: [.Block])
+    impl Marker {
+        sites :: [.File, .Block]
+    }
+}
 
-marker Bindgen($sites: [.Module])
+struct NoPrelude {
+    impl Marker {
+        sites :: [.File]
+    }
+}
 
-marker allow(lint: Ident, reason: String{none}, $sites: [.Declaration, .Field, .Statement], $repeatable: true)
+struct SQL {
+    row: Type{none}
+
+    impl Marker {
+        sites :: [.Block]
+    }
+}
+
+struct Bindgen {
+    impl Marker {
+        sites :: [.Module]
+    }
+}
+
+struct allow {
+    lint: Ident
+    reason: String{none}
+
+    impl Marker {
+        sites :: [.Declaration, .Field, .Statement]
+        repeatable :: true
+    }
+}
 
 // Stable-address storage is not a code-generation hint.
-marker Static($sites: [.Constant])
+struct Static {
+    impl Marker {
+        sites :: [.Constant]
+    }
+}
 
-marker wire($sites: [.Field])
+struct wire {
+    impl Marker {
+        sites :: [.Field]
+    }
+}
 

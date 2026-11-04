@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0381 — Jet diagnostic</title>
-<meta name="description" content="A marker declaration used a retired trailing `on` clause or second parameter list.">
+<meta name="description" content="A `marker` declaration is a retired spelling of a marker type.">
 <meta property="og:title" content="E0381 — Jet diagnostic">
-<meta property="og:description" content="A marker declaration used a retired trailing `on` clause or second parameter list.">
+<meta property="og:description" content="A `marker` declaration is a retired spelling of a marker type.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,43 +25,61 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0381</h1>
-<p>A marker declaration used a retired trailing `on` clause or second parameter list.</p>
+<p>A `marker` declaration is a retired spelling of a marker type.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A marker declaration used a retired trailing `on` clause or second parameter list.</p>
+<p class="diag-copy what" data-registry-field="what">A `marker` declaration is a retired spelling of a marker type.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">D-MARKER-SITES1=B gives every marker one named parameter list: ordinary names have types, and `@` names have fixed metadata values.</p>
+<p class="diag-copy why" data-registry-field="why">A marker is a struct: its fields are the marker&#39;s arguments, and its `impl Marker { … }` block gives the marker&#39;s settings, its group or its `fn expand(self, target: Target)` template.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `marker Name(args..., $sites: [...], $repeatable: true, ...)`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `struct Name { field: Type  impl Marker { sites :: [.Function] } }`; `jet fix` rewrites the declaration.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0381</code>: <code>tests/ui/marker_decl_rejected_forms.stderr</code>.</p>
-<pre class="diag">Error [E0381]: A trailing `on` clause isn&#39;t how a marker states a fact
-  --&gt; tests/ui/marker_decl_rejected_forms.jet:6:29
+<pre class="diag">Error [E0381]: `marker Traced` is a retired declaration
+  --&gt; tests/ui/marker_decl_rejected_forms.jet:6:1
     |
-  6 | marker Inline(mode: String) on [.Function]
+  6 | marker Traced(label: String, $sites: [.Function], $repeatable: true)
+    | ^^^^^^^^^^^^^
+ Why: A marker is a struct: its fields are the marker&#39;s arguments, and its `impl Marker { … }` block gives the marker&#39;s settings, its group or its `fn expand(self, target: Target)` template
+ Fix: Declare `struct Traced { … impl Marker { … } }`; `jet fix` rewrites this declaration
+More: jet-lang.dev/e/E0381
+
+Error [E0381]: `marker Fast` is a retired declaration
+  --&gt; tests/ui/marker_decl_rejected_forms.jet:8:1
+    |
+  8 | marker Fast = #[Inline(.Always), Scalar]
+    | ^^^^^^^^^^^
+ Why: A marker is a struct: its fields are the marker&#39;s arguments, and its `impl Marker { … }` block gives the marker&#39;s settings, its group or its `fn expand(self, target: Target)` template
+ Fix: Declare `struct Fast { … impl Marker { … } }`; `jet fix` rewrites this declaration
+More: jet-lang.dev/e/E0381
+
+Error [E0381]: A trailing `on` clause isn&#39;t how a marker states a fact
+  --&gt; tests/ui/marker_decl_rejected_forms.jet:10:29
+    |
+ 10 | marker Inline(mode: String) on [.Function]
     |                             ^^
- Why: D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `$` names are fixed metadata values — not a clause after the list
- Fix: Move the sites into the parameter list as `$sites: [.Function, …]`
+ Why: A marker is a struct whose `impl Marker` block gives its settings, the legal sites among them — not a clause after a parameter list
+ Fix: Declare `struct Inline { impl Marker { sites :: [.Function, …] } }`
 More: jet-lang.dev/e/E0381
 
 Error [E0381]: A second parameter list isn&#39;t how a marker states a fact
-  --&gt; tests/ui/marker_decl_rejected_forms.jet:8:30
+  --&gt; tests/ui/marker_decl_rejected_forms.jet:12:30
     |
-  8 | marker Pre(condition: String)(sites: [.Function])
+ 12 | marker Pre(condition: String)(sites: [.Function])
     |                              ^
- Why: D-MARKER-SITES1=B: the rule&#39;s own typed arguments and fixed metadata share one named-parameter list, told apart by the compiler-fact `$` sigil — not two parameter lists
- Fix: Fold the second list&#39;s facts into the first as `$sites: […]`, `$repeatable: true`
+ Why: A marker&#39;s arguments are its struct&#39;s fields and its facts are the settings of its `impl Marker` block — not two parameter lists
+ Fix: Declare `struct Pre { impl Marker { sites :: […]  repeatable :: true } }`
 More: jet-lang.dev/e/E0381
 
 Error [E0381]: The checked-text marker declaration is retired
-  --&gt; tests/ui/marker_decl_rejected_forms.jet:10:17
+  --&gt; tests/ui/marker_decl_rejected_forms.jet:14:17
     |
- 10 | marker Selector on [.Text] {
+ 14 | marker Selector on [.Text] {
     |                 ^^
- Why: D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form
- Fix: Write `marker Selector($sites: [.Text])` for a plain rule, or use a built-in typed text head
+ Why: A marker is a struct whose `impl Marker` block gives its settings; `sites` records legal sites, and checked-text contracts are not a separate marker form
+ Fix: Write `struct Selector { impl Marker { sites :: [.Text] } }` for a plain rule, or use a built-in typed text head
 More: jet-lang.dev/e/E0381
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -116,7 +116,7 @@ fn sema_process_args_spec_wrong_arity(method: String, actual: Int, span: Span) -
         "positional" -> Val(sema_error("E1303", span, "`positional` expects 2 arguments (name, help), got {actual}", "`ArgsSpec.positional(name, help)` registers a required positional argument", "pass exactly two strings: the positional name and a help description"))
         "subcommand" -> Val(sema_error("E1303", span, "`subcommand` expects 3 arguments (name, help, spec), got {actual}", "`ArgsSpec.subcommand(name, help, spec)` gives a subcommand its own nested ArgsSpec", "pass the subcommand name, help text, and an ArgsSpec built with `args.spec()`"))
         "version" | "completion" -> Val(sema_error("E1303", span, "`{method}` expects 1 argument, got {actual}", "`version(text)` configures `--version`; `completion(shell)` renders shell completion text", "pass exactly one string"))
-        "parse" -> Val(sema_error("E1304", span, "`parse` expects 1 argument (argv), got {actual}", "`ArgsSpec.parse(argv)` parses a `[String]` (from `process.argv()`) against the spec", "pass exactly one argument: the argv list, e.g. `process.argv()`"))
+        "parse" -> Val(sema_error("E1304", span, "`parse` expects 1 argument (the argument list), got {actual}", "`ArgsSpec.parse(args)` parses the program's words (`process.args()`) against the spec; pass exactly that list.", "pass exactly one argument: the argument list, e.g. `spec.parse(process.args())`"))
         "description" -> Val(sema_call_arity_diagnostic(method, 1, actual, false, span))
         else -> None
     }

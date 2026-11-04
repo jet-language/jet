@@ -1,0 +1,18 @@
+# Card #6477: one reachable task spawn makes the program multi-threaded, so
+# every inline reference count update keeps the lock prefix.
+fixture: a_reachable_task_spawn_keeps_counts_locked.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --release --debug-info=true main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "7\n"
+when arch x86_64
+when tool objdump
+step: objdump -d --no-show-raw-insn --disassemble=main_run .jet/build/main
+exit: 0
+stdout: ~ "lock incq" # card #6477: a task spawn route is in the runtime's thread receipt
+stdout: !~ "\tincq" # card #6477: no count update in a multi-threaded program is unlocked
+end when
+end when

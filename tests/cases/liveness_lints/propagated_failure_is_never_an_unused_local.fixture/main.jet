@@ -1,0 +1,26 @@
+#Error
+enum ParseError {
+    Empty
+}
+
+fn parse(raw: String) -> Int ParseError! {
+    if raw == "" -> return Err(ParseError.Empty)
+    Ok(raw.len())
+}
+
+fn load_one() -> Int ParseError! {
+    a :: parse("ab")
+    Ok(a)
+}
+
+fn load_two() -> Int ParseError! {
+    b :: parse("")
+    c :: load_one()
+    Ok(b + c)
+}
+
+fn run() {
+    spare :: 5
+    print(load_one() ?? 0)
+    print(load_two() ?? -1)
+}

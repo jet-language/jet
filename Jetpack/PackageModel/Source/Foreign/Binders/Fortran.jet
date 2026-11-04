@@ -6,7 +6,7 @@
 // Fortran's column-major order become binding facts, and generated wrappers
 // reject a wrong flat-list length before entering foreign code. Unsupported
 // declarations fail binding instead of guessing an ABI (I3).
-use core.files as files
+use files :: core.files
 
 
 FORTRAN_BIND_SCHEMA :: "jet-fortran-bind-v1"
@@ -381,7 +381,7 @@ fn pkg_fortran_render(lib: String, routines: [FortranRoutine]) -> String Never! 
         symbol :: if routine.has_arrays() -> "jet_fortran_{lib}_{routine.jet_name}" else -> routine.symbol
         out = "{out}    fn {routine.jet_name}{pkg_fortran_abi_params(routine.params)} -> {routine.result.jet()} = \"{symbol}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\n\n"
+    out = "{out}}}\nuse abi :: c.{abi}\n\n"
     loop routine in routines {
         // The wrapper's column-major extent guard is a local
         // stop path, not a grantable positive effect; the wrapper publishes

@@ -1,7 +1,9 @@
-use core.files as fs
-use core.process as process
-use core.sys as sys
-use core.time as time
+use {
+    fs :: core.files
+    process :: core.process
+    sys :: core.sys
+    time :: core.time
+}
 
 fn require(ok: Bool, message: String) {
     if !ok -> panic(message)
@@ -35,9 +37,9 @@ fn recover_after_sigkill(path: Path) -> Recovery {
 }
 
 fn run() {
-    args :: process.argv()
-    if args.len() > 1 && (args.get(1) ?? "") == "--storage-crash-writer" {
-        path :: args.get(2) ?? panic("missing crash log path")
+    args :: process.args()
+    if args.len() > 0 && (args.get(0) ?? "") == "--storage-crash-writer" {
+        path :: args.get(1) ?? panic("missing crash log path")
         crash_writer(Path.from(path))
         return
     }

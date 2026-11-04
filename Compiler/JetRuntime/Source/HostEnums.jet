@@ -39,16 +39,7 @@ HOST_TERMINAL_MODE_COUNT :: I64{2}
 fn host_arguments_refused() {
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_word(I64{7454127125272162152}, I64{8})
-    trap_write_word(I64{8439872645597850997}, I64{8})
-    trap_write_word(I64{7089066488320385390}, I64{8})
-    trap_write_word(I64{7812726531951388012}, I64{8})
-    trap_write_word(I64{6878248285201852960}, I64{8})
-    trap_write_word(I64{7454127395855101800}, I64{8})
-    trap_write_word(I64{7070778358877220213}, I64{8})
-    trap_write_word(I64{7954799936903538277}, I64{8})
-    trap_write_word(I64{7454127125238325366}, I64{8})
-    trap_write_word(I64{8319104414226915446}, I64{8})
+    trap_write_static(rt_static_text("host arguments unavailable; call jet_rt_host_arguments before env or argv access"))
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
@@ -56,11 +47,7 @@ fn host_arguments_refused() {
 fn host_environment_index_refused() {
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_word(I64{2337497349600932979}, I64{8})
-    trap_write_word(I64{7885362534758641253}, I64{8})
-    trap_write_word(I64{7306085893296909925}, I64{8})
-    trap_write_word(I64{7381153998842044536}, I64{8})
-    trap_write_word(I64{111494907916832}, I64{6})
+    trap_write_static(rt_static_text("startup environment index out of range"))
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
@@ -68,11 +55,7 @@ fn host_environment_index_refused() {
 fn host_argument_index_refused() {
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_word(I64{2337497349600932979}, I64{8})
-    trap_write_word(I64{8389754676633367137}, I64{8})
-    trap_write_word(I64{8007532514336729376}, I64{8})
-    trap_write_word(I64{7021710393347175541}, I64{8})
-    trap_write_word(I64{6645614}, I64{3})
+    trap_write_static(rt_static_text("startup argument index out of range"))
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
@@ -80,11 +63,7 @@ fn host_argument_index_refused() {
 fn host_record_index_refused() {
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_word(I64{8511913738388071794}, I64{8})
-    trap_write_word(I64{7575182590666699361}, I64{8})
-    trap_write_word(I64{8391735665924334702}, I64{8})
-    trap_write_word(I64{7453001576142499616}, I64{8})
-    trap_write_word(I64{101}, I64{1})
+    trap_write_static(rt_static_text("record variant index out of range"))
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
@@ -92,11 +71,7 @@ fn host_record_index_refused() {
 fn host_sigpipe_refused() {
     jet_rt_stdout_flush()
     trap_header(I64{0})
-    trap_write_word(I64{8367798494427701606}, I64{8})
-    trap_write_word(I64{7019269490406400111}, I64{8})
-    trap_write_word(I64{5136728248599341420}, I64{8})
-    trap_write_word(I64{7953752904724138320}, I64{8})
-    trap_write_word(I64{444234034276}, I64{5})
+    trap_write_static(rt_static_text("failed to initialize SIGPIPE handling"))
     trap_msg_prelude_end()
     trap_footer(I64{0})
 }
@@ -115,31 +90,19 @@ fn host_stderr_name() -> I64 {
 
 fn host_write_zero_text() -> I64 {
     text :: jet_rt_string_builder_new()
-    rt_text_push_word(text, I64{8367798494427701606}, I64{8})
-    rt_text_push_word(text, I64{2334399978102268015}, I64{8})
-    rt_text_push_word(text, I64{8458358670138239095}, I64{8})
-    rt_text_push_word(text, I64{1919247974}, I64{4})
+    jet_rt_string_builder_push(text, rt_static_text("failed to write whole buffer"))
     jet_rt_string_builder_finish(text)
 }
 
 fn host_resolver_prefix() -> I64 {
     text :: jet_rt_string_builder_new()
-    rt_text_push_word(text, I64{8367798494427701606}, I64{8})
-    rt_text_push_word(text, I64{8103501230877974639}, I64{8})
-    rt_text_push_word(text, I64{8319104478668415264}, I64{8})
-    rt_text_push_word(text, I64{7020393216925919520}, I64{8})
-    rt_text_push_word(text, I64{35435332987252}, I64{6})
+    jet_rt_string_builder_push(text, rt_static_text("failed to lookup address information: "))
     jet_rt_string_builder_finish(text)
 }
 
 fn host_resolver_nul() -> I64 {
     text :: jet_rt_string_builder_new()
-    rt_text_push_word(text, I64{7881701908294691174}, I64{8})
-    rt_text_push_word(text, I64{7593478464387358821}, I64{8})
-    rt_text_push_word(text, I64{8439867065126643054}, I64{8})
-    rt_text_push_word(text, I64{7310577382458942830}, I64{8})
-    rt_text_push_word(text, I64{8746588938527711332}, I64{8})
-    rt_text_push_word(text, I64{25972}, I64{2})
+    jet_rt_string_builder_push(text, rt_static_text("file name contained an unexpected NUL byte"))
     jet_rt_string_builder_finish(text)
 }
 

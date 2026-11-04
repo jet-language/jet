@@ -1,17 +1,19 @@
 // Persistent supervised PHP worker-pool binder ported from
 // jet_pkg_model::PhpBind. Each pool owns four supervised workers built from
 // the shared supervisor in Foreign/WorkerSupervisor.jet.
-use jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
-use core.files as files
-use jet_pkg_model.[
-    ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage, pkg_ascii_lower,
-    pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
-    pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
-    pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
-    pkg_binder_require_lib_name, pkg_binder_resolved_tool_path, pkg_binder_write,
-    pkg_worker_build_archive, pkg_worker_invoke_wrapper, pkg_worker_prepare_build,
-    pkg_worker_render_supervisor_c, pkg_worker_require_supported_host, pkg_worker_run_tool,
-]
+use {
+    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+    files :: core.files
+    jet_pkg_model.[
+        ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage, pkg_ascii_lower,
+        pkg_binder_append_artifact_boundary, pkg_binder_canonicalize, pkg_binder_cc_ar_identity,
+        pkg_binder_fill_template, pkg_binder_host_is_unix, pkg_binder_identity_digest,
+        pkg_binder_is_ident, pkg_binder_lines, pkg_binder_remove_tree_quiet,
+        pkg_binder_require_lib_name, pkg_binder_resolved_tool_path, pkg_binder_write,
+        pkg_worker_build_archive, pkg_worker_invoke_wrapper, pkg_worker_prepare_build,
+        pkg_worker_render_supervisor_c, pkg_worker_require_supported_host, pkg_worker_run_tool,
+    ]
+}
 
 // Static token discovery run with `php -r`: prints `N\t<name>` per top-level
 // one-argument function or `E\tARG\t<name>` for an unsupported signature.
@@ -226,7 +228,7 @@ fn pkg_php_render_jet(lib: String, functions: [String]) -> String Never! {
     loop name in functions {
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct PhpPool {{ value: Int }}\n#Error\nenum PhpError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nfn close(^pool: PhpPool) {{ abi.close(pool.value) }}\n\nfn open() -> PhpPool PhpError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\nfn cancel(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n")
+    &out.push("}}\nuse abi :: c.{abi}\nuse json :: core.encoding.json\n\nstruct PhpPool {{ value: Int }}\n#Error\nenum PhpError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nfn close(^pool: PhpPool) {{ abi.close(pool.value) }}\n\nfn open() -> PhpPool PhpError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\nfn cancel(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n")
     &out.push(pkg_render_decode_response("PhpError", DecoderProtocol.StandardEnvelope))
     loop name in functions {
         &out.push("fn {name}(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {{\n    payload :: json.to_string(input) ?? return Err(PhpError.Protocol)\n    raw :: abi.{name}(pool.value, payload, deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")

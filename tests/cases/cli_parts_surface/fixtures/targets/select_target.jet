@@ -4,8 +4,10 @@ package {
     name: "select-target"
     authority: { allow: [Exec, FS, IO] }
 }
-use core.process as process
-use core.files as files
+use {
+    process :: core.process
+    files :: core.files
+}
 
 fn run() {
     version :: process.cmd([String]{"rustc", "-vV"}).run() ?? panic("rustc must report its host target")

@@ -517,7 +517,7 @@ Kubernetes custom resources extend the API, and "many core Kubernetes functions 
 
 ### 4.26 Foreign code (FFI and binders)
 
-**Closed.** Four foreign-language lists disagree (DEFECT 2, #6207). `Registration/Items.jet:989-996` builds an effect name `FFI.{language}` from a closed enum.
+**Closed.** Four foreign-language lists disagree (DEFECT 2, #6207). `Registration/Items.jet:989-996` builds an effect name `FFI.[language]` from a closed enum.
 Driver tables name types per language: `jet_driver_rust_foreign_record_type` (`Driver/RustForeign.jet:255`, 14 names), `jet_driver_foreign_parse_provenance` (`ForeignProviders.jet:723`, 20).
 Jetpack binders repeat this per schema: `SqlSchemaBinder.jet:320`, `ProtoSchemaBinder.jet:283`, `HeaderParser.jet:509/529`, `BinderRender.jet:176`.
 `jet_cli_import_map_javascript_doc_type` (`ImportBindings.jet:140`) maps JavaScript doc types.

@@ -8,17 +8,19 @@ package {
         db: .Library{ entry: db }
     }
 }
-use core as core
-// core.db is plain Core source over the vendored SQLite amalgamation: the
-// private driver below holds the only engine pointers, and connections,
-// scopes, row policies, pools and migrations are ordinary Jet values.
-use c.[sqlite3]
-use core.mem as sqlite_mem
-use core.math as math
-use core.time as time
-use core.encoding as encoding
-use core.encoding.[Dyn]
-use __core_encoding_stream as stream
+use {
+    core :: core
+    // core.db is plain Core source over the vendored SQLite amalgamation: the
+    // private driver below holds the only engine pointers, and connections,
+    // scopes, row policies, pools and migrations are ordinary Jet values.
+    c.[sqlite3]
+    sqlite_mem :: core.mem
+    math :: core.math
+    time :: core.time
+    encoding :: core.encoding
+    core.encoding.[Dyn]
+    stream :: __core_encoding_stream
+}
 
 // core.db owns its SQL values, typed row selection and conversion. The private
 // SQLite adapter alone holds engine pointers; fallible row reads use DBError.
@@ -1379,8 +1381,10 @@ fn decode<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: Stri
     fn strlen(text: U64) -> U64 = "strlen"
 }
 
-struct SqliteDB { raw: U64 }
-struct SqliteStmt { raw: U64 }
+// The raw SQLite pointers are `priv`: a literal outside core.db could
+// otherwise hand Close a forged pointer (`SqliteDB{raw: 1}` faulted at close).
+struct SqliteDB { priv raw: U64 }
+struct SqliteStmt { priv raw: U64 }
 impl SqliteDB.Close {
     fn close(^self) {
         #Unsafe("this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later") {

@@ -18,7 +18,8 @@
 // - retain publishes one more owner;
 // - release consumes one owner; only a true result authorizes freeing the
 //   block (LOCK XADD is a full fence, so the last owner observes every
-//   earlier owner's writes);
+//   earlier owner's writes; a sole owner stores the decrement plainly, since
+//   no other reference exists);
 // - unique is true when the caller's reference is the only one. A writer has
 //   exclusive access to its own reference, so a count of 1 it observes stays
 //   1 until that writer itself clones.
@@ -57,7 +58,20 @@ fn rc_init(count: I64) { rc_store(count, I64{1}) }
 // Main.jet main_process_ending): a later unique test of a shared block stays
 // false and its writer copies, as for any other shared block.
 #Export(c) fn jet_rt_rc_release(count: I64) -> Bool {
-    if (rc_load(count) < I64{0} || main_process_ending != I64{0}) -> return false
+    word :: rc_load(count)
+    if (word < I64{0} || main_process_ending != I64{0}) -> return false
+    if (word.bit_and(RC_OWNER_BITS) == I64{1}) {
+        // The sole owner, as in unique: no other thread holds a reference
+        // to retain, release or mark with, so the word cannot change and a
+        // plain store leaves what LOCK XADD would. The load read the word
+        // every earlier owner's LOCK XADD published (x86-64 loads are not
+        // reordered with later loads or stores), so their writes are seen
+        // before the caller frees.
+        #Unsafe("count addresses the aligned prefix word of a live refcounted block whose only reference the caller holds") {
+            os_store_i64(count, wrapping(word - I64{1}))
+        }
+        return true
+    }
     rc_add(count, I64{-1}).bit_and(RC_OWNER_BITS) == I64{1}
 }
 

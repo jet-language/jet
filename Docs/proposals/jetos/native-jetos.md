@@ -22,7 +22,7 @@ evidence source for subsystem tradeoffs and reuse decisions.
 ## Priority source law
 
 Ordinary contributions stay plain values. An expert override uses
-`OptionValue.{ value, priority }` with `.Default`, `.Force`, or `.Priority(n)`.
+`OptionValue.[ value, priority ]` with `.Default`, `.Force`, or `.Priority(n)`.
 Real option paths ending in `priority` remain ordinary. Explain retains the
 wrapper and all contenders; realization receives only the selected value.
 

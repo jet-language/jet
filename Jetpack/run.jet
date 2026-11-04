@@ -1,9 +1,14 @@
 // Standalone Jet-hosted engine entry. Protocol and sandbox dispatch belong to
-// cli_jetpack_main; this wrapper only supplies the full argv (program name
-// first, which selects the jetpack-nix-index/jetpack-trust-root personalities)
-// and exits with its status.
-use core.process as jetpack_process
+// cli_jetpack_main; this wrapper supplies the start path first (a release
+// hard link named jetpack-nix-index or jetpack-trust-root selects that
+// personality) and then the program's words, and exits with its status.
+use {
+    jetpack_process :: core.process
+    jetpack_sys :: core.sys
+}
 
 fn run() {
-    jetpack_process.exit(cli_jetpack_main(jetpack_process.argv()))
+    words := [String]{jetpack_sys.executable()}
+    loop word in jetpack_process.args() -> &words.push(word)
+    jetpack_process.exit(cli_jetpack_main(words))
 }

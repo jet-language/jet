@@ -82,6 +82,7 @@ JFMT_MEMBER_ASSOC_TYPE :: 6
 JFMT_MEMBER_IMPORT :: 7
 JFMT_MEMBER_ITEM :: 8
 JFMT_MEMBER_CONSTANT :: 9
+JFMT_MEMBER_MARKER_IMPL :: 10
 
 struct JetFmtMember {
     kind: Int
@@ -97,6 +98,8 @@ struct JetFmtTypeBody {
     trait_impls: [TraitImplBlock]
     methods: [Func]
     validate_body: [Stmt]
+    marker: MarkerDecl?{None}
+    marker_expand_span: Span?{None}
 }
 
 // Rust `TypeBodyMember::is_compact` / `ImplBodyMember::is_compact`: data
@@ -636,9 +639,9 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         // Tag declarations are emitted verbatim (non-destructive).
         .Tag(t) -> jfmt_write_verbatim(&f, t.span.start, t.span.end, true)
         .EffectDecl(declaration) -> jfmt_write_verbatim(&f, declaration.span.start, declaration.span.end, true)
-        // FORM1: declarations with typed bodies use the same
-        // item-template formatter as derives.
-        .MarkerDecl(declaration) -> jfmt_fmt_marker_decl(&f, declaration)
+        // A marker prints inside the struct that declares it
+        // (jfmt_fmt_marker_impl).
+        .MarkerDecl(_) -> {}
         // Fact declarations share marker parameter syntax, so
         // use the same source-aware comma-list formatter.
         .FactDecl(declaration) -> jfmt_fmt_fact_decl(&f, declaration)
@@ -720,33 +723,6 @@ fn jfmt_fmt_marker_decl_params(f: &JetFmt, params: [MarkerDeclParam], source_sta
         jfmt_comma_after(&f, multiline, param.name_span.end)
     }
     jfmt_comma_end(&f, multiline, source)
-}
-
-fn jfmt_fmt_marker_decl(f: &JetFmt, declaration: MarkerDecl) {
-    jfmt_write(&f, "marker ")
-    jfmt_write(&f, declaration.name)
-    // A group declaration `marker Name = #[A, B]` has members, not parameters.
-    if declaration.group == .Val(members) {
-        jfmt_write(&f, " = #[")
-        group_source :: if members.len() > 0 -> jfmt_source_marker_group_span(f, members[0].name_span.start) else -> JetFmtSourceList?{None}
-        jfmt_fmt_marker_list(&f, members, group_source)
-        jfmt_write(&f, "]")
-        jfmt_newline(&f)
-        return
-    }
-    jfmt_write(&f, "(")
-    jfmt_fmt_marker_decl_params(&f, declaration.params, declaration.name_span.end)
-    jfmt_write(&f, ")")
-    if declaration.body == .Val(body) {
-        jfmt_write(&f, " {{")
-        jfmt_newline(&f)
-        f.indent += 1
-        jfmt_fmt_derive_body_items(&f, body)
-        f.indent -= 1
-        jfmt_emit_leading(&f, declaration.span.end)
-        jfmt_end_template_block(&f)
-    }
-    jfmt_newline(&f)
 }
 
 fn jfmt_fmt_fact_decl(f: &JetFmt, declaration: FactDecl) {
@@ -884,22 +860,33 @@ fn jfmt_derive_body_item_end(f: JetFmt, body_item: DeriveBodyItem) -> Int {
 }
 
 // Rust `ModuleBodyEntry`: module imports and items live in separate AST
-// vectors, so retain authored order while formatting.
+// vectors, so retain authored order while formatting. Each run of imports
+// with no item between them prints as one group (jfmt_fmt_import_groups).
 fn jfmt_fmt_module_body(f: &JetFmt, imports: [ImportDecl], items: [Item], span_end: Int) {
     entries := [JetFmtMember]{}
     loop index in 0..<imports.len() -> &entries.push(JetFmtMember{kind: JFMT_MEMBER_IMPORT, index: index, start: imports[index].span.start})
-    loop index in 0..<items.len() -> &entries.push(JetFmtMember{kind: JFMT_MEMBER_ITEM, index: index, start: jfmt_item_span_start(f, items[index])})
+    loop index in 0..<items.len() {
+        // A marker prints inside the struct that declares it.
+        if items[index] == .MarkerDecl(_) -> next
+        &entries.push(JetFmtMember{kind: JFMT_MEMBER_ITEM, index: index, start: jfmt_item_span_start(f, items[index])})
+    }
     sorted :: jfmt_sort_members(entries)
-    loop position in 0..<sorted.len() {
+    position := 0
+    loop position < sorted.len() {
         entry :: sorted[position]
         if position > 0 -> jfmt_blank_separator_before_item(&f)
-        jfmt_emit_leading(&f, entry.start)
         if entry.kind == JFMT_MEMBER_IMPORT {
-            jfmt_fmt_import(&f, imports[entry.index])
-            jfmt_emit_trailing(&f, imports[entry.index].span.end)
+            run := [ImportDecl]{}
+            loop position < sorted.len() && sorted[position].kind == JFMT_MEMBER_IMPORT {
+                &run.push(imports[sorted[position].index].copy())
+                position += 1
+            }
+            jfmt_fmt_import_groups(&f, run)
         } else {
+            jfmt_emit_leading(&f, entry.start)
             jfmt_fmt_item(&f, items[entry.index])
             jfmt_emit_trailing(&f, jfmt_item_span_end(items[entry.index]))
+            position += 1
         }
     }
     // Comments between the last body member and the closing brace have no
@@ -1874,7 +1861,64 @@ fn jfmt_fmt_type_body_member(f: &JetFmt, member: JetFmtMember, body: JetFmtTypeB
         } else {
             jfmt_fmt_body(&f, body.validate_body)
         }
+    } else if member.kind == JFMT_MEMBER_MARKER_IMPL {
+        declaration :: body.marker ?? return
+        jfmt_fmt_marker_impl(&f, declaration, member.start, body.marker_expand_span)
     }
+}
+
+// `impl Marker { … }`: the settings stack on adjacent lines with the group,
+// and the `expand` template is set off by a blank line. The struct prints the
+// fields, so only the `$` settings of the declaration print here, without
+// their sigil.
+fn jfmt_fmt_marker_impl(f: &JetFmt, declaration: MarkerDecl, start: Int, expand: Span?) {
+    jfmt_emit_leading(&f, start)
+    settings := [MarkerDeclParam]{}
+    loop param in declaration.params {
+        if param.name.starts_with("$") && param.value != None -> &settings.push(param)
+    }
+    if settings.len() == 0 && declaration.group == None && declaration.body == None {
+        jfmt_write(&f, "impl Marker {{}}")
+        return
+    }
+    jfmt_write(&f, "impl Marker {{")
+    jfmt_newline(&f)
+    f.indent += 1
+    rows := 0
+    loop setting in settings {
+        value :: setting.value ?? next
+        if rows > 0 -> jfmt_newline(&f)
+        jfmt_emit_leading(&f, setting.name_span.start)
+        jfmt_write(&f, jfmt_bytes_text(setting.name.bytes(), 1, setting.name.bytes().len()))
+        jfmt_write(&f, " :: ")
+        jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
+        rows += 1
+    }
+    if declaration.group == .Val(members) {
+        if rows > 0 -> jfmt_newline(&f)
+        if members.len() > 0 -> jfmt_emit_leading(&f, members[0].span.start)
+        jfmt_write(&f, "group :: #[")
+        group_source :: if members.len() > 0 -> jfmt_source_marker_group_span(f, members[0].name_span.start) else -> JetFmtSourceList?{None}
+        jfmt_fmt_marker_list(&f, members, group_source)
+        jfmt_write(&f, "]")
+        rows += 1
+    }
+    if declaration.body == .Val(template) {
+        if rows > 0 {
+            jfmt_newline(&f)
+            jfmt_newline(&f)
+        }
+        if expand == .Val(span) -> jfmt_emit_leading(&f, span.start)
+        jfmt_write(&f, "fn expand(self, target: Target) {{")
+        jfmt_newline(&f)
+        f.indent += 1
+        jfmt_fmt_derive_body_items(&f, template)
+        f.indent -= 1
+        if expand == .Val(span) -> jfmt_emit_leading(&f, span.end)
+        jfmt_end_template_block(&f)
+    }
+    f.indent -= 1
+    jfmt_end_block(&f)
 }
 
 // Emit a source-ordered type-body member list. `preceded` says whether the
@@ -1914,7 +1958,8 @@ fn jfmt_fmt_struct(f: &JetFmt, s: StructDef) {
     // (card #506): `validate { … }` is one more body member,
     // printed where it was authored like every other one.
     if s.validate_span == .Val(span) -> &members.push(JetFmtMember{kind: JFMT_MEMBER_VALIDATE, index: 0, start: span.start})
-    body :: JetFmtTypeBody{state: s.state, fields: s.fields, cli_bindings: s.cli_bindings, trait_impls: s.trait_impls, methods: s.methods, validate_body: s.validate_block}
+    if s.marker_span == .Val(span) -> &members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER_IMPL, index: 0, start: span.start})
+    body :: JetFmtTypeBody{state: s.state, fields: s.fields, cli_bindings: s.cli_bindings, trait_impls: s.trait_impls, methods: s.methods, validate_body: s.validate_block, marker: s.marker, marker_expand_span: s.marker_expand_span}
     jfmt_fmt_type_body_members(&f, jfmt_sort_members(members), body, derives_decode, false)
     f.indent -= 1
     jfmt_end_block(&f)
@@ -2156,48 +2201,122 @@ fn jfmt_fmt_const(f: &JetFmt, c: ConstDef) {
     jfmt_fmt_expr(&f, c.value, JFMT_PREC_OR_FALLBACK)
 }
 
+// The imports of one scope (#6542): two or more print as one `use { … }`
+// block with a row per line, the re-exports as one `pub use { … }` block,
+// and a lone import keeps its one line. Comments before the first import
+// print above the group; the rest stay beside their rows.
+fn jfmt_fmt_import_groups(f: &JetFmt, imports: [ImportDecl]) {
+    plain := [ImportDecl]{}
+    reexports := [ImportDecl]{}
+    loop import in jfmt_import_rows(imports) {
+        if import.is_pub -> &reexports.push(import) else -> &plain.push(import)
+    }
+    if plain.len() > 0 -> jfmt_fmt_import_group(&f, plain)
+    if reexports.len() > 0 {
+        if plain.len() > 0 {
+            jfmt_newline(&f)
+            jfmt_newline(&f)
+        }
+        jfmt_fmt_import_group(&f, reexports)
+    }
+}
+
+// A renamed member leaves its member list for an `alias :: owner.member` row
+// of its own (#6542); the list keeps the members that are not renamed.
+fn jfmt_import_rows(imports: [ImportDecl]) -> [ImportDecl] Never! {
+    rows := [ImportDecl]{}
+    loop import in imports {
+        if import.kind == .Unqualified(module_alias, module_alias_span, items, items_span, span) {
+            plain := [ImportedItem]{}
+            item_spans := [Span]{}
+            local_spans := [Span]{}
+            renamed := [ImportDecl]{}
+            loop index in 0..<items.len() {
+                item :: items[index]
+                item_span :: if index < import.item_spans.len() -> import.item_spans[index] else -> items_span
+                local_span :: if index < import.local_spans.len() -> import.local_spans[index] else -> item_span
+                if item.alias == .Val(alias) {
+                    &renamed.push(ImportDecl{kind: ImportKind.Module{name: "{module_alias}.{item.original}", span: item_span}, alias: alias, alias_span: local_span, span: import.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: import.is_pub, is_package_pub: import.is_package_pub, inline_version: None})
+                } else {
+                    &plain.push(item)
+                    &item_spans.push(item_span)
+                    &local_spans.push(local_span)
+                }
+            }
+            if renamed.len() == 0 {
+                &rows.push(import)
+                next
+            }
+            if plain.len() > 0 {
+                row := import
+                row.kind = ImportKind.Unqualified{module_alias: module_alias, module_alias_span: module_alias_span, items: plain, items_span: items_span, span: span}
+                row.item_spans = item_spans
+                row.local_spans = local_spans
+                &rows.push(row)
+            }
+            loop row in renamed -> &rows.push(row)
+            next
+        }
+        &rows.push(import)
+    }
+    rows
+}
+
+fn jfmt_fmt_import_group(f: &JetFmt, imports: [ImportDecl]) {
+    jfmt_emit_leading(&f, imports[0].span.start)
+    if imports.len() == 1 {
+        jfmt_fmt_import(&f, imports[0])
+        jfmt_emit_trailing(&f, imports[0].span.end)
+        return
+    }
+    if imports[0].is_pub -> jfmt_write(&f, "pub ")
+    jfmt_write(&f, "use {{")
+    jfmt_newline(&f)
+    f.indent += 1
+    loop import in imports {
+        jfmt_emit_leading(&f, import.span.start)
+        jfmt_fmt_import_row(&f, import)
+        jfmt_emit_trailing(&f, import.span.end)
+        jfmt_newline(&f)
+    }
+    f.indent -= 1
+    jfmt_write(&f, "}}")
+}
+
 fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
     // `pub use` is the only re-export spelling (ballot pending).
     if imp.is_pub -> jfmt_write(&f, "pub ")
-    jfmt_write(&f, "use")
-    jfmt_write(&f, " ")
+    jfmt_write(&f, "use ")
+    jfmt_fmt_import_row(&f, imp)
+}
+
+// One import row; an alias prints as `alias :: path` (#6542).
+fn jfmt_fmt_import_row(f: &JetFmt, imp: ImportDecl) {
     if imp.kind == {
         .File(path, _) -> {
+            if imp.alias != jfmt_last_segment(path, "/") -> jfmt_write(&f, "{imp.alias} :: ")
             jfmt_write(&f, "\"")
             jfmt_write(&f, path)
             jfmt_write(&f, "\"")
-            if imp.alias != jfmt_last_segment(path, "/") {
-                jfmt_write(&f, " ")
-                jfmt_write(&f, "as")
-                jfmt_write(&f, " ")
-                jfmt_write(&f, imp.alias)
-            }
         }
         .Module(name, _) -> {
+            // A two-segment `a.b` with no alias reads as the member `b` of
+            // `a`, so that module keeps its alias even when it repeats the
+            // last segment; `foo` and `a.b.c` can omit a matching one.
+            two_segments :: name.split(".").to_list().len() == 2
+            if imp.alias != jfmt_last_segment(name, ".") || two_segments -> jfmt_write(&f, "{imp.alias} :: ")
             jfmt_write(&f, name)
             // U11 `use pkg#version;` inline dep.
             if imp.inline_version == .Val(version) {
                 jfmt_write(&f, "#")
                 jfmt_write(&f, version.text)
             }
-            // A dotted `use a.b` with no `as` parses as an *unqualified* item
-            // import (`b` from `a`), not a module import. So for a dotted
-            // module name the `as alias` is load-bearing even when it equals
-            // the last segment — keep it. Only a single-segment name (`use
-            // foo`) can safely omit a matching alias.
-            if imp.alias != jfmt_last_segment(name, ".") || name.contains(".") {
-                jfmt_write(&f, " ")
-                jfmt_write(&f, "as")
-                jfmt_write(&f, " ")
-                jfmt_write(&f, imp.alias)
-            }
         }
         .Unqualified(module_alias, module_alias_span, items, items_span, _) -> {
             if items.len() == 0 -> return
             // The dotless single-item spelling (`use math.clamp`) only means
             // the same thing when nothing else in the path carries a dot or an
-            // alias: `use core.math.[abs]` and `use math.[abs as a]` would both
-            // re-read as a module import.
+            // alias: `use core.math.[abs]` would re-read as a module import.
             first :: items[0]
             collapses :: items.len() == 1 && first.alias == None && !first.original.contains(".") && !module_alias.contains(".")
             if collapses {
@@ -2214,10 +2333,6 @@ fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
                 item_span :: if index < imp.item_spans.len() -> imp.item_spans[index] else -> local_span
                 jfmt_comma_before(&f, index, multiline, item_span.start)
                 jfmt_write(&f, items[index].original)
-                if items[index].alias == .Val(alias) {
-                    jfmt_write(&f, " as ")
-                    jfmt_write(&f, alias)
-                }
                 jfmt_comma_after(&f, multiline, item_span.end)
             }
             jfmt_comma_end(&f, multiline, source)

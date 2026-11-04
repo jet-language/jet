@@ -43,43 +43,58 @@ fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String], sou
     loop declaration in program.imports {
         if declaration.is_pub || declaration.is_package_pub -> next
         if declaration.kind == {
-            .File(path, _) -> {
+            .File(path, path_span) -> {
                 if path.ends_with(".h") -> next
-                explicit_alias :: declaration.alias_span.start > declaration.span.start
+                // `use helper :: "./helper"` renames the alias, written before
+                // the path; an unaliased file import is removed whole.
+                explicit_alias :: declaration.alias_span.end <= path_span.start
                 span :: if explicit_alias -> declaration.alias_span else -> declaration.span
                 edit :: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: span, new_text: ""}
-                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, edit, &verdicts)
+                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, Val(edit), &verdicts)
             }
             .Module(_, path_span) -> {
-                // `use core.files as files` renames the alias; an unaliased
-                // path import is removed whole.
-                explicit_alias :: declaration.alias_span.start >= path_span.end
+                // `use files :: core.files` renames the alias, written before
+                // the path; an unaliased path import is removed whole.
+                explicit_alias :: declaration.alias_span.end <= path_span.start
                 span :: if explicit_alias -> declaration.alias_span else -> Span{start: path_span.end - declaration.alias.len(), end: path_span.end}
                 edit :: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: declaration.span, new_text: ""}
-                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, edit, &verdicts)
+                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, Val(edit), &verdicts)
             }
-            .Unqualified(_, module_alias_span, items, _, _) -> {
+            .Unqualified(module_alias, module_alias_span, items, _, _) -> {
                 loop (index, item) in items {
                     local :: sema_registration_import_local(item)
                     span := module_alias_span
+                    item_span := module_alias_span
+                    if index < declaration.item_spans.len() -> item_span = declaration.item_spans[index]
                     if {
                         index < declaration.local_spans.len() -> span = declaration.local_spans[index]
-                        index < declaration.item_spans.len() -> span = declaration.item_spans[index]
+                        index < declaration.item_spans.len() -> span = item_span
                     }
-                    // A member without `as` keeps its path: `mem` becomes `mem as _mem`.
-                    replacement :: if item.alias == None -> "{local} as _{local}" else -> "_{local}"
-                    sema_liveness_note_import(program, foreign_aliases, local, source, span, TextEdit{span: span, new_text: replacement}, &verdicts)
+                    // An alias written before the path (`biggest :: numeric.max`)
+                    // is renamed in place; the dotted member row `owner.member`
+                    // becomes the alias row `_member :: owner.member`. A member
+                    // of a `.[…]` list has no alias to rename, so the lint
+                    // carries no edit there.
+                    edit := TextEdit?{None}
+                    if {
+                        item.alias != None || span.end <= module_alias_span.start -> edit = Val(TextEdit{span: span, new_text: "_{local}"})
+                        items.len() == 1 && item_span.start == module_alias_span.end + 1 -> edit = Val(TextEdit{span: Span{start: module_alias_span.start, end: item_span.end}, new_text: "_{local} :: {module_alias}.{item.original}"})
+                    }
+                    sema_liveness_note_import(program, foreign_aliases, local, source, span, edit, &verdicts)
                 }
             }
         }
     }
 }
 
-fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit, verdicts: &[SemaLivenessVerdict]) Never! {
+fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit?, verdicts: &[SemaLivenessVerdict]) Never! {
     if name == "" || name.starts_with("_") || span.start >= span.end -> return
     if program.used_import_names.contains(name) || foreign_aliases.contains(name) -> return
-    diagnostic :: sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
-    sema_liveness_verdict("L0103", name, source, span, "import is never read", diagnostic_with_edit(diagnostic, edit), &verdicts)
+    diagnostic := sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
+    if edit == .Val(fix) {
+        diagnostic = diagnostic_with_edit(diagnostic, fix)
+    }
+    sema_liveness_verdict("L0103", name, source, span, "import is never read", diagnostic, &verdicts)
 }
 
 // An inline `#FFI(asm)` body is the `core.mem` import's reader: the import is

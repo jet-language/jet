@@ -81,7 +81,20 @@ function writeJSONHeld(root, name, value) {
 let reusableHistoryBackup = null; // { dir, source, name, backup }
 const fileKey = (st) => st ? `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` : null;
 
-function historyBackupAt(root, archive, keep, backups) {
+// A fresh process (every CLI write) has no identity to compare, but it has
+// just read the archive bytes under the lock. When the newest history backup
+// holds exactly those bytes it is already the pre-write copy, so the archive
+// (the largest file by far) is not copied and synced again on every write.
+function identicalNewestBackup(backups, prefix, bytes) {
+  const newest = backups.list().filter(name => name.startsWith(prefix)).sort().at(-1);
+  if (!newest) return null;
+  const st = backups.tryStat(newest);
+  if (!st?.isFile() || st.nlink !== 1 || st.size !== bytes.length) return null;
+  const held = backups.read(newest, bytes.length, `refusing unsafe history backup ${newest}`);
+  return held.equals(bytes) ? newest : null;
+}
+
+function historyBackupAt(root, archive, keep, backups, currentBytes = null) {
   const source = fileKey(root.tryStat('history.json'));
   const last = reusableHistoryBackup;
   if (last && source && last.dir === root.expectedPath && last.source === source) {
@@ -90,7 +103,8 @@ function historyBackupAt(root, archive, keep, backups) {
       return join(root.expectedPath, 'backups', last.name);
   }
   reusableHistoryBackup = null;
-  const path = backupRequiredAt(root, archive, keep, backups);
+  const reused = currentBytes ? identicalNewestBackup(backups, 'history-', currentBytes) : null;
+  const path = reused ? join(root.expectedPath, 'backups', reused) : backupRequiredAt(root, archive, keep, backups);
   const name = basename(path);
   reusableHistoryBackup = { dir: root.expectedPath, source, name, backup: fileKey(backups.tryStat(name)) };
   return path;
@@ -108,7 +122,7 @@ function withStorePairTransaction(dataDir, liveFile, config, work, prepare = nul
       if (removeEmptyHistory) writeJSONHeld(root, 'history.json', emptyHistory());
       const prepared = prepare ? prepare(root, backupAuthority) : undefined;
       const liveBackup = backupRequiredAt(root, liveFile, config.backups, backupAuthority);
-      const historyBackup = historyBackupAt(root, archive, config.backups, backupAuthority);
+      const historyBackup = historyBackupAt(root, archive, config.backups, backupAuthority, prepared?.historyBytes);
       beginRepairTransaction(dataDir, {
         liveBackup,
         historyBackup,
@@ -214,19 +228,23 @@ export function openStore(dataDir) {
       historyMigrated = migrateRecommendationLosses(decision) || historyMigrated;
     return {
       state: normalize(pair.live.value, pair.history.value.cards),
-      history, historyMigrated,
+      history, historyMigrated, historyBytes: pair.history.bytes,
     };
   };
   let liveCache = null;
+  // Every store write is an atomic rename (a new inode), so a pair whose two
+  // file identities match before and after one snapshot was read whole from
+  // one committed version; reading both files a second time to compare bytes
+  // only doubled the cost of every CLI read.
+  const pairKeyAt = root => `${fileKey(root.tryStat('tower.json'))}|${fileKey(root.tryStat('history.json'))}`;
   const readConsistentPair = () => {
     for (let attempt = 0; attempt < 8; attempt++) {
-      const { first, second } = withDirectoryAuthority(dataDir, root => {
+      const { first, before, after } = withDirectoryAuthority(dataDir, root => {
         const backupAuthority = root.tryStat('backups') ? root.child('backups') : null;
         try {
-          return {
-            first: pairSnapshotAt(root, backupAuthority),
-            second: pairSnapshotAt(root, backupAuthority, false),
-          };
+          const before = pairKeyAt(root);
+          const first = pairSnapshotAt(root, backupAuthority);
+          return { first, before, after: pairKeyAt(root) };
         } finally {
           backupAuthority?.close();
         }
@@ -235,13 +253,7 @@ export function openStore(dataDir) {
         recoverPendingRepair(dataDir, file);
         continue;
       }
-      if (second.pending) {
-        recoverPendingRepair(dataDir, file);
-        continue;
-      }
-      if (!sameBytes(first.live.bytes, second.live.bytes)
-        || !sameBytes(first.history.bytes, second.history.bytes))
-        continue;
+      if (before !== after) continue;
       validateStoredState(first.live.value, 'live store');
       validateStoredHistory(first.history.value, 'history store');
       for (const decision of first.history.value.decisions || [])
@@ -914,15 +926,26 @@ export function laneOf(card, decisions, cards) {
   return { lane: 'blocked', who: null, label: '' };
 }
 
-function milestoneCards(id, cards, historyCards = []) {
-  const linked = new Map();
-  for (const c of historyCards) if (c.milestoneId === id) linked.set(c.id, c);
-  for (const c of cards) if (c.milestoneId === id) linked.set(c.id, c);
-  return [...linked.values()];
+// Cards grouped by milestone in one pass over both lists; a live card replaces
+// its archived copy. Callers that walk every milestone build this once instead
+// of rescanning thousands of archived cards per milestone.
+export function cardsByMilestone(cards, historyCards = []) {
+  const index = new Map();
+  for (const list of [historyCards, cards]) for (const c of list) {
+    if (!c.milestoneId) continue;
+    let linked = index.get(c.milestoneId);
+    if (!linked) index.set(c.milestoneId, linked = new Map());
+    linked.set(c.id, c);
+  }
+  return index;
 }
 
-export function milestoneProgress(m, cards, historyCards = []) {
-  const linked = milestoneCards(m.id, cards, historyCards);
+function milestoneCards(id, cards, historyCards = [], index = cardsByMilestone(cards, historyCards)) {
+  return [...(index.get(id)?.values() || [])];
+}
+
+export function milestoneProgress(m, cards, historyCards = [], index = undefined) {
+  const linked = milestoneCards(m.id, cards, historyCards, index);
   const done = linked.filter(c => c.phase === 'done').length;
   const reviewReady = linked.length > 0 && done === linked.length;
   return { total: linked.length, done, reviewReady, met: reviewReady && m.status === 'met' && !!m.verification };
@@ -935,10 +958,10 @@ function clearMilestoneVerification(m, { keepCloseout = false } = {}) {
   if (m.status === 'met') m.status = 'review-ready';
 }
 
-function syncMilestone(s, id, historyCards = []) {
+function syncMilestone(s, id, historyCards = [], index = undefined) {
   const m = s.milestones.find(x => x.id === id);
   if (!m) return;
-  const linked = milestoneCards(id, s.cards, historyCards);
+  const linked = milestoneCards(id, s.cards, historyCards, index);
   if (!linked.length) {
     clearMilestoneVerification(m);
     m.status = 'open';
@@ -958,7 +981,8 @@ function syncMilestone(s, id, historyCards = []) {
 }
 
 function syncMilestones(s, ids = s.milestones.map(m => m.id), historyCards = []) {
-  for (const id of new Set(ids.filter(Boolean))) syncMilestone(s, id, historyCards);
+  const index = cardsByMilestone(s.cards, historyCards);
+  for (const id of new Set(ids.filter(Boolean))) syncMilestone(s, id, historyCards, index);
 }
 
 function invalidateCardMilestone(s, card) {
@@ -1026,12 +1050,13 @@ export function radarData(s, historyCards = []) {
     if (aCur !== bCur) return aCur ? -1 : 1;
     return (a.order ?? a.num ?? 999) - (b.order ?? b.num ?? 999);
   });
+  const byMilestone = cardsByMilestone(s.cards, historyCards);
   return sorted.map(e => {
     const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
     const active = all.filter(c => !['done', 'frozen'].includes(c.phase));
     const done = all.filter(c => c.phase === 'done');
     const milestones = s.milestones.filter(m => m.epochId === e.id && !m.archived).map(m => {
-      const progress = milestoneProgress(m, s.cards, historyCards);
+      const progress = milestoneProgress(m, s.cards, historyCards, byMilestone);
       return { id: m.id, title: m.title, goal: m.goal, status: m.status, met: progress.met,
         ...progress, stalledDays: milestoneStallDays(m, s.cards, s.events) };
     });
@@ -1146,7 +1171,8 @@ export function project(s, config = null, history = null) {
   validateProjectedPhases(s, history);
   const cards = s.cards.map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
   const historyCards = history?.cards || [];
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards) }));
+  const byMilestone = cardsByMilestone(s.cards, historyCards);
+  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards, byMilestone) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
   // Acceptance ballots are a distinct owner duty (verify queue), not a
   // generic decision — keep the decide/push-notification counts to the
@@ -1240,7 +1266,8 @@ export function projectClosed(s, config = null, history = null) {
     // for lane or board semantics.
     ...projectCardSummary(projectCardRecord(c, h.decisions, h.cards, c.questions || [], archiveGroups)), archived: true,
   }));
-  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards, h.cards)));
+  const byMilestone = cardsByMilestone(s.cards, h.cards);
+  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards, h.cards, byMilestone)));
   return {
     rev: s.meta.rev, cards: [...liveDone, ...archived],
     counts: { done: liveDone.length, archived: archived.length },

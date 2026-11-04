@@ -1,5 +1,7 @@
-use core.encoding.json as json
-use core.encoding.toml as toml
+use {
+    json :: core.encoding.json
+    toml :: core.encoding.toml
+}
 
 fn kit_steps_json_projection_valid(part: String) -> Bool {
     if !part.starts_with("{{") || !part.ends_with("}}") -> return false
@@ -187,6 +189,13 @@ fn kit_steps_json_relation(actual: String, assertion: KitAssertion, history: [Ki
     transformed :: kit_steps_transform(expected_text, assertion.transform) ?? return Val("prior JSON subject transform failed")
     right :: kit_steps_json_values(transformed, assertion.json_mode, assertion.json_path) ?? return Val("JSON relation prior path missing")
     if left.len() == 0 || right.len() == 0 -> return Val("JSON relation filter selected no values")
+    if assertion.json_op == "!=" {
+        if left.len() != right.len() -> return None
+        loop i in 0..<left.len() {
+            if !kit_steps_json_equal(left[i], right[i]) -> return None
+        }
+        return Val("JSON relation values are equal to {label}")
+    }
     if left.len() != right.len() -> return Val("JSON relation selection lengths differ")
     loop i in 0..<left.len() {
         if assertion.json_op == "#==" || assertion.json_op == "#>=" {

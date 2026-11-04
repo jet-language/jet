@@ -103,6 +103,9 @@ test('Now renders only briefing and status reports, with safe markdown, links, m
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /<details class="report__history" data-report="briefing-history"><summary>Briefing history · 1/);
   assert.match(html, /<details class="report__past" data-report="briefing:[^"]+"><summary>Old/);
+  assert.doesNotMatch(html, /History body/, 'a folded past briefing renders no body');
+  const shown = renderNowReports(db.projectBoard(s), { isOpen: (key, fallback) => key.startsWith('briefing') || fallback });
+  assert.match(shown, /data-report="briefing:[^"]+" open><summary>Old[^]*?<div class="report__body"><p class="md__p">History body/);
   assert.match(html, /<progress max="100" value="75"/);
   assert.match(html, /Active workers:<\/b> Pip/);
   assert.match(html, /Waiting for integration/);

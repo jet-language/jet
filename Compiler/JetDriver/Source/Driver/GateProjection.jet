@@ -1,8 +1,10 @@
 // The driver retains one shared GateLedger for all checked documentation rows.
 // The host supplies owning package policies and external lock/trust/build facts;
 // no CLI reader re-scans source text to discover an unsafe operation.
-use jet_foundation.[GateLedger, Diagnostic, Program, diagnostic_with_source_path, gate_ledger_sort]
-use jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics]
+use {
+    jet_foundation.[GateLedger, Diagnostic, Program, diagnostic_with_source_path, gate_ledger_sort]
+    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics]
+}
 
 fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
     modules := [SemaGateModule]{}

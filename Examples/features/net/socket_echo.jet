@@ -4,10 +4,12 @@ package {
     authority: { allow: [Env, FS.Write, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
-use core.files as fs
-use core.net as net
-use core.time as time
-use core.sys as os
+use {
+    fs :: core.files
+    net :: core.net
+    time :: core.time
+    os :: core.sys
+}
 
 fn run() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     typed :: net.socket_addr("127.0.0.1", 0) ?? panic("address")

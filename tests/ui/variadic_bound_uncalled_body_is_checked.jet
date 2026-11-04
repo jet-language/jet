@@ -1,0 +1,18 @@
+// A function with a trait-bounded variadic parameter is checked against its
+// bounds even when nothing calls it (#6449).
+trait Edit {
+    fn edit(&self) -> Int
+}
+trait Inspect {
+    fn inspect(self) -> String
+}
+
+fn apply(items: ...[Edit, Inspect]) {
+    loop item in items {
+        item.nothing_here()
+    }
+}
+
+fn run() {
+    print("ok")
+}

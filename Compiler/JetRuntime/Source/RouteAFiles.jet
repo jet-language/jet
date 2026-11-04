@@ -31,7 +31,9 @@ entries_root := I64{0}
     root :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(root, I64{24})
     sync_store(wrapping(root + I64{8}), I64{1})
-    entries_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        entries_root = root
+    }
 }
 
 fn entries_enter(key: I64) -> I64 {

@@ -7,8 +7,10 @@
 // lower bound and distributions return their documented degenerate value.
 // Empty collections return `None` (or an empty collection) without advancing
 // the stream.
-use core.math as math
-use core as core
+use {
+    math :: core.math
+    core :: core
+}
 fn nonfinite(value: Float) -> Bool Never! {
     if math.is_finite(value) -> return false
     true
@@ -303,14 +305,14 @@ fn bytes(n: Int) -[Rand]> [U8] Never! {
     }
 }
 
-fn pick(items: [String]) -[Rand]> String? Never! {
+fn pick<T>(items: [T]) -[Rand]> T? Never! {
     if items.len() == 0 -> return None
-    Val(items[int(0, items.len() - 1)])
+    Val(items[int(0, items.len() - 1)].copy())
 }
 
 /// Weighted selection. Length mismatches, negative/non-finite weights, and a
 /// zero total are absent. Zero weights remain valid and are never selected.
-fn weighted_pick(items: [String], weights: [Float]) -[Rand]> String? Never! {
+fn weighted_pick<T>(items: [T], weights: [Float]) -[Rand]> T? Never! {
     if items.len() == 0 || items.len() != weights.len() -> return None
     maximum := Float{0.0}
     loop w in weights {
@@ -330,10 +332,10 @@ fn weighted_pick(items: [String], weights: [Float]) -[Rand]> String? Never! {
         scaled :: w / maximum
         acc = acc + scaled
         last = i
-        if draw < acc -> return Val(items[i])
+        if draw < acc -> return Val(items[i].copy())
     }
     if last < 0 -> return None
-    Val(items[last])
+    Val(items[last].copy())
 }
 
 /// Fisher–Yates. Mutates `items` in place.

@@ -1,7 +1,9 @@
-use core.files as audit_files
-use core.text.parse as audit_parse
-use core.process as audit_process
-use core.encoding.json as audit_json
+use {
+    audit_files :: core.files
+    audit_parse :: core.text.parse
+    audit_process :: core.process
+    audit_json :: core.encoding.json
+}
 
 // Same shared UTF-8 byte-span/Unicode word recipes as corpus_policy.jet:35-40,742-774.
 // Kept private because this fixture is a standalone CLI program, not a public API.
@@ -73,7 +75,7 @@ fn audit_card_number(card: String) -> Int {
     raw :: card.bytes()
     loop i in 1..<raw.len() {
         digit :: Int.from_u8(raw[i]) - 48
-        assert(number <= (9223372036854775807 - digit) / 10, "audit card reference must contain a numeric card ID")
+        assert(number <= (9223372036854775807 - digit) /% 10, "audit card reference must contain a numeric card ID")
         number = number * 10 + digit
     }
     number
@@ -94,15 +96,15 @@ fn run() {
     assert(header >= 0, "accessibility audit must have the machine-readable findings header")
     assert(header + 1 < lines.len(), "accessibility findings table needs a separator row")
     separator :: audit_table_cells(lines[header + 1])
-    assert_eq(separator.len(), expected.len(), "accessibility findings table separator must match its five columns")
-    loop cell in separator -> assert_eq(cell, "---", "accessibility findings table needs a Markdown separator for every column")
+    assert(separator.len() == expected.len(), "accessibility findings table separator must match its five columns")
+    loop cell in separator -> assert(cell == "---", "accessibility findings table needs a Markdown separator for every column")
     rows := [[String]]{}
     finding_ids := [String]{}
     loop i in (header + 2)..<lines.len() {
         line :: lines[i]
         if !line.trim_start().starts_with("|") -> break
         cells :: audit_table_cells(line)
-        assert_eq(cells.len(), expected.len(), "accessibility findings row must have id, surface, screen_reader, state, and card: {line}")
+        assert(cells.len() == expected.len(), "accessibility findings row must have id, surface, screen_reader, state, and card: {line}")
         loop j in 0..<expected.len() -> assert(!cells[j].is_empty(), "accessibility finding {expected[j]} must not be empty: {line}")
         assert(!finding_ids.contains(cells[0]), "accessibility finding IDs must be unique: {cells[0]}")
         &finding_ids.push(cells[0])
@@ -112,7 +114,7 @@ fn run() {
     assert(!rows.is_empty(), "accessibility audit must list at least one finding")
     loop row in rows {
         if audit_parse.lower(row[3].trim()) == "pass" {
-            assert_eq(row[4], "—", "passing accessibility finding {row[0]} must not name a Tower card")
+            assert(row[4] == "—", "passing accessibility finding {row[0]} must not name a Tower card")
             next
         }
         cards :: audit_card_refs(row[4])
@@ -130,11 +132,12 @@ fn run() {
             // The original JSON::json_int also truncates Float with an i64 cast.
             resolved :: if value == {
                 .Int(number) -> number
-                .Float(number) -> number.to_int()
+                .Float(number) -> Int.from_float(number) ?? panic("Tower card JSON num is not an integer")
+                .Number(number) -> Int.parse(number) ?? panic("Tower card JSON num is not an integer: {number}")
                 else -> panic("Tower card JSON must contain a numeric num")
             }
             expected_num :: audit_card_number(card)
-            assert_eq(resolved, expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved}, not {expected_num}: {output.output}")
+            assert(resolved == expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved}, not {expected_num}: {output.output}")
         }
     }
     laws :: [String]{"D-REPORT-LAW1=A", "D-REPORT-HOME1=A", "D-REPORT-MACHINE1=A", "D-REPORT-EDITOR1=A", "`jet.report/v2`"}

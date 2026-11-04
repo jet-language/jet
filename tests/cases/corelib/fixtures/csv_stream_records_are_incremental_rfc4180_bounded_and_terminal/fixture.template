@@ -1,7 +1,9 @@
 
-use core.encoding as encoding
-use core.encoding.csv as csv
-use core.files as files
+use {
+    encoding :: core.encoding
+    csv :: core.encoding.csv
+    files :: core.files
+}
 
 fn run() {
     output :: files.create("{work}/output.csv") ?? panic("create")
@@ -58,7 +60,7 @@ fn run() {
         .Val(row) -> {
             print(row.line)
             print(row.fields[0])
-            print(&row.fields[1].replace(crlf, "|"))
+            print(row.fields[1].replace(crlf, "|"))
         }
         .None -> { print("options-missing") }
     }

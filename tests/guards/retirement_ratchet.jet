@@ -1,5 +1,7 @@
-use core.files as s6_ratchet_files
-use core.text.parse as s6_ratchet_text
+use {
+    s6_ratchet_files :: core.files
+    s6_ratchet_text :: core.text.parse
+}
 
 // Retired authority vocabulary stays in fixtures, history or unrelated English.
 // Boundary and allowlist rules are exact; this is not a blanket source grep.
@@ -54,23 +56,20 @@ fn s6_ratchet_concat(first: String, second: String) -> String {
 }
 
 fn s6_ratchet_producer(path: String, line: String) -> Bool {
-    if path == "Compiler/Prelude/Markers.jet" {
-        return line.trim_start().starts_with("marker ") &&
-            (line.contains(s6_ratchet_concat("marker Abil", "ities")) || line.contains(s6_ratchet_concat("marker Cap", "s")))
+    // The Prelude marker source and its generated embedded copy.
+    if path == "Compiler/Prelude/Markers.jet" || path == "Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet" {
+        return line.trim_start().starts_with("struct ") &&
+            (line.contains(s6_ratchet_concat("struct Abil", "ities {{")) || line.contains(s6_ratchet_concat("struct Cap", "s {{")))
     }
     if path == "Compiler/Prelude/Diagnostics.jet" {
         return line.starts_with("diagnostic\tE0077\t") && line.contains(s6_ratchet_concat("#", "Grant"))
     }
     // The E0077 registry row (and the generated DiagnosticRows copies in
-    // selfhost_terminators fixtures), the generated Prelude marker source, the
-    // CLI syntax dictionary rows for the retired markers, and the E0077 parser
-    // test.
+    // selfhost_terminators fixtures), the CLI syntax dictionary rows for the
+    // retired markers, and the E0077 parser test.
     if path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet" ||
         (path.starts_with("tests/cases/selfhost_terminators/") && path.ends_with("/main.jet")) {
         return line.trim_start().starts_with(s6_ratchet_concat("what: \"The `#", "Grant` scope marker is retired."))
-    }
-    if path == "Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet" {
-        return line.contains(s6_ratchet_concat("marker Abil", "ities(")) && line.contains(s6_ratchet_concat("marker Cap", "s("))
     }
     if path == "Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet" {
         return line.contains(s6_ratchet_concat("token: \"Abil", "ities\"")) || line.contains(s6_ratchet_concat("token: \"Cap", "s\""))

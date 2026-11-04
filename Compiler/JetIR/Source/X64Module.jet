@@ -6,12 +6,14 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 
-use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
-use jet_backend.[
-    X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
-    X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
-    x64_object_functions_threads, x64_object_main, x64_object_main_debug,
-]
+use {
+    jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
+    jet_backend.[
+        X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
+        X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange, X64_FUNCTION_ALIGN,
+        x64_object_functions_threads, x64_object_main, x64_object_main_debug,
+    ]
+}
 
 // The module-wide rows every function's selection reads.
 struct IRX64Tables {
@@ -24,6 +26,9 @@ struct IRX64Tables {
     headers: [Int]
     // Selector texts (source paths, stop messages, big-integer decimals) -> data row.
     texts: [String:Int]
+    // Big-integer decimals -> the data row of the word that is their static
+    // exact Int (ir_x64_static_int).
+    ints: [String:Int]
     // DWARF: the source files (row per distinct path) and a debug type per IR type row.
     files: [String]
     file_rows: [String:Int]
@@ -55,6 +60,66 @@ fn ir_x64_add_text(tables: &IRX64Tables, text: String) -> Int Never! {
     id
 }
 
+// A big-integer decimal's exact Int as process-lifetime data
+// (JetRuntime Int.jet's 48-byte carrier and its base-1e9 u32 limbs), and
+// the data word holding the tagged Int that names it, so a ConstBigInt is
+// one load instead of a runtime parse and allocation per evaluation. The
+// carrier starts with 2^62 references: every owner a load hands out is
+// dropped once and a clone adds its own, so no run reaches the count zero
+// that would free it. A decimal the carrier can't hold canonically (one in
+// the inline range, or not plain digits) keeps the runtime parse.
+fn ir_x64_static_int(tables: &IRX64Tables, text: String) Never! {
+    if tables.ints.get(text) != None -> return
+    bytes := [Int]{}
+    loop byte in text.bytes() -> &bytes.push(Int.from_u8(byte))
+    negative :: bytes.len() > 0 && bytes[0] == 45
+    first :: if negative -> 1 else -> 0
+    digits :: bytes.len() - first
+    if digits < 19 || bytes[first] == 48 -> return
+    loop at in first..<bytes.len() {
+        if bytes[at] < 48 || bytes[at] > 57 -> return
+    }
+    // A 19-digit magnitude up to 2^62 - 1 (2^62 when negative) is an inline Int.
+    if digits == 19 {
+        bound :: (if negative -> "4611686018427387904" else -> "4611686018427387903").bytes()
+        at := 0
+        loop at < 19 && bytes[first + at] == Int.from_u8(bound[at]) {
+            at += 1
+        }
+        if at == 19 || bytes[first + at] < Int.from_u8(bound[at]) -> return
+    }
+    limbs := [U8]{}
+    count := 0
+    end := bytes.len()
+    loop end > first {
+        start :: if end - 9 > first -> end - 9 else -> first
+        limb := 0
+        loop at in start..<end -> limb = limb * 10 + bytes[at] - 48
+        loop shift in 0..<4 -> &limbs.push(U8{(limb >> (8 * shift)).bit_and(255)})
+        count += 1
+        end = start
+    }
+    limbs_row :: tables.data.len()
+    &tables.lengths.push(limbs.len())
+    &tables.data.push(X64Data{id: X64DataID{value: limbs_row}, bytes: ^limbs, align: 4, relocs: [X64DataReloc]{}})
+    // refs, retired_next, negative, limbs (relocated), len, cap.
+    words :: [Int]{4611686018427387904, 0, if negative -> 1 else -> 0, 0, count, count}
+    carrier := [U8]{}
+    loop word in words {
+        loop shift in 0..<8 -> &carrier.push(U8{(word >> (8 * shift)).bit_and(255)})
+    }
+    carrier_row :: tables.data.len()
+    &tables.lengths.push(48)
+    &tables.data.push(X64Data{id: X64DataID{value: carrier_row}, bytes: ^carrier, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 24, target: X64DataID{value: limbs_row}, addend: 0}}})
+    // The Int word is the carrier's address with bit 62 set (Int.jet int_tag).
+    tagged := [U8]{}
+    loop _ in 0..<8 -> &tagged.push(U8{0})
+    word_row :: tables.data.len()
+    &tables.lengths.push(8)
+    &tables.data.push(X64Data{id: X64DataID{value: word_row}, bytes: ^tagged, align: 8, relocs: [X64DataReloc]{X64DataReloc{offset: 0, target: X64DataID{value: carrier_row}, addend: 4611686018427387904}}})
+    tables.ints[text] = word_row
+}
+
 // The DWARF description of a slot type, by its machine layout.
 fn ir_x64_debug_type(ty: IRType) -> X64DebugType Never! {
     if ty.kind == {
@@ -76,7 +141,7 @@ fn ir_x64_debug_type(ty: IRType) -> X64DebugType Never! {
 }
 
 fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
-    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}}
+    tables := IRX64Tables{data: [X64Data]{}, lengths: [Int]{}, headers: [Int]{}, texts: [String:Int]{}, ints: [String:Int]{}, files: [String]{}, file_rows: [String:Int]{}, debug_types: [X64DebugType]{}, type_debug: [Int]{}}
     loop (row, bytes) in m.data {
         // A static object (BuildStatic.jet) holds words; a text row is bytes.
         align :: if m.data_relocs.get(row) != None -> 8 else -> 1
@@ -96,7 +161,10 @@ fn ir_x64_tables(m: IRModule) -> IRX64Tables Never! {
                 row :: f.a[at]
                 if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(&tables, row)
             }
-            if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() -> _ := ir_x64_add_text(&tables, m.names[f.a[at]])
+            if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
+                _ := ir_x64_add_text(&tables, m.names[f.a[at]])
+                ir_x64_static_int(&tables, m.names[f.a[at]])
+            }
         }
     }
     // A static object's address words: a data row's address, or the
@@ -200,7 +268,7 @@ fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64R
             &variables.push(^selected.variables)
         } else {
             &row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
-            &functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}})
+            &functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             &debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             &variables.push([X64DebugVariable]{})
         }
@@ -339,13 +407,14 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     if owned.program.functions[entry].param_count != 0 || owned.program.functions[entry].result >= 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {owned.program.functions[entry].name} must take no parameters and return nothing"}}
     owned_main :: owned.program.owned_main
     owned_attach :: owned.program.owned_attach
+    kept :: owned.program.kept.copy()
     program :: ir_x64_object_module(&owned)
     main :: x64_object_main(X64FunctionID{value: entry}, owned_main, owned_attach)
     debug := [X64FunctionDebug]{x64_object_main_debug(main)}
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
-    ir_x64_reached_only(&functions, &debug)
+    ir_x64_reached_only(&functions, &debug, kept)
     threads :: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
@@ -363,11 +432,12 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
 }
 
 // Keeps the rows of `functions` (with their `debug` rows) whose function the
-// first row, `main`, reaches through function relocations. The optimizer
-// keeps every body it inlined (ir_optimize_module), so a function whose
-// calls were all inlined has none left; a program object is one `.text`,
-// which the static link keeps whole, so its dead functions go here.
-fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) Never! {
+// first row, `main`, or a `dead_code: keep` root (`roots`, IRModule.kept)
+// reaches through function relocations. The optimizer keeps every body it
+// inlined (ir_optimize_module), so a function whose calls were all inlined
+// has none left; a program object is one `.text`, which the static link
+// keeps whole, so its dead functions go here.
+fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug], roots: [Int]) Never! {
     if functions.len() != debug.len() -> panic("the object writer has {functions.len()} functions and {debug.len()} debug rows")
     max_id := -1
     loop function in functions {
@@ -385,6 +455,11 @@ fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDe
     }
     work := [Int]{functions[0].id.value}
     reached[functions[0].id.value + 1] = true
+    loop id in roots {
+        if id + 1 < 0 || id + 1 >= reached.len() || reached[id + 1] -> next
+        reached[id + 1] = true
+        &work.push(id)
+    }
     loop work.len() > 0 {
         id :: &work.pop() ?? { break }
         loop row in id_rows[id + 1] {

@@ -38,18 +38,18 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2805</code>: <code>tests/ui/http_route_invalid_literal.stderr</code>.</p>
 <pre class="diag">Error [E2805]: Invalid HTTP route `/users/{id}`: brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{name}` parameter spelling
-  --&gt; http_route_invalid_literal.jet:9:16
+  --&gt; http_route_invalid_literal.jet:11:16
     |
-  9 |     router.get(&quot;/users/{id}&quot;, handle)
+ 11 |     router.get(&quot;/users/{id}&quot;, handle)
     |                ^^^^^^^^^^^^^
  Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
  Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
 More: jet-lang.dev/e/E2805
 
 Error [E2805]: Invalid HTTP route `/teams/{name}`: use `:name` or final `*name`; braces are not route markers
-  --&gt; http_route_invalid_literal.jet:11:16
+  --&gt; http_route_invalid_literal.jet:13:16
     |
- 11 |     router.get(doubled, handle)
+ 13 |     router.get(doubled, handle)
     |                ^^^^^^^
  Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
  Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`

@@ -1,7 +1,9 @@
-
-use core.net as net
-use core.tasks as tasks
-use core.time as time
+package { name: "tcp-expired-deadlines" authority: { allow: [Net, Time] } }
+use {
+    net :: core.net
+    tasks :: core.tasks
+    time :: core.time
+}
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
@@ -25,7 +27,7 @@ fn run() {
     first.close() ?? panic("first close")
 
     second := net.tcp_connect(address) ?? panic("second connect")
-    #Context(deadline: time.now() - 1) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 - 1) {
         if second.read(1) == {
             .Ok(_) -> print("unexpected second read")
             .Err(error) -> print(net.error_message(error))

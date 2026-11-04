@@ -1,0 +1,48 @@
+use files :: core.files
+
+// A method that returns a view (`-> Directory from self | picked`) lends a
+// handle its receiver or argument owns. Passing that call's result straight
+// to a read parameter, binding it to a variable, or wrapping it in an Option
+// closes nothing: the owner's handle stays open for every later use (the
+// package authority resolver revalidates its root this way, and a close at
+// the end of the statement made the next revalidation fail with "the
+// directory handle is already closed").
+
+struct Picked {
+    handle: Directory?
+}
+
+struct Resolver {
+    root: Directory
+
+    fn pick(self, picked: Picked) -> Directory Never! from self | picked {
+        if picked.handle == {
+            .Val(handle) -> { return handle }
+            .None -> { return self.root }
+        }
+    }
+
+    fn check(self, directory: Directory) -> Bool Never! {
+        directory.stat() ? info -> info.is_dir ! error -> false
+    }
+}
+
+fn bound_once(resolver: Resolver, picked: Picked) {
+    bound :: resolver.pick(picked)
+    print("bound {resolver.check(bound)}")
+}
+
+fn run() {
+    resolver :: Resolver{root: files.open_directory(".") ?? panic("open .")}
+    root :: Picked{handle: None}
+    print("root {resolver.check(resolver.pick(root))}")
+    print("root again {resolver.check(resolver.pick(root))}")
+    inner :: Picked{handle: Val(files.open_directory(".") ?? panic("open inner"))}
+    print("inner {resolver.check(resolver.pick(inner))}")
+    print("inner again {resolver.check(resolver.pick(inner))}")
+    bound_once(resolver, root)
+    print("root after binding {resolver.check(resolver.root)}")
+    wrapped :: Directory?{Val(resolver.pick(inner))}
+    print("wrapped {wrapped != None}")
+    print("inner after wrapping {resolver.check(resolver.pick(inner))}")
+}

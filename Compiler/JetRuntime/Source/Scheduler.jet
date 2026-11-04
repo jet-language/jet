@@ -55,7 +55,11 @@ fn scheduler_words_drop(header: I64) {
 // Every control starts here, so the stop rail's root half (Trap.jet
 // trap_root_rail_code) is installed before any control can hold a stop.
 fn scheduler_control_new() -> I64 {
-    if (trap_root_rail_code == I64{0}) -> trap_root_rail_code = rt_trap_root_address()
+    if (trap_root_rail_code == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            trap_root_rail_code = rt_trap_root_address()
+        }
+    }
     control :: jet_rt_alloc(I64{128}, I64{8})
     thread_zero(control, I64{128})
     sync_store(control, I64{1})
@@ -198,7 +202,9 @@ fn scheduler_process_root_install(control: I64) {
     scheduler_control_retain(control)
     sync_mutex_lock(scheduler_root)
     previous :: scheduler_process_root
-    scheduler_process_root = control
+    #Unsafe("written under the scheduler root mutex") {
+        scheduler_process_root = control
+    }
     sync_mutex_unlock(scheduler_root)
     scheduler_control_drop(previous)
 }
@@ -206,7 +212,11 @@ fn scheduler_process_root_install(control: I64) {
 fn scheduler_process_root_release(control: I64) {
     sync_mutex_lock(scheduler_root)
     owned :: scheduler_process_root == control
-    if owned -> scheduler_process_root = I64{0}
+    if owned {
+        #Unsafe("written under the scheduler root mutex") {
+            scheduler_process_root = I64{0}
+        }
+    }
     sync_mutex_unlock(scheduler_root)
     if owned -> scheduler_control_drop(control)
 }
@@ -219,7 +229,9 @@ fn scheduler_root_task_control() -> I64 {
     if (previous == I64{0} || sync_load(wrapping(previous + I64{16})) != I64{0}) {
         fresh :: scheduler_control_new()
         sync_store(wrapping(fresh + I64{104}), SCHEDULER_SCOPE_ROOT)
-        scheduler_process_root = fresh
+        #Unsafe("written under the scheduler root mutex") {
+            scheduler_process_root = fresh
+        }
         replaced = previous
     }
     control :: scheduler_process_root
@@ -516,7 +528,11 @@ fn scheduler_shield_leave_finished() {
 task_panic_code := I64{0}
 
 fn scheduler_body_enter() -> I64 {
-    if (task_panic_code == I64{0}) -> task_panic_code = rt_task_panic_publish_address()
+    if (task_panic_code == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            task_panic_code = rt_task_panic_publish_address()
+        }
+    }
     sync_swap(wrapping(thread_base() + I64{64}), I64{1})
 }
 fn scheduler_body_leave(saved: I64) { sync_store(wrapping(thread_base() + I64{64}), saved) }
@@ -774,7 +790,9 @@ scheduler_root := I64{0}
 // runtime-init: 3 when scheduler_root
 #Export(c) fn jet_rt_scheduler_init() {
     if (scheduler_root != I64{0}) -> return
-    scheduler_root = jet_rt_alloc(I64{168}, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        scheduler_root = jet_rt_alloc(I64{168}, I64{8})
+    }
     thread_zero(scheduler_root, I64{168})
 }
 
@@ -906,7 +924,11 @@ fn scheduler_reap_finished(root: I64) {
 // worker (which locks the root before it reads its handle) and shutdown both
 // see a complete record.
 fn scheduler_start_worker(root: I64, flags: I64) {
-    if (scheduler_compensate_code == I64{0}) -> scheduler_compensate_code = rt_scheduler_compensate_address()
+    if (scheduler_compensate_code == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            scheduler_compensate_code = rt_scheduler_compensate_address()
+        }
+    }
     scheduler_reap_finished(root)
     record :: jet_rt_alloc(I64{16}, I64{8})
     sync_store(record, root.bit_or(flags))
@@ -1225,7 +1247,8 @@ fn scheduler_timer_cancel(node: I64) {
             return I64{0}
         }
         now :: sync_now_ns()
-        earliest := sync_deadline(I64{50000000})
+        // With no timer pending the thread sleeps until one is scheduled.
+        earliest := I64{-1}
         link := wheel + I64{16}
         loop sync_load(link) != (I64{0}) {
             node :: sync_load(link)
@@ -1239,7 +1262,7 @@ fn scheduler_timer_cancel(node: I64) {
                     scheduler_timer_node_drop(node)
                 }
                 else -> {
-                    if deadline < earliest -> earliest = deadline
+                    if (earliest < I64{0} || deadline < earliest) -> earliest = deadline
                     link = node
                 }
             }
@@ -1330,10 +1353,9 @@ fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
         sync_park_drop(virtual_slot)
         return status
     }
+    // The park's own timeout ends the sleep; no timer thread is involved.
     slot :: sync_park_new()
-    timer :: scheduler_timer_schedule(sync_deadline(duration_ns), slot)
     status :: scheduler_yield(wait_kind, slot, duration_ns)
-    scheduler_timer_cancel(timer)
     sync_park_drop(slot)
     status
 }

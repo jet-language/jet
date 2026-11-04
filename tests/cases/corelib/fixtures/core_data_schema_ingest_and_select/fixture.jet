@@ -1,5 +1,5 @@
 
-use core.data as data
+use data :: core.data
 
 #Codable
 struct Ticket {
@@ -21,5 +21,7 @@ fn run() {
     loop t in selected {
         print("{t.team}:{t.minutes}")
     }
-    print("{data.status()[5].step}:{data.status()[5].path}")
+    loop status in data.status() {
+        if status.step == "core.data.schema" -> print("{status.step}:{status.path}")
+    }
 }

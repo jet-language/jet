@@ -1,9 +1,11 @@
 // Real same-read schema dependency witnesses. The fixture launcher unsets
 // JET_SCHEMA_CACHE_DIR so every write remains beneath this owned temporary root.
-use core.files as schema_test_files
-use core.sys as schema_test_sys
-use core.process as schema_test_process
-use jet_driver.[jet_driver_read_schema_dependency, load_snapshot]
+use {
+    schema_test_files :: core.files
+    schema_test_sys :: core.sys
+    schema_test_process :: core.process
+    jet_driver.[jet_driver_read_schema_dependency, load_snapshot]
+}
 
 #Test("schema_ingress") {
     assert(schema_test_sys.get("JET_SCHEMA_CACHE_DIR") == None)

@@ -2,8 +2,10 @@
 // index parity. All original fixtures/assertions remain unregistered until C4's
 // native checked graph, CP-NAMES use-site spans, Sema effect facts and S5–S12/S20
 // compose. Never supply an empty graph, prefilled refs or mirrored witnesses.
-use jet_foundation.[ArithmeticPolicyFact, ArithmeticMode, ArithmeticOperation, Span, NameFacts]
-use jet_parser.[parse_source]
+use {
+    jet_foundation.[ArithmeticPolicyFact, ArithmeticMode, ArithmeticOperation, Span, NameFacts]
+    jet_parser.[parse_source]
+}
 
 #Test("semindex_arithmetic_hover_preserves_checked_policy_operation_and_exact_scope") {
     fact :: ArithmeticPolicyFact{mode: ArithmeticMode.Wrapping, scope_span: Span{start: 7, end: 81}, operation_span: Span{start: 25, end: 26}, operation: Val(ArithmeticOperation.Add)}
@@ -130,7 +132,7 @@ fn semindex_expressions_original_reference_library_source() -> String Never! {
     "fn report() {{ print(\"library\") }}\n"
 }
 fn semindex_expressions_original_reference_main_source() -> String Never! {
-    "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
+    "use api :: \"./library\"\nuse alias_report :: api.report\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
 }
 fn semindex_expressions_original_target_kind(index: SemIndex, name: String, kind: String) -> Bool {
     loop reference in index.references() {

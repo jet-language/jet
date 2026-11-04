@@ -4,29 +4,31 @@
 // `info`, `outdated`, and `reserved`. `command` is the normalized command
 // word (`inspect` for `inspect env`, which keeps its group word); `None`
 // leaves the command to the caller's E2104 refusal.
-use core.files as cli_files
-use core.process as cli_process
-use core.sys as cli_sys
-use jet_driver.[
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-]
-use jet_foundation.[
-    CORE_MODULE_EXPORTS,
-    DIAGNOSTIC_ERROR,
-    Diagnostic,
-    DiagnosticRegistryFix,
-    MARKER_SOURCE,
-    TAppliedRule,
-    diagnostic_registry_rows,
-    diagnostic_render_all,
-    marker_source_read,
-]
-use jet_pkg_model.[WorkspaceDeclarationCache]
-use jetpack_foundation.[CONFIG_FILE, ENV_FILE]
-use jet_env_model.[envmodel_evaluate_env]
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_sys :: core.sys
+    jet_driver.[
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+    ]
+    jet_foundation.[
+        CORE_MODULE_EXPORTS,
+        DIAGNOSTIC_ERROR,
+        Diagnostic,
+        DiagnosticRegistryFix,
+        MARKER_SOURCE,
+        TAppliedRule,
+        diagnostic_registry_rows,
+        diagnostic_render_all,
+        marker_source_read,
+    ]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+    jetpack_foundation.[CONFIG_FILE, ENV_FILE]
+    jet_env_model.[envmodel_evaluate_env]
+}
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.
@@ -124,7 +126,7 @@ JET_CLI_KEYWORD_LIST :: [String]{
     "return", "yield", "defer", "struct", "enum", "impl", "policy", "wrap", "trait", "tag",
     "effect", "derive", "comptime", "fact", "distinct", "migration", "rename", "add", "remove", "change", "via",
     "self", "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test",
-    "Todo", "State", "Transition", "state", "protocol", "client", "server", "marker", "validate",
+    "Todo", "State", "Transition", "state", "protocol", "client", "server", "validate",
     "check", "true", "false", "None", "it",
 }
 
@@ -166,7 +168,7 @@ JET_CLI_RESERVED_SIGILS :: [JetCLIReservedEntry]{
     {spelling: "&", kind: "sigil", note: "borrow for write"},
     {spelling: "^", kind: "sigil", note: "take/move ownership"},
     {spelling: "@", kind: "sigil", note: "prefix `@` marks a live link"},
-    {spelling: "$", kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$sites:`"},
+    {spelling: "$", kind: "sigil", note: "compiler fact: `T.$layout`, `$build.os`, `$holds:`"},
     {spelling: "<:", kind: "sigil", note: "open a statement-expansion fence"},
     {spelling: ":>", kind: "sigil", note: "close a statement-expansion fence"},
     {spelling: "...", kind: "sigil", note: "spread elements"},
@@ -265,25 +267,31 @@ fn jet_cli_digest_one_line(value: String) -> String Never! {
     words.join(" ")
 }
 
+// One registered rule as its marker type on one line: the fields, then the
+// `impl Marker` settings.
 fn jet_cli_digest_marker_declaration(rule: TAppliedRule) -> String Never! {
     fields := [String]{}
     loop param in rule.signature.params {
         default :: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
         &fields.push("{param.name}: {param.source_type}{default}")
     }
-    if rule.signature.variadic_source_type == .Val(source_type) -> &fields.push("{source_type}...")
+    if rule.signature.variadic_source_type == .Val(source_type) {
+        variadic_name :: rule.signature.variadic_name ?? "values"
+        &fields.push("{variadic_name}: [{source_type}]")
+    }
     sites :: loop site in rule.sites -> ".{site}"
-    &fields.push("@sites: [{sites.join(", ")}]")
-    if rule.repeatable -> &fields.push("@repeatable: true")
-    if rule.owns_menu -> &fields.push("@owns_menu: true")
-    if rule.inherits -> &fields.push("@inherits: true")
-    if rule.resolution != "SiteBound" -> &fields.push("@resolution: .{rule.resolution}")
+    settings := [String]{"sites :: [{sites.join(", ")}]"}
+    if rule.repeatable -> &settings.push("repeatable :: true")
+    if rule.owns_menu -> &settings.push("owns_menu :: true")
+    if rule.inherits -> &settings.push("inherits :: true")
+    if rule.resolution != "SiteBound" -> &settings.push("resolution :: .{rule.resolution}")
     if rule.policy_scopes.len() > 0 {
         scopes :: loop scope in rule.policy_scopes -> ".{scope}"
-        &fields.push("@scopes: [{scopes.join(", ")}]")
+        &settings.push("scopes :: [{scopes.join(", ")}]")
     }
-    if rule.companion_site == .Val(companion) -> &fields.push("@companion: [{companion.rule}, .{companion.site}]")
-    "marker {rule.name}({fields.join(", ")})"
+    if rule.companion_site == .Val(companion) -> &settings.push("companion :: [{companion.rule}, .{companion.site}]")
+    &fields.push("impl Marker {{ {settings.join("; ")} }}")
+    "struct {rule.name} {{ {fields.join(", ")} }}"
 }
 
 fn jet_cli_digest_marker_text(rules: [TAppliedRule]) -> String Never! {
@@ -378,12 +386,12 @@ fn jet_cli_llm_digest() -> String Never! {
         "Errors: failures propagate implicitly; handle `T?` or `T E!` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition {{ ... }} else {{ ... }}`; loops use `loop name in source {{ ... }}`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{{ field: value }}`; list literals use `[T]{{ value1, value2 }}`.",
-        "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
+        "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use alias :: core.module`, and two or more imports use one `use {{ … }}` block with a row per line.",
         "Ownership is safe by default. `&T` writes, `^T` moves, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     }
     core_rules_body :: core_rules_lines.join("\n")
     marker_body :: "User marker spelling is `#Name(arguments)`; rows below are registry declarations.\n\n```text\n{marker_text}\n```"
-    core_body :: "Use a module alias, then call an indexed item: `use core.term as term`; `term.print(\"hi\")`.\n\n```text\n{jet_cli_digest_core_module_text()}\n```"
+    core_body :: "Use a module alias, then call an indexed item: `use term :: core.term`; `term.print(\"hi\")`.\n\n```text\n{jet_cli_digest_core_module_text()}\n```"
     diagnostic_body :: "Diagnostic rows use current registry meaning. Match code first; follow `fix`. Rows marked reserved are not current syntax.\n\n```text\n{jet_cli_digest_diagnostic_text()}\n```"
     sections :: [String]{
         "# Jet LLM surface digest",
@@ -781,7 +789,7 @@ fn jet_cli_inspect_env_host(file: String, source: String, base_dir: String, colo
         .Ok(evaluated) -> evaluated
         .Err(error) -> {
             if json {
-                return jet_cli_inspect_env_output(jet_cli_reports_status_json("inspect.env", false, jet_cli_report_cwd(), file, source, [Diagnostic]{error.diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
+                return jet_cli_inspect_env_output(jet_cli_reports_status_json("inspect.env", false, jet_cli_report_base(file), file, source, [Diagnostic]{error.diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
             }
             return jet_cli_inspect_env_output("", diagnostic_render_all(file, source, [Diagnostic]{error.diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
         }

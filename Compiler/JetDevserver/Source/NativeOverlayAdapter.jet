@@ -1,14 +1,17 @@
 // Typed resident-session/native-overlay bridge. Keeps canonical event identity
 // and body intact. Never parses devtools_json, selects panel policy or executes actions.
 // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:8
-use std.collections.[VecDeque]
-use std.fmt as fmt
-use jet_foundation.Devtools.[JetDevtoolsEvent]
-use jet_devserver.NativeOverlayHost.[NativeOverlayAction, NativeOverlayEvent, NativeOverlayGrant, NativeOverlayNode, NativeOverlayNodeKind, NativeOverlayPanelFact, JET_DEVTOOLS_PROTOCOL, MAX_OVERLAY_DEPTH, MAX_OVERLAY_NODES, MAX_OVERLAY_PANELS, MAX_OVERLAY_TEXT_BYTES]
-use jet_devserver.Session.[DevtoolsProjection, ResidentDevSession]
-use jet_devserver.TerminalHost.[panel_availability as project_panel_availability, JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
-use jet_devserver.Devtools.catalog.[descriptors]
-use core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
+use {
+    std.collections.[VecDeque]
+    fmt :: std.fmt
+    jet_foundation.Devtools.[JetDevtoolsEvent]
+    jet_devserver.NativeOverlayHost.[NativeOverlayAction, NativeOverlayEvent, NativeOverlayGrant, NativeOverlayNode, NativeOverlayNodeKind, NativeOverlayPanelFact, JET_DEVTOOLS_PROTOCOL, MAX_OVERLAY_DEPTH, MAX_OVERLAY_NODES, MAX_OVERLAY_PANELS, MAX_OVERLAY_TEXT_BYTES]
+    jet_devserver.Session.[DevtoolsProjection, ResidentDevSession]
+    jet_devserver.TerminalHost.[JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
+    project_panel_availability :: jet_devserver.TerminalHost.panel_availability
+    jet_devserver.Devtools.catalog.[descriptors]
+    core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
+}
 
 // Rust: crates/jet-devserver/src/NativeOverlayAdapter.rs:23
 NATIVE_OVERLAY_EVENT_LOG_PANEL_ID :: "event-log"

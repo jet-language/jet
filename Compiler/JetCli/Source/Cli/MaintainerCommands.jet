@@ -1,13 +1,15 @@
 // Source/CmdDevTools.rs: reduce and ice-report. Compilation and diagnostics
 // stay with the driver; these leaves own only command policy, line
 // minimization, and sequential file publication.
-use core.files as cli_files
-use core.process as cli_process
-use core.sys as cli_sys
-use core.term as cli_term
-use core.time as cli_time
-use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.[diagnostic_render_all]
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_sys :: core.sys
+    cli_term :: core.term
+    cli_time :: core.time
+    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
+    jet_foundation.[diagnostic_render_all]
+}
 
 fn jet_cli_maintainer_error(code: String, what: String, why: String?, fix: String?, color: Bool, json: Bool, status: Int) -> JetDriverVerbOutput Never! {
     diagnostic_copy :: jet_cli_diagnostic_copy(code)

@@ -1,35 +1,37 @@
 // Web dev-server state and terminal/browser parity. Browser swaps preserve module-owned state.
 // Rust: crates/jet-devserver/src/WebHost.rs:13
-use std.fs as fs
-use std.io.[BufReader, IsTerminal, Write]
-use std.net.[IpAddr, SocketAddr, TcpListener, TcpStream]
-use core.files.[OSPath]
-use std.sync.atomic.[AtomicBool, AtomicU64, AtomicUsize, Ordering]
-use std.sync.[Arc, Mutex]
-use std.thread as thread
-use std.time.[Duration, Instant]
-use jet_devserver.TerminalStyleReload.[TerminalCapabilityFacts, TerminalColorMode, TerminalStyleHostAdapter, TerminalStyleHostSource]
-use jet_driver.Diagnostics.[ColorChoice]
-use jet_driver.Package.[ReleaseDevtoolsPolicy]
-use jet_foundation.Dyn.[Dyn]
-use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFreshnessFact, JetDevtoolsFreshnessState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsLifecycleState, JetDevtoolsMutationLifecycle, JetDevtoolsPrivacy, JetDevtoolsQueryState, JetDevtoolsSourceIdentityFact, JetDevtoolsSourceSpan, JetDevtoolsTraceKind, JetDevtoolsSelection, JET_DEVTOOLS_PROTOCOL, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_EVENTS]
-use jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlKind, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
-use jet_foundation.HotSwap.[HotSwapDecision]
-use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
-use jet_devserver.[ResidentDevSession]
-use jet_devserver.Session as Session
-use jet_devserver.BrowserTrace as BrowserTrace
-use jet_devserver.BrowserWebAdapter.[BrowserWebState]
-use jet_devserver.WebErrorPage.[WebErrorDevStatusFacts]
-use jet_devserver.Canvas.[DebugSessions]
-use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
-use jet_foundation.[
-    JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFunctionIdentity,
-    JetDevtoolsGameLaunchPhase, JetDevtoolsMutationLifecycle, JetDevtoolsQueryState,
-    JetDevtoolsSourceSpan, JetDevtoolsTraceKind, foundation_json_escape,
-]
-use jetpack_foundation.[ColorChoice]
-use core.encoding.[Dyn]
+use {
+    fs :: std.fs
+    std.io.[BufReader, IsTerminal, Write]
+    std.net.[IpAddr, SocketAddr, TcpListener, TcpStream]
+    core.files.[OSPath]
+    std.sync.atomic.[AtomicBool, AtomicU64, AtomicUsize, Ordering]
+    std.sync.[Arc, Mutex]
+    thread :: std.thread
+    std.time.[Duration, Instant]
+    jet_devserver.TerminalStyleReload.[TerminalCapabilityFacts, TerminalColorMode, TerminalStyleHostAdapter, TerminalStyleHostSource]
+    jet_driver.Diagnostics.[ColorChoice]
+    jet_driver.Package.[ReleaseDevtoolsPolicy]
+    jet_foundation.Dyn.[Dyn]
+    jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFreshnessFact, JetDevtoolsFreshnessState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsLifecycleState, JetDevtoolsMutationLifecycle, JetDevtoolsPrivacy, JetDevtoolsQueryState, JetDevtoolsSourceIdentityFact, JetDevtoolsSourceSpan, JetDevtoolsTraceKind, JetDevtoolsSelection, JET_DEVTOOLS_PROTOCOL, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_EVENTS]
+    jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlKind, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
+    jet_foundation.HotSwap.[HotSwapDecision]
+    jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
+    jet_devserver.[ResidentDevSession]
+    Session :: jet_devserver.Session
+    BrowserTrace :: jet_devserver.BrowserTrace
+    jet_devserver.BrowserWebAdapter.[BrowserWebState]
+    jet_devserver.WebErrorPage.[WebErrorDevStatusFacts]
+    jet_devserver.Canvas.[DebugSessions]
+    jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+    jet_foundation.[
+        JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFunctionIdentity,
+        JetDevtoolsGameLaunchPhase, JetDevtoolsMutationLifecycle, JetDevtoolsQueryState,
+        JetDevtoolsSourceSpan, JetDevtoolsTraceKind, foundation_json_escape,
+    ]
+    jetpack_foundation.[ColorChoice]
+    core.encoding.[Dyn]
+}
 // Rust: crates/jet-devserver/src/WebHost.rs:55
 APPLICATION_PORT_RANGE :: 8080..8089
 // Rust: crates/jet-devserver/src/WebHost.rs:56

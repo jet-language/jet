@@ -1,6 +1,8 @@
-use core.compute as compute
-use core.math.random as random
-use core.files as files
+use {
+    compute :: core.compute
+    random :: core.math.random
+    files :: core.files
+}
 
 
 fn predict(w1: Tensor, w2: Tensor, x: Tensor) -> Tensor {
@@ -8,9 +10,27 @@ fn predict(w1: Tensor, w2: Tensor, x: Tensor) -> Tensor {
     return compute.matmul(hidden, w2) ?? panic("output")
 }
 
+// core.compute no longer ships a loss or an optimizer step
+// (D-COMPUTE-AUTODIFF-SCOPE1=B, #3955), so the model writes them from
+// elementwise ops.
+fn mean_squared_error(prediction: Tensor, target: Tensor) -> Tensor {
+    diff :: compute.sub(prediction, target) ?? panic("diff")
+    squares :: compute.mul(diff, diff) ?? panic("squares")
+    rows :: compute.sum_axis(squares, 0) ?? panic("rows")
+    total :: compute.sum_axis(rows, 0) ?? panic("total")
+    count :: compute.full([1], Float.from_int(compute.numel(diff))) ?? panic("count")
+    return compute.div(total, count) ?? panic("mean")
+}
+
+fn gradient_step(weight: Tensor, gradient: Tensor, rate: Float) -> Tensor {
+    scale :: compute.full(compute.shape(gradient), rate) ?? panic("rate")
+    delta :: compute.mul(gradient, scale) ?? panic("delta")
+    return compute.sub(weight, delta) ?? panic("step")
+}
+
 fn training_loss(w1: Tensor, w2: Tensor, x: Tensor, target: Tensor) -> Tensor {
     prediction :: predict(w1, w2, x)
-    return compute.mse_loss(prediction, target) ?? panic("loss")
+    return mean_squared_error(prediction, target)
 }
 
 fn batch_inputs(order: [Int], start: Int) -> Tensor {
@@ -77,8 +97,8 @@ fn train() -> Tensor {
             loss :: training_loss(w1, w2, x, target)
             gw1 :: manual_grad_w1(w1, w2, x, target)
             gw2 :: manual_grad_w2(w1, w2, x, target)
-            w1 = compute.sgd_step(w1, gw1, 0.2) ?? panic("w1 step")
-            w2 = compute.sgd_step(w2, gw2, 0.2) ?? panic("w2 step")
+            w1 = gradient_step(w1, gw1, 0.2)
+            w2 = gradient_step(w2, gw2, 0.2)
             print("batch={start} loss={compute.to_list(loss)}")
         }
     }

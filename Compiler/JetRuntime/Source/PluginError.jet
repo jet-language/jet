@@ -27,9 +27,7 @@
 #Export(c) fn jet_rt_handle_show_plugin_error(value: I64) -> I64 { jet_rt_handle_display_plugin_error(value) }
 fn plugin_frame_debug(target: I64, frame: I64) {
     // "PluginFrame { function: "
-    rt_text_push_word(target, I64{8234390367679900752}, I64{8})
-    rt_text_push_word(target, I64{8459484663258639713}, I64{8})
-    rt_text_push_word(target, I64{2322289982652572526}, I64{8})
+    jet_rt_string_builder_push(target, rt_static_text("PluginFrame {{ function: "))
     rt_text_push_rust_debug_str(target, data_tree_word(wrapping(frame + PLUGIN_FRAME_FUNCTION)))
     // ", component: "
     rt_text_push_word(target, I64{7957702681909469228}, I64{8})
@@ -43,9 +41,7 @@ fn plugin_frame_debug(target: I64, frame: I64) {
 }
 fn plugin_fault_debug(target: I64, fault: I64) {
     // "PluginFault { export: "
-    rt_text_push_word(target, I64{7009411269035125840}, I64{8})
-    rt_text_push_word(target, I64{8675375970396695669}, I64{8})
-    rt_text_push_word(target, I64{35435433848688}, I64{6})
+    jet_rt_string_builder_push(target, rt_static_text("PluginFault {{ export: "))
     rt_text_push_rust_debug_str(target, data_tree_word(wrapping(fault + PLUGIN_FAULT_EXPORT)))
     // ", message: "
     rt_text_push_word(target, I64{7449362198107594796}, I64{8})

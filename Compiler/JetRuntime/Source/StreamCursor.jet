@@ -6,13 +6,19 @@
 // drop releases (cap,1) only when nonempty, then the (32,8) carrier.
 // This replaces Rust Box<JetCursor/JetReader> in native packs, never mixes it.
 // Reference semantics: Foundation/StreamCursor.rs26-498.
+// Packed input (stride 1) is copied with one bulk move; word-stride input
+// narrows one element per byte.
 fn stream_new(data: I64, len: I64, stride: I64, position: I64) -> I64 {
     handle :: jet_rt_alloc(I64{32}, I64{8})
     target :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
-    at := I64{0}
-    loop at < len {
-        rt_text_put(wrapping(target + at), scan_byte(data, stride, at))
-        at += I64{1}
+    if (stride == I64{1}) {
+        jet_rt_mem_move(target, data, len)
+    } else {
+        at := I64{0}
+        loop at < len {
+            rt_text_put(wrapping(target + at), scan_byte(data, stride, at))
+            at += I64{1}
+        }
     }
     rt_text_store(handle, target)
     rt_text_store(wrapping(handle + I64{8}), len)
@@ -119,24 +125,34 @@ fn stream_bounds_error(handle: I64, need: I64, method: I64, width: I64, little: 
 }
 fn stream_read(handle: I64, width: I64, little: Bool, signed: Bool, floating: Bool, ok: I64, error: I64) -> I64 {
     position :: rt_text_word(wrapping(handle + I64{24}))
-    need :: width /% I64{8}
-    method :: if floating -> I64{6} else if signed -> I64{5} else -> I64{4}
-    if (need > rt_text_len(handle) - position) {
+    need :: width >> I64{3}
+    // 0 <= position <= length (every advance proves it), so `left` cannot
+    // overflow, and every offset below stays inside the owned bytes.
+    left :: wrapping(rt_text_len(handle) - position)
+    if (need > left) {
+        method :: if floating -> I64{6} else if signed -> I64{5} else -> I64{4}
         rt_text_store(error, stream_bounds_error(handle, need, method, width, little))
         return I64{0}
     }
     data :: wrapping(rt_text_data(handle) + position)
     value := I64{0}
-    at := I64{0}
-    loop at < need {
-        byte :: rt_text_byte(wrapping(data + at))
-        if little { value = value.bit_or(byte << (at * I64{8})) } else { value = (value << I64{8}).bit_or(byte) }
-        at += I64{1}
+    if (little && left >= I64{8}) {
+        // Eight owned bytes start at the field, so one unaligned word load
+        // reads them; little-endian, the field is its low `need` bytes.
+        word :: rt_text_word(data)
+        value = if (need == I64{8}) -> word else -> word.bit_and(wrapping((I64{1} << width) - I64{1}))
+    } else {
+        at := I64{0}
+        loop at < need {
+            byte :: rt_text_byte(wrapping(data + at))
+            if little { value = value.bit_or(byte << (at << I64{3})) } else { value = (value << I64{8}).bit_or(byte) }
+            at = wrapping(at + I64{1})
+        }
     }
     if (signed && width < I64{64}) { value = (value << (I64{64} - width)) >> (I64{64} - width) }
     // Fixed IntN and Float outputs carry their raw bits, not exact-Int tags.
     rt_text_store(ok, value)
-    rt_text_store(wrapping(handle + I64{24}), position + need)
+    rt_text_store(wrapping(handle + I64{24}), wrapping(position + need))
     I64{1}
 }
 #Export(c) fn jet_reader_read_u8(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{8}, false, false, false, ok, error) }
@@ -239,11 +255,15 @@ fn stream_negative_error(method: I64, value: I64) -> I64 {
         return I64{0}
     }
     output :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * stride, I64{8})
-    at := I64{0}
-    loop at < count {
-        byte :: rt_text_byte(wrapping(wrapping(rt_text_data(handle) + position) + at))
-        if (stride == I64{1}) { rt_text_put(wrapping(output + at), byte) } else { rt_text_store(wrapping(output + at * stride), byte) }
-        at += I64{1}
+    source :: wrapping(rt_text_data(handle) + position)
+    if (stride == I64{1}) {
+        jet_rt_mem_move(output, source, count)
+    } else {
+        at := I64{0}
+        loop at < count {
+            rt_text_store(wrapping(output + at * stride), rt_text_byte(wrapping(source + at)))
+            at += I64{1}
+        }
     }
     rt_text_store(ok_data, output)
     rt_text_store(ok_len, count)

@@ -205,6 +205,17 @@ export function runCwd(entry, caseText, stagedCwd) {
   return caseInvocation(entry, caseText).step ? join(root, dirname(entry.shown)) : root;
 }
 
+// A refused `jet run` names each file by its full path. An example run by the
+// tier spells it relative to the example's directory, so the run tier drops
+// that directory. A case's own `jet run` step keeps the full path, spelled
+// `{work}/` for the folder it ran in, as testkit Golden.jet's path normalizer
+// spells it.
+export function withoutExampleDirectory(stderr, entry, caseText, cwd) {
+  const step = caseInvocation(entry, caseText).step;
+  const file = step ? basename(entry.path) : entry.shown;
+  return stderr.replaceAll(dirname(resolve(cwd, file)) + sep, step ? "{work}/" : "");
+}
+
 // `run: none` in a case: the example serves until stopped (testkit Golden.jet
 // only compiles it). Its run passes once its output is the expected `.out`,
 // and the process group is stopped there (`until`). Without an expected
@@ -702,7 +713,9 @@ async function runExample(entry, caseText, expected, slot, scratch, options) {
     }
   }
   const staged = stageFeatureProject(entry, scratch, slot);
-  const run = await runJet(runArgs(entry, caseText), { ...runOptions, cwd: runCwd(entry, caseText, staged?.cwd) });
+  const cwd = runCwd(entry, caseText, staged?.cwd);
+  const ran = await runJet(runArgs(entry, caseText), { ...runOptions, cwd });
+  const run = { ...ran, stderr: withoutExampleDirectory(ran.stderr, entry, caseText, cwd) };
   const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(run, expected), stderr: run.stderr, stdout: run.stdout };
   if (result.status !== "passed") return result;
   for (const emitTier of EMIT_TIERS) {

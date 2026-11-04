@@ -17,7 +17,9 @@ fn rt_crypto_entropy_drop_address() -> I64 {
     rt_text_store(closure, I64{1})
     rt_text_store(wrapping(closure + I64{8}), rt_crypto_entropy_drop_address())
     rt_text_store(wrapping(closure + I64{16}), I64{0})
-    crypto_entropy_key = jet_rt_tls_key_new(closure)
+    #Unsafe("runtime-init runs before any other thread exists") {
+        crypto_entropy_key = jet_rt_tls_key_new(closure)
+    }
 }
 #Export(c) fn jet_rt_crypto_entropy_drop(_closure: I64, state: I64) -> I64 {
     rt_crypto_wipe(state, I64{16})

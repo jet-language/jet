@@ -1,10 +1,11 @@
-// The native Dyn tree's handle methods. A key lookup scans the borrowed
-// native Object in place; the scalar reads and Field/At cross the
+// The native Dyn tree's handle methods. A key lookup, a field read and a
+// Text read scan the borrowed native Object or Text in place; the other
+// scalar reads, At, and a field or Text read that fails cross the
 // encoding.dyn routes, whose Dyn operand ir_route converts to a runtime tree
 // for the call; a path write or a remove lends the receiver place's Dyn to
 // the runtime and stores the rebuilt tree back; `decode<T>()` calls T's
 // Decode implementation, a container's Core decode helper or the runtime's
-// scalar Decode adapter.
+// scalar Decode adapter, whose String Decode reads a native Text in place.
 
 use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, StmtKind]
 
@@ -23,15 +24,20 @@ fn ir_dyn_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
         .DynIndexAt(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
         .DynBinary(op, site, location) -> return Val(ir_dyn_operator(&m, p, &b, ty, receiver, "jet_dyn_binary", op, site, location, args, span))
         .DynCompare(op, site, location) -> return Val(ir_dyn_operator(&m, p, &b, ty, receiver, "jet_dyn_compare", op, site, location, args, span))
+        .DynField | .JSONField -> return Val(ir_dyn_field(&m, p, &b, ty, dyn_row, receiver, args, span))
+        .DynText | .JSONText -> {
+            if args.len() != 0 -> return Val(ir_fail_slot(&b, span, "handle method jet_dyn_text with {args.len()} arguments"))
+            tree :: ir_expr(&m, p, &b, receiver)
+            if ir_failed(b) || tree < 0 -> return Val(-1)
+            return Val(ir_dyn_text_read(&m, p, &b, ty, dyn_row, tree, "jet_dyn_text", span))
+        }
         else -> {}
     }
     // The encoding.dyn routes: the tree is borrowed, an index moves.
     route :: if operation == {
-        .DynField | .JSONField -> (symbol: "jet_dyn_field", arity: 1, mask: [Bool]{true, true})
         .DynAt | .JSONAt -> (symbol: "jet_dyn_at", arity: 1, mask: [Bool]{true, false})
         .DynGetAt -> (symbol: "jet_dyn_get_at", arity: 1, mask: [Bool]{true, false})
         .DynInt | .JSONInt -> (symbol: "jet_dyn_int", arity: 0, mask: [Bool]{true})
-        .DynText | .JSONText -> (symbol: "jet_dyn_text", arity: 0, mask: [Bool]{true})
         .DynBool | .JSONBool -> (symbol: "jet_dyn_bool", arity: 0, mask: [Bool]{true})
         .DynFloat | .JSONFloat -> (symbol: "jet_dyn_float", arity: 0, mask: [Bool]{true})
         .DynKeys -> (symbol: "jet_dyn_keys", arity: 0, mask: [Bool]{true})
@@ -109,6 +115,72 @@ fn ir_dyn_checked(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int,
     ir_box_take(&m, p, &b, outcome, 8, row)
 }
 
+// The checked layout of the native Dyn.Object: its variant index, the
+// payload member holding the entry List, the entry row and its key/value
+// members.
+struct IRDynObject { object: Int, payload: IRMember, entry_row: Int, entry: [IRMember] }
+
+fn ir_dyn_object_layout(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, span: Span) -> IRDynObject? Never! {
+    object :: ir_variant_index(p, dyn_row, "Object") ?? {
+        _ :: ir_fail_slot(&b, span, "canonical Dyn has no Object variant")
+        return None
+    }
+    members :: ir_variant_members(&m, p, dyn_row, [Type]{}, object) ?? [IRMember]{}
+    if members.len() != 1 {
+        _ :: ir_fail_slot(&b, span, "Dyn.Object has no payload layout")
+        return None
+    }
+    payload :: members[0]
+    entry_ty :: if ir_untag(m.types[payload.ty].ty) == .List(element) -> element else -> {
+        _ :: ir_fail_slot(&b, span, "Dyn.Object payload is not its checked ordered List")
+        return None
+    }
+    entry_row :: ir_value_type(&m, p, entry_ty) ?? {
+        _ :: ir_type_fail(&b, span, entry_ty)
+        return None
+    }
+    entry :: ir_inline_members(&m, p, entry_row) ?? [IRMember]{}
+    if entry.len() != 2 || entry[0].name != "key" || entry[1].name != "value" {
+        _ :: ir_fail_slot(&b, span, "Dyn.Object entries are not checked key/value records")
+        return None
+    }
+    Val(IRDynObject{object: object, payload: payload, entry_row: entry_row, entry: entry})
+}
+
+// The address of the first entry of the native Dyn `tree`'s Object whose key
+// equals the String `key`, read in place (JetRuntime Dyn.jet
+// data_tree_object_find); 0 when `tree` holds another variant or no entry
+// has that key.
+fn ir_dyn_object_find(m: &IRModule, b: &IRBuilder, layout: IRDynObject, tree: Int, key: Int) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    zero :: ir_word_const(&m, &b, 0)
+    hit :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Const, hit, 0, -1, -1, b.line)
+    selector :: ir_load_word(&m, &b, tree, 0)
+    expected :: ir_word_const(&m, &b, layout.object)
+    is_object :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
+    ir_open_if(&b.f, is_object, b.line)
+    payload :: layout.payload
+    holder :: if payload.boxed -> ir_load_word(&m, &b, tree, payload.offset) else -> tree
+    entries :: ir_load_at(&m, &b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
+    length :: ir_load_word(&m, &b, entries, 0)
+    data :: ir_load_word(&m, &b, entries, 16)
+    stride :: ir_list_stride(m, layout.entry_row)
+    index :: ir_count_open(&m, &b, length)
+    missing :: ir_bool_op(&m, &b, IROp.Eq, hit, zero)
+    ir_open_if(&b.f, missing, b.line)
+    entry :: ir_element_address(&m, &b, data, index, stride)
+    name :: ir_load_at(&m, &b, entry, layout.entry[0].offset, layout.entry[0].ty)
+    same :: ir_bool_op(&m, &b, IROp.Eq, name, key)
+    ir_open_if(&b.f, same, b.line)
+    ir_emit(&b.f, IROp.Copy, hit, entry, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_count_close(&m, &b, index)
+    ir_end(&b.f, b.line)
+    hit
+}
+
 // `tree.get(key)` / `tree.has(key)` (JetRuntime Dyn.jet jet_dyn_get_key,
 // jet_dyn_has over data_tree_object_find): the first entry of a native
 // Object whose key equals `key`, read in place. get gives Some(a new owner
@@ -116,14 +188,7 @@ fn ir_dyn_checked(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int,
 // other variant has no keys.
 fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], has: Bool, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn key lookup with {args.len()} arguments")
-    object :: ir_variant_index(p, dyn_row, "Object") ?? return ir_fail_slot(&b, span, "canonical Dyn has no Object variant")
-    members :: ir_variant_members(&m, p, dyn_row, [Type]{}, object) ?? return ir_fail_slot(&b, span, "Dyn.Object has no payload layout")
-    if members.len() != 1 -> return ir_fail_slot(&b, span, "Dyn.Object has no payload layout")
-    payload :: members[0]
-    entry_ty :: if ir_untag(m.types[payload.ty].ty) == .List(element) -> element else -> { return ir_fail_slot(&b, span, "Dyn.Object payload is not its checked ordered List") }
-    entry_row :: ir_value_type(&m, p, entry_ty) ?? return ir_type_fail(&b, span, entry_ty)
-    entry_members :: ir_inline_members(&m, p, entry_row) ?? return ir_fail_slot(&b, span, "Dyn.Object entries are not checked key/value records")
-    if entry_members.len() != 2 || entry_members[0].name != "key" || entry_members[1].name != "value" -> return ir_fail_slot(&b, span, "Dyn.Object entries are not checked key/value records")
+    layout :: ir_dyn_object_layout(&m, p, &b, dyn_row, span) ?? return -1
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if has && m.types[result_row].kind != .Bool -> return ir_fail_slot(&b, span, "Dyn.has as {ir_type_name(ty)}")
     if !has {
@@ -136,43 +201,20 @@ fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_ro
         key_ty :: ir_ty(p, b, args[0])
         return ir_fail_slot(&b, span, "Dyn key lookup by {ir_type_name(key_ty)}")
     }
-    pointer_row :: ir_pointer_row(&m)
+    hit :: ir_dyn_object_find(&m, &b, layout, tree, key)
     zero :: ir_word_const(&m, &b, 0)
-    hit :: ir_temp(&m, &b, pointer_row)
-    ir_emit(&b.f, IROp.Const, hit, 0, -1, -1, b.line)
-    selector :: ir_load_word(&m, &b, tree, 0)
-    expected :: ir_word_const(&m, &b, object)
-    is_object :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
-    ir_open_if(&b.f, is_object, b.line)
-    holder :: if payload.boxed -> ir_load_word(&m, &b, tree, payload.offset) else -> tree
-    entries :: ir_load_at(&m, &b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
-    length :: ir_load_word(&m, &b, entries, 0)
-    data :: ir_load_word(&m, &b, entries, 16)
-    stride :: ir_list_stride(m, entry_row)
-    index :: ir_count_open(&m, &b, length)
-    missing :: ir_bool_op(&m, &b, IROp.Eq, hit, zero)
-    ir_open_if(&b.f, missing, b.line)
-    entry :: ir_element_address(&m, &b, data, index, stride)
-    name :: ir_load_at(&m, &b, entry, entry_members[0].offset, entry_members[0].ty)
-    same :: ir_bool_op(&m, &b, IROp.Eq, name, key)
-    ir_open_if(&b.f, same, b.line)
-    ir_emit(&b.f, IROp.Copy, hit, entry, -1, -1, b.line)
-    ir_end(&b.f, b.line)
-    ir_end(&b.f, b.line)
-    ir_count_close(&m, &b, index)
-    ir_end(&b.f, b.line)
     if has {
         found :: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
         ir_release(&m, &b, tree)
         ir_release(&m, &b, key)
         return found
     }
-    value_row :: entry_members[1].ty
+    value_row :: layout.entry[1].ty
     result :: ir_temp(&m, &b, result_row)
     ir_option_none(&m, &b, result)
     present :: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
     ir_open_if(&b.f, present, b.line)
-    value :: ir_load_at(&m, &b, hit, entry_members[1].offset, value_row)
+    value :: ir_load_at(&m, &b, hit, layout.entry[1].offset, value_row)
     owned :: ir_copy_value(&m, p, &b, value, span)
     size :: m.types[value_row].size
     made :: ir_option_make(&m, p, &b, result_row, owned, size)
@@ -180,6 +222,92 @@ fn ir_dyn_key_lookup(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_ro
     ir_end(&b.f, b.line)
     ir_release(&m, &b, tree)
     ir_release(&m, &b, key)
+    b.fresh[result] = true
+    result
+}
+
+// `tree.field(key)` (JetRuntime Dyn.jet jet_dyn_field): the first entry of a
+// native Object whose key equals `key` gives Ok(a new owner of its value),
+// read in place as get does, where the route would build a runtime tree of
+// the whole Object and convert the entry's value back. A missing key or
+// another variant takes the route, whose failure names the field.
+fn ir_dyn_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn field lookup with {args.len()} arguments")
+    layout :: ir_dyn_object_layout(&m, p, &b, dyn_row, span) ?? return -1
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    tree :: ir_expr(&m, p, &b, receiver)
+    key :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || tree < 0 || key < 0 -> return -1
+    if ir_kind_of(m, b, key) != .String {
+        key_ty :: ir_ty(p, b, args[0])
+        return ir_fail_slot(&b, span, "Dyn field lookup by {ir_type_name(key_ty)}")
+    }
+    hit :: ir_dyn_object_find(&m, &b, layout, tree, key)
+    zero :: ir_word_const(&m, &b, 0)
+    result :: ir_temp(&m, &b, result_row)
+    present :: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
+    ir_open_if(&b.f, present, b.line)
+    value :: ir_load_at(&m, &b, hit, layout.entry[1].offset, layout.entry[1].ty)
+    owned :: ir_copy_value(&m, p, &b, value, span)
+    found :: ir_result_box(&m, p, &b, ty, true, owned)
+    ir_emit(&b.f, IROp.Move, result, found, -1, -1, b.line)
+    b.fresh[found] = false
+    ir_else(&b.f, b.line)
+    routed :: ir_dyn_route_lent(&m, p, &b, "jet_dyn_field", [Int]{tree, key}, ty, span)
+    if ir_failed(b) || routed < 0 -> return -1
+    ir_emit(&b.f, IROp.Move, result, routed, -1, -1, b.line)
+    b.fresh[routed] = false
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, tree)
+    ir_release(&m, &b, key)
+    b.fresh[result] = true
+    result
+}
+
+// The borrowing route `symbol` over `operands` inside one arm of a branch:
+// the operands stay owned by the caller, which releases them once after the
+// branch joins.
+fn ir_dyn_route_lent(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, operands: [Int], ty: Type, span: Span) -> Int Never! {
+    fresh := [Bool]{}
+    mask := [Bool]{}
+    loop slot in operands {
+        &fresh.push(b.fresh[slot])
+        &mask.push(true)
+        b.fresh[slot] = false
+    }
+    routed :: ir_route(&m, p, &b, symbol, operands, mask, ty, span)
+    loop (index, slot) in operands -> b.fresh[slot] = fresh[index]
+    routed
+}
+
+// `tree.text()` and `tree.decode<String>()` (JetRuntime Dyn.jet jet_dyn_text,
+// DynCodec.jet jet_rt_codec_decode_string, the route `symbol`): a native
+// Text gives Ok(a new owner of its String), read in place; another variant
+// takes the route, whose failure names the variant it found.
+fn ir_dyn_text_read(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, tree: Int, symbol: String, span: Span) -> Int Never! {
+    text :: ir_variant_index(p, dyn_row, "Text") ?? return ir_fail_slot(&b, span, "canonical Dyn has no Text variant")
+    members :: ir_variant_members(&m, p, dyn_row, [Type]{}, text) ?? [IRMember]{}
+    if members.len() != 1 || m.types[members[0].ty].kind != .String -> return ir_fail_slot(&b, span, "Dyn.Text has no String payload layout")
+    payload :: members[0]
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_temp(&m, &b, result_row)
+    selector :: ir_load_word(&m, &b, tree, 0)
+    expected :: ir_word_const(&m, &b, text)
+    is_text :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
+    ir_open_if(&b.f, is_text, b.line)
+    holder :: if payload.boxed -> ir_load_word(&m, &b, tree, payload.offset) else -> tree
+    value :: ir_load_at(&m, &b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
+    owned :: ir_copy_value(&m, p, &b, value, span)
+    found :: ir_result_box(&m, p, &b, ty, true, owned)
+    ir_emit(&b.f, IROp.Move, result, found, -1, -1, b.line)
+    b.fresh[found] = false
+    ir_else(&b.f, b.line)
+    routed :: ir_dyn_route_lent(&m, p, &b, symbol, [Int]{tree}, ty, span)
+    if ir_failed(b) || routed < 0 -> return -1
+    ir_emit(&b.f, IROp.Move, result, routed, -1, -1, b.line)
+    b.fresh[routed] = false
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, tree)
     b.fresh[result] = true
     result
 }
@@ -306,6 +434,9 @@ fn ir_dyn_decode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: 
     scalar :: ir_codec_scalar(concrete) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
     tree :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || tree < 0 -> return -1
+    if scalar == "string" {
+        if ir_dyn_def(p, ir_ty(p, b, receiver)) == .Val(dyn_row) -> return ir_dyn_text_read(&m, p, &b, ty, dyn_row, tree, "jet_rt_codec_decode_string", span)
+    }
     ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
 }
 

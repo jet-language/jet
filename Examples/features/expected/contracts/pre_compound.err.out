@@ -1,8 +1,8 @@
-Stop [E3001]: `panic: need 4 or 8`
+Stop [E3005]: #Pre contract failed: need 4 or 8
   --> pre_compound.jet:19 in run
      |
 19 |     print(lanes(6))
      |           ^^^^^
- Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
- Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
-More: jet-lang.dev/e/E3001
+ Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `#Pre contract failed: need 4 or 8` is the clause's own message string. Checked in every build (not a debug/release split) — with file:line.
+ Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result).
+More: jet-lang.dev/e/E3005

@@ -4,17 +4,23 @@ package {
     authority: { allow: [FS.Read, Net, Time] }
 }
 
-use core.http.client as client
-use core.http.server as server
-use core.net as net
-use core.web as web
+use {
+    client :: core.http.client
+    server :: core.http.server
+    net :: core.net
+    web :: core.web
+}
 
 #Codable
 struct NewJoke { text: String }
 
 struct JokeState { added: Int }
 
-marker ReadJoke = #[Server.Get("/jokes/:id"), Inline]
+struct ReadJoke {
+    impl Marker {
+        group :: #[Server.Get("/jokes/:id"), Inline]
+    }
+}
 
 struct Jokes {
     prefix: String

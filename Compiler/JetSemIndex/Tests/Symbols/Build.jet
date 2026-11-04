@@ -7,8 +7,10 @@
 // numeric destination113–129 remains solely in Language.jet (S16), with the
 // approved current-contract golden migration. Full checked_text169–226 source
 // and assertions remain solely in SemIndex/Convert.jet (S20), called below.
-use jet_foundation.[NameFacts]
-use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+use {
+    jet_foundation.[NameFacts]
+    jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
+}
 
 fn semantic_s14_from_checked(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> SemanticSymbolIndex Never! {
     assert(registration.complete, "fixture must come from the real complete C4 checked graph")
@@ -200,7 +202,7 @@ fn semantic_s14_semantic_symbols_index_value_tail_callable(db: SymbolDB, registr
 // one actual fixture root, load/check main, then pass its real graph/DB here.
 fn semantic_s14_import_library_source() -> String Never! { "fn score(name: String) -> Int {{ return 1 }}\n" }
 fn semantic_s14_import_main_source() -> String Never! {
-    "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() {{ print(imported_score(\"Ada\")) }}\n"
+    "use api :: \"./library\"\nuse imported_score :: api.score\nfn run() {{ print(imported_score(\"Ada\")) }}\n"
 }
 fn semantic_s14_semantic_symbols_include_module_and_selected_imports(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)

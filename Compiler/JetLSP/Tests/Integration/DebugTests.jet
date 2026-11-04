@@ -1,14 +1,16 @@
-use Compiler.JetLSP.Tests.Integration.Debug.[Fixture, fixture, canvas_source_id, LOOPS, CALLS, have, native_fixture, native_binary, dap_frame, dap_response, write_dap_request, read_dap_until, read_dap_response, dap_u32_after, dap_u32_before, linux_process_state, spawn_attachable_native_target, wait_for_target_binary]
-use jet.Debug as DebugEngine
-use jet.Canvas as Canvas
-use jet.[compile_for_debug, compile_with_path]
-use tests.common.[Scratch]
-use std.[fs, env, process, thread]
-use std.process.[Command, Stdio]
-use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
-use std.sync.mpsc as mpsc
-use std.sync.mpsc.[RecvTimeoutError]
-use core.sys.target.[selected_os]
+use {
+    Compiler.JetLSP.Tests.Integration.Debug.[Fixture, fixture, canvas_source_id, LOOPS, CALLS, have, native_fixture, native_binary, dap_frame, dap_response, write_dap_request, read_dap_until, read_dap_response, dap_u32_after, dap_u32_before, linux_process_state, spawn_attachable_native_target, wait_for_target_binary]
+    DebugEngine :: jet.Debug
+    Canvas :: jet.Canvas
+    jet.[compile_for_debug, compile_with_path]
+    tests.common.[Scratch]
+    std.[fs, env, process, thread]
+    std.process.[Command, Stdio]
+    std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+    mpsc :: std.sync.mpsc
+    std.sync.mpsc.[RecvTimeoutError]
+    core.sys.target.[selected_os]
+}
 
 // GATE #4494: actual filesystem/CLI/pipe/thread/channel/lldb providers.
 // Rust: tests/debug.rs:111
@@ -218,7 +220,7 @@ use core.sys.target.[selected_os]
 
 // Rust: tests/debug.rs:539
 #Test("unsupported_feature_stops_at_e2203_boundary") {
-    file :: fixture("boundary", "use core.files as fs\nfn run() {{\n    print(\"hi\")\n}}\n")
+    file :: fixture("boundary", "use fs :: core.files\nfn run() {{\n    print(\"hi\")\n}}\n")
     out :: DebugEngine.run_session(file.path, ["c"])
     assert(out.contains("E2203"), "an unsteppable feature must stop at E2203; got:\n{out}")
     assert(out.contains("jet debug") && (out.contains("jet run") || out.contains("jet build")), "E2203 must name `jet debug` and point at the real build; got:\n{out}")

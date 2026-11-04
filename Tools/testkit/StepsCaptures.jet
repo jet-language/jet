@@ -1,6 +1,8 @@
-use core.files as files
-use core.crypto as crypto
-use core.sys as sys
+use {
+    files :: core.files
+    crypto :: core.crypto
+    sys :: core.sys
+}
 
 fn kit_steps_capture_valid(words: [String], original: String) -> Bool {
     if words.len() < 3 || words[0] == "" -> return false
@@ -48,7 +50,7 @@ fn kit_steps_capture_valid(words: [String], original: String) -> Bool {
 fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx, state: KitStepState) -> String Err! {
     subject :: kit_steps_subject(selector)
     text := kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
-    if subject.starts_with("cap:") -> text = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("captured subject unavailable")
+    if subject.starts_with("cap:") -> text = kit_steps_state_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state) ?? return Err("captured subject unavailable")
     if subject == "file" || subject == "file?" {
         location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("capture file escapes work")
         if subject == "file?" && !files.exists(location) -> text = ""
@@ -178,6 +180,29 @@ fn kit_steps_captured_subject(name: String, captures: [KitCapture]) -> String? {
         }
     }
     None
+}
+
+// A `cap:NAME` subject reads the innermost loop binding of that name, else the capture.
+fn kit_steps_state_named(name: String, state: KitStepState) -> KitCapturedValue? {
+    count :: state.bindings.len()
+    loop offset in 0..<count {
+        binding :: state.bindings[count - 1 - offset]
+        if binding.name == name -> return Val(binding.value)
+    }
+    kit_steps_capture_named(name, state.captures)
+}
+
+fn kit_steps_state_subject(name: String, state: KitStepState) -> String? {
+    count :: state.bindings.len()
+    loop offset in 0..<count {
+        binding :: state.bindings[count - 1 - offset]
+        if binding.name != name -> next
+        return if binding.value == {
+            .Text(text) -> Val(text)
+            else -> None
+        }
+    }
+    kit_steps_captured_subject(name, state.captures)
 }
 
 fn kit_steps_range_capture_name(word: String) -> String? {

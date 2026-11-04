@@ -1,9 +1,11 @@
-use jet_foundation.[Binding, Diagnostic, Func, Program, StructDef, Type, TypeAliasDef]
-use jet_lexer.[
-    STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_INT, lex, token_decoded, token_integer,
-    token_string_parts,
-]
-use jet_parser.[expand_named_marker_groups_with_uses, named_marker_groups, parse_tokens]
+use {
+    jet_foundation.[Binding, Diagnostic, Func, Program, StructDef, Type, TypeAliasDef]
+    jet_lexer.[
+        STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_INT, lex, token_decoded, token_integer,
+        token_string_parts,
+    ]
+    jet_parser.[expand_named_marker_groups_with_uses, named_marker_groups, parse_tokens]
+}
 
 fn entry02_program(source: String) -> Program { parser_test_program(source) }
 fn entry02_errors(source: String) -> [Diagnostic] { parser_test_errors(source) }
@@ -340,7 +342,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 // Named groups keep the original expansion rules while importing table-local
 // literal and interpolation IDs from independently lexed declarations.
 #Test("named_marker_groups_preserve_imported_literal_tables") {
-    declaration :: lex(`marker Pair = #[Label("value={inner}"), Count(7)]`.bytes())
+    declaration :: lex(`struct Pair { impl Marker { group :: #[Label("value={inner}"), Count(7)] } }`.bytes())
     assert(declaration.diagnostics.is_empty())
     groups :: named_marker_groups(declaration.tokens, declaration.tables)
     assert_eq(groups.len(), 1)

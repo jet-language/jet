@@ -6,22 +6,18 @@
 fn numeric_widen_stop(file: I64, line: I64) {
     trap_header(I64{1})
     // Exact JET_NUMERIC_WIDEN_TRAP text; generated little-endian word literals.
-    trap_write_word(I64{8461736369858766967}, I64{8})
-    trap_write_word(I64{7953747407922356845}, I64{8})
-    trap_write_word(I64{8317992806848425838}, I64{8})
-    trap_write_word(I64{8367810653513654387}, I64{8})
-    trap_write_word(I64{7883941909811455336}, I64{8})
-    trap_write_word(I64{8027794332106910817}, I64{8})
-    trap_write_word(I64{7956017139119322229}, I64{8})
-    trap_write_word(I64{8316287474279129191}, I64{8})
-    trap_write_word(I64{7237481}, I64{3})
+    trap_write_static(rt_static_text("whole number cannot cross into the decimal without losing precision"))
     trap_msg_message_end()
     trap_context(sync_load(file), sync_load(wrapping(file + I64{8})), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{1})
 }
 
 #Export(c) fn jet_numeric_checked_widen_at(raw: I64, signed: Bool, target_f32: Bool, file: I64, line: I64) -> Float {
+    precision :: if target_f32 -> I64{24} else -> I64{53}
+    // A magnitude below 2^precision has at most `precision` significant
+    // bits, so the check below accepts it and Float{raw} is exact.
     magnitude :: if (signed && raw < I64{0}) -> wrapping(I64{0} - raw) else -> raw
+    if (magnitude >= I64{0} && magnitude < (I64{1} << precision)) -> return Float{raw}
     significant := I64{0}
     trailing := I64{0}
     remaining := magnitude
@@ -36,7 +32,6 @@ fn numeric_widen_stop(file: I64, line: I64) {
         remaining = (remaining >> I64{1}).bit_and(I64{9223372036854775807})
         trailing_more = remaining != I64{0} && (remaining.bit_and(I64{1})) == I64{0}
     }
-    precision :: if target_f32 -> I64{24} else -> I64{53}
     if (significant > precision && trailing < significant - precision) {
         // The stop is published: the caller's stop point takes it.
         numeric_widen_stop(file, line)

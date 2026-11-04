@@ -38,6 +38,7 @@ use jet_foundation.[
     FunctionDefaultRef,
     Item,
     NamedSpan,
+    ModuleCap,
     NameRows,
     name_rows,
     name_rows_get_text,
@@ -57,6 +58,7 @@ use jet_foundation.[
     compiler_threads_partition,
     compiler_transfer_rows,
     CoreCallRecord,
+    diagnostic_with_label,
     diagnostic_with_rights,
     body_node,
     body_type,
@@ -92,6 +94,8 @@ struct SemaEffectFunctionSource {
     // A top-level `#Kernel(.parallel)` whose declaration obligations hold
     // (sema_kernel_pending): E1102 judges its effect and body obligations.
     kernel: SemaKernelPending?{None}
+    // The `#FX(…)` caps of the modules enclosing this function (E0712/E0749).
+    module_caps: [ModuleCap]{[ModuleCap]{}}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -237,6 +241,8 @@ struct SemaEffectNode {
     // `!` prohibition (E0749's span).
     row_span: Span?{None}
     prohibition_span: Span?{None}
+    // The `#FX(…)` caps of the inline modules enclosing this function.
+    module_caps: [ModuleCap]{[ModuleCap]{}}
 }
 
 fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -257,6 +263,7 @@ fn sema_effect_source_from_function(func: Func, module_identity: String) -> Sema
         loop_spans: sema_effect_statement_spans(func.body, false),
         assume_det_spans: sema_effect_statement_spans(func.body, true),
         memo_span: sema_effect_memo_span(func),
+        module_caps: func.module_caps,
     }
 }
 
@@ -653,8 +660,10 @@ fn sema_effect_positive_panic(span: Span) -> Diagnostic {
     sema_error("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from the list, or write `-[!Panic]>`")
 }
 
-fn sema_effect_check_unsafe_region(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    if (reason ?? "").len() > 0 -> return true
+// A checked String argument that is not a literal (`#Unsafe(reason)`) is a
+// reason; the rule's signature check owns its type.
+fn sema_effect_check_unsafe_region(reason: String?, has_reason_expr: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if (reason ?? "").len() > 0 || (reason == None && has_reason_expr) -> return true
     &diagnostics.push(sema_error("E3112", span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`"))
     false
 }
@@ -759,14 +768,174 @@ fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String], pa
 }
 
 // A package `authority.deny` row reached by one of the package's functions.
-fn sema_effect_package_denied_diagnostic(node: SemaEffectNode, reached: [String], denied: String) -> Diagnostic {
+// A denied Panic names the reachable function where the stop enters the call
+// graph (`panic_site`) and the three exits, the same as a `-[!Panic]>` row.
+fn sema_effect_package_denied_diagnostic(node: SemaEffectNode, reached: [String], denied: String, panic_site: String) -> Diagnostic {
     reached_list :: sema_effect_show(reached)
+    reaches_panic :: loop effect_name in reached {
+        if sema_effect_root(effect_name) == "Panic" -> break true
+    } ?? false
+    if reaches_panic {
+        diagnostic :: sema_error("E0749", node.name_span, "`{node.name}` can stop, but the package denies Panic with `authority: {{ deny: [{denied}] }}`", "`{panic_site}` can stop; every function in the package and every callee it can reach must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `{denied}` from `authority.deny`")
+        return diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name, panic_site}, [String]{}, None)
+    }
     diagnostic :: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which the package denies with `authority: {{ deny: [{denied}] }}`", "a package `deny` row means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop `{denied}` from `authority.deny`")
     diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
 fn sema_effect_pure_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
     sema_error("E3401", node.span, "`{node.name}` calls or reaches impure effects `{sema_effect_show(reached)}`", "a pure function must produce the same result without ambient effects", "remove the call that introduces `{sema_effect_show(reached)}`, or drop the `-[]>` bound from `{node.name}` so its effects are inferred")
+}
+
+// A module cap as one checked function meets it. `site` names where a file
+// module's cap is written (`run.jet:1`); an inline cap sits in the
+// function's own file, where the report labels it.
+struct SemaEffectModuleCap {
+    cap: ModuleCap
+    site: String?
+}
+
+// A module's `#FX(…)` cap over one function: the function-row rule, with
+// plain entries as a ceiling (E0712) and `!` entries as denials (E0749)
+// that hold through every callee it can reach. Names were validated once
+// per cap (sema_effect_module_cap_names).
+fn sema_effect_check_module_cap(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int, solved: [String], cap: SemaEffectModuleCap, diagnostics: &[Diagnostic]) {
+    node :: nodes[node_index]
+    ceiling := [String]{}
+    loop entry in cap.cap.entries {
+        denied :: entry.name.starts_with("!")
+        raw :: if denied -> entry.name.slice(1, entry.name.len()) else -> entry.name
+        effect_name :: sema_effect_parse_name(raw) ?? next
+        if !denied {
+            if sema_effect_root(effect_name) != "Panic" -> sema_effect_set_add(&ceiling, effect_name)
+            next
+        }
+        if sema_effect_memory_fact(effect_name) != None {
+            span :: if cap.site == None -> entry.span else -> node.name_span
+            _ :: sema_effect_memory_project(nodes, node_by_key, node_index, EffectRowEntry{name: effect_name, span: span}, &diagnostics)
+            next
+        }
+        reached :: sema_effect_covered(solved, [String]{effect_name})
+        if reached.len() == 0 -> next
+        panic_site := "the reachable call graph"
+        if sema_effect_root(effect_name) == "Panic" {
+            seen := (loop _ in nodes -> false)
+            if sema_effect_panic_site(nodes, node_by_key, node_index, &seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
+        }
+        &diagnostics.push(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_site, cap))
+    }
+    if ceiling.len() == 0 -> return
+    over :: sema_effect_uncovered(solved, ceiling)
+    if over.len() > 0 -> &diagnostics.push(sema_effect_module_ceiling_diagnostic(node, over, ceiling, cap))
+}
+
+fn sema_effect_module_cap_where(cap: SemaEffectModuleCap) -> String Never! {
+    if cap.site == .Val(site) -> return "; the cap is written at `{site}`"
+    ""
+}
+
+fn sema_effect_module_cap_report(diagnostic: Diagnostic, chain: [String], cap: SemaEffectModuleCap) -> Diagnostic {
+    labeled := diagnostic
+    if cap.site == None -> labeled = diagnostic_with_label(^labeled, cap.cap.span, "module `{cap.cap.module_name}` is capped here")
+    diagnostic_with_rights(^labeled, "invocation", chain, [String]{"module {cap.cap.module_name}"}, None)
+}
+
+fn sema_effect_module_denied_diagnostic(node: SemaEffectNode, reached: [String], denied: String, panic_site: String, cap: SemaEffectModuleCap) -> Diagnostic {
+    name :: sema_inline_member_source_name(node.name)
+    module_name :: cap.cap.module_name
+    where :: sema_effect_module_cap_where(cap)
+    if sema_effect_root(denied) == "Panic" {
+        diagnostic :: sema_error("E0749", node.name_span, "`{name}` can stop, but module `{module_name}` denies Panic", "`{panic_site}` can stop; the module's `#FX(!Panic)` cap means every function inside it and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the module's `#FX(…)` cap")
+        return sema_effect_module_cap_report(diagnostic, [String]{name, panic_site}, cap)
+    }
+    reached_list :: sema_effect_show(reached)
+    diagnostic :: sema_error("E0749", node.name_span, "`{name}` reaches the `{reached_list}` effect, which module `{module_name}` denies", "the module's `#FX(…)` cap denies `{denied}` to every function inside it and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, move `{name}` out of module `{module_name}`, or drop `!{denied}` from the module's `#FX(…)` cap")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
+}
+
+fn sema_effect_module_ceiling_diagnostic(node: SemaEffectNode, over: [String], ceiling: [String], cap: SemaEffectModuleCap) -> Diagnostic {
+    name :: sema_inline_member_source_name(node.name)
+    module_name :: cap.cap.module_name
+    sorted := over.copy()
+    &sorted.sort()
+    over_list :: sema_effect_show(sorted)
+    diagnostic :: sema_error("E0712", node.name_span, "`{name}` uses the effect `{over_list}`, which module `{module_name}`'s `#FX(…)` cap doesn't allow", "the module's cap allows only `{sema_effect_show(ceiling)}` in every function inside it, even through a call{sema_effect_module_cap_where(cap)}", "add `{over_list}` to the module's `#FX(…)` cap, or move that work out of module `{module_name}`")
+    sema_effect_module_cap_report(diagnostic, [String]{name}, cap)
+}
+
+// Each `#FX(…)` cap on a module declared in `items`, nested modules
+// included, names known effects; a positive `Panic` is rejected as in a
+// row (E0749). Reported once per cap, where it is written.
+fn sema_effect_module_cap_names(items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .CodeModule(definition) {
+            if definition.cap == .Val(cap) {
+                loop entry in cap.entries {
+                    raw :: if entry.name.starts_with("!") -> entry.name.slice(1, entry.name.len()) else -> entry.name
+                    effect_name :: sema_effect_parse_name(raw) ?? {
+                        &diagnostics.push(sema_effect_unknown(raw, entry.span))
+                        next
+                    }
+                    if !entry.name.starts_with("!") && sema_effect_root(effect_name) == "Panic" -> &diagnostics.push(sema_effect_positive_panic(entry.span))
+                }
+            }
+            if definition.body == .Val(body) -> sema_effect_module_cap_names(body, &diagnostics)
+        }
+    }
+}
+
+// `#FX(…) module name` over a file module: every function in the file takes
+// the cap, and each file that file declares takes it too. The result is by
+// graph module index, outermost cap first.
+fn sema_effect_file_module_caps(graph_modules: [SemaRegistrationModule], edges: [SemaRegistrationImportEdge]) -> [[SemaEffectModuleCap]] {
+    rows := [String:Int]{}
+    loop (index, module_row) in graph_modules -> rows[module_row.module_identity] = index
+    direct := (loop _ in graph_modules -> [SemaEffectModuleCap]{})
+    parents := (loop _ in graph_modules -> [Int]{})
+    seen := [String:Bool]{}
+    loop edge in edges {
+        if edge.declaration.kind == .File(_, _) {
+            source :: rows.get(edge.source_module_identity) ?? next
+            target :: rows.get(edge.target_module_identity) ?? next
+            key :: "{source}:{target}:{edge.declaration.alias}"
+            if seen.get(key) != None -> next
+            if !sema_effect_declares_file_module(graph_modules[source].program.items, edge.declaration.alias) -> next
+            seen[key] = true
+            &parents[target].push(source)
+            cap :: sema_effect_file_module_cap(graph_modules[source].program.items, edge.declaration.alias) ?? next
+            module_row :: graph_modules[source]
+            file :: sema_effect_source_display(sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, cap.span))
+            site :: if sema_source_line_at(module_row.source_segments, cap.span) == .Val(line) -> "{file}:{line}" else -> file
+            &direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(site)})
+        }
+    }
+    (loop index in 0..<graph_modules.len() -> sema_effect_file_caps_of(index, direct, parents, 0))
+}
+
+fn sema_effect_declares_file_module(items: [Item], name: String) -> Bool Never! {
+    loop item in items {
+        if item == .CodeModule(definition) && definition.name == name && definition.body == None -> return true
+    }
+    false
+}
+
+fn sema_effect_file_module_cap(items: [Item], name: String) -> ModuleCap? Never! {
+    loop item in items {
+        if item == .CodeModule(definition) && definition.name == name && definition.body == None -> return definition.cap
+    }
+    None
+}
+
+// The module graph is acyclic (import cycles are load errors); `depth` only
+// bounds the walk.
+fn sema_effect_file_caps_of(index: Int, direct: [[SemaEffectModuleCap]], parents: [[Int]], depth: Int) -> [SemaEffectModuleCap] Never! {
+    caps := [SemaEffectModuleCap]{}
+    if depth > direct.len() -> return caps
+    loop parent in parents[index] {
+        loop cap in sema_effect_file_caps_of(parent, direct, parents, depth + 1) -> &caps.push(cap)
+    }
+    loop cap in direct[index] -> &caps.push(cap)
+    caps
 }
 
 // Rust `Effects.rs` `e0725`.
@@ -917,6 +1086,7 @@ fn sema_effect_node_from_source(function: FnBody, sources: [SemaEffectFunctionSo
     node.assume_det_spans = actual.assume_det_spans.copy()
     node.memo_span = actual.memo_span
     node.kernel = actual.kernel
+    node.module_caps = actual.module_caps.copy()
     if actual.is_unsafe && !sema_effect_check_unsafe_function(actual, &diagnostics) {
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
@@ -2336,9 +2506,11 @@ fn sema_effect_region_inferred(nodes: &[SemaEffectNode], solved: [[String]], own
 // collected at once on up to `threads` compiler threads
 // (sema_effect_collect_threads); the result is the same for any thread count.
 // `package_denials` is the root package's `authority.deny` row; `denial_modules`
-// marks, by graph module index, the modules that row binds. `decls` is the
-// run's declaration table, which direct callees name.
-fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], decls: DeclTable, threads: CompilerThreads) -> SemaEffectGraphResult {
+// marks, by graph module index, the modules that row binds. `file_caps` holds,
+// by graph module index, the `#FX(…)` caps a file module takes from the
+// `module name` declarations above it. `decls` is the run's declaration
+// table, which direct callees name.
+fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: ^SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], decls: DeclTable, threads: CompilerThreads) -> SemaEffectGraphResult {
     owned_prepared := ^prepared
     diagnostics := ^owned_prepared.diagnostics
     nodes := ^owned_prepared.nodes
@@ -2498,10 +2670,29 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             if graph_module >= denial_modules.len() || !denial_modules[graph_module] -> next
             reached :: sema_effect_covered(solved[node_index], [String]{denied})
             if reached.len() == 0 -> next
+            panic_site := "the reachable call graph"
+            if sema_effect_root(denied) == "Panic" {
+                seen := (loop _ in nodes -> false)
+                if sema_effect_panic_site(nodes, calls.node_by_key, node_index, &seen) == .Val(stop) -> panic_site = nodes[stop].chain_name
+            }
             denial_diagnostics := [Diagnostic]{}
-            &denial_diagnostics.push(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied))
+            &denial_diagnostics.push(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_site))
             sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^denial_diagnostics)
         }
+    }
+    // A module's `#FX(…)` caps bind every function inside it: a file
+    // module's from the module graph, an inline module's from the function.
+    loop node_index in 0..<nodes.len() {
+        graph_module :: inputs[nodes[node_index].module_index].module_index
+        caps := [SemaEffectModuleCap]{}
+        if graph_module < file_caps.len() {
+            loop cap in file_caps[graph_module] -> &caps.push(cap)
+        }
+        loop cap in nodes[node_index].module_caps -> &caps.push(SemaEffectModuleCap{cap: cap, site: None})
+        if caps.len() == 0 -> next
+        cap_diagnostics := [Diagnostic]{}
+        loop cap in caps -> sema_effect_check_module_cap(nodes, calls.node_by_key, node_index, solved[node_index], cap, &cap_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^cap_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
         sema_effect_check_module_regions(modules[inputs[module_index].module_index].functions, inputs[module_index], module_index, source_indices[module_index], solved, calls, &nodes, &diagnostics)
@@ -2889,8 +3080,8 @@ fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagno
     valid := true
     loop statement in statements {
         if statement == {
-            .Unsafe(audit, _, body, span) -> {
-                if !sema_effect_check_unsafe_region(audit, span, &diagnostics) -> valid = false
+            .Unsafe(audit, audit_expr, body, span) -> {
+                if !sema_effect_check_unsafe_region(audit, audit_expr != None, span, &diagnostics) -> valid = false
                 if !sema_effect_check_unsafe_statements(body, &diagnostics) -> valid = false
             }
             .While(_, body, _, _, _) -> {

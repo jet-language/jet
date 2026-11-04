@@ -4,8 +4,10 @@
 // exchange (1s read deadline, one200, one408, close suffix) needs those options.
 // Report.accepted/completed ==8 depends on that eighth connection and remains pending.
 // PENDING-SEAM(http-keepalive-constants): idle timeout ==60s and max requests ==1000.
-use core.http.server as server
-use core.net as net
+use {
+    server :: core.http.server
+    net :: core.net
+}
 
 fn s6_pipeline_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 

@@ -129,7 +129,7 @@ All are selection techniques at every level; they apply to the IR selector, not 
 |---|---|---|---|
 | G1 | Const operands as imm32, imul/shift immediates, no register for a constant | yes | selection: done in IRx64b batch 1 (Const slots as immediates, skipped inline tests and divisor/count checks) |
 | G2 | result takes a dying operand's register; edge/ABI hints | yes | selection: word compares read register homes directly (IRx64b batch 1); hints later |
-| G3 | Float values in xmm registers | yes | selection, later (IR Float slots live in frame homes today) |
+| G3 | Float values in xmm registers | yes | IR allocator: Float slots in xmm8-xmm15 and, for ranges through no call passing more than two Floats, xmm2-xmm7, kept around calls (X64Alloc.jet); a Float operand in its frame home is a memory operand of the SSE op |
 | G4 | address folding (SIB, LEA) | yes | IR Load/Store carry a constant offset already; base+index*scale for list elements is selection |
 | G5 | fused compare/branch, overflow flag reuse, cold layout, inverted jcc | yes | selection (IRx64b batch 1: compare+If/BrIf fusion done; cold paths after the epilogue done) |
 | G6 | frame addresses as rbp displacements | yes | selection: done (90de4dd41: Load/Store/CopyBytes whose base is a single-write StackAddress fold the displacement) |
@@ -196,7 +196,7 @@ refer to these passes.
 |---|---|---|---|
 | direct calls (CallIndirect of a single-write FunctionAddress -> Call) | Opt.jet | 1, 2 | P5 |
 | inlining, bottom-up over Tarjan SCCs; callee <= 40 IR instructions, caller budget 200 (O2: 60/400); never recursive, never a callee that writes a parameter, only where the result and argument slots have the callee's type rows; a callee whose arithmetic can stop only into its own source file (selection reports stops at the function's file) | OptInline.jet | 1, 2 | P4, M2 |
-| simplify to a fixed point (<= 8 rounds): fold, unreachable, compare+not fusion (never Float), propagate, coalesce, dead, structure, Block unwrap | OptSimplify.jet | 1, 2 | M3-M5, M7, M17, P1.a-c, e-g, i-m, o, A5 |
+| simplify to a fixed point (<= 8 rounds): fold, unreachable, compare+not fusion (never Float), common values (an op repeated on operands that still hold becomes a Move of the first result), propagate, coalesce, dead, structure, Block unwrap | OptSimplify.jet | 1, 2 | M3-M5, M7, M17, P1.a-c, e-g, i-m, o, A5 |
 | scalar replacement of non-escaping single-write StackAddress storage (disjoint same-typed <= 8-byte fields) | OptScalar.jet | 2 | W9 |
 
 Contracts with selection (confirmed by IRx64b 2026-10-21): selection reads every operand, cold paths included,

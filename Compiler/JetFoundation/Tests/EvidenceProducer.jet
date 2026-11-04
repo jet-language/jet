@@ -1,14 +1,16 @@
 // Evidence.rs producer: append_frame, write_record_from_codes and the
 // expectation / property-case capture context.
-use jet_foundation.[
-    EvidenceExpectation, EvidenceOutcome, evidence_capture_context, evidence_report_read,
-    evidence_write_record_from_codes,
-]
-use core.files as evidence_test_files
-use core.sys as evidence_test_sys
-// The native O0 lowering lays out `files.Stat`'s DateTime fields only when
-// core.time is in the unit; the producer stats the report it appends to.
-use core.time as evidence_test_time
+use {
+    jet_foundation.[
+        EvidenceExpectation, EvidenceOutcome, evidence_capture_context, evidence_report_read,
+        evidence_write_record_from_codes,
+    ]
+    evidence_test_files :: core.files
+    evidence_test_sys :: core.sys
+    // The native O0 lowering lays out `files.Stat`'s DateTime fields only when
+    // core.time is in the unit; the producer stats the report it appends to.
+    evidence_test_time :: core.time
+}
 
 fn evidence_producer_require(ok: Bool, name: String) Never! {
     if !ok -> panic("evidence producer contract: {name}")

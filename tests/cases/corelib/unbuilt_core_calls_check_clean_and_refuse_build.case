@@ -1,17 +1,17 @@
 # A Core call no `jet` has built yet (E2104 "not built yet") is refused only by
 # a compile that lowers it: `jet check` lowers nothing and passes, while
 # `jet build` refuses the call at its site, citing the card that ports it.
-# The call is `ws.connect`: the service tree runtime is Jet source now and
-# builds, so `service.tree` no longer serves as the unbuilt call.
+# The call is `mod.load`: the WebSocket runtime is Jet source now and builds,
+# so `ws.connect` no longer serves as the unbuilt call.
 fixture: fixtures/unbuilt_core_calls
-step: jet check ws_connect.jet
+step: jet check mod_load.jet
 exit: 0
 stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
 
-step: jet build ws_connect.jet
+step: jet build mod_load.jet
 exit: 1
-stderr: ~ "Error [E2104]: `ws.connect` is not built yet" # build still refuses the unported WebSocket runtime
-stderr: ~ "card #4957" # the refusal names the card that ports it
+stderr: ~ "Error [E2104]: `mod.load` is not built yet" # build still refuses the unported module loader runtime
+stderr: ~ "card #4599" # the refusal names the card that ports it
 
 # The browser automation runtime (sessions and test reports) is unbuilt too:
 # a Core browser function and a `Browser` session method are each refused at
@@ -34,4 +34,18 @@ step: jet build browser_session.jet
 exit: 1
 stderr: ~ "Error [E2104]: `Browser.subscribe` is not built yet" # the session method's runtime route is unbuilt
 stderr: ~ "card #4954" # the refusal names the card that ports it
+stderr: !~ "internal compiler error" # sema refuses before codegen
+
+# The configured HTTP client runtime is unbuilt: `http.Client.new()` lowers
+# to a runtime route no runtime carries, and the client's methods have no IR
+# builder. The constructor is refused at its site, so no client value (and
+# none of its methods) reaches the backend.
+step: jet check http_client.jet
+exit: 0
+stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
+
+step: jet build http_client.jet
+exit: 1
+stderr: ~ "Error [E2104]: `HTTPClient.new` is not built yet" # the client constructor's runtime route is unbuilt
+stderr: ~ "card #3665" # the refusal names the card that ports it
 stderr: !~ "internal compiler error" # sema refuses before codegen

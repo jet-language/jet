@@ -117,7 +117,7 @@ Bind-and-discard, compile-only, and observerless entries fail manifest validatio
 This worked seed shows the contract shape; the checked-in corpus owns the exact Jet spelling.
 
 ```jet
-use core.crypto.uuid as uuid
+use uuid :: core.crypto.uuid
 
 fn run() {
     result :: uuid.v4()
@@ -149,7 +149,7 @@ seed uuid-v4-shape-001
   "seed": "uuid-v4-shape-001",
   "mutation_arm": "boundary-length",
   "mutator_version": "value-mutator-1",
-  "source": "use core.crypto.uuid as uuid\\n\\nfn run() {\\n    result :: uuid.v4()\\n    print(result.len() == 36)\\n    print(result.contains(\"-\"))\\n}",
+  "source": "use uuid :: core.crypto.uuid\\n\\nfn run() {\\n    result :: uuid.v4()\\n    print(result.len() == 36)\\n    print(result.contains(\"-\"))\\n}",
   "expected_relation": "length=true; contains-hyphen=true",
   "actual_relation": "length=true; contains-hyphen=true",
   "stdout_bytes": "true\\ntrue\\n",

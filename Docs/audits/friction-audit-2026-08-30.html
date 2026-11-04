@@ -679,8 +679,8 @@
         </header>
         <blockquote class="evidence"><q>args :: process.argv(); if args.len() != 2 -&gt; panic("usage: incident_report INPUT_FILE")</q><cite>tests/agent_workloads/adapters/incident_report.jet:9-13</cite></blockquote>
         <div class="comparison" aria-label="Incident report CLI before and after">
-          <div class="code-pane"><div class="code-label"><span>Before</span><span>raw argv</span></div><pre><code>use core.files as fs
-use core.process as process
+          <div class="code-pane"><div class="code-label"><span>Before</span><span>raw argv</span></div><pre><code>use fs :: core.files
+use process :: core.process
 
 fn run() {
     args :: process.argv()
@@ -689,7 +689,7 @@ fn run() {
     input :: args.get(1) ?? panic(<span class="code-string">"missing input file"</span>)
     text :: fs.read(input) ?? panic(<span class="code-string">"cannot read input"</span>)
 }</code></pre></div>
-          <div class="code-pane after"><div class="code-label"><span>After</span><span>typed #CLI</span></div><pre><code>use core.files as fs
+          <div class="code-pane after"><div class="code-label"><span>After</span><span>typed #CLI</span></div><pre><code>use fs :: core.files
 
 #CLI
 struct IncidentArgs {

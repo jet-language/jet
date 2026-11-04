@@ -1,6 +1,19 @@
 // Small GFM-ish markdown → HTML renderer. Zero deps. Source is always truth.
+// Live updates redraw whole views many times a minute while most text is
+// unchanged, so rendered HTML is kept per source string (bounded, oldest out).
+const CACHE_LIMIT = 600;
+const cache = new Map();
 export function renderMarkdown(src) {
   const text = String(src ?? '').replace(/\r\n/g, '\n');
+  const hit = cache.get(text);
+  if (hit !== undefined) return hit;
+  const html = renderUncached(text);
+  if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value);
+  cache.set(text, html);
+  return html;
+}
+
+function renderUncached(text) {
   const parts = text.split(/(```[\s\S]*?```)/);
   let html = '';
   for (const part of parts) {

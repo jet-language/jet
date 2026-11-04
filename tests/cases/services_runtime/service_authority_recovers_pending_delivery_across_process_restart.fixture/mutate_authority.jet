@@ -1,10 +1,12 @@
 // SETUP-PORT of tests/services_runtime.rs:472-477,482-494.
 // File mutation only; every original assertion remains in the case.
-use core.files as files
-use core.process as process
+use {
+    files :: core.files
+    process :: core.process
+}
 
 fn run() {
-    path :: process.argv().get(1) ?? panic("missing store path")
+    path :: process.args().get(0) ?? panic("missing store path")
     corrupt := files.read_bytes(path) ?? panic("read authority store")
     pipes := [Int]{}
     pipe_byte :: U8{0x7c}

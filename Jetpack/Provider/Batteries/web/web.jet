@@ -1,11 +1,13 @@
-use core.auth as auth
-use core.db as db
-use core.encoding.json as json
-use core.http.server as server
-use core.web as core_web
-use core.web.forms as forms
-use core.web.query as query
-use core.web.router as router
+use {
+    auth :: core.auth
+    db :: core.db
+    json :: core.encoding.json
+    server :: core.http.server
+    core_web :: core.web
+    forms :: core.web.forms
+    query :: core.web.query
+    router :: core.web.router
+}
 
 // Web battery contract:
 // - route helpers keep path/query/status/redirect decisions in one ordinary library;
@@ -14,8 +16,8 @@ use core.web.router as router
 // - SSR emits serializable island props; the browser package owns reactive state.
     #Codable
     struct NewOrder {
-        priv item: String
-        priv quantity: Int
+        item: String
+        quantity: Int
     }
 
     #Codable
@@ -26,9 +28,9 @@ use core.web.router as router
 
 
     struct FormView {
-        priv valid: Bool
+        valid: Bool
         priv html: String
-        priv errors: String
+        errors: String
     }
 
     fn order_list_path(limit: Int) -> String {
@@ -207,8 +209,8 @@ use core.web.router as router
         return true
     }
     struct LoginState {
-        priv session_id: String
-        priv cookie: String
+        session_id: String
+        cookie: String
     }
 
     fn login_state(user: String, password: String) -> LoginState? {

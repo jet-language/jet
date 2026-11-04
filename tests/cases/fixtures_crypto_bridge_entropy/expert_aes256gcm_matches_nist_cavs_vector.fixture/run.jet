@@ -1,8 +1,10 @@
 // tests/fixtures/crypto_bridge_entropy.rs:556-572. PENDING-SAME-HEAD. Runtime UNRUN.
 // CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
-use core.crypto as crypto
-use core.crypto.expert as expert
-use core.files as files
+use {
+    crypto :: core.crypto
+    expert :: core.crypto.expert
+    files :: core.files
+}
 fn filled(value: Int, count: Int) -> [U8] {
     out := [U8]{}
     loop _ in 0..<count -> &out.push((U8{value}))
@@ -41,6 +43,6 @@ fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
         aad :: hex("")
         sealed :: expert.aes256gcm_seal(key, nonce, plain, aad) ?? panic("seal")
         assert_eq(sealed, hex("bdc1ac884d332457a1d2664f168c76f0"))
-        assert_eq(expert.aes256gcm_open(key, nonce, sealed, aad), Ok(plain))
+        assert_eq(expert.aes256gcm_open(key, nonce, sealed, aad) ?? panic("open"), plain)
     }
 }

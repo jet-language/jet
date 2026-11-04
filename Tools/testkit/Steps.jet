@@ -1,7 +1,9 @@
-use core.files as files
-use core.process as process
-use core.sys as sys
-use core.time as time
+use {
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
+    time :: core.time
+}
 
 
 // The lexer decodes JSON-quoted tokens and retains raw spans for JSON literals.
@@ -426,7 +428,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
             }
             selector :: if words[1] == "=" && (words[2] == "text" || words[2] == "lines") -> kit_steps_subject(words[3]) else -> kit_steps_subject(words[1])
             stream_capture :: if words[1] == "=" -> (words[2] == "text" || words[2] == "lines") && selector != "file" && selector != "file?" else -> selector != "file" && selector != "file?"
-            if !process_seen && stream_capture {
+            // A captured subject (`cap:NAME`) reads an earlier capture, not a step's stream.
+            if !process_seen && stream_capture && !selector.starts_with("cap:") {
                 plan.error = "line {line_number}: stream capture without step"
                 return plan
             }
@@ -764,7 +767,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             }
             target :: kit_steps_count_label(assertion.value)
             relation :: if target == "" -> assertion.value else -> target
-            if ((assertion.json_op == "==" && !assertion.value.starts_with("$")) || (assertion.json_op == "#==" && !assertion.value.starts_with("$")) || (assertion.json_op == "#>=" && target != "")) && !kit_steps_known_relation(plan, relation, i) {
+            if kit_steps_json_is_relation(assertion, assertion.value) && !kit_steps_known_relation(plan, relation, i) {
                 plan.error = "line {line_number}: JSON relation needs a known prior label"
                 return plan
             }
@@ -807,6 +810,13 @@ fn kit_steps_parse(source: String) -> KitPlan {
             if (!ordinary && !not_equal) || (value == "any" && !kit_steps_reason(original)) {
                 plan.error = "line {line_number}: invalid exit or missing partial reason"
                 return plan
+            }
+            // A status under a guard its step does not share is an assertion,
+            // so the guard selects it; the step's own status stays unconditional.
+            if conditions.len() > 0 && plan.steps[i].conditions != conditions {
+                if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
+                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "status", value: value})
+                next
             }
             plan.steps[i].exit = value
             plan.steps[i].exit_explicit = true
@@ -883,8 +893,7 @@ fn kit_steps_expand(value: String, env: KitEnv, work: String, scratch: String, b
         .replace("{{host-triple}}", kit_steps_host_triple())
         .replace("{{path-sep}}", if sys.family() == "windows" -> ";" else -> ":")
         .replace("{{jetpack}}", env.jetpack).replace("{{jet}}", env.jet).replace("{{built}}", built)
-    if expanded.contains("{{sys:dll-suffix}}") -> return expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
-    expanded
+    kit_steps_sys_expand(expanded)
 }
 
 fn kit_steps_required(plan: KitPlan, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
@@ -1083,17 +1092,30 @@ fn kit_steps_check(step: KitStep, context: KitStepCtx, state: KitStepState, sour
         }
     }
     if process || step.exit_explicit {
-        if step.exit == "nonzero" {
-            if result.code == 0 -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit 0; expected nonzero"), context, step, result)
-        } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
-            forbidden :: Int.parse(kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim().copy()) ?? 0
-            if result.code == forbidden -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}"), context, step, result)
-        } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}"), context, step, result)
+        verdict :: kit_steps_exit_status(step.exit, result.code)
+        if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
     }
     loop assertion in step.assertions {
         verdict :: kit_steps_check_assertion(assertion, context, state, source_name, true)
         if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
     }
+    kit_expect_verdict("PASS", "")
+}
+
+// One `exit:` status (`nonzero`, `any`, `!= N` or an integer) judged against a
+// run's exit code: a step's own status, or a guarded `exit:` assertion.
+fn kit_steps_exit_status(expected: String, code: Int) -> KitVerdict {
+    if expected == "any" -> return kit_expect_verdict("PASS", "")
+    if expected == "nonzero" {
+        if code == 0 -> return kit_expect_verdict("FAIL", "exit 0; expected nonzero")
+        return kit_expect_verdict("PASS", "")
+    }
+    if expected.starts_with("!=") {
+        forbidden :: Int.parse(kit_steps_byte_slice(expected, 2, expected.count_bytes()).trim().copy()) ?? 0
+        if code == forbidden -> return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
+        return kit_expect_verdict("PASS", "")
+    }
+    if code != (Int.parse(expected) ?? 0) -> return kit_expect_verdict("FAIL", "exit {code}; expected {expected}")
     kit_expect_verdict("PASS", "")
 }
 

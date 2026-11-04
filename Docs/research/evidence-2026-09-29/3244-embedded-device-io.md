@@ -56,7 +56,7 @@ The CLI probes are in `~/.cache/jet-dev/scratch/Closer11/emb/`.
 | Target rejection: `core.files` on board.sensor_v1 | Sema `CoreApiUnavailable` → E3310 | `selected_target_machine_rejects_unavailable_core_api_before_codegen` **ok** through the driver API. From the CLI: `jet check --target=board.sensor_v1 files_on_board.jet` exits **0** (`ok ... has no errors (115 warnings)`), and `jet check --help` lists no `--target` flag, so the CLI check does not apply the target. `jet build --target=board.sensor_v1` stops earlier with `E3302 Target thumbv7em-none-eabihf is not available` (no Jet toolchain for that triple here). | PASS via the driver; the CLI does not reach it (D4) |
 | Dev/JIT rejected on no-OS | `supports_execution_tier` | `no_os_machine_rejects_dev_and_jit_explicitly` **ok** | PASS |
 | Heap-free Core program on `wasm_no_os` | Core layer | `heap_free_core_target_witness` **FAILED**: generated Rust lacks `// jet:target-dossier layer=core provider=target-providers-v1:` (tests/target_machines.rs:1027). | FAIL (D2) |
-| Unused dependency exclusion | import closure + target audit | Contradicted. An *unused* `use core.mem as mem` (the MMIO tests import it; the allocator witness uses only `mem.Fixed`) is enough to raise E3303 from `core.mem`'s own `AllocError` declaration. `jet check --target=board.sensor_v1 emb/unused_mem.jet` (unused import only; the target flag is ignored, see D4) reports `L0505 heap_growth_in_loop` at `Core/mem/mem.jet:15:12` (`pub struct AllocError`), so the imported module body is analysed as user code. No test asserts that unused Core modules are absent from the ELF/map. | FAIL (D1) + GAP |
+| Unused dependency exclusion | import closure + target audit | Contradicted. An *unused* `use mem :: core.mem` (the MMIO tests import it; the allocator witness uses only `mem.Fixed`) is enough to raise E3303 from `core.mem`'s own `AllocError` declaration. `jet check --target=board.sensor_v1 emb/unused_mem.jet` (unused import only; the target flag is ignored, see D4) reports `L0505 heap_growth_in_loop` at `Core/mem/mem.jet:15:12` (`pub struct AllocError`), so the imported module body is analysed as user code. No test asserts that unused Core modules are absent from the ELF/map. | FAIL (D1) + GAP |
 | No host-only fallback presented as embedded | — | This table labels every host run as host. The MCU witness uses a C program object, not Jet-compiled firmware. | Upheld by this report |
 
 ## Defects
@@ -65,7 +65,7 @@ The CLI probes are in `~/.cache/jet-dev/scratch/Closer11/emb/`.
   - Repro: tests `selected_target_machine_validates_direct_mmio_accesses`,
     `selected_target_machine_rejects_direct_mmio_outside_region` and
     `allocator_firmware_target_witness`.
-  - The source is just `use core.mem as mem` plus volatile or `Fixed` calls;
+  - The source is just `use mem :: core.mem` plus volatile or `Fixed` calls;
     `sensor_machine()` declares `AllocatorPolicy::Fixed`.
   - Observed: `E3303` at `<corelib>/Core/mem/mem.jet` 281..291 (`#Error pub struct AllocError { ... allocator: String }`).
   - Expected: compiles, and for the out-of-region case reports only E3313.
@@ -88,7 +88,7 @@ The CLI probes are in `~/.cache/jet-dev/scratch/Closer11/emb/`.
     `NIX_HARDENING_ENABLE=` the test passes.
 - **D4: `jet check --target` is ignored.**
   - Repro: `jet check --target=board.sensor_v1 ~/.cache/jet-dev/scratch/Closer11/emb/files_on_board.jet`
-    (`use core.files as fs` + `fs.read`).
+    (`use fs :: core.files` + `fs.read`).
   - Observed: exit 0, 115 Core-internal lint warnings, and no E3310.
     `jet check --help` has no `--target`.
   - Expected: the target is applied and E3310 is reported, or the unknown flag

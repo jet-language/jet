@@ -425,62 +425,19 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
     }
     // ExactNumeric.rs:88-93 and NumericConversion.rs:115-116 own these
     // raw reasons. Root rendering below remains byte-for-byte unchanged.
-    message :: jet_rt_alloc(I64{40}, I64{8})
-    length := I64{15}
-    if {
-        (reason == I64{0}) -> {
-            trap_store(message, I64{2334101988825262436})
-            trap_store(wrapping(message + I64{8}), I64{31369502581094754})
-        }
-        (reason == I64{1}) -> {
-            length = I64{29}
-            trap_store(message, I64{7311146993653867854})
-            trap_store(wrapping(message + I64{8}), I64{8389209267074589728})
-            trap_store(wrapping(message + I64{16}), I64{8104338719519951136})
-            trap_store(wrapping(message + I64{24}), I64{500068347503})
-        }
-        (reason == I64{2}) -> {
-            length = I64{19}
-            trap_store(message, I64{2334106421097295433})
-            trap_store(wrapping(message + I64{8}), I64{8026294645210835059})
-            trap_store(wrapping(message + I64{16}), I64{7630453})
-        }
-        (reason == I64{3}) -> {
-            length = I64{37}
-            trap_store(message, I64{8026576056014889302})
-            trap_store(wrapping(message + I64{8}), I64{7594793504856765285})
-            trap_store(wrapping(message + I64{16}), I64{8315162377463603316})
-            trap_store(wrapping(message + I64{24}), I64{7957695015158704500})
-            trap_store(wrapping(message + I64{32}), I64{435678704672})
-        }
-        else -> jet_rt_unreachable(I64{0}, I64{0})
+    if (reason < I64{0} || reason > I64{3}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
     }
-    published :: rt_task_panic_publish(message, length, I64{1})
-    jet_rt_free(message, I64{40}, I64{8})
-    if published -> return
+    message :: if {
+        (reason == I64{0}) -> rt_static_text("divided by zero")
+        (reason == I64{1}) -> rt_static_text("Negative default Int exponent")
+        (reason == I64{2}) -> rt_static_text("Invalid shift count")
+        else -> rt_static_text("Value doesn't fit in destination type")
+    }
+    if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
     trap_header(I64{1})
-    if {
-        (reason == I64{0}) -> trap_msg_divide_zero()
-        (reason == I64{1}) -> {
-            trap_write_word(I64{7311146993653867854}, I64{8})
-            trap_write_word(I64{8389209267074589728}, I64{8})
-            trap_write_word(I64{8104338719519951136}, I64{8})
-            trap_write_word(I64{500068347503}, I64{5})
-        }
-        (reason == I64{2}) -> {
-            trap_write_word(I64{2334106421097295433}, I64{8})
-            trap_write_word(I64{8026294645210835059}, I64{8})
-            trap_write_word(I64{7630453}, I64{3})
-        }
-        (reason == I64{3}) -> {
-            trap_write_word(I64{8026576056014889302}, I64{8})
-            trap_write_word(I64{7594793504856765285}, I64{8})
-            trap_write_word(I64{8315162377463603316}, I64{8})
-            trap_write_word(I64{7957695015158704500}, I64{8})
-            trap_write_word(I64{435678704672}, I64{5})
-        }
-        else -> jet_rt_unreachable(I64{0}, I64{0})
-    }
+    trap_write_static(message)
     trap_msg_message_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{1})
@@ -883,13 +840,27 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
         }
         return if negative -> -small else -> small
     }
-    node :: int_new((len - at) /% I64{9} + I64{1})
-    loop at < len {
-        digit :: trap_byte(wrapping(ptr + at)) - I64{48}
-        if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
-        int_scale(node, I64{10}, digit)
-        at += I64{1}
+    // Limbs are base 1e9, so each takes the next nine digits from the right
+    // as they are: one pass over the digits, with no repeated rescaling.
+    count :: (len - at + I64{8}) /% I64{9}
+    node :: int_new(count)
+    end := len
+    index := I64{0}
+    loop index < count {
+        start :: if (end - I64{9} > at) -> end - I64{9} else -> at
+        limb := I64{0}
+        cursor := start
+        loop cursor < end {
+            digit :: trap_byte(wrapping(ptr + cursor)) - I64{48}
+            if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
+            limb = limb * I64{10} + digit
+            cursor += I64{1}
+        }
+        int_set(node, index, limb)
+        end = start
+        index += I64{1}
     }
+    int_store(wrapping(node + I64{32}), count)
     if negative -> int_store(wrapping(node + I64{16}), I64{1})
     int_pack(node)
 }

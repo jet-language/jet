@@ -241,31 +241,91 @@ fn net_unix_path_status(path: I64) -> I64 {
     }
     if (length >= I64{108}) -> HOST_UNIX_PATH_TOO_LONG else -> I64{0}
 }
+// A pathname of SUN_LEN bytes or more is reached through its directory: the
+// directory is opened O_PATH and the socket is named
+// /proc/self/fd/<fd>/<name>, which Linux resolves through that open
+// descriptor. On success this returns the descriptor (the caller closes it
+// after the call), writes the alias pathname with its zero byte at
+// `address` + 2 and its length at `address` + 120. A path with no directory
+// part, or a name too long for the alias, stays HOST_UNIX_PATH_TOO_LONG; a
+// directory that cannot be opened is its negative errno.
+fn net_unix_long_alias(path: I64, address: I64) -> I64 {
+    length :: rt_text_len(path)
+    data :: rt_text_data(path)
+    slash := length - I64{1}
+    loop slash >= (I64{0}) && rt_text_byte(wrapping(data + slash)) != (I64{47}) -> slash -= I64{1}
+    if (slash < I64{0}) -> return HOST_UNIX_PATH_TOO_LONG
+    name_length :: length - slash - I64{1}
+    // "/proc/self/fd/", at most 10 digits, "/", the name and its zero byte.
+    if (name_length == I64{0} || name_length > I64{82}) -> return HOST_UNIX_PATH_TOO_LONG
+    directory_length :: if (slash == I64{0}) -> I64{1} else -> slash
+    directory :: jet_rt_alloc(directory_length + I64{1}, I64{8})
+    rt_text_bytes_copy(directory, data, directory_length)
+    net_store_uint(wrapping(directory + directory_length), I64{1}, I64{0})
+    // openat(AT_FDCWD, directory, O_PATH | O_DIRECTORY | O_CLOEXEC).
+    descriptor :: host_call(I64{257}, I64{-100}, directory, I64{2686976})
+    jet_rt_free(directory, directory_length + I64{1}, I64{8})
+    if (descriptor < I64{0}) -> return descriptor
+    prefix :: rt_static_text("/proc/self/fd/")
+    at := wrapping(address + I64{2})
+    rt_text_bytes_copy(at, rt_text_data(prefix), rt_text_len(prefix))
+    at = wrapping(at + rt_text_len(prefix))
+    digits := I64{1}
+    scale := I64{10}
+    loop descriptor >= scale {
+        digits += I64{1}
+        scale = scale * I64{10}
+    }
+    value := descriptor
+    place := digits
+    loop place > (I64{0}) {
+        place -= I64{1}
+        net_store_uint(wrapping(at + place), I64{1}, I64{48} + value % I64{10})
+        value = value /% I64{10}
+    }
+    at = wrapping(at + digits)
+    net_store_uint(at, I64{1}, I64{47})
+    rt_text_bytes_copy(wrapping(at + I64{1}), wrapping(data + slash + I64{1}), name_length)
+    net_store_uint(wrapping(at + I64{1} + name_length), I64{1}, I64{0})
+    rt_text_store(wrapping(address + I64{120}), rt_text_len(prefix) + digits + I64{1} + name_length)
+    descriptor
+}
 fn net_socket_unix_call(state: I64, path: I64, number: I64, error: I64) -> I64 {
-    refusal :: net_unix_path_status(path)
+    refusal := net_unix_path_status(path)
+    scratch :: jet_rt_alloc(I64{128}, I64{8})
+    alias := I64{-1}
+    if (refusal == HOST_UNIX_PATH_TOO_LONG) {
+        opened :: net_unix_long_alias(path, scratch)
+        if (opened >= I64{0}) {
+            alias = opened
+            refusal = I64{0}
+        } else if (opened != HOST_UNIX_PATH_TOO_LONG) {
+            jet_rt_free(scratch, I64{128}, I64{8})
+            return fd_error(opened, error)
+        }
+    }
     if (refusal != I64{0}) {
+        jet_rt_free(scratch, I64{128}, I64{8})
         host_error_out(I64{0}, I64{0}, error)
         return refusal
     }
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
-        scratch :: jet_rt_alloc(I64{128}, I64{8})
-        length :: rt_text_len(path)
+        length :: if (alias >= I64{0}) -> rt_text_word(wrapping(scratch + I64{120})) else -> rt_text_len(path)
         net_store_uint(scratch, I64{2}, I64{1})
-        rt_text_bytes_copy(wrapping(scratch + I64{2}), rt_text_data(path), length)
-        if (length != I64{0}) {
-            #Unsafe("scratch owns the sockaddr_un pathname and its final zero byte") {
-                os_store_u8(wrapping(scratch + I64{2} + length), I64{0})
-            }
+        if (alias < I64{0}) {
+            rt_text_bytes_copy(wrapping(scratch + I64{2}), rt_text_data(path), length)
+            if (length != I64{0}) -> net_store_uint(wrapping(scratch + I64{2} + length), I64{1}, I64{0})
         }
         // Empty path is addrlen=2, exactly std's SUN_PATH_OFFSET; no invented
         // pathname, abstract-name policy, unlink or terminator-length change.
         address_length :: I64{2} + length + (if (length == I64{0}) -> I64{0} else -> I64{1})
         result = host_call(number, fd_word(state, I64{8}), scratch, address_length)
-        jet_rt_free(scratch, I64{128}, I64{8})
     }
     fd_unlock(state)
+    if (alias >= I64{0}) -> _ := host_call(I64{3}, alias, I64{0}, I64{0})
+    jet_rt_free(scratch, I64{128}, I64{8})
     fd_error(result, error)
 }
 #Export(c) fn jet_socket_unix_bind_raw(state: I64, path: I64, error: I64) -> I64 {

@@ -2,8 +2,10 @@
 
 `check.mjs` reads a compiler trace (`JET_TRACE_FILE=<path> jet build …`) and
 `budget.json` (per-phase ns per source line) and prints, per phase, its
-seconds, ns per source line, the budget of the chosen column and the ratio. It
-exits 1 when any phase, the work sum or a natural-unit budget is over.
+seconds, ns per source line, the budget of the chosen column and the ratio,
+then the subtotal of the always-on check rows. It exits 1 when any phase, the
+work sum or a natural-unit budget is over, or when a full-unit trace (it has a
+`lower` span) lacks an always-on span.
 
 Columns:
 
@@ -20,8 +22,14 @@ node --test Tools/perf/budget/check.test.mjs
 
 The rows follow the current pipeline: load and parse, register, comptime, sema
 bodies, effects, failure inference, other finalize, `lower`, `ir.build`,
-`ir.opt`, `ir.x64`, `ir.object` and link. Driver time between phases is the
-residual P15 row.
+`ir.opt` with `ir.lint`, `ir.x64`, `ir.object` and link. Driver time between
+phases is the residual P15 row.
+
+Rows with `always_on` carry the checks that run once in every default build
+(D-SPEED-CHECKS1, Docs/spec/reference/compiler-speed.md): ownership in
+P5a+P5b, effects in P5c, failure inference in P5d, the IR consistency check
+(`ir.lint`) in P9 and DWARF debug info in P11. Its `spans` are the spans a
+full-unit trace must carry.
 
 What the native `jet` writes for the checker (Compiler/JetCli/Source/Cli/Request.jet):
 

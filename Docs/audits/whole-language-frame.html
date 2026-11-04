@@ -217,7 +217,7 @@ footer { margin-top: 4rem; padding-top: 1.15rem; border-top: 1px solid var(--bor
 authority: { holds: { allow: [FS, Time] } }
 
 // run.jet
-use core.http as http
+use http :: core.http
 fn fetch(url: String) String -[FS]&gt; { return http.get(url).body().text(1024) }   // E0740: `fetch` uses the effect `Net`, which its signature doesn&#39;t allow
 fn run() {
     #FX(FS) { fetch(&quot;https://x&quot;) }                                                // E0712: this `#FX` region uses the effect `Net`, which it has no authority for
@@ -237,8 +237,8 @@ claims  3 rows   generated 1   examples 1   not generated 0   failing 0
   add_fee.Post   generated(1000)      inputs from Pre
   fee on 100     examples(1)
 $ jet prove app.jet --lens solver
-  add_fee.Post   proved               solver: cents &gt; 0 implies cents + 5 &gt; cents; runtime check erased</code></pre></div></div><p>Evidence words (<strong>proposed</strong>, D-GRADE1 option D): every record is producer plus outcome plus count, kept in parallel; the summary shows the strongest rung by one narrow acceptance order used only for package floors: <code>proved</code> above <code>generated(n)</code> above <code>examples(n)</code> above <code>checked</code> above <code>unchecked</code>. Compiler facts are not claims and have no rung; gates are rights instances and keep their kind.</p><p>Rungs:</p><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">rung</th><th scope="col">who</th><th scope="col">code</th><th scope="col">evidence reached</th></tr></thead><tbody><tr class=""><td>0</td><td>beginner</td><td><code>#Test(&quot;fee on 100&quot;) { assert_eq(add_fee(100), 105) }</code></td><td><code>examples(1)</code> (ratified)</td></tr><tr class=""><td>1</td><td>intermediate</td><td><code>#Post(result &gt; cents, &quot;fee must be added&quot;)</code> on an effect-free function</td><td><code>checked</code> in every build (ratified D-PREPOST1); <strong>proposed</strong> <code>generated(1000)</code> under <code>jet test</code> with no extra text</td></tr><tr class=""><td>2</td><td>expert</td><td><code>#Test fn fee_grows(cents: Int(1..)) { assert(add_fee(cents) &gt; cents) }</code></td><td><code>generated(n)</code> with your own domain (ratified property form and inline range, D-RANGETYPE1)</td></tr><tr class=""><td>3</td><td>expert</td><td><code>jet prove app.jet --lens solver</code></td><td>the ratified umbrella adds <code>proved</code> rows; proved claims erase their check (D-PROVE-SEM1) (the solver is the only producer-enabling lens, D-PROVE-LENS1; bare <code>jet prove</code> runs every non-solver producer)</td></tr><tr class=""><td>4</td><td>expert, package</td><td><code>policy: .{ claims: .{ min: generated(1000) } }</code></td><td><strong>proposed</strong> a claim below the floor is a diagnostic; lowering the floor is one visible edit (ballot D-GRADE-POLICY1)</td></tr></tbody></table></div><p>Eligibility is part of the design: default generation runs only for callables whose inferred row is <code>-[]&gt;</code>; an effectful contract, a precondition that names another function, or a type without a generator is reported as not generated, with the reason. No false <code>generated</code> is possible because the generator refuses rather than guesses.</p><p>Three exits for the auto-generation magic:</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>see what it did</td><td>the report line names the input count and the kept smallest failing input</td></tr><tr class=""><td>write it explicitly</td><td><code>#Test fn name(p: T)</code> with your own generator bounds</td></tr><tr class=""><td>refuse it</td><td><code>jet test --grade=examples</code>; <code>policy: .{ claims: .{ min: examples(1) } }</code> states a floor without generation</td></tr></tbody></table></div><h3 id="element-3-shapes-one-fact-text-formats-env-and-args-shapes-one-fact-md">Element 3 — Shapes: one fact, text formats, env, and args (<code>shapes-one-fact.md</code>)</h3><p>Look at how much already exists. A struct is Codable by default (D-META-AUTO1), field defaults live on the declaration, <code>env.decode&lt;T&gt;(prefix:, file:, allow:)</code> is shipped and shares one codec with JSON, TOML, and CSV. What is missing is the last projection, arguments anywhere in a program, and one stated precedence among flags, environment, and defaults.</p><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Today (real; verified on every tier, verification block <code>shapes</code>; <code>#Env</code> per <code>markers.rs:78-79</code>, <code>#CLI</code> per <code>examples/features/cli/typed_entry_args.jet:15</code>):</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>use core.encoding.json as json
-use core.sys as env
+  add_fee.Post   proved               solver: cents &gt; 0 implies cents + 5 &gt; cents; runtime check erased</code></pre></div></div><p>Evidence words (<strong>proposed</strong>, D-GRADE1 option D): every record is producer plus outcome plus count, kept in parallel; the summary shows the strongest rung by one narrow acceptance order used only for package floors: <code>proved</code> above <code>generated(n)</code> above <code>examples(n)</code> above <code>checked</code> above <code>unchecked</code>. Compiler facts are not claims and have no rung; gates are rights instances and keep their kind.</p><p>Rungs:</p><div class="table-wrap"><table class="rung-table"><thead><tr><th scope="col">rung</th><th scope="col">who</th><th scope="col">code</th><th scope="col">evidence reached</th></tr></thead><tbody><tr class=""><td>0</td><td>beginner</td><td><code>#Test(&quot;fee on 100&quot;) { assert_eq(add_fee(100), 105) }</code></td><td><code>examples(1)</code> (ratified)</td></tr><tr class=""><td>1</td><td>intermediate</td><td><code>#Post(result &gt; cents, &quot;fee must be added&quot;)</code> on an effect-free function</td><td><code>checked</code> in every build (ratified D-PREPOST1); <strong>proposed</strong> <code>generated(1000)</code> under <code>jet test</code> with no extra text</td></tr><tr class=""><td>2</td><td>expert</td><td><code>#Test fn fee_grows(cents: Int(1..)) { assert(add_fee(cents) &gt; cents) }</code></td><td><code>generated(n)</code> with your own domain (ratified property form and inline range, D-RANGETYPE1)</td></tr><tr class=""><td>3</td><td>expert</td><td><code>jet prove app.jet --lens solver</code></td><td>the ratified umbrella adds <code>proved</code> rows; proved claims erase their check (D-PROVE-SEM1) (the solver is the only producer-enabling lens, D-PROVE-LENS1; bare <code>jet prove</code> runs every non-solver producer)</td></tr><tr class=""><td>4</td><td>expert, package</td><td><code>policy: .{ claims: .{ min: generated(1000) } }</code></td><td><strong>proposed</strong> a claim below the floor is a diagnostic; lowering the floor is one visible edit (ballot D-GRADE-POLICY1)</td></tr></tbody></table></div><p>Eligibility is part of the design: default generation runs only for callables whose inferred row is <code>-[]&gt;</code>; an effectful contract, a precondition that names another function, or a type without a generator is reported as not generated, with the reason. No false <code>generated</code> is possible because the generator refuses rather than guesses.</p><p>Three exits for the auto-generation magic:</p><div class="table-wrap"><table class="markdown-table"><thead><tr><th scope="col">exit</th><th scope="col">spelling</th></tr></thead><tbody><tr class=""><td>see what it did</td><td>the report line names the input count and the kept smallest failing input</td></tr><tr class=""><td>write it explicitly</td><td><code>#Test fn name(p: T)</code> with your own generator bounds</td></tr><tr class=""><td>refuse it</td><td><code>jet test --grade=examples</code>; <code>policy: .{ claims: .{ min: examples(1) } }</code> states a floor without generation</td></tr></tbody></table></div><h3 id="element-3-shapes-one-fact-text-formats-env-and-args-shapes-one-fact-md">Element 3 — Shapes: one fact, text formats, env, and args (<code>shapes-one-fact.md</code>)</h3><p>Look at how much already exists. A struct is Codable by default (D-META-AUTO1), field defaults live on the declaration, <code>env.decode&lt;T&gt;(prefix:, file:, allow:)</code> is shipped and shares one codec with JSON, TOML, and CSV. What is missing is the last projection, arguments anywhere in a program, and one stated precedence among flags, environment, and defaults.</p><div class="comparison"><div class="compare-side real"><p class="compare-title"><span>Today (real; verified on every tier, verification block <code>shapes</code>; <code>#Env</code> per <code>markers.rs:78-79</code>, <code>#CLI</code> per <code>examples/features/cli/typed_entry_args.jet:15</code>):</span><span class="badge real">REAL</span></p><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><pre><code>use json :: core.encoding.json
+use env :: core.sys
 
 #CLI
 struct Config {
@@ -252,8 +252,8 @@ fn run(args: Config) ![FieldError] {            // CLI owned by the parameter ty
     file :: json.decode&lt;Config&gt;(text)           // JSON owned by the shape (ratified)
     settings :: env.decode&lt;Config&gt;(prefix: &quot;APP_&quot;)   // env: shipped, one codec with json
     print(file.port)                            // 9000
-}</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed (<strong>illustrative</strong>, ballot D-SHAPE-PROJECT1 option A; the struct is unchanged):</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>use core.args as args
-use core.sys as env
+}</code></pre></div></div><div class="compare-side illustrative"><p class="compare-title"><span>Proposed (<strong>illustrative</strong>, ballot D-SHAPE-PROJECT1 option A; the struct is unchanged):</span><span class="badge illustrative">ILLUSTRATIVE</span></p><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><pre><code>use args :: core.args
+use env :: core.sys
 
 #CLI
 struct Config {
@@ -335,8 +335,10 @@ name:    &quot;orders&quot;
 version: &quot;0.1.0&quot;
 edition: &quot;2026&quot;
 authority: { holds: { allow: [FS, Time] } }</code></pre></div></div><div class="code-block"><div class="code-card real"><div class="code-head"><span>jet</span><span class="badge real">REAL</span></div><div class="code-context">Today:</div><pre><code>// run.jet
-use core.files as fs
-use core.encoding.json as json
+use {
+    fs :: core.files
+    json :: core.encoding.json
+}
 
 #CLI
 struct Config {
@@ -367,10 +369,12 @@ $ jet prove run.jet --lens solver # separate
 $ jet dev --swap run.jet          # swap by flag
 $ jet prove run.jet --capture     # opt-in safe capture
 $ jet inspect gates run.jet; jet inspect authority run.jet; jet inspect facts   # three views</code></pre></div></div><div class="code-block"><div class="code-card illustrative"><div class="code-head"><span>jet</span><span class="badge illustrative">ILLUSTRATIVE</span></div><div class="code-context">Proposed (the source gains one marker on <code>Order</code>, one <code>#PublishedSchema</code> for the day its shape changes, and one line that states config precedence; the rest is what the tools say):</div><pre><code>// run.jet — proposed lines marked
-use core.files as fs
-use core.encoding.json as json
-use core.args as args
-use core.sys as env
+use {
+    fs :: core.files
+    json :: core.encoding.json
+    args :: core.args
+    env :: core.sys
+}
 
 #CLI
 struct Config {

@@ -36,7 +36,11 @@ When priorities conflict, the earlier one wins:
    the program needs it, not before the first useful result.
 3. **Runtime performance.** Do not buy convenient syntax with hidden runtime
    overhead. Judge performance on correct, matched workloads under the
-   [strict performance gate](../../AGENTS.md#strict-performance-gate).
+   [strict performance gate](../../AGENTS.md#strict-performance-gate). The
+   target for every program is the best hand-written machine code that delivers
+   the same features. Jet features that physically cost bytes or cycles, such as
+   better errors, safety checks, and fault reports, stay; their cost is driven
+   as low as possible, never removed to win a benchmark.
 4. **One mechanism.** Keep one semantic path for each operation. Allow flexible
    code organization when it expresses the same meaning; reject parallel
    mechanisms that make users choose without gaining control.

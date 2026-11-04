@@ -1,19 +1,21 @@
 // Bounded runtime-owned snapshot readers and projections.
 // Never reads process memory or exposes payloads, locals, environment or credentials.
 // Rust: crates/jet-devserver/src/LiveInspect.rs:5
-use jet_foundation.Devtools.[JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES]
-use jet_foundation.DevtoolsControl.[JetDevtoolsDecodedEnvelope]
-use jet_foundation.Dyn.[Dyn]
-use jet_foundation.JSON.[json_get, json_int, json_str, parse_json]
-use jet_foundation.[foundation_json_quote]
-use jet_devserver.WebHost.[decode_devtools_envelope]
-use jet_debug.[render_event_observations]
-use std.fs as fs
-use std.fs.[OpenOptions]
-use std.time.[SystemTime, UNIX_EPOCH]
-use core.files.[OSPath]
-use core.sys.target.[selected_os, selected_family]
-use core.encoding.[Dyn]
+use {
+    jet_foundation.Devtools.[JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES]
+    jet_foundation.DevtoolsControl.[JetDevtoolsDecodedEnvelope]
+    jet_foundation.Dyn.[Dyn]
+    jet_foundation.JSON.[json_get, json_int, json_str, parse_json]
+    jet_foundation.[foundation_json_quote]
+    jet_devserver.WebHost.[decode_devtools_envelope]
+    jet_debug.[render_event_observations]
+    fs :: std.fs
+    std.fs.[OpenOptions]
+    std.time.[SystemTime, UNIX_EPOCH]
+    core.files.[OSPath]
+    core.sys.target.[selected_os, selected_family]
+    core.encoding.[Dyn]
+}
 
 // Rust: crates/jet-devserver/src/LiveInspect.rs:14
 MAX_SNAPSHOT_BYTES :: U64{1024 * 1024}

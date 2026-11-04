@@ -919,7 +919,18 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
                 return ir_list_try_reserve(&m, p, &b, ty, subject, element, one, -1, value, span)
             }
             .Clear -> {
+                // The buffer is the receiver's own (ir_make_unique above):
+                // its elements end here and the buffer stays for refilling.
+                // A write window's elements stay its owner's.
                 zero :: ir_word_const(&m, &b, 0)
+                if m.types[element].drop != "" {
+                    capacity :: ir_load_word(&m, &b, subject, 8)
+                    below :: ir_word_const(&m, &b, -1)
+                    owner :: ir_bool_op(&m, &b, IROp.Lt, below, capacity)
+                    ir_open_if(&b.f, owner, b.line)
+                    ir_list_drop_items(&m, &b, subject, element)
+                    ir_end(&b.f, b.line)
+                }
                 ir_emit(&b.f, IROp.Store, -1, subject, 0, zero, b.line)
                 return -1
             }
@@ -2421,45 +2432,95 @@ fn ir_option_zip_store(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, of
 
 // `Option.lift2(f, left, right)`: both present lend their payloads to `f`,
 // whose result is boxed fresh; otherwise None. Both operands are only read.
+// `f` is evaluated only once both are present (lazy callable creation, as the
+// Web Prelude's `jet_option_lift2`), and a `T Never!` callable hands over `T`.
+// A fallible `f` (checked type `ty`, the Result of the option) settles its
+// Result box: an Err becomes the call's Err, an Ok payload the option's.
 fn ir_option_lift2(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, function: Int, left: Int, right: Int, span: Span) -> Int Never! {
-    result_ty :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 to {ir_type_name(ty)}") }
+    // copy: `ty` is still the call's checked type, which the Result box below is made of
+    option_ty := ty.copy()
+    failure_ty := Type?{None}
+    if ir_untag(ty) == .Result(ok, err) {
+        option_ty = ok.copy()
+        failure_ty = Val(err.copy())
+    }
+    result_ty :: if ir_untag(option_ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 to {ir_type_name(ty)}") }
     left_checked :: ir_ty(p, b, left)
     right_checked :: ir_ty(p, b, right)
     function_ty :: ir_ty(p, b, function)
     left_ty :: if ir_untag(left_checked) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(left_checked)}") }
     right_ty :: if ir_untag(right_checked) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Option.lift2 over {ir_type_name(right_checked)}") }
-    called_ty :: ir_closure_result(function_ty) ?? return ir_fail_slot(&b, span, "Option.lift2 with {ir_type_name(function_ty)}")
-    if type_carrier_identity(called_ty) != type_carrier_identity(result_ty) -> return ir_fail_slot(&b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(result_ty)}")
+    called_ty :: ir_callback_result(function_ty) ?? return ir_fail_slot(&b, span, "Option.lift2 with {ir_type_name(function_ty)}")
+    produced :: if failure_ty == .Val(err) -> Type.Result{ok: result_ty.copy(), err: err.copy()} else -> result_ty.copy()
+    if type_carrier_identity(called_ty) != type_carrier_identity(produced) -> return ir_fail_slot(&b, span, "Option.lift2 boxing {ir_type_name(called_ty)} as {ir_type_name(produced)}")
     if ir_unit_type(left_ty) || ir_unit_type(right_ty) || ir_unit_type(result_ty) -> return ir_fail_slot(&b, span, "Option.lift2 over Unit")
-    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    option_row :: ir_value_type(&m, p, option_ty) ?? return ir_type_fail(&b, span, option_ty)
     left_row :: ir_value_type(&m, p, left_ty) ?? return ir_type_fail(&b, span, left_ty)
     right_row :: ir_value_type(&m, p, right_ty) ?? return ir_type_fail(&b, span, right_ty)
-    called_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
-    callback :: ir_expr(&m, p, &b, function)
-    if ir_failed(b) || callback < 0 -> return -1
+    payload_row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
+    called_row :: ir_value_type(&m, p, called_ty) ?? return ir_type_fail(&b, span, called_ty)
     first :: ir_expr(&m, p, &b, left)
     if ir_failed(b) || first < 0 -> return -1
     second :: ir_expr(&m, p, &b, right)
     if ir_failed(b) || second < 0 -> return -1
-    result :: ir_temp(&m, &b, result_row)
-    ir_option_none(&m, &b, result)
+    option :: ir_temp(&m, &b, option_row)
+    ir_option_none(&m, &b, option)
+    // The Err box a fallible `f` reports, or null (the Result's empty word) while none has.
+    failure := -1
+    if failure_ty != None {
+        result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+        failure = ir_fresh_temp(&m, &b, result_row)
+        ir_emit(&b.f, IROp.Const, failure, 0, -1, -1, b.line)
+    }
     first_present :: ir_option_is_some(&m, &b, first)
     ir_open_if(&b.f, first_present, b.line)
     second_present :: ir_option_is_some(&m, &b, second)
     ir_open_if(&b.f, second_present, b.line)
+    callback :: ir_expr(&m, p, &b, function)
+    if ir_failed(b) || callback < 0 -> return -1
     first_item :: ir_option_payload(&m, &b, first, left_row)
     second_item :: ir_option_payload(&m, &b, second, right_row)
-    called :: ir_call_closure(&m, &b, callback, [Int]{first_item, second_item}, called_row)
     result_size :: ir_type_size(&m, p, result_ty)
-    made :: ir_option_make(&m, p, &b, result_row, called, result_size)
-    ir_option_set(&m, &b, result, made)
+    if failure_ty == .Val(err) {
+        err_row :: ir_value_type(&m, p, err) ?? return ir_type_fail(&b, span, called_ty)
+        boxed :: ir_call_closure(&m, &b, callback, [Int]{first_item, second_item}, called_row)
+        zero :: ir_word_const(&m, &b, 0)
+        selector :: ir_load_word(&m, &b, boxed, 0)
+        failed :: ir_bool_op(&m, &b, IROp.Eq, selector, zero)
+        ir_open_if(&b.f, failed, b.line)
+        error :: ir_load_at(&m, &b, boxed, 8, err_row)
+        if error >= 0 -> b.fresh[error] = true
+        made_failure :: ir_result_box(&m, p, &b, ty, false, error)
+        ir_emit(&b.f, IROp.Copy, failure, made_failure, -1, -1, b.line)
+        ir_else(&b.f, b.line)
+        value :: ir_load_at(&m, &b, boxed, 8, payload_row)
+        b.fresh[value] = true
+        made :: ir_option_make(&m, p, &b, option_row, value, result_size)
+        ir_option_set(&m, &b, option, made)
+        ir_end(&b.f, b.line)
+        shell_bytes :: ir_result_box_bytes(&m, p, called_ty)
+        shell :: ir_word_const(&m, &b, shell_bytes)
+        ir_free(&m, &b, boxed, shell)
+    } else {
+        called :: ir_call_callback(&m, p, &b, callback, function_ty, [Int]{first_item, second_item}, payload_row, span)
+        made :: ir_option_make(&m, p, &b, option_row, called, result_size)
+        ir_option_set(&m, &b, option, made)
+    }
+    ir_release(&m, &b, callback)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
     ir_release(&m, &b, first)
     ir_release(&m, &b, second)
-    ir_release(&m, &b, callback)
-    b.fresh[result] = true
-    result
+    if failure_ty == None {
+        b.fresh[option] = true
+        return option
+    }
+    clean :: ir_is_null(&m, &b, failure)
+    ir_open_if(&b.f, clean, b.line)
+    success :: ir_result_box(&m, p, &b, ty, true, option)
+    ir_emit(&b.f, IROp.Copy, failure, success, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    failure
 }
 
 fn ir_closure_op_name(operation: TClosureOp) -> String Never! {
@@ -3225,6 +3286,22 @@ fn ir_float_word(m: &IRModule, b: &IRBuilder, floating: Int, row: Int, unsigned:
 // an out slot; an Option or Result result as a tag word with its payload in
 // one zeroed out slot, from which the builder makes its own box.
 
+// The Core leaf routes that are pure and never fail, each built as the one
+// operation it is: `math.sqrt(x)` the IEEE square root, `math.fabs(x)` the
+// sign-bit clear, `math.is_finite(x)` and the other Float predicates the
+// operation their receiver form `x.is_finite()` lowers to (BuildTypes.jet
+// ir_float_predicate). None for any other route.
+fn ir_leaf_route(name: String) -> String? Never! {
+    if name == {
+        "jet_std_math_sqrt" -> Val("sqrt")
+        "jet_std_math_abs_f64" -> Val("fabs")
+        "jet_std_math_is_finite" -> Val("is_finite")
+        "jet_std_math_is_infinite" -> Val("is_infinite")
+        "jet_std_math_is_nan" -> Val("is_nan")
+        else -> None
+    }
+}
+
 // Routes built inline rather than calling the runtime (list.get /
 // list.index_of); None for any other route. Every argument is borrowed.
 fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int? Never! {
@@ -3322,11 +3399,20 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         ir_release(&m, &b, inputs[1])
         return Val(stream)
     }
-    // `math.sqrt(x)`: the IEEE square root, one instruction.
-    if name == "jet_std_math_sqrt" {
-        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "sqrt with {inputs.len()} arguments"))
+    // A pure, never-failing Core leaf (ir_leaf_route): the operation itself,
+    // with no call and so no stop poll after it.
+    if ir_leaf_route(name) == .Val(leaf) {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "{leaf} with {inputs.len()} arguments"))
         row :: b.f.slot_type[inputs[0]]
-        if m.types[row].kind != .Float -> return Val(ir_fail_slot(&b, span, "sqrt of {ir_type_name(m.types[row].ty)}"))
+        if leaf != "sqrt" && leaf != "fabs" -> return Val(ir_float_predicate(&m, &b, inputs[0], leaf, m.types[row].ty.copy(), span))
+        if m.types[row].kind != .Float -> return Val(ir_fail_slot(&b, span, "{leaf} of {ir_type_name(m.types[row].ty)}"))
+        if leaf == "fabs" {
+            word_row :: ir_word_row(&m)
+            bits :: ir_reinterpret(&m, &b, inputs[0], word_row)
+            mask :: ir_word_const(&m, &b, 9223372036854775807)
+            magnitude :: ir_word_op(&m, &b, IROp.BitAnd, bits, mask)
+            return Val(ir_reinterpret(&m, &b, magnitude, row))
+        }
         root :: ir_temp(&m, &b, row)
         ir_emit(&b.f, IROp.Sqrt, root, inputs[0], -1, -1, b.line)
         return Val(root)
@@ -3995,7 +4081,7 @@ fn ir_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [
 // (core_call_native_return_labels).
 fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name :: ir_route_symbol(symbol)
-    if IR_ROUTES_INLINE.contains(name) {
+    if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None {
         if ir_route_inline(&m, p, &b, name, inputs, result, span) == .Val(inlined) -> return inlined
     }
     if ir_environment_route(name) == .Val(environment) -> return ir_environment_call(&m, p, &b, environment, inputs, result, span)
@@ -4156,8 +4242,8 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 &lowered.push(slot)
             }
             .Option(some) -> {
-                // An Option crosses as its own borrowed word: an Option<Int>
-                // its inline word (IR_OPTION_INT_NONE when absent), an Option
+                // An Option crosses as its own borrowed word: an inline Option
+                // its word (IR_OPTION_INT_NONE when absent), an Option
                 // of a runtime handle its box (null when absent, the handle
                 // word at 0).
                 inner :: if ir_untag(shown) == .Option(item) -> item else -> { return ir_fail_slot(&b, span, "runtime route {name} Option argument of {shown}") }
@@ -4255,12 +4341,13 @@ fn ir_route_symbol(symbol: String) -> String Never! {
     symbol.copy()
 }
 
-// The routes ir_route_inline builds in place instead of calling the runtime;
-// ir_route_labeled reaches it only for these.
+// The routes ir_route_inline builds in place instead of calling the runtime
+// besides the leaf routes (ir_leaf_route); ir_route_labeled reaches it only
+// for these.
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from", "JetCache::new",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_std_math_sqrt", "jet_devtools_publish_payload",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",
@@ -4274,12 +4361,12 @@ IR_ROUTES_INLINE :: comptime { [String]{
 IR_ROUTES_NATIVE_INDEX :: comptime { [String]{"jet_bit_set_has", "jet_bitset_add", "jet_bitset_remove"} }
 
 // Whether the builder lowers a Core call of route `name` itself, with no
-// runtime or environment route: an inline route, a special of ir_core_call
-// (the raw List layout leaves, crypto.wipe, channels, event policy, object
-// entries), or an Iter route (BuildLazy.jet ir_lazy_symbol). IR Lint's
-// registry check (Lint.jet ir_lint_core_routes) reads it.
+// runtime or environment route: an inline or leaf route, a special of
+// ir_core_call (the raw List layout leaves, crypto.wipe, channels, event
+// policy, object entries), or an Iter route (BuildLazy.jet ir_lazy_symbol).
+// IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 fn ir_route_builder_lowered(name: String) -> Bool Never! {
-    if IR_ROUTES_INLINE.contains(name) -> return true
+    if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
     if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" || name == "jet_raw_crypto_wipe" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::JetEvent::with_policy" -> return true
     if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
@@ -4399,7 +4486,7 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         // The runtime answers its generic Option box (ir_option_unbox).
         pointer_row :: ir_pointer_row(&m)
         boxed :: ir_runtime(&m, &b, export, args, pointer_row)
-        return ir_option_unbox(&m, &b, boxed, row)
+        return ir_option_unbox(&m, p, &b, boxed, row)
     }
     ir_runtime(&m, &b, export, args, row)
 }

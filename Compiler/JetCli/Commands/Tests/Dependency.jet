@@ -1,18 +1,20 @@
 // CmdPkg observable bytes plus checked carrier edit/publication acceptance.
 // Provider-dependent fetch execution is a separate admitted runtime proof.
-use jet_pkg_model.[DepSpec, GitSelector, LockFile, LockedPackage]
-use jetpack_foundation.[FoundationPublicationError, FoundationPublicationPhase]
-use jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[diagnostic_from_registry]
-use core.sys as cli_sys
-use core.files as cli_files
-use jet_cli_commands.[
-    jet_cli_dependency_add_spec, jet_cli_dependency_edit, jet_cli_dependency_edit_success,
-    jet_cli_dependency_flag, jet_cli_dependency_input, jet_cli_dependency_publication_error,
-    jet_cli_dependency_publish, jet_cli_dependency_source_error, jet_cli_dependency_success,
-    jet_cli_package_dependency,
-]
-use core.process as cli_process
+use {
+    jet_pkg_model.[DepSpec, GitSelector, LockFile, LockedPackage]
+    jetpack_foundation.[FoundationPublicationError, FoundationPublicationPhase]
+    jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[diagnostic_from_registry]
+    cli_sys :: core.sys
+    cli_files :: core.files
+    jet_cli_commands.[
+        jet_cli_dependency_add_spec, jet_cli_dependency_edit, jet_cli_dependency_edit_success,
+        jet_cli_dependency_flag, jet_cli_dependency_input, jet_cli_dependency_publication_error,
+        jet_cli_dependency_publish, jet_cli_dependency_source_error, jet_cli_dependency_success,
+        jet_cli_package_dependency,
+    ]
+    cli_process :: core.process
+}
 
 #Test("dependency") {
     lock := LockFile.empty()

@@ -1,13 +1,16 @@
 // Ordinary files run only their explicit `fn run` body. Module declarations
-// remain available to every function in the file.
+// remain available to every function in the file; module state a function
+// changes lives in a `shared` holder.
+struct Count { value: Int }
+
 LIMIT :: 2
-counter := 0
+COUNTER :: shared Count{value: 0}
 
 fn run() {
     print("script entry")
     print(LIMIT)
-    counter += LIMIT
-    print(counter)
+    COUNTER.value += LIMIT
+    print(COUNTER.value)
     print(even(LIMIT + 2))
     print(helper())
 }

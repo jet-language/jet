@@ -1,15 +1,17 @@
 // Claims ported from tests/jetpack_semantic_lock.rs and SemanticLock.rs
 // `flake_tests` that write project files: the live `.jet/lock` commit path
 // and loading a flake against its semantic lock.
-use jetpack_trust.[
-    FlakeGraph, LockInput, SemanticLockFile, SemanticRecord, SourceMapEntry,
-    trust_parse_semantic_lock, trust_semantic_lock_atomic_commit, trust_semantic_lock_live_path,
-    trust_semantic_lock_load, trust_semantic_lock_merge_revalidate_commit,
-    trust_strip_semantic_sections, trust_write_semantic_lock,
-]
-use jet_pkg_model.[LockedSourceChannel, pkg_lock_parse, pkg_lock_record_source_channel]
-use core.crypto as crypto
-use core.files as files
+use {
+    jetpack_trust.[
+        FlakeGraph, LockInput, SemanticLockFile, SemanticRecord, SourceMapEntry,
+        trust_parse_semantic_lock, trust_semantic_lock_atomic_commit, trust_semantic_lock_live_path,
+        trust_semantic_lock_load, trust_semantic_lock_merge_revalidate_commit,
+        trust_strip_semantic_sections, trust_write_semantic_lock,
+    ]
+    jet_pkg_model.[LockedSourceChannel, pkg_lock_parse, pkg_lock_record_source_channel]
+    crypto :: core.crypto
+    files :: core.files
+}
 
 // The project outlives this helper, so it is a `tmpdir`: a `temp_dir` would
 // remove it when its `TempDir` drops at return (#6119).

@@ -1,4 +1,4 @@
-use core.encoding.json as json
+use json :: core.encoding.json
 
 // Keys, indices (a negative index counts from the end), universal selection,
 // filters, and explicit object projection.
@@ -373,6 +373,19 @@ fn kit_steps_json_test(text: String, mode: String, path: String, op: String, lit
     None
 }
 
+// True when the text, with its substitution slots stubbed, parses as a JSON value.
+fn kit_steps_json_literal(text: String) -> Bool {
+    _ :: json.parse(kit_steps_json_preview(text)) ?? return false
+    true
+}
+
+// True when a JSON assertion compares against a prior step's document rather than a literal.
+fn kit_steps_json_is_relation(assertion: KitAssertion, value: String) -> Bool {
+    if assertion.json_op == "==" || assertion.json_op == "#==" -> return !value.starts_with("$")
+    if assertion.json_op == "#>=" -> return kit_steps_count_label(value) != ""
+    assertion.json_op == "!=" && assertion.extra == "relation"
+}
+
 fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     body :: kit_steps_body(value)
     tokens :: kit_steps_tokens(body) ?? return None
@@ -423,6 +436,11 @@ fn kit_steps_json_assertion(value: String) -> KitAssertion? {
     if kit_expect_named(["==", "!=", "#=="], op) && literal.starts_with("$") {
         if tokens.len() != needed + 1 || kit_steps_json_path(literal) == None -> return None
         return Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal, json_mode: mode, json_path: path, json_op: op, optional_file: subject == "file?", transform: transform})
+    }
+    // `!= LABEL` relates the path to the same path in a prior step's document and
+    // requires them to differ; a JSON literal on the right stays a value comparison.
+    if op == "!=" && tokens.len() == needed + 1 && !kit_steps_json_literal(literal) && kit_steps_relation_label(literal) != "" {
+        return Val(KitAssertion{stream: stream, path: source, mode: "json", value: literal, json_mode: mode, json_path: path, json_op: op, extra: "relation", optional_file: subject == "file?", transform: transform})
     }
     if kit_expect_named(["=", "!=", "has", "!has", "in", ">", ">=", "<", "<="], op) {
         preview :: kit_steps_json_preview(literal)

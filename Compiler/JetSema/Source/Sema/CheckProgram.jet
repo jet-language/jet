@@ -787,7 +787,7 @@ fn sema_incremental_item_header(item: Item) -> Item Never! {
             published_schema_span: definition.published_schema_span,
             is_single_use: definition.is_single_use, single_use_span: definition.single_use_span,
             is_must_use: definition.is_must_use, must_use_span: definition.must_use_span,
-            layout: definition.layout, layout_span: definition.layout_span,
+            layout: definition.layout, layout_span: definition.layout_span, layout_alignment_span: definition.layout_alignment_span,
             serde_markers: definition.serde_markers, type_markers: definition.type_markers,
             validate_block: definition.validate_block, validate_span: definition.validate_span,
         }}
@@ -913,7 +913,7 @@ fn sema_incremental_program_header(program: Program) -> Program Never! {
         user_policy_declarations: program.user_policy_declarations,
         applied_rules: program.applied_rules, rule_facts: program.rule_facts,
         else_arms: program.else_arms, used_import_names: program.used_import_names,
-        debug_sites: program.debug_sites,
+        debug_sites: program.debug_sites, app_route_roots: program.app_route_roots,
     }
 }
 
@@ -2079,6 +2079,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             }
         }
         param_mutable := func.params[param_index].convention == AccessConvention.Write
+        // A sized-integer parameter starts with its type's interval, which a
+        // later exit guard narrows.
+        param_bounds :: sema_expression_type_interval(parameter_ty)
         param_symbol := Symbol{
             id: symbol_id(SymbolKind.Parameter, module_identity, owner_id.key, func.params[param_index].name),
             kind: SymbolKind.Parameter,
@@ -2090,7 +2093,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             visibility: 0,
         }
         if {
-            !sema_scope_declare_local(&scopes, sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program), param_mutable, func.params[param_index].convention, None, false) -> {
+            !sema_scope_declare_local(&scopes, sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program), param_mutable, func.params[param_index].convention, param_bounds, false) -> {
                 &diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }
@@ -7677,7 +7680,7 @@ fn sema_comptime_runtime_ceiling_diagnostic(subject: String, needed: RuntimeLaye
     sema_error_optional("E1006", span, "`{subject}` needs `runtime: {needed_name}`", "this package declares `runtime: {ceiling_name}` in `package.jet`, which caps imports at the `{ceiling_name}` runtime profile; `{subject}` needs `{needed_name}`; import chain: {chain}", "remove the import or helper use, raise the ceiling to `runtime: {needed_name}` in `package.jet`, or use a `{ceiling_name}` runtime alternative")
 }
 
-// The Core modules one import declaration names: `use core.files as fs`
+// The Core modules one import declaration names: `use fs :: core.files`
 // parses as member `files` of `core`; `use core.mem.[...]` names its module.
 fn sema_runtime_ceiling_import_modules(declaration: ImportDecl) -> [String] Never! {
     names := [String]{}
@@ -7696,6 +7699,19 @@ fn sema_runtime_ceiling_import_modules(declaration: ImportDecl) -> [String] Neve
     names
 }
 
+// The local name an import gives `module_name`: the declaration alias, or
+// the alias of the member row that names that module.
+fn sema_runtime_ceiling_import_alias(declaration: ImportDecl, module_name: String) -> String Never! {
+    if declaration.kind == .Unqualified(module_alias, _, items, _, _) {
+        loop item in items {
+            if "{module_alias}.{item.original}" != module_name -> next
+            if item.alias == .Val(alias) -> return alias.copy()
+            return item.original.copy()
+        }
+    }
+    declaration.alias.copy()
+}
+
 // How a written usage reaches its Core helper: the ambient `input()` helper,
 // an import of the helper's module, or the prelude itself.
 fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> String Never! {
@@ -7704,7 +7720,7 @@ fn sema_runtime_ceiling_helper_chain(usage: String, imports: [ImportDecl]) -> St
     if parts.len() > 1 {
         loop declaration in imports {
             loop module_name in sema_runtime_ceiling_import_modules(declaration) {
-                if module_name == parts[0] -> return "`use {module_name} as {declaration.alias}` → `{usage}`"
+                if module_name == parts[0] -> return "`use {sema_runtime_ceiling_import_alias(declaration, module_name)} :: {module_name}` → `{usage}`"
             }
         }
     }
@@ -7947,6 +7963,29 @@ fn sema_failure_settle_obligations(diagnostics: &[Diagnostic], solved: [String:B
     }
     diagnostics = kept
     survived
+}
+
+// E2404 repeated sites: every call of one callee whose failure domain has no
+// route into the same caller domain is one root, reported once at its first
+// site. `seen` carries the reported domains across the bundle's report lists.
+fn sema_failure_domain_dedupe(diagnostics: &[Diagnostic], seen: &[String:Bool]) Never! {
+    repeated :: loop diagnostic in diagnostics {
+        if diagnostic.code == "E2404" -> break true
+    } ?? false
+    if !repeated -> return
+    kept := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        detail :: diagnostic.detail ?? ""
+        if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") {
+            &kept.push(diagnostic)
+            next
+        }
+        key :: detail.split("\n").to_list()[0]
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &kept.push(diagnostic)
+    }
+    diagnostics = kept
 }
 
 // #3708 for one comptime function closure: the failure rows, function-value
@@ -8712,6 +8751,12 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop settle_index in 0..<modules.len() {
         if sema_failure_settle_obligations(&modules[settle_index].diagnostics, infallible_keys) -> modules[settle_index].complete = false
     }
+    // The bundle list and the per-module lists each keep one report per
+    // failure domain.
+    bundle_domains := [String:Bool]{}
+    sema_failure_domain_dedupe(&diagnostics, &bundle_domains)
+    module_domains := [String:Bool]{}
+    loop dedupe_index in 0..<modules.len() -> sema_failure_domain_dedupe(&modules[dedupe_index].diagnostics, &module_domains)
     // The `#Inline(Always)` promise (E0917-E0919) needs every body's
     // function-value references first. These read-only checks, the effect
     // inputs with each module's effect-graph rows, and the liveness verdicts
@@ -8729,9 +8774,17 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     // The root package's `authority.deny` row binds the root package's own modules.
     denial_modules := [Bool]{}
     loop graph_module in final_graph.modules -> &denial_modules.push(graph_module.package_identity == final_graph.package_identity)
+    // Each `#FX(…)` module cap names known effects, checked once where it is
+    // written; a file module's caps reach its file through the module graph.
+    loop graph_module in final_graph.modules {
+        cap_diagnostics := [Diagnostic]{}
+        sema_effect_module_cap_names(graph_module.program.items, &cap_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, graph_module.source_segments, ^cap_diagnostics)
+    }
+    file_caps :: sema_effect_file_module_caps(final_graph.modules, final_graph.edges)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, final_graph.decls, threads)
+    effects := sema_effects_check_modules(&modules, effect_inputs, ^effect_prepared, package_denials, denial_modules, file_caps, final_graph.decls, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
@@ -8899,6 +8952,7 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
         if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) -> &reported.push(diagnostic)
     }
     diagnostics = reported
+    sema_crypto_misuse_precedence(&diagnostics)
     programs := [Program]{}
     if final_graph.retain_programs {
         loop source_module in final_graph.modules -> &programs.push(source_module.program)

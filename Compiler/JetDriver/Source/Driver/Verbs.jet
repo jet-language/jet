@@ -125,6 +125,14 @@ fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuth
     loop index in 0..<presented.labels.len() {
         presented.labels[index].span = jet_driver_shift_span(presented.labels[index].span, shift)
     }
+    // A cause the checker linked inside one checked body has no origin of
+    // its own: it names a report of this same file, so it takes this
+    // origin and shift, and the batch's clear counts can match it.
+    loop index in 0..<presented.cause.len() {
+        if presented.cause[index].origin != None -> next
+        presented.cause[index].origin = presented.origin
+        if presented.cause[index].span == .Val(cause_span) -> presented.cause[index].span = Val(jet_driver_shift_span(cause_span, shift))
+    }
     presented.source_path = None
     presented.source_offset = None
     presented.source_start = None

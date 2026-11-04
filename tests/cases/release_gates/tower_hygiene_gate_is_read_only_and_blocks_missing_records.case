@@ -9,7 +9,6 @@ copy: tower/tower.json tower-before
 copy: tower/history.json history-before
 copy: tower/read-only-marker.txt marker-before
 step success: bash {root}/Tools/ci/tower-hygiene-gate.sh
-cwd: {root}
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/success.txt
@@ -30,7 +29,6 @@ file: tower/history.json == history-before
 file: tower/read-only-marker.txt == marker-before
 write: Docs/spec/bad.md = "D-MISSING1\n"
 step failure: bash {root}/Tools/ci/tower-hygiene-gate.sh
-cwd: {root}
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/failure.txt
@@ -46,7 +44,6 @@ file: tower/history.json == history-before
 file: tower/read-only-marker.txt == marker-before
 mkdir: outside
 step traversal: bash {root}/Tools/ci/tower-hygiene-gate.sh
-cwd: {root}
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/outside/../tower/traversal.txt
@@ -56,7 +53,6 @@ file: tower/traversal.txt absent
 mkdir: tower/tower.json.lock
 write: tower/tower.json.lock/info.json = "{\"pid\": 1, \"at\": 0}\n"
 step locked: bash {root}/Tools/ci/tower-hygiene-gate.sh
-cwd: {root}
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/locked.txt

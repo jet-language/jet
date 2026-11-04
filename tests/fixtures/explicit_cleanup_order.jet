@@ -4,9 +4,11 @@ package {
     name: "explicit_cleanup_order"
     authority: { allow: [Exec, Env, IO, Mem.Alloc] }
 }
-use core.process as process
-use core.sys as os
-use core.mem.scope as scope
+use {
+    process :: core.process
+    os :: core.sys
+    scope :: core.mem.scope
+}
 
 struct Resource { name: String }
 impl Resource.Close {
@@ -33,6 +35,6 @@ fn stop_case() {
     }
 }
 fn run() {
-    args :: process.argv()
-    if args.len() > 1 -> stop_case() else -> exit_case()
+    args :: process.args()
+    if args.len() > 0 -> stop_case() else -> exit_case()
 }

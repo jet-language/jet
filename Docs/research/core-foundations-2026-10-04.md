@@ -303,7 +303,7 @@ After:
 fn volatile_load<T>(pointer: *T) -> T Never!
 
 // Core/mem/mem.jet
-use jet_builtins as builtin
+use builtin :: jet_builtins
 fn volatile_read<T>(pointer: *T) -> T Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         return builtin.volatile_load<T>(pointer)
@@ -394,7 +394,7 @@ pub const NUMERIC_STATIC_MEMBERS: &[&str] = &["zero", "one"];
 After (`Core/math/numeric.jet`, shape from D-TRAIT-OVERLOAD1):
 
 ```jet
-use jet_builtins as builtin
+use builtin :: jet_builtins
 
 #builtin.Role(.Add)
 trait Add {
@@ -471,7 +471,7 @@ widths would give two spellings for one meaning (`Unsigned<7>` and
 
 ```jet
 // Core/math/fixed.jet (illustrative)
-use jet_builtins as builtin
+use builtin :: jet_builtins
 
 struct Unsigned<prep bits: Int> { raw: builtin.Bits<bits> }
 struct Signed<prep bits: Int> { raw: builtin.Bits<bits> }

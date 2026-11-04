@@ -1,0 +1,40 @@
+# A program built or run from one directory and run again from its own
+# package directory still shows the stopping line: the report opens the
+# recorded file from the run directory when the build directory path does
+# not resolve, and `jet run` does not reuse an image written for another
+# entry path. The release build keeps its debug info in the image
+# (`--debug-info=true`): the stock release profile splits it into a side
+# file, and that image's report prints addresses only.
+fixture: fixtures/a_stop_report_reads_its_source_from_the_run_directory_on_every_tier
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build app/overflow.jet
+exit: 0
+step debug: {work}/app/.jet/build/overflow
+cwd: app
+exit: 70
+stderr: ~ "--> overflow.jet:2 in recurse" # debug build names the stopping frame
+stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # debug build shows the source line
+step: jet build --release --debug-info=true app/overflow.jet
+exit: 0
+step release: {work}/app/.jet/build/overflow
+cwd: app
+exit: 70
+stderr: ~ "--> overflow.jet:2 in recurse" # release build names the stopping frame
+stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # release build shows the source line
+step outside: jet run app/overflow.jet
+exit: 70
+stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # run from the work directory shows the line
+step inside: jet run overflow.jet
+cwd: app
+exit: 70
+stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # run from app/ shows the line
+step inside_o0: jet run --optimize=none overflow.jet
+cwd: app
+exit: 70
+stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # O0 run from app/ shows the line
+step inside_o2: jet run --optimize=full overflow.jet
+cwd: app
+exit: 70
+stderr: ~ "2 | fn recurse(n: Int) -> Int { recurse(n + 1) + 1 }" # O2 run from app/ shows the line

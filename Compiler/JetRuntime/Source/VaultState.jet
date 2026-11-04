@@ -222,10 +222,7 @@ fn vault_debug_bytes(target: I64, bytes: I64, length: I64) {
 }
 fn vault_origin_debug(target: I64, origin: I64) {
     // "JetVaultOrigin { repo_uuid: "
-    rt_text_push_word(target, I64{8389209266807137610}, I64{8})
-    rt_text_push_word(target, I64{8872212664905462351}, I64{8})
-    rt_text_push_word(target, I64{8463776006944420384}, I64{8})
-    rt_text_push_word(target, I64{540697705}, I64{4})
+    jet_rt_string_builder_push(target, rt_static_text("JetVaultOrigin {{ repo_uuid: "))
     vault_debug_bytes(target, wrapping(origin + VAULT_ORIGIN_UUID), I64{16})
     rt_text_push_word(target, I64{2322280078323359788}, I64{8}) // ", name: "
     rt_text_push_rust_debug_str(target, rt_text_word(wrapping(origin + VAULT_ORIGIN_NAME)))
@@ -246,9 +243,7 @@ fn vault_origin_debug(target: I64, origin: I64) {
 fn vault_record_debug(record: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     // "VaultRecord { name: "
-    rt_text_push_word(target, I64{7162221442391957846}, I64{8})
-    rt_text_push_word(target, I64{7020584582313701999}, I64{8})
-    rt_text_push_word(target, I64{540697965}, I64{4})
+    jet_rt_string_builder_push(target, rt_static_text("VaultRecord {{ name: "))
     rt_text_push_rust_debug_str(target, rt_text_word(wrapping(record + VAULT_RECORD_NAME)))
     // ", key_type: "
     rt_text_push_word(target, I64{8751724950884917292}, I64{8})
@@ -285,23 +280,17 @@ fn vault_record_debug(record: I64) -> I64 {
     rt_text_push_word(target, I64{138418612575}, I64{5})
     vault_debug_bytes(target, wrapping(record + VAULT_RECORD_OPAQUE), I64{16})
     // ", created_unix_ms: "
-    rt_text_push_word(target, I64{7310575183467847724}, I64{8})
-    rt_text_push_word(target, I64{7881150267141742436}, I64{8})
-    rt_text_push_word(target, I64{2112115}, I64{3})
+    jet_rt_string_builder_push(target, rt_static_text(", created_unix_ms: "))
     vault_push_u64(target, rt_text_word(wrapping(record + VAULT_RECORD_CREATED)))
     // ", status_unix_ms: "
-    rt_text_push_word(target, I64{8319683848551211052}, I64{8})
-    rt_text_push_word(target, I64{8317409057592735071}, I64{8})
-    rt_text_push_word(target, I64{8250}, I64{2})
+    jet_rt_string_builder_push(target, rt_static_text(", status_unix_ms: "))
     vault_push_u64(target, rt_text_word(wrapping(record + VAULT_RECORD_STATUS_MS)))
     // ", record_hash: "
     rt_text_push_word(target, I64{7237970023832231980}, I64{8})
     rt_text_push_word(target, I64{9071419541514335}, I64{7})
     vault_debug_bytes(target, wrapping(record + VAULT_RECORD_HASH), I64{32})
     // ", public_key_hash: "
-    rt_text_push_word(target, I64{7163375852442361900}, I64{8})
-    rt_text_push_word(target, I64{8314041146370517855}, I64{8})
-    rt_text_push_word(target, I64{2112104}, I64{3})
+    jet_rt_string_builder_push(target, rt_static_text(", public_key_hash: "))
     vault_debug_bytes(target, wrapping(record + VAULT_RECORD_PUBLIC_HASH), I64{32})
     // ", reason_hash: "
     rt_text_push_word(target, I64{7957705928737955884}, I64{8})
@@ -316,19 +305,14 @@ fn vault_record_debug(record: I64) -> I64 {
         rt_text_push_word(target, I64{41}, I64{1})
     }
     // ", key: \"<redacted>\""
-    rt_text_push_word(target, I64{2459029689611264044}, I64{8})
-    rt_text_push_word(target, I64{7310577365076505148}, I64{8})
-    rt_text_push_word(target, I64{2244196}, I64{3})
+    jet_rt_string_builder_push(target, rt_static_text(", key: \"<redacted>\""))
     rt_text_push_word(target, I64{32032}, I64{2})
     jet_rt_string_builder_finish(target)
 }
 fn vault_store_debug(store: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     // "VaultStore { repository_uuid: "
-    rt_text_push_word(target, I64{8031135795009380694}, I64{8})
-    rt_text_push_word(target, I64{8099004988725945714}, I64{8})
-    rt_text_push_word(target, I64{6879655728805147503}, I64{8})
-    rt_text_push_word(target, I64{35435164824949}, I64{6})
+    jet_rt_string_builder_push(target, rt_static_text("VaultStore {{ repository_uuid: "))
     vault_debug_bytes(target, wrapping(store + VAULT_STORE_UUID), I64{16})
     rt_text_push_word(target, I64{7598532953533194284}, I64{8}) // ", revisi"
     rt_text_push_word(target, I64{540700271}, I64{4}) // "on: "
@@ -1452,21 +1436,15 @@ fn vault_preview_text(plan: I64, key_type: I64, reason: I64) -> I64 {
     } else {
         jet_rt_string_builder_push(target, lifecycle)
     }
-    rt_text_push_word(target, I64{8245924292133462075}, I64{8})
-    rt_text_push_word(target, I64{8314037927948153961}, I64{8})
-    rt_text_push_word(target, I64{540700271}, I64{4})
+    jet_rt_string_builder_push(target, rt_static_text("; authority reason: "))
     jet_rt_string_builder_push(target, reason)
-    rt_text_push_word(target, I64{7310021076952883259}, I64{8})
-    rt_text_push_word(target, I64{7881150267141742451}, I64{8})
-    rt_text_push_word(target, I64{2112115}, I64{3})
+    jet_rt_string_builder_push(target, rt_static_text("; expires_unix_ms: "))
     vault_push_u64(target, rt_text_word(wrapping(plan + VAULT_PLAN_EXPIRES)))
     jet_rt_string_builder_finish(target)
 }
 fn vault_write_debug(_write: I64) -> I64 {
     target :: jet_rt_string_builder_new()
-    rt_text_push_word(target, I64{7598231678874902870}, I64{8})
-    rt_text_push_word(target, I64{7017845660660032884}, I64{8})
-    rt_text_push_word(target, I64{45347949081699}, I64{6})
+    jet_rt_string_builder_push(target, rt_static_text("VaultWrite(<redacted>)"))
     jet_rt_string_builder_finish(target)
 }
 // Seed2127-2166. Candidate96 is scratch only; allocate the write after grant

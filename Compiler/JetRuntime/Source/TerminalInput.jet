@@ -19,7 +19,9 @@ TERM_INPUT_CAPACITY :: I64{65536}
     if (terminal_input_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(root, I64{32})
-    terminal_input_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        terminal_input_root = root
+    }
 }
 
 // Caller holds the stdin lock: the number of buffered unread bytes.

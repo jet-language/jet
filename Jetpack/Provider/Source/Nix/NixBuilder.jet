@@ -7,7 +7,7 @@
 NIX_BUILDER_OUTPUT_ROOT :: "/work/output"
 NIX_BUILDER_FAILURE_CHARS :: 4096
 
-nix_builder_scratch_sequence := 0
+NIX_BUILDER_SCRATCH_SEQUENCE :: shared ProcessSequence{next: 1}
 
 // A failure at the native Nix build boundary, projected through the same
 // provider diagnostic contract as substitution; the route itself is visible
@@ -96,8 +96,8 @@ struct NixBuildScratch {
         nix_builder_create_real_directory(hangar, "Hangar root")
         root :: files.join(hangar, STORE_BUILD_SCRATCH_DIR)
         nix_builder_create_real_directory(root, "Hangar build scratch root")
-        nix_builder_scratch_sequence += 1
-        path :: files.join(root, "native-{pkg_sha256_hex(drv_path.bytes())}-{nix_builder_scratch_sequence}")
+        sequence :: process_sequence_take(NIX_BUILDER_SCRATCH_SEQUENCE)
+        path :: files.join(root, "native-{pkg_sha256_hex(drv_path.bytes())}-{sequence}")
         files.create_dir(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={process.current_pid()}\n") ?? return Err(NativeNixBuildError.Store("marking native build scratch: {err}"))
         Ok(NixBuildScratch{path})

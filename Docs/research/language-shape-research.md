@@ -343,7 +343,7 @@ effects remain the ordinary function rules.
 
 | Source | Idea | Jet use | Failure to avoid |
 | --- | --- | --- | --- |
-| ML, Roc, Swift, Zig | Expected-type shorthand | Keep `Type.{...}` beside `.{...}` and `Type.Variant` beside `.Variant`. | Do not infer a nominal type from matching fields. |
+| ML, Roc, Swift, Zig | Expected-type shorthand | Keep `Type.[...]` beside `.{...}` and `Type.Variant` beside `.Variant`. | Do not infer a nominal type from matching fields. |
 | Koka | Inferred effect rows | Let common private code omit uniquely known effects; reveal and pin them at boundaries. | Do not make dense effect notation dominate ordinary code. |
 | CUE, Nickel | Order-independent refinement | Let config and policy add compatible facts; report both sources on conflict. | Never let later file order silently win. |
 | Pony | Capabilities as authority | Make external power visible and narrowable. | Do not expose a large reference-mode vocabulary to beginners. |

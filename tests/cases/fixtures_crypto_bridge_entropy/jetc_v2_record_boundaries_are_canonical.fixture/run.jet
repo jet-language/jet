@@ -1,6 +1,8 @@
-use core.crypto as crypto
-use core.crypto.expert as expert
-use core.files as files
+use {
+    crypto :: core.crypto
+    expert :: core.crypto.expert
+    files :: core.files
+}
 
 // tests/fixtures/crypto_bridge_entropy.rs:862-912. KNOWN-FAILING #4821.
 // Rust private jetc_v2_plain_len/record_shape_valid predicates ported verbatim
@@ -56,5 +58,5 @@ fn plain_length(body: Int) -> Int? {
         assert_eq(files.read_bytes(restored) ?? panic("restored"), plaintext)
         assert_eq(files.read_bytes(source) ?? panic("preserved"), plaintext)
     }
-    loop entry in files.read_dir(".") ?? panic("root") -> assert(!entry.name.starts_with(".jetc-"))
+    loop entry in files.readdir(".") ?? panic("root") -> assert(!entry.name.starts_with(".jetc-"))
 }

@@ -2,8 +2,10 @@
 // Foundation Item collection; Graph owns the schema/source helpers, Doctests
 // owns source_docs and Contracts owns checked enrichment. No textual contract
 // inference or second AST. project_root is the canonical loader root.
-use jet_foundation.[Item, Func, Span, Marker, type_name]
-use core.files.runtime.kernel_path_components as doc_os_path
+use {
+    jet_foundation.[Item, Func, Span, Marker, type_name]
+    doc_os_path :: core.files.runtime.kernel_path_components
+}
 
 // Rust collect_protocol_names: global leaf-name membership, including private
 // and generic nested modules, collected before any module's impl rows.
@@ -92,12 +94,13 @@ fn doc_collect_items(items: [Item], module_path: String, parent: String, inherit
                 doc_collect_items(definition.body, module_path, doc_qualified(parent, definition.name), public, file_path, display_path, source, project_root, protocol_names, &items_out, &impls_out)
             }
             .ModuleAlias(definition) -> doc_add_item(&items_out, "module_alias", definition.name, parent, module_path, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
-            .MarkerDecl(definition) -> doc_add_item(&items_out, "marker", definition.name, parent, module_path, true, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
             .FactDecl(definition) -> doc_add_item(&items_out, "fact", definition.name, parent, module_path, true, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
             .Const(definition) -> doc_add_item(&items_out, "const", definition.name, parent, module_path, false, false, definition.span, definition.name_span, [Marker]{}, file_path, display_path, source, project_root)
-            // These eight canonical Item variants intentionally emit no docs,
+            // These nine canonical Item variants intentionally emit no docs,
             // exactly as Rust's catchall. Explicit arms keep AST changes visible.
-            .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) -> {}
+            // A marker's docs are its struct's, so its companion declaration
+            // adds none.
+            .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .UserDerive(_) | .TemplateLoop(_) | .MarkerDecl(_) -> {}
         }
     }
 }

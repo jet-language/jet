@@ -7,8 +7,10 @@ package {
 // caller can take: fix the grant, skip, replace the file, or rebuild. This
 // example needs no built library; it drives the refusals that happen before
 // anything is mapped, inside one hermetic temporary directory.
-use core.mod as library
-use core.files as files
+use {
+    library :: core.mod
+    files :: core.files
+}
 
 fn outcome(path: String, roots: [String]) -> String {
     if library.load(path, grant: {read: roots}) == {

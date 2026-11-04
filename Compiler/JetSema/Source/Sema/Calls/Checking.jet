@@ -4,29 +4,38 @@
 // one-way conversion to TCallArg. It never materializes a Type-only default:
 // Registration must provide the original expression through
 // SemaCallDefaultValue first.
-use jet_foundation.[
-    AccessConvention,
-    BinderRef,
-    CallArg,
-    Diagnostic,
-    Expr,
-    FunctionDefaultRef,
-    CopyFact,
-    Span,
-    Symbol,
-    SymbolID,
-    SymbolKind,
-    TLetTy,
-    Type,
-    ast_empty_call_arg_flags,
-    diagnostic_registry_row,
-    expr_span,
-    symbol_id,
-    checked_symbol_local,
-    type_identity_equal,
-    type_name,
-]
-use jet_parser.[jfmt_expr_start]
+use {
+    jet_foundation.[
+        AccessConvention,
+        BinderRef,
+        CallArg,
+        DIAGNOSTIC_ERROR,
+        Diagnostic,
+        DiagnosticCryptoMisuseReason,
+        DiagnosticStructured,
+        Expr,
+        Func,
+        Lambda,
+        Stmt,
+        FunctionDefaultRef,
+        CopyFact,
+        Span,
+        Symbol,
+        SymbolID,
+        SymbolKind,
+        TLetTy,
+        Type,
+        ast_empty_call_arg_flags,
+        ast_visit_expr,
+        diagnostic_registry_row,
+        expr_span,
+        symbol_id,
+        checked_symbol_local,
+        type_identity_equal,
+        type_name,
+    ]
+    jet_parser.[jfmt_expr_start]
+}
 
 struct SemaCallTypedArguments {
     values: [TExpr]
@@ -294,6 +303,111 @@ fn sema_call_convention_diagnostic(callee: String, param: SemaCallParam, arg: Ca
     }
 }
 
+// Whether a callback argument at a C boundary is outside the C callback
+// subset, which accepts only function values. A name that is not a
+// registered function, and a module-qualified name, are left to the
+// ordinary argument check.
+fn sema_call_c_callback_unsafe(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    if argument == {
+        .Ident(name, _, _) -> {
+            function :: sema_http_route_find_function(environment, program, scopes, name) ?? return false
+            return !sema_call_foreign_thread_safe_func(function.declaration)
+        }
+        .Lambda(lambda, _) -> return !sema_call_foreign_thread_safe_lambda(lambda) || sema_call_lambda_captures_local(lambda, scopes)
+        .Field(base, _, _, _) -> {
+            if base == .Ident(name, _, _) {
+                index :: sema_scope_resolve_index(scopes, name) ?? return false
+                kind :: scopes.bindings[index].symbol.kind
+                return kind != SymbolKind.Module && kind != SymbolKind.Import
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
+// A C callback lambda is capture-free: no name it reads, other than its own
+// parameters and bindings, may be a local of the enclosing function.
+fn sema_call_lambda_captures_local(lambda: Lambda, scopes: SemaScopeTable) -> Bool {
+    inner := (loop parameter in lambda.params -> parameter.name)
+    names := [String]{}
+    if lambda.body == {
+        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_call_note_ident(&names, expression))
+        .Block(body) -> {
+            loop statement in body {
+                if statement == {
+                    .Val(binding) -> {
+                        &inner.push(binding.name)
+                        ast_visit_expr(binding.init, (expression: Expr) -> sema_call_note_ident(&names, expression))
+                    }
+                    .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_call_note_ident(&names, expression))
+                    .Return(value, _) -> {
+                        if value == .Val(returned) -> ast_visit_expr(returned, (expression: Expr) -> sema_call_note_ident(&names, expression))
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    loop name in names {
+        if inner.contains(name) -> next
+        index :: sema_scope_resolve_index(scopes, name) ?? next
+        kind :: scopes.bindings[index].symbol.kind
+        if kind == SymbolKind.Local || kind == SymbolKind.Parameter -> return true
+    }
+    false
+}
+
+fn sema_call_note_ident(names: &[String], expression: Expr) {
+    if expression == .Ident(name, _, _) -> &names.push(name)
+}
+
+fn sema_call_foreign_thread_safe_func(func: Func) -> Bool Never! {
+    if !func.is_pure || func.type_params.len() > 0 || func.pre.len() > 0 || func.post.len() > 0 -> return false
+    loop statement in func.body {
+        if !sema_call_foreign_thread_safe_stmt(statement) -> return false
+    }
+    true
+}
+
+fn sema_call_foreign_thread_safe_lambda(lambda: Lambda) -> Bool Never! {
+    if lambda.take_names.len() > 0 || lambda.meta.mut_captures.len() > 0 || lambda.meta.cloned_captures.len() > 0 -> return false
+    if lambda.body == {
+        .Expr(value) -> return sema_call_foreign_thread_safe_expr(value)
+        .Block(body) -> {
+            loop statement in body {
+                if !sema_call_foreign_thread_safe_stmt(statement) -> return false
+            }
+            return true
+        }
+    }
+}
+
+fn sema_call_foreign_thread_safe_stmt(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Return(value, _) -> return if value == .Val(returned) -> sema_call_foreign_thread_safe_expr(returned) else -> true
+        .Expr(value) -> return sema_call_foreign_thread_safe_expr(value)
+        .Val(binding) -> return sema_call_foreign_thread_safe_expr(binding.init)
+        else -> return false
+    }
+}
+
+fn sema_call_foreign_thread_safe_expr(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Ident(_, _, _) -> return true
+        .Unary(_, operand, _, _) -> return sema_call_foreign_thread_safe_expr(operand)
+        .Copy(value, _, _) -> return sema_call_foreign_thread_safe_expr(value)
+        .Binary(_, left, right, _, _) -> return sema_call_foreign_thread_safe_expr(left) && sema_call_foreign_thread_safe_expr(right)
+        .CompareChain(operands, _, _, _, _) -> {
+            loop operand in operands {
+                if !sema_call_foreign_thread_safe_expr(operand) -> return false
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
 fn sema_call_lambda_escape_policy(parameter: SemaCallParam, abi: SemaRegistrationCallableABI?) -> Bool? {
     if parameter.convention == AccessConvention.Move -> return Val(true)
     callable_abi :: abi ?? return None
@@ -363,6 +477,14 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         unit_parameter :: sema_expr_unit_fact(required, environment, program) != None
         argument_expected := Type?{None}
         if !self_typed && !borrowed_trait && !unit_parameter -> argument_expected = Val(required)
+        // A C callback is a pure, monomorphic function or a capture-free
+        // lambda whose body is safe on a foreign thread; anything else is
+        // E3203, reported before the argument's own type check.
+        if !default_in_owner && abi == .Val(callable_abi) {
+            if sema_registration_callback_boundary_param(callable_abi, required_declared) && sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) {
+                &diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+            }
+        }
         diagnostic_start :: diagnostics.len()
         checked_argument :: if {
             default_in_owner -> sema_call_check_owner_default(^owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, &tail_store, &context, span, &binder_keys, &diagnostics)
@@ -474,6 +596,7 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         &source_indices.push(args[index].flags.source_index ?? -1)
     }
     if !complete -> return None
+    sema_call_crypto_misuse(callee, params, args, values, slots, context, &diagnostics)
     &reference_starts.push(context.name_references.len())
     loop position in 0..<take_indices.len() {
         if sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, context) -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[take_indices[position]].expr))
@@ -521,6 +644,173 @@ fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
         return found
     }
     false
+}
+
+// One registered E2702 bound (D-CRYPTO-DIAG1=A): a parameter of a Core
+// crypto operation and the values the operation accepts there
+// (Core/Crypto/Crypto.jet, Expert.jet return CryptoError outside it).
+// `bytes`: the bound is on a byte list's length, not on an Int.
+struct SemaCryptoBound {
+    parameter: String
+    reason: DiagnosticCryptoMisuseReason
+    noun: String
+    bytes: Bool
+    low: Int
+    high: Int?
+}
+
+fn sema_crypto_int(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int?) -> SemaCryptoBound Never! {
+    SemaCryptoBound{parameter: parameter, reason: reason, noun: noun, bytes: false, low: low, high: high}
+}
+
+fn sema_crypto_bytes(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int) -> SemaCryptoBound Never! {
+    SemaCryptoBound{parameter: parameter, reason: reason, noun: noun, bytes: true, low: low, high: Val(high)}
+}
+
+fn sema_crypto_bounds(callee: String) -> [SemaCryptoBound] Never! {
+    output :: DiagnosticCryptoMisuseReason.OutputLength
+    material :: DiagnosticCryptoMisuseReason.InvalidLength
+    nonce :: DiagnosticCryptoMisuseReason.NonceLength
+    if callee == {
+        "core.crypto.hkdf_sha256" | "core.crypto.expert.hkdf_sha256_raw" -> [SemaCryptoBound]{sema_crypto_int("len", output, "output length", 0, Val(8160))}
+        "core.crypto.pbkdf2_hmac" -> [SemaCryptoBound]{
+            sema_crypto_int("iterations", DiagnosticCryptoMisuseReason.IterationCount, "iteration count", 1, None),
+            sema_crypto_int("key_len", output, "key length", 1, Val(67108864)),
+        }
+        "core.crypto.expert.argon2id" -> [SemaCryptoBound]{
+            sema_crypto_bytes("salt", DiagnosticCryptoMisuseReason.SaltLength, "salt", 8, 64),
+            sema_crypto_int("memory_kib", DiagnosticCryptoMisuseReason.MemoryCost, "memory cost in KiB", 8192, Val(262144)),
+            sema_crypto_int("iterations", DiagnosticCryptoMisuseReason.IterationCount, "iteration count", 1, Val(10)),
+            sema_crypto_int("lanes", DiagnosticCryptoMisuseReason.LaneCount, "lane count", 1, Val(8)),
+            sema_crypto_int("output_len", output, "output length", 16, Val(64)),
+        }
+        "core.crypto.expert.xchacha20poly1305_seal" | "core.crypto.expert.xchacha20poly1305_open" -> [SemaCryptoBound]{
+            sema_crypto_bytes("key", material, "key", 32, 32),
+            sema_crypto_bytes("nonce", nonce, "nonce", 24, 24),
+        }
+        "core.crypto.expert.aes256gcm_seal" | "core.crypto.expert.aes256gcm_open" -> [SemaCryptoBound]{
+            sema_crypto_bytes("key", material, "key", 32, 32),
+            sema_crypto_bytes("nonce", nonce, "nonce", 12, 12),
+        }
+        "core.crypto.expert.ed25519_sign" -> [SemaCryptoBound]{sema_crypto_bytes("secret", material, "secret key", 32, 32)}
+        "core.crypto.expert.ed25519_verify_strict" -> [SemaCryptoBound]{
+            sema_crypto_bytes("public", material, "public key", 32, 32),
+            sema_crypto_bytes("signature", material, "signature", 64, 64),
+        }
+        "core.crypto.expert.x25519_raw" -> [SemaCryptoBound]{
+            sema_crypto_bytes("secret_bytes", material, "secret key", 32, 32),
+            sema_crypto_bytes("public_bytes", material, "public key", 32, 32),
+        }
+        else -> [SemaCryptoBound]{}
+    }
+}
+
+// The compiler-known length of a byte-list argument: a written list literal
+// without spreads, or a value of a fixed-length list type.
+fn sema_crypto_known_length(value: Expr, ty: Type) -> Int? Never! {
+    if value == .ListLit(elements, _, _) {
+        loop element in elements {
+            if element == .Spread(_, _, _) -> return None
+        }
+        return Val(elements.len())
+    }
+    if ty == .FixedList(_, length) {
+        if length == .Literal(_, count) -> return Val(count)
+    }
+    None
+}
+
+fn sema_crypto_misuse(operation: String, bound: SemaCryptoBound, expected: String, actual: Int, span: Span) -> Diagnostic Never! {
+    unit :: if !bound.bytes -> "" else if actual == 1 -> " byte" else -> " bytes"
+    over :: if bound.bytes -> " bytes" else -> ""
+    article :: if bound.noun.starts_with("i") || bound.noun.starts_with("o") -> "an" else -> "a"
+    diagnostic := sema_error("E2702", span, "Crypto API misuse", "the {bound.noun} is {actual}{unit}, and `{operation}` takes {expected}{over}, so the call can only fail", "Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass {article} {bound.noun} of {expected}{over}")
+    diagnostic.structured = Val(DiagnosticStructured.CryptoMisuse{reason: bound.reason, operation: operation, expected: Val(expected), actual: Val(actual)})
+    diagnostic
+}
+
+// E2702: a call whose compiler-known argument is outside the bound its Core
+// crypto operation documents (sema_crypto_bounds) can only fail. It reads the
+// checked call, so an argument's own type error comes first, and a raw
+// `core.crypto.expert` call outside `#Unsafe` is its E0510 alone. A value only
+// known at run time is the operation's to check. The call stays checked, so
+// the effect solve still reads its arguments; its implicit propagation is not
+// reported again (sema_crypto_misused_call), and an error of any earlier
+// check drops every E2702 (sema_crypto_misuse_precedence).
+fn sema_call_crypto_misuse(callee: String, params: [SemaCallParam], args: [CallArg], values: [TExpr], slots: [Int], context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    if !callee.starts_with("core.crypto.") -> return
+    bounds :: sema_crypto_bounds(callee)
+    if bounds.len() == 0 -> return
+    if callee.starts_with("core.crypto.expert.") && context.unsafe_depth == 0 -> return
+    parts :: callee.split(".").to_list()
+    operation :: parts[parts.len() - 1].copy()
+    memory := Int?{None}
+    iterations := Int?{None}
+    memory_span := Span?{None}
+    refused := false
+    loop bound in bounds {
+        index :: sema_crypto_argument_index(params, slots, bound.parameter) ?? next
+        known :: if bound.bytes -> sema_crypto_known_length(args[index].expr, values[index].ty) else -> sema_call_compute_literal_int(args[index].expr)
+        actual :: known ?? next
+        if bound.parameter == "memory_kib" {
+            memory = Val(actual)
+            memory_span = Val(expr_span(args[index].expr))
+        }
+        if bound.parameter == "iterations" -> iterations = Val(actual)
+        expected := "at least {bound.low}"
+        if bound.high == .Val(high) {
+            if actual >= bound.low && actual <= high -> next
+            expected = if bound.low == high -> "exactly {high}" else -> "{bound.low}..{high}"
+        } else if actual >= bound.low {
+            next
+        }
+        &diagnostics.push(sema_crypto_misuse(operation, bound, expected, actual, expr_span(args[index].expr)))
+        refused = true
+    }
+    if refused || callee != "core.crypto.expert.argon2id" -> return
+    // Argon2id's joint work bound (spec.md, the expert surface): memory cost
+    // × iterations of at most 1048576, each within its own bound above.
+    if memory == .Val(kib) && iterations == .Val(passes) && memory_span == .Val(at) && kib * passes > 1048576 {
+        work :: sema_crypto_int("memory_kib", DiagnosticCryptoMisuseReason.MemoryTimeCost, "memory cost × iterations", 0, Val(1048576))
+        &diagnostics.push(sema_crypto_misuse(operation, work, "at most 1048576", kib * passes, at))
+    }
+}
+
+// Whether the call `source` already has its E2702 among `diagnostics`.
+fn sema_crypto_misused_call(source: Expr?, diagnostics: [Diagnostic]) -> Bool Never! {
+    call :: source ?? return false
+    span :: expr_span(call)
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E2702" -> next
+        if diagnostic.span == .Val(at) {
+            if at.start >= span.start && at.end <= span.end -> return true
+        }
+    }
+    false
+}
+
+// D-CRYPTO-DIAG1=A precedence: E2702 is considered only once syntax, types,
+// effects and every other check pass, so any other error drops each E2702.
+fn sema_crypto_misuse_precedence(diagnostics: &[Diagnostic]) Never! {
+    misused := false
+    other := false
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E2702" -> misused = true
+        else if diagnostic.severity == DIAGNOSTIC_ERROR -> other = true
+    }
+    if !misused || !other -> return
+    kept := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E2702" -> &kept.push(diagnostic)
+    }
+    diagnostics = kept
+}
+
+fn sema_crypto_argument_index(params: [SemaCallParam], slots: [Int], parameter: String) -> Int? Never! {
+    loop index in 0..<slots.len() {
+        if params[slots[index]].name == parameter -> return Val(index)
+    }
+    None
 }
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is

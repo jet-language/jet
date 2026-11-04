@@ -185,7 +185,7 @@ rung under the trait rung.
 ```jet
 #FX(!Net, !FS, !Exec, !Time, !Rand)     // file head: the whole module is
                                          // deterministic and offline
-use core.text as text
+use text :: core.text
 
 fn tokenize(s: String) -> [Token] { … }
 ```

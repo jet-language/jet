@@ -1,7 +1,9 @@
-use core.http as devserver_http
-use core.http.[HTTPError, HTTPRequest, Headers]
-use core.files as devserver_files
-use core.text as devserver_text
+use {
+    devserver_http :: core.http
+    core.http.[HTTPError, HTTPRequest, Headers]
+    devserver_files :: core.files
+    devserver_text :: core.text
+}
 
 MAX_REQUEST_BODY_BYTES :: 1048576
 MAX_REQUEST_LINE_BYTES :: 8192
@@ -31,9 +33,9 @@ struct DevserverRequest {
 
     // Complete buffered message adapter. Streaming BufRead acquisition remains
     // DC1/DC2/DC5's native bounded transport prerequisite, not an EOF read-all.
-    // #4431 gates Core's before-proportional-allocation body budget guarantee:
-    // current parse_request slices the body before checking its 1 MiB cap.
-    // Keep Core's canonical error; never repair this with a Tools parser fork.
+    // Core's parse_request checks the 1 MiB body cap before it slices the body
+    // and keeps that one slice as the wire bytes (#4428). Keep Core's canonical
+    // error; never repair a framing gap with a Tools parser fork.
     fn read(raw: [U8]) -> DevserverRequest? DevserverTransportError! {
         if raw.len() == 0 -> return Ok(None)
         parsed :: devserver_http.parse_request(raw) ?? return Err(.CoreHTTP{error: err})
@@ -45,8 +47,8 @@ struct DevserverRequest {
     // checked IR owner type. Keep the real carrier API, not a local mirror.
     fn from_http(parsed: HTTPRequest) -> DevserverRequest DevserverTransportError! {
         headers :: devserver_request_headers(parsed.headers)
-        // #4428: Core currently rejects non-UTF8 wire bodies before this point.
-        // The adapter never coerces bytes into text or invents a binary fallback.
+        // #4428: Core keeps the wire body as bytes, so a binary upload arrives
+        // byte for byte. The adapter never coerces bytes into text.
         body :: devserver_http.body_as_bytes(parsed.body)
         Ok(DevserverRequest{method: parsed.method, target: parsed.path, headers: headers, body: body})
     }

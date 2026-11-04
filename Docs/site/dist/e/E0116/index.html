@@ -36,23 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a value-producing call here, or discard the valueless call as a statement.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0116</code>: <code>tests/ui/bare_lambda_param_type_unknown.stderr</code>.</p>
-<pre class="diag">Error [E0801]: Tell me the type of `x`
-  --&gt; bare_lambda_param_type_unknown.jet:2:10
+<p>First UI snapshot mentioning <code>E0116</code>: <code>tests/ui/cffi_abi_function_value.stderr</code>.</p>
+<pre class="diag">Error [E3203]: `fn(I32) I32` is not a C-compatible type for a foreign function parameter or return.
+  --&gt; tests/ui/cffi_abi_function_value.jet:8:19
     |
-  2 |     f :: x -&gt; x + 1
-    |          ^
- Why: This lambda parameter has no type to go on
- Fix: Write `(x: Int) -&gt; …` (or whatever type fits)
-More: jet-lang.dev/e/E0801
+  8 |     callback :: c.ping
+    |                   ^^^^
+ Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
+ Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+More: jet-lang.dev/e/E3203
 
-Error [E0116]: `f` doesn&#39;t hand back a value
-  --&gt; bare_lambda_param_type_unknown.jet:3:11
+Error [E0116]: `callback` doesn&#39;t hand back a value
+  --&gt; tests/ui/cffi_abi_function_value.jet:9:11
     |
-  3 |     print(f(5))
-    |           ^
+  9 |     print(callback(1))
+    |           ^^^^^^^^
  Why: A call is a value only when its function declares a return type after `-&gt;`
- Fix: Inside an arm, wrap the call in `{ … }`; otherwise put `f` on its own line, or declare it as `fn f(…) -&gt; Type { … }`
+ Fix: Inside an arm, wrap the call in `{ … }`; otherwise put `callback` on its own line, or declare it as `fn callback(…) -&gt; Type { … }`
 More: jet-lang.dev/e/E0116
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

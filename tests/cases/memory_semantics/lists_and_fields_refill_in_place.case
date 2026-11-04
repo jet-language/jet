@@ -1,0 +1,31 @@
+# `xs = [T]{}` empties a List place that always holds its value in place
+# (an owned local or a write parameter), and `field = ""` / `field = [T]{}`
+# empties a String or List field in place. So a refill through `&[T]` or
+# `&Struct` reuses the buffers and the peak resident set does not grow, a
+# value another owner holds keeps its elements, and the emptied elements end
+# (by assignment and by `xs.clear()`). Checked on O0, O1, O2, the default
+# run and a built binary.
+fixture: lists_and_fields_refill_in_place.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+limit: time=120
+exit: 0
+stdout: = lists_and_fields_refill_in_place.out
+step: jet run --optimize=basic main.jet
+limit: time=120
+exit: 0
+stdout: = lists_and_fields_refill_in_place.out
+step: jet run --optimize=full main.jet
+limit: time=120
+exit: 0
+stdout: = lists_and_fields_refill_in_place.out
+step: jet run main.jet
+limit: time=120
+exit: 0
+stdout: = lists_and_fields_refill_in_place.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+limit: time=120
+exit: 0
+stdout: = lists_and_fields_refill_in_place.out

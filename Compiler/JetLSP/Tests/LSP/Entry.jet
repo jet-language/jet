@@ -1,14 +1,16 @@
-use jet_foundation.[Diagnostic, Span, TextEdit]
-use jet_foundation.Syntax
-use jet_semindex.[SemanticSymbolKind]
-use jet_lexer.[lex]
-use jet_driver.Loader.[find_manifest_root]
-use core.files.runtime.kernel_path_components.[OSPath]
-use core.files.runtime.kernel_path_components as entry_path
-use core.files.host.retained_descriptor as entry_fs
-use core.sys.env as entry_env
-use core.sys.process as entry_process
-use core.sync.atomic.[AtomicU64, Ordering]
+use {
+    jet_foundation.[Diagnostic, Span, TextEdit]
+    jet_foundation.Syntax
+    jet_semindex.[SemanticSymbolKind]
+    jet_lexer.[lex]
+    jet_driver.Loader.[find_manifest_root]
+    core.files.runtime.kernel_path_components.[OSPath]
+    entry_path :: core.files.runtime.kernel_path_components
+    entry_fs :: core.files.host.retained_descriptor
+    entry_env :: core.sys.env
+    entry_process :: core.sys.process
+    core.sync.atomic.[AtomicU64, Ordering]
+}
 
 // Rust: Source/LSP/mod.rs:46
 // GATE #4494: real atomic fetch_add, not a fabricated project identity.
@@ -125,13 +127,13 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
 
 // Rust: Source/LSP/mod.rs:252
 #Test("marker_hover_and_completion_show_one_canonical_parameter_list") {
-    src :: "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)\n#Needs(\"x\") fn work() {{}}\nfn run() {{\n    \n}}\n"
+    src :: "struct Needs {{\n    value: String\n\n    impl Marker {{\n        sites :: [.Function, .Method]\n        repeatable :: true\n    }}\n}}\n#Needs(\"x\") fn work() {{}}\nfn run() {{\n    \n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
     assert(diagnostics.iter().all((d) -> { d.severity != Severity.Error }), "marker declaration should check: {diagnostics:Debug}")
     db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
     (tokens, _) :: lex(src)
-    expected :: "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)"
-    name_offset :: (src.find("Needs(value") ?? panic("marker declaration")) + 1
+    expected :: "struct Needs {{ value: String, impl Marker {{ sites :: [.Function, .Method]; repeatable :: true }} }}"
+    name_offset :: (src.find("Needs {{") ?? panic("marker declaration")) + 1
     hover :: compute_hover(db, tokens, src, project.entry(), name_offset) ?? panic("marker hover")
     assert(hover.contains(expected), "{hover}")
     completion_offset :: (src.rfind("    \n") ?? panic("completion line")) + 4
@@ -174,7 +176,7 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     project :: TestProject.new()
     // GATE #4494: write the actual imported source, not checked facts.
     entry_fs.write(entry_path.join(project.root, entry_path.from_text("library.jet", project.root.platform)), "fn render(#Root value: Int) -> Int {{ return value }}\n".bytes()) ?? panic("write imported root-call library")
-    src :: "use \"./library\" as one\nfn run() {{ value :: 1\n    value.render()\n}}\n"
+    src :: "use one :: \"./library\"\nfn run() {{ value :: 1\n    value.render()\n}}\n"
     (diagnostics, maybe_bundle, facts) :: check_document_with_bundle(project.entry(), src)
     assert(diagnostics.iter().all((d) -> { d.severity != Severity.Error }), "imported root-call fixture should check: {diagnostics:Debug}")
     db :: build_symbol_db(maybe_bundle ?? panic("imported root-call bundle"), facts)

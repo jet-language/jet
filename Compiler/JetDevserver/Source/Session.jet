@@ -1,22 +1,24 @@
 // Transport-neutral resident development session, shared by Canvas and application views.
-use std.fs
-use std.sync.[Arc, Mutex]
-use std.sync.atomic.[AtomicU64, Ordering]
-use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
-use jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsJobPanelFact, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelProjection]
-use jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventSink, JetDevtoolsEventSinkGuard, JetDevtoolsFreshnessFact, JetDevtoolsSelection, JetDevtoolsSourceIdentityFact, JetDevtoolsTimeCursor, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_TEXT_BYTES, JET_DEVTOOLS_PROTOCOL, JetDevtoolsLifecycleState]
-use jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsCommandReceipt, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDatabaseExplainResult, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
-use jet_devserver.SessionRecording.[RecordingError, ReplayCursor, ReplayProjection, SessionCheckpoint, SessionEvent, SessionIdentity, SessionRecording, TruncationFacts]
-use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
-use jet_foundation.Dyn.[Dyn]
-use jet_foundation.JSON.[foundation_json_escape, parse_json, parse_json_with_limit]
-use jet_foundation.Persist.[PersistRejectReason]
-use jet_devserver.CapturePolicy.[CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact]
-use jet_devserver.WatchService.[PersistOutcome, SessionSnapshot, SessionBroker]
-use jet_foundation.[foundation_json_escape]
-use core.files.[OSPath]
-use core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsHostKind, JetDevtoolsPanelCapability]
-use core.encoding.[Dyn]
+use {
+    std.fs
+    std.sync.[Arc, Mutex]
+    std.sync.atomic.[AtomicU64, Ordering]
+    std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+    jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsJobPanelFact, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelCatalogError, JetDevtoolsPanelProjection]
+    jet_foundation.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsEventSink, JetDevtoolsEventSinkGuard, JetDevtoolsFreshnessFact, JetDevtoolsSelection, JetDevtoolsSourceIdentityFact, JetDevtoolsTimeCursor, JET_DEVTOOLS_MAX_ENVELOPE_BYTES, JET_DEVTOOLS_MAX_TEXT_BYTES, JET_DEVTOOLS_PROTOCOL, JetDevtoolsLifecycleState]
+    jet_foundation.DevtoolsControl.[JetDevtoolsCommand, JetDevtoolsCommandEnvelope, JetDevtoolsCommandReceipt, JetDevtoolsDatabaseExplainRequest, JetDevtoolsDatabaseExplainResult, JetDevtoolsDecodedEnvelope, JetDevtoolsGameControlRequest, JetDevtoolsProjectRebuildRequest, JET_DEVTOOLS_MAX_COMMANDS]
+    jet_devserver.SessionRecording.[RecordingError, ReplayCursor, ReplayProjection, SessionCheckpoint, SessionEvent, SessionIdentity, SessionRecording, TruncationFacts]
+    jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
+    jet_foundation.Dyn.[Dyn]
+    jet_foundation.JSON.[foundation_json_escape, parse_json, parse_json_with_limit]
+    jet_foundation.Persist.[PersistRejectReason]
+    jet_devserver.CapturePolicy.[CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact]
+    jet_devserver.WatchService.[PersistOutcome, SessionSnapshot, SessionBroker]
+    jet_foundation.[foundation_json_escape]
+    core.files.[OSPath]
+    core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsHostKind, JetDevtoolsPanelCapability]
+    core.encoding.[Dyn]
+}
 
 // Rust: crates/jet-devserver/src/Session.rs:43
 DEVTOOLS_TEXT_LIMIT :: comptime { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }

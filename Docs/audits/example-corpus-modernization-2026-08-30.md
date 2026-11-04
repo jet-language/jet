@@ -58,7 +58,7 @@ The local expert exception is occurrence-scoped in `tests/corpus_policy.tsv`; ot
 For a canonical filename operation, use one anchored pattern and one capture:
 
 ```jet
-use core.regex as re
+use re :: core.regex
 
 pattern :: Regex{"^IMG_(\d+)\.jpeg$"}
 photos :: entries

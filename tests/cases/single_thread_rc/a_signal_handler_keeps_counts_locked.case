@@ -1,0 +1,19 @@
+# Card #6477: a signal handler counts as a second thread. `process.on_signal`
+# reaches the runtime's `signal` import, so the program keeps every inline
+# reference count update lock-prefixed.
+fixture: a_signal_handler_keeps_counts_locked.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --release --debug-info=true --allow=Exec main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "6\n"
+when arch x86_64
+when tool objdump
+step: objdump -d --no-show-raw-insn --disassemble=main_run .jet/build/main
+exit: 0
+stdout: ~ "lock incq" # card #6477: the signal route is in the runtime's thread receipt
+stdout: !~ "\tincq" # card #6477: no count update is unlocked once a handler can run
+end when
+end when

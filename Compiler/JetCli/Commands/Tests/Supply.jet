@@ -1,12 +1,14 @@
 // CmdSupply::run_sbom uses the real checked Package and optional lock reader.
 // Exact deterministic SPDX/CycloneDX output stays plain under --json.
-use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[Diagnostic, diagnostic_from_registry]
-use jet_cli.[jet_cli_report_cwd, jet_cli_reports_status_json]
-use core.sys as cli_sys
-use core.files as cli_files
-use jet_cli_commands.[jet_cli_supply_sbom]
-use core.process as cli_process
+use {
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[Diagnostic, diagnostic_from_registry]
+    jet_cli.[jet_cli_report_cwd, jet_cli_reports_status_json]
+    cli_sys :: core.sys
+    cli_files :: core.files
+    jet_cli_commands.[jet_cli_supply_sbom]
+    cli_process :: core.process
+}
 
 #Test("supply") {
     root :: "{cli_sys.temp_dir()}/jet-cli-supply-{cli_process.current_pid()}"
@@ -42,7 +44,7 @@ use core.process as cli_process
         assert_eq(corrupt, absent)
         machine_error :: jet_cli_supply_sbom(project, [String]{}, false, true)
         expected_report :: diagnostic_from_registry("E1202", None, "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again")
-        assert_eq(machine_error.stdout, jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{expected_report}))
+        assert_eq(machine_error.stdout, jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{expected_report}))
         assert_eq(machine_error.stderr, "")
         assert_eq(machine_error.exit_code, JET_DRIVER_EXIT_USER_ERROR)
     }

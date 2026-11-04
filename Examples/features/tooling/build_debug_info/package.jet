@@ -1,7 +1,9 @@
 // #5005: two Bool build options. `debug_info` (stock true) says whether the
 // image carries DWARF debug info: with `false` it has no `.debug_*` section,
 // `.eh_frame` stays, and a crash report prints addresses instead of function
-// names and lines. `small` (stock false) favors a smaller binary: inlining
+// names and lines; with `split` (the stock `release` profile's) `jet build`
+// writes them to a side file beside the image, found by its build id.
+// `small` (stock false) favors a smaller binary: inlining
 // keeps to the O1 limits at any `optimize` level. The same rows are the flags
 // `--debug-info=false` and `--small` (a bare Bool flag is `true`) and the
 // `fn build` calls `b.debug_info(false)` and `b.small(true)`.

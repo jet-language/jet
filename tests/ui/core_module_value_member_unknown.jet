@@ -1,9 +1,11 @@
 // A value read of a name a Core module lacks is E1004 at the name. core.math's
 // constants are `PI` and friends, read without a call, so a lowercase
-// spelling suggests the constant; `core.math.X` through `use core as core`
+// spelling suggests the constant; `core.math.X` through `use core :: core`
 // reads the same module.
-use core as core
-use core.math as math
+use {
+    core :: core
+    math :: core.math
+}
 
 fn run() {
     print(math.pi)

@@ -10,7 +10,7 @@ Jet already has a ratified C++ boundary. `D-FFI-CPP1=A` specifies a Clang-based 
 
 That boundary is the useful incremental-adoption story: C++ remains C++ on the native side, while Jet consumes one checked C ABI projection. It is not a promise to import arbitrary C++ object layout or to guess an ABI from mangled names. The C++ ABI document explicitly says that platform vendors retain authority over their C++ ABI ([Itanium ABI, introduction](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#intro)).
 
-The first prototype binds a real class with a constructor, two overloads, a throwing method, a callback, and a threaded free function. Binding succeeds and produces the expected opaque-handle/fallible projection. Execution is currently blocked in all three requested native paths before the backend runs: the generated projection contains `Counter.{ value: value }`, while the current checker requires `Counter{…}`. This note records that exact blocker rather than claiming cross-tier output.
+The first prototype binds a real class with a constructor, two overloads, a throwing method, a callback, and a threaded free function. Binding succeeds and produces the expected opaque-handle/fallible projection. Execution is currently blocked in all three requested native paths before the backend runs: the generated projection contains `Counter.[ value: value ]`, while the current checker requires `Counter{…}`. This note records that exact blocker rather than claiming cross-tier output.
 
 ## Constraints Jet cannot weaken
 
@@ -180,7 +180,7 @@ scripts/agent/jet-env full jet build --profile=debug /home/nate/.cache/jet-test-
 All four exited 1 before executing the C++ call. The common diagnostic was:
 
 ```text
-Error [E0320]: Struct construction uses `Counter{…}`, not `Counter.{…}`
+Error [E0320]: Struct construction uses `Counter{…}`, not `Counter.[…]`
   --> /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet:21:1
     |
  21 |

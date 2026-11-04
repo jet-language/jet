@@ -2,15 +2,17 @@
 // plus every candidate-policy/proof/ordering branch. Real SemVer + Diagnostic.
 // Full closure proof retains #4313/#4403, #4303 borrowed trim ABI, and
 // #4414 String.split iterator next() returning None. No acceptance case removed.
-use jet_foundation.[Diagnostic]
-use jetpack_publication.[
-    PublicationDiagnosticError, PublicationResolveMode, PublicationSemVer, PublicationSolverCandidate,
-    PublicationVersionConstraint, PublicationVersionReq, publication_check_conflicts, publication_e2602,
-    publication_indent_proof, publication_parse_semver, publication_parse_version_req,
-    publication_resolve_mode_default, publication_resolve_mode_label, publication_select_compatible,
-    publication_select_highest_compatible, publication_semver_display, publication_solve_registry,
-    publication_version_req_display,
-]
+use {
+    jet_foundation.[Diagnostic]
+    jetpack_publication.[
+        PublicationDiagnosticError, PublicationResolveMode, PublicationSemVer, PublicationSolverCandidate,
+        PublicationVersionConstraint, PublicationVersionReq, publication_check_conflicts, publication_e2602,
+        publication_indent_proof, publication_parse_semver, publication_parse_version_req,
+        publication_resolve_mode_default, publication_resolve_mode_label, publication_select_compatible,
+        publication_select_highest_compatible, publication_semver_display, publication_solve_registry,
+        publication_version_req_display,
+    ]
+}
 
 fn publication_resolve_test_version(text: String) -> PublicationSemVer Never! {
     publication_parse_semver(text) ?? panic("invalid resolver fixture version: {text}")

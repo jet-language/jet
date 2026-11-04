@@ -1,88 +1,90 @@
 // Typed expression construction for Jet's source-level semantic model.
 // Registry-dependent paths retain their diagnostics until they have checked
 // metadata; no unchecked expression is lowered as if it were valid.
-use core.math as math
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    AccessConvention,
-    ArithmeticOperation,
-    ArithmeticPolicyFact,
-    BinOp,
-    BodyNode,
-    NodeKind,
-    TExprType,
-    StmtKind,
-    compiler_transfer_rows,
-    type_table_intern,
-    Call,
-    CallArg,
-    CallContractRow,
-    CtValue,
-    Diagnostic,
-    Dimension,
-    DimensionAxis,
-    Expr,
-    Func,
-    Item,
-    IntegerWidth,
-    CopyFact,
-    OperatorMarker,
-    ParamZone,
-    QuantityKind,
-    Span,
-    StrFormat,
-    StrPart,
-    Symbol,
-    SymbolID,
-    SymbolKind,
-    TBinaryOp,
-    TCanonicalField,
-    TComptimeValue,
-    TGenericParam,
-    TIntegerBounds,
-    TIntegerWidth,
-    TMethodRef,
-    TNumericOp,
-    TPatternPosition,
-    TStrFormat,
-    TTypedGoal,
-    TUnaryOp,
-    TUnitFormat,
-    TUnitRoundingMode,
-    TraitImplBlock,
-    Type,
-    TypeTupleField,
-    UnOp,
-    UnitFormat,
-    UnitRatio,
-    ast_comptime_value_type,
-    ast_empty_call_arg_flags,
-    compute_shape_dimensions,
-    core_module_export,
-    core_source_owns_type,
-    core_source_receiver_method,
-    core_source_receiver_method_routes,
-    dimension_display_name,
-    dimension_divide,
-    dimension_identity,
-    dimension_multiply,
-    expr_source_start,
-    expr_span,
-    symbol_id,
-    checked_symbol_local,
-    type_identity_equal,
-    type_name,
-    CORE_SOURCE_OWNED_ROWS,
-    Lambda,
-    LambdaBody,
-    LambdaParam,
-    NamedSpan,
-    Pattern,
-    PlaceAccess,
-    TTryConvert,
-    ast_empty_lambda_meta,
-    core_module_has_type,
-]
+use {
+    math :: core.math
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        AccessConvention,
+        ArithmeticOperation,
+        ArithmeticPolicyFact,
+        BinOp,
+        BodyNode,
+        NodeKind,
+        TExprType,
+        StmtKind,
+        compiler_transfer_rows,
+        type_table_intern,
+        Call,
+        CallArg,
+        CallContractRow,
+        CtValue,
+        Diagnostic,
+        Dimension,
+        DimensionAxis,
+        Expr,
+        Func,
+        Item,
+        IntegerWidth,
+        CopyFact,
+        OperatorMarker,
+        ParamZone,
+        QuantityKind,
+        Span,
+        StrFormat,
+        StrPart,
+        Symbol,
+        SymbolID,
+        SymbolKind,
+        TBinaryOp,
+        TCanonicalField,
+        TComptimeValue,
+        TGenericParam,
+        TIntegerBounds,
+        TIntegerWidth,
+        TMethodRef,
+        TNumericOp,
+        TPatternPosition,
+        TStrFormat,
+        TTypedGoal,
+        TUnaryOp,
+        TUnitFormat,
+        TUnitRoundingMode,
+        TraitImplBlock,
+        Type,
+        TypeTupleField,
+        UnOp,
+        UnitFormat,
+        UnitRatio,
+        ast_comptime_value_type,
+        ast_empty_call_arg_flags,
+        compute_shape_dimensions,
+        core_module_export,
+        core_source_owns_type,
+        core_source_receiver_method,
+        core_source_receiver_method_routes,
+        dimension_display_name,
+        dimension_divide,
+        dimension_identity,
+        dimension_multiply,
+        expr_source_start,
+        expr_span,
+        symbol_id,
+        checked_symbol_local,
+        type_identity_equal,
+        type_name,
+        CORE_SOURCE_OWNED_ROWS,
+        Lambda,
+        LambdaBody,
+        LambdaParam,
+        NamedSpan,
+        Pattern,
+        PlaceAccess,
+        TTryConvert,
+        ast_empty_lambda_meta,
+        core_module_has_type,
+    ]
+}
 
 // A checked node of `kind`. The kind moves in: callers build it as a literal
 // around their checked children, and copying it copied the whole subtree.
@@ -2564,6 +2566,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         discarded: false,
         foreign_effect_root: foreign_effect_root,
         unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
+        replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
     })
     // Demand: a codec call requires the generated codec it reaches, and a
     // call of a demand-checked derived method requires its body.
@@ -2605,6 +2608,27 @@ fn sema_expr_call_foreign_without_undo(program: SemaProgramTables, callee: Symbo
             .Function(module_index, index) -> return graph.modules[module_index].functions[index].abi.is_extern && graph.modules[module_index].functions[index].declaration.undo == None
             .Foreign(module_index, index) -> return graph.modules[module_index].foreign_functions[index].declaration.undo == None
             else -> return false
+        }
+    }
+    false
+}
+
+// Whether renaming this call to its declared callee's `#Deprecated(use:)`
+// replacement would fail to call it: at the call, the replacement's name
+// resolves to a local or parameter, or to nothing (a function of that name,
+// or an import of it, is the rename).
+fn sema_expr_call_replacement_hidden(program: SemaProgramTables, scopes: SemaScopeTable, callee: SymbolID?, span: Span) -> Bool {
+    symbol :: callee ?? return false
+    if program.registration_graph == .Val(graph) {
+        row :: sema_registration_callable_row(graph, symbol.key) ?? return false
+        if row == .Function(module_index, index) {
+            if graph.modules[module_index].functions[index].declaration.markers.len() == 0 -> return false
+            payload :: sema_lifecycle_marker(graph.modules[module_index].functions[index].declaration.markers, "") ?? return false
+            parts :: payload.replacement.split(".").to_list()
+            leaf :: parts[parts.len() - 1].trim()
+            binding :: sema_scope_resolve_index_at(scopes, leaf, span) ?? return true
+            kind :: scopes.bindings[binding].symbol.kind
+            return kind == SymbolKind.Local || kind == SymbolKind.Parameter
         }
     }
     false
@@ -3583,6 +3607,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if explicit_unit.handled -> return explicit_unit.value
     enum_variant := sema_expression_enum_variant_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if enum_variant.handled -> return enum_variant.value
+    receipt_attach := sema_receipt_try_attach(receiver, method, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if receipt_attach.handled -> return receipt_attach.value
     pre_receiver := sema_expr_try_method_static_routes(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if pre_receiver.handled -> return pre_receiver.value
     hardware_pre_receiver := sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3652,6 +3678,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         return sema_expr_check_declared_method(receiver, receiver_value, method, routed_method, method_span, owner_type_args, type_args, rule, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, &diagnostics) -> return None
+    if method == "routes" -> sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, environment, program, &diagnostics)
+    if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" -> sema_call_app_browser_feature(receiver_value, method, method_span, environment, program, context.function_name, &diagnostics)
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
@@ -3811,6 +3839,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
                 }
                 &context.name_references.push(SemaNameReferenceFact{span: span, symbol: prepared_binding.symbol, kind: "local"})
                 if !sema_ownership_note_reference(&state, name, span, scopes, SemaOwnershipReferenceKind.Read) -> return None
+                if sema_compiler_host_value_held(prepared_ty) == .Val(held) -> sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, &diagnostics)
                 prepared :: sema_fact_prepared_expr(known, prepared_ty, span, environment, program, &context) ?? return None
                 return sema_expr_expected_owned(^prepared, expected, environment, program, &diagnostics)
             }
@@ -3897,6 +3926,11 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
     }
     ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
     kind :: scopes.bindings[index].symbol.kind
+    // A constant read in a body is known while compiling; runtime code may
+    // read it unless it holds a compiler value.
+    if kind == SymbolKind.Constant && environment.function_name != "" {
+        if sema_compiler_host_value_held(ty) == .Val(held) -> sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, &diagnostics)
+    }
     result := TExpr?{None}
     if kind == SymbolKind.Local || kind == SymbolKind.Parameter {
         local := checked_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id, ty)
@@ -3914,25 +3948,11 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
 }
 
 // A function's symbol type spells its parameter and result types as its
-// declaration writes them; a written trait name there is a trait value, as
-// in the function's own checked signature, so the function value carries it
-// as one.
+// declaration writes them. The function value carries them resolved, as in
+// the function's own checked signature: a written trait name is a trait
+// value, and a nominal type is its declared identity.
 fn sema_function_value_type(program: SemaProgramTables, ty: Type, module_name: String) -> Type Never! {
-    if program.registration_graph == .Val(graph) {
-        names := [String]{}
-        sema_public_failure_collect_named(ty, &names)
-        found := [String]{}
-        actuals := [Type]{}
-        loop name in names {
-            if found.contains(name) -> next
-            resolved :: sema_type_resolve_declared(graph, Type.Named{name: name}, module_name)
-            if resolved == .TraitObject(_) {
-                &found.push(name)
-                &actuals.push(resolved)
-            }
-        }
-        if found.len() > 0 -> return sema_inference_substitute_type(ty, found, actuals)
-    }
+    if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared(graph, ty, module_name)
     ty.copy()
 }
 
@@ -4435,6 +4455,19 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
                 &diagnostics.push(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(value_ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(value_ty)}?` if it can be missing"))
                 return None
             }
+            // An optional compared with `None` is the presence test
+            // (S31 `x == None`, D-FLOWTYPE1 `x != None`): it reads the
+            // tag only, so the payload needs no Equatable.
+            if sema_expr_unwrap_tag(value_ty) == .Option(_) {
+                none_right :: sema_expression_absent_none(right)
+                none_span :: if none_right -> expr_span(right) else -> expr_span(left)
+                subject :: if none_right -> checked_lhs else -> checked_rhs
+                checked_pattern := sema_check_pattern(subject, Pattern.Absent{span: none_span}, TPatternPosition.Arm, false, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                checked :: checked_pattern.checked ?? return None
+                absent :: sema_tree_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span)
+                if op == BinOp.Eq -> return sema_expr_expected_owned(^absent, expected, environment, program, &diagnostics)
+                return sema_expr_expected_owned(sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: absent}, span), expected, environment, program, &diagnostics)
+            }
         }
     }
     // `x == 5` holds only when the optional `x` holds 5, and
@@ -4774,9 +4807,11 @@ fn sema_expr_check_shared_identifier(name: String, span: Span, expected: Type?, 
     sema_expr_check_copy_typed(checked, span, expected, environment, program, &context, &diagnostics, sema_expr_copy_string_view(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, &scopes), true)
 }
 
+// A raw pointer operation is a low-level memory operation: outside an
+// audited region it is E3101 (E3103 is the call of an `#Unsafe fn`).
 fn sema_expr_require_unsafe(operation: String, span: Span, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if context.unsafe_depth > 0 -> return true
-    &diagnostics.push(sema_error("E3103", span, "`{operation}` requires an `#Unsafe` region", "raw pointer operations can violate memory safety and must be explicitly audited", "put this operation inside `#Unsafe(\"reason\") {{ … }}`"))
+    &diagnostics.push(sema_error("E3101", span, "`{operation}` can only run inside an `#Unsafe` block", "this operation can violate memory safety, so it must sit in an audited region", "wrap it: #Unsafe(\"why this is safe\") {{ … }}"))
     false
 }
 
@@ -5099,42 +5134,10 @@ fn sema_expr_check_method_call_expr(receiver: Expr, method: String, method_span:
         receiver_last_use = !sema_ownership_name_live_after(name, &tail_store, &context)
     }
     sema_receiver_mark_finish(&state, unmarked, scopes, receiver_last_use, context.compiler_generated, &diagnostics)
-    if checked == .Val(value) {
-        if sema_expr_process_args_view(receiver, method, args, value.ty, environment, program, scopes) -> &diagnostics.push(sema_lint("L0515", method_span, "the direct process.argv().skip(1) projection repeats the process argument view", "process.args() owns the program argument view after argv[0], so the boundary stays in one Core API", "replace process.argv().skip(1) with process.args()"))
-    }
     if written_place {
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, &scopes, state, &diagnostics)
     }
     checked
-}
-
-// L0515 (Rust CheckerInfer/expr.rs process_args_view_edit): `process.argv().skip(1)`
-// on the `core.process` import spelled `process` restates `process.args()`.
-fn sema_expr_process_args_view(receiver: Expr, method: String, args: [CallArg], ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
-    if method != "skip" || args.len() != 1 || args[0].label != None || args[0].spread -> return false
-    one :: if sema_registration_cli_without_parens(args[0].expr) == {
-        .Int(value, _, _, _, _) -> value == 1
-        else -> false
-    }
-    if !one -> return false
-    strings :: if ty == {
-        .Apply(name, type_args) -> name == "Iter" && type_args.len() == 1 && type_args[0] == Type.String
-        .List(element) -> element == Type.String
-        else -> false
-    }
-    if !strings -> return false
-    argv_call := sema_registration_cli_without_parens(receiver)
-    if argv_call == .Try(inner, _, _, try_context, _) {
-        if try_context == None -> argv_call = sema_registration_cli_without_parens(inner)
-    }
-    if argv_call == .MethodCall(argv_receiver, argv_method, _, _, _, argv_args, _) {
-        if argv_method != "argv" || argv_args.len() != 0 -> return false
-        if argv_receiver == .Ident(alias, _, _) {
-            if alias != "process" || !sema_expr_core_module_alias_visible(alias, scopes) -> return false
-            return sema_call_core_import_module(environment, program, alias) == (Val("core.process"))
-        }
-    }
-    false
 }
 
 fn sema_expr_check_list_literal(elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

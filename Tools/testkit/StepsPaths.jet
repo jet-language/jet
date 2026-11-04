@@ -1,10 +1,10 @@
-use core.files as files
+use files :: core.files
 
 // Destructive operations stay under work or the kit-owned scratch/tmp directory,
 // never the repository root or arbitrary scratch paths.
 fn kit_steps_relative_path(path: String) -> Bool {
     if path == "" || path.contains("{{root}}") || path.contains("{{scratch}}") -> return false
-    relative := path.replace("{{work}}", ".").replace("{{tmp}}", ".").replace("{{sys:dll-suffix}}", "suffix")
+    relative := path.replace("{{work}}", ".").replace("{{tmp}}", ".").replace("{{sys:dll-suffix}}", "suffix").replace("{{sys:exe-suffix}}", "")
     loop prefix in ["{{cap:", "{{tool:", "{{pid:"] {
         loop {
             start :: kit_steps_byte_index(relative, prefix) ?? break

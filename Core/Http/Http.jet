@@ -9,11 +9,13 @@ package {
     }
 }
 
-use core as core
-use core.http.client as provider
-use core.net.url as http_url
-use core.encoding.json as json_codec
-use core.files.[FileWriter]
+use {
+    core :: core
+    provider :: core.http.client
+    http_url :: core.net.url
+    json_codec :: core.encoding.json
+    core.files.[FileWriter]
+}
 C_MAX_BODY_BYTES :: 1048576
 C_MAX_HEADER_BYTES :: 32768
 C_MAX_HEADER_LINE_BYTES :: 8192
@@ -99,6 +101,14 @@ C_BODY_CHUNK_BYTES :: 65536
 // first `text`/`json` read takes it and later reads fail with BodyConsumed.
 struct __HTTPBodyCell { taken: Bool }
 
+// A server request carries its connection's plain TCP socket (-1 over TLS),
+// shared by every copy, so core.net.ws.upgrade can take the connection over.
+// An upgraded connection gets no HTTP response from the server.
+struct __HTTPUpgradeCell {
+    fd: Int
+    upgraded: Bool
+}
+
 /// One HTTP request: what a client builds and sends, and what a server
 /// parses and routes. The method, path, body and headers are public facts;
 /// the rest is the client's send configuration and the server's route state.
@@ -127,6 +137,7 @@ struct HTTPRequest {
     __form: [Header]{[]}
     __multipart: [Header]{[]}
     __cell: Shared<__HTTPBodyCell>?{None}
+    __upgrade: Shared<__HTTPUpgradeCell>?{None}
 }
 
 /// One HTTP response: the status, body and headers, plus the client's
@@ -241,6 +252,25 @@ fn __take_body(cell: Shared<__HTTPBodyCell>?, failure: HTTPError?) HTTPError! {
     }
     if failure == .Val(error) -> return Err(error)
     Ok(())
+}
+
+fn __upgrade_cell(fd: Int) -> Shared<__HTTPUpgradeCell> Never! {
+    shared __HTTPUpgradeCell{fd: fd, upgraded: false}
+}
+
+fn __upgraded(cell: Shared<__HTTPUpgradeCell>) -> Bool Never! {
+    guard :: cell.guard_read()
+    guard.value.upgraded
+}
+
+// The request's plain socket, taken at most once; None for a client request,
+// a TLS connection or a connection already upgraded.
+fn __upgrade_claim(request: HTTPRequest) -> Int? Never! {
+    cell :: request.__upgrade ?? return None
+    guard := cell.guard_edit()
+    if guard.value.upgraded || guard.value.fd < 0 -> return None
+    guard.value.upgraded = true
+    Val(guard.value.fd)
 }
 
 fn __request(method: String, url: String) -> HTTPRequest Never! {
@@ -1003,11 +1033,10 @@ fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
         value :: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
         &fields.fields.push(Header{name: name, value: trim(value)})
     }
+    // The body stays the wire bytes, sliced once after its length check
+    // (#4428). A read as text decodes it then, so a binary upload parses.
     body := Body.Empty
-    if body_raw.len() > 0 {
-        body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
-        body = Body.Text(body_text)
-    }
+    if body_raw.len() > 0 -> body = Body.Bytes(^body_raw)
     Ok(__server_request(method_text(method_parse(parts[0])), parts[1], body, fields))
 }
 

@@ -1,18 +1,20 @@
 // The production request is not cloneable (its optional TraceSink is a trait
 // object). These real parse/query calls must transfer that carrier, even when
 // authorization rejects the entry before checking. No manufactured success.
-use jet_driver.[
-    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest,
-    JetDriverCompilerQueries, JetDriverCoreSource, JetDriverHostFacts,
-    JetDriverStage, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
-    jet_driver_compiler_queries_documents, jet_driver_compiler_queries_new,
-    jet_driver_compiler_queries_stats,
-]
-use jet_eval.[
-    JetCompilerServicesSourceInput, jet_eval_compiler_services_parse, jet_eval_default_config,
-]
-use jet_foundation.[compiler_threads_single]
-use jet_sema.[sema_has_error_since]
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest,
+        JetDriverCompilerQueries, JetDriverCoreSource, JetDriverHostFacts,
+        JetDriverStage, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
+        jet_driver_compiler_queries_documents, jet_driver_compiler_queries_new,
+        jet_driver_compiler_queries_stats,
+    ]
+    jet_eval.[
+        JetCompilerServicesSourceInput, jet_eval_compiler_services_parse, jet_eval_default_config,
+    ]
+    jet_foundation.[compiler_threads_single]
+    jet_sema.[sema_has_error_since]
+}
 
 fn query_ownership_request() -> JetDriverCompileRequest Never! {
     JetDriverCompileRequest{

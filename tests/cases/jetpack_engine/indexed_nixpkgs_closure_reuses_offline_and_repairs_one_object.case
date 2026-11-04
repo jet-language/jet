@@ -3,7 +3,8 @@
 # PENDING-GRAMMAR(batch-four): await:file, capture:text, quoted JSON members,
 # cap subject, scoped .split capture, mkdir/chmod. All original assertions remain.
 fixture: indexed-nix.fixture
-artifact: peer
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
 env: JETPACK_ROOT={work}/root
 env: PATH=/usr/bin
 env: JETPACK_DEBUG_NIX_CACHE=1
@@ -51,8 +52,8 @@ json: stdout doc $.explain.graph.direct_dependencies[0].digest = "{cap:library_d
 json: stdout doc $.explain.graph.dependencies has {"digest":"{cap:runtime_digest}"} # original dependency digest membership
 step: jetpack audit --no-color
 exit: 0
-capture: refs stdout.split("{cap:package_id}", 1) after "Closure:" trim
-cap:refs: first-line = "{cap:library_digest}" # original first reference line
+capture: refs stdout.split("{cap:package_id}", 1) after "Closure:" trim # the package's closure references follow its Closure: label
+cap:refs.line(0): = "{cap:library_digest}" # original first reference line
 step: jetpack explain ripgrep-lib-1.0@nixpkgs --json
 exit: 0
 json: stdout doc $.explain.graph.direct_dependencies #= 1

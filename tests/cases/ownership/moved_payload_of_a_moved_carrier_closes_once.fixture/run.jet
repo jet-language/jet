@@ -1,0 +1,78 @@
+// `^x` of a payload bound from a moved Option or Result whose payload has no
+// clone (a List of values holding file handles) moves the payload out of the
+// carrier: each item closes once, where its new holder ends it, and a carrier
+// whose payload stays is closed once when it ends (#6528).
+use files :: core.files
+
+struct Lock {
+    owner: files.FileLock
+    marker: files.FileReader
+}
+
+struct Tag { name: String }
+impl Tag.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Held {
+    name: String
+    lock: Lock?
+    tag: Tag
+}
+
+#Error
+enum Failure {
+    Missing
+}
+
+fn held(name: String) -> Held Never! {
+    Held{name: name, lock: None, tag: Tag{name: name}}
+}
+
+fn keep(^items: [Held]) -> Int {
+    count :: items.len()
+    loop item in ^items {
+        print("keep {item.name}")
+    }
+    count
+}
+
+// The Option's payload moves on in one arm of a valued match.
+fn pick(^warm: [Held]?) -> Int {
+    count :: if ^warm == {
+        .Val(list) -> keep(^list)
+        .None -> 0
+    }
+    print("picked {count}")
+    count
+}
+
+// The payload moves on only on one path; on the other the carrier keeps it.
+fn maybe(^warm: [Held]?, moving: Bool) -> Int {
+    if ^warm == {
+        .Val(list) -> if moving -> return keep(^list)
+        .None -> {}
+    }
+    print("left {moving}")
+    0
+}
+
+// A Result's Ok payload moves on the same way.
+fn settle(^got: [Held] Failure!) -> Int {
+    if ^got == {
+        .Ok(list) -> return keep(^list)
+        .Err(_) -> {}
+    }
+    print("failed")
+    0
+}
+
+fn run() {
+    print("pick {pick(Val([held("a"), held("b")]))}")
+    print("pick {pick(None)}")
+    print("maybe {maybe(Val([held("c")]), true)}")
+    print("maybe {maybe(Val([held("d")]), false)}")
+    print("settle {settle(Ok([held("e")]))}")
+    print("settle {settle(Err(Failure.Missing))}")
+    print("end")
+}

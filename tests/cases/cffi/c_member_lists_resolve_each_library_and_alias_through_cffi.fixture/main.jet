@@ -1,4 +1,7 @@
-use c.[c as libc, m]
+use {
+    c.[m]
+    libc :: c.c
+}
 
 #Import module c.c {
     fn clamp(left: Int, middle: Int, right: Int) -> Int = "libc_clamp"
@@ -8,13 +11,13 @@ use c.[c as libc, m]
 }
 
 module c_scope {
-    use c.[c as lib]
+    use lib :: c.c
     fn call() -> Int {
         return lib.clamp(1, 2, 3)
     }
 }
 module m_scope {
-    use c.[m as lib]
+    use lib :: c.m
     fn call() -> Int {
         return lib.version(1, 2, 3)
     }

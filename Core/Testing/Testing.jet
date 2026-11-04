@@ -8,14 +8,16 @@ package {
         testing: .Library{ entry: testing }
     }
 }
-use core as core
-use core.files as files
-use core.sys as sys
-use core.math.random as random
-use core.time.[Clock]
-use core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot]
-use core.crypto as crypto
-use core.encoding.json as json
+use {
+    core :: core
+    files :: core.files
+    sys :: core.sys
+    random :: core.math.random
+    core.time.[Clock]
+    core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot]
+    crypto :: core.crypto
+    json :: core.encoding.json
+}
 
 // A second spelling, never a second owner.
 pub use core.math.random.[RNG]
@@ -376,9 +378,9 @@ fn fake_city(state: &U64, locale: Int) -> String Never! {
 /// The Prelude `Test` carrying the current harness iteration and result.
 fn test_suite() -> Test Never! { __suite_snapshot() }
 
-// D-TEST-STRATEGY1=A (Docs/spec/syntax-decisions.md:3900-3912): the public
-// history records project the Foundation history data. Identities are logical
-// numbers, never host pointers.
+// The public history records project the Foundation history data, not
+// another wire format. Identities are logical numbers, never host
+// pointers.
 struct HandleID {
     value: Int
 }
@@ -452,8 +454,8 @@ enum HistoryValue {
     Redacted(String)
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3907-3909): the four retained
-// precondition kinds.
+// The four retained precondition kinds an operation can wait on: a live
+// handle, a handle in a named state, a completed task, an available event.
 enum HistoryPrecondition {
     HandleLive(HandleID)
     HandleState(handle: HandleID, state: String)
@@ -461,7 +463,7 @@ enum HistoryPrecondition {
     EventAvailable(EventID)
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3905-3906).
+// One operation of a history case, with the handles it creates and consumes.
 struct HistoryOperation {
     index: Int
     name: String
@@ -482,7 +484,7 @@ struct HistoryScheduleChoice {
     choice: String
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3904).
+// One history case: its id, its seed, its operations and its schedule.
 struct HistoryCase {
     case_id: String
     seed: Int
@@ -490,14 +492,14 @@ struct HistoryCase {
     schedule: [HistoryScheduleChoice]
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3902-3903).
+// A history case together with the commands it decodes to.
 struct TypedHistoryCase<Command> {
     case: HistoryCase
     commands: [Command]
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3910-3912). The `cases` argument
-// of `histories` stays the case bound.
+// The campaign bounds a strategy works within. The `cases` argument of
+// `histories` stays the case bound.
 struct HistoryBounds {
     max_steps: Int
     max_resources: Int
@@ -505,15 +507,15 @@ struct HistoryBounds {
     max_discarded_cases: Int
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3912).
+// The generation weight of one named operation.
 struct HistoryDistribution {
     operation: String
     weight: Int
 }
 
-// D-TEST-STRATEGY1=A (syntax-decisions.md:3875-3898): one immutable value with
-// all five fields. `generate` receives the HistoryRNG, `case_index` and
-// `max_steps`; `rebuild` and `valid` see the canonical case.
+// An explicit strategy: one immutable value with all five fields. `generate`
+// receives the HistoryRNG, `case_index` and `max_steps`; `rebuild` and
+// `valid` see the canonical case.
 struct HistoryStrategy<Command> {
     generate: fn(HistoryRNG, Int, Int) -> TypedHistoryCase<Command>?
     rebuild: fn(HistoryCase) -> TypedHistoryCase<Command>?

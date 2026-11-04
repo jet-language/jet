@@ -1,107 +1,115 @@
 // In-memory source closure loader. Filesystem authority and provider access stay
 // with their adapters; this stage only resolves the checked source collection.
-use jet_foundation.[
-    CORE_CALLS,
-    CORE_MODULE_EXPORTS,
-    CORE_BARE_SOURCE_MODULES,
-    DIAGNOSTIC_ERROR,
-    DIAGNOSTIC_LINT,
-    CompilerThreads,
-    DeriveBodyItem,
-    Diagnostic,
-    Func,
-    ImportDecl,
-    ImportKind,
-    InlineVersion,
-    Item,
-    AllocatorPolicy,
-    ByteSize,
-    RuntimeLayer,
-    SourceFile,
-    NamedSpan,
-    NameTable,
-    Param,
-    ParseResult,
-    PolicyDeclaration,
-    Program,
-    Span,
-    ast_program,
-    compiler_threads_admit,
-    compiler_threads_failure_text,
-    compiler_threads_heaviest_first,
-    compiler_threads_partition,
-    compiler_threads_single,
-    core_bare_source_module,
-    core_module_export,
-    core_module_has_member,
-    diagnostic_with_source_path,
-    jet_ring_parse_manifest_layer,
-    source_file_id,
-    name_count,
-    name_find,
-    name_index,
-    name_intern,
-    name_table,
-    ImportedItem,
-]
-use jet_lexer.[
-    STRING_PART_INTERPOLATION,
-    TOKEN_BLOCK_COMMENT,
-    TOKEN_COLON,
-    TOKEN_COMMA,
-    TOKEN_DOT,
-    TOKEN_EOF,
-    TOKEN_EQ,
-    TOKEN_HASH,
-    TOKEN_IDENT,
-    TOKEN_LBRACE,
-    TOKEN_LBRACKET,
-    TOKEN_LINE_COMMENT,
-    TOKEN_LPAREN,
-    TOKEN_RAW_STRING,
-    TOKEN_RBRACE,
-    TOKEN_RBRACKET,
-    TOKEN_RPAREN,
-    TOKEN_QUESTION_DOT,
-    TOKEN_SEMI,
-    TOKEN_STRING,
-    Lexed,
-    Token,
-    TokenTables,
-    lex,
-    lex_config,
-    lex_generated_threads,
-    lex_threads,
-    lexer_chunk_cut,
-    token_decoded,
-    token_string_parts,
-]
-use jet_parser.[
-    parse_lexed_with_source,
-    parse_lexed_with_source_threads,
-    parser_line_starts,
-]
-use jet_sema.[
-    SemaRegistrationImportEdge,
-    SemaSourceOrigin,
-    SemaSourceSegment,
-    sema_cli_entry_expand,
-    sema_cli_entry_expand_imported,
-    sema_cli_entry_module_needed,
-    sema_cli_entry_pending,
-    sema_effect_builtin_leaf_diagnostic,
-    sema_effect_parse_name,
-    sema_effect_root,
-    sema_registration_unit_family_type_names,
-    sema_source_words,
-    sema_source_wanted_words,
-    sema_unknown_module_alias,
-]
-use jet_pkg_model.[
-    PackageGrant, PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
-    pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
-    pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
-]
+use {
+    jet_foundation.[
+        AppRouteFile,
+        AppRouteRoot,
+        Expr,
+        ast_visit_body,
+        CORE_CALLS,
+        CORE_MODULE_EXPORTS,
+        CORE_BARE_SOURCE_MODULES,
+        DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
+        CompilerThreads,
+        DeriveBodyItem,
+        Diagnostic,
+        Func,
+        ImportDecl,
+        ImportKind,
+        InlineVersion,
+        Item,
+        AllocatorPolicy,
+        ByteSize,
+        RuntimeLayer,
+        SourceFile,
+        NamedSpan,
+        NameTable,
+        Param,
+        ParseResult,
+        PolicyDeclaration,
+        Program,
+        Span,
+        ast_program,
+        compiler_threads_admit,
+        compiler_threads_failure_text,
+        compiler_threads_heaviest_first,
+        compiler_threads_partition,
+        compiler_threads_single,
+        core_bare_source_module,
+        core_module_export,
+        core_module_has_member,
+        core_module_has_type,
+        diagnostic_with_source_path,
+        jet_ring_parse_manifest_layer,
+        source_file_id,
+        name_count,
+        name_find,
+        name_index,
+        name_intern,
+        name_table,
+        ImportedItem,
+    ]
+    jet_lexer.[
+        STRING_PART_INTERPOLATION,
+        TOKEN_BLOCK_COMMENT,
+        TOKEN_COLON,
+        TOKEN_COMMA,
+        TOKEN_DOT,
+        TOKEN_EOF,
+        TOKEN_EQ,
+        TOKEN_HASH,
+        TOKEN_IDENT,
+        TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LINE_COMMENT,
+        TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_RAW_STRING,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
+        TOKEN_RPAREN,
+        TOKEN_QUESTION_DOT,
+        TOKEN_SEMI,
+        TOKEN_STRING,
+        Lexed,
+        Token,
+        TokenTables,
+        lex,
+        lex_config,
+        lex_generated_threads,
+        lex_threads,
+        lexer_chunk_cut,
+        token_decoded,
+        token_string_parts,
+    ]
+    jet_parser.[
+        parse_lexed_with_source,
+        parse_lexed_with_source_threads,
+        parser_line_starts,
+    ]
+    jet_sema.[
+        SemaRegistrationImportEdge,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_cli_entry_expand,
+        sema_cli_entry_expand_imported,
+        sema_cli_entry_module_needed,
+        sema_cli_entry_pending,
+        sema_effect_builtin_leaf_diagnostic,
+        sema_effect_parse_name,
+        sema_effect_root,
+        sema_registration_unit_family_type_names,
+        sema_source_words,
+        sema_source_wanted_words,
+        sema_unknown_module_alias,
+    ]
+    jet_pkg_model.[
+        PackageGrant, PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
+        pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
+        pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
+    ]
+}
 
 // The one language edition (greenfield: one meaning, no edition-gated behaviour).
 JET_DRIVER_EDITION :: "2026"
@@ -1013,10 +1021,9 @@ fn jet_driver_root_inline_carrier(snapshot: JetDriverAuthorizedSourceSnapshot, r
         }
         if !block.found -> next
         if has_manifest {
-            // The entry's own block is worded by the entry-facts check, a
-            // stock carrier by its registry row (Rust `package_facts_for_entry`).
-            span :: Span{start: block.start, end: block.end}
-            conflict :: if file_index == entry_index -> jet_driver_diagnostic("E1363", span, "an inline Package conflicts with package.jet", "one project cannot carry both an inline Package block and a package.jet manifest", "remove package.jet or remove the inline Package block") else -> jet_driver_row_diagnostic("E1363", Val(span))
+            // The entry's own block and a stock carrier both report the
+            // registry row (Rust `package_facts_for_entry`).
+            conflict :: jet_driver_row_diagnostic("E1363", Val(Span{start: block.start, end: block.end}))
             &diagnostics.push(diagnostic_with_source_path(^conflict, carrier_path, 0))
             return None
         }
@@ -1992,10 +1999,15 @@ fn jet_driver_find_source_path(source_units: [JetDriverSourceUnit], root_index: 
     loop relative_path in relative_paths {
         loop (index, unit) in source_units {
             if unit.root_index == root_index && unit.relative_path == relative_path {
+                // A capitalized module (`use Util`) yields the same candidate
+                // path twice ({m}.jet and {P}.jet), so a repeat of the unit
+                // already chosen is that one file, not a second match.
                 if target == .Val(first) {
-                    first_path :: source_units[first].relative_path
-                    &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
-                    return None
+                    if first != index {
+                        first_path :: source_units[first].relative_path
+                        &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
+                        return None
+                    }
                 }
                 target = Val(index)
             }
@@ -2756,7 +2768,7 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
     }
     alias :: declaration.alias
     if JET_DRIVER_FIRST_PARTY_RESERVED.contains(alias) {
-        &diagnostics.push(jet_driver_diagnostic("E1002", declaration.alias_span, "`{alias}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "rename the module or use it with `as other_name`"))
+        &diagnostics.push(jet_driver_diagnostic("E1002", declaration.alias_span, "`{alias}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "rename the module, or import it as `other_name :: …`"))
         return false
     }
     if declaration.kind == .Module(name, span) {
@@ -3203,8 +3215,12 @@ struct JetDriverCoreIdentifierDemand {
     // A `#UnitFamily` declaration: its explicit conversions lower to their
     // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
     unit_family: Bool{false}
+    // A generic `.decode<T>()` call or a `FieldError` use: Dyn decode and
+    // `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
+    // (BuildDyn.jet ir_dyn_decode, ir_decode_under), so core.encoding loads.
+    codec_decode: Bool{false}
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
-    // `use core as core` alias by its fixed typed row and lowers it to the
+    // `use core :: core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (fixed_sigs.rs:5488 hmac_sha256,
     // SHA256Raw.rs:103). Natively that member's body is its Core source
     // module, so the scan records each `<head>.<segment>` (and
@@ -3242,6 +3258,8 @@ struct JetDriverCoreDemandNames {
     pattern_matches_name: Int
     pattern_match_name: Int
     unit_family_name: Int
+    decode_name: Int
+    field_error_name: Int
     bare: [Int]
     bare_alias: [Int]
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
@@ -3283,7 +3301,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
             if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3305,6 +3323,8 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
         if tokens[index].kind == TOKEN_IDENT {
             name :: name_index(tokens[index].decoded)
             if name == names.or_err_name -> demand.option_or_err = true
+            if name == names.field_error_name -> demand.codec_decode = true
+            if name == names.decode_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LT -> demand.codec_decode = true
             // Loading a potential source owner is syntactic; Sema alone
             // decides whether this receiver is the canonical primitive Int.
             if name == names.abs_name {
@@ -3417,6 +3437,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.math_abs_receiver -> demand.math_abs_receiver = true
         if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
+        if output.codec_decode -> demand.codec_decode = true
         if output.unit_family -> demand.unit_family = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
@@ -3637,9 +3658,10 @@ fn jet_driver_core_runtime_row(core_sources: [JetDriverCoreSource], path: String
     best
 }
 
-// Rust `bind_core_runtime_imports`: in a Core source, `use core.a.runtime.u.f
-// [as g]` is the one-member list `use core.a.runtime.u.[f as g]`, so the unit
-// resolves through the selective-import path like any member list.
+// Rust `bind_core_runtime_imports`: in a Core source, `use core.a.runtime.u.f`
+// or `use g :: core.a.runtime.u.f` is the one-member list
+// `use core.a.runtime.u.[f]` (local name `g`), so the unit resolves through
+// the selective-import path like any member list.
 fn jet_driver_core_runtime_member_imports(program: &Program, core_sources: [JetDriverCoreSource]) Never! {
     rewritten := [ImportDecl]{}
     loop declaration in program.imports {
@@ -3652,7 +3674,7 @@ fn jet_driver_core_runtime_member_imports(program: &Program, core_sources: [JetD
                     item :: name_parts[name_parts.len() - 1]
                     unit_span :: Span{start: span.start, end: span.start + unit.count_bytes()}
                     member_span :: Span{start: unit_span.end + 1, end: span.end}
-                    local_span :: if declaration.alias_span.start == declaration.span.start -> member_span else -> declaration.alias_span
+                    local_span :: declaration.alias_span
                     local :: if declaration.alias != item -> String?{Val(declaration.alias)} else -> String?{None}
                     &rewritten.push(ImportDecl{kind: ImportKind.Unqualified{module_alias: unit, module_alias_span: unit_span, items: [ImportedItem]{ImportedItem{original: item, alias: local}}, items_span: member_span, span: declaration.span}, alias: declaration.alias, alias_span: declaration.alias_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None})
                     next
@@ -3662,6 +3684,168 @@ fn jet_driver_core_runtime_member_imports(program: &Program, core_sources: [JetD
         &rewritten.push(declaration)
     }
     program.imports = rewritten
+}
+
+// #6542: `alias :: owner.x` binds whatever the path names. When the path names
+// no module and its owner declares the member `x`, the row is that member, as
+// the member list `owner.[x]` bound to `alias` is. The owner can be a Core
+// module, an inline module of this file, the file a body-less `module owner`
+// of this file declares, the alias of a file or module import of this scope,
+// or a package dependency. Any other path stays a module import and keeps its
+// own error.
+fn jet_driver_member_imports(program: &Program, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) {
+    if jet_driver_member_rows(program.imports, program.imports, program.items, program.items, request, source_units, unit, packages, index) == .Val(rows) -> program.imports = rows
+    loop item_index in 0..<program.items.len() {
+        if program.items[item_index] == .CodeModule(code_module) && code_module.body == .Val(body) {
+            rows :: jet_driver_member_rows(code_module.imports, program.imports, body, program.items, request, source_units, unit, packages, index) ?? next
+            module_value := code_module.copy()
+            module_value.imports = rows
+            program.items[item_index] = Item.CodeModule{value: module_value}
+        }
+    }
+}
+
+// `imports` with each member row read as a member list, or None when no row
+// names a member. `scope` holds the items of the importing module body and
+// `outer` the file's top-level items; `outer_imports` are the file's imports.
+fn jet_driver_member_rows(imports: [ImportDecl], outer_imports: [ImportDecl], scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) -> [ImportDecl]? {
+    rows := [ImportDecl]{}
+    changed := false
+    loop declaration in imports {
+        if jet_driver_member_import(declaration, imports, outer_imports, scope, outer, request, source_units, unit, packages, index) == .Val(member) {
+            &rows.push(member)
+            changed = true
+        } else {
+            &rows.push(declaration.copy())
+        }
+    }
+    if !changed -> return None
+    Val(rows)
+}
+
+fn jet_driver_member_import(declaration: ImportDecl, imports: [ImportDecl], outer_imports: [ImportDecl], scope: [Item], outer: [Item], request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) -> ImportDecl? {
+    if declaration.kind == .Module(name, span) {
+        parts :: name.split(".").to_list()
+        if parts.len() < 2 -> return None
+        member :: parts[parts.len() - 1]
+        owner :: name.slice(0, name.count_bytes() - member.count_bytes() - 1)
+        names_member := false
+        if parts[0] == "core" {
+            if parts.len() == 2 || jet_driver_core_module_named(request.core_sources, name) || jet_driver_core_private_unit(name, span) != None -> return None
+            names_member = core_module_has_member(owner, member) || core_module_has_type(owner, member)
+        } else if parts.len() == 2 {
+            names_member = jet_driver_inline_module_declares(scope, owner, member) || jet_driver_inline_module_declares(outer, owner, member) || jet_driver_file_module_declares(outer, owner, member, request, source_units, unit) || jet_driver_imported_owner_declares(declaration, imports, outer_imports, owner, member, request, source_units, unit, packages, index)
+        }
+        if !names_member -> return None
+        owner_span :: Span{start: span.start, end: span.start + owner.count_bytes()}
+        member_span :: Span{start: owner_span.end + 1, end: span.end}
+        local :: if declaration.alias != member -> String?{Val(declaration.alias)} else -> String?{None}
+        local_span :: declaration.alias_span
+        return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: owner, module_alias_span: owner_span, items: [ImportedItem]{ImportedItem{original: member, alias: local}}, items_span: member_span, span: declaration.span}, alias: owner, alias_span: owner_span, span: declaration.span, item_spans: [Span]{member_span}, local_spans: [Span]{local_span}, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub, inline_version: None})
+    }
+    None
+}
+
+// Whether `module_name` is a Core module: a public export row or a source row.
+fn jet_driver_core_module_named(core_sources: [JetDriverCoreSource], module_name: String) -> Bool Never! {
+    if core_module_export(module_name) != None -> return true
+    loop row in core_sources {
+        if row.module_name == module_name -> return true
+    }
+    false
+}
+
+// Whether `items` hold the inline module `owner` that declares `member`.
+fn jet_driver_inline_module_declares(items: [Item], owner: String, member: String) -> Bool Never! {
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == owner && code_module.body == .Val(body) -> return jet_driver_items_declare(body, member)
+    }
+    false
+}
+
+// Whether `items`, a module's top level, declare `member`: an item or a
+// nested module.
+fn jet_driver_items_declare(items: [Item], member: String) -> Bool Never! {
+    loop named in jet_driver_namespace_item_names(items) {
+        if named.name == member -> return true
+    }
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == member -> return true
+    }
+    false
+}
+
+// Whether `items` hold a body-less `module owner` whose file declares `member`
+// at its top level.
+fn jet_driver_file_module_declares(items: [Item], owner: String, member: String, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit) -> Bool {
+    loop item in items {
+        if item == .CodeModule(code_module) && code_module.name == owner && code_module.body == None {
+            unresolved := [Diagnostic]{}
+            target :: jet_driver_code_module_file(source_units, unit, owner, code_module.name_span, &unresolved) ?? return false
+            return jet_driver_unit_text_declares(request, source_units[target], member)
+        }
+    }
+    false
+}
+
+// Whether `owner` is the alias of a file or module import of this scope (or
+// of the file, for an inline module's row), or else a dependency of this
+// package, whose target declares `member`, while the path `declaration`
+// names itself resolves to no module.
+fn jet_driver_imported_owner_declares(declaration: ImportDecl, imports: [ImportDecl], outer_imports: [ImportDecl], owner: String, member: String, request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo], index: JetDriverSourceIndex) -> Bool {
+    unresolved := [Diagnostic]{}
+    target := Int?{None}
+    owner_row := jet_driver_owner_import(imports, owner)
+    if owner_row == None -> owner_row = jet_driver_owner_import(outer_imports, owner)
+    if owner_row == .Val(row) {
+        if row.kind == {
+            .File(path, path_span) -> target = jet_driver_lookup_file_target(source_units, unit, path, path_span, &unresolved)
+            .Module(module_name, module_span) -> {
+                if jet_driver_core_import_module(row) == .Val(core_name) -> return core_module_has_member(core_name, member) || core_module_has_type(core_name, member)
+                target = jet_driver_find_module_import_target(unit, module_name, row.inline_version, packages, source_units, index, module_span, &unresolved)
+            }
+            .Unqualified(_, _, _, _, _) -> return false
+        }
+    } else {
+        package_index :: jet_driver_find_package_by_root(packages, unit.root_index) ?? return false
+        if jet_driver_find_dependency(packages[package_index], owner) == None -> return false
+        target = jet_driver_find_module_import_target(unit, owner, None, packages, source_units, index, declaration.span, &unresolved)
+    }
+    target_index :: target ?? return false
+    if declaration.kind == .Module(name, span) {
+        if jet_driver_find_module_import_target(unit, name, declaration.inline_version, packages, source_units, index, span, &unresolved) != None -> return false
+    }
+    target_unit :: source_units[target_index]
+    if jet_driver_unit_text_declares(request, target_unit, member) -> return true
+    // A package file stands for the package namespace: any file of it can
+    // declare the member.
+    if !jet_driver_unit_is_namespace_member(target_unit) -> return false
+    loop (unit_index, candidate) in source_units {
+        if unit_index == target_index || candidate.root_index != target_unit.root_index || !jet_driver_unit_is_namespace_member(candidate) -> next
+        if jet_driver_unit_text_declares(request, candidate, member) -> return true
+    }
+    false
+}
+
+// The file or module import row of `imports` that `alias` names.
+fn jet_driver_owner_import(imports: [ImportDecl], alias: String) -> ImportDecl? Never! {
+    loop row in imports {
+        if row.alias != alias || jet_driver_is_foreign_provider_import(row) -> next
+        if row.kind == {
+            .File(_, _) | .Module(_, _) -> return Val(row)
+            .Unqualified(_, _, _, _, _) -> {}
+        }
+    }
+    None
+}
+
+// Whether the source of `unit` declares `member` at its top level. The file
+// is parsed here only for this question; the loader still parses and loads
+// it through its own import.
+fn jet_driver_unit_text_declares(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, member: String) -> Bool {
+    text :: jet_driver_source_unit_text(request, unit) ?? return false
+    parsed :: jet_driver_parse_user_unit(text, false)
+    jet_driver_items_declare(parsed.parsed.program.items, member)
 }
 
 // The runtime unit row a source file is when it sits at that unit's
@@ -4211,7 +4395,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         demand :: ^parsed_unit.demand
         parse_result := ^parsed_unit.parsed
         // Runtime member imports consult shared rows only on the load thread.
-        if importer_core -> jet_driver_core_runtime_member_imports(&parse_result.program, request.core_sources)
+        if importer_core -> jet_driver_core_runtime_member_imports(&parse_result.program, request.core_sources) else -> jet_driver_member_imports(&parse_result.program, request, source_units, unit, catalog.packages, source_index_result.index)
         parse_diagnostic_start :: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> &diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
@@ -4275,6 +4459,15 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             if !bare_modules.contains("core.text.fmt") -> &bare_modules.push("core.text.fmt")
             fmt_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.text.fmt", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if fmt_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    &pending.push(index)
+                }
+            }
+        }
+        if demand.codec_decode {
+            encoding_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.encoding", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
+            if encoding_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     &pending.push(index)
@@ -4540,7 +4733,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                     }
                     // `use core.files` and `use core.[data, files]` select Core
                     // submodules by name. A selected submodule with a source
-                    // row loads that source, as `use core.files as files`
+                    // row loads that source, as `use files :: core.files`
                     // does, so its source-owned members, types and impls
                     // (`files.open`, `data.csv<T>`, the DateTime methods)
                     // resolve against it.
@@ -4603,6 +4796,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     }
     jet_driver_expand_imported_cli_entry(&modules, source_units, entry_module_identity)
     modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, bare_modules)
+    jet_driver_attach_app_route_roots(&modules, source_units, request.authorized_sources)
     jet_driver_fill_line_starts(request, &source_units)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, generated_records)
     loop diagnostic in provenance.diagnostics -> &diagnostics.push(diagnostic)
@@ -4683,4 +4877,91 @@ fn jet_driver_pascal_segment(part: String) -> String {
         out = "{out}{word.slice(0, 1).to_ascii_upper()}{word.slice(1, word.len())}"
     }
     out
+}
+
+// `.routes(from: "dir")` convention facts. The CLI's authorized snapshot
+// keeps every directory listing under the source root; each root a user
+// module names resolves against that module's directory, and the `.jet`
+// files below it, with whether each parses to a top-level `fn page`, go on
+// the module's Program for sema's App graph check. A file whose name starts
+// with `_` opts out of routing and is left out.
+fn jet_driver_attach_app_route_roots(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], snapshot: JetDriverAuthorizedSourceSnapshot) {
+    loop index in 0..<modules.len() {
+        unit_index :: modules[index].source_unit_index
+        if unit_index < 0 || unit_index >= source_units.len() -> next
+        unit :: source_units[unit_index]
+        if unit.root_index < 0 || unit.root_index >= snapshot.roots.len() -> next
+        root :: snapshot.roots[unit.root_index]
+        if root.directories.len() == 0 || unit.file_index < 0 || unit.file_index >= root.files.len() -> next
+        names :: jet_driver_app_route_names(modules[index].program)
+        if names.len() == 0 -> next
+        directory :: jet_driver_parent_path(root.files[unit.file_index].path)
+        loop name in names -> &modules[index].program.app_route_roots.push(jet_driver_app_route_root(root, directory, name))
+    }
+}
+
+// The literal roots of every `.routes(from: "…")` call in the file, once each.
+fn jet_driver_app_route_names(program: Program) -> [String] {
+    names := [String]{}
+    loop item in program.items {
+        if item == .Func(function) -> ast_visit_body(function.body, (expression: Expr) -> jet_driver_note_app_route_name(&names, expression), false)
+    }
+    ast_visit_body(program.script_body, (expression: Expr) -> jet_driver_note_app_route_name(&names, expression), false)
+    names
+}
+
+fn jet_driver_note_app_route_name(names: &[String], expression: Expr) {
+    if expression == .MethodCall(_, method, _, _, _, args, _) {
+        if method != "routes" || args.len() != 1 -> return
+        if args[0].expr == .Str(parts, _, _) {
+            text := ""
+            loop part in parts {
+                if part == .Lit(value) { text = "{text}{value}" } else { return }
+            }
+            if !names.contains(text) -> &names.push(text)
+        }
+    }
+}
+
+fn jet_driver_app_route_root(root: JetDriverAuthorizedSourceRoot, directory: String, name: String) -> AppRouteRoot {
+    relative := name
+    if relative.starts_with("./") -> relative = relative.slice(2, relative.len())
+    if relative.ends_with("/") && relative.len() > 1 -> relative = relative.slice(0, relative.len() - 1)
+    target :: if relative.starts_with("/") -> relative else -> if directory == "/" -> "/{relative}" else -> "{directory}/{relative}"
+    files := [AppRouteFile]{}
+    found :: jet_driver_app_route_walk(root, target, "", &files)
+    &files.sort_by((left: AppRouteFile, right: AppRouteFile) -> left.path <=> right.path)
+    AppRouteRoot{root: name, found: found, files: files}
+}
+
+fn jet_driver_app_route_walk(root: JetDriverAuthorizedSourceRoot, directory: String, relative: String, files: &[AppRouteFile]) -> Bool {
+    loop listing in root.directories {
+        if listing.path != directory -> next
+        loop entry in listing.entries {
+            child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+            if entry.is_directory {
+                _ :: jet_driver_app_route_walk(root, entry.path, child, &files)
+                next
+            }
+            if !entry.name.ends_with(".jet") || (entry.name.starts_with("_") && entry.name_is_unicode) -> next
+            &files.push(AppRouteFile{path: child, has_page: jet_driver_app_route_has_page(root, entry.path)})
+        }
+        return true
+    }
+    false
+}
+
+// A page is the parsed top-level `fn page` declaration, never a text match,
+// so commented-out text does not count.
+fn jet_driver_app_route_has_page(root: JetDriverAuthorizedSourceRoot, path: String) -> Bool {
+    loop file in root.files {
+        if file.path != path -> next
+        parsed :: jet_driver_parse_user_source(file.source)
+        if jet_driver_has_errors(parsed.diagnostics) -> return false
+        loop item in parsed.program.items {
+            if item == .Func(function) && function.name == "page" -> return true
+        }
+        return false
+    }
+    false
 }

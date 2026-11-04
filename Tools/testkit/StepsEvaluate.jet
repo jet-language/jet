@@ -1,6 +1,8 @@
-use core.files as files
-use core.crypto as crypto
-use core.sys as sys
+use {
+    files :: core.files
+    crypto :: core.crypto
+    sys :: core.sys
+}
 fn kit_steps_path_tokens(value: String) -> Bool {
     value.contains("{{work}}") || value.contains("{{root}}") || value.contains("{{scratch}}") || value.contains("{{tmp}}") || value.contains("{{jet}}") || value.contains("{{jetpack}}")
 }
@@ -73,12 +75,12 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     stderr :: if raw_match -> state.last.stderr else -> state.json_stderr ?? state.last.stderr
     actual := kit_steps_select_stream(stdout, stderr, assertion.stream)
     if assertion.stream.starts_with("cap:") {
-        if (assertion.mode == "=" || assertion.mode == "!=") && assertion.value.starts_with("{{cap:") && assertion.value.ends_with("}}") {
-            left :: kit_steps_capture_named(kit_steps_byte_slice(assertion.stream, 4, assertion.stream.count_bytes()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
-            right :: kit_steps_capture_named(kit_steps_byte_slice(assertion.value, 5, assertion.value.count_bytes() - 1), state.captures) ?? return kit_expect_verdict("ERROR", "captured relation unavailable")
+        if assertion.transform == "" && (assertion.mode == "=" || assertion.mode == "!=") && assertion.value.starts_with("{{cap:") && assertion.value.ends_with("}}") {
+            left :: kit_steps_state_named(kit_steps_byte_slice(assertion.stream, 4, assertion.stream.count_bytes()), state) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
+            right :: kit_steps_state_named(kit_steps_byte_slice(assertion.value, 5, assertion.value.count_bytes() - 1), state) ?? return kit_expect_verdict("ERROR", "captured relation unavailable")
             return if (left == right) == (assertion.mode == "=") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "captured values differ")
         }
-        actual = kit_steps_captured_subject(kit_steps_byte_slice(assertion.stream, 4, assertion.stream.count_bytes()), state.captures) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
+        actual = kit_steps_state_subject(kit_steps_byte_slice(assertion.stream, 4, assertion.stream.count_bytes()), state) ?? return kit_expect_verdict("ERROR", "captured subject unavailable")
     }
     value := if assertion.mode == "same-as" -> assertion.value else -> kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
     extra := kit_steps_runtime_expand(assertion.extra, context, state) ?? return kit_expect_verdict("ERROR", "assertion token unavailable")
@@ -206,7 +208,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
                 .None -> kit_expect_verdict("PASS", "")
             }
         }
-        error :: if (assertion.json_op == "==" && !value.starts_with("$")) || (assertion.json_op == "#==" && !value.starts_with("$")) || (assertion.json_op == "#>=" && kit_steps_count_label(value) != "") ->
+        error :: if kit_steps_json_is_relation(assertion, value) ->
             kit_steps_json_relation(actual, evaluated, state.history) else -> kit_steps_json_test(actual, assertion.json_mode, assertion.json_path, assertion.json_op, value)
         return if error == {
             .Val(message) -> kit_expect_verdict("FAIL", message)
@@ -294,6 +296,7 @@ fn kit_steps_exit_test(assertion: KitAssertion, state: KitStepState) -> KitVerdi
         }
         return kit_expect_verdict("ERROR", "exit label missing: {assertion.value}")
     }
+    if assertion.mode == "status" -> return kit_steps_exit_status(assertion.value, state.last.code)
     loop code in assertion.alternatives {
         if actual == kit_steps_integer(code) -> return kit_expect_verdict("PASS", "")
     }

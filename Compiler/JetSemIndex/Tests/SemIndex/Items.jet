@@ -76,7 +76,7 @@ fn semindex_s9_state_owner_assertions(index: SemIndex, source: String, json: Str
 // tests/semindex.rs774–795: caller supplies real checked two-file symbols.
 fn semindex_s9_import_library_source() -> String Never! { "fn score(name: String) -> Int {{ return 1 }}\n" }
 fn semindex_s9_import_main_source() -> String Never! {
-    "use \"./library\" as api\nuse api.[score as imported_score]\nfn run() {{ print(imported_score(\"Ada\")) }}\n"
+    "use api :: \"./library\"\nuse imported_score :: api.score\nfn run() {{ print(imported_score(\"Ada\")) }}\n"
 }
 fn semindex_s9_import_assertions(symbols: SemanticSymbolIndex) Never! {
     assert_eq(symbols.lookup("api").len(), 1)

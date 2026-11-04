@@ -1,28 +1,30 @@
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1
 // Deep Canvas edit transaction: JSON decode through atomic source commit.
 // apply_transaction_json is the sibling-facing seam.
-use core.files.[OSPath]
-use std.fmt.[format]
-use std.io.[ErrorKind]
-use jet_driver.Diagnostics.[Diagnostic, Severity, Span, TextEdit]
-use jet_driver.AST as AST
-use jet_driver.AST.[Expr, Item, Stmt]
-use jet_driver.Formatter.[format_source]
-use jet_driver.Syntax as Syntax
-use jet_driver.Sema as Sema
-use jet_driver.SHA256.[sha256_hex]
-use jet_semindex.[SourceSpan, SemIndex]
-use jet_semindex as semindex
-use jet_devserver.Canvas.DebugSourceGit.[canonical_path]
-use jet_devserver.Canvas.GraphHelpers.[canvas_action_preview_ok, diagnostics_error, edit, edit_conflict, edit_error, edit_ok, edit_ok_source, function_signature_span, graph_id_name_span, indentation_at, line_after, line_start, preview_ok, snippet, span_through_closing_parens]
-use jet_devserver.Canvas.GraphJson.[canvas_collapse_hints, func_source_span]
-use jet_devserver.Canvas.GraphProjection.[trait_method_signature, GraphEditAnchor, Projection]
-use jet_devserver.Canvas.ProjectScan.[project_file]
-use jet_devserver.Canvas.QueryActions.[default_arg_for_type]
-use jet_devserver.Canvas.SourceModel.[read_source_without_symlinks, source_revision, write_new_file_without_symlinks, write_source_if_unchanged, SourceWriteError, ensure_no_symlink_directory]
-use jet_devserver.Canvas.ValidationJson.[extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str, json_string_array, json_string_field, json_usize_field, normalize_bounds, parse_simple_call, quoted_attr, replace_ident, required_string, validate_comment_alpha, validate_comment_color, validate_function_signature, validate_ident, validate_qualified_name, validate_signature_fragment, validate_single_line_fragment, validate_type_fragment, wire_span_from_json_chunk]
-use jet_devserver.Canvas.EditActions02.[apply_reorder_statements, apply_add_pattern_arm, apply_edit_pattern_arm, apply_remove_pattern_arm, apply_toggle_switch_state, apply_append_multi_input, apply_remove_multi_input_element, apply_exec_convergence, write_checked_source, write_checked_formatted, find_func_by_name_span, collect_statement_locs]
-use jet_foundation.[Diagnostic, Item, Span, TextEdit]
+use {
+    core.files.[OSPath]
+    std.fmt.[format]
+    std.io.[ErrorKind]
+    jet_driver.Diagnostics.[Diagnostic, Severity, Span, TextEdit]
+    AST :: jet_driver.AST
+    jet_driver.AST.[Expr, Item, Stmt]
+    jet_driver.Formatter.[format_source]
+    Syntax :: jet_driver.Syntax
+    Sema :: jet_driver.Sema
+    jet_driver.SHA256.[sha256_hex]
+    jet_semindex.[SourceSpan, SemIndex]
+    semindex :: jet_semindex
+    jet_devserver.Canvas.DebugSourceGit.[canonical_path]
+    jet_devserver.Canvas.GraphHelpers.[canvas_action_preview_ok, diagnostics_error, edit, edit_conflict, edit_error, edit_ok, edit_ok_source, function_signature_span, graph_id_name_span, indentation_at, line_after, line_start, preview_ok, snippet, span_through_closing_parens]
+    jet_devserver.Canvas.GraphJson.[canvas_collapse_hints, func_source_span]
+    jet_devserver.Canvas.GraphProjection.[trait_method_signature, GraphEditAnchor, Projection]
+    jet_devserver.Canvas.ProjectScan.[project_file]
+    jet_devserver.Canvas.QueryActions.[default_arg_for_type]
+    jet_devserver.Canvas.SourceModel.[read_source_without_symlinks, source_revision, write_new_file_without_symlinks, write_source_if_unchanged, SourceWriteError, ensure_no_symlink_directory]
+    jet_devserver.Canvas.ValidationJson.[extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str, json_string_array, json_string_field, json_usize_field, normalize_bounds, parse_simple_call, quoted_attr, replace_ident, required_string, validate_comment_alpha, validate_comment_color, validate_function_signature, validate_ident, validate_qualified_name, validate_signature_fragment, validate_single_line_fragment, validate_type_fragment, wire_span_from_json_chunk]
+    jet_devserver.Canvas.EditActions02.[apply_reorder_statements, apply_add_pattern_arm, apply_edit_pattern_arm, apply_remove_pattern_arm, apply_toggle_switch_state, apply_append_multi_input, apply_remove_multi_input_element, apply_exec_convergence, write_checked_source, write_checked_formatted, find_func_by_name_span, collect_statement_locs]
+    jet_foundation.[Diagnostic, Item, Span, TextEdit]
+}
 
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:35
 EDIT_SCHEMA_VERSION :: U32{1}
@@ -556,7 +558,7 @@ fn core_call_prefix_and_import(src: String, module_ref: String) -> (String, Text
     alias :: default_core_alias(module_ref)
     (offset, joins_use_block) :: core_import_insert_point(src)
     suffix :: if joins_use_block -> "\n" else -> "\n\n"
-    import :: edit(SourceSpan { start: offset, end: offset }, "use {module_ref} as {alias}{suffix}")
+    import :: edit(SourceSpan { start: offset, end: offset }, "use {alias} :: {module_ref}{suffix}")
     return (_0: alias, _1: .Val(import))
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
@@ -576,24 +578,32 @@ fn imported_core_prefix(src: String, module_ref: String) -> String? {
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1168
 struct CoreImport { module_ref: String; alias: String }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
+// A `use` line or a row of a `use {` block (#6542): `alias :: core.x`, or
+// `core.x` named by its last segment.
 fn core_imports(src: String) -> [CoreImport] {
     imports := []
+    in_block := false
     loop line in src.lines() {
         code := line.split("//").next().unwrap_or("").trim() // #4303
-        rest :: code.strip_prefix("use core.") ?? next
-        full :: "core.{rest}"
+        if in_block && code.starts_with("}}") {
+            in_block = false
+            next
+        }
+        if !in_block && code.starts_with("use {{") {
+            in_block = true
+            next
+        }
+        row :: if in_block -> code else -> (code.strip_prefix("use ") ?? next)
         module_ref: String
         alias: String
-        if full.split_once(" as ") == .Val(tuple_4) {
-            found_module :: tuple_4._0
-            found_alias :: tuple_4._1
-            module_ref = found_module.trim() // #4303
-            alias_text := found_alias.trim() // #4303
-            alias = ident_prefix(alias_text)
+        if row.split_once(" :: ") == .Val(named) {
+            alias = ident_prefix(named._0.trim()) // #4303
+            module_ref = named._1.trim() // #4303
         } else {
-            module_ref = full.trim() // #4303
+            module_ref = row.trim() // #4303
             alias = default_core_alias(module_ref)
         }
+        if !module_ref.starts_with("core.") -> next
         if !module_ref.is_empty() && !alias.is_empty() -> imports.push(CoreImport { module_ref: module_ref.to_string(), alias: ^alias })
     }
     return ^imports
@@ -603,14 +613,21 @@ fn ident_prefix(text: String) -> String { text.chars().take_while((c) -> c.is_as
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1203
 fn default_core_alias(module_ref: String) -> String { module_ref.rsplit('.').next().unwrap_or("core").to_string() }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1207
+// The new `use` line goes after the leading imports; a `use {` block's
+// rows and its closing `}` count as import lines (#6542).
 fn core_import_insert_point(src: String) -> (Usize, Bool) {
     offset := 0
     insert_at := 0
     saw_use := false
+    in_block := false
     loop line in src.split_inclusive('\n') {
         trimmed := line.trim() // #4303
-        if trimmed.starts_with("use ") {
+        if in_block {
+            if trimmed.starts_with("}}") -> in_block = false
+            insert_at = offset + line.len()
+        } else if trimmed.starts_with("use ") {
             saw_use = true
+            if trimmed.starts_with("use {{") -> in_block = true
             insert_at = offset + line.len()
         } else if saw_use -> break
         else if trimmed.is_empty() || trimmed.starts_with("//") -> insert_at = offset + line.len()

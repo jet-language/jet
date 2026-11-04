@@ -4,8 +4,10 @@ package {
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
-use core.http.server as http_server
-use core.net as net
+use {
+    http_server :: core.http.server
+    net :: core.net
+}
 
 fn handle_trailers(req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.body().text(1024) ?? panic("body")

@@ -1,10 +1,12 @@
-use core as core
-use core.http as http
-use core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
-use core.encoding.json as json_codec
-use core.net.url as route_url
-use core.net.tls as server_tls
-use core.encoding.[Dyn]
+use {
+    core :: core
+    http :: core.http
+    core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
+    json_codec :: core.encoding.json
+    route_url :: core.net.url
+    server_tls :: core.net.tls
+    core.encoding.[Dyn]
+}
 
 // core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
 // when bound with `tls: server.tls(cert, key)`.
@@ -21,13 +23,55 @@ use core.encoding.[Dyn]
 
 // Body-less route markers record route facts. Only `mux.mount(value)`
 // exposes the tagged methods of that value's struct.
-marker Get(path: String, $sites: [.Method])
-marker Post(path: String, $sites: [.Method])
-marker Put(path: String, $sites: [.Method])
-marker Delete(path: String, $sites: [.Method])
-marker Patch(path: String, $sites: [.Method])
-marker Head(path: String, $sites: [.Method])
-marker Options(path: String, $sites: [.Method])
+struct Get {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
+struct Post {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
+struct Put {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
+struct Delete {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
+struct Patch {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
+struct Head {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
+struct Options {
+    path: String
+
+    impl Marker {
+        sites :: [.Method]
+    }
+}
 
 C_MAX_HEAD_BYTES :: 32768
 C_MAX_LINE_BYTES :: 8192
@@ -1076,16 +1120,28 @@ fn __accept_conn(stream: ^TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -
     Val(__HTTPConn{tcp: Val(^stream), tls: None})
 }
 
-// Whether the connection's request was answered by the mux.
+// Whether the connection's request was answered by the mux. A request the
+// handler upgraded to a WebSocket gets no HTTP response, and its socket is
+// left to the upgraded connection rather than closed here.
 fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
     budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := __HTTPWire{buffer: [U8]{}, end_ns: core.time.__clock_mono_ns() + budget}
     answered := false
+    upgraded := false
     if __read_request(stream, &wire) == {
-        .Ok(request) -> {
+        .Ok(received) -> {
+            fd :: if stream.tcp == .Val(plain) -> core.net.__tcp_fd(plain) else -> -1
+            cell :: http.__upgrade_cell(fd)
+            request := received
+            request.__upgrade = Val(cell)
             reply :: __dispatch(mux, request)
-            bytes :: __response_wire(request.method, reply) ?? __error_wire(500)
-            answered = __send(stream, bytes, core.time.__clock_mono_ns() + budget)
+            upgraded = http.__upgraded(cell)
+            if upgraded {
+                answered = true
+            } else {
+                bytes :: __response_wire(request.method, reply) ?? __error_wire(500)
+                answered = __send(stream, bytes, core.time.__clock_mono_ns() + budget)
+            }
         }
         .Err(fault) -> {
             if fault == .Reply(status) {
@@ -1095,7 +1151,7 @@ fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[N
     }
     // A TLS stream sends close_notify and closes the socket it owns.
     if stream.tls == .Val(secure) -> secure.close()
-    if stream.tcp == .Val(plain) {
+    if !upgraded && stream.tcp == .Val(plain) {
         if plain.close() == {
             .Ok(_) -> {}
             .Err(_) -> {}

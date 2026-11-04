@@ -8,12 +8,14 @@ package {
         crypto: .Library{ entry: crypto }
     }
 }
-use core
-use core.crypto.expert as rawcrypto
-use core.crypto.random as random
-use core.crypto.vault.[KeyUnlock, WrappedVaultKey]
-use core.files.[basename, dirname, join]
-use __core_crypto_ct as fixedcrypto
+use {
+    core
+    rawcrypto :: core.crypto.expert
+    random :: core.crypto.random
+    core.crypto.vault.[KeyUnlock, WrappedVaultKey]
+    core.files.[basename, dirname, join]
+    fixedcrypto :: __core_crypto_ct
+}
 
 // core.crypto - safe envelopes and expert primitives.
 //
@@ -41,7 +43,7 @@ module uuid
 
 module vault
 
-use __core_crypto_jetc as jetc
+use jetc :: __core_crypto_jetc
 
 // Private whole-record physical facts for the temporary syscall seed.
 // `linux` is a compile-time host capability, consumed once at parent open.
@@ -50,7 +52,7 @@ struct __JetcStat {
     status: Int, errno: Int, dev: Int, ino: Int, len: Int,
     mtime: Int, mtime_ns: Int, nlink: Int, is_file: Bool, is_dir: Bool,
 }
-struct JetcFd { fd: Int }
+struct JetcFd { priv fd: Int } // priv: a literal elsewhere could close any descriptor at scope end
 // Close reads the consumed receiver in place. Rebinding it (`owner :: ^self`)
 // would make a second owner whose scope-end Close re-enters this one.
 impl JetcFd.Close {

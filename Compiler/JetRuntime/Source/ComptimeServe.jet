@@ -158,8 +158,10 @@ fn comptime_serve_loop(frame: I64) -> I64 {
 // the compiler's order (ComptimeWire.jet). Serves until the compiler's EXIT.
 #Export(c) fn jet_rt_comptime_serve(table: I64, count: I64) {
     frame :: jet_rt_alloc(I64{64}, I64{8})
-    comptime_serve_root = frame
-    comptime_serve_stop_code = rt_comptime_serve_stop_address()
+    #Unsafe("the serve entry runs once, on the image's only thread, before it serves") {
+        comptime_serve_root = frame
+        comptime_serve_stop_code = rt_comptime_serve_stop_address()
+    }
     comptime_serve_reply(frame, I64{0}, count, I64{0}, I64{0}, I64{0})
     comptime_serve_send(table, count * I64{8})
     _ := comptime_serve_loop(frame)

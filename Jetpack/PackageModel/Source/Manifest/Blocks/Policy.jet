@@ -1,19 +1,21 @@
 // `policy: { … }` (
 // ) and the standalone
 // organization policy document (Package/Blocks.rs).
-use core.math as policy_core_math
-use jet_foundation.[
-    POLICY_RULES, PolicyDeclaration, PolicyKey, PolicyScope, Span, authority_parse_right,
-    lint_auto_derive_name, lint_parse_policy_lints, policy_key_name, policy_key_parse,
-    policy_parse_value, policy_resolve,
-]
-use jetpack_foundation.[
-    MANIFEST_BLOCK_POLICY, POLICY_EXCEPTION_FIELD_EXPIRES, POLICY_EXCEPTION_FIELD_ID,
-    POLICY_EXCEPTION_FIELD_REASON, POLICY_EXCEPTION_FIELD_SCOPE, POLICY_EXCEPTION_TYPE,
-    POLICY_FIELD_CLAIMS, POLICY_FIELD_CONTAIN, POLICY_FIELD_DEPS, POLICY_FIELD_EFFECTS,
-    POLICY_FIELD_EXCEPTIONS, POLICY_FIELD_EXPERT, POLICY_FIELD_HARDEN, POLICY_FIELD_LICENSES,
-    POLICY_FIELD_LINTS, POLICY_FIELD_SOURCES, POLICY_FIELD_UNSAFE,
-]
+use {
+    policy_core_math :: core.math
+    jet_foundation.[
+        POLICY_RULES, PolicyDeclaration, PolicyKey, PolicyScope, Span,
+        lint_auto_derive_name, lint_parse_policy_lints, policy_key_name, policy_key_parse,
+        policy_parse_value, policy_resolve,
+    ]
+    jetpack_foundation.[
+        MANIFEST_BLOCK_POLICY, POLICY_EXCEPTION_FIELD_EXPIRES, POLICY_EXCEPTION_FIELD_ID,
+        POLICY_EXCEPTION_FIELD_REASON, POLICY_EXCEPTION_FIELD_SCOPE, POLICY_EXCEPTION_TYPE,
+        POLICY_FIELD_CLAIMS, POLICY_FIELD_CONTAIN, POLICY_FIELD_DEPS,
+        POLICY_FIELD_EXCEPTIONS, POLICY_FIELD_EXPERT, POLICY_FIELD_HARDEN, POLICY_FIELD_LICENSES,
+        POLICY_FIELD_LINTS, POLICY_FIELD_SOURCES, POLICY_FIELD_UNSAFE,
+    ]
+}
 
 fn pkg_bad_mem(detail: String) -> PackageParseError Never! {
     PackageParseError.BadMemoryPolicy{detail: detail}
@@ -47,7 +49,7 @@ fn pkg_parse_policy(body: String, package_only_fields: Bool) -> [PolicyDeclarati
         name :: entry.key
         raw :: entry.value
         if name == "trust" || name == "providers" -> return Err(PackageParseError.RetiredAuthorityField{field: "policy.{name}", replacement: "authority.{name}"})
-        if package_only_fields && (name == POLICY_FIELD_EFFECTS || name == POLICY_FIELD_UNSAFE || name == POLICY_FIELD_EXPERT || name == POLICY_FIELD_DEPS || name == POLICY_FIELD_CLAIMS) -> next
+        if package_only_fields && (name == POLICY_FIELD_UNSAFE || name == POLICY_FIELD_EXPERT || name == POLICY_FIELD_DEPS || name == POLICY_FIELD_CLAIMS) -> next
         if policy_key_parse(name) == None {
             pkg_policy_unknown_key(name, raw, package_only_fields)
             next
@@ -101,7 +103,6 @@ struct PackagePolicySurface {
     licenses: [String]?
     source_maps: [PolicySourceMap]
     exceptions: [PackagePolicyException]
-    effects: [String: [String]]
     unsafe_paths: [String]?
     expert: Bool?
     deps: [String]?
@@ -109,11 +110,10 @@ struct PackagePolicySurface {
 }
 
 fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface PackageParseError! {
-    surface := PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, effects: [String: [String]]{}, unsafe_paths: None, expert: None, deps: None, claims_min: None}
+    surface := PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, unsafe_paths: None, expert: None, deps: None, claims_min: None}
     seen_sources := [String]{}
     sources_seen := false
     exceptions_seen := false
-    effects_seen := false
     unsafe_seen := false
     expert_seen := false
     deps_seen := false
@@ -121,17 +121,6 @@ fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface Packag
     loop entry in pkg_key_value_entries(body) {
         raw :: entry.value
         if entry.key == {
-            POLICY_FIELD_EFFECTS -> {
-                if effects_seen -> return Err(pkg_bad_policy("`policy.effects` is declared more than once"))
-                effects_seen = true
-                paths_seen := [String]{}
-                loop ceiling in pkg_key_value_entries(pkg_record_value_body(raw, "policy.effects")) {
-                    path :: pkg_parse_policy_path(ceiling.key, "policy.effects")
-                    if paths_seen.contains(path) -> return Err(pkg_bad_policy("`policy.effects.{path}` is declared more than once"))
-                    &paths_seen.push(path)
-                    surface.effects[path] = pkg_parse_effect_ceiling(ceiling.value, "policy.effects.{path}")
-                }
-            }
             POLICY_FIELD_UNSAFE -> {
                 if unsafe_seen -> return Err(pkg_bad_policy("`policy.unsafe` is declared more than once"))
                 unsafe_seen = true
@@ -261,21 +250,6 @@ fn pkg_parse_policy_path_list(raw: String, field: String) -> [String] PackagePar
         if !paths.contains(path) -> &paths.push(path)
     }
     Ok(pkg_manifest_sorted(paths))
-}
-
-// An effect ceiling `-[]>` / `-[IO, Net]>` as a sorted set of positive names.
-fn pkg_parse_effect_ceiling(raw: String, field: String) -> [String] PackageParseError! {
-    inner :: pkg_strip_wrapped(raw.trim(), "-[", "]>") ?? return Err(pkg_bad_policy("`{field}` must be an effect ceiling such as `-[]>` or `-[IO.Net]>`"))
-    effects := [String]{}
-    loop piece in pkg_top_level_commas(inner) {
-        entry :: piece.trim()
-        if entry == "" -> return Err(pkg_bad_policy("`{field}` cannot contain an empty effect"))
-        if entry.contains("(") -> return Err(pkg_bad_policy("`{field}` accepts only positive effect names, not parameterized rights"))
-        right :: authority_parse_right(entry) ?? return Err(pkg_bad_policy("`{entry}` is not a registered effect name for `{field}`"))
-        if !effects.contains(right) -> &effects.push(right)
-        if right == "Panic" -> return Err(pkg_bad_policy("`Panic` is deny-only and cannot appear in a positive effect ceiling"))
-    }
-    Ok(pkg_manifest_sorted(effects))
 }
 
 fn pkg_parse_dependency_policy_list(raw: String) -> [String] PackageParseError! {

@@ -1,5 +1,5 @@
 
-use core.event as event
+use event :: core.event
 
 fn run() {
     scope :: event.scope()
@@ -9,7 +9,7 @@ fn run() {
         print("killer {n}")
         late.unsubscribe()
     })
-    print(&ev.emit(1).summary())
+    print(ev.emit(1).summary())
     print("listeners={ev.listener_count()}")
 
     additions :: event.scope()
@@ -18,16 +18,16 @@ fn run() {
         print("root {n}")
         _ :: growing.on(additions, (m: Int) -> { print("added {m}") })
     })
-    print(&growing.emit(1).summary())
-    print(&growing.emit(2).summary())
+    print(growing.emit(1).summary())
+    print(growing.emit(2).summary())
 
     nested_scope :: event.scope()
     nested :: event.new<Int>()
     nested.once(nested_scope, (n) -> {
         print("once {n}")
-        if n == 1 { &nested.emit(2) }
+        if n == 1 { nested.emit(2) }
     })
-    print(&nested.emit(1).summary())
+    print(nested.emit(1).summary())
     print("nested-listeners={nested.listener_count()}")
 
     owned :: event.new<Int>()
@@ -35,14 +35,14 @@ fn run() {
         owner :: event.scope()
         owned.on(owner, (n) -> { print("leaked {n}") })
     }
-    print(&owned.emit(9).summary())
+    print(owned.emit(9).summary())
 
     cancelled :: event.scope()
     stopped :: event.new<Int>()
     cancelled.cancel()
     stopped_sub :: stopped.on(cancelled, (n) -> { print("cancelled event {n}") })
     print("cancelled-active={stopped_sub.is_active()}")
-    print(&stopped.emit(10).summary())
+    print(stopped.emit(10).summary())
     stopped_hook :: event.hook<Int, String>("base")
     stopped_hook.on(cancelled, (n) -> "cancelled hook {n}")
     print(stopped_hook.run(10, "fallback"))
@@ -52,14 +52,14 @@ fn run() {
     ordered.on_priority(order_scope, 5, (n) -> { print("first {n}") })
     ordered.on_priority(order_scope, 5, (n) -> { print("second {n}") })
     ordered.on(order_scope, (n) -> { print("low {n}") })
-    print(&ordered.emit(3).summary())
+    print(ordered.emit(3).summary())
 
     depth_scope :: event.scope()
     depth :: event.new<Int>()
     depth.on_priority(depth_scope, 5, (n) -> {
         print("enter {n}")
-        if n == 1 { print(&depth.emit(2).summary()) }
+        if n == 1 { print(depth.emit(2).summary()) }
     })
     depth.on(depth_scope, (n) -> { print("leave {n}") })
-    print(&depth.emit(1).summary())
+    print(depth.emit(1).summary())
 }

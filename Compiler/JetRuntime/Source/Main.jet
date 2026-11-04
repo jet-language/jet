@@ -20,7 +20,9 @@ main_exit_root := I64{0}
 // runtime-init: 5 when main_exit_root
 #Export(c) fn jet_rt_process_exit_init() {
     if (main_exit_root != I64{0}) -> return
-    main_exit_root = jet_rt_alloc(I64{32}, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        main_exit_root = jet_rt_alloc(I64{32}, I64{8})
+    }
     thread_zero(main_exit_root, I64{32})
 }
 
@@ -40,9 +42,17 @@ main_root_control := I64{0}
 // stopped has nothing to take.
 main_stopped_code := I64{0}
 
-fn main_stopped_install(code: I64) { main_stopped_code = code }
+fn main_stopped_install(code: I64) {
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        main_stopped_code = code
+    }
+}
 
-fn main_process_end() { main_process_ending = I64{1} }
+fn main_process_end() {
+    #Unsafe("an idempotent flag: every writer stores the same 1") {
+        main_process_ending = I64{1}
+    }
+}
 
 // core.perf's raw fidelity word, zero until written
 // (Core/Perf reads zero as the default). A loaded-image host's next entry
@@ -54,7 +64,9 @@ main_perf_bits := I64{0}
 #Export(c) fn jet_perf_write_bits(bits: I64) {
     word :: host_native_int(bits)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    main_perf_bits = word
+    #Unsafe("a whole-word setting: each setter stores one aligned word and the last setter wins, which is what setting it means") {
+        main_perf_bits = word
+    }
 }
 
 // The program entry returning, before its drops (JetIR ir_emit_return). A
@@ -92,8 +104,16 @@ fn main_exit_claim(code: I64) {
 main_exit_handlers_code := I64{0}
 main_parked_report_code := I64{0}
 
-fn main_exit_handlers_install(code: I64) { main_exit_handlers_code = code }
-fn main_parked_report_install(code: I64) { main_parked_report_code = code }
+fn main_exit_handlers_install(code: I64) {
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        main_exit_handlers_code = code
+    }
+}
+fn main_parked_report_install(code: I64) {
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        main_parked_report_code = code
+    }
+}
 
 fn main_exit_cleanup() -> I64 {
     // Exit callbacks run before the observer's report.
@@ -146,7 +166,9 @@ fn rt_main_stopped_address() -> I64 {
     record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     if (record == I64{0}) -> return I64{0}
     jet_rt_root_leave(root, save)
-    main_root_control = I64{0}
+    #Unsafe("only the main thread running jet_rt_main writes its root control") {
+        main_root_control = I64{0}
+    }
     code :: trap_word(wrapping(save + I64{32}))
     report :: scheduler_stop_take_message(record)
     scheduler_stop_drop(record)
@@ -168,8 +190,6 @@ fn rt_main_stopped_address() -> I64 {
 // The entry then runs with no root, so a stop writes its report straight to
 // fd 2 and exits with its code (Trap.jet).
 #Export(c) fn jet_rt_main_owned_start() {
-    // JET_CHECKED_ALLOC=1 never runs a program built without the checker.
-    alloc_check_require()
     // Fatal signals print the fault report (Fault.jet), stack overflow too.
     fault_start()
 }
@@ -178,13 +198,11 @@ fn rt_main_stopped_address() -> I64 {
 // libc main; Image/Loader.jet x64_image_exec explicitly truncates/sign-normalizes it.
 // Returning an I64 low word needs no ABI thunk or new I32 export admission.
 #Export(c) fn jet_rt_main(entry: I64) -> I64 {
-    // Startup (HostStartup.jet jet_rt_host_arguments) has captured and
-    // seeded the environment when the program reads it. The runtime's
+    // Startup (HostStartup.jet jet_rt_host_main_arguments) has registered
+    // argv and envp; the first environment reader indexes and seeds it. The
     // .init_array has already run; these idempotent initializers also make
     // the explicit loaded-image boundary usable.
     host_arguments_require()
-    // JET_CHECKED_ALLOC=1 never runs a program built without the checker.
-    alloc_check_require()
     jet_rt_thread_init()
     jet_rt_scheduler_init()
     // No jet_rt_observe_init here: its hook (Observe.jet) is kept exactly
@@ -209,22 +227,26 @@ fn rt_main_stopped_address() -> I64 {
     // process exits with the stop's code (D-FAIL-EXIT1).
     save :: jet_rt_alloc(I64{40}, I64{8})
     root :: jet_rt_root_begin(save)
-    main_root_control = root
+    #Unsafe("only the main thread running jet_rt_main writes its root control") {
+        main_root_control = root
+    }
     #Unsafe("entry is the loader/object's checked executable System V void(void) address, not a closure header") {
         os_call0_unit(entry)
     }
     stopped :: main_stopped_code
     if (stopped != I64{0}) -> _ := coll_call2(stopped, root, save)
     jet_rt_root_leave(root, save)
-    main_root_control = I64{0}
+    #Unsafe("only the main thread running jet_rt_main writes its root control") {
+        main_root_control = I64{0}
+    }
     jet_rt_free(save, I64{40}, I64{8})
     main_exit_claim(I64{0})
     parked_code :: main_exit_cleanup()
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins
     // the worker executing the process boundary and cannot self-wait.
     jet_scheduler_drain_after_exit()
-    // JET_CHECKED_ALLOC=1 (Alloc.jet): a write after one of the last frees
-    // traps here rather than going unseen.
+    // Checked mode (Alloc.jet, `--checked-alloc`): a write after one of the
+    // last frees traps here rather than going unseen.
     alloc_check_sweep()
     main_flush(wrapping(main_exit_root + I64{16}))
     if (parked_code != I64{0}) {
@@ -236,8 +258,10 @@ fn rt_main_stopped_address() -> I64 {
     // which frees again. Fatal/explicit claims never reach this release. An
     // ending process dropped nothing, so its live Secrets are scrubbed here.
     if (main_process_ending != I64{0}) -> secret_scrub()
-    main_process_ending = I64{0}
-    main_perf_bits = I64{0}
+    #Unsafe("the entry has returned and drained its workers; only the main thread runs here") {
+        main_process_ending = I64{0}
+        main_perf_bits = I64{0}
+    }
     sync_store(main_exit_root, I64{0})
     // Normal entry returns zero, not the entry's unused register.
     I64{0}

@@ -6,50 +6,52 @@
 // actions. The other inspect actions belong to InspectB.jet. A plane, scope,
 // or action whose Jet port has not landed is refused with E2104, never
 // guessed.
-use core.files as cli_files
-use core.sys as cli_sys
-use core.time as cli_time
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverCompileMode,
-    JetDriverCompileResult,
-    JetDriverBuildQueryScope,
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
-    JET_DRIVER_EXIT_USER_ERROR,
-    JET_DRIVER_EXIT_USAGE,
-    jet_driver_inline_package,
-    jet_driver_mask_inline_package,
-    jet_driver_present_diagnostics,
-    jet_driver_report_problems,
-]
-use jet_foundation.[
-    JET_CLI_COMMANDS,
-    JET_CLI_HANDLERS,
-    BuildOptions,
-    Diagnostic,
-    DiagnosticRegistryStatus,
-    Func,
-    ImplDef,
-    Item,
-    Program,
-    Span,
-    Type,
-    TypeParam,
-    diagnostic_from_registry,
-    diagnostic_registry_rows,
-    diagnostic_render_all,
-    type_name,
-    DIAGNOSTIC_ERROR,
-]
-use jet_eval.[jet_eval_compiler_services_source_map]
-use jet_lexer.[
-    lex,
-]
-use jet_parser.[
-    parse_source,
-]
-use jetpack_artifact_store.[ArtifactStore]
+use {
+    cli_files :: core.files
+    cli_sys :: core.sys
+    cli_time :: core.time
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverBuildQueryScope,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JET_DRIVER_EXIT_USAGE,
+        jet_driver_inline_package,
+        jet_driver_mask_inline_package,
+        jet_driver_present_diagnostics,
+        jet_driver_report_problems,
+    ]
+    jet_foundation.[
+        JET_CLI_COMMANDS,
+        JET_CLI_HANDLERS,
+        BuildOptions,
+        Diagnostic,
+        DiagnosticRegistryStatus,
+        Func,
+        ImplDef,
+        Item,
+        Program,
+        Span,
+        Type,
+        TypeParam,
+        diagnostic_from_registry,
+        diagnostic_registry_rows,
+        diagnostic_render_all,
+        type_name,
+        DIAGNOSTIC_ERROR,
+    ]
+    jet_eval.[jet_eval_compiler_services_source_map]
+    jet_lexer.[
+        lex,
+    ]
+    jet_parser.[
+        parse_source,
+    ]
+    jetpack_artifact_store.[ArtifactStore]
+}
 
 // CLI.rs `InspectPlane::ALL`, in order.
 JET_CLI_INSPECT_PLANES :: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates"}
@@ -1300,7 +1302,7 @@ fn jet_cli_inspect_types(programs: [Program], json: Bool) -> JetDriverVerbOutput
         left :: implementation.left
         rhs :: implementation.rhs
         owner :: if jet_cli_inspect_plain_number(left) && !jet_cli_inspect_plain_number(rhs) -> rhs else -> left
-        source :: "{left}.{implementation.trait_name}<{rhs}>"
+        source :: "{left}.{implementation.trait_name}({rhs})"
         kind :: if implementation.explicit_rhs -> "explicit hook" else -> "hook"
         rows := [String]{"{left} {symbol} {rhs} -> {implementation.result}  {kind} {source}"}
         if jet_cli_inspect_plain_number(rhs) && !jet_cli_inspect_plain_number(left) && (implementation.trait_name == "Add" || implementation.trait_name == "Mul") {
@@ -1351,7 +1353,7 @@ fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [
     build_query :: job.action == "graph" || job.action == "query" || job.action == "explain-build"
     if job.json {
         action :: if build_query -> "diagnostics" else -> "inspect"
-        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json(action, false, jet_cli_report_cwd(), job.file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json(action, false, jet_cli_report_base(job.file), job.file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     stderr :: if build_query -> jet_driver_report_problems(job.file, source, errors, job.color, true) else -> diagnostic_render_all(job.file, source, errors, job.color)
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}

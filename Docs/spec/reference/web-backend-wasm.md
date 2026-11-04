@@ -37,6 +37,17 @@ file system is the program's; a page has none, so file calls fail with
 ENOSYS. The host runs one thread: a program that starts a `task` stops with
 E3001 (`tasks are not available on the web target yet`).
 
+When the page has a `document`, the host shows what the program's `core.ui`
+backend paints. Each paint (a `ui.mount`, or a `paint` after `layout`)
+replaces the children of `#jet-app`, which the host creates in `document.body`
+if the page has none: one element per leaf, placed absolutely at its frame (a
+`button` for a button, an `input` for a text input, a `span` for text, a `div`
+for any other node; a box stacks its children and adds no element). A click on
+a button runs its Jet handler once the program's `run` has returned 0, and the
+paint that handler causes (for example a `ui.reactive_render` effect re-running
+on a signal it read) replaces the elements again. Under `node app.js` there is
+no document and nothing is recorded.
+
 ## Partition and ABI
 
 The hybrid boundary is:
@@ -93,6 +104,7 @@ Each file is named here so documentation review cannot silently omit a new examp
 - `store_history.jet`
 - `ui_showcase.jet`
 - `ui_web_click.jet`
+- `ui_web_mount.jet`
 - `ui_web_reactive.jet`
 - `web_app.jet`
 - `web_compute.jet`

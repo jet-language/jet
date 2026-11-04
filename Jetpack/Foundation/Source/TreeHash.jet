@@ -7,12 +7,14 @@
 //
 // The tree bounds MAX_TREE_FILE_BYTES, MAX_TREE_TOTAL_BYTES,
 // MAX_TREE_FILES, and MAX_TREE_DEPTH live in Syntax.jet.
-use jet_foundation.[
-    SHA256_H0, SHA256_K, SHA256_LENGTH_MASK, sha256_compress, sha256_hex_bytes,
-]
-use core.files as files
-use core.time as time
-use core.sys as sys
+use {
+    jet_foundation.[
+        SHA256_H0, SHA256_K, SHA256_LENGTH_MASK, sha256_compress, sha256_hex_bytes,
+    ]
+    files :: core.files
+    time :: core.time
+    sys :: core.sys
+}
 
 // Every directory entry a tree walk visits consumes one node.
 MAX_TREE_NODES :: 2000000
@@ -466,13 +468,19 @@ struct FoundationFileAuthority {
     }
 
     // The held-source publication validator: the original handle's object is
-    // unchanged, and it is still the object bound at the source path.
+    // unchanged, and it is still the object bound at the source path. The
+    // content check leaves out the link count: a file renamed over the source
+    // path unlinks the held object without changing it, and the path check
+    // names that failure as a move.
     fn revalidate(self) IOError! -[FS]> {
         held :: self.handle.stat()
-        if !held.is_file || held.links != 1 || !foundation_same_authority_identity(self.identity, held) {
+        if !held.is_file || !foundation_same_file_identity(self.identity, held) {
             return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input changed while it was held")}))
         }
         self.ensure_paths_current()
+        if held.links != 1 || held.links != self.identity.links {
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input changed while it was held")}))
+        }
     }
 
     // Remove only this checked file's binding through its ORIGINAL parent.

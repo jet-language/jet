@@ -3,10 +3,12 @@
 // unchanged. The assertions belong to the .case files, not this child program.
 // The terminal subject is PENDING-SEAM(term-is-terminal): width/height alone do
 // not establish that both stdin and stdout are TTYs.
-use core.process as process
-use core.files as files
-use core.time as time
-use core.sys as sys
+use {
+    process :: core.process
+    files :: core.files
+    time :: core.time
+    sys :: core.sys
+}
 
 fn output(size: String) {
     if size == "small" -> print("ok")
@@ -52,7 +54,11 @@ fn descendant(pid_file: String) {
         group :: sys.getpgid(sys.getppid()) ?? panic("read the tree's process group")
         sys.setpgid(0, group) ?? panic("join the tree's process group")
     }
-    files.write(pid_file, "{process.current_pid()}") ?? panic("write descendant pid")
+    // The pid file appears whole, by rename: a tree killed while this child
+    // writes leaves no empty or partial pid file behind.
+    staging :: "{pid_file}.part"
+    files.write(staging, "{process.current_pid()}") ?? panic("write descendant pid")
+    files.rename(staging, pid_file) ?? panic("publish descendant pid")
     loop { time.sleep(1s) }
 }
 
@@ -129,14 +135,14 @@ fn reaped(pid_files: [String]) {
 }
 
 fn run() {
-    args :: process.argv()
-    mode :: args.get(1) ?? ""
-    if mode == "output" -> output(args.get(2) ?? "large")
+    args :: process.args()
+    mode :: args.get(0) ?? ""
+    if mode == "output" -> output(args.get(1) ?? "large")
     else if mode == "cpu" -> cpu()
     else if mode == "memory" -> memory()
     else if mode == "files" -> descriptors()
-    else if mode == "tree" -> tree(args.get(2) ?? panic("tree needs a pid file"))
-    else if mode == "descendant" -> descendant(args.get(2) ?? panic("descendant needs a pid file"))
-    else if mode == "reaped" -> reaped(args.slice(2, args.len()))
+    else if mode == "tree" -> tree(args.get(1) ?? panic("tree needs a pid file"))
+    else if mode == "descendant" -> descendant(args.get(1) ?? panic("descendant needs a pid file"))
+    else if mode == "reaped" -> reaped(args.slice(1, args.len()))
     else -> process.exit(2)
 }

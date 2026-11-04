@@ -8,8 +8,10 @@ package {
         tasks: .Library{ entry: tasks }
     }
 }
-use core as core
-use core.time as time
+use {
+    core :: core
+    time :: core.time
+}
 
 // Timer creation and scheduler identity are host cells. Scheduler channels
 // and task groups use language primitives; TaskState transitions are pure Jet.
@@ -30,7 +32,7 @@ fn interval_milliseconds(period: time.Duration) -> Int Never! {
 
 // These functions back compiler-private channel rows, not new public API.
 module scheduler {
-    use core as core
+    use core :: core
 
     fn channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
         pair :: core.tasks.__channel_new<T>()

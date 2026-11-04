@@ -1,7 +1,9 @@
 // -* source-backed graph, formatter round-trip and write transactions.
-use jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, apply_transaction_json, source_revision, source_control_json_for_file]
-use jet.[format_source]
-use std.[fs, env, process]
+use {
+    jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, apply_transaction_json, source_revision, source_control_json_for_file]
+    jet.[format_source]
+    std.[fs, env, process]
+}
 
 // Rust: tests/canvas.rs:11
 // GATE #4494: filesystem/process primitives retain actual providers.
@@ -100,7 +102,7 @@ CANVAS_COLLAPSE_FIXTURE :: comptime { String{"fn compute(limit: Int) -> Int {{\n
 // Rust: tests/canvas.rs:280
 CANVAS_STRUCTURAL_WRITE_FIXTURE :: comptime { String{"fn run() {{\n    print(\"start\")\n}}\n"} }
 // Rust: tests/canvas.rs:285
-CANVAS_RAILS_FIXTURE :: comptime { String{"use core.mem as mem\n\nfn maybe() -> Int String! {{\n    return Ok(1)\n}}\n\nfn checked() -> Int String! {{\n    n :: maybe()\n    return Ok(n)\n}}\n\nfn run() {{\n    #Unsafe(\"Canvas proof rail fixture\") {{\n        marker := 1\n    }}\n    print(checked())\n}}\n"} }
+CANVAS_RAILS_FIXTURE :: comptime { String{"use mem :: core.mem\n\nfn maybe() -> Int String! {{\n    return Ok(1)\n}}\n\nfn checked() -> Int String! {{\n    n :: maybe()\n    return Ok(n)\n}}\n\nfn run() {{\n    #Unsafe(\"Canvas proof rail fixture\") {{\n        marker := 1\n    }}\n    print(checked())\n}}\n"} }
 // Rust: tests/canvas.rs:304
 CANVAS_SHIELD_FIXTURE :: comptime { String{"fn run() {{\n    #Shield {{\n        print(\"before\")\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:311
@@ -108,7 +110,7 @@ CANVAS_POLICY_FIXTURE :: comptime { String{"fn run() {{\n    #Policy(copies: .Ex
 // Rust: tests/canvas.rs:318
 CANVAS_TASK_RAIL_FIXTURE :: comptime { String{"fn worker() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    task.group g {{\n        t :: task {{\n            worker()\n        }}\n        result :: (task.all {{ worker() }}) ?? panic(\"task.all failed\")\n        print(result[0])\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:333
-CANVAS_EVENT_DISPATCHER_FIXTURE :: comptime { String{"use core.event as event\n\nstruct Resource {{\n    id: Int\n\n    fn on(&self) {{}}\n    fn close(&self) {{}}\n    fn cancel(&self) {{}}\n}}\n\nfn run() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(&clicked.emit(1).summary())\n    before_save :: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs :: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report :: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nfn show_publish(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
+CANVAS_EVENT_DISPATCHER_FIXTURE :: comptime { String{"use event :: core.event\n\nstruct Resource {{\n    id: Int\n\n    fn on(&self) {{}}\n    fn close(&self) {{}}\n    fn cancel(&self) {{}}\n}}\n\nfn run() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(&clicked.emit(1).summary())\n    before_save :: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs :: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report :: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nfn show_publish(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:377
 CANVAS_TRAIT_INTERFACE_FIXTURE :: comptime { String{"trait Drawable {{\n    fn render(self) -[IO]> String\n    fn label(self) -> String {{\n        return \"drawable\"\n    }}\n}}\n\nstruct Badge {{\n    text: String\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
 // Rust: tests/canvas.rs:393
@@ -116,7 +118,7 @@ CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE :: comptime { String{"module ui {{\n    tr
 // Rust: tests/canvas.rs:411
 CANVAS_TRAIT_ASSOC_TYPE_FIXTURE :: comptime { String{"trait Indexed {{\n    type Elem\n    fn at(self, i: Int) -> Elem\n}}\n\nstruct Nums {{\n    values: [Int]\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
 // Rust: tests/canvas.rs:425
-CANVAS_TASK_FLOW_FIXTURE :: comptime { String{"use core.tasks as tasks\n\nfn work() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    (sender, ch) :: channel<Int>()\n    task.group g {{\n        t :: task {{\n            sender.send(work())\n        }}\n        print(ch.receive() ?? panic(\"channel closed\"))\n    }}\n}}\n"} }
+CANVAS_TASK_FLOW_FIXTURE :: comptime { String{"use tasks :: core.tasks\n\nfn work() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    (sender, ch) :: channel<Int>()\n    task.group g {{\n        t :: task {{\n            sender.send(work())\n        }}\n        print(ch.receive() ?? panic(\"channel closed\"))\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:442
 CANVAS_DEBUG_FIXTURE :: comptime { String{"fn run() {{\n    total := 1\n    print(total)\n    print(\"program finished\")\n}}\n"} }
 

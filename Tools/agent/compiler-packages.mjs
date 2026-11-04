@@ -21,6 +21,32 @@ const RESERVED_SOURCE_NAMES = new Set(['package.jet', 'pkg.jet', 'env.jet', 'con
 
 const repoPath = (repo, path) => relative(repo, path).split(sep).join('/');
 
+// A `use { … }` block (#6542) rewritten as one `use` line per row, keeping every
+// line and byte offset: `use {` and its `}` turn to spaces and each row's last
+// four columns of indentation become `use `. Line-based import scans (package
+// blanking, Core dedupe, unit assembly) then see the single-line form.
+// `pub use { … }` blocks stay as written.
+export function unblockUses(text) {
+    const lines = text.split('\n');
+    let indent = null, depth = 0;
+    for (let at = 0; at < lines.length; at++) {
+        const line = lines[at];
+        if (indent === null) {
+            const open = /^(\s*)use \{\s*$/.exec(line);
+            if (open) { indent = open[1]; lines[at] = ' '.repeat(line.length); }
+            continue;
+        }
+        if (depth === 0 && line.trimEnd() === `${indent}}`) { indent = null; lines[at] = ' '.repeat(line.length); continue; }
+        const row = `${indent}    `;
+        if (depth === 0 && line.startsWith(row) && /^[A-Za-z_"]/.test(line.slice(row.length))) lines[at] = `${indent}use ${line.slice(row.length)}`;
+        for (const ch of line.replace(/\/\/.*$/, '')) depth += ch === '[' ? 1 : ch === ']' ? -1 : 0;
+    }
+    return lines.join('\n');
+}
+
+// A single-line Core import: `use core.x` or `use alias :: core.x`.
+export const CORE_IMPORT_LINE = /^use (?:[A-Za-z_][A-Za-z0-9_]* :: )?core\.[^\[\n]*$/gm;
+
 function isProject(directory) {
     return PROJECT_MARKERS.some(marker => existsSync(join(directory, marker)));
 }
@@ -165,12 +191,12 @@ export function fixtureUnit(repo, files, packageNames = [...compilerPackages(rep
     // surviving token at its offset; forms this does not recognize stay as written.
     const memberImports = (importText, module, members) => {
         const parts = members.split(',');
-        const bindings = parts.map(part => part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/));
+        const bindings = parts.map(part => part.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/));
         if (bindings.some((binding, index) => !binding && parts[index].trim() !== '')) return importText;
         let removed = false;
         const kept = bindings.map(binding => {
             if (!binding) return false;
-            const key = `${module}.${binding[1]} as ${binding[2] ?? binding[1]}`;
+            const key = `${module}.${binding[1]}`;
             if (seenMembers.has(key)) { removed = true; return false; }
             seenMembers.add(key);
             return true;
@@ -182,10 +208,10 @@ export function fixtureUnit(repo, files, packageNames = [...compilerPackages(rep
         return importText.slice(0, importText.indexOf('[') + 1) + rewritten + ']';
     };
     return files.map(path => {
-        const text = readFileSync(join(root, path), 'utf8')
+        const text = unblockUses(readFileSync(join(root, path), 'utf8'))
             .replace(packageImport, blank)
             .replace(/^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm, memberImports)
-            .replace(/^use core\.[^\[\n]*$/gm, line => {
+            .replace(CORE_IMPORT_LINE, line => {
                 const key = line.trimEnd();
                 if (seenImports.has(key)) return blank(line);
                 seenImports.add(key);

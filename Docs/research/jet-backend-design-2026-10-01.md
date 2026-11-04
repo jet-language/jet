@@ -369,6 +369,18 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+At O1 and O2 a program function whose every value return is a fresh box of
+at most 16 bytes stored only with drop-free payloads (a `T E!` of a Float,
+word, Bool or payload-free error enum; an Option's None is null, not a box)
+takes the box's storage as a
+hidden last parameter instead (`retslot`, JetIR `OptReturnSlot.jet`): each
+direct call passes frame storage of that size, and the caller's unique test,
+free and Drop of the box disappear, so an `Ok` costs no allocation. The
+convention changes in place for the whole image; a function keeps its boxes
+when any caller lets the box outlive the call (returns, stores, moves or
+passes it) or anything but a direct call reaches it (a function value, a
+glue or runtime symbol, the entry). Libraries keep every export's ABI.
+
 `Compiler/JetRuntime/Source/Text.jet` owns the native text exports. Headers are
 24-byte allocations aligned to 8; buffers are allocated with alignment 1 and
 freed with their recorded capacity. Empty buffers have pointer 1 and capacity
@@ -1668,14 +1680,18 @@ the linker supplies the few glibc-only names below. What the linker does:
   section's relocations assigns GOT slots and reports undefined symbols.
 - **Layout.** ET_EXEC at the link base (`LINK_BASE` 0x400000 for `jet
   build`; `LINK_RUN_BASE` 0x200000000000 for an image `jet run` maps into its
-  own process, `Image/Loader.jet`) with file offset = address - base, three
-  page-aligned `PT_LOAD` segments: read-only (headers, `.rodata*`,
+  own process, `Image/Loader.jet`) with three `PT_LOAD` segments on pages of
+  their own: read-only (headers, `.rodata*`,
   `.gcc_except_table*`, the kept unwind records plus a zero terminator),
   read+execute (`.text*`, padded with `int3`), read+write (`.tdata`, the
   init/fini arrays, `.data.rel.ro*`, the GOT, `.data*`, then `.bss*` and
   common symbols), plus `PT_TLS` (`.tdata` + `.tbss`) and `PT_GNU_STACK`.
-  Section headers, `.symtab` and debug sections follow the loaded image
-  (Debug information, above).
+  In the file the read+write bytes follow the read-only ones (the two
+  mappings share that file page, neither executable), then section headers,
+  `.symtab` and debug sections (Debug information, above), then the code
+  from a page boundary to the end of the file, so the code's mapping reads
+  nothing else. A runtime image (`Image/RuntimePack.jet`) and a resident
+  executable keep file offset = address - base.
 - **Relocation.** `R_X86_64_64`, `PC32`, `PLT32`, `32`, `32S`, `PC64`,
   `GOTPCREL`, `GOTPCRELX`, `REX_GOTPCRELX`, `GOTPC32`, `GOTOFF64`, `TLSGD`,
   `TLSLD`, `DTPOFF32/64`, `GOTTPOFF`, `TPOFF32/64` and `SIZE32/64`; anything

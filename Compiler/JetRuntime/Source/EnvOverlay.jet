@@ -41,7 +41,9 @@ env_overlay_root := I64{0}
         encoding_store(wrapping(root + index * I64{8}), I64{0})
         index += I64{1}
     }
-    env_overlay_root = root
+    #Unsafe("runtime-init runs before any other thread exists") {
+        env_overlay_root = root
+    }
 }
 
 fn env_overlay_equal(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
@@ -124,7 +126,7 @@ fn env_overlay_row_store(row: I64, key: I64, key_length: I64, value: I64, value_
 }
 
 fn env_overlay_begin() -> Bool {
-    host_arguments_require()
+    host_environment_require()
     sync_mutex_lock(env_overlay_root)
     if (encoding_word(wrapping(env_overlay_root + I64{8})) != I64{0}) -> return true
     if !env_overlay_reserve(host_env_length) -> return false

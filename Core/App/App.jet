@@ -18,8 +18,10 @@ SYNC_MAX_INT :: 9223372036854775807
 // Live bindings are core.web's process-wide registry: `app` names the same
 // bindings. Sync sessions are records of that registry under
 // web.LIVE_SYNC_SOURCE.
-use core.web as web
-use core.text as unicode
+use {
+    web :: core.web
+    unicode :: core.text
+}
 
 #Error
 enum AppError {
@@ -39,8 +41,10 @@ struct Session {
     expires_at: Int
 }
 
-use core.web.[Live]
-use core.reactive.loadable.[Loadable]
+use {
+    core.web.[Live]
+    core.reactive.loadable.[Loadable]
+}
 fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }

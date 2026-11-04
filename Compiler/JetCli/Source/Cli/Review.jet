@@ -4,17 +4,19 @@
 // (each side's gate ledger with the package/lock writers, GateProjection.jet)
 // and in proof receipts. `--diagnostics` compares the checker diagnostics of
 // the two sides by occurrence identity instead.
-use core.files as cli_files
-use core.encoding.[Dyn]
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverStage,
-    JetDriverVerbOutput, jet_driver_present_diagnostics,
-    JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR,
-]
-use jet_foundation.[
-    Diagnostic, DiagnosticCause, DiagnosticOrigin, GateLedger, gate_kind_name, gate_ledger_sort,
-    diagnostic_from_registry, diagnostic_render_all, sha256_hex, DIAGNOSTIC_ERROR,
-]
+use {
+    cli_files :: core.files
+    core.encoding.[Dyn]
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverStage,
+        JetDriverVerbOutput, jet_driver_present_diagnostics,
+        JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR,
+    ]
+    jet_foundation.[
+        Diagnostic, DiagnosticCause, DiagnosticOrigin, GateLedger, gate_kind_name, gate_ledger_sort,
+        diagnostic_from_registry, diagnostic_render_all, sha256_hex, DIAGNOSTIC_ERROR,
+    ]
+}
 
 // SemanticOps.rs `ReviewSemanticOp`; `kind` and `alignment` hold the stable
 // names (`added`, `matched`, ...).

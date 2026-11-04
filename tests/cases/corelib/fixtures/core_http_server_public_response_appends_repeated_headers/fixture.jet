@@ -1,8 +1,10 @@
-
-use core.http.client as client
-use core.http.server as server
-use core.net as net
-use core.tasks as tasks
+package { name: "http-server-repeated-headers" authority: { allow: [FS.Read, Net, Time] } }
+use {
+    client :: core.http.client
+    server :: core.http.server
+    net :: core.net
+    tasks :: core.tasks
+}
 
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
@@ -19,5 +21,5 @@ fn run() {
     print(cookies.len())
     print(cookies[0])
     print(cookies[1])
-    serving.join()
+    _ :: serving.join() ?? panic("serve join")
 }

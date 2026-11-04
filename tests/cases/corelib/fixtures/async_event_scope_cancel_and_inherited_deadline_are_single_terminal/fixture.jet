@@ -1,7 +1,9 @@
-
-use core.event as event
-use core.tasks as tasks
-use core.time as time
+package { name: "async-event-scope-cancel" authority: { allow: [Time] } }
+use {
+    event :: core.event
+    tasks :: core.tasks
+    time :: core.time
+}
 
 fn owner_teardown_task() -> Task<DispatchReport<String>> {
     owner_scope :: event.scope()
@@ -13,7 +15,7 @@ fn owner_teardown_task() -> Task<DispatchReport<String>> {
         held_sender :: release_tx.copy()
         released :: release_rx.receive() ?? panic("release")
     })
-    running :: ev.emit_async(98)
+    ev.emit_async(98).detach()
     started :: started_rx.receive() ?? panic("started")
     queued :: ev.emit_async(99)
     return queued
@@ -34,9 +36,9 @@ fn run() {
     cancel_pending :: cancelled.emit_async(3)
     print("before-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
     cancel_scope.cancel()
-    pending_report :: cancel_pending.join()
-    queued_report :: cancel_queued.join()
-    running_report :: cancel_running.join()
+    pending_report :: cancel_pending.join() ?? panic("cancel pending join")
+    queued_report :: cancel_queued.join() ?? panic("cancel queued join")
+    running_report :: cancel_running.join() ?? panic("cancel running join")
     print("cancel pending={!pending_report.accepted() && pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
     print("cancel queued={queued_report.accepted() && queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
     print("cancel running={running_report.accepted() && running_report.state() == .Cancelled} trace={running_report.trace().summary()}")
@@ -52,13 +54,13 @@ fn run() {
     })
     queued_running :: queued_deadline.emit_async(10)
     queued_started :: queued_started_rx.receive() ?? panic("started")
-    #Context(deadline: time.now() + 20) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
         expires_queued :: queued_deadline.emit_async(11)
-        queued_expired :: expires_queued.join()
+        queued_expired :: expires_queued.join() ?? panic("deadline queued join")
         print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
     }
     queued_scope.cancel()
-    queued_running.join()
+    _ :: queued_running.join() ?? panic("queued running join")
 
     pending_scope :: event.scope()
     pending_deadline :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
@@ -71,16 +73,16 @@ fn run() {
     pending_running :: pending_deadline.emit_async(20)
     pending_started :: pending_started_rx.receive() ?? panic("started")
     pending_queued :: pending_deadline.emit_async(21)
-    #Context(deadline: time.now() + 20) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
         expires_pending :: pending_deadline.emit_async(22)
-        pending_expired :: expires_pending.join()
+        pending_expired :: expires_pending.join() ?? panic("deadline pending join")
         print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
     }
     pending_scope.cancel()
-    pending_queued.join()
-    pending_running.join()
+    _ :: pending_queued.join() ?? panic("pending queued join")
+    _ :: pending_running.join() ?? panic("pending running join")
 
     owner_task :: owner_teardown_task()
-    owner_report :: owner_task.join()
+    owner_report :: owner_task.join() ?? panic("owner join")
     print("owner teardown={owner_report.accepted() && owner_report.state() == .Cancelled} trace={owner_report.trace().summary()}")
 }

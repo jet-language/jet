@@ -5,10 +5,12 @@ package {
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
-use core.files as files
-use core.http.server as server
-use core.net as net
-use core.net.tls as tls
+use {
+    files :: core.files
+    server :: core.http.server
+    net :: core.net
+    tls :: core.net.tls
+}
 
 fn run() {
     ca :: files.read("fixtures/tls/custom-root.ca.cert.pem") ?? panic("CA fixture")

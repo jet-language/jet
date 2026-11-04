@@ -1,11 +1,13 @@
 // The production constructor and field-access tables must agree. The full
 // fixture assembler uses the real parser/checker with Core and user module
 // origins; the user-module UI fixture must retain E0119.
-use jet_foundation.[
-    Type, core_record_field, core_record_literal_fields, core_record_literal_is_core_only,
-]
-use jet_parser.[parse_generated_source]
-use jet_sema.[SemaSourceSegment, check_program]
+use {
+    jet_foundation.[
+        Type, core_record_field, core_record_literal_fields, core_record_literal_is_core_only,
+    ]
+    jet_parser.[parse_generated_source]
+    jet_sema.[SemaSourceSegment, check_program]
+}
 
 fn core_failure_record_expect(owner: String, field: String) {
     fields :: core_record_literal_fields(owner) ?? panic("failure record is not constructable")

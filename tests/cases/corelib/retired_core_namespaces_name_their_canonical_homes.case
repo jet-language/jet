@@ -1,6 +1,8 @@
 # Port of tests/corelib_parts/system.rs::retired_core_namespaces_name_their_canonical_homes; guest sources preserved verbatim.
 # PENDING-GRAMMAR(batch-four): first matching diagnostic.
-# Internal AST core_list_prefix assertions -> compiler-lib ledger; all 29 teaching cases retained.
+# Internal AST core_list_prefix assertions -> compiler-lib ledger; 28 teaching cases retained. Step 3 (`old :: core.time.datetime`)
+# is no longer a retired namespace: by the #6542 owner order (`double :: math.double`) an alias row binds a module's item, and
+# core.time has a `datetime` item, so the import binds it and only the unused-import lint remains.
 fixture: fixtures/retired_core_namespaces_name_their_canonical_homes
 step: jet check 0.jet --json
 exit: nonzero
@@ -12,8 +14,9 @@ step: jet check 2.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.time" # original first E1001 fix names canonical home
 step: jet check 3.jet --json
-exit: nonzero
-json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.time" # original first E1001 fix names canonical home
+exit: 0
+json: stdout doc $.reports[0].code = "L0103" # the alias row binds core.time's `datetime` item (#6542 owner order); no E1001
+json: stdout doc $.reports[0].what ~ "`old`" # the bound import is merely unused
 step: jet check 4.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.text" # original first E1001 fix names canonical home

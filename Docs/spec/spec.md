@@ -86,19 +86,22 @@ vocabulary](vocabulary.md).
   `Sh.raw(text)` operation is the escape hatch. A bare string never silently
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
   D-UNIFYLIT1=A).
-- Marker rules use one named parameter list:
-  `marker Name(args..., $sites: [...], $repeatable: ..., ...)`. Ordinary
-  arguments and `$`-marked metadata share that list; checked-text marker
-  declarations are retired, so typed text heads do not introduce a second
-  rule form (D-META-FORM1, D-MARKER-SITES1, D-BOUND-SINK1=A).
-  A fixed named group instead writes `marker Fast = #[Inline, Scalar]`,
-  has at least two members and no parameters, and expands through the same
+- A marker is a struct whose fields are its arguments, with one
+  `impl Marker { … }` block in its body. The block's settings are written
+  `name :: value` (`sites :: [...]`, `repeatable :: true`, …) and its template
+  is `fn expand(self, target: Target) { … }`; the retired `marker Name(…)`
+  and `marker Name = #[…]` declarations are E0381 with the struct rewrite
+  (D-DECL-TYPES1=A, D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
+  takes its items as separate arguments at the use site.
+  A fixed named group instead is a field-less marker struct whose block sets
+  `group :: #[Inline, Scalar]`; it has at least two members and no parameters,
+  and expands through the same
   argument, site and duplicate checks as its written members. Gates, refusals,
   retired markers and other named groups cannot be hidden inside it
   (D-MARKER-GROUP1=A).
   Markers declared by the current module may be bare; imported markers always
   name their local import alias in PascalCase, acronyms in caps, as in
-  `#Web.Get(...)` through `use core.http.server as web` (D-MARKER-CASE1=A);
+  `#Web.Get(...)` through `use web :: core.http.server` (D-MARKER-CASE1=A);
   a lowercase library part is E0087. Group members bind in the declaring
   module, not in whichever module applies the group. A public group cannot
   publish a private member (D-MARKER-MODULE1=A).
@@ -813,6 +816,17 @@ and `clear` on a fixed-size list are **E0964**. A literal index outside
 `0..N-1` is **E0965**. A proven `distinct Int(lo..hi)` or sized-integer
 interval may index without a runtime bounds check when `lo >= 0` and `hi < N`
 (D-TYPE2-REFINE1).
+An immutable integer name whose interval is known keeps, after a guard of the
+form `if i >= N -> return` (also `>`, `<`, `<=`, the mirrored forms and
+`a || b`, with an integer literal or a fixed-size list's `.len()` as the
+bound, and any exit: `return`, `break`, `next`, a diverging call), only the
+part of its interval that the guard lets through, for the rest of the block:
+
+```jet
+channel :: Int.from_u8(byte)
+if channel >= channels.len() -> return Err("bad channel")
+channels[channel] += U64{1}
+```
 Finally, `[T#N]` widens to `[T]`; the length fact is erased at that coercion.
 
 ## Closures and function values
@@ -1201,7 +1215,13 @@ it through another is E0204. `^x` on a captured name inside a lambda body moves
 `x` into the lambda: `x` is gone after the lambda is made, and a second call
 of the lambda binding on any path is E0121.
 A literal, `x.copy()`, or call result is a temporary and
-may enter a take parameter without another marker. `x.copy()` is the one copy spelling
+may enter a take parameter without another marker. A temporary with cleanup
+lent to a read parameter (`show(open_log("x"))`) closes exactly once, when its
+statement ends; one made in a branch or a loop condition of the statement
+closes right after the call that reads it. The result of a call that returns a
+view (`-> Directory from self | picked`) is borrowed, not owned: passed on,
+bound with `::`, wrapped in a carrier, or taken apart, it closes nothing, and
+its owner closes it. `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
 syntax; the retired prefix `~x` teaches E0941 (whose Safe fix writes `x.copy()`)
@@ -1759,7 +1779,7 @@ actually reads either capability.
 
 For example, interpolated `print` in
 `Examples/features/basics/first_hour_expert.jet` records both `IO` and the
-`Mem.Alloc` needed for its fresh `String`; `core.process.argv()` records the
+`Mem.Alloc` needed for its fresh `String`; `core.process.args()` records the
 `Exec.Args` leaf, while starting a process records the `Exec` root. A Core
 call with a precise leaf under its own root records only that leaf, so
 `files.read` requires `FS.Read` and `files.write` requires `FS.Write`; the root
@@ -1903,6 +1923,20 @@ an all-zero shared secret. HKDF output is at most 8160 bytes. Argon2id accepts
 8192–262144 KiB, 1–10 iterations, 1–8 lanes, `memory >= 8 * lanes`, and
 `memory * iterations <= 1048576`; salts are 8–64 bytes and output is 16–64
 bytes. Invalid expert parameters use the `CryptoError` family.
+
+A bound the compiler can see is checked at the call (D-CRYPTO-DIAG1=A): an
+argument outside one of the bounds above, or outside `hkdf_sha256`'s 0–8160-byte
+length or `pbkdf2_hmac`'s 1–67108864-byte key length and at-least-one
+iteration count, is E2702 (`Crypto API misuse`, with the operation, the bound
+and the value), not a `CryptoError` at run time. The compiler sees a written
+Int literal, and a byte argument's length when it is a list literal or a
+fixed-length `[U8#N]` value; expert keys, secrets and public keys are 32
+bytes, Ed25519 signatures 64, AES-GCM nonces 12 and XChaCha20 nonces 24.
+E2702 is considered only once every other check passes: the argument's own
+type error, an expert call's missing `#Unsafe` gate (E0510), an effect error,
+or any other error is reported instead, and the call's own failure
+propagation is not reported beside its E2702. A value only known at run time
+still reaches the operation's own check.
 
 `crypto.file_seal(recipients, source, destination)` and
 `crypto.file_open(identity, source, destination)` have unit success and the
@@ -2099,15 +2133,47 @@ Jet has two import forms: a quoted path names a file, and an unquoted name
 names a module.
 
 ```jet
-use "scoring";
-use util as text;
-use core.files;
+use {
+    "scoring"
+    text :: util
+    core.files
+}
 ```
 
 A quoted path is relative to the directory of the file containing the `use`.
 The `.jet` suffix is implicit. A path cannot escape its project with `..`.
-The last path segment supplies the default namespace; `as` gives either form
-an explicit alias (S16).
+The last path segment supplies the default namespace; `alias :: path` gives
+either form an explicit alias (S16).
+
+Two or more imports are written as one `use { … }` block with one row per
+line, and `pub use { … }` re-exports every row (#6542). A row is any import:
+a module path, `path#version`, a member list `path.[a, b]`, a quoted file,
+each optionally after `alias ::`. A file may hold several blocks, and an
+inline module body takes its own. `jet fmt` writes a lone import on one line
+and two or more as a block, with re-exports in a separate `pub use { … }`
+block.
+
+```jet
+use {
+    "scoring"
+    text :: util
+    core.files
+    biggest :: numeric.max
+    core.math.[min]
+}
+```
+
+`alias :: path` binds `alias` to whatever `path` names. A path that names a
+module (a Core, local, package or foreign language module) is that module
+import. A path `owner.name` that names no module, under an owner that declares
+the member `name` (a Core module, an inline or local module, the file a
+body-less `module owner` declares, a file import's alias, or a package
+dependency), binds that member; any other path keeps its module error. A
+member list names its members unrenamed: a renamed member is its own
+`alias :: owner.name` row. A row takes one alias, so `alias ::` with a member
+list is an error, and an empty block is an error. The retired spellings
+`use path as alias`, `owner.[name as alias]` and `owner.{…}` are E0630, a
+teaching error that `jet fmt` rewrites to the rows above.
 
 An unquoted module name is resolved by recursively searching from the project
 root for `name.jet` and for `name/run.jet`; `core` is a compiler-provided
@@ -2262,7 +2328,7 @@ pub use wrap.wrap
 
 A public declaration that is not re-exported does not become part of the
 parent directory's surface, and neither does the child module itself: when
-`text/module.jet` re-exports only `wrap.[wrap as shout]`, reaching the file
+`text/module.jet` re-exports only `shout :: wrap.wrap`, reaching the file
 from outside, as `text.wrap.wrap("hi")`, reports **E0605**.
 
 A file and the item it re-exports may share a name, as `wrap` does above. The
@@ -2901,8 +2967,8 @@ A project binder mounts a language root and library name as `<language>.<lib>`.
 Generated Jet modules and their provenance live below
 `.jet/bindings/<language>/`; generated Jet is ordinary source and can be
 inspected. Import a whole library or a member list with
-`use <lang>.<lib> as alias` or
-`use <lang>.[lib as alias, other]`. A generated descriptor records the ABI
+`use alias :: <lang>.<lib>` or `use <lang>.[lib, other]`. A generated
+descriptor records the ABI
 contract, ownership/layout rules, callback and error model, effect leaf,
 provider, cache suffix, and capability set. Every generated artifact carries
 the `jet-ffi-descriptor-v1` stamp, and a stale stamp is rejected before a
@@ -3497,7 +3563,7 @@ file is available. Query state and queue transitions are defined by
 
 ### Events and hooks
 
-`use core.event as event` exposes typed compiler-known event values; it does
+`use event :: core.event` exposes typed compiler-known event values; it does
 not add an event declaration syntax. `event.new<T>()` creates an infallible
 synchronous `Event<T>`. `event.scope()` creates an owner for subscriptions;
 `scope.cancel()` is idempotent, unsubscribes every owned listener, and makes
@@ -3538,7 +3604,7 @@ creates a typed fold. Handlers return `HookDecision.Continue`,
 scope, priority, and once rules as events.
 
 ```jet
-use core.event as event
+use event :: core.event
 
 fn run() {
     scope :: event.scope()
@@ -3569,7 +3635,7 @@ An RAII guard restores the terminal on normal return, `?` propagation, and panic
 unwind. The marker itself does not require an import; `term.read_key()` does.
 
 ```jet
-use core.term as term
+use term :: core.term
 
 #Live {
     key :: term.read_key()
@@ -3841,6 +3907,28 @@ With `false` the image has no `.debug_*` section; `.eh_frame` stays, and a
 crash report prints the faulting address and the return addresses of its
 frames instead of function names and lines.
 
+`debug_info` also takes `split`, the value of the stock `release` profile
+(`--release` is `optimize: full` and `debug_info: split`; a `release` profile
+in `package.jet` replaces both). Under `split`, `jet build` writes the DWARF,
+the location table, the symbol table and the section headers to a side file,
+`<image>.debug` beside the image, and files the same bytes in the package's
+symbol store as
+`.jet/symbols/.build-id/<first two hex digits>/<rest>.debug`. The image keeps
+its loaded segments and a GNU build-id note under one `PT_NOTE` header, with
+section headers naming only that note; the build id hashes both files, so
+debuggers and profilers given the store (`gdb`'s
+`debug-file-directory`, `perf`'s build-id lookup) find the side file. An
+image that links no unwinder (no code of it unwinds the stack; a crash report
+walks frame pointers) moves its call frame information to the side file too,
+as `.debug_frame`, so its loaded segments hold no `.eh_frame`; with an
+unwinder `.eh_frame` stays loaded. A crash report of the image prints
+addresses, as under `false`.
+`jet run`, `jet dev` and `jet test` keep the debug info in the image under
+`split`, as under `true`, so their crash reports name functions and lines.
+`backtrace: full` stays legal with `split`. A user who wants the debug info
+in a release image writes `--debug-info=true` or `debug_info: true` in a
+`release` profile.
+
 ### Size-oriented builds
 
 `small` (stock `false`) favors a smaller binary: with `true` the optimizer
@@ -3882,6 +3970,21 @@ non-generic function of the package's own modules, so the image carries them
 `fn build` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
 [`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
+
+`checked_alloc` (stock `false`) holds a Bool. With `true` the program links
+the runtime's checked memory allocator and runs with it from its first
+allocation: every heap block carries guard words and the call chain that
+allocated it, and a double free, a free of a pointer the heap never handed
+out, a free with another size or alignment than the allocation's, a write
+past a block's end or a write into a freed block (freed blocks wait in a
+quarantine and are checked as they leave it and when `main` returns) stops
+the program with a report that names the block and the call sites, then
+aborts. With `false` the image holds none of the checked allocator, and the
+program reads nothing at start to decide it. `jet build --checked-alloc`,
+`jet run --checked-alloc` and `jet test --checked-alloc` are `true`, and
+`fn build` writes `b.checked_alloc(true)`. The row is part of every build
+key, so a checked build never reuses an unchecked one's outputs. A web build
+has no checked allocator: `true` with `os: web` is refused (E2104).
 
 ### Output places, link inputs and targets
 
@@ -4348,7 +4451,7 @@ Plain `#CLI` always registers `--help`.
 
 `run` is the reserved program entry name. A typed `fn run(args: T)` is an
 explicit request for command input; a `main` function has no entry meaning.
-Raw argv access remains explicit through `core.args` or `core.term.args`. An
+Raw argument access remains explicit through `core.process.args()`. An
 `Output.Executable` entry uses the same contract. There is no variadic typed
 entry. An App-returning typed entry decodes the one argument, calls `run(args)`,
 and serves the returned App; it does not change the CLI schema
@@ -4449,11 +4552,11 @@ has a valid built-in-only schema. Metadata failures are E2103
 
 ## Editions and compatibility
 
-A package may pin an edition with `edition: "2026"` in `package.jet`. Supported
-editions are `2026`, `2027`, and `2028`; a missing field uses the newest stable
-edition supported by the running toolchain. A single-file `jet run file.jet`
-has no edition marker and uses that newest edition. An unsupported future
-edition is E2001. The durable compatibility contract for patch, minor, major,
+A package may pin an edition with `edition: "2026"` in `package.jet`. The one
+supported edition is `2026`, and it carries no edition-gated behaviour; a
+missing field uses that edition, as does a single-file `jet run file.jet`,
+which has no edition marker. Any other edition is E2001 (7bef65ccd4). The
+durable compatibility contract for patch, minor, major,
 epoch, edition, migration, deprecation, and generated-code licensing lives in
 [the release policy](release-policy.md) (D-REL3, E2-V4).
 
@@ -4629,7 +4732,7 @@ A sandbox's WIT world lists the entry file's top-level functions. A host uses a
 typed plugin handle:
 
 ```jet
-use core.plugin as plugin
+use plugin :: core.plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])

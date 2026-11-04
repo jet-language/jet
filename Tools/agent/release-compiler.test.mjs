@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { COMPILER_ALIASES, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName } from './release-compiler.mjs';
+import { COMPILER_ALIASES, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName, shardJobs } from './release-compiler.mjs';
 
 const row = (id, tier, status, suite = 'ui') => ({ suite, case: id, tier, status, detail: '' });
 
@@ -36,6 +36,14 @@ test('options collect every problem at once', () => {
     assert.equal(parseArgs(['abc', '--min-gains', '0']).minGains, 0);
 });
 
+test('the shards split the slot memory cap instead of each claiming the host', () => {
+    assert.equal(shardJobs(parseArgs(['abc']), '16G'), 2);
+    assert.equal(shardJobs(parseArgs(['abc']), undefined), 2);
+    assert.equal(shardJobs(parseArgs(['abc', '--shards', '1']), '24G'), 12);
+    assert.equal(shardJobs(parseArgs(['abc', '--shards', '16']), '16G'), 1);
+    assert.equal(shardJobs(parseArgs(['abc', '--jobs', '3']), '64G'), 3);
+});
+
 test('a lost row is one the release passes and the candidate fails on both runs', () => {
     const release = [row('a.jet', 'o0', 'PASS'), row('b.jet', 'o0', 'PASS'), row('c.jet', 'o0', 'FAIL'), row('d.jet', 'o1', 'UNEXPECTED-PASS')];
     const candidate = [row('a.jet', 'o0', 'PASS'), row('b.jet', 'o0', 'FAIL'), row('c.jet', 'o0', 'PASS'), row('e.jet', 'o0', 'PASS')];
@@ -60,6 +68,7 @@ test('a disposition names a card and matches a tier or every tier', () => {
 test('Jetpack census keys drop line numbers and stop at the per-file summary', () => {
     const text = 'Jetpack/A.jet:10:2: error[E1]: bad\nJetpack/A.jet:99:1: error[E1]: bad\nJetpack/B.jet:3:4: error[E2]: worse\nerrors per file:\nJetpack/C.jet:1:1: x: y\n';
     assert.deepEqual(jetpackKeys(text), ['Jetpack/A.jet\terror[E1]', 'Jetpack/B.jet\terror[E2]']);
+    assert.deepEqual(jetpackKeys('total errors: 0\n'), []);
 });
 
 test('chain RESULT rows and merge-tree conflicts parse', () => {

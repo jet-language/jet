@@ -1,10 +1,10 @@
-use core.time as time
+use time :: core.time
 #Pre(n != 65, "contract-high") fn checked(n: Int) -> Int { return n }
 fn callback(n: Int) -> Int {
 if n == 0 { print("worker-0-start") }
 if n == 64 { print("worker-1-start") }
 if n == 128 { print("worker-2-complete") }
-if n == 1 { #Context(deadline: time.now() - 1) { time.sleep(1ms) } }
+if n == 1 { #Context(deadline: time.unix_ns() /% 1_000_000 - 1) { time.sleep(1ms) } }
 if n == 65 { return checked(n) }
 return n
 }

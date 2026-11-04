@@ -2,10 +2,12 @@
 // shared-kernel state transitions; original tests/notebook.rs remains packet0986.
 // Native journeys below use the actual Kernel/evaluator/UUID providers; they
 // remain #4494/#4483/#4409/#4500 gated until Main publishes those producers.
-use jet_ast.[CtValue, NamedCtValue]
-use jet_foundation.[Type, TypeTupleField, sha256_hex]
-// Test source assembled into the same canonical jet_repl owner by Main.
-use core.files.runtime.kernel_path_components as notebook_kernel_test_paths
+use {
+    jet_ast.[CtValue, NamedCtValue]
+    jet_foundation.[Type, TypeTupleField, sha256_hex]
+    // Test source assembled into the same canonical jet_repl owner by Main.
+    notebook_kernel_test_paths :: core.files.runtime.kernel_path_components
+}
 
 fn notebook_kernel_test_eval(text: String, value: CtValue?) -> EvalResult Never! {
     EvalResult{text: text, status: ReplTurnStatus.Ok, had_effect: false, quit: false, value: value}

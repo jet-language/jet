@@ -1,9 +1,11 @@
-use core.math as report_json_math
-use core.encoding.json as report_json_codec
-use jetpack_foundation.[
-    ReportEnvelope, StatusEnvelope, StatusFields, report_render_status,
-    report_render_status_with_reports,
-]
+use {
+    report_json_math :: core.math
+    report_json_codec :: core.encoding.json
+    jetpack_foundation.[
+        ReportEnvelope, StatusEnvelope, StatusFields, report_render_status,
+        report_render_status_with_reports,
+    ]
+}
 
 #Test("status JSON rejects non-finite fields through ReportError on every entry point") {
     numbers :: [Float]{report_json_math.NAN, report_json_math.INFINITY, -report_json_math.INFINITY}
@@ -34,10 +36,12 @@ use jetpack_foundation.[
     text :: envelope.json() ?? panic("finite status JSON")
     line :: envelope.json_line() ?? panic("finite status JSON line")
     assert_eq(line, "{text}\n")
+    // The strict parser keeps every number as its exact lexeme (`Dyn.Number`,
+    // core.encoding.json `parse`), so the float field reads back as "1.25".
     tree :: report_json_codec.parse(text) ?? panic("finite status JSON parses")
     value :: tree.field("value") ?? panic("status value")
     if value == {
-        .Float(number) -> assert(number == 1.25)
-        else -> panic("status value must stay a float")
+        .Number(lexeme) -> assert_eq(lexeme, "1.25")
+        else -> panic("status value must stay the JSON number 1.25")
     }
 }

@@ -1,11 +1,13 @@
 
-use core.args as args
-use core.process as process
+use {
+    args :: core.args
+    process :: core.process
+}
 
 fn run() {
     spec :: args.spec()
         .option("name", "display name", "NAME")
         .positional("name", "display name")
-    parsed :: spec.parse_or_exit(process.argv())
+    parsed :: spec.parse_or_exit(process.args())
     print(parsed.option("name") ?? "none")
 }

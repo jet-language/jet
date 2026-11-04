@@ -18,7 +18,9 @@ fn rt_fault_allocation_drop_address() -> I64 {
     trap_store(closure, I64{1})
     trap_store(wrapping(closure + I64{8}), rt_fault_allocation_drop_address())
     trap_store(wrapping(closure + I64{16}), I64{0})
-    fault_allocation_key = jet_rt_tls_key_new(closure)
+    #Unsafe("runtime-init runs before any other thread exists") {
+        fault_allocation_key = jet_rt_tls_key_new(closure)
+    }
 }
 
 #Export(c) fn jet_rt_fault_allocation_drop(_closure: I64, state: I64) -> I64 {
@@ -44,7 +46,15 @@ fn fault_allocation_state() -> I64 {
     trap_store(wrapping(state + I64{24}), I64{0})
 }
 
+// Whether the armed schedule fails this allocation (FaultSchedule.jet
+// fault_check_code; 0 there means nothing ever armed one).
 #Export(c) fn jet_fault_should_fail_allocation() -> Bool {
+    code :: fault_check_code
+    if (code == I64{0}) -> return false
+    coll_call1(code, I64{0}) != I64{0}
+}
+
+fn fault_allocation_should_fail() -> Bool {
     state :: fault_allocation_state()
     if (state == I64{0}) { return false }
     old :: trap_word(wrapping(state + I64{8}))

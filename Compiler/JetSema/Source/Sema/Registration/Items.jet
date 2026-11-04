@@ -3,115 +3,117 @@
 // This layer owns declaration identity and graph edges only. Types and the checked tree remain
 // Foundation-owned; callable signatures are projected by Declarations.jet and
 // defaults remain AST references keyed by FunctionDefaultRef.
-use core.text as unicode
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    AccessConvention,
-    CORE_SOURCE_OWNED_ROWS,
-    CallArg,
-    CallContractRow,
-    CallablePolicy,
-    CallablePolicyChain,
-    CompilerThreads,
-    ConstDef,
-    DeclID,
-    DeclTable,
-    decl_id_index,
-    decl_table_add,
-    decl_table_find,
-    decl_table_index,
-    Diagnostic,
-    Dimension,
-    DimensionAxis,
-    EffectRowEntry,
-    EnumDef,
-    EnumGroup,
-    Expr,
-    ExternFn,
-    Field,
-    Func,
-    FunctionCallMetadata,
-    FunctionDefaultRef,
-    ImplDef,
-    ImportDecl,
-    ImportedItem,
-    ImportKind,
-    InternalTag,
-    Item,
-    SerdeCodec,
-    TraitRef,
-    TargetMachine,
-    Marker,
-    Measure,
-    NamedSpan,
-    NamedType,
-    NameRows,
-    NameTable,
-    OperatorMarker,
-    Param,
-    ParamZone,
-    Program,
-    QuantityKind,
-    SerdeWireShape,
-    Span,
-    StructDef,
-    Symbol,
-    SymbolID,
-    SymbolKind,
-    TagMarker,
-    TraitImplBlock,
-    TraitMethodSig,
-    Type,
-    TypeIdentity,
-    TypeParam,
-    TypeTupleField,
-    UnitFamilyDef,
-    UnitRatio,
-    UnitScaleProvenance,
-    UserPolicyDecl,
-    Variant,
-    Stmt,
-    VariantPayload,
-    ast_empty_call_arg_flags,
-    ast_func,
-    ast_program,
-    compiler_apply_order,
-    compiler_threads_admit,
-    compiler_threads_failure_text,
-    compiler_threads_heaviest_first,
-    compiler_transfer_rows,
-    core_enum_payload_variants,
-    core_enum_variant_payload,
-    core_module_export,
-    core_module_has_member,
-    core_module_has_type,
-    core_record_literal_fields,
-    core_source_owns_type,
-    expr_span,
-    builtin_codec_trait_ref,
-    name_count,
-    name_find_bytes,
-    name_rows,
-    name_rows_get,
-    name_rows_get_text,
-    name_rows_hash,
-    name_rows_remove,
-    name_rows_set,
-    name_text,
-    sema_reserved_type_name,
-    symbol_id,
-    type_identity,
-    type_identity_key,
-    type_name,
-    type_with_effective_fn_returns,
-    unit_family_distinct_defs,
-    CModule,
-    TCompilerBuiltin,
-]
-use jet_parser.[
-    jfmt_decode_shapes,
-    parse_generated_source,
-]
+use {
+    unicode :: core.text
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        AccessConvention,
+        CORE_SOURCE_OWNED_ROWS,
+        CallArg,
+        CallContractRow,
+        CallablePolicy,
+        CallablePolicyChain,
+        CompilerThreads,
+        ConstDef,
+        DeclID,
+        DeclTable,
+        decl_id_index,
+        decl_table_add,
+        decl_table_find,
+        decl_table_index,
+        Diagnostic,
+        Dimension,
+        DimensionAxis,
+        EffectRowEntry,
+        EnumDef,
+        EnumGroup,
+        Expr,
+        ExternFn,
+        Field,
+        Func,
+        FunctionCallMetadata,
+        FunctionDefaultRef,
+        ImplDef,
+        ImportDecl,
+        ImportedItem,
+        ImportKind,
+        InternalTag,
+        Item,
+        SerdeCodec,
+        TraitRef,
+        TargetMachine,
+        Marker,
+        Measure,
+        NamedSpan,
+        NamedType,
+        NameRows,
+        NameTable,
+        OperatorMarker,
+        Param,
+        ParamZone,
+        Program,
+        QuantityKind,
+        SerdeWireShape,
+        Span,
+        StructDef,
+        Symbol,
+        SymbolID,
+        SymbolKind,
+        TagMarker,
+        TraitImplBlock,
+        TraitMethodSig,
+        Type,
+        TypeIdentity,
+        TypeParam,
+        TypeTupleField,
+        UnitFamilyDef,
+        UnitRatio,
+        UnitScaleProvenance,
+        UserPolicyDecl,
+        Variant,
+        Stmt,
+        VariantPayload,
+        ast_empty_call_arg_flags,
+        ast_func,
+        ast_program,
+        compiler_apply_order,
+        compiler_threads_admit,
+        compiler_threads_failure_text,
+        compiler_threads_heaviest_first,
+        compiler_transfer_rows,
+        core_enum_payload_variants,
+        core_enum_variant_payload,
+        core_module_export,
+        core_module_has_member,
+        core_module_has_type,
+        core_record_literal_fields,
+        core_source_owns_type,
+        expr_span,
+        builtin_codec_trait_ref,
+        name_count,
+        name_find_bytes,
+        name_rows,
+        name_rows_get,
+        name_rows_get_text,
+        name_rows_hash,
+        name_rows_remove,
+        name_rows_set,
+        name_text,
+        sema_reserved_type_name,
+        symbol_id,
+        type_identity,
+        type_identity_key,
+        type_name,
+        type_with_effective_fn_returns,
+        unit_family_distinct_defs,
+        CModule,
+        TCompilerBuiltin,
+    ]
+    jet_parser.[
+        jfmt_decode_shapes,
+        parse_generated_source,
+    ]
+}
 
 JET_CANONICAL_EFFECT_PACKAGE_IDENTITY :: "jet:canonical-prelude"
 JET_CANONICAL_EFFECT_MODULE_PATH :: "Prelude/Effects.jet"
@@ -289,6 +291,32 @@ fn sema_registration_unit_fact_for_type(graph: SemaRegistrationGraph, ty: Type) 
         return Val(graph.unit_facts[fact_index])
     }
     None
+}
+
+// `Quantity<Dimension, .Kind>` (the parser's canonical bound text) holds for a
+// unit type of that family and kind, and for any quantity whose physical
+// dimension equals the dimension of a family named `Dimension` in that kind; a
+// derived quantity such as `kilogram * meter / s / s` is Linear.
+fn sema_registration_quantity_bound_satisfied(graph: SemaRegistrationGraph, actual: Type, bound: String) -> Bool Never! {
+    kind := "Linear"
+    dimension := Dimension?{None}
+    if actual == .Quantity(_, quantity_dimension) {
+        dimension = Val(quantity_dimension.copy())
+    } else {
+        fact :: sema_registration_unit_fact_for_type(graph, actual) ?? return false
+        kind = if fact.kind == {
+            .Linear -> "Linear"
+            .Point -> "Point"
+            .Delta -> "Delta"
+        }
+        if bound == "Quantity<{fact.family}, .{kind}>" -> return true
+        dimension = fact.dimension
+    }
+    if dimension == None -> return false
+    loop fact in graph.unit_facts {
+        if bound == "Quantity<{fact.family}, .{kind}>" && sema_expr_unit_dimensions_equal(fact.dimension, dimension) -> return true
+    }
+    false
 }
 
 fn sema_registration_unit_fact_is_builtin_time(fact: SemaRegistrationUnitFact) -> Bool Never! {
@@ -3611,6 +3639,86 @@ fn sema_registration_direct_symbol(module_row: SemaRegistrationModule, name: Str
     None
 }
 
+// A Core module's public surface is its `module core.X exports {…}` row in
+// Compiler/Prelude/Core.jet, not its source visibility: Core declares no
+// `pub`, so every Core item is visible by default. Code outside Core reaches
+// only the names that row lists, or a Core submodule; the rest (a handle
+// struct such as `SqliteDB { raw }`, a host leaf, an internal constant) is
+// Core's own. Core itself reaches every Core item. A dotted member
+// (`use core.[math.abs]`) is checked against its own module's row.
+fn sema_registration_core_private(module_row: SemaRegistrationModule, name: String, requester_module: String) -> Bool Never! {
+    if !module_row.module_identity.starts_with("<corelib>/") || requester_module.starts_with("<corelib>/") -> return false
+    owner := module_row.module_name.copy()
+    leaf := name.copy()
+    if name.cut_last(".") == .Val(parts) {
+        owner = "{owner}.{parts.before}"
+        leaf = parts.after.copy()
+    }
+    if core_module_export(owner) == None -> return false
+    !core_module_has_member(owner, leaf) && !core_module_has_type(owner, leaf) && core_module_export("{owner}.{leaf}") == None
+}
+
+fn sema_registration_core_private_error(name: String, module_name: String, span: Span) -> Diagnostic {
+    sema_error("E0609", span, "`{name}` is private in module `{module_name}`", "a Core module's API is the names it exports; its other types and helpers belong to Core alone", "use what `{module_name}` exports instead")
+}
+
+// Whether `module_row` declares a child module `name` (`module name` /
+// `priv(package) module name`), whether or not the requester may see it.
+fn sema_registration_module_declares_child(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+    loop import in module_row.imports {
+        if import.declaration.kind == {
+            .File(_, _) | .Module(_, _) -> {
+                if import.declaration.alias == name -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+// The Core module behind `alias` when `alias.name` names a declaration that
+// module keeps private from `module_identity`: the qualified spelling of an
+// import the E0609 above refuses (`db.SqliteDB{raw: 1}`).
+fn sema_registration_core_private_qualified(graph: SemaRegistrationGraph, module_identity: String, alias: String, name: String) -> String? {
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    loop import in graph.modules[module_index].imports {
+        if import.declaration.alias != alias || sema_registration_file_import_taken_over(graph.modules[module_index], import) -> next
+        target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? return None
+        target :: graph.modules[target_index]
+        if !sema_registration_core_private(target, name, module_identity) -> return None
+        if sema_registration_lookup_name_at(graph, target_index, target.module_identity, name) == None -> return None
+        return Val(target.module_name.copy())
+    }
+    None
+}
+
+// The `alias.child` path when `alias.child.…` reaches into a `priv module`
+// `child` that the module imported as `alias` declares: only that module
+// (and, for `priv(package)`, its package) may name what it holds.
+fn sema_registration_private_module_path(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String? {
+    qualified :: name.split_once(".") ?? return None
+    nested :: qualified.after.split_once(".") ?? return None
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    loop import in graph.modules[module_index].imports {
+        if import.declaration.alias != qualified.before || sema_registration_file_import_taken_over(graph.modules[module_index], import) -> next
+        target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? return None
+        if target_index == module_index -> return None
+        loop declaration in graph.modules[target_index].declarations {
+            if declaration == .CodeModule(definition) {
+                if definition.name != nested.before || definition.body == None || definition.is_pub -> next
+                if definition.is_package_pub && graph.modules[target_index].package_identity == graph.modules[module_index].package_identity -> return None
+                return Val("{qualified.before}.{nested.before}")
+            }
+        }
+        return None
+    }
+    None
+}
+
+fn sema_registration_private_module_error(path: String, span: Span) -> Diagnostic {
+    sema_error("E0605", span, "`{path}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use what `{path}` holds from inside its enclosing module, or remove `priv` from the module")
+}
+
 fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: String, requester_package: String, seen: [String]) -> SemaRegistrationExport? {
     if module_index < 0 || module_index >= graph.modules.len() -> return None
     key :: "{module_index}:{name}"
@@ -3620,6 +3728,7 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
     next_seen := seen
     &next_seen.push(key)
     module_row :: graph.modules[module_index]
+    if sema_registration_core_private(module_row, name, requester_module) -> return None
     direct :: sema_registration_direct_symbol(module_row, name)
     if direct == .Val(export) {
         if sema_registration_visible(export.visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) -> return Val(export)
@@ -3678,7 +3787,7 @@ fn sema_registration_declared_import_spans(module_index: Int, imports: [ImportDe
     }
 }
 
-// A C library import (`use c.lib`, `use c.lib as x`, `use c.[lib as x, …]`)
+// A C library import (`use c.lib`, `use x :: c.lib`, `use c.[lib, …]`)
 // binds its one library alias to the synthetic `__c_{lib}` module, as a
 // qualified module import does, whichever spelling named it.
 fn sema_registration_foreign_import_declaration(edge: SemaRegistrationImportEdge) -> ImportDecl Never! {
@@ -3711,7 +3820,7 @@ fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &Sema
     source_identity := graph.modules[source_index].module_identity
     source_package := graph.modules[source_index].package_identity
     visibility :: sema_registration_import_visibility(declaration)
-    // The alias joins the key: one `use c.[a as x, b as y]` declaration
+    // The alias joins the key: one `use c.[a, b]` declaration
     // registers one library-module import per C library it names.
     span_key :: "{source_index}|{declaration.span.start}|{declaration.span.end}|{declaration.alias}"
     if registered.spans.get(span_key) != None {
@@ -3770,7 +3879,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                 local :: sema_registration_import_local(item)
                 // (Rust `core_list_path`): a member naming a
                 // Core submodule (`use core.mem`, `core.encoding.[json]`) binds
-                // that module as a namespace, exactly like `use core.mem as mem`.
+                // that module as a namespace, exactly like `use mem :: core.mem`.
                 submodule :: "{target_name}.{item.original}"
                 if (target_name == "core" || target_name.starts_with("core.")) && core_module_export(submodule) != None {
                     if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
@@ -3797,7 +3906,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                 resolved :: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package, [String]{})
                 if resolved == {
                     .Val(export) -> {
-                        duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_owner(graph, module_index, local))
+                        duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_conflict(graph, module_index, local, item.original, export.source_module_identity))
                         if {
                             duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                             else -> {
@@ -3839,7 +3948,9 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         }
                         if {
                             private_template -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {item.original}` in the defining file"))
+                            direct != None && sema_registration_core_private(graph.modules[target_index], item.original, source_identity) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_registration_core_private_error(item.original, target_name, declaration.span))
                             direct != None -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only visible declarations can be selected through an import", "make the declaration public or keep the use in its defining module"))
+                            sema_registration_module_declares_child(graph.modules[export_index], item.original) -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "a `priv module` is usable only by its enclosing module, and a `priv(package) module` only by its own package", "use what `{target_name}` makes public, or import `{item.original}` from inside its package"))
                             else -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_error("E0611", declaration.span, "`{item.original}` is not defined in module `{target_name}`", "an import member must name one registered declaration", "declare or import the member before selecting it"))
                         }
                     }
@@ -3866,8 +3977,9 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
 // and the imports registered before the package names (`import_count` of
 // them), as Rust consults `namespace_owner` last. A name one of those already
 // binds stays theirs. A declaration of a package name is refused (E0105), and
-// so is an imported item of a package function's name; a module alias or an
-// imported type shadows the package name, as in Rust.
+// so is an imported item of a package function's name unless it imports that
+// very function; a module alias or an imported type shadows the package name,
+// as in Rust.
 fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_index: Int, import_count: Int) {
     if graph.modules[module_index].namespace_slot < 0 -> return
     loop position in 0..<graph.modules[module_index].symbols.len() {
@@ -3880,7 +3992,9 @@ fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_
         loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
             if graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind == .Import -> next
             local :: graph.modules[module_index].imports[import_index].bindings[binding_index].local
-            if !sema_registration_namespace_function_owner(graph, module_index, local) -> next
+            original :: graph.modules[module_index].imports[import_index].bindings[binding_index].original
+            source :: graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity
+            if !sema_registration_namespace_function_conflict(graph, module_index, local, original, source) -> next
             span :: graph.modules[module_index].imports[import_index].declaration.span
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", span))
         }
@@ -3892,6 +4006,17 @@ fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_
 fn sema_registration_namespace_function_owner(graph: SemaRegistrationGraph, module_index: Int, name: String) -> Bool Never! {
     owner :: sema_registration_namespace_owner(graph, module_index, name) ?? return false
     graph.modules[owner.module_index].symbols[owner.row].kind == .Function
+}
+
+// Whether importing `original` from `source_module_identity` as `local`
+// collides with a package function another member declares. The import that
+// names the very declaration the package already binds under that name
+// (`use mathlib.clamp` beside the `clamp` of mathlib.jet, `pub use
+// wrap.wrap`) binds nothing new, so it is no collision.
+fn sema_registration_namespace_function_conflict(graph: SemaRegistrationGraph, module_index: Int, local: String, original: String, source_module_identity: String) -> Bool Never! {
+    owner :: sema_registration_namespace_owner(graph, module_index, local) ?? return false
+    if graph.modules[owner.module_index].symbols[owner.row].kind != .Function -> return false
+    original != local || graph.modules[owner.module_index].module_identity != source_module_identity
 }
 
 fn sema_registration_module_has_nominal_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {

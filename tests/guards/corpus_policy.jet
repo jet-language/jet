@@ -2,7 +2,7 @@
 // owns recurrence. This is test support, never a user-program lint.
 // Guard logic lives in ordinary helpers so LIGHT `jet check tests/guards` sees
 // its semantic errors; #Test blocks only dispatch to those checked helpers.
-use core.files as policy_files
+use policy_files :: core.files
 
 struct PolicySourceRow {
     selector: String
@@ -45,7 +45,6 @@ fn policy_slice_raw(raw: [U8], start: Int, end: Int) -> String {
 fn policy_rule_registry() -> [PolicyRuleSpec] {
     [PolicyRuleSpec]{
         PolicyRuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)"},
-        PolicyRuleSpec{name: "raw-cli-builder-shape", why: "a maintained CLI recipe must not rebuild the parser beside its typed entry", replacement: "use the resolved typed #CLI entry or the one approved args builder"},
         PolicyRuleSpec{name: "fixture-cli-role", why: "a diagnostic fixture may retain parser syntax only as an explicitly classified fixture", replacement: "keep the exact negative or fixture role and do not copy its shape into teaching code"},
         PolicyRuleSpec{name: "dogfood-stdlib-recipes", why: "the maintained dogfood recipe must use the canonical typed helper", replacement: "call the resolved Core helper instead of a local reimplementation"},
         PolicyRuleSpec{name: "dogfood-path-containment", why: "path containment must use the typed path relation", replacement: "call Path.is_within for the normalized path values"},
@@ -59,7 +58,6 @@ fn policy_rule_registry() -> [PolicyRuleSpec] {
         PolicyRuleSpec{name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary"},
         PolicyRuleSpec{name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion"},
         PolicyRuleSpec{name: "entry-explicit", why: "ordinary-file execution belongs in an explicit fn run (D-ENTRY-SCRIPT1=C)", replacement: "move loose executable statements into fn run"},
-        PolicyRuleSpec{name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()"},
         PolicyRuleSpec{name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()"},
         PolicyRuleSpec{name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup"},
         PolicyRuleSpec{name: "unit-scalar-rewrap", why: "a scalar conversion must not unwrap and immediately rewrap the same unit", replacement: "use the linear unit operation directly"},
@@ -550,11 +548,11 @@ fn policy_test_unclassified_inventory_entries() {
 fn policy_test_occurrence_scoped_exceptions() {
     manifest :: policy_manifest()
     selector :: "tests/ui/args_spec_bad_parse_arity.jet"
-    candidate :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.argv@0..0"}
+    candidate :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.args@0..0"}
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate}), None)
     duplicate :: policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{candidate, candidate}) ?? panic("a second occurrence cannot reuse one exception")
     assert(duplicate.contains("expected 1"), "duplicate occurrence must fail")
-    assert_eq(duplicate, "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
+    assert_eq(duplicate, "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 2; replacement=remove the additional occurrence or add a distinct reviewed site")
     applied :: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
     assert_eq(applied, [PolicyOccurrence]{})
 }
@@ -562,10 +560,10 @@ fn policy_test_occurrence_scoped_exceptions() {
 fn policy_test_missing_and_shifted_exception_sites() {
     manifest :: policy_manifest()
     selector :: "tests/ui/args_spec_bad_parse_arity.jet"
-    shifted :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.argv@1..1"}
-    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
-    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
-    assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.argv@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
+    shifted :: PolicyOccurrence{file: selector, rule: "raw-cli-fixed-shape", site: "call:process.args@1..1"}
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{shifted}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@1..1; why=occurrence has no unique exception; replacement=add one exact exception"))
+    assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
+    assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
 }
 #Test("corpus occurrence exceptions reject missing and shifted sites") { policy_test_missing_and_shifted_exception_sites() }
 

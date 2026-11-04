@@ -1,0 +1,22 @@
+struct Route {
+    path: String
+    label: String{"route"}
+    tags: [String]
+    impl Marker {
+        sites :: [.Function, .Method]
+        repeatable :: true
+        fn expand(self, target: Target) {
+        }
+    }
+}
+struct Quick {
+    impl Marker {
+        group :: #[Inline(.Always), Scalar]
+    }
+}
+
+#Route("/orders", "orders", "a", "b") fn orders() -> String { "orders" }
+
+#Quick fn bump(value: Int) -> Int { value + 1 }
+
+fn run() { print("{orders()} {bump(1)}") }

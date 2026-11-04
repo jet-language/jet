@@ -3,7 +3,7 @@
 // routines split into plain scalar calls and one class handle group
 // (`<group>_new`, pointer-first methods, `<group>_free`/`_close`); a C bridge
 // keeps the raw pointers in generation-checked slots.
-use core.files as files
+use files :: core.files
 
 
 // A Pascal binding also names the shared runtime FreePascal produced.
@@ -399,7 +399,7 @@ fn pkg_pascal_render_jet(lib: String, surface: PascalSurface) -> String Never! {
     abi :: "jet_pascal_{lib}"
     handle :: surface.handle
     ty :: pkg_pascal_case(handle.group)
-    out := [String]{"use c.{abi} as abi\n\n#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"}
+    out := [String]{"use abi :: c.{abi}\n\n#Import module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"}
     loop routine in surface.plain -> &out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
     &out.push(pkg_pascal_raw_jet(abi, handle.ctor, handle.ctor.name))
     loop routine in handle.methods -> &out.push(pkg_pascal_raw_jet(abi, routine, routine.name))

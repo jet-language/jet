@@ -1,13 +1,15 @@
-use jet_comptime.[ReplEffectRequest]
-use jet_foundation.[authority_parse_right, authority_answer, ApplicationAuthority, AuthorityVerdict, Span]
-use jet_driver.Package as repl_turn_test_package
-use jet_driver.EffectBudget as repl_turn_test_budget
-use jet_sema.Effects as repl_turn_test_effects
-use core.files.host.retained_descriptor as repl_turn_test_files
-use core.files.runtime.kernel_path_components as repl_turn_test_paths
-use core.process.host.native_process as repl_turn_test_process
-use core.sys.target as repl_turn_test_target
-use std.os.unix.fs.[symlink] // GATE #4494: native symlink primitive.
+use {
+    jet_comptime.[ReplEffectRequest]
+    jet_foundation.[authority_parse_right, authority_answer, ApplicationAuthority, AuthorityVerdict, Span]
+    repl_turn_test_package :: jet_driver.Package
+    repl_turn_test_budget :: jet_driver.EffectBudget
+    repl_turn_test_effects :: jet_sema.Effects
+    repl_turn_test_files :: core.files.host.retained_descriptor
+    repl_turn_test_paths :: core.files.runtime.kernel_path_components
+    repl_turn_test_process :: core.process.host.native_process
+    repl_turn_test_target :: core.sys.target
+    std.os.unix.fs.[symlink] // GATE #4494: native symlink primitive.
+}
 
 // Rust: crates/jet-repl/src/lib.rs:3937
 struct CountingPrompt { count: Int }

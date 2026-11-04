@@ -52,6 +52,9 @@ struct Program {
     // The authored text of every `debug(…)` call, so sema can
     // write the trace site and the E3405 unwrap edit without the source.
     debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
+    // Every `.routes(from:)` root this file names, as the driver read it
+    // from the authorized snapshot, so sema checks the convention files.
+    app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
 }
 
 // One `debug(…)` call as written. `name_start` keys it to the call's
@@ -166,7 +169,7 @@ struct ImportBinding {
     is_package_pub: Bool
 }
 
-// The local name of one `use a.[b as c]` member: its alias, else the last
+// The local name of one `use c :: a.b` member: its alias, else the last
 // segment of its path.
 fn member_import_local(original: String, alias: String?) -> String Never! {
     if alias == .Val(name) -> return name
@@ -264,6 +267,16 @@ struct CodeModule {
     imports: [ImportDecl]
     web_target: WebBucket?
     instance_identity: ModuleInstanceIdentity?
+    span: Span
+    cap: ModuleCap?{None}
+}
+
+// A module's `#FX(…)` cap. Its plain entries are the ceiling and its `!`
+// entries are denials for every function inside the module, nested modules
+// included. Sema checks each function's solved row against it.
+struct ModuleCap {
+    module_name: String
+    entries: [EffectRowEntry]
     span: Span
 }
 
@@ -659,6 +672,7 @@ struct TraitMethodSig {
     declared_effects: [EffectRowEntry]?
     return_view_provenance: ViewProvenanceMap?
     declared_return_view_provenance: ViewProvenanceMap?
+    markers: [Marker]
 }
 
 struct TraitImplBlock {
@@ -909,6 +923,8 @@ struct Func {
     markers: [Marker]
     compiler_generated: Bool
     body: [Stmt]
+    // The caps of every module enclosing this function, outermost first.
+    module_caps: [ModuleCap]{[ModuleCap]{}}
 }
 
 // Only a concrete `App` or `App E!` return makes `run` an app entry.
@@ -962,10 +978,17 @@ struct StructDef {
     must_use_span: Span?
     layout: StructLayout?
     layout_span: Span?
+    layout_alignment_span: Span?
     serde_markers: [Marker]
     type_markers: [Marker]
     validate_block: [Stmt]
     validate_span: Span?
+    // A marker type's `impl Marker { … }` block: the marker the struct declares
+    // (its fields first, then the block's settings), where the block starts and
+    // the span of its `fn expand` template.
+    marker: MarkerDecl?{None}
+    marker_span: Span?{None}
+    marker_expand_span: Span?{None}
 }
 
 struct CLICommandBinding {
@@ -1435,6 +1458,7 @@ fn ast_struct(name: String, name_span: Span, span: Span) -> StructDef Never! {
         must_use_span: None,
         layout: None,
         layout_span: None,
+        layout_alignment_span: None,
         serde_markers: [Marker]{},
         type_markers: [Marker]{},
         validate_block: [Stmt]{},

@@ -2,7 +2,7 @@
 // and tests/marker_registry_coverage.rs (#6096, #5902 C4). The Rust gates scanned
 // the Rust sources; these scan the Jet compiler sources that replaced them, and
 // read the registry rows from their committed homes.
-use core.files as dc_files
+use dc_files :: core.files
 
 // The deleted gate's named exclusions (tests/diagnostics_coverage.rs:1230-1243):
 // rustc codes kept only to classify foreign compiler output, the internal
@@ -68,7 +68,7 @@ fn dc_source_paths() -> [String] {
     paths
 }
 
-// `Explain::is_code`: a letter code (`E0001`, `L0515`, `W0410`, `R0801`,
+// `Explain::is_code`: a letter code (`E0001`, `L0516`, `W0410`, `R0801`,
 // `JT0001`) or a word-shaped code (`E-WEB-RUN`).
 fn dc_is_code(code: String) -> Bool {
     bytes :: code.bytes()
@@ -314,13 +314,12 @@ fn dc_marker_literal_offenders(sources: [(path: String, text: String)], names: [
     offenders
 }
 
-// The active marker rows, read from the one marker declaration source.
+// The active marker structs, read from the one marker declaration source.
 fn dc_marker_names() -> [String] {
     names := [String]{}
-    loop raw in dc_read("Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet").split("\n") {
-        line :: raw.trim()
-        if !line.starts_with("marker ") -> next
-        open :: line.index("(") ?? line.count_bytes()
+    loop line in dc_read("Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet").split("\n") {
+        if !line.starts_with("struct ") -> next
+        open :: line.index("{{") ?? line.count_bytes()
         &names.push(dc_slice(line, 7, open).trim().copy())
     }
     assert(names.len() > 20, "the marker declaration source must be readable")

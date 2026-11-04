@@ -52,7 +52,7 @@ def full_mask(k: int) -> str:
 
 # --- Jet sources -----------------------------------------------------------
 
-JET_COMMON = """use core.time as time
+JET_COMMON = """use time :: core.time
 
 enum Case {{
 {cases}

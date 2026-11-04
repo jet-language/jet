@@ -1,27 +1,29 @@
 // Rust: crates/jet-devserver/src/WebHost.rs:1809
-use jet_devserver.WebHost.[WebHost, CanvasHostOptions, DevStatus, DevRevisionFacts, terminal_style_adapter, LIVE_RELOAD_POLL_MS, PUBLICATION_COUNTER, APPLICATION_PORT_RANGE, CANVAS_SESSION_BYTES]
-use jet_devserver.[ResidentDevSession]
-use jet_devserver.Canvas as Canvas
-use jet_devserver.BrowserWebAdapter as browser_web_adapter
-use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
-use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
-use jet_driver.Package.[ReleaseDevtoolsPolicy]
-use jet_foundation.HotSwap.[HotSwapDecision]
-use std.sync.[Arc, Mutex, MutexGuard]
-use std.sync.atomic.[AtomicBool, Ordering]
-use std.net.[TcpListener, IpAddr]
-use std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
-use std.thread as thread
-use std.fs as fs
-use std.fs.[File, OpenOptions]
-use std.io as io
-use std.io.[Read, Write, Seek, SeekFrom]
-use std.ffi.[OsStr, CString]
-use std.path.[Component]
-use core.files.[OSPath]
-use core.sys.target.[selected_os, selected_family]
-use jet_repl.Term.[RawGuard, KeyReader, Key]
-use core.sys.host.unix_fd.[mkdirat, openat, renameat, unlinkat]
+use {
+    jet_devserver.WebHost.[WebHost, CanvasHostOptions, DevStatus, DevRevisionFacts, terminal_style_adapter, LIVE_RELOAD_POLL_MS, PUBLICATION_COUNTER, APPLICATION_PORT_RANGE, CANVAS_SESSION_BYTES]
+    jet_devserver.[ResidentDevSession]
+    Canvas :: jet_devserver.Canvas
+    browser_web_adapter :: jet_devserver.BrowserWebAdapter
+    jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+    jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+    jet_driver.Package.[ReleaseDevtoolsPolicy]
+    jet_foundation.HotSwap.[HotSwapDecision]
+    std.sync.[Arc, Mutex, MutexGuard]
+    std.sync.atomic.[AtomicBool, Ordering]
+    std.net.[TcpListener, IpAddr]
+    std.time.[Duration, Instant, SystemTime, UNIX_EPOCH]
+    thread :: std.thread
+    fs :: std.fs
+    std.fs.[File, OpenOptions]
+    io :: std.io
+    std.io.[Read, Write, Seek, SeekFrom]
+    std.ffi.[OsStr, CString]
+    std.path.[Component]
+    core.files.[OSPath]
+    core.sys.target.[selected_os, selected_family]
+    jet_repl.Term.[RawGuard, KeyReader, Key]
+    core.sys.host.unix_fd.[mkdirat, openat, renameat, unlinkat]
+}
 // GATE #4494: native threads, locks, retained handles, raw FFI and terminal IO.
 // GATE #4483: dispatch uses selected target facts, including native flag/layout widths.
 // GATE #4409: IO errors retain their source kinds.
@@ -402,9 +404,11 @@ fn normal_output_name(value: String) -> OsStr io.Error! {
 
 // Rust: crates/jet-devserver/src/WebHost.rs:2594
 module secure_output_unix {
-    use std.os.fd.[AsRawFd, FromRawFd]
-    use std.os.unix.ffi.[OsStrExt]
-    use std.os.unix.fs.[MetadataExt, OpenOptionsExt]
+    use {
+        std.os.fd.[AsRawFd, FromRawFd]
+        std.os.unix.ffi.[OsStrExt]
+        std.os.unix.fs.[MetadataExt, OpenOptionsExt]
+    }
     // Rust: crates/jet-devserver/src/WebHost.rs:2603
     O_RDONLY :: 0
     // Rust: crates/jet-devserver/src/WebHost.rs:2604
@@ -585,9 +589,11 @@ module secure_output_unix {
 
 // Rust: crates/jet-devserver/src/WebHost.rs:2920
 module secure_output_windows {
-    use std.os.windows.ffi.[OsStrExt]
-    use std.os.windows.fs.[OpenOptionsExt]
-    use std.os.windows.io.[AsRawHandle]
+    use {
+        std.os.windows.ffi.[OsStrExt]
+        std.os.windows.fs.[OpenOptionsExt]
+        std.os.windows.io.[AsRawHandle]
+    }
     // Rust: crates/jet-devserver/src/WebHost.rs:2930 `Handle` is `*U8`
     // Rust: crates/jet-devserver/src/WebHost.rs:2931
     GENERIC_READ :: 0x80000000

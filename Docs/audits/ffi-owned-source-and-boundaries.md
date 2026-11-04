@@ -58,7 +58,7 @@ jet run
 
 ```jet
 // PROPOSED generated module and owning/view API.
-use cpp.frames as frames
+use frames :: cpp.frames
 
 fn run() {
     frame :: frames.make_frame()
@@ -90,7 +90,7 @@ The native PNG protocol includes initializing a decoder, selecting a format, all
 
 ```jet
 // PROPOSED generated protocol API; logo.png is a project input.
-use c.png as png
+use png :: c.png
 
 fn run() {
     image :: png.Image.open("logo.png", format: .RGBA)
@@ -188,7 +188,7 @@ The normal path adds no new language keyword. Each higher rung exposes the same 
 
 ```jet
 // AUTOMATIC: same complete caller as above.
-use "sum.h" as sums
+use sums :: "sum.h"
 fn run() {
     bytes := [U8]{10, 20, 30}
     print(sums.sum_bytes(&bytes))
@@ -219,7 +219,7 @@ jet bind sums --freeze
 
 ```jet
 // PROPOSED caller after selecting native arity.
-use "sum.h" as sums
+use sums :: "sum.h"
 fn run() {
     bytes := [U8]{10, 20, 30}
     print(sums.sum_bytes(&bytes, bytes.len()))
@@ -519,7 +519,7 @@ uint64_t sum_bytes(const uint8_t *bytes, size_t count) {
 
 ```jet
 // PROPOSED complete Jet caller; foreign artifact resolution is below.
-use "sum.h" as sums
+use sums :: "sum.h"
 
 fn run() {
     bytes := [U8]{10, 20, 30}
@@ -791,7 +791,7 @@ The proposed retained-callback experience is:
 
 ```jet
 // PROPOSED complete caller for a contracted notification fixture.
-use c.source as source
+use source :: c.source
 
 fn run() {
     prefix :: "byte"
@@ -811,7 +811,7 @@ The recommended callback facade gives each invocation a borrowed event object. `
 
 ```jet
 // PROPOSED asynchronous fixture; output byte: 7, then stopped.
-use c.source as source
+use source :: c.source
 
 fn run() {
     prefix :: "byte"

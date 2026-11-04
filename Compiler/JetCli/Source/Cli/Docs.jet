@@ -7,16 +7,18 @@
 // format; it does not walk the AST a second time. The items are the checked
 // modules' items as sema settled them, so derived impls and inferred failure
 // contracts are the checker's.
-use jet_driver.[
-    JetDriverDocModule,
-]
-use jet_foundation.[
-    Func,
-    Item,
-    Marker,
-    Span,
-    type_name,
-]
+use {
+    jet_driver.[
+        JetDriverDocModule,
+    ]
+    jet_foundation.[
+        Func,
+        Item,
+        Marker,
+        Span,
+        type_name,
+    ]
+}
 
 JET_CLI_DOC_SCHEMA_VERSION :: 1
 JET_CLI_DOC_EXPECT_MARKER :: "// =>"
@@ -438,9 +440,10 @@ fn jet_cli_doc_collect_items(items: [Item], unit: JetCLIDocUnit, parent: String,
                 jet_cli_doc_collect_items(generic_module.body, unit, jet_cli_doc_qualified(parent, generic_module.name), public, protocol_names, &output, &impls)
             }
             .ModuleAlias(definition) -> jet_cli_doc_add_item(&output, unit, "module_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
-            .MarkerDecl(definition) -> jet_cli_doc_add_item(&output, unit, "marker", definition.name, parent, true, false, definition.span, definition.name_span, no_markers)
             .FactDecl(definition) -> jet_cli_doc_add_item(&output, unit, "fact", definition.name, parent, true, false, definition.span, definition.name_span, no_markers)
             .Const(definition) -> jet_cli_doc_add_item(&output, unit, "const", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
+            // A marker's docs are its struct's, so its companion declaration
+            // adds none.
             else -> {}
         }
     }

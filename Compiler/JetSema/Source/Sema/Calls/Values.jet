@@ -66,7 +66,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     declared :: sema_call_value_is_declaration(callee, scopes)
     value_params :: if declared -> sema_call_params_from_type(resolved_signature) else -> sema_call_params_from_value_type(resolved_signature)
     params :: value_params ?? {
-        &diagnostics.push(sema_call_not_callable(shown_callee, resolved_signature, span))
+        &diagnostics.push(sema_call_value_not_callable(callee, resolved_signature, span))
         return None
     }
     checked_args := args
@@ -249,10 +249,18 @@ fn sema_call_check_value_owned(state: &SemaOwnershipState, callee: Expr, args: [
     callee_value :: checked_callee ?? return None
     signature :: callee_value.ty
     if !sema_call_type_is_function(signature) {
-        &diagnostics.push(sema_call_not_callable("this function value", signature, span))
+        &diagnostics.push(sema_call_value_not_callable(callee, signature, span))
         return None
     }
     sema_call_value_checked_from_type(&state, callee, callee_value, signature, args, span, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
+}
+
+// A callee that isn't a function. A named one is reported by its name; any
+// other expression is reported at the argument list that tries to call it.
+fn sema_call_value_not_callable(callee: Expr, ty: Type, span: Span) -> Diagnostic {
+    if callee == .Ident(name, _, _) -> return sema_call_not_callable(name, ty, span)
+    arguments :: Span{start: expr_span(callee).end, end: span.end}
+    sema_error("E0803", arguments, "this is {sema_type_show(ty)}, not a function", "only a function value can be called with `.call(…)`", "call a defined `fn` by name, or store a lambda in a binding before `.call(…)`")
 }
 
 fn sema_call_check_value(state: &SemaOwnershipState, callee: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

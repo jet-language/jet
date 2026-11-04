@@ -29,6 +29,7 @@ use jet_foundation.[
     UnOp,
     diagnostic_from_registry,
     diagnostic_with_edit,
+    diagnostic_with_label,
     expr_span,
     symbol_id,
     type_name,
@@ -257,7 +258,7 @@ fn sema_marker_rules_metadata_names(declaration: MarkerDecl, name: String, sites
     Val([String]{})
 }
 
-// A declared `$companion` site; `site` is None when the rule declares none.
+// A declared `companion` setting; `site` is None when the rule declares none.
 struct SemaMarkerRulesCompanion {
     site: TAppliedRuleCompanionSite?
 }
@@ -322,6 +323,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     params := [TAppliedRuleParameter]{}
     variadic := TAppliedRuleArgKind?{None}
     variadic_source_type := String?{None}
+    variadic_name := String?{None}
     loop parameter_index in 0..<declaration.params.len() {
         if declaration.params[parameter_index].name.starts_with("$") {
             next
@@ -333,6 +335,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
             }
             variadic = Val(sema_marker_rules_type_kind(ty))
             variadic_source_type = Val(type_name(ty))
+            variadic_name = Val(declaration.params[parameter_index].name)
             next
         }
         applied_parameter :: sema_marker_rules_applied_parameter(declaration.params[parameter_index], source) ?? return None
@@ -340,7 +343,7 @@ fn sema_marker_rules_applied_row(declaration: MarkerDecl, source: String) -> TAp
     }
     Val(TAppliedRule{
         name: declaration.name,
-        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type},
+        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type, variadic_name: variadic_name},
         policy_scopes: scopes,
         sites: sites,
         repeatable: repeatable,
@@ -624,6 +627,16 @@ fn sema_marker_rules_effect_path(argument: Expr, source_type: String) -> String?
     sema_marker_rules_argument_path(argument)
 }
 
+// The span of the root an argument path starts from: `Bogus` in `Bogus.Write`
+// or in `!Bogus`.
+fn sema_marker_rules_root_span(argument: Expr) -> Span {
+    if argument == .Unary(op, operand, _, _) {
+        if op == UnOp.Not -> return sema_marker_rules_root_span(operand)
+    }
+    if argument == .Field(base, _, _, _) -> return sema_marker_rules_root_span(base)
+    expr_span(argument)
+}
+
 // Whether an argument names an item; an `Effect` argument may name it denied.
 fn sema_marker_rules_names_item(argument: Expr, source_type: String) -> Bool {
     if source_type == "Effect" && argument == .Unary(op, operand, _, _) {
@@ -898,10 +911,13 @@ fn sema_marker_rules_menu_candidate(path: String, menu: TAppliedRuleArgumentMenu
     return if menu.first_variant_segment -> segments[start] else -> segments[segments.len() - 1]
 }
 
-fn sema_marker_rules_unknown_variant_error(marker: Marker, menu: TAppliedRuleArgumentMenu, written: String) -> Diagnostic {
+// A `.Variant` argument is underlined from the rule name; a bare or labeled
+// argument from the `#`, as the Rust checker's snapshots pin.
+fn sema_marker_rules_unknown_variant_error(marker: Marker, menu: TAppliedRuleArgumentMenu, written: String, argument: Expr) -> Diagnostic {
     variants := (loop variant in menu.variants -> "`{variant}`")
     choices := variants.join(", ")
-    sema_error("E0930", marker.span, "`#{marker.name}` has no `{menu.name}` called `{written}`", "`{menu.name}` is a closed menu: {choices}", "pick one of {choices}")
+    start :: if argument == .EnumLit(_, _, _, _, _, _, _) -> marker.name_span.start else -> marker.span.start
+    sema_error("E0930", Span{start: start, end: marker.span.end}, "`#{marker.name}` has no `{menu.name}` called `{written}`", "`{menu.name}` is a closed menu: {choices}", "pick one of {choices}")
 }
 
 fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?, declared: Bool, owns_menu: Bool, registry: SemaScopeMembersMarkerRegistry, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, values: [SemaComptimeItemValue], facts: &[SemaMarkerRuleArgumentFact], comptime_sources: &[SemaComptimeItemSource], comptime_requests: &[SemaComptimeRequest], diagnostics: &[Diagnostic]) -> Bool {
@@ -935,17 +951,28 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
             }
         }
         if !declared && !owns_menu {
-            menu_index_option := sema_marker_rules_menu_index(registry.argument_menus, source_type)
+            // A `[Menu]` parameter checks each written element against the menu.
+            list_menu :: source_type.starts_with("[") && source_type.ends_with("]")
+            menu_type :: if list_menu -> source_type.slice(1, source_type.len() - 1) else -> source_type
+            menu_index_option := sema_marker_rules_menu_index(registry.argument_menus, menu_type)
             if menu_index_option != None {
                 menu_index :: menu_index_option ?? return false
                 menu := registry.argument_menus[menu_index]
+                elements := [Expr]{argument}
+                if list_menu {
+                    elements = if argument == .ListLit(items, _, _) -> items else -> [Expr]{}
+                }
                 if menu.variants.len() > 0 {
-                    path :: sema_marker_rules_effect_path(argument, source_type)
-                    if path == .Val(value) {
-                        candidate := sema_marker_rules_menu_candidate(value, menu)
-                        if candidate != "" && !menu.variants.contains(candidate) {
-                            &diagnostics.push(sema_marker_rules_unknown_variant_error(marker, menu, candidate))
-                            return false
+                    loop element in elements {
+                        path :: sema_marker_rules_effect_path(element, menu_type)
+                        if path == .Val(value) {
+                            candidate := sema_marker_rules_menu_candidate(value, menu)
+                            if candidate != "" && !menu.variants.contains(candidate) {
+                                // An unknown effect root is the effect vocabulary's own E0119, reported once.
+                                unknown :: if menu.name == "Effect" -> sema_effect_unknown(candidate, sema_marker_rules_root_span(element)) else -> sema_marker_rules_unknown_variant_error(marker, menu, candidate, element)
+                                &diagnostics.push(unknown)
+                                return false
+                            }
                         }
                     }
                 }
@@ -1365,6 +1392,9 @@ fn sema_marker_rules_item_applications(item: Item, applications: &[AppliedRuleAp
         .Impl(implementation) -> {
             loop method in implementation.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
         }
+        .Trait(definition) -> {
+            loop method in definition.methods -> sema_marker_rules_attach(method.markers, method.name_span, RuleSite.Method, &applications)
+        }
         .CodeModule(code_module) -> {
             if code_module.body == .Val(body) {
                 loop nested in body -> sema_marker_rules_item_applications(nested, &applications)
@@ -1499,13 +1529,20 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
             }
         }
     }
-    fix := if nearest != "" && !ambiguous -> "did you mean `#{nearest}`?" else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
+    fix := if {
+        // A retired rule names the form that replaced it.
+        marker.name == "Invariant" -> "`#Invariant` is retired: use `distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline"
+        nearest != "" && !ambiguous -> "did you mean `#{nearest}`?"
+        else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
+    }
     diagnostic := sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.", fix)
-    if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
+    if nearest != "" && !ambiguous && marker.name != "Invariant" -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
-fn sema_marker_rules_repeated_error(marker: Marker) -> Diagnostic {
-    sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+fn sema_marker_rules_repeated_error(marker: Marker, first: Marker) -> Diagnostic {
+    diagnostic := sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+    diagnostic.detail = Val("second application span: the copy this report points at\nfirst application span: the earlier copy on the same target")
+    diagnostic_with_label(^diagnostic, first.span, "first application span")
 }
 
 fn sema_marker_rules_collect_function(function: Func, markers: &[Marker]) Never! {
@@ -1679,25 +1716,78 @@ fn sema_marker_rules_validate_sites(registry: SemaScopeMembersMarkerRegistry, pr
     }
 }
 
-// A source-declared marker rule names its legal sites (`$sites: [.Type]`).
+// A source-declared marker rule names its legal sites (`sites :: [.Type]`).
 fn sema_marker_rules_user_site_error(registry: SemaScopeMembersMarkerRegistry, application: AppliedRuleApplication, site: RuleSite) -> Diagnostic? {
     user_index :: sema_marker_rules_user_rule_index(registry, application.marker) ?? return None
     if registry.marker_rules[user_index].sites.contains(sema_marker_rules_site_name(site)) -> return None
     Val(sema_marker_rules_declared_site_error(application.marker, registry.marker_rules[user_index]))
 }
 
-// The site check of every source-declared marker applied in `program`.
+// The argument and site checks of every source-declared marker applied in
+// `program`.
 fn sema_marker_rules_validate_user_sites(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
     loop application in sema_marker_rules_applications(program) {
-        site :: application.site ?? next
         if sema_marker_rules_builtin_index(registry, application.marker) != None -> next
+        if sema_marker_rules_user_argument_error(registry, application.marker) == .Val(error) -> &diagnostics.push(error)
+        site :: application.site ?? next
         diagnostic :: sema_marker_rules_user_site_error(registry, application, site) ?? next
         &diagnostics.push(diagnostic)
     }
 }
 
+// A source-declared rule's arguments bind its declared signature (E0930). A
+// literal argument fails only when its own type contradicts the parameter's
+// declared type; names and calls stay open for ordinary inference.
+fn sema_marker_rules_user_argument_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic? {
+    user_index :: sema_marker_rules_user_rule_index(registry, marker) ?? return None
+    rule :: registry.marker_rules[user_index]
+    if rule.group -> return None
+    declared :: sema_marker_rules_declared_signature(rule)
+    bindings :: sema_marker_rules_marker_signature_bindings(marker, declared.signature) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+    loop binding in bindings {
+        argument :: sema_marker_rules_marker_expression(marker, binding.source_index) ?? return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+        expected := declared.variadic_expected_type.copy()
+        if binding.parameter_index == .Val(index) {
+            expected = if index < declared.expected_types.len() -> declared.expected_types[index] else -> None
+        }
+        actual :: sema_marker_rules_literal_kind(argument) ?? next
+        wanted :: sema_marker_rules_declared_kind(expected) ?? next
+        if actual != wanted -> return Val(sema_marker_rules_signature_error(marker, declared.signature, true))
+    }
+    None
+}
+
+fn sema_marker_rules_literal_kind(argument: Expr) -> String? Never! {
+    if argument == {
+        .Str(_, _, _) -> return Val("String")
+        .Int(_, _, _, _, _) -> return Val("Int")
+        .Float(_, _, _, _, _) -> return Val("Float")
+        .Bool(_, _, _) -> return Val("Bool")
+        .Char(_, _, _) -> return Val("Char")
+        .ListLit(_, _, _) -> return Val("List")
+        .MapLit(_, _, _) -> return Val("Map")
+        else -> {}
+    }
+    None
+}
+
+fn sema_marker_rules_declared_kind(ty: Type?) -> String? Never! {
+    declared :: ty ?? return None
+    if declared == {
+        .String -> return Val("String")
+        .Int -> return Val("Int")
+        .Float -> return Val("Float")
+        .Bool -> return Val("Bool")
+        .Char -> return Val("Char")
+        .List(_) -> return Val("List")
+        .Map(_, _, _) -> return Val("Map")
+        else -> {}
+    }
+    None
+}
+
 fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegistry, program: Program, diagnostics: &[Diagnostic]) {
-    seen := [String:Bool]{}
+    seen := [String:Marker]{}
     loop application in sema_marker_rules_applications(program) {
         builtin_index := sema_marker_rules_builtin_index(registry, application.marker)
         repeatable := false
@@ -1722,12 +1812,15 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
         if repeatable {
             next
         }
-        // Same declaration on the same target.
+        // Same declaration on the same target. An application with no
+        // target span, such as a marked block, has no identity to repeat on.
+        if application.target == None -> next
         key :: "{sema_marker_rules_declaration_key(application.marker)}|{sema_marker_rules_span_key(application.target)}"
-        if seen.get(key) != None {
-            &diagnostics.push(sema_marker_rules_repeated_error(application.marker))
+        if seen.get(key) == .Val(first) {
+            &diagnostics.push(sema_marker_rules_repeated_error(application.marker, first))
+            next
         }
-        seen[key] = true
+        seen[key] = application.marker
     }
 }
 
@@ -2103,7 +2196,7 @@ fn sema_marker_rules_no_prelude_call(call: Call, environment: SemaScopeEnvironme
     if call.name != "print" && call.name != "input" -> return false
     if !sema_module_no_prelude(environment, program) || !sema_call_gate_is_unshadowed(call.name, scopes) -> return false
     name :: call.name
-    &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use core.term as io` and call `io.{name}(…)`, or remove `#NoPrelude`"))
+    &diagnostics.push(sema_error("E0429", call.name_span, "`{name}` is not ambient here — this file opted out with `#NoPrelude`", "`#NoPrelude` disables the curated prelude auto-imports (`print` / `input`)", "write `use io :: core.term` and call `io.{name}(…)`, or remove `#NoPrelude`"))
     loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     true
 }

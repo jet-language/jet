@@ -1,10 +1,12 @@
 // Claims ported from tests/jetpack_variants.rs: declared variant domains are
 // recorded in the semantic lock, written, parsed, and reported as covered.
-use jetpack_trust.[LockRecordKind, SemanticLockFile, trust_parse_semantic_lock, trust_write_semantic_lock]
-use jet_pkg_model.[
-    ARCH_X64, ArtifactKind, PackageVariant, PlatformKey, VariantArch, VariantLibc, VariantLinkage,
-    VariantOS, VariantRole,
-]
+use {
+    jetpack_trust.[LockRecordKind, SemanticLockFile, trust_parse_semantic_lock, trust_write_semantic_lock]
+    jet_pkg_model.[
+        ARCH_X64, ArtifactKind, PackageVariant, PlatformKey, VariantArch, VariantLibc, VariantLinkage,
+        VariantOS, VariantRole,
+    ]
+}
 
 #Test("semantic lock covers declared variant domains") {
     need :: PackageVariant.cross_target(VariantOS.Linux, VariantArch.Aarch64, VariantLibc.Musl).with_linkage(VariantLinkage.Static)

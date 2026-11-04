@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compilerSources } from '../../../Tools/agent/compiler-packages.mjs';
+import { compilerSources, unblockUses } from '../../../Tools/agent/compiler-packages.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const out = process.argv[2];
 if (!out) throw new Error('usage: run-rust-foreign-fixtures.mjs <outdir>');
@@ -18,11 +18,11 @@ const read = path => readFileSync(resolve(repo, path), 'utf8');
 const core = new Set();
 function body(text) {
   const kept = []; let skipping = false;
-  for (const line of text.split('\n')) {
-    if (skipping) { if (line.startsWith(']') || line === '}') skipping = false; continue; }
+  for (const line of unblockUses(text).split('\n')) {
+    if (skipping) { if (line.trimStart().startsWith(']') || line === '}') skipping = false; continue; }
     if (/^use jet_\w+\.\[\s*$/.test(line)) { skipping = true; continue; }
     if (/^use jet_/.test(line)) continue;
-    if (/^use core\./.test(line)) { core.add(line); continue; }
+    if (/^use (?:\w+ :: )?core\./.test(line)) { core.add(line); continue; }
     kept.push(line);
   }
   return kept.join('\n');
@@ -57,13 +57,13 @@ const host = process.argv.includes('--host') || process.argv.includes('--host-fu
 const roots = [body(planner.slice(0, prefix)), body(read('Compiler/JetDriver/Source/Driver/RustForeignSource.jet')), body(host ? fixture.slice(0, fixture.indexOf('fn run()')) : fixture)];
 if (host) {
   if (process.argv.includes('--host-full')) roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet')));
-  else roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet').split('\n').filter(line => line.startsWith('use core.')).join('\n')));
+  else roots.push(body(unblockUses(read('Compiler/JetCli/Source/Cli/RustForeign.jet')).split('\n').filter(line => /^use (?:\w+ :: )?core\./.test(line)).join('\n')));
   if (environmentFixture) {
     const tests = read('Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet');
     const start = tests.indexOf('fn cli_rust_foreign_test_environment()');
     const end = tests.indexOf('\nfn run()', start);
     if (start < 0 || end < 0) throw new Error('missing canonical helper environment regression');
-    roots.push(body('use core.sys as rust_foreign_test_sys\n' + tests.slice(start, end) + '\nfn run() { cli_rust_foreign_test_environment()\nprint("FFI environment fixtures passed") }\n'));
+    roots.push(body('use rust_foreign_test_sys :: core.sys\n' + tests.slice(start, end) + '\nfn run() { cli_rust_foreign_test_environment()\nprint("FFI environment fixtures passed") }\n'));
   } else roots.push(body(read('Compiler/JetCli/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet')));
 }
 const owned = new Set(roots.join('\n').match(/\b(?:JetDriverRustForeign\w*|jet_driver_rust_foreign_\w*|rust_foreign_fixture_\w*|JET_DRIVER_RUST_FOREIGN_\w*)\b/g) ?? []);

@@ -2,49 +2,51 @@
 // metadata, and provenance bytes; this stage never opens a path or calls the
 // native assembler.  It parses the exact Jet cache and source overlays, merges
 // one surface per requested language/library, and publishes provider facts.
-use jet_foundation.[
-    AccessConvention,
-    AppliedRuleApplication,
-    CModule,
-    CModuleKind,
-    Diagnostic,
-    ExternFn,
-    FencedStatement,
-    Func,
-    ImportDecl,
-    ImportKind,
-    Item,
-    SourceFile,
-    NamedSpan,
-    PolicyDeclaration,
-    Program,
-    Span,
-    Stmt,
-    TextEdit,
-    Type,
-    UserPolicyDecl,
-    diagnostic_with_source_path,
-    source_file_id,
-]
-use jet_lexer.[
-    lex_generated,
-    token_shift_spans,
-]
-use jet_parser.[
-    parse_lexed,
-]
-use jet_sema.[
-    SemaForeignBoundaryInput,
-    SemaForeignBoundaryObligationInput,
-    SemaForeignCloseAdapterInput,
-    SemaForeignHandleInput,
-    SemaForeignImportBinding,
-    SemaForeignOverlayOverrideInput,
-    SemaForeignProviderInput,
-    SemaRegistrationImportEdge,
-    SemaSourceOrigin,
-    SemaSourceSegment,
-]
+use {
+    jet_foundation.[
+        AccessConvention,
+        AppliedRuleApplication,
+        CModule,
+        CModuleKind,
+        Diagnostic,
+        ExternFn,
+        FencedStatement,
+        Func,
+        ImportDecl,
+        ImportKind,
+        Item,
+        SourceFile,
+        NamedSpan,
+        PolicyDeclaration,
+        Program,
+        Span,
+        Stmt,
+        TextEdit,
+        Type,
+        UserPolicyDecl,
+        diagnostic_with_source_path,
+        source_file_id,
+    ]
+    jet_lexer.[
+        lex_generated,
+        token_shift_spans,
+    ]
+    jet_parser.[
+        parse_lexed,
+    ]
+    jet_sema.[
+        SemaForeignBoundaryInput,
+        SemaForeignBoundaryObligationInput,
+        SemaForeignCloseAdapterInput,
+        SemaForeignHandleInput,
+        SemaForeignImportBinding,
+        SemaForeignOverlayOverrideInput,
+        SemaForeignProviderInput,
+        SemaRegistrationImportEdge,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+    ]
+}
 
 struct JetDriverForeignRequest {
     library: String
@@ -217,7 +219,7 @@ fn jet_driver_foreign_import_header(declaration: ImportDecl) -> String Never! {
 }
 
 fn jet_driver_foreign_import_conflict_diagnostic(library: String, header: String, span: Span) -> Diagnostic {
-    jet_driver_diagnostic("E3204", span, "two different `use` forms refer to the same C library `{library}`", "Jet allows one bring-in per C lib per file — either `use \"{header}\" as alias`, `use c.{library} as alias`, or `use c.[{library} as alias]`, not both", "remove one line; keep the form that matches your workflow")
+    jet_driver_diagnostic("E3204", span, "two different `use` forms refer to the same C library `{library}`", "Jet allows one bring-in per C lib per file — either `use alias :: \"{header}\"`, `use alias :: c.{library}`, or `use c.[{library}]`, not both", "remove one line; keep the form that matches your workflow")
 }
 
 fn jet_driver_foreign_binding_diagnostic(path: String, library: String, reason: String) -> Diagnostic {

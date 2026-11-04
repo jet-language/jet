@@ -244,7 +244,7 @@ class Corpus:
         self.rows: list[Vector] = []
         self.source: list[str] = []
         if batch == "epoch_parse":
-            self.source.append("use core.time as time")
+            self.source.append("use time :: core.time")
             self.source.extend(
                 [
                     "",
@@ -258,9 +258,9 @@ class Corpus:
                 ]
             )
         elif batch == "civil_arithmetic":
-            self.source.append("use core.time as date")
+            self.source.append("use date :: core.time")
         else:
-            self.source.append("use core.time as time")
+            self.source.append("use time :: core.time")
         self.source.extend(["", "fn run() {"])
         self._value_number = 0
 
@@ -733,7 +733,7 @@ def _table_block(rows: list[Vector]) -> str:
 def compact_source(batch: str, rows: list[Vector]) -> str:
     table = _table_block(rows)
     if batch == "epoch_parse":
-        text = """use core.time as time
+        text = """use time :: core.time
 
 fn parse_status(text: String) String -> {
     if time.parse_rfc3339(text) == {
@@ -794,7 +794,7 @@ fn run() {
 """
         return text.replace("@@TABLE@@", table) + "\n"
     if batch == "civil_arithmetic":
-        text = """use core.time as date
+        text = """use date :: core.time
 
 fn field(meta: String, key: String) String -> {
     loop part in meta.split(";") {
@@ -876,7 +876,7 @@ fn run() {
 }
 """
         return text.replace("@@TABLE@@", table) + "\n"
-    text = """use core.time as time
+    text = """use time :: core.time
 
 fn field(meta: String, key: String) String -> {
     loop part in meta.split(";") {

@@ -227,7 +227,7 @@ def aot_run_matrix() -> dict[str, object]:
         scratch = Path(raw)
         entry = scratch / f"{stem}.jet"
         entry.write_text(
-            """use core.encoding.base64 as b64
+            """use b64 :: core.encoding.base64
 
 fn run() {
     print(b64.encode([U8]{102, 111, 111}))

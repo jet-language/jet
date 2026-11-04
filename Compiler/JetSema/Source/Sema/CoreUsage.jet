@@ -837,7 +837,7 @@ fn sema_core_helper_import_chain(usage: String, imports: [SemaCoreImport]) -> St
     parts := usage.split("::").to_list()
     module_name := if parts.len() > 0 -> parts[0] else -> usage
     loop row in imports {
-        if row.module_name == module_name -> return "`use {row.module_name} as {row.alias}` → `{usage}`"
+        if row.module_name == module_name -> return "`use {row.alias} :: {row.module_name}` → `{usage}`"
     }
     "prelude helper `{usage}`"
 }

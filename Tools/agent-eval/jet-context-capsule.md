@@ -58,7 +58,7 @@ fn run() {
 }
 ```
 
-Use `use core.module as alias` at the top of a file. Do not invent a module
+Use `use alias :: core.module` at the top of a file. Do not invent a module
 alias or a `::` method call. A record is declared with `struct Name { field:
 Type }` and constructed with `Name{field: value}`.
 
@@ -67,11 +67,13 @@ Type }` and constructed with `Name{field: value}`.
 The left side of a dot is always the receiver or module alias:
 
 ```jet
-use core.files as files
-use core.process as process
+use {
+    files :: core.files
+    process :: core.process
+}
 
 fn run() {
-    path :: process.argv().get(1) ?? panic("missing path")
+    path :: process.args().get(0) ?? panic("missing path")
     text :: files.read(path) ?? panic("read failed")
     print(text.trim())
 }
@@ -141,7 +143,7 @@ program and preserve the original error when propagation is intended.
 ## 5. Forty common library verbs
 
 These are the common operation names to reach for. Import the shown core module
-with `use core.<module> as <alias>` and call `<alias>.<verb>(...)`. The ordered
+with `use <alias> :: core.<module>` and call `<alias>.<verb>(...)`. The ordered
 extrema `min`, `max` and `clamp` are prelude names and need no import.
 
 1. `term.print`  2. `term.eprint`  3. `term.input`  4. `term.readline`
@@ -162,7 +164,7 @@ Useful module aliases are `term` for `core.term`, `files` for `core.files`,
 `regex` for `core.regex`, `math` for `core.math`, `time` for `core.time`, `net`
 for `core.net`, and `http` for `core.http`.
 
-HTTP services use `use core.http.server as server` and `use core.net as net`.
+HTTP services use `use server :: core.http.server` and `use net :: core.net`.
 Create a router with `server.mux()`, register `mux.get(path, handler)`, and
 return `Ok(server.response(status, body))` from the handler. A request route
 parameter is `request.param("name")`. `net.tcp_listen(address)` plus
@@ -247,10 +249,10 @@ fn run() {
 ### 8. Command-line argument
 
 ```jet
-use core.process as process
+use process :: core.process
 
 fn run() {
-    name :: process.argv().get(1) ?? "world"
+    name :: process.args().get(0) ?? "world"
     print("hello, {name}")
 }
 ```
@@ -258,11 +260,13 @@ fn run() {
 ### 9. File input
 
 ```jet
-use core.files as files
-use core.process as process
+use {
+    files :: core.files
+    process :: core.process
+}
 
 fn run() {
-    path :: process.argv().get(1) ?? panic("missing path")
+    path :: process.args().get(0) ?? panic("missing path")
     text :: files.read(path) ?? panic("read failed")
     print(text.trim())
 }
@@ -271,16 +275,18 @@ fn run() {
 ### 10. HTTP health endpoint
 
 ```jet
-use core.http.server as server
-use core.net as net
-use core.process as process
+use {
+    server :: core.http.server
+    net :: core.net
+    process :: core.process
+}
 
 struct State {
     done: Bool
 }
 
 fn run() (HTTPError | NetError | IOError)! {
-    port :: process.argv().get(1) ?? "18080"
+    port :: process.args().get(0) ?? "18080"
     listener :: net.tcp_listen("127.0.0.1:{port}")
     state :: shared State{done: false}
     mux :: server.mux()

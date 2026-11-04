@@ -11,7 +11,7 @@ Scratch: `~/.cache/jet-dev/scratch/Closer04/` (`pc.jet`, `rd.jet`).
 ## c1 — roots, empty paths, separators, prefixes
 
 `pc.jet` prints `fp.parts`, `fp.parents`, `fp.drive`, `fp.root`, `fp.anchor`
-and `fp.is_empty` for each case using `use core.files.path as fp`. Output
+and `fp.is_empty` for each case using `use fp :: core.files.path`. Output
 was byte-identical on `jet run`, `jet run --interpret` and the AOT binary
 (`jet build pc.jet` → `.jet/build/pc`):
 

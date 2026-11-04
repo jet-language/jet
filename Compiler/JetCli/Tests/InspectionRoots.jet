@@ -1,10 +1,12 @@
 // Inspection actions and planes consume the same Package discovery as
 // compilation, including inline roots and the command-specific error channel.
-use jet_cli.[JetCLIPlan, jet_cli_inspect_require_root, jet_cli_require_inspect_root]
-use jet_driver.[JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
-use core.sys as cli_sys
-use core.files as cli_files
-use core.process as cli_process
+use {
+    jet_cli.[JetCLIPlan, jet_cli_inspect_require_root, jet_cli_require_inspect_root]
+    jet_driver.[JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+    cli_sys :: core.sys
+    cli_files :: core.files
+    cli_process :: core.process
+}
 
 fn inspection_root_fixture_require_root(start: String, expected: String) {
     if jet_cli_require_inspect_root(start, "missing package", true) == {

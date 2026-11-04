@@ -1,6 +1,8 @@
-use core.net as net
-use core.net.ws as ws
-use core.http.server as server
+use {
+    net :: core.net
+    ws :: core.net.ws
+    server :: core.http.server
+}
 fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock :: ws.upgrade(req) ?? panic("upgrade")
     message :: sock.recv() ?? panic("recv")

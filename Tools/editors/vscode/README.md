@@ -144,7 +144,7 @@ TextMate grammar sources live in
 [`Tools/editors/vscode/syntaxes`](syntaxes/); their lexical vocabulary is generated
 from the syntax registry
 ([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
-and the active rows of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet)).
+and the marker structs of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet)).
 Semantic tokens refine live coloring for ownership markers, rules, decorators,
 and effect rows. The editor surface is not a substitute for the compiler's
 parser: use feature sources and the language specification for accepted syntax.

@@ -66,7 +66,11 @@ fn observe_value_drop(node: I64) {
 // value_id/type_identity/disposition/reason/rendered_value. Retain by copying
 // E4 text; the producer continues owning its source and optional text owner.
 #Export(c) fn jet_observe_record_live_value(source: I64) {
-    if observe_values_code == (I64{0}) -> observe_values_code = rt_observe_raw_values_address()
+    if observe_values_code == (I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            observe_values_code = rt_observe_raw_values_address()
+        }
+    }
     sync_mutex_lock(observe_root)
     link := observe_root + I64{112}
     id :: sync_load(source)
@@ -110,7 +114,11 @@ fn observe_event_drop(node: I64) {
 // Source has canonical Event fields in Observe.rs:49-65 order; sequence is
 // assigned under the same lock as append, as the Rust VecDeque producer does.
 #Export(c) fn jet_observe_event(source: I64) {
-    if observe_events_code == (I64{0}) -> observe_events_code = rt_observe_raw_events_address()
+    if observe_events_code == (I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            observe_events_code = rt_observe_raw_events_address()
+        }
+    }
     node :: jet_rt_alloc(I64{128}, I64{8})
     sync_store(node, I64{0})
     at := I64{8}
@@ -504,7 +512,9 @@ observe_start_code := I64{0}
 
 // runtime-init: 4 when observe_task_linked,observe_channels_code,observe_values_code,observe_events_code
 #Export(c) fn jet_rt_observe_start_init() {
-    observe_start_code = rt_observe_start_address()
+    #Unsafe("runtime-init runs before any other thread exists") {
+        observe_start_code = rt_observe_start_address()
+    }
 }
 
 // jet_rt_observe_runtime_start_from_env as a code word's target. Returns

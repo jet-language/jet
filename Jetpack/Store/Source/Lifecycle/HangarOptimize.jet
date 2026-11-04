@@ -174,8 +174,7 @@ fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport Sto
 // aside first and restores it when linking fails.
 fn store_hardlink_replace(first: String, file: String) StoreError! -[FS, Env]> {
     if first == file -> return
-    sequence :: store_optimize_sequence
-    store_optimize_sequence += 1
+    sequence :: process_sequence_take(STORE_OPTIMIZE_SEQUENCE)
     temporary :: files.with_suffix(file, ".jet-dedup-{sys.pid()}-{sequence}")
     if sys.is_windows() {
         files.rename(file, temporary)

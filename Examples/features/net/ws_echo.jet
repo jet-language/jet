@@ -4,9 +4,11 @@ package {
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time] }
 }
 
-use core.http.server as http_server
-use core.time as time
-use core.net.ws as ws
+use {
+    http_server :: core.http.server
+    time :: core.time
+    ws :: core.net.ws
+}
 
 fn handle_ws(req: HTTPRequest) -> HTTPResponse HTTPError! {
     sock :: ws.upgrade(req) ?? return Ok(http_server.response(400, "upgrade failed"))

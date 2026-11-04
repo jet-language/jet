@@ -1,0 +1,20 @@
+// Each callee type parameter `T` here is spelled like the caller's `T`, but it
+// is a different variable: it binds to whatever type the caller passes, even a
+// type built from the caller's own `T`.
+fn wrap<T>(value: T) -> [T] { [T]{value} }
+
+fn pair<T>(first: T, second: T) -> [T] { [T]{first, second} }
+
+fn twice<T>(value: T) -> Int {
+    one :: wrap(value)
+    maybe :: T?{Val(value)}
+    lifted :: wrap(maybe)
+    nested :: wrap(one)
+    both :: pair(maybe, value)
+    one.len() + lifted.len() + nested[0].len() + both.len()
+}
+
+fn run() {
+    print("{twice(5)}")
+    print("{twice("a")}")
+}

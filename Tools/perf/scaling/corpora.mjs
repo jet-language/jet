@@ -273,7 +273,7 @@ function dataTables(n, r) {
 
 // core.time is left out: the generated compiler rejects Core/Time today
 // (E0312/E0109 on LocalDate comparisons).
-const CORE_IMPORTS = ['use core.math as math', 'use core.text as text', 'use core.collections as collections', 'use core.term as term'];
+const CORE_IMPORTS = ['use math :: core.math', 'use text :: core.text', 'use collections :: core.collections', 'use term :: core.term'];
 
 // n files, each importing four Core modules.
 function imports(n, r) {

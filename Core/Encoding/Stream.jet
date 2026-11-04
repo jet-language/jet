@@ -2,11 +2,13 @@
 // The public wrappers preserve the shipped text/file return shapes.
 // Write leaves take borrowed View<U8> windows; EOF remains an optional success,
 // distinct from typed EncodingError failures propagated by the stream policy.
-use core.encoding.[DataEvent, Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
-use core.encoding as encoding
-use core.files.[FileReader, FileWriter]
-use core.mem as mem
-use core.math as math
+use {
+    core.encoding.[DataEvent, Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+    encoding :: core.encoding
+    core.files.[FileReader, FileWriter]
+    mem :: core.mem
+    math :: core.math
+}
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
 fn object_entries(value: Dyn) -> View<(key: String, value: Dyn)> Never! from value {

@@ -220,8 +220,9 @@ static void panic_case(void) { require_stop(2,text("boom"),NULL,NULL,NULL); }
 #endif
 static void alloc_invalid_layout(void) { (void)jet_rt_alloc(1,3); }
 static void alloc_failure(void) { (void)jet_rt_alloc(INT64_MAX-7,8); }
-// JET_CHECKED_ALLOC=1 cases (Alloc.jet checked mode): each bad free traps
-// naming this function; checked-clean exercises good layouts end to end.
+// Checked-mode cases (Alloc.jet checked mode, on in every C host that links
+// the runtime object): each bad free traps naming this function;
+// checked-clean exercises good layouts end to end.
 static void alloc_checked_clean(void) {
     static const int64_t aligns[]={1,8,16,64,4096};
     for(int a=0;a<5;++a) for(int64_t size=0;size<=9000;size=size*3+1) {

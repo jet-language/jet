@@ -1,0 +1,20 @@
+# Card #6477: a program that can never run a second thread (no reachable task
+# spawn, thread start, signal handler or library load, and no foreign call
+# other than a vetted libc leaf) updates its inline reference counts with
+# plain inc/dec, without the lock prefix.
+fixture: a_program_that_never_starts_a_second_thread_counts_without_lock.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --release --debug-info=true main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "6\n"
+when arch x86_64
+when tool objdump
+step: objdump -d --no-show-raw-insn --disassemble=main_run .jet/build/main
+exit: 0
+stdout: ~ "incq" # card #6477: the entry body retains its strings and lists inline
+stdout: !~ "lock " # card #6477: no second thread can observe the counts, so no update is lock-prefixed
+end when
+end when

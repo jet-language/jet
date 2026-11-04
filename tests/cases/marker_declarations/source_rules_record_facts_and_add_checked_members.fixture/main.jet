@@ -1,9 +1,19 @@
-marker Recorded($sites: [.Type])
+struct Recorded {
+    impl Marker {
+        sites :: [.Type]
+    }
+}
 
-marker AddGreeting($sites: [.Type]) {
-    tname :: target.name
-    impl $tname {
-        fn greeting(self) -> String { "hello" }
+struct AddGreeting {
+    impl Marker {
+        sites :: [.Type]
+
+        fn expand(self, target: Target) {
+            tname :: target.name
+            impl $tname {
+                fn greeting(self) -> String { "hello" }
+            }
+        }
     }
 }
 

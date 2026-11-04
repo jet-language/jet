@@ -1,6 +1,8 @@
 // Exact originals tests/policy_scope.rs; no fixture spelling migrations.
-use jet_pkg_model.[PackageFacts, pkg_parse_policy_document]
-use jet_foundation.[PolicyKey, PolicyValue]
+use {
+    jet_pkg_model.[PackageFacts, pkg_parse_policy_document]
+    jet_foundation.[PolicyKey, PolicyValue]
+}
 
 #Test("package policy cannot authorize unsafe") {
     rejected :: if PackageFacts.parse("name: \"bad_policy\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Allow }}\n", "test") == {
@@ -16,12 +18,22 @@ use jet_foundation.[PolicyKey, PolicyValue]
     assert(rejected)
 }
 
+// Effect ceilings are module caps (`#FX(…) module name`) and package
+// `authority.deny`, never a policy field.
+#Test("package policy has no effect ceilings") {
+    rejected :: if PackageFacts.parse("name: \"policy\"\nversion: \"0.1.0\"\npolicy: {{ effects: {{ \"./src\": -[]> }} }}\n", "test") == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            assert(error.message().contains("`effects` is not a registered package policy"))
+            true
+        }
+    }
+    assert(rejected)
+}
+
 // volatile: original input ends "})" without closing the policy brace.
 #Test("package team policy parser normalizes typed controls") {
-    package :: PackageFacts.parse("name: \"policy\"\nversion: \"0.1.0\"\ndeps: {{ zlib: c@system }}\npolicy: {{ effects: {{ \"./src\": -[IO, IO]> }}, unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: {{ deny: [float_money] }})\n", "test") ?? panic("typed controls parse")
-    ceiling :: package.policy.effects.get("src") ?? panic("src ceiling")
-    assert_eq(ceiling.len(), 1)
-    assert(ceiling.contains("IO"))
+    package :: PackageFacts.parse("name: \"policy\"\nversion: \"0.1.0\"\ndeps: {{ zlib: c@system }}\npolicy: {{ unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: {{ deny: [float_money] }})\n", "test") ?? panic("typed controls parse")
     assert_eq(package.policy.unsafe_paths, Val([String]{"src"}))
     assert_eq(package.policy.expert, Val(false))
     assert_eq(package.policy.deps, Val([String]{"zlib"}))

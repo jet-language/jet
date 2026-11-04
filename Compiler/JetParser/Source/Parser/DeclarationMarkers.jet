@@ -79,10 +79,10 @@ fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
 }
 
 // Policy.rs `marker_argument_shape_error`: E0930 names the rule's registered
-// signature.
+// signature at the marker span without its `#`, as sema's shape error does.
 fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
     expected :: "{marker.name}{marker_registered_signature(marker.name)}"
-    parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
+    parser_add_error_code(&state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
 
 // The layout fact of a
@@ -289,6 +289,17 @@ fn parser_layout_marker_span(markers: [Marker], grouped: Bool, layout: StructLay
     None
 }
 
+// The written byte value of a struct's `align(N)` / `align(target, N)`
+// layout argument, where an unusable alignment is reported.
+fn parser_layout_alignment_span(markers: [Marker]) -> Span? {
+    marker :: loop candidate in markers {
+        if candidate.name == "Layout" -> break candidate
+    } ?? return None
+    value :: parser_marker_expression(marker, 1) ?? return None
+    call :: parser_layout_align_call(value) ?? return None
+    Val(expr_span(call.args[call.args.len() - 1].expr))
+}
+
 // Rust `BoundRuleArguments::parameter_for_source`: the parameter each written
 // argument binds, positional ones first and labeled ones by name. A bare
 // identifier naming one of `flags` (`#Meta(category: "Movement", tunable)`)
@@ -399,7 +410,7 @@ fn parser_marker_target_path(target: Expr) -> String? {
 // `marker_argument_shape_error` from the applicator).
 fn parser_marker_shape_fatal(state: &JetParserState, marker: Marker) {
     expected :: "{marker.name}{marker_registered_signature(marker.name)}"
-    parser_add_fatal_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
+    parser_add_fatal_code(&state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
 
 // Rust `MetaAttr::maturity`: the closed maturity scale a `maturity:` value names.

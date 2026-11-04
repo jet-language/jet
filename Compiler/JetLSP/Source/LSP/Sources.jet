@@ -1,17 +1,19 @@
 // Source/LSP/Server.rs:5272–5465,5577–5697,5744–5775,5933–5952.
 // Position/URI own the UTF-16 and file URI kernels. No second document state.
-use jet_foundation.[Span, diagnostic_utf8_width, type_name]
-use jet_lexer.[Token, TOKEN_IDENT]
-use core.text.runtime.kernel_unicode_string as lsp_source_text
-use core.files.runtime.kernel_path_components as lsp_source_path
-use core.sys.target.[selected_family, NativeTargetFamily]
+use {
+    jet_foundation.[Span, diagnostic_utf8_width, type_name]
+    jet_lexer.[Token, TOKEN_IDENT]
+    lsp_source_text :: core.text.runtime.kernel_unicode_string
+    lsp_source_path :: core.files.runtime.kernel_path_components
+    core.sys.target.[selected_family, NativeTargetFamily]
 
-use core.files.runtime.kernel_path_components.[OSPath, PathPlatform]
-use core.files.host.retained_descriptor as lsp_source_io
-use jet_driver.[JetDriverCompilerCheckResult]
-use jet_sema.[SemaCompilerModuleSource]
-use jetpack.[PackageIndex, env_discovery_load]
-use jet_devserver.[project_root]
+    core.files.runtime.kernel_path_components.[OSPath, PathPlatform]
+    lsp_source_io :: core.files.host.retained_descriptor
+    jet_driver.[JetDriverCompilerCheckResult]
+    jet_sema.[SemaCompilerModuleSource]
+    jetpack.[PackageIndex, env_discovery_load]
+    jet_devserver.[project_root]
+}
 
 // Native gates #4494/#4392/#4483/#4500: retained_descriptor.canonicalize and
 // exists over OSPath must be the real Core OS owners. No textual fallback

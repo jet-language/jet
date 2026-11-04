@@ -109,8 +109,12 @@ fn sema_call_check_special_approx(call: Call, expected: Type?, environment: Sema
         }
         else -> Type.Float
     }
-    line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
-    converted :: sema_expr_numeric_conversion(argument, target, call.name_span, line) ?? argument
+    // `approx` is the one explicit lossy crossing (core-library "approx(value)
+    // explicitly accepts possible precision loss"): the whole number rounds to
+    // the nearest float through a plain cast, never the exactness-checked
+    // crossing that stops on a value it cannot hold exactly.
+    rust_type :: sema_expr_numeric_rust_type(target) ?? "f64"
+    converted :: TExpr{ty: target, kind: TExprKind.NumericMethod{receiver: argument, operation: TNumericOp.CastAs{dst_rust: rust_type}}, span: call.name_span}
     checked :: sema_expr_expected(converted, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
@@ -840,7 +844,7 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
         check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !check.arguments_complete {
-            sema_expression_rejected_call_propagation(check.result_type, span, expected, environment, program, &scopes, &context, &diagnostics)
+            sema_expression_rejected_call_propagation(check.result_type, None, diagnostics.len(), span, expected, environment, program, &scopes, &context, &diagnostics)
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
         value := sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
@@ -1087,6 +1091,22 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
     }
 }
 
+// A union that holds the general `Err` is open: `Err("message")` builds that
+// member, the same default error an unannotated function's message sends.
+fn sema_call_default_err_message_into_open_union(value: Expr, err: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    open := false
+    if sema_expr_unwrap_tag(err) == .Union(members) {
+        loop member in members {
+            if sema_expr_unwrap_tag(member) == (Type.Named{name: "Err"}) -> open = true
+        }
+    }
+    if !open -> return false
+    message :: sema_failure_union_unparen(value)
+    if message == .Str(_, _, _) -> return true
+    probed :: sema_failure_union_probe_type(message, environment, program, &scopes, &state, &tail_store, &context) ?? return false
+    sema_expr_unwrap_tag(probed) == .String
+}
+
 fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     result :: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
@@ -1095,7 +1115,7 @@ fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaSco
         // never resolves.
         &context.failure_edges.push("")
         if result_value == .Result(ok, err) {
-            if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None {
+            if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None && !sema_call_default_err_message_into_open_union(call.args[0].expr, err, environment, program, &scopes, &state, &tail_store, &context) {
                 return sema_call_default_err_contextual_result(call, result_value, ok, err, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             // Record what this `Err` sends down the
@@ -1288,7 +1308,11 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     }
     source_args := call.args
     args := call.args
-    binding := sema_call_bind_direct(call.name, candidate.signature, &args, call.name_span, &diagnostics) ?? return None
+    root_mark :: diagnostics.len()
+    binding := sema_call_bind_direct(call.name, candidate.signature, &args, call.name_span, &diagnostics) ?? {
+        sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, &scopes, &context, &diagnostics)
+        return None
+    }
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
         inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, program, &scopes, &state, &tail_store, &context)
         sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, program, &scopes, &state, &tail_store, &context)
@@ -1355,7 +1379,10 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         resolved_binding = resolved
     }
     abi :: sema_call_direct_target_abi(candidate, environment, program)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? {
+        sema_call_direct_rejected_propagation(candidate, call, root_mark, expected, environment, program, &scopes, &context, &diagnostics)
+        return None
+    }
     sema_call_lint_shared_loop_arguments(source_args, environment, scopes, &diagnostics)
     callee_facts :: sema_contract_function_facts(environment, program, candidate.symbol.id)
     if callee_facts == .Val(facts) {
@@ -1397,6 +1424,26 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+// A direct call rejected at its arguments after its callee resolved: the
+// callee's declared result still auto-propagates, linked to the call's own
+// error (sema_expression_rejected_call_propagation). Only a rejection that
+// reported an error has one: an argument still waiting on a compile-time
+// value rejects without one and is checked again. The check adds reports
+// only; the facts it would record belong to a call that never lowers, and a
+// discarded probe must not keep them, so the context is rolled back. A
+// generic callee whose type arguments are still open has no settled result
+// type to check.
+fn sema_call_direct_rejected_propagation(candidate: SemaCallDirectTarget, call: Call, root_mark: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    if !sema_has_error_since(diagnostics, root_mark) -> return
+    if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() -> return
+    result_type_raw :: sema_call_signature_return(candidate.signature) ?? return
+    result_type :: sema_call_resolved_type(result_type_raw, environment, program)
+    source :: Expr.Call{call: call.copy(), id: AST_NODE_GENERATED}
+    mark :: sema_check_context_save(context)
+    sema_expression_rejected_call_propagation(result_type, Val(source), root_mark, call.name_span, expected, environment, program, &scopes, &context, &diagnostics)
+    sema_check_context_rollback(&context, mark)
 }
 
 // D-MEMPROVENANCE3=A (Rust `check_param_view_from_requirements`): a
@@ -1467,6 +1514,21 @@ fn sema_call_try_direct_forms(call: Call, expected: Type?, environment: SemaScop
             &diagnostics.push(sema_error("E0039", call.name_span, "`getenv` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
         } else {
             &diagnostics.push(sema_error("E0040", call.name_span, "`{call.name}` is not in Jet; use the `task` keyword instead", "Jet uses blocking tasks and channels, not async/await — simpler and race-free", "write `task your_work()` or `task {{ … }}`"))
+        }
+        loop argument_index in 0..<call.args.len() {
+            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    // E0041 (spec.md:2702-2704): an unshadowed foreign lock or semaphore
+    // call teaches channels and `Shared<T>`.
+    mutex_form :: call.name == "Mutex" || call.name == "mutex" || call.name == "lock"
+    semaphore_form :: call.name == "Semaphore" || call.name == "semaphore"
+    if (mutex_form || semaphore_form) && sema_scope_resolve_index(scopes, call.name) == None {
+        if mutex_form {
+            &diagnostics.push(sema_error("E0041", call.name_span, "`{call.name}` is not a Jet API; use a channel, or `Shared<T>` with `Condition`", "tasks pass owned values over channels; when tasks must share memory, `Shared<T>` guards the state under a lock and `Condition` coordinates predicate waits", "create `channel<T>()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)"))
+        } else {
+            &diagnostics.push(sema_error("E0041", call.name_span, "`{call.name}` is not in Jet; use a bounded channel as a token pool", "each received token admits one worker until that worker sends the token back", "create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"))
         }
         loop argument_index in 0..<call.args.len() {
             _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

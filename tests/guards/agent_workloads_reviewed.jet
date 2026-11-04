@@ -64,11 +64,13 @@ S4_REVIEW_EXPECTED_DOMAIN_CONTRACT :: comptime { [[String]]{[String]{"build-test
 [String]{"repository-semantic-edit", "jet=Core:files,process,inspect-codemod;bash=cp,awk,mv;python=stdlib-shutil,pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
 [String]{"git-diff-review", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
 [String]{"git-diff-empty", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"}} }
-use core.files as s4_review_files
-use core.crypto as s4_review_crypto
-use core.sys as s4_review_sys
-use core.text.parse as s4_review_parse
-use core.process as s4_review_process
+use {
+    s4_review_files :: core.files
+    s4_review_crypto :: core.crypto
+    s4_review_sys :: core.sys
+    s4_review_parse :: core.text.parse
+    s4_review_process :: core.process
+}
 
 fn s4_review_slice(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""

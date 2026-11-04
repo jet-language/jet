@@ -1219,8 +1219,10 @@ The fleet adds two web hosts. Shared Configs carry common packages and health ru
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-use core.http as http
-use core.net as net
+use {
+    http :: core.http
+    net :: core.net
+}
 
 fn run_api() ? {
     print("api ready")

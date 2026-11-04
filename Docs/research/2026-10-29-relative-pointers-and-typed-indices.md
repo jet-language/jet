@@ -670,7 +670,7 @@ changes `n`, `lookups` and the key count.
 
 ```jet
 // #6204 benchmark, Jet side: the owner's Node pool linked by U16 indices.
-use core.time as time
+use time :: core.time
 
 struct Node {
     text: [U8#32]

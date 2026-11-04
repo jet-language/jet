@@ -261,7 +261,7 @@ fn link_bind_layout(c: &LinkContext, view: LinkImageView) -> LinkLayout Never! {
         file_end: if has_rw -> file_end else -> rw_start, mem_end: if has_rw -> addr else -> rw_start,
         has_rw: has_rw, has_tls: false, tdata_end: rw_start, init_start: rw_start, init_end: rw_start,
         fini_start: rw_start, fini_end: rw_start, preinit_start: rw_start, preinit_end: rw_start,
-        bss_start: file_end, notes: [String:Int]{},
+        bss_start: file_end, note_at: 0, notes: [String:Int]{}, packed: false, rw_shift: 0,
     }
 }
 
@@ -303,9 +303,9 @@ fn link_bind_write(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l:
         if link_u32(c.bufs, 1, at) == 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
     }
     start :: view.program_base
-    link_phdr(&out, c.base, 1, 4, start, l.r_end - start, l.r_end - start, LINK_PAGE)
-    link_phdr(&out, c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
-    if l.has_rw -> link_phdr(&out, c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
+    link_phdr(&out, start - c.base, 1, 4, start, l.r_end - start, l.r_end - start, LINK_PAGE)
+    link_phdr(&out, l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
+    if l.has_rw -> link_phdr(&out, l.rw_start - c.base, 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
     loop k in 0..<view.phnum {
         at :: view.phoff + LINK_PHDR_SIZE * k
         if link_u32(c.bufs, 1, at) != 1 -> &out.extend(c.bufs[1][at..<at + LINK_PHDR_SIZE])
@@ -414,7 +414,10 @@ fn link_bind_sections(c: &LinkContext, out: &[U8], origin: Int, view: LinkImageV
 // for whoever needs the whole file. A whole executable is all `tail`
 // (image_end and tail_at 0). A kept program (Image/Loader.jet
 // x64_executable_kept) is bound to its pack file again, its `image` that
-// file's first page. x64_executable_bytes puts the file together.
+// file's first page. x64_executable_bytes puts the file together. A split
+// link's executable (x64_executable_split) also has its side debug file
+// `debug_file` and the build id `build_id` both files' notes hold; others
+// have both empty.
 struct X64Executable {
     image: [U8]
     image_path: String
@@ -426,11 +429,21 @@ struct X64Executable {
     patch_bytes: [[U8]]
     tail_at: Int
     tail: [U8]
+    debug_file: [U8]
+    build_id: [U8]
 }
 
 // The executable whose file is `bytes`.
 fn x64_executable_whole(bytes: ^[U8]) -> X64Executable Never! {
-    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_end: 0, image_gap_at: 0, image_gap: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: ^bytes}
+    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_end: 0, image_gap_at: 0, image_gap: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: ^bytes, debug_file: [U8]{}, build_id: [U8]{}}
+}
+
+// The executable a split link wrote (x64_link_executable_split).
+fn x64_executable_split(linked: ^X64SplitExecutableResult) -> X64Executable Never! {
+    exe := x64_executable_whole(^linked.bytes)
+    exe.debug_file = ^linked.debug_file
+    exe.build_id = ^linked.build_id
+    exe
 }
 
 // The file of `exe`, whose image part is whole (x64_executable_complete).

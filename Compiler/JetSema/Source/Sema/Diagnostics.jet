@@ -8,6 +8,7 @@ use jet_foundation.[
     TagMarker,
     Type,
     core_module_for_alias,
+    diagnostic_caused_by,
     diagnostic_from_registry,
     diagnostic_registry_row,
     diagnostic_with_source_mapping,
@@ -144,6 +145,23 @@ fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
     }
     false
 }
+
+// Names the first error in `root_start..<start` as the cause of every report
+// from `start` on; nothing changes when that range has no error.
+fn sema_link_reports_to_first_error(diagnostics: &[Diagnostic], root_start: Int, start: Int) Never! {
+    root := -1
+    loop index in root_start..<start {
+        if diagnostics[index].severity == DIAGNOSTIC_ERROR {
+            root = index
+            break
+        }
+    }
+    if root < 0 -> return
+    loop index in start..<diagnostics.len() {
+        diagnostics[index] = diagnostic_caused_by(diagnostics[index].copy(), diagnostics[root])
+    }
+}
+
 // The 1-based line of `site`. Rust's `LineIndex::line_col` clamps an offset to
 // the source length, so a site past the end of the unit reads the final line.
 // That case is real: a derive expanded from `Prelude/Derives.jet` keeps that
@@ -265,7 +283,7 @@ fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
 fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
     fix := "declare it first: `{name} :: ...`"
     if core_module_for_alias(name) == .Val(owner) {
-        fix = "add `use {owner} as {name}`"
+        fix = "add `use {name} :: {owner}`"
     } else if sema_scope_closest_visible_name(scopes, name) == .Val(near) {
         fix = "did you mean `{near}`?"
     }

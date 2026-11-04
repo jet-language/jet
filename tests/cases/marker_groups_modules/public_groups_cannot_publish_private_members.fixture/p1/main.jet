@@ -1,5 +1,13 @@
 priv module secret {
-marker Hidden($sites: [.Function])
+struct Hidden {
+    impl Marker {
+        sites :: [.Function]
+    }
 }
-marker Public = #[Secret.Hidden, Inline]
+}
+struct Public {
+    impl Marker {
+        group :: #[Secret.Hidden, Inline]
+    }
+}
 fn run() {}

@@ -1,20 +1,22 @@
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1
-use std.collections.[HashSet]
-use core.files.[OSPath]
-use std.fmt.[format]
-use jet_semindex.[SemIndex, SourceSpan, SymbolDef, SymbolRef]
-use jet_semindex as semindex
-use jet_impact.[ImpactReport]
-use jet_devserver.Canvas.GraphHelpers.[contains_ci, dedupe_results, edit, nearest_node, node_for_span, open_query_context, query_diagnostics_error, query_error, query_ok, query_result_json, simple_diff, spans_overlap, text_matches]
-use jet_devserver.Canvas.GraphJson as graph_json
-use jet_devserver.Canvas.NodeCatalog as node_catalog
-use jet_devserver.Canvas.ProjectScan.[env_project_json, project_context_for_entry, project_file]
-use jet_devserver.Canvas.GraphProjection.[canvas_game_fact_json, CanvasGameFact, Projection]
-use jet_devserver.Canvas.ProjectTransactions.[module_belongs_to, normalize_and_format_project_changes, prepare_project_rename, project_revision_after_changes, rel_path, validate_project_rename_overlay]
-use jet_devserver.Canvas.SchemaApi.[ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, QUERY_SCHEMA_VERSION]
-use jet_devserver.Canvas.SourceModel.[read_source_without_symlinks, source_revision]
-use jet_devserver.Canvas.ValidationJson.[json_optional_str, json_str, json_string_field, span_json]
-use jet_foundation.[CORE_MODULE_EXPORTS]
+use {
+    std.collections.[HashSet]
+    core.files.[OSPath]
+    std.fmt.[format]
+    jet_semindex.[SemIndex, SourceSpan, SymbolDef, SymbolRef]
+    semindex :: jet_semindex
+    jet_impact.[ImpactReport]
+    jet_devserver.Canvas.GraphHelpers.[contains_ci, dedupe_results, edit, nearest_node, node_for_span, open_query_context, query_diagnostics_error, query_error, query_ok, query_result_json, simple_diff, spans_overlap, text_matches]
+    graph_json :: jet_devserver.Canvas.GraphJson
+    node_catalog :: jet_devserver.Canvas.NodeCatalog
+    jet_devserver.Canvas.ProjectScan.[env_project_json, project_context_for_entry, project_file]
+    jet_devserver.Canvas.GraphProjection.[canvas_game_fact_json, CanvasGameFact, Projection]
+    jet_devserver.Canvas.ProjectTransactions.[module_belongs_to, normalize_and_format_project_changes, prepare_project_rename, project_revision_after_changes, rel_path, validate_project_rename_overlay]
+    jet_devserver.Canvas.SchemaApi.[ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, QUERY_SCHEMA_VERSION]
+    jet_devserver.Canvas.SourceModel.[read_source_without_symlinks, source_revision]
+    jet_devserver.Canvas.ValidationJson.[json_optional_str, json_str, json_string_field, span_json]
+    jet_foundation.[CORE_MODULE_EXPORTS]
+}
 
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:23
 PROJECT_QUERY_RESULT_LIMIT :: Usize{200}
@@ -486,13 +488,11 @@ fn core_source_callee(src: String, module_path: String) -> String {
     if imported_core_alias(src, module_path) == .Val(alias) -> alias else -> module_path.rsplit('.').next().unwrap_or(module_path).to_string()
 }
 // Rust: crates/jet-devserver/src/Canvas/query_actions.rs:1509
+// The local name of `module_path` when the source imports it: an `alias ::`
+// row, a bare path, or a `use {` block row (core_imports, #6542).
 fn imported_core_alias(src: String, module_path: String) -> String? {
-    prefix :: "use {module_path} as "
-    loop line in src.lines() {
-        code := line.split("//").next().unwrap_or("").trim() // #4303
-        rest :: code.strip_prefix(prefix) ?? next
-        alias := rest.split((c) -> !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("").trim() // #4303
-        if !alias.is_empty() -> return .Some(alias.to_string())
+    loop import in core_imports(src) {
+        if import.module_ref == module_path -> return .Some(^import.alias)
     }
     .None
 }

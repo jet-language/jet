@@ -28,103 +28,106 @@
 // an operation's own operands right after it run only in its slow path: its
 // hot path proved them inline. Eq and Ne against a constant compare words.
 
-use jet_foundation.[Type, name_rows_value]
-use jet_backend.[
-    X64Alu,
-    X64Cond,
-    X64CompiledFunction,
-    X64DataID,
-    X64DebugLocation,
-    X64DebugVariable,
-    X64FloatOp,
-    X64FunctionDebug,
-    X64FunctionID,
-    X64LineRow,
-    X64Reloc,
-    X64RelocTarget,
-    X64Shift,
-    X64VariableRange,
-    X64_FUNCTION_ALIGN,
-    X64_R10,
-    X64_R11,
-    X64_R8,
-    X64_R9,
-    X64_RAX,
-    X64_RBP,
-    X64_RCX,
-    X64_RDI,
-    X64_RDX,
-    X64_RSI,
-    X64_RSP,
-    dwarf_cfa_advance,
-    dwarf_cfa_def_cfa,
-    dwarf_cfa_def_cfa_offset,
-    dwarf_cfa_def_cfa_register,
-    dwarf_cfa_offset,
-    dwarf_cfa_remember_state,
-    dwarf_cfa_restore_state,
-    x64_alu_ri,
-    x64_alu_rr,
-    x64_assemble_template,
-    x64_call_reg,
-    x64_call_rel32,
-    x64_cmov_rr,
-    x64_cond_invert,
-    x64_cqo,
-    x64_cvtsd2ss,
-    x64_cvtsi2sd,
-    x64_cvtsi2ss,
-    x64_cvtss2sd,
-    x64_cvttsd2si,
-    x64_cvttss2si,
-    x64_div,
-    x64_dwarf_register,
-    x64_fits_i32,
-    x64_float_load,
-    x64_float_op,
-    x64_float_store,
-    x64_idiv,
-    x64_imul_rr,
-    x64_imul_rri,
-    x64_imul_wide,
-    x64_jcc_rel32,
-    x64_jmp_rel32,
-    x64_lea,
-    x64_lea_indexed,
-    x64_lea_rip,
-    x64_load,
-    x64_load_indexed,
-    x64_load_u8,
-    x64_lock_step,
-    x64_mov_ri,
-    x64_mov_rr,
-    x64_movaps,
-    x64_movq_from_xmm,
-    x64_movq_to_xmm,
-    x64_movzx_r8,
-    x64_mul,
-    x64_neg,
-    x64_nops,
-    x64_patch_rel32,
-    x64_pop,
-    x64_push,
-    x64_rep_movsb,
-    x64_ret,
-    x64_setcc,
-    x64_shift_cl,
-    x64_shift_ri,
-    x64_store,
-    x64_store_indexed,
-    x64_store_indexed_imm,
-    x64_store_u8,
-    x64_test_rr,
-    x64_test_ri,
-    x64_ucomisd,
-    x64_ucomiss,
-    x64_ud2,
-    x64_vector_load,
-    x64_vector_store,
-]
+use {
+    jet_foundation.[Type, name_rows_value]
+    jet_backend.[
+        X64Alu,
+        X64Cond,
+        X64CompiledFunction,
+        X64DataID,
+        X64DebugLocation,
+        X64DebugVariable,
+        X64FloatOp,
+        X64FunctionDebug,
+        X64FunctionID,
+        X64LineRow,
+        X64Reloc,
+        X64RelocTarget,
+        X64Shift,
+        X64VariableRange,
+        X64_FUNCTION_ALIGN,
+        X64_R10,
+        X64_R11,
+        X64_R8,
+        X64_R9,
+        X64_RAX,
+        X64_RBP,
+        X64_RCX,
+        X64_RDI,
+        X64_RDX,
+        X64_RSI,
+        X64_RSP,
+        dwarf_cfa_advance,
+        dwarf_cfa_def_cfa,
+        dwarf_cfa_def_cfa_offset,
+        dwarf_cfa_def_cfa_register,
+        dwarf_cfa_offset,
+        dwarf_cfa_remember_state,
+        dwarf_cfa_restore_state,
+        x64_alu_ri,
+        x64_alu_rr,
+        x64_assemble_template,
+        x64_call_reg,
+        x64_call_rel32,
+        x64_cmov_rr,
+        x64_cond_invert,
+        x64_cqo,
+        x64_cvtsd2ss,
+        x64_cvtsi2sd,
+        x64_cvtsi2ss,
+        x64_cvtss2sd,
+        x64_cvttsd2si,
+        x64_cvttss2si,
+        x64_div,
+        x64_dwarf_register,
+        x64_fits_i32,
+        x64_float_load,
+        x64_float_op,
+        x64_float_op_mem,
+        x64_float_store,
+        x64_idiv,
+        x64_imul_rr,
+        x64_imul_rri,
+        x64_imul_wide,
+        x64_jcc_rel32,
+        x64_jmp_rel32,
+        x64_lea,
+        x64_lea_indexed,
+        x64_lea_rip,
+        x64_load,
+        x64_load_indexed,
+        x64_load_u8,
+        x64_count_step,
+        x64_mov_ri,
+        x64_mov_rr,
+        x64_movaps,
+        x64_movq_from_xmm,
+        x64_movq_to_xmm,
+        x64_movzx_r8,
+        x64_mul,
+        x64_neg,
+        x64_nops,
+        x64_patch_rel32,
+        x64_pop,
+        x64_push,
+        x64_rep_movsb,
+        x64_ret,
+        x64_setcc,
+        x64_shift_cl,
+        x64_shift_ri,
+        x64_store,
+        x64_store_indexed,
+        x64_store_indexed_imm,
+        x64_store_u8,
+        x64_test_rr,
+        x64_test_ri,
+        x64_ucomisd,
+        x64_ucomiss,
+        x64_ud2,
+        x64_vector_load,
+        x64_vector_store,
+    ]
+}
 
 IR_X64_ARGUMENT_REGISTERS :: [Int]{7, 6, 2, 1, 8, 9}
 
@@ -211,6 +214,10 @@ struct IRX64Emitter {
     // The rel32 fields of the branches inside the function, each patched
     // to its target (ir_x64_patch), for ir_x64_relax.
     branches: [Int]
+    // Each closed Loop's head and End offsets, in the order they close
+    // (inner before outer), for the loop alignment of ir_x64_relax.
+    loops: [Int]
+    loop_ends: [Int]
     colds: [IRX64Cold]
     errors: [String]
     // A comparison whose Bool only the next If / BrIf reads leaves its
@@ -433,19 +440,33 @@ fn ir_x64_home_xmm(al: IRX64Allocation, slot: Int, scratch: Int) -> Int Never! {
     scratch
 }
 
+// Whether a call from instruction `at` keeps xmm slot `slot`: a call
+// instruction reads its arguments before and writes its result after the
+// call itself; within any other instruction every slot whose range holds
+// it is kept.
+fn ir_x64_keeps_xmm(f: IRFunction, al: IRX64Allocation, at: Int, slot: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op == .Call || op == .CallRuntime || op == .CallIndirect -> return al.starts[slot] < at && al.ends[slot] > at
+    al.starts[slot] <= at && al.ends[slot] >= at
+}
+
+// Whether a call from instruction e.at keeps any xmm slot.
+fn ir_x64_keeps_xmms(e: IRX64Emitter, f: IRFunction, al: IRX64Allocation) -> Bool Never! {
+    if e.at < 0 -> return false
+    loop slot in al.xmm_slots {
+        if ir_x64_keeps_xmm(f, al, e.at, slot) -> return true
+    }
+    false
+}
+
 // Before (`out`) or after a call from instruction e.at, stores to their
-// homes or loads back the Float slots in xmm8-xmm15 that live across it,
-// which the C ABI lets the callee clobber. A call instruction reads its
-// arguments before and writes its result after the call itself; within any
-// other instruction every slot whose range holds it is kept.
+// homes or loads back the Float slots in xmm registers that live across it
+// (ir_x64_keeps_xmm), which the C ABI lets the callee clobber.
 fn ir_x64_keep_xmms(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: Bool) Never! {
     at :: e.at
     if at < 0 -> return
-    op :: f.op[at]
-    call :: op == .Call || op == .CallRuntime || op == .CallIndirect
     loop slot in al.xmm_slots {
-        live :: if call -> al.starts[slot] < at && al.ends[slot] > at else -> al.starts[slot] <= at && al.ends[slot] >= at
-        if !live -> next
+        if !ir_x64_keeps_xmm(f, al, at, slot) -> next
         if out {
             x64_float_store(&e.code, false, X64_RBP, al.homes[slot], al.xmms[slot])
         } else {
@@ -773,6 +794,12 @@ fn ir_x64_stop_texts() -> [String] Never! {
 // else by the stop `exit` with no result written, where its caller's stop
 // check takes the stop on (Build.jet ir_stop_check).
 fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, exit: Int) Never! {
+    // The shared calls of the numeric stops (.Stop): offset, path, text
+    // and edge of each.
+    tails := [Int]{}
+    tail_paths := [Int]{}
+    tail_texts := [Int]{}
+    tail_targets := [Int]{}
     loop cold in e.colds {
         e.at = cold.at
         here :: e.code.len()
@@ -848,15 +875,36 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 ir_x64_jump_to(&e, cold.resume)
             }
             .Stop -> {
+                // Of the stops of one path, text and edge whose calls keep
+                // no xmm register, only the first lays out the call: the
+                // later ones load their line, the one argument that differs,
+                // and jump in after the first's.
                 path :: tables.texts.get(cold.symbol) ?? -1
-                ir_x64_lea_data(&e, X64_RDI, path)
-                x64_mov_ri(&e.code, X64_RSI, tables.lengths[path])
-                x64_mov_ri(&e.code, X64_RDX, cold.line)
-                ir_x64_lea_data(&e, X64_RCX, cold.text)
-                x64_mov_ri(&e.code, X64_R8, tables.lengths[cold.text])
-                ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}, false)
                 target :: ir_x64_stop_target(e, cold, exit)
-                ir_x64_stop_resume(&e, m, target)
+                x64_mov_ri(&e.code, X64_RDX, cold.line)
+                shared := -1
+                keeps :: ir_x64_keeps_xmms(e, f, al)
+                if !keeps {
+                    loop (k, tail) in tails {
+                        if tail_paths[k] == path && tail_texts[k] == cold.text && tail_targets[k] == target -> shared = tail
+                    }
+                }
+                if shared >= 0 {
+                    ir_x64_jump_to(&e, shared)
+                } else {
+                    if !keeps {
+                        &tails.push(e.code.len())
+                        &tail_paths.push(path)
+                        &tail_texts.push(cold.text)
+                        &tail_targets.push(target)
+                    }
+                    ir_x64_lea_data(&e, X64_RDI, path)
+                    x64_mov_ri(&e.code, X64_RSI, tables.lengths[path])
+                    ir_x64_lea_data(&e, X64_RCX, cold.text)
+                    x64_mov_ri(&e.code, X64_R8, tables.lengths[cold.text])
+                    ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_numeric_stop"}, false)
+                    ir_x64_stop_resume(&e, m, target)
+                }
             }
             .ShiftStop -> {
                 path :: tables.texts.get(cold.symbol) ?? -1
@@ -1162,14 +1210,15 @@ fn ir_x64_block_unique(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
 }
 
 // jet_rt_block_retain(block) inline (Refcount.jet): one `lock inc` of the
-// count word 24 bytes before the payload, none for an immortal (negative)
-// count. A count that passes the largest value stops as the routine does.
+// count word 24 bytes before the payload (a plain inc in a single-thread
+// program, IRModule.single_thread), none for an immortal (negative) count.
+// A count that passes the largest value stops as the routine does.
 fn ir_x64_block_retain(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, block: Int) Never! {
     reg :: ir_x64_use(&e, m, f, al, block, X64_RAX)
     x64_load(&e.code, X64_RCX, reg, -24)
     x64_test_rr(&e.code, X64_RCX, X64_RCX)
     immortal :: x64_jcc_rel32(&e.code, X64Cond.S)
-    x64_lock_step(&e.code, reg, -24, true)
+    x64_count_step(&e.code, reg, -24, true, !m.single_thread)
     overflow :: x64_jcc_rel32(&e.code, X64Cond.O)
     ir_x64_land(&e, immortal)
     ir_x64_overflow_trap(&e, overflow)
@@ -1195,7 +1244,8 @@ fn ir_x64_alloc_entry(f: IRFunction, al: IRX64Allocation, at: Int, symbol: Strin
 // retain it meanwhile), so it is true without a write; an immortal count is
 // false; a count carrying the zero-at-free mark (bit 62, Refcount.jet
 // RC_ZERO_MARK) takes the routine in a slow path, which masks the mark off;
-// any other takes one `lock dec`, true when it reaches zero. The Bool is
+// any other takes one `lock dec` (a plain dec in a single-thread program),
+// true when it reaches zero. The Bool is
 // fused into a following branch like jet_rt_block_unique's.
 fn ir_x64_block_release(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, block: Int) Never! {
     reg :: ir_x64_use(&e, m, f, al, block, X64_RAX)
@@ -1209,7 +1259,7 @@ fn ir_x64_block_release(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     // The sign bit is clear here, so the shift leaves bit 62 alone.
     x64_shift_ri(&e.code, X64Shift.Shr, X64_RCX, 62)
     marked :: x64_jcc_rel32(&e.code, X64Cond.NE)
-    x64_lock_step(&e.code, reg, -24, false)
+    x64_count_step(&e.code, reg, -24, false, !m.single_thread)
     ir_x64_land(&e, last)
     ir_x64_land(&e, immortal)
     fused :: ir_x64_fusable(e, f, al, at)
@@ -1223,7 +1273,8 @@ fn ir_x64_block_release(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
 
 // jet_rt_string_clone(src) inline (Text.jet): a header with a buffer (a
 // nonzero capacity word at +16, so no static text) whose count (the word 8
-// bytes before it) is not immortal gains one owner by one `lock inc`. Any
+// bytes before it) is not immortal gains one owner by one `lock inc` (a
+// plain inc in a single-thread program, IRModule.single_thread). Any
 // other header calls the routine in a slow path. A count that passes the
 // largest value stops as the routine does.
 fn ir_x64_string_clone(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, src: Int, dst: Int) Never! {
@@ -1238,7 +1289,7 @@ fn ir_x64_string_clone(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     // The clone is the same header: stored before the step, so a stop
     // after an overflowing one leaves it set as the routine does.
     ir_x64_store(&e, m, f, al, dst, reg)
-    x64_lock_step(&e.code, reg, -8, true)
+    x64_count_step(&e.code, reg, -8, true, !m.single_thread)
     overflow :: x64_jcc_rel32(&e.code, X64Cond.O)
     slow := ir_x64_cold(IRX64ColdKind.Route, sites)
     slow.resume = e.code.len()
@@ -1250,7 +1301,8 @@ fn ir_x64_string_clone(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
 }
 
 // jet_rt_string_drop(slot) inline: a header with a buffer and a count above
-// 1 loses one owner by one `lock dec`; a null header is left alone. The
+// 1 loses one owner by one `lock dec` (a plain dec in a single-thread
+// program, IRModule.single_thread); a null header is left alone. The
 // last owner (a count of 1) and a header without a buffer call the routine,
 // which frees or leaves a static text. A `lock dec` that reaches zero
 // because another owner dropped meanwhile takes the count back to 1 (no
@@ -1267,9 +1319,9 @@ fn ir_x64_string_drop(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     x64_load(&e.code, X64_RCX, reg, -8)
     x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 1)
     &sites.push(x64_jcc_rel32(&e.code, X64Cond.LE))
-    x64_lock_step(&e.code, reg, -8, false)
+    x64_count_step(&e.code, reg, -8, false, !m.single_thread)
     &done.push(x64_jcc_rel32(&e.code, X64Cond.NE))
-    x64_lock_step(&e.code, reg, -8, true)
+    x64_count_step(&e.code, reg, -8, true, !m.single_thread)
     &sites.push(x64_jmp_rel32(&e.code))
     loop site in done -> ir_x64_land(&e, site)
     slow := ir_x64_cold(IRX64ColdKind.Route, sites)
@@ -1418,19 +1470,23 @@ fn ir_x64_magic(d: Int) -> IRX64Magic Never! {
     IRX64Magic{multiplier: multiplier, add: false, shift: p - 64}
 }
 
-// The divisor of a constant `slot` that divides by a multiply
-// (ir_x64_magic), else 0.
+// The divisor of a constant `slot` that divides by a multiply (ir_x64_magic
+// of its magnitude: 3 <= |d| < 2^62, not a power of two), else 0.
 fn ir_x64_magic_divisor(al: IRX64Allocation, slot: Int) -> Int Never! {
     if slot < 0 || !al.consts[slot] -> return 0
     d :: al.values[slot]
-    if d < 3 || d >= (1 << 62) || ir_x64_power_of_two(al, slot) > 0 -> return 0
+    size :: if d < 0 -> 0 - d else -> d
+    if size < 3 || size >= (1 << 62) || size.bit_and(size - 1) == 0 -> return 0
     d
 }
 
 // rax divided by the constant d (ir_x64_magic_divisor) as idiv leaves it:
 // the truncated quotient in rax, the remainder in rdx, d in rcx. Uses r11.
+// A negative d divides by its magnitude and negates the quotient: the
+// truncated quotient of n by -d is minus that of n by d, the remainder the
+// same.
 fn ir_x64_magic_division(e: &IRX64Emitter, d: Int) Never! {
-    magic :: ir_x64_magic(d)
+    magic :: ir_x64_magic(if d < 0 -> 0 - d else -> d)
     x64_mov_rr(&e.code, X64_R11, X64_RAX)
     x64_mov_ri(&e.code, X64_RCX, magic.multiplier)
     x64_imul_wide(&e.code, X64_RCX)
@@ -1439,6 +1495,7 @@ fn ir_x64_magic_division(e: &IRX64Emitter, d: Int) Never! {
     x64_mov_rr(&e.code, X64_RAX, X64_R11)
     x64_shift_ri(&e.code, X64Shift.Shr, X64_RAX, 63)
     x64_alu_rr(&e.code, X64Alu.Add, X64_RAX, X64_RDX)
+    if d < 0 -> x64_neg(&e.code, X64_RAX)
     x64_mov_ri(&e.code, X64_RCX, d)
     x64_mov_rr(&e.code, X64_RDX, X64_RAX)
     x64_imul_rr(&e.code, X64_RDX, X64_RCX)
@@ -1562,7 +1619,7 @@ fn ir_x64_exact_division(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
         if quotient >= 0 -> return ir_x64_paired_remainder(&e, m, f, al, at, quotient)
     }
     magic :: ir_x64_magic_divisor(al, f.b[at])
-    if magic > 0 {
+    if magic != 0 {
         ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
         ir_x64_operand_test(&e, al, f.a[at], X64_RAX, &sites)
         ir_x64_magic_division(&e, magic)
@@ -1766,7 +1823,7 @@ fn ir_x64_word_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         if quotient >= 0 -> return ir_x64_word_paired_remainder(&e, m, f, al, tables, at, quotient)
     }
     magic :: if division && ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
-    if magic > 0 {
+    if magic != 0 {
         // Neither is the divisor 0 or -1.
         ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
         ir_x64_magic_division(&e, magic)
@@ -1893,9 +1950,9 @@ fn ir_x64_float_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     if op == .Rem {
         return ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: if single -> "fmodf" else -> "fmod"}, -1, [Int]{f.a[at], f.b[at]}, 0, 2, dst, 0)
     }
-    left :: ir_x64_use_xmm(&e, m, f, al, f.a[at], 0)
-    right :: ir_x64_use_xmm(&e, m, f, al, f.b[at], 1)
     if ir_x64_is_compare(op) {
+        left :: ir_x64_use_xmm(&e, m, f, al, f.a[at], 0)
+        right :: ir_x64_use_xmm(&e, m, f, al, f.b[at], 1)
         // Lt/Le compare the mirrored operands so every ordered test is
         // above/above-or-equal, which an unordered result (CF set) fails.
         if op == .Lt || op == .Le {
@@ -1921,16 +1978,24 @@ fn ir_x64_float_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
         return ir_x64_store(&e, m, f, al, dst, X64_RAX)
     }
     // In dst's own register unless that is the right operand's (floor
-    // division computes in xmm0, floor's argument and result).
+    // division computes in xmm0, floor's argument and result). A left
+    // operand in its home loads straight there, a right one is read from
+    // its home.
+    if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .FloorDiv -> return ir_x64_fail(&e, f, at, "no Float form")
     target := ir_x64_home_xmm(al, dst, 0)
-    if op == .FloorDiv || (target == right && f.a[at] != f.b[at]) -> target = 0
-    if target != left -> x64_movaps(&e.code, target, left)
-    if op == {
-        .Add -> x64_float_op(&e.code, X64FloatOp.Add, single, target, right)
-        .Sub -> x64_float_op(&e.code, X64FloatOp.Sub, single, target, right)
-        .Mul -> x64_float_op(&e.code, X64FloatOp.Mul, single, target, right)
-        .Div | .FloorDiv -> x64_float_op(&e.code, X64FloatOp.Div, single, target, right)
-        else -> return ir_x64_fail(&e, f, at, "no Float form")
+    held :: al.xmms[f.b[at]]
+    if op == .FloorDiv || (target == held && f.a[at] != f.b[at]) -> target = 0
+    ir_x64_load_xmm(&e, m, f, al, f.a[at], target)
+    float_op :: if op == {
+        .Add -> X64FloatOp.Add
+        .Sub -> X64FloatOp.Sub
+        .Mul -> X64FloatOp.Mul
+        else -> X64FloatOp.Div
+    }
+    if {
+        held >= 0 -> x64_float_op(&e.code, float_op, single, target, held)
+        f.a[at] == f.b[at] -> x64_float_op(&e.code, float_op, single, target, target)
+        else -> x64_float_op_mem(&e.code, float_op, single, target, X64_RBP, al.homes[f.b[at]])
     }
     if op == .FloorDiv -> ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: if single -> "floorf" else -> "floor"}, false)
     ir_x64_store_xmm(&e, m, f, al, dst, target)
@@ -2598,6 +2663,10 @@ fn ir_x64_end(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     if e.open.len() == 0 -> return ir_x64_fail(&e, f, at, "End without an open construct")
     here :: e.code.len()
     row :: e.open.len() - 1
+    if e.heads[row] >= 0 {
+        &e.loops.push(e.heads[row])
+        &e.loop_ends.push(here)
+    }
     opener :: e.open[row]
     e.end_of[opener] = here
     if e.falses[row] >= 0 -> ir_x64_patch(&e, e.falses[row], here)
@@ -2688,6 +2757,15 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         }
         .ConstBigInt -> {
             if f.a[at] < 0 || f.a[at] >= m.names.len() -> return ir_x64_fail(&e, f, at, "name {f.a[at]} is not interned")
+            // A static exact Int (X64Module.jet ir_x64_static_int) is the
+            // word its data row holds.
+            word :: tables.ints.get(m.names[f.a[at]]) ?? -1
+            if word >= 0 {
+                reg :: ir_x64_home_reg(m, f, al, dst, X64_RAX)
+                ir_x64_lea_data(&e, reg, word)
+                x64_load(&e.code, reg, reg, 0)
+                return ir_x64_store(&e, m, f, al, dst, reg)
+            }
             text :: tables.texts.get(m.names[f.a[at]]) ?? -1
             ir_x64_helper(&e, m, f, al, "jet_rt_int_from_static", [IRX64Arg]{IRX64Arg.Data{id: text}, IRX64Arg.Imm{value: tables.lengths[text]}}, dst)
         }
@@ -2754,14 +2832,8 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             ir_x64_store(&e, m, f, al, dst, X64_RAX)
         }
         .Block -> ir_x64_open(&e, at, -1, -1)
-        .Loop -> {
-            // The head starts on the functions' own alignment, so where a
-            // hot loop falls in the cache lines does not depend on the
-            // code before it.
-            x64_nops(&e.code, (X64_FUNCTION_ALIGN - e.code.len() % X64_FUNCTION_ALIGN) % X64_FUNCTION_ALIGN)
-            head :: e.code.len()
-            ir_x64_open(&e, at, head, -1)
-        }
+        // ir_x64_relax aligns the head of an innermost loop.
+        .Loop -> ir_x64_open(&e, at, e.code.len(), -1)
         .If -> {
             // Both arms run; the comparison waits for the End.
             if e.picks[at] >= 0 {
@@ -3280,7 +3352,10 @@ fn ir_x64_variables(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX
         &variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: false})
         if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] || al.frames[slot] != 0 -> next
         if al.regs[slot] >= 0 || al.xmms[slot] >= 0 {
-            start :: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot]]
+            // From the body on: the frame-free prefix keeps its values in
+            // registers of its own (ir_x64_wrap).
+            first :: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot]]
+            start :: if first < body -> body else -> first
             stop :: positions[al.ends[slot] + 1]
             // An xmm register is 16 + n (x64_dwarf_register).
             reg :: if al.regs[slot] >= 0 -> al.regs[slot] else -> 16 + al.xmms[slot]
@@ -3318,25 +3393,25 @@ fn ir_x64_compile_function(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64F
 // Scheduler.jet scheduler_control_current); an unattached thread's GS names
 // a zero word (Thread.jet thread_base). With no stop it returns 0 from the
 // first zero word; with one, jet_rt_session_propagate's delivered status as
-// a Bool (zero while a cleanup or shield masks it). It keeps xmm8-xmm15
+// a Bool (zero while a cleanup or shield masks it). It keeps xmm2-xmm15
 // across that call, so a call of it keeps the Float slots in them in place
 // (ir_x64_call_out):
 //   mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
 //   test rax, rax; jz done; mov rax, [rax + 32]; test rax, rax; jz done;
-//   sub rsp, 136; movups [rsp + 16k], xmm(8 + k) for k in 0..<8;
-//   call jet_rt_session_propagate; movups xmm(8 + k), [rsp + 16k];
-//   add rsp, 136; test rax, rax; setne al; movzx eax, al; done: ret
+//   sub rsp, 232; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
+//   call jet_rt_session_propagate; movups xmm(2 + k), [rsp + 16k];
+//   add rsp, 232; test rax, rax; setne al; movzx eax, al; done: ret
 fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     code := [U8]{}
     sites := ir_x64_stop_quiet(&code)
-    // The eight xmm registers below an 8-byte pad keep rsp 16-byte aligned
-    // at the call.
-    frame :: 8 + 16 * 8
+    // The fourteen xmm registers below an 8-byte pad keep rsp 16-byte
+    // aligned at the call.
+    frame :: 8 + 16 * 14
     x64_alu_ri(&code, X64Alu.Sub, X64_RSP, frame)
     framed :: code.len()
-    loop index in 0..<8 -> x64_vector_store(&code, X64_RSP, 16 * index, 8 + index)
+    loop index in 0..<14 -> x64_vector_store(&code, X64_RSP, 16 * index, 2 + index)
     status_at :: x64_call_rel32(&code)
-    loop index in 0..<8 -> x64_vector_load(&code, 8 + index, X64_RSP, 16 * index)
+    loop index in 0..<14 -> x64_vector_load(&code, 2 + index, X64_RSP, 16 * index)
     x64_alu_ri(&code, X64Alu.Add, X64_RSP, frame)
     restored :: code.len()
     x64_test_rr(&code, X64_RAX, X64_RAX)
@@ -3354,7 +3429,7 @@ fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     relocs := [X64Reloc]{X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}}}
     name :: if f.symbol != "" -> f.symbol else -> f.key
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^code, relocs: ^relocs},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^code, relocs: ^relocs, align: X64_FUNCTION_ALIGN},
         debug: X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: ^cfi, ranges: [X64VariableRange]{}},
         variables: [X64DebugVariable]{},
         errors: [String]{},
@@ -3362,10 +3437,12 @@ fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
 }
 
 // An `#FFI(asm)` leaf (IRFunction.asm): the template's bytes in the
-// ordinary frame (the old selector's InlineAsm). Every argument (the
-// seventh from the caller's stack) is pushed in order before the template's
-// registers pop, so no binding overwrites an argument not yet read. The
-// template's registers are all caller-saved and it leaves rsp balanced.
+// ordinary frame (the old selector's InlineAsm). The template's registers are
+// all caller-saved and it leaves rsp balanced. Its operand registers are the
+// argument registers in order (ir_x64_asm_bound), so the first six arguments
+// are already bound and a seventh loads from the caller's stack. Any other
+// binding pushes every argument in order before the template's registers
+// pop, so no binding overwrites an argument not yet read.
 fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64FunctionResult Never! {
     code := [U8]{}
     cfi := [U8]{}
@@ -3378,18 +3455,23 @@ fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64Functio
     dwarf_cfa_advance(&cfi, cfa_at, code.len())
     dwarf_cfa_def_cfa_register(&cfi, x64_dwarf_register(X64_RBP))
     body :: code.len()
-    loop index in 0..<leaf.regs.len() {
-        if index < IR_X64_ARGUMENT_REGISTERS.len() {
-            x64_push(&code, IR_X64_ARGUMENT_REGISTERS[index])
-        } else {
-            x64_load(&code, X64_RAX, X64_RBP, 16 + 8 * (index - IR_X64_ARGUMENT_REGISTERS.len()))
-            x64_push(&code, X64_RAX)
+    stacked :: IR_X64_ARGUMENT_REGISTERS.len()
+    if ir_x64_asm_bound(leaf) {
+        loop index in stacked..<leaf.regs.len() -> x64_load(&code, leaf.regs[index], X64_RBP, 16 + 8 * (index - stacked))
+    } else {
+        loop index in 0..<leaf.regs.len() {
+            if index < stacked {
+                x64_push(&code, IR_X64_ARGUMENT_REGISTERS[index])
+            } else {
+                x64_load(&code, X64_RAX, X64_RBP, 16 + 8 * (index - stacked))
+                x64_push(&code, X64_RAX)
+            }
         }
-    }
-    operand := leaf.regs.len() - 1
-    loop operand >= 0 {
-        x64_pop(&code, leaf.regs[operand])
-        operand -= 1
+        operand := leaf.regs.len() - 1
+        loop operand >= 0 {
+            x64_pop(&code, leaf.regs[operand])
+            operand -= 1
+        }
     }
     loop byte in leaf.code -> &code.push(byte)
     if leaf.result > 0 -> x64_mov_rr(&code, X64_RAX, leaf.result)
@@ -3405,11 +3487,26 @@ fn ir_x64_asm_function(f: IRFunction, leaf: IRAsmLeaf, row: Int) -> IRX64Functio
     }
     name :: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^code, relocs: [X64Reloc]{}},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^code, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
         debug: X64FunctionDebug{lines: ^lines, body: body, cfi: ^cfi, ranges: [X64VariableRange]{}},
         variables: [X64DebugVariable]{},
         errors: [String]{},
     }
+}
+
+// Whether `leaf`'s operand registers are the argument registers in order,
+// any operand past them in a register that is no argument register.
+fn ir_x64_asm_bound(leaf: IRAsmLeaf) -> Bool Never! {
+    loop (index, reg) in leaf.regs {
+        if index < IR_X64_ARGUMENT_REGISTERS.len() {
+            if reg != IR_X64_ARGUMENT_REGISTERS[index] -> return false
+        } else {
+            loop argument in IR_X64_ARGUMENT_REGISTERS {
+                if reg == argument -> return false
+            }
+        }
+    }
+    true
 }
 
 // The line row for code starting at `at`: a new row when the line changes,
@@ -3428,10 +3525,158 @@ fn ir_x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
     &lines.push(X64LineRow{at: at, line: line})
 }
 
+// ---------------------------------------------------------------------------
+// The frame-free prefix.
+
+// The caller-saved registers the frame-free prefix keeps its values in, in
+// preference order: none is scratch for an instruction it takes
+// (ir_x64_wrap_op), which use rax, rcx, r10 and r11 only.
+IR_X64_WRAP_REGISTERS :: [Int]{6, 2, 8, 9, 7}
+
+// The frame-free prefix of `f`: its leading instructions up to the end of
+// the last top-level one that holds a Return, when all of them are ones
+// ir_x64_wrap_op takes and they read only immediates, General parameters
+// and values they wrote before. It runs before the prologue, so a Return
+// in it leaves without building the frame, and keeps every value in a
+// register (`regs`, per slot: a General parameter's argument register, a
+// written value's IR_X64_WRAP_REGISTERS one, free again past the value's
+// last read, -1 for none). Returns its length, 0 for none (an aggregate
+// result, a fourth General argument in rcx, too few registers).
+fn ir_x64_wrap(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, regs: &[Int]) -> Int Never! {
+    if al.result_home != 0 || al.result_storage >= 0 -> return 0
+    count :: f.slot_type.len()
+    fused := [Bool]{}
+    loop _ in 0..<count {
+        &regs.push(-1)
+        &fused.push(false)
+    }
+    // Per register: the slot holding it, -1 for none, -2 for one it keeps
+    // to the end (a parameter's, which its import still reads, or one a
+    // body slot lives in, a leaf's r8 or r9, so the prefix's values reach
+    // their places in any order).
+    owner := [Int]{}
+    loop _ in 0..<16 -> &owner.push(-1)
+    loop slot in 0..<count {
+        if al.regs[slot] >= 0 -> owner[al.regs[slot]] = -2
+    }
+    general := 0
+    loop slot in 0..<f.param_count {
+        if ir_x64_slot_class(m, f, slot) != .General -> next
+        if general >= 3 -> return 0
+        reg :: IR_X64_ARGUMENT_REGISTERS[general]
+        regs[slot] = reg
+        owner[reg] = -2
+        general += 1
+    }
+    end := 0
+    depth := 0
+    returns := 0
+    returned := 0
+    reads := [Int]{}
+    at := 0
+    // The last instruction falls into the epilogue: it stays in the body.
+    loop at < f.op.len() - 1 {
+        op :: f.op[at]
+        if e.absorbed[at] || !ir_x64_wrap_op(m, f, al, e.picks, at) || (op == .End && depth == 0) || (op == .Else && depth == 0) -> break
+        // A branch lands inside the prefix, at a construct it opened.
+        if (op == .Br && f.a[at] >= depth) || (op == .BrIf && f.b[at] >= depth) -> break
+        ir_x64_reads_into(f, at, &reads)
+        held := true
+        loop slot in reads {
+            if slot < 0 || slot >= count || (!al.consts[slot] && !fused[slot] && (al.frames[slot] != 0 || regs[slot] < 0)) -> held = false
+        }
+        if !held -> break
+        written :: ir_x64_write(f, at)
+        if written >= 0 && regs[written] < 0 && !al.consts[written] {
+            if al.frames[written] != 0 || ir_x64_slot_class(m, f, written) != .General -> break
+            if (ir_x64_is_compare(op) || ir_x64_inline_unique(m, f, at)) && ir_x64_fusable(e, f, al, at) {
+                // Its flags go straight into the branch after it.
+                fused[written] = true
+            } else {
+                // A register whose value no later instruction reads.
+                reg := -1
+                loop candidate in IR_X64_WRAP_REGISTERS {
+                    held_by :: owner[candidate]
+                    if reg < 0 && (held_by == -1 || (held_by >= 0 && al.ends[held_by] < at)) -> reg = candidate
+                }
+                if reg < 0 -> break
+                regs[written] = reg
+                owner[reg] = written
+            }
+        }
+        if op == .If || op == .Block -> depth += 1
+        if op == .End -> depth -= 1
+        if op == .Return -> returns += 1
+        at += 1
+        if depth == 0 && returns > returned {
+            end = at
+            returned = returns
+        }
+    }
+    end
+}
+
+// Whether the frame-free prefix takes instruction `at`: a Block, an If that
+// is no pick (ir_x64_selectable), their Else and End, a branch, a Return, a
+// constant, a memory access, an Offset, or a quiet value (X64Alloc.jet
+// ir_x64_quiet) but a Mul an access does not fold, whose unsigned form
+// takes rdx. None calls, has a slow path, or uses a scratch register but
+// rax, rcx, r10 and r11.
+fn ir_x64_wrap_op(m: IRModule, f: IRFunction, al: IRX64Allocation, picks: [Int], at: Int) -> Bool Never! {
+    if f.op[at] == {
+        .Nop | .Const | .Load | .Store | .Offset | .Block | .Else | .End | .Br | .BrIf -> true
+        .If -> picks[at] < 0
+        .Return -> f.b[at] != IR_TAIL_JUMP
+        .Mul -> ir_x64_folded(m, f, al, at)
+        else -> ir_x64_quiet(m, f, al.consts, al.values, at)
+    }
+}
+
+// The prefix's allocation: `al` with the prefix registers `regs` in place
+// of the body's registers and no frame homes.
+fn ir_x64_wrap_allocation(al: IRX64Allocation, regs: [Int]) -> IRX64Allocation Never! {
+    homes := [Int]{}
+    loop _ in 0..<regs.len() -> &homes.push(0)
+    IRX64Allocation{
+        regs: regs,
+        xmms: al.xmms,
+        xmm_slots: al.xmm_slots,
+        homes: homes,
+        consts: al.consts,
+        values: al.values,
+        frames: al.frames,
+        starts: al.starts,
+        ends: al.ends,
+        stack: al.stack,
+        saved: al.saved,
+        frame_bytes: al.frame_bytes,
+        result_home: al.result_home,
+        result_storage: al.result_storage,
+    }
+}
+
+// A Return in the frame-free prefix: its value into rax (xmm0 for a Float),
+// edx 0 (no stop) as the epilogue leaves it, and `ret` with no frame to
+// undo.
+fn ir_x64_wrap_return(e: &IRX64Emitter, m: IRModule, f: IRFunction, fast: IRX64Allocation, at: Int) Never! {
+    slot :: f.a[at]
+    if slot >= 0 {
+        if ir_x64_slot_class(m, f, slot) == {
+            .General -> ir_x64_load(&e, m, f, fast, slot, X64_RAX)
+            .Float -> ir_x64_load_xmm(&e, m, f, fast, slot, 0)
+            .Empty -> {}
+        }
+    }
+    // xor edx, edx
+    &e.code.push(0x31)
+    &e.code.push(0xd2)
+    x64_ret(&e.code)
+}
+
 // Function row `row` (`f`, borrowed from `m`).
 fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al :: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1}
+    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1}
     loop _ in 0..<f.op.len() {
         &e.end_of.push(-1)
         &e.pad_label.push(-1)
@@ -3445,25 +3690,38 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         loop k in ir_x64_select_test(m, f, al, at)..<at -> e.absorbed[k] = f.op[k] != .Nop
     }
 
-    // The frame and its call frame instructions, as the old selector's:
-    // after `push rbp` the CFA is rsp + 16 with rbp below the return
-    // address; after `mov rbp, rsp` it is rbp + 16; callee-saved register k
-    // is saved at CFA - 8 * (3 + k).
-    cfi := [U8]{}
+    // The frame-free prefix (ir_x64_wrap) first, in registers of its own
+    // with its parameters normalized as their imports would; a Return in it
+    // leaves at once.
+    lines := [X64LineRow]{}
+    if f.line > 0 -> &lines.push(X64LineRow{at: 0, line: f.line})
+    positions := [Int]{}
+    fast_regs := [Int]{}
+    wrap :: ir_x64_wrap(&e, m, f, al, &fast_regs)
+    if wrap > 0 {
+        fast :: ir_x64_wrap_allocation(al, fast_regs)
+        loop slot in 0..<f.param_count {
+            if fast.regs[slot] >= 0 -> ir_x64_normalize(&e, ir_x64_type(m, f, slot), fast.regs[slot])
+        }
+        loop at in 0..<wrap {
+            &positions.push(e.code.len())
+            ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
+            if f.op[at] == .Return -> ir_x64_wrap_return(&e, m, f, fast, at) else -> ir_x64_select_at(&e, m, f, fast, tables, at)
+        }
+        ir_x64_debug_line(&lines, e.code.len(), f.line)
+    }
+
+    // The frame: `push rbp; mov rbp, rsp`, the saved registers, then the
+    // frame homes. Its call frame instructions wait for the relaxed offsets
+    // (a branch in the prefix may shrink).
     x64_push(&e.code, X64_RBP)
-    dwarf_cfa_advance(&cfi, 0, e.code.len())
-    dwarf_cfa_def_cfa_offset(&cfi, 16)
-    dwarf_cfa_offset(&cfi, x64_dwarf_register(X64_RBP), 2)
-    cfa_at := e.code.len()
+    pushed :: e.code.len()
     x64_mov_rr(&e.code, X64_RBP, X64_RSP)
-    dwarf_cfa_advance(&cfi, cfa_at, e.code.len())
-    dwarf_cfa_def_cfa_register(&cfi, x64_dwarf_register(X64_RBP))
-    cfa_at = e.code.len()
-    loop (index, reg) in al.saved {
+    based :: e.code.len()
+    saves := [Int]{}
+    loop reg in al.saved {
         x64_push(&e.code, reg)
-        dwarf_cfa_advance(&cfi, cfa_at, e.code.len())
-        dwarf_cfa_offset(&cfi, x64_dwarf_register(reg), 3 + index)
-        cfa_at = e.code.len()
+        &saves.push(e.code.len())
     }
     if al.frame_bytes > 0 -> x64_alu_ri(&e.code, X64Alu.Sub, X64_RSP, al.frame_bytes)
 
@@ -3498,20 +3756,22 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         }
     }
 
+    // The prefix's values the body still reads, into their places.
+    if wrap > 0 {
+        loop slot in f.param_count..<f.slot_type.len() {
+            if fast_regs[slot] >= 0 && al.starts[slot] < wrap && al.ends[slot] >= wrap -> ir_x64_store(&e, m, f, al, slot, fast_regs[slot])
+        }
+    }
+
     // The prologue ends where the body starts; the line table marks it with
     // the function's own line until a body line replaces it.
     body :: e.code.len()
-    lines := [X64LineRow]{}
-    if f.line > 0 {
-        &lines.push(X64LineRow{at: 0, line: f.line})
-        &lines.push(X64LineRow{at: body, line: f.line})
-    }
-    positions := [Int]{}
+    if f.line > 0 -> &lines.push(X64LineRow{at: body, line: f.line})
     poll :: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     // The slow paths of the instruction before `at` start at colds[traps].
     traps := 0
-    at := 0
+    at := wrap
     loop at < f.op.len() {
         &positions.push(e.code.len())
         ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
@@ -3575,16 +3835,51 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         ir_x64_patch(&e, site, if nth < body_returns -> epilogue else -> exit)
     }
     ir_x64_emit_colds(&e, m, f, al, tables, exit)
-    // Rel8 branches where they reach (X64Relax.jet): every offset taken so
-    // far moves with the code. The prologue has no branch, so the frame
-    // rules up to `cfa_at` and `body` stay.
-    relax :: ir_x64_relax(&e.code, e.branches)
+    // Rel8 branches where they reach, and the heads of the innermost loops
+    // of the hot code (not the slow paths after the epilogue) on their
+    // alignment (X64Relax.jet): every offset taken so far moves with the
+    // code. Outer loops' heads run once per inner run, so they take no
+    // padding.
+    heads := [Int]{}
+    head_ends := [Int]{}
+    loop (closed, head) in e.loops {
+        if head >= epilogue -> next
+        innermost := true
+        loop inner in 0..<closed {
+            if head <= e.loops[inner] && e.loop_ends[inner] <= e.loop_ends[closed] -> innermost = false
+        }
+        if innermost {
+            &heads.push(head)
+            &head_ends.push(e.loop_ends[closed])
+        }
+    }
+    relax :: ir_x64_relax(&e.code, e.branches, heads, head_ends)
     loop k in 0..<e.relocs.len() -> e.relocs[k].at = ir_x64_relaxed_at(relax, e.relocs[k].at)
     loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_at(relax, lines[k].at)
     loop k in 0..<positions.len() -> positions[k] = ir_x64_relaxed_at(relax, positions[k])
     loop k in 0..<e.tails.len() -> e.tails[k] = ir_x64_relaxed_at(relax, e.tails[k])
     ret_at :: ir_x64_relaxed_at(relax, ret)
     ends :: ir_x64_relaxed_at(relax, epilogue)
+    body_at :: ir_x64_relaxed_at(relax, body)
+    // The call frame instructions, as the old selector's: up to `push rbp`
+    // (the whole frame-free prefix) the CFA is rsp + 8; after it rsp + 16
+    // with rbp below the return address; after `mov rbp, rsp` it is
+    // rbp + 16; callee-saved register k is saved at CFA - 8 * (3 + k).
+    cfi := [U8]{}
+    cfa_at := ir_x64_relaxed_at(relax, pushed)
+    dwarf_cfa_advance(&cfi, 0, cfa_at)
+    dwarf_cfa_def_cfa_offset(&cfi, 16)
+    dwarf_cfa_offset(&cfi, x64_dwarf_register(X64_RBP), 2)
+    moved :: ir_x64_relaxed_at(relax, based)
+    dwarf_cfa_advance(&cfi, cfa_at, moved)
+    dwarf_cfa_def_cfa_register(&cfi, x64_dwarf_register(X64_RBP))
+    cfa_at = moved
+    loop (order, reg) in al.saved {
+        saved :: ir_x64_relaxed_at(relax, saves[order])
+        dwarf_cfa_advance(&cfi, cfa_at, saved)
+        dwarf_cfa_offset(&cfi, x64_dwarf_register(reg), 3 + order)
+        cfa_at = saved
+    }
     // At a tail jump, as at the `ret`, the CFA is rsp + 8; the code between
     // them keeps the body's frame.
     loop jump in e.tails {
@@ -3605,11 +3900,11 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
 
     variables := [X64DebugVariable]{}
     ranges := [X64VariableRange]{}
-    ir_x64_variables(m, f, al, tables, positions, body, ends, &variables, &ranges)
+    ir_x64_variables(m, f, al, tables, positions, body_at, ends, &variables, &ranges)
     name :: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     IRX64FunctionResult{
-        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^e.code, relocs: ^e.relocs},
-        debug: X64FunctionDebug{lines: ^lines, body: body, cfi: ^cfi, ranges: ^ranges},
+        function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^e.code, relocs: ^e.relocs, align: relax.align},
+        debug: X64FunctionDebug{lines: ^lines, body: body_at, cfi: ^cfi, ranges: ^ranges},
         variables: ^variables,
         errors: ^e.errors,
     }
@@ -3777,8 +4072,9 @@ fn ir_x64_test_leaf(source: String, names: [String], returns: Bool) -> IRAsmLeaf
 }
 
 // count(n) counts i up to n; the Loop is line 3 and its first instruction
-// line 4, so the line table's row for line 4 is the head.
-#Test("A Loop's head starts on the functions' alignment") {
+// line 4, so the line table's row for line 4 is the head. The innermost
+// loop's head starts on its alignment, which the function's start keeps.
+#Test("An innermost Loop's head starts on its alignment") {
     m := ir_module_new()
     word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     truth :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
@@ -3800,13 +4096,14 @@ fn ir_x64_test_leaf(source: String, names: [String], returns: Bool) -> IRAsmLeaf
     _ := ir_emit(&f, IROp.End, -1, 2, -1, -1, 5)
     _ := ir_emit(&f, IROp.Return, -1, i, -1, -1, 6)
     &m.functions.push(f)
-    lines :: ir_x64_compile_function(m, ir_x64_tables(m), 0).debug.lines
+    compiled :: ir_x64_compile_function(m, ir_x64_tables(m), 0)
     head := -1
-    loop row in lines {
+    loop row in compiled.debug.lines {
         if row.line == 4 && head < 0 -> head = row.at
     }
     assert(head > 0)
-    assert_eq(head % X64_FUNCTION_ALIGN, 0)
+    assert(compiled.function.align >= X64_FUNCTION_ALIGN)
+    assert_eq(head % compiled.function.align, 0)
 }
 
 // step(x) is x / 2 for an even x, else 3x + 1, both arms wrapping word
@@ -3871,5 +4168,135 @@ fn ir_x64_test_leaf(source: String, names: [String], returns: Bool) -> IRAsmLeaf
             assert_eq(picked, y)
             assert(found)
         }
+    }
+}
+
+// A Float operand in its frame home is read there: subsd xmm10,
+// [rbp - 280] is F2, REX.R, 0F 5C, ModRM 10 010 101 and the disp32.
+#Test("A Float operation reads its right operand from a frame home") {
+    code := [U8]{}
+    x64_float_op_mem(&code, X64FloatOp.Sub, false, 10, X64_RBP, -280)
+    assert_eq(code, [U8]{242, 68, 15, 92, 149, 232, 254, 255, 255})
+}
+
+// early(data): the word at data, returned at once when it is 0, else data
+// divided by it. The load, the test and that Return run before the
+// prologue (ir_x64_wrap): `xor edx, edx; ret` falls straight into it.
+#Test("An early Return leaves before the frame is built") {
+    m := ir_module_new()
+    word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    truth :: ir_type_row(&m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("early", "test:wrap.jet::early", "", "wrap.jet", 1)
+    data :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "data"), 1)
+    f.result = word
+    value :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    zero :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    empty :: ir_slot(&f, truth, IRSlotKind.Temp, -1, 0)
+    quotient :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.Load, value, data, 0, -1, 2)
+    _ := ir_emit(&f, IROp.Const, zero, 0, -1, -1, 2)
+    _ := ir_emit(&f, IROp.Eq, empty, value, zero, -1, 2)
+    _ := ir_open_if(&f, empty, 2)
+    _ := ir_emit(&f, IROp.Return, -1, value, -1, -1, 3)
+    ir_end(&f, 3)
+    _ := ir_emit(&f, IROp.Div, quotient, data, value, IR_OVERFLOW_WRAP, 4)
+    _ := ir_emit(&f, IROp.Return, -1, quotient, -1, -1, 4)
+    &m.functions.push(f)
+    compiled :: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    code :: compiled.function.code
+    assert(code[0] != 0x55)
+    want := [U8]{0x31, 0xd2}
+    x64_ret(&want)
+    x64_push(&want, X64_RBP)
+    x64_mov_rr(&want, X64_RBP, X64_RSP)
+    found := -1
+    loop start in 0..<(code.len() - want.len() + 1) {
+        same := true
+        loop k in 0..<want.len() {
+            if code[start + k] != want[k] {
+                same = false
+                break
+            }
+        }
+        if same {
+            found = start
+            break
+        }
+    }
+    assert(found > 0)
+    // The CFA stays rsp + 8 up to the `push rbp`, rsp + 16 after it, then
+    // rbp + 16 after `mov rbp, rsp` (dwarf register 6 is rbp).
+    pushed :: found + 4
+    moved :: pushed + 3
+    cfi :: compiled.debug.cfi
+    frame := [U8]{}
+    dwarf_cfa_advance(&frame, 0, pushed)
+    dwarf_cfa_def_cfa_offset(&frame, 16)
+    dwarf_cfa_offset(&frame, 6, 2)
+    dwarf_cfa_advance(&frame, pushed, moved)
+    dwarf_cfa_def_cfa_register(&frame, 6)
+    assert(cfi.len() >= frame.len())
+    loop k in 0..<frame.len() -> assert(cfi[k] == frame[k])
+}
+
+// square(x) = (x + 1) * (x + 1), wrapping: no call anywhere, so its values
+// take r8 and r9 and it saves no callee-saved register.
+#Test("A leaf keeps its values in caller-saved registers") {
+    m := ir_module_new()
+    word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("square", "test:leaf.jet::square", "", "leaf.jet", 1)
+    x :: ir_slot(&f, word, IRSlotKind.Param, ir_intern_name(&m, "x"), 1)
+    f.result = word
+    one :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    y :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    z :: ir_slot(&f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(&f, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(&f, IROp.Add, y, x, one, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(&f, IROp.Mul, z, y, y, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(&f, IROp.Return, -1, z, -1, -1, 2)
+    &m.functions.push(f)
+    al :: ir_x64_allocate(m, m.functions[0])
+    assert_eq(al.saved.len(), 0)
+    held := false
+    loop reg in al.regs {
+        if reg == X64_R8 -> held = true
+    }
+    assert(held)
+}
+
+// A big-integer constant is data: its base-1e9 limbs, least significant
+// first, a carrier with its sign and limb count, and the word naming it
+// with bit 62 set. One in the inline range stays a runtime parse.
+#Test("A big-integer constant is a static exact Int") {
+    m := ir_module_new()
+    int_row :: ir_type_row(&m, Type.Int) ?? panic("no Int row")
+    f := ir_function_new("big", "test:big.jet::big", "", "big.jet", 1)
+    f.result = int_row
+    texts :: [String]{"-123456789012345678901234567890", "4611686018427387904", "4611686018427387903", "-4611686018427387904", "-4611686018427387905"}
+    loop text in texts {
+        slot :: ir_slot(&f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&f, IROp.ConstBigInt, slot, ir_intern_name(&m, text), -1, -1, 1)
+    }
+    &m.functions.push(f)
+    tables :: ir_x64_tables(m)
+    assert(tables.ints.get("4611686018427387903") == None)
+    assert(tables.ints.get("-4611686018427387904") == None)
+    assert(tables.ints.get("4611686018427387904") != None)
+    assert(tables.ints.get("-4611686018427387905") != None)
+    word :: tables.ints.get("-123456789012345678901234567890") ?? panic("no static Int")
+    assert_eq(tables.data[word].relocs.len(), 1)
+    assert_eq(tables.data[word].relocs[0].addend, 4611686018427387904)
+    carrier :: tables.data[tables.data[word].relocs[0].target.value]
+    assert_eq(carrier.bytes.len(), 48)
+    assert_eq(carrier.bytes[16], U8{1})
+    assert_eq(carrier.bytes[32], U8{4})
+    assert_eq(carrier.relocs[0].offset, 24)
+    limbs :: tables.data[carrier.relocs[0].target.value].bytes
+    expected :: [Int]{234567890, 345678901, 456789012, 123}
+    assert_eq(limbs.len(), 16)
+    loop (index, limb) in expected {
+        value := 0
+        loop k in 0..<4 -> value = value.bit_or(Int.from_u8(limbs[4 * index + k]) << (8 * k))
+        assert_eq(value, limb)
     }
 }

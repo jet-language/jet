@@ -356,6 +356,15 @@ persist; write grants are short-lived and constrain source, builder, action,
 output, platform, sandbox, and policy facts. Without the broker, callers keep
 using their per-user Hangar.
 
+The administrator broker listens on `/run/jet/shared-store.sock`. A
+non-administrator broker keeps its layout under `shared-store/` in the caller's
+Jetpack root, with its socket at `shared-store/broker.sock`, so the socket path
+grows with the root. Linux limits a socket address to 107 bytes, so the shared
+runtime binds and connects a longer path through its directory: it opens the
+directory as an `O_PATH` descriptor and uses `/proc/self/fd/<fd>/<name>`. The
+socket file still appears at its full path. Only a socket name longer than
+82 bytes is refused.
+
 ## Services and readiness
 
 Development services run as direct argument vectors under a platform-owned

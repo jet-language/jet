@@ -1,7 +1,7 @@
 // The Jet env file `env.jet` (U3): the directive author surface
 //
 //     // env.jet: a Jetpack project environment (dev-shell descriptor)
-//     use jetpack as pkg
+//     use pkg :: jetpack
 //
 //     fn shell() -> [JSON] {
 //         return [
@@ -110,7 +110,7 @@ struct EnvFile {
         loop package in self.packages -> &quoted.push(env_file_quote_jet_string(package))
         &lines.push("        pkg.packages([{quoted.join(", ")}])")
         &lines.push("        pkg.prompt({prompt})")
-        "// {ENV_FILE} — a Jetpack project environment\nuse jetpack as pkg\n\nfn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
+        "// {ENV_FILE} — a Jetpack project environment\nuse pkg :: jetpack\n\nfn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
     }
 
     // Path to the env file in a project dir.

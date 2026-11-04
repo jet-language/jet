@@ -13,11 +13,14 @@ write: main.jet main.template
 step: jet build main.jet
 exit: 0
 step: built
-exit: 0
-stdout: = http_post_expired_ambient_deadline_fails_closed.stdout.expected
+# An exceeded ambient deadline at a network wait emits E3003 and exits with
+# the runtime error code (spec.md:2691-2694), so neither branch prints.
+exit: 70
+stdout: = ""
+stderr: ~ "E3003" # deadline stop at the network wait
 file: hits.txt = "0"
 write: wake/main.jet wake/source.template
-step: jet run wake/main.jet
+step: jet run --allow=Net wake/main.jet
 exit: 0
 wait: peer
 exit: any # original server.join result ignored; no response/panic equality assertion

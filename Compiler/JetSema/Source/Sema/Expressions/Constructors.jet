@@ -1,64 +1,66 @@
 // Checked struct and enum construction expressions.
-use core.net.url as boundary_url
-use core.regex as boundary_regex
-use core.text as boundary_unicode
-use core.time as boundary_time
-use jet_foundation.[
-    AST_NODE_GENERATED,
-    AccessConvention,
-    ByteTextPart,
-    Call,
-    CallArg,
-    Diagnostic,
-    EnumLitArg,
-    Expr,
-    NodeKind,
-    ExprField,
-    ExprPair,
-    Field,
-    TargetHardwareUse,
-    TypedHeadKind,
-    ParamZone,
-    PlaceAccess,
-    Span,
-    StrFormat,
-    StrPart,
-    Symbol,
-    SymbolKind,
-    TComptimeValue,
-    TFieldRef,
-    Type,
-    TypeParam,
-    TypeTupleField,
-    TypedLitBody,
-    Variant,
-    ast_empty_call_arg_flags,
-    core_enum_payload_variants,
-    core_enum_variant_labels,
-    core_enum_variant_payload,
-    core_enum_variants,
-    core_module_enum_variants,
-    core_module_type_leaf,
-    core_record_literal_fields,
-    core_record_literal_is_core_only,
-    core_source_owns_type,
-    core_identity_is,
-    core_type_modules,
-    expr_span,
-    typed_head_kind_of,
-    typed_head_literal_constructor,
-    symbol_id,
-    type_identity_key,
-    type_name,
-    TLetTy,
-    TLetWrapper,
-    TPatternBindingFact,
-    TPatternPosition,
-    jet_target_layout_atomic_scalar_type,
-    checked_generated_local,
-    TextEdit,
-    diagnostic_with_edit,
-]
+use {
+    boundary_url :: core.net.url
+    boundary_regex :: core.regex
+    boundary_unicode :: core.text
+    boundary_time :: core.time
+    jet_foundation.[
+        AST_NODE_GENERATED,
+        AccessConvention,
+        ByteTextPart,
+        Call,
+        CallArg,
+        Diagnostic,
+        EnumLitArg,
+        Expr,
+        NodeKind,
+        ExprField,
+        ExprPair,
+        Field,
+        TargetHardwareUse,
+        TypedHeadKind,
+        ParamZone,
+        PlaceAccess,
+        Span,
+        StrFormat,
+        StrPart,
+        Symbol,
+        SymbolKind,
+        TComptimeValue,
+        TFieldRef,
+        Type,
+        TypeParam,
+        TypeTupleField,
+        TypedLitBody,
+        Variant,
+        ast_empty_call_arg_flags,
+        core_enum_payload_variants,
+        core_enum_variant_labels,
+        core_enum_variant_payload,
+        core_enum_variants,
+        core_module_enum_variants,
+        core_module_type_leaf,
+        core_record_literal_fields,
+        core_record_literal_is_core_only,
+        core_source_owns_type,
+        core_identity_is,
+        core_type_modules,
+        expr_span,
+        typed_head_kind_of,
+        typed_head_literal_constructor,
+        symbol_id,
+        type_identity_key,
+        type_name,
+        TLetTy,
+        TLetWrapper,
+        TPatternBindingFact,
+        TPatternPosition,
+        jet_target_layout_atomic_scalar_type,
+        checked_generated_local,
+        TextEdit,
+        diagnostic_with_edit,
+    ]
+}
 
 // A type named by a local binding, through a module alias
 // (`types.Kind`), or by the canonical identity a declared type resolves to
@@ -76,6 +78,21 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEn
     return if sema_resolved_kind(graph, resolved) == SymbolKind.Type -> Val(sema_resolved_symbol(graph, resolved)) else -> None
     }
     None
+}
+
+// A type name that resolves to nothing. `alias.Name` through a Core module
+// alias, naming a declaration that module doesn't export, is the E0609 its
+// `use core.X.[Name]` import gets; `alias.child.Name` into a `priv module`
+// of the imported module is E0605; anything else is an unknown name.
+fn sema_expression_unknown_type(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    if program.registration_graph == .Val(graph) {
+        caller :: sema_scope_caller_row(environment, graph)
+        if caller >= 0 && name.split_once(".") == .Val(qualified) {
+            if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) -> return sema_registration_private_module_error(path, span)
+            if sema_registration_core_private_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) == .Val(module_name) -> return sema_registration_core_private_error(qualified.after, module_name, span)
+        }
+    }
+    sema_unknown_name(name, span)
 }
 
 // A type the Core export ledger owns without a source declaration
@@ -157,10 +174,10 @@ fn sema_expression_enum_variant_path(base: Expr, member: String, environment: Se
     if index == .Val(found) {
         kind :: scopes.bindings[found].symbol.kind
         // A whole-module import binds its alias as an Import symbol
-        // (`use core.encoding as enc` then `enc.EncodingFormat.JSON`).
+        // (`use enc :: core.encoding` then `enc.EncodingFormat.JSON`).
         if kind != SymbolKind.Type && kind != SymbolKind.Module && kind != SymbolKind.Import -> return None
     }
-    // `use core.encoding.[Dyn as Tree]`: an alias of a Core enum carrier
+    // `use Tree :: core.encoding.Dyn`: an alias of a Core enum carrier
     // names that enum, whose variants are read by its Core leaf.
     enum_root :: sema_expression_core_enum_alias(root, &scopes) ?? root
     if sema_expression_names_enum(enum_root, environment, program, &scopes) -> return Val(SemaExpressionEnumPath{enum_name: enum_root, variant: sema_expression_join_segments(segments, 1)})
@@ -274,7 +291,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
         }
     }
     owner :: sema_expression_type_symbol(&scopes, environment, program, type_name) ?? {
-        &diagnostics.push(sema_unknown_name(type_name, span))
+        &diagnostics.push(sema_expression_unknown_type(type_name, span, environment, program))
         return None
     }
     ty := if type_args.len() > 0 -> Type.Apply{name: type_name, args: type_args} else -> Type.Named{name: type_name}
@@ -367,6 +384,7 @@ fn sema_expression_struct_field_finish(fact: SemaStructFieldFact, checked: TExpr
     expected_ty :: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
     string_view :: fact.string_view
     if !string_view && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+    if !string_view -> sema_expression_struct_field_view_escape(field_value, scopes, state, &diagnostics)
     // A supported Atomic field checks its scalar initializer against the
     // scalar (`expected_ty`); the Atomic.new carrier is added below.
     compatible :: sema_expr_expected_assignable(expected_ty, checked.ty, environment, program) ?? return None
@@ -380,6 +398,32 @@ fn sema_expression_struct_field_finish(fact: SemaStructFieldFact, checked: TExpr
     reference.boxed = fact.boxed
     initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
+}
+
+// Rust `named_view_has_stable_owner` for a list window stored in a struct
+// field: a named `View`/`ViewMut` over a local would let the struct outlive
+// the storage it reads, so only a window over a parameter (the receiver
+// included) or a module-level value may be stored.
+fn sema_expression_struct_field_view_escape(field_value: Expr, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+    if field_value == .Ident(name, span, _) {
+        index :: sema_scope_resolve_index_at(scopes, name, span) ?? return
+        ty :: scopes.bindings[index].symbol.ty ?? return
+        if scopes.bindings[index].string_view || sema_stmt_string_view_type(ty) -> return
+        window :: if sema_expr_unwrap_tag(ty) == {
+            .Apply(view_name, _) -> view_name == "View" || view_name == "ViewMut"
+            else -> false
+        }
+        if !window -> return
+        key :: scopes.bindings[index].symbol.id.key
+        loop fact in state.views {
+            if !fact.active || fact.carrier_key != key -> next
+            owner_name :: fact.source.root
+            owner :: sema_scope_resolve(scopes, owner_name) ?? return
+            if owner.kind == SymbolKind.Parameter || owner.kind == SymbolKind.Constant -> return
+            &diagnostics.push(sema_error("E2305", span, "`{name}` cannot be shared — it does not live long enough to be stored in a struct field", "`{name}` is a view into `{owner_name}`; sharing it outside `{owner_name}`'s scope would let it outlive its owner and point into freed storage", "keep `{name}` inside `{owner_name}`'s scope, or copy what you need before it leaves"))
+            return
+        }
+    }
 }
 
 // The owner's type arguments as far as `bindings` has inferred them; an
@@ -568,6 +612,12 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             &diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
             return None
         }
+        // Only the type's own module writes a `priv` field, so a literal
+        // elsewhere cannot forge a value whose invariant that field carries.
+        if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_name, environment, program) {
+            &diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
+            return None
+        }
         if supplied[found] {
             &diagnostics.push(sema_error("E0303", source.name_span, "field `{source.name}` appears more than once", "each field may be written only once in a struct literal", "remove the duplicate field"))
             return None
@@ -622,6 +672,12 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     missing := [String]{}
     loop (index, field) in struct_def.fields {
         if supplied[index] || field.computed != None -> next
+        // An omitted `priv` field is still written, by its default or not at
+        // all, so only the type's own module may build the value.
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, environment, program) {
+            &diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
+            return None
+        }
         default_value :: field.default ?? {
             &missing.push(field.name)
             next
@@ -775,7 +831,7 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
         }
     }
     owner :: sema_expression_type_symbol(&scopes, environment, program, resolved_name) ?? {
-        &diagnostics.push(sema_unknown_name(resolved_name, span))
+        &diagnostics.push(sema_expression_unknown_type(resolved_name, span, environment, program))
         return None
     }
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: owner, kind: "type"})

@@ -3,10 +3,12 @@
 // schema projects into a Jet surface plus a C automation bridge, and the
 // published cache carries enough identity to reject a stale or hand-edited
 // bridge before the linker consumes it.
-use jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST, TYPE_ERR]
-use core.files as files
-use core.sys as sys
-use core.time as time
+use {
+    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST, TYPE_ERR]
+    files :: core.files
+    sys :: core.sys
+    time :: core.time
+}
 
 COM_BINDER_SCHEMA :: "jet-com-bind-v3"
 COM_TOOL_ACTION :: "could not inspect the COM type library"
@@ -526,7 +528,7 @@ fn pkg_com_render_jet(lib: String, schema: ComSchema) -> String Never! {
         result :: if method.result == ComKind.Unit -> "" else -> " -> {method.result.abi_jet()}"
         out = "{out}    fn {method.name()}(handle: Int{params}){result} = \"{abi}_{method.name()}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"
+    out = "{out}}}\nuse abi :: c.{abi}\nuse json :: core.encoding.json\n\n"
     interfaces :: pkg_com_interfaces(schema)
     loop interface in interfaces -> out = "{out}struct {interface} {{ value: Int }}\n"
     out = "{out}#Error\nenum ComError {{ WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }}\n\n"

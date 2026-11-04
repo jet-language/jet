@@ -1,19 +1,23 @@
-// #1180: one argv executor, one explicit Exec authority, one receipt.
+// #1180: one argv executor, one explicit Exec authority, one plan, one receipt.
 package {
     name: "agent_executor"
     authority: { allow: [Exec, IO, Mem.Alloc, Time.Wait] }
 }
 
-use core.process as process
+use process :: core.process
 
 fn run() -[Exec, IO, Time.Wait]> {
-    policy :: Authority.from_rights(["Exec:printf"])
+    // An `Exec:<path>` grant names one absolute executable; bare `Exec`
+    // grants whichever executable the plan resolves.
+    policy :: Authority.from_rights(["Exec"])
     spec :: process.cmd(["printf", "agent-safe"])
         .stdout(.Capture)
         .stderr(.Capture)
         .cwd("/tmp")
         .under(policy)
+    plan :: spec.plan() ?? panic("agent plan")
     receipt :: process.run_spec(spec) ?? panic("agent receipt")
     print(receipt.output)
+    print(plan.policy_digest == receipt.policy_digest)
     print(receipt.redacted)
 }

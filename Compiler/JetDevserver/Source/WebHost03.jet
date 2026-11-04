@@ -1,27 +1,29 @@
 // Private continuation of jet_devserver.WebHost.
-use jet_devserver.WebHost.[DevStatus, MAX_CONNECTION_THREADS, REQUEST_DEADLINE, WebHost, current_revision_for_request, current_revision_for_source_id, decode_devtools_envelope, devtools_path, inject_canvas_session, is_application_control_path, is_loopback_host, method_not_allowed, next_web_error_request_id, object_map, paused_evaluate_error_status, read_source_without_symlinks, serve_static_from_root, session_response, source_id_from_payload, source_tool_path, wait_for_shutdown, web_stream_path, with_session]
-use std.io.[Read, Write, BufReader, Error, ErrorKind]
-use std.net.[TcpStream, TcpListener, SocketAddr, IpAddr, Ipv4Addr]
-use std.sync.[Arc, Mutex]
-use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
-use std.time.[Duration, Instant]
-use std.thread as thread
-use core.files.[OSPath]
-use jet_devserver.[MAX_REQUEST_BODY_BYTES, ResidentDevSession]
-use jet_devserver.Canvas as Canvas
-use jet_devserver.BrowserWebAdapter as browser_web_adapter
-use jet_devserver.BrowserHost as BrowserHost
-use jet_devserver.Devtools as Devtools
-use jet_devserver.PausedEvaluate.[PausedEvaluateHost]
-use jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
-use jet_driver.Package.[ReleaseDevtoolsPolicy]
-use jet_foundation.Dyn.[Dyn]
-use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
-// Rust: crates/jet-devserver/src/WebHost.rs:3789
-// Canonical WebPending implementation, not the Rust include bridge.
-use jet_codegen.Prelude.Core.WebPending as web_stream_bridge
-use jet_foundation.[foundation_json_escape]
-use core.encoding.[Dyn]
+use {
+    jet_devserver.WebHost.[DevStatus, MAX_CONNECTION_THREADS, REQUEST_DEADLINE, WebHost, current_revision_for_request, current_revision_for_source_id, decode_devtools_envelope, devtools_path, inject_canvas_session, is_application_control_path, is_loopback_host, method_not_allowed, next_web_error_request_id, object_map, paused_evaluate_error_status, read_source_without_symlinks, serve_static_from_root, session_response, source_id_from_payload, source_tool_path, wait_for_shutdown, web_stream_path, with_session]
+    std.io.[Read, Write, BufReader, Error, ErrorKind]
+    std.net.[TcpStream, TcpListener, SocketAddr, IpAddr, Ipv4Addr]
+    std.sync.[Arc, Mutex]
+    std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+    std.time.[Duration, Instant]
+    thread :: std.thread
+    core.files.[OSPath]
+    jet_devserver.[MAX_REQUEST_BODY_BYTES, ResidentDevSession]
+    Canvas :: jet_devserver.Canvas
+    browser_web_adapter :: jet_devserver.BrowserWebAdapter
+    BrowserHost :: jet_devserver.BrowserHost
+    Devtools :: jet_devserver.Devtools
+    jet_devserver.PausedEvaluate.[PausedEvaluateHost]
+    jet_devserver.TerminalStyleReload.[TerminalStyleHostAdapter]
+    jet_driver.Package.[ReleaseDevtoolsPolicy]
+    jet_foundation.Dyn.[Dyn]
+    jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
+    // Rust: crates/jet-devserver/src/WebHost.rs:3789
+    // Canonical WebPending implementation, not the Rust include bridge.
+    web_stream_bridge :: jet_codegen.Prelude.Core.WebPending
+    jet_foundation.[foundation_json_escape]
+    core.encoding.[Dyn]
+}
 // Rust: crates/jet-devserver/src/WebHost.rs:3589
 fn canvas_api_path(path: String, target: String) -> Bool {
     return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/__jet_canvas/session").bit_or("/__jet_canvas/live").bit_or("/__jet_canvas/graph").bit_or("/__jet_canvas/project").bit_or("/__jet_canvas/source-control").bit_or("/__jet_canvas/core-catalog").bit_or("/__jet_canvas/proof").bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction").bit_or("/__jet_canvas/project/transaction").bit_or("/__jet_canvas/query").bit_or("/__jet_canvas/debug").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/canvas/session").bit_or("/canvas/graph").bit_or("/canvas/project").bit_or("/canvas/source-control").bit_or("/canvas/core-catalog").bit_or("/canvas/proof").bit_or("/canvas/source").bit_or("/canvas/command").bit_or("/canvas/transaction").bit_or("/canvas/project/transaction").bit_or("/canvas/query").bit_or("/canvas/debug").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/panel/session").bit_or("/panel/graph").bit_or("/panel/project").bit_or("/panel/source-control").bit_or("/panel/core-catalog").bit_or("/panel/proof").bit_or("/panel/source").bit_or("/panel/command").bit_or("/panel/transaction").bit_or("/panel/project/transaction").bit_or("/panel/query").bit_or("/panel/debug").bit_or("/__jet_dev_version").bit_or("/__jet_dev_status").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser").bit_or("/__jet_web/stream")

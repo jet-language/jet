@@ -1,4 +1,12 @@
 // A public group cannot export a private marker (E0605).
-marker Private($sites: [.Function])
-marker Published = #[Private, Inline]
+struct Private {
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+struct Published {
+    impl Marker {
+        group :: #[Private, Inline]
+    }
+}
 fn run() {}

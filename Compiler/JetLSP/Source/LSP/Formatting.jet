@@ -2,11 +2,13 @@
 // Pending W38 Server ABI reconciliation: LSPServer and its lex method use the
 // sole W36 documents; this fragment does not declare Server or another cache.
 // Formatter and typed-head registry are canonical port-compiler publications.
-use core.encoding.[Dyn]
-use jet_foundation.[Span, TextEdit, foundation_json_quote]
-use jet_parser.[jet_format_source]
-use jet_lexer.[Token, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_IDENT, TOKEN_DOT, TOKEN_HASH]
-use jet_devserver.[close]
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[Span, TextEdit, foundation_json_quote]
+    jet_parser.[jet_format_source]
+    jet_lexer.[Token, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_IDENT, TOKEN_DOT, TOKEN_HASH]
+    jet_devserver.[close]
+}
 
 fn lsp_format_response(server: LSPServer, params: Dyn?, id: Dyn) -> String? {
     value :: params ?? return None

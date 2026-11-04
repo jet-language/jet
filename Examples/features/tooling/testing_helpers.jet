@@ -4,8 +4,10 @@ package {
     authority: { allow: [Env, FS, IO, Mem.Alloc, Time] }
 }
 
-use core.testing as testing
-use core.files as fs
+use {
+    testing :: core.testing
+    fs :: core.files
+}
 
 module perf.testing {
     budgets: [Budget{name: "parse", scope: .Test("parse"), metric: .BenchTime(.P50), provider: .BenchMeasurement("parse"), comparison: .AbsoluteFrom("local/testing-helpers"), limit: .AtMost(5ms), enforcement: .Warn}]

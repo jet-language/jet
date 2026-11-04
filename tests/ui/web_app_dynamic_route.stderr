@@ -1,8 +1,8 @@
-Error [E2810]: Route `/` is not a statically known handler
-  --> tests/ui/web_app_dynamic_route.jet:6:27
+Error [E2810]: `route` `/` is not a statically known handler
+  --> tests/ui/web_app_dynamic_route.jet:6:22
     |
-  6 | fn run() App -> web.app().route("/", pick()).csr()
-    |                           ^^^^^
- Why: D-WEBAPP1 keeps every route on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge
- Fix: Pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic subtrees
+  6 | fn run() { web.app().route("/", pick()).csr().serve() }
+    |                      ^^^^^
+ Why: Jet records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge.
+ Fix: Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees.
 More: jet-lang.dev/e/E2810

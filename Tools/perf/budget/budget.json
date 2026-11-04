@@ -29,19 +29,22 @@
       "phase": "sema bodies + ownership (one pass; P5b is not traced apart)",
       "spans": ["sema.bodies", "sema.recheck"],
       "budget": { "225K": 13200, "500K": 5960, "1M": 3300, "2.5s-wall": 1640, "20ms-wall": 13 },
+      "always_on": { "check": "ownership (P5b)", "spans": ["sema.bodies"] },
       "units": [{ "counter": "parse.tokens", "unit": "token", "budget": { "1M": 368 } }]
     },
     {
       "id": "P5c",
       "phase": "effect tracking",
       "spans": ["sema.effects"],
-      "budget": { "225K": 1200, "500K": 540, "1M": 300, "2.5s-wall": 137, "20ms-wall": 1 }
+      "budget": { "225K": 1200, "500K": 540, "1M": 300, "2.5s-wall": 137, "20ms-wall": 1 },
+      "always_on": { "check": "effect tracking", "spans": ["sema.effects"] }
     },
     {
       "id": "P5d",
       "phase": "failure inference",
       "spans": ["sema.failure"],
-      "budget": { "225K": 800, "500K": 360, "1M": 200, "2.5s-wall": 82, "20ms-wall": 1 }
+      "budget": { "225K": 800, "500K": 360, "1M": 200, "2.5s-wall": 82, "20ms-wall": 1 },
+      "always_on": { "check": "failure inference", "spans": ["sema.failure"] }
     },
     {
       "id": "P6",
@@ -65,9 +68,10 @@
     },
     {
       "id": "P9",
-      "phase": "IR O1 passes",
-      "spans": ["ir.opt"],
-      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 683, "20ms-wall": 5 }
+      "phase": "IR O1 passes + IR consistency check (ir.lint, once, over the module x64 selection reads)",
+      "spans": ["ir.opt", "ir.lint"],
+      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 683, "20ms-wall": 5 },
+      "always_on": { "check": "IR consistency check (SPEED-500K P9; the native back end has no separate LIR, so ir.lint is also its P11)", "spans": ["ir.lint"] }
     },
     {
       "id": "P10",
@@ -77,9 +81,10 @@
     },
     {
       "id": "P11",
-      "phase": "object write",
+      "phase": "object write + DWARF debug info (SPEED-500K P13; debug_info is on in stock builds and runs)",
       "spans": ["ir.object"],
-      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 273, "20ms-wall": 2 }
+      "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 273, "20ms-wall": 2 },
+      "always_on": { "check": "debug info (P13b, written with the object)", "spans": ["ir.object"] }
     },
     {
       "id": "P14",

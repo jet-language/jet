@@ -8,7 +8,7 @@ package {
         time: .Library{ entry: time }
     }
 }
-use core as core
+use core :: core
 
 
 // Civil calendars, validation, codecs, wall-clock policy, and monotonic points
@@ -279,13 +279,22 @@ impl Clock.Equatable {
 fn time_int_min() -> Int Never! { -9223372036854775808 }
 fn time_int_max() -> Int Never! { 9223372036854775807 }
 
+// Whether `value` is inside (-10^18, 10^18): an inline Int, so comparing
+// it there skips the boxed Int64 bounds. Two such values add or subtract
+// to less than 2 * 10^18 in magnitude, well inside Int64.
+fn time_int_near(value: Int) -> Bool Never! {
+    value > -1000000000000000000 && value < 1000000000000000000
+}
+
 fn saturating_add_ns(a: Int, b: Int) -> Int Never! {
+    if time_int_near(a) && time_int_near(b) -> return a + b
     if b > 0 && a > time_int_max() - b -> return time_int_max()
     if b < 0 && a < time_int_min() - b -> return time_int_min()
     a + b
 }
 
 fn saturating_sub_ns(a: Int, b: Int) -> Int {
+    if time_int_near(a) && time_int_near(b) -> return a - b
     if b > 0 && a < time_int_min() + b -> return time_int_min()
     if b < 0 && a > time_int_max() + b -> return time_int_max()
     a - b
@@ -557,7 +566,7 @@ fn civil_clamp(value: Int, low: Int, high: Int) -> Int Never! {
 // Int64 saturation. The Int64 bounds are boxed Ints, so a value well inside
 // them (every timestamp near now) returns without comparing against them.
 fn civil_i64(value: Int) -> Int Never! {
-    if value > -1000000000000000000 && value < 1000000000000000000 -> return value
+    if time_int_near(value) -> return value
     civil_clamp(value, time_int_min(), time_int_max())
 }
 fn civil_mod(value: Int, divisor: Int) -> Int Never! {
@@ -937,7 +946,7 @@ fn civil_integer(value: String, label: String) -> Int TimeError! {
         if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> return Err(TimeError{reason: "bad {label}: {value}"})
     }
     parsed :: Int.parse(value) ?? return Err(TimeError{reason: "bad {label}: {value}"})
-    if parsed < time_int_min() || parsed > time_int_max() -> return Err(TimeError{reason: "bad {label}: {value}"})
+    if !time_int_near(parsed) && (parsed < time_int_min() || parsed > time_int_max()) -> return Err(TimeError{reason: "bad {label}: {value}"})
     Ok(parsed)
 }
 fn civil_digits(value: String) -> Bool Never! {
@@ -1040,7 +1049,71 @@ fn civil_rfc_time(value: String) -> (time: LocalTime, leap: Bool) TimeError! {
     if parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || parts.second < 0 || parts.second > 60 || (parts.second == 60 && (parts.hour != 23 || parts.minute != 59)) -> return Err(TimeError{reason: "time out of range: {value}"})
     Ok((time: civil_time(parts.hour, parts.minute, parts.second, parts.nanos), leap: parts.second == 60))
 }
+// The value of the two ASCII digits at `at`, or -1 when one is not a digit.
+fn civil_two_digits(raw: [U8], at: Int) -> Int Never! {
+    high :: raw[at]
+    low :: raw[at + 1]
+    if high < (U8{48}) || high > (U8{57}) || low < (U8{48}) || low > (U8{57}) -> return -1
+    Int.from_u8(high) * 10 + Int.from_u8(low) - 528
+}
+// `YYYY-MM-DDTHH:MM:SS[.F{1,9}](Z|±HH:MM)` with every field in range and no
+// leap second, read from one byte copy. That is exactly the set of values
+// the general path below accepts in this shape, with the same fields, so
+// None (any other shape, a field out of range, a leap second) hands the
+// value to the general path for its result or its error.
+fn civil_rfc3339_fixed(value: String) -> DateTime? Never! {
+    raw :: value.bytes()
+    n :: raw.len()
+    if n < 20 || raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[10] != (U8{84}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return None
+    century :: civil_two_digits(raw, 0)
+    year_low :: civil_two_digits(raw, 2)
+    month :: civil_two_digits(raw, 5)
+    day :: civil_two_digits(raw, 8)
+    hour :: civil_two_digits(raw, 11)
+    minute :: civil_two_digits(raw, 14)
+    second :: civil_two_digits(raw, 17)
+    if century < 0 || year_low < 0 -> return None
+    year :: century * 100 + year_low
+    if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 -> return None
+    at := 19
+    nanos := 0
+    if raw[at] == (U8{46}) {
+        at += 1
+        digits := 0
+        loop at < n && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) {
+            if digits == 9 -> return None
+            nanos = nanos * 10 + Int.from_u8(raw[at]) - 48
+            digits += 1
+            at += 1
+        }
+        if digits == 0 -> return None
+        loop digits < 9 {
+            nanos = nanos * 10
+            digits += 1
+        }
+    }
+    offset := 0
+    if n - at == 1 && raw[at] == (U8{90}) {
+        offset = 0
+    } else if n - at == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
+        offset_hour :: civil_two_digits(raw, at + 1)
+        offset_minute :: civil_two_digits(raw, at + 4)
+        if offset_hour < 0 || offset_hour > 23 || offset_minute < 0 || offset_minute > 59 -> return None
+        offset = offset_hour * 3600 + offset_minute * 60
+        if raw[at] == (U8{45}) -> offset = -offset
+    } else {
+        return None
+    }
+    // Every field is in range here, so new and civil_time would clamp
+    // nothing, and the nanos are below 10^9, so civil_timestamp's floor is 0.
+    // A year of at most 9999 keeps the seconds below 4 * 10^11 in magnitude:
+    // inside time_int_near, so civil_utc's civil_i64, saturating_sub_ns and
+    // civil_timestamp's civil_i64 return their operands unchanged.
+    seconds :: (civil_day(LocalDate{date_y: year, date_m: month, date_d: day}) - 719162) * 86400 + hour * 3600 + minute * 60 + second - offset
+    Val(DateTime{secs: seconds, nanos: nanos, leap_second: false})
+}
 fn parse_rfc3339(value: String) -> DateTime TimeError! {
+    if civil_rfc3339_fixed(value) == .Val(fixed) -> return Ok(fixed)
     parts :: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     if !civil_ascii(parts.tail) -> return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     date :: parse(parts.head)

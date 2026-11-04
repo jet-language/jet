@@ -1,0 +1,27 @@
+use math :: core.math
+
+// Every Float spelling of abs clears the sign bit and keeps the other 63 bits,
+// so -0.0 gives +0.0 and a NaN keeps its payload; is_inf and is_finite read
+// the same magnitude.
+fn show(bits: Int) {
+    x :: math.from_bits(bits)
+    print("{bits} {math.to_bits(math.abs(x))} {math.to_bits(math.fabs(x))} {math.to_bits(math.abs_float(x))} {math.is_inf(x)} {math.is_finite(x)}")
+}
+
+fn run() {
+    // +0, -0, 1.5, -2, +inf, -inf, the quiet NaN, the same NaN negative, a
+    // signalling NaN with payload 1 (both signs), the smallest subnormal
+    // (both signs), and the largest finite (both signs).
+    patterns :: [Int]{0, -9223372036854775807 - 1, 4609434218613702656, -4611686018427387904, 9218868437227405312, -4503599627370496, 9221120237041090560, -2251799813685248, 9218868437227405313, -4503599627370495, 1, -9223372036854775807, 9218868437227405311, -4503599627370497}
+    loop bits in patterns -> show(bits)
+    total := Float{0.0}
+    x := Float{-1.0}
+    i := 0
+    loop i < 2000 {
+        total = total + math.abs(x)
+        x = x * Float{-1.5}
+        if !math.is_finite(x) -> x = Float{-1.0}
+        i += 1
+    }
+    print(math.to_bits(total))
+}

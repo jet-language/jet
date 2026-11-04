@@ -64,7 +64,7 @@ The bounded method exercise uses the existing native JSON shape through the
 default `jet run` path with a fresh binary:
 
 ```jet
-use core.encoding.json as json
+use json :: core.encoding.json
 
 #Codable
 struct Settings { port: Int }

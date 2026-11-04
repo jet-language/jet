@@ -14,8 +14,10 @@
 // the program's. Each module places its data and slots where the module
 // before it ended (WebLayout).
 
-use jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
-use jet_wasm.[WASM_I32, WASM_I64, WASM_PAGE, wasm_put_fixed, wasm_put_signed, wasm_put_unsigned, wasm_sig_side, wat_put_name, wat_put_section, wat_put_vec_section]
+use {
+    jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
+    jet_wasm.[WASM_I32, WASM_I64, WASM_PAGE, wasm_put_fixed, wasm_put_signed, wasm_put_unsigned, wasm_sig_side, wat_put_name, wat_put_section, wat_put_vec_section]
+}
 
 // The first byte either module's data may take.
 WEB_DATA_BASE :: 1024
@@ -155,7 +157,17 @@ fn web_hooks_body(st: &WebState, hooks: [WebHook], fini: Bool) -> WebBody Never!
     loop priority in priorities {
         loop hook in hooks {
             if hook.fini != fini || hook.priority != priority -> next
-            if st.sigs[hook.row].starts_with(":") -> web_call_dropping(&e, st, hook.row) else -> &st.errors.push("lifecycle hook {hook.row} takes parameters")
+            sig :: st.sigs[hook.row]
+            // An init hook may take the native init array's (argc, argv, envp)
+            // (JetIR BuildLibrary.jet ir_lifecycle_hook); a web module starts
+            // with no process arguments, so it passes three zeros.
+            arguments :: !fini && sig.starts_with("lll:")
+            if !sig.starts_with(":") && !arguments {
+                &st.errors.push("lifecycle hook {hook.row} takes parameters")
+                next
+            }
+            if arguments -> loop _ in 0..<3 -> web_i64(&e, 0)
+            web_call_dropping(&e, st, hook.row)
         }
     }
     web_finish(e)

@@ -3063,7 +3063,7 @@ version: "0.1.0"
       || receipt.result?.changed !== true) {
       throw new Error(`core menu insertion bypassed the descriptor callee source transaction: ${JSON.stringify(receipt)}`);
     }
-    await ctx.expectSourceContains("use core.math as math");
+    await ctx.expectSourceContains("use math :: core.math");
     await ctx.expectSourceContains("math.abs");
     await ctx.screenshot("core-abs-inserted");
 
@@ -3102,7 +3102,7 @@ version: "0.1.0"
     }
 }
 `;
-    const baseSource = `use "./helper" as h
+    const baseSource = `use h :: "./helper"
 
 fn run() {
     limit :: 4
@@ -3356,7 +3356,7 @@ fn run() {
     try {
       await ctx.waitFor(async () => {
         const source = await ctx.source();
-        return source.includes("use core.math as math") && source.includes("canvas_value :: math.abs(1)");
+        return source.includes("use math :: core.math") && source.includes("canvas_value :: math.abs(1)");
       }, "library source transaction");
     } catch (error) {
       const diagnostic = await ctx.driver.evaluate(`(() => ({
@@ -5363,7 +5363,7 @@ fn run() {
     print(helper())
 }
 `);
-    await writeFile(join(root, "other.jet"), `use "./main" as main
+    await writeFile(join(root, "other.jet"), `use main :: "./main"
 
 fn use_helper() Int -> {
     return main.helper()
@@ -5454,7 +5454,7 @@ fn run() {
     print(helper())
 }
 `);
-    await writeFile(join(root, "other.jet"), `use "./main" as main
+    await writeFile(join(root, "other.jet"), `use main :: "./main"
 
 fn use_helper() Int -> {
     return main.helper()

@@ -2,7 +2,9 @@
 // 8-byte C-ABI word: Text and List<Text> fields are owned pointers to 24-byte
 // headers, ExactInt fields are owned Int words, the signal option is an inline
 // Int? word (INT_OPTION_NONE when absent, else its owned ExactInt), and
-// limit_hit is a nullable rawenum box8. Bool fields are normalized 0/1 words.
+// limit_hit is the IR's inline Option word of a payload-free enum
+// (INT_OPTION_NONE when absent, else the variant index), so it owns nothing.
+// Bool fields are normalized 0/1 words.
 // Borrowed getters lend headers and never transfer ownership.
 fn process_flag_word(address: I64) -> I64 {
     word :: encoding_word(address)
@@ -90,7 +92,6 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     encoding_store(wrapping(result + I64{112}), process_text_list_clone(encoding_word(wrapping(value + I64{112})), false))
     encoding_store(wrapping(result + I64{120}), process_flag_word(wrapping(value + I64{120})))
     encoding_store(wrapping(result + I64{128}), jet_rt_int_clone(encoding_word(wrapping(value + I64{128}))))
-    encoding_store(wrapping(result + I64{136}), process_optional_raw_clone(encoding_word(wrapping(value + I64{136}))))
     result
 }
 #Export(c) fn jet_rt_handle_drop_process_receipt(value: I64) {
@@ -109,7 +110,6 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     process_text_list_drop(encoding_word(wrapping(value + I64{104})), false)
     process_text_list_drop(encoding_word(wrapping(value + I64{112})), false)
     jet_rt_int_drop(encoding_word(wrapping(value + I64{128})))
-    encoding_enum_drop(encoding_word(wrapping(value + I64{136})))
     jet_rt_free(value, I64{144}, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_process_receipt(a: I64, b: I64) -> Bool {
@@ -130,7 +130,7 @@ fn process_optional_int_eq(a: I64, b: I64) -> Bool {
     if !process_text_list_eq(encoding_word(wrapping(a + I64{112})), encoding_word(wrapping(b + I64{112})), false) -> return false
     if process_flag_word(wrapping(a + I64{120})) != process_flag_word(wrapping(b + I64{120})) -> return false
     if jet_int_compare(encoding_word(wrapping(a + I64{128})), encoding_word(wrapping(b + I64{128}))) != (I64{0}) -> return false
-    process_optional_raw_eq(encoding_word(wrapping(a + I64{136})), encoding_word(wrapping(b + I64{136})))
+    encoding_word(wrapping(a + I64{136})) == encoding_word(wrapping(b + I64{136}))
 }
 #Export(c) fn jet_rt_handle_field_process_receipt_output(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{8})), out, I64{24}) }
 #Export(c) fn jet_rt_handle_field_process_receipt_errors(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{16})), out, I64{24}) }

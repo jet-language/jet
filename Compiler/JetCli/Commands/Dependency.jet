@@ -3,23 +3,25 @@
 // The front owns root discovery and the distinct script-lock/toolchain routes.
 // Success is plain stdout even in machine mode; source-owned parse/fetch errors
 // remain direct, uncolored diagnostics, unlike spanless CLI input/IO errors.
-use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
-use jet_pkg_model.[
-    AuthorityResolver, DepSpec, GitSelector, InlinePackageBlock, LockFile, Manifest, PackageFacts,
-    WorkspaceDeclarationCache, pkg_add_dependency, pkg_binder_slice, pkg_extract_inline_package,
-    pkg_lock_load, pkg_manifest_path_checked, pkg_package_facts_for_entry, pkg_remove_dependency,
-    pkg_to_manifest,
-]
-use jetpack_foundation.[
-    FoundationFileAuthority, FoundationPublicationError, MAX_TREE_FILE_BYTES,
-    foundation_open_file_authority, foundation_write_file_nofollow_at_root,
-]
-use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
-use core.files as cli_files
-use jet_cli.[
-    JET_CLI_PACKAGE_FILE, jet_cli_diagnostic_copy, jet_cli_find_project_entry,
-    jet_cli_io_error_text, jet_cli_read_error, jet_cli_reports_status_json,
-]
+use {
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+    jet_pkg_model.[
+        AuthorityResolver, DepSpec, GitSelector, InlinePackageBlock, LockFile, Manifest, PackageFacts,
+        WorkspaceDeclarationCache, pkg_add_dependency, pkg_binder_slice, pkg_extract_inline_package,
+        pkg_lock_load, pkg_manifest_path_checked, pkg_package_facts_for_entry, pkg_remove_dependency,
+        pkg_to_manifest,
+    ]
+    jetpack_foundation.[
+        FoundationFileAuthority, FoundationPublicationError, MAX_TREE_FILE_BYTES,
+        foundation_open_file_authority, foundation_write_file_nofollow_at_root,
+    ]
+    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+    cli_files :: core.files
+    jet_cli.[
+        JET_CLI_PACKAGE_FILE, jet_cli_diagnostic_copy, jet_cli_find_project_entry,
+        jet_cli_io_error_text, jet_cli_read_error, jet_cli_reports_status_json,
+    ]
+}
 
 #Error
 struct JetCLIDependencyError { output: JetDriverVerbOutput }
@@ -35,7 +37,7 @@ struct JetCLIPackageInput {
 fn jet_cli_dependency_cli_error(code: String, what: String, fix: String?, color: Bool, json: Bool) -[FS, Env]> JetCLIDependencyError Never! {
     shared :: jet_cli_diagnostic_copy(code)
     report :: diagnostic_from_registry(code, None, what, shared.why, fix ?? shared.fix)
-    if json -> return JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{report}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    if json -> return JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{report}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
 }
 fn jet_cli_dependency_source_error(path: String, raw: String, report: Diagnostic) -> JetCLIDependencyError Never! {
@@ -85,7 +87,7 @@ fn jet_cli_package_input_entry(root: String, color: Bool, json: Bool) -[FS, Env]
         .Refused(plan) -> {
             if plan == {
                 .Refused(report, plan_color, code, notice) -> {
-                    if json -> return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{report}), stderr: "{notices.join("")}{notice}", exit_code: code}})
+                    if json -> return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_base(""), "", "", [Diagnostic]{report}), stderr: "{notices.join("")}{notice}", exit_code: code}})
                     return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: "{notices.join("")}{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, plan_color)}", exit_code: code}})
                 }
                 .Done(output) -> return Err(jet_cli_dependency_with_notice(JetCLIDependencyError{output: output}, notices.join("")))

@@ -15,13 +15,19 @@ fn net_unix_connect_job_drop(job: I64) {
     path :: net_word(job, I64{16})
     status := net_unix_path_status(path)
     state := I64{0}
+    // A pathname too long for sockaddr_un is tried through its directory
+    // (net_socket_unix_call); the call reports when no alias fits.
+    if (status == HOST_UNIX_PATH_TOO_LONG) -> status = I64{0}
     if (status == I64{0}) {
         // CLOEXEC without NONBLOCK: this detached worker alone may block.
         descriptor :: host_call(I64{41}, I64{1}, I64{524289}, I64{0})
         if (descriptor < I64{0}) { status = descriptor } else {
             state = jet_fd_adopt_unbuffered_raw(descriptor, I64{0})
             scratch :: jet_rt_alloc(I64{32}, I64{8})
-            if (jet_socket_unix_connect_raw(state, path, scratch) < I64{0}) {
+            called :: jet_socket_unix_connect_raw(state, path, scratch)
+            if (called == HOST_UNIX_PATH_TOO_LONG) {
+                status = called
+            } else if (called < I64{0}) {
                 status = -net_word(scratch, I64{8})
             } else {
                 // std switches to nonblocking only after successful connect.

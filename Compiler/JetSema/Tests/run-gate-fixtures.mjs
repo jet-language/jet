@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilerFixtureUnit, compilerPackages } from "../../../Tools/agent/compiler-packages.mjs";
+import { compilerFixtureUnit, compilerPackages, unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
@@ -27,7 +27,7 @@ const fixtures = [
 for (const [name, path] of fixtures) {
     const project = join(out, name);
     mkdirSync(join(project, "src"), { recursive: true });
-    const fixture = readFileSync(join(repo, path), "utf8").replace(packageImport, blank);
+    const fixture = unblockUses(readFileSync(join(repo, path), "utf8")).replace(packageImport, blank);
     const entry = name === "named-tuple-identity" ? "\nfn run() { named_tuple_identity_fixture() }\n" : "";
     const implementation = name === "named-tuple-identity" ? foundation : production;
     writeFileSync(join(project, "src/compiler.jet"), implementation + "\n" + fixture + entry);

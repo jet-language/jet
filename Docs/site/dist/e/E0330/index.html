@@ -36,33 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Provide a type context for the leading-dot enum variant.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0330</code>: <code>tests/ui/E0405_refutable_test_bind_route_must_diverge.stderr</code>.</p>
-<pre class="diag">Error [E2417]: Explicit failure domain `String (text)` is not an Error type
-  --&gt; tests/ui/E0405_refutable_test_bind_route_must_diverge.jet:1:16
+<p>First UI snapshot mentioning <code>E0330</code>: <code>tests/ui/enum_dot_no_context.stderr</code>.</p>
+<pre class="diag">Error [E0330]: Can&#39;t infer the enum type for `.Red`
+  --&gt; tests/ui/enum_dot_no_context.jet:2:10
     |
-  1 | fn parse_age() Int !String -&gt; { return .Ok(42) }
-    |                ^^^^^^^^^^^
- Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
-More: jet-lang.dev/e/E2417
-
-Error [E0330]: Can&#39;t infer the enum type for `.Ok`
-  --&gt; tests/ui/E0405_refutable_test_bind_route_must_diverge.jet:1:40
-    |
-  1 | fn parse_age() Int !String -&gt; { return .Ok(42) }
-    |                                        ^^^^^^^
+  2 |     x := .Red
+    |          ^^^^
  Why: A leading-dot variant needs a known enum type from context
- Fix: Add a type annotation, or write the full form `EnumName.Ok`
+ Fix: Write the full form `EnumName.Red`, or use it where its enum type is already expected
 More: jet-lang.dev/e/E0330
-
-Error [E0405]: `??` must diverge after a refutable binding
-  --&gt; tests/ui/E0405_refutable_test_bind_route_must_diverge.jet:3:39
-    |
-  3 | fn run() { parse_age() == .Ok(age) ?? 0 }
-    |                                       ^
- Why: A failed pattern match cannot continue without defining the captures
- Fix: Use `return`, `panic(...)`, `break`, or `next` as the fallback
-More: jet-lang.dev/e/E0405
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

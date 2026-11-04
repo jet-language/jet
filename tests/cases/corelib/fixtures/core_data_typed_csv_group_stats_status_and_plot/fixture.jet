@@ -1,5 +1,5 @@
-
-use core.data as data
+package { name: "typed_csv_group_stats", authority: { allow: [Env, FS] } }
+use data :: core.data
 
 #Codable
 struct Ticket {
@@ -39,7 +39,7 @@ fn run() {
     loop ticket in collected {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
-    maybe_minutes :: [ Val(2.0), missing_minutes(), Val(6.0), missing_minutes() ]
+    maybe_minutes :: [Float?]{Val(2.0), missing_minutes(), Val(6.0), missing_minutes()}
     series :: maybe_minutes
     print(series.len())
     print(series.filter((value) -> value == None).len())
@@ -50,7 +50,7 @@ fn run() {
     loop g in groups {
         print("{g.key}:{g.value}")
     }
-    values :: [2.0, 4.0, 6.0]
+    values :: [Float]{2.0, 4.0, 6.0}
     print(data.sum(values) ?? panic("sum"))
     print(data.mean(values) ?? panic("mean"))
     joined :: data.inner_join(rows, budgets, (t) -> t.team, (b) -> b.team) ?? panic("join")

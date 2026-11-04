@@ -33,7 +33,7 @@
 // start stack after the environment (JetRuntime CompilerHost.jet
 // host_getauxval) and falls back to /proc/self when absent, as under a
 // kernel exec.
-use core.files as loader_files
+use loader_files :: core.files
 
 // The absolute path the program's `os.executable()` reports (a char*);
 // absent when X64Launch.executable is "".
@@ -663,7 +663,7 @@ fn x64_executable_kept(path: String) -> X64Executable? {
     if tail_at < image_end || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
     head :: loader_files.read_at(image_path, 0, OS_PAGE_SIZE) ?? return None
     if head.len() < 64 || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
-    Val(X64Executable{image: head, image_path: image_path, image_stamp: stamp, image_end: image_end, image_gap_at: head.len(), image_gap: stamp[2] - head.len(), patch_at: patch_at, patch_bytes: patch_bytes, tail_at: tail_at, tail: tail})
+    Val(X64Executable{image: head, image_path: image_path, image_stamp: stamp, image_end: image_end, image_gap_at: head.len(), image_gap: stamp[2] - head.len(), patch_at: patch_at, patch_bytes: patch_bytes, tail_at: tail_at, tail: tail, debug_file: [U8]{}, build_id: [U8]{}})
 }
 
 // A cursor over a kept form's bytes; `failed` once a read ran past the end.

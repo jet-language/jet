@@ -57,7 +57,7 @@ Recommendation: **A**. It keeps `set` a plain write, and it is one generic funct
 Planned witness, to be added once the module parses (not added now: no output can be observed or blessed):
 
 ```jet
-use core.reactive as reactive
+use reactive :: core.reactive
 
 fn run() {
     n := reactive.signal(1)

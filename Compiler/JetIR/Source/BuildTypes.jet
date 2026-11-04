@@ -2,8 +2,10 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 
-use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
-use jet_sema.[sema_type_def_instance_type]
+use {
+    jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+    jet_sema.[sema_type_def_instance_type]
+}
 
 // A rendered type's identity: its declaration key when it names one (every
 // instance of a generic declaration shares it).
@@ -238,6 +240,14 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
             // the Int does.
             word := ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "jet_rt_int_drop")
             word.clone = "jet_rt_int_clone"
+            word.option_word = true
+            return Val(ir_intern_type(&m, type_carrier_identity(ty), word))
+        }
+        if ir_option_scalar_payload(&m, p, inner, laying) {
+            // One word: the scalar's zero-extended word when present, the
+            // niche 2^62 when absent; nothing to drop or copy.
+            word := ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "")
+            word.option_word = true
             return Val(ir_intern_type(&m, type_carrier_identity(ty), word))
         }
         // A box pointer, null when absent; its payload lies at offset 0.
@@ -1099,7 +1109,7 @@ fn ir_record_member_arg(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, me
     ty :: m.types[member.ty].ty
     if ir_untag(ty) == .Option(inner) {
         if ir_option_inline(m, member.ty) {
-            // The runtime borrows a box with the Int at 0: a stack word
+            // The runtime borrows a box with the payload at 0: a stack word
             // stands in for it, null for None.
             word :: ir_load_at(&m, &b, holder, at, member.ty)
             scratch :: ir_out_slot(&m, &b, 1)
@@ -1197,7 +1207,7 @@ fn ir_record_load_value(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, 
         ir_option_none(&m, &a, joined)
         ir_open_if(&a.f, present, a.line)
         if ir_option_inline(m, row) {
-            // The getter hands its Int over through the out slot.
+            // The getter hands its payload over through the out slot.
             payload :: ir_temp(&m, &a, inner_row)
             ir_emit(&a.f, IROp.Load, payload, slot, 0, -1, a.line)
             ir_emit(&a.f, IROp.Move, joined, payload, -1, -1, a.line)
@@ -1379,15 +1389,44 @@ fn ir_option_int_payload(m: &IRModule, p: IRProgram, written: Type, laying: [Str
         .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
         else -> return false
     }
+    row :: ir_option_payload_row(&m, p, ty, laying) ?? return false
+    m.types[row].kind == .Int
+}
+
+// Whether an Option of `written` (which lays out) is one inline word of a
+// scalar payload: one with no drop whose zero-extended word stays below the
+// niche 2^62 (Build.jet IR_OPTION_INT_NONE): a Bool, a Char, an unsigned
+// word of up to 62 bits or a payload-free enum's variant index. A signed
+// word is not one: a write window into the payload stores only its own
+// bytes, which would leave a negative value's high bytes behind.
+fn ir_option_scalar_payload(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
+    ty :: ir_untag(written)
+    if ty == {
+        .Bool | .Char -> return true
+        .IntN(signed, bits) -> return !signed && bits <= 62
+        .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
+        else -> return false
+    }
+    row :: ir_option_payload_row(&m, p, ty, laying) ?? return false
+    if m.types[row].drop != "" -> return false
+    if m.types[row].kind == {
+        .Bool | .Char -> true
+        .Word -> (!m.types[row].signed && m.types[row].bits <= 62) || ir_enum_def(m, p, row) != None
+        else -> false
+    }
+}
+
+// The row of the Option payload `ty` (untagged), None when it is one of the
+// structs `laying` (then it is not laid out yet) or does not lay out.
+fn ir_option_payload_row(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
     if laying.len() > 0 {
         if ir_nominal_name(ty) == .Val(name) {
             if ir_type_def(p, name) == .Val(row) {
-                if ir_laying_decl_at(laying, p.types[row].key) >= 0 -> return false
+                if ir_laying_decl_at(laying, p.types[row].key) >= 0 -> return None
             }
         }
     }
-    row :: ir_value_type_in(&m, p, ty, laying) ?? return false
-    m.types[row].kind == .Int
+    ir_value_type_in(&m, p, ty, laying)
 }
 
 // The declared payload-free enum an IR slot type stands for, if any.

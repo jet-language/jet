@@ -20,10 +20,11 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
+| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row; the retired `use path as alias`, `owner.[x as y]` and `owner.{…}` teach E0630 | — |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
-| `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
+| `struct Name { impl Marker { group :: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
 | `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration | `D-MARKER-MODULE1=A` |
 | `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules | `D-CODEGEN-HINTS1=A` |
 | `#DevPanel` | exported typed devtools panel marker | `D-DX-PLUGIN1=D` |
@@ -37,7 +38,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
 | `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
-| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
+| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
 | `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*` | `D-BUILD-FACT3=A` |
 | `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
 | `$phase` | total evaluation-site phase fact | `D-PREP-SURFACE2=A; D-META-ROOT3=A` |
@@ -148,7 +149,7 @@ edit when the rewrite is mechanical. A function-return colon gets the existing
 E0003's existing wording.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
-every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#Abilities`, `#Pre`);
+every `#` applied rule is PascalCase (`#Test`, `#Unsafe`, `#FX`, `#Pre`);
 lowercase `#[allow(...)]` is the registered lint-policy exception. Traits are
 PascalCase. The standard library is
 **"Core"** — never "std"/"stdlib" — in docs, identifiers, and error copy.
@@ -181,9 +182,10 @@ gzip/zstd under `core.archive`. `core.time` is the one clock/civil-time door.
 Retired free namespaces have no aliases or re-exports, and there is no
 `core.json` short door.
 
-**D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06)*: grouped imports use `use path.[a as x, b]`. A missing
-`as` uses the final path segment. Braces and wildcards are not grouped-import
-syntax.
+**D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06; amended by #6542)*: grouped imports use `use path.[a, b]`.
+Each member keeps its final path segment as its local name; a renamed member is
+its own `x :: path.a` row. Braces, `as` and wildcards are not grouped-import
+syntax (E0630).
 The compiler's checked-build projections select Core graph record types with
 `use core.build.[BuildGraphFile]` and `use core.build.[BuildGraphNode]`.
 Imported Core record types retain their source-owned associated methods:
@@ -341,8 +343,8 @@ derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`).
 The ratified program-struct command form is recorded by D-CLI-GLOBAL1 below.
 There is no Jet `main` entry and no
-variadic entry signature. Raw argv access stays explicit inside `fn run()`
-via `core.process.argv`. See Docs/spec/spec.md
+variadic entry signature. Raw argument access stays explicit inside `fn run()`
+via `core.process.args()`. See Docs/spec/spec.md
 "Typed entry-signature CLI parsing" for the full field-mapping rule. The
 existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
@@ -1059,7 +1061,7 @@ are bare member names only (E0961 if not — E0963 remains S76 fixed-list
 destructure). In list position the fields splice into the surrounding list;
 elsewhere the result is an ordinary list of that length. Sema desugars before
 inference; no checked-program node. S76 `[T#N]` fixed-size lists are unaffected.
-**D-FANOUT2** (no `s.{…}` second axis) is moot.
+**D-FANOUT2** (no `s.[…]` second axis) is moot.
 
 **D-SWIZZLE1 — Vector swizzles**: `v.xyz`, `v.wzyx`, lvalue `v.xy = {…}` on
 lane/vector types; overlapping writes diagnosed (E3110/E3111).
@@ -1504,7 +1506,7 @@ a name that is both. `Name :: distinct Base` still declares a new nominal type.
 `alias` is an ordinary identifier; `alias X :: Y` is an ordinary parse error
 with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
 unchanged. Core's former `Date :: LocalDate` is the prelude rename
-`pub use core.time.[LocalDate as Date]`.
+`pub use Date :: core.time.LocalDate`.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a
@@ -2058,18 +2060,24 @@ by #343.
 ### Modules, visibility & imports
 
 **S16 — `use`** *(D-S16-USE, D-MOD1/2, D-MOD-DIR, D-SELIMPORT1, D-CORE-USELIST1)*: quotes mean
-a file path, no quotes mean a module; `as alias` optional in both.
+a file path, no quotes mean a module; `alias ::` before either is optional (#6542).
 
 **D-CORE-USELIST1=A amends D-SELIMPORT1.** A grouped member import uses one
-bracket list, with `as` beside the member that needs a local name. The former
-brace-group spelling is retired, and wildcard imports do not parse.
+bracket list. Under #6542 a member that needs a local name is its own
+`alias :: owner.member` row; the former `as` alias and brace-group spellings
+are retired (E0630), and wildcard imports do not parse.
 
 ```jet
-use "./lib"                      // file path, namespace lib
-use "grades/scoring" as g        // file path, alias
+use {
+    "./lib" // file path, namespace lib
+    g :: "grades/scoring" // file path, alias
+}
 module math                      // finds math.jet, then math/module.jet (E0607)
-use math.clamp                   // selective import
-use math.[sin, cos as c]         // grouped + aliased selective import
+use {
+    math.clamp // selective import
+    math.[sin] // grouped selective import
+    c :: math.cos // aliased member
+}
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
@@ -2085,8 +2093,8 @@ The executable witness is
 
 `.[ ]` has one prefix-member law. In expression position, entries remain
 members and produce their values (`point.[x, y]`); after `use`, entries produce
-aliases (`use math.[sin, cos as c]`). The expression grammar keeps member
-entries, while the import grammar additionally permits `as` aliases and dotted
+imports (`use math.[sin, cos]`). The expression grammar keeps member
+entries, while the import grammar additionally permits dotted
 paths. The prefix itself may be dotted at any depth, so
 `use core.encoding.[json, csv]` walks the same members as
 `use core.[encoding.json, encoding.csv]`.
@@ -2430,8 +2438,9 @@ share one `#[A, B]` list. A one-item list or adjacent bare stack is E0999 with
 the canonical rewrite. `jet fmt` performs that rewrite and preserves order.
 Scoped block rules do not stack.
 
-**D-MARKER-GROUP1=A — Fixed named marker groups**: `marker Fast =
-#[Inline(.Always), Scalar]` names two or more fixed applications. Use it as
+**D-MARKER-GROUP1=A — Fixed named marker groups**: a field-less marker struct
+whose `impl Marker` block sets `group :: #[Inline(.Always), Scalar]` (spelled
+`marker Fast = #[…]` before D-DECL-TYPES1=A) names two or more fixed applications. Use it as
 `#Fast` or as a member of an ordinary application list. A group has no
 parameters; its declaration is not a callable marker signature. Fewer than
 two members is E0999. Gates, refusals, retired markers, unknown members and
@@ -2449,7 +2458,7 @@ rejection as an ordinary written list.
 **D-MARKER-MODULE1=A — Markers belong to modules**: marker identity is its
 declaring module and declaration, not a process-wide short name. A module may
 write its own marker bare. An imported marker always uses the import's local
-name: `use core.http.server as web` followed by `#web.Get(...)`. Nested exports
+name: `use web :: core.http.server` followed by `#web.Get(...)`. Nested exports
 retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
 E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
 private exports remain E0605. Group members resolve lexically in the group's
@@ -2575,7 +2584,7 @@ package scope. The nearest declaration of a key wins, unmentioned keys inherit,
 and `jet explain` reports the effective value plus every declaration it
 overrode. A compiler-owned applicability matrix decides which levels each
 setting may use and whether it may tighten, override, or merge. Site-specific
-proof and authority stay site-bound: `#Unsafe` authorization, `#Abilities`,
+proof and authority stay site-bound: `#Unsafe` authorization, `#FX`,
 direct fact tags, `#Scrub(Tag)`, and field wire attributes do not widen through this
 ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
@@ -2586,7 +2595,7 @@ it returns one effective value and the complete outer-to-inner declaration
 chain. The registry keeps only non-memory policy settings: `gc: true`,
 `explicit_units: true`, `copies: .Explicit`, and `sentries: .Off`. Memory
 floors are effect-row prohibitions, not policy fields. Site-bound
-`#Unsafe`, `#Abilities`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
+`#Unsafe`, `#FX`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
 explicit applicability but never inherit.
 The concrete terminal view uses the ratified existing route:
 `jet explain marker Source/sensor.jet:9` reports the effect-row denial.
@@ -2597,14 +2606,16 @@ settled by D-POLICY-WORD1 holds a typed `{ ... }` value whose governance
 keys are ordinary fields, written like every other Package role field, with
 bare top-level `name:`/`version:` identity — not the `#Policy(...)` marker
 call. Each package-field key maps to the identical key the source-scope
-`#Policy(...)` marker uses. Memory floors use the `effects:` rights namespace,
+`#Policy(...)` marker uses. Memory floors use the `authority:` rights namespace,
 so `deny: [Mem.Alloc]` is the manifest spelling and there is no package
 memory-policy mirror. Package policy may only tighten safety — it
 can forbid unsafe code but can never authorize an unsafe operation; that
 still requires a written `#Unsafe("reason")` block or function. Reuse across
 a monorepo is reached through the ratified `jet split` (D-ECO-SPLITPOLICY1),
 which extracts a shared `policy:` value into a named `Config` when needed;
-`policy:` itself does not compose a `use:` list of named profiles.
+`policy:` itself does not compose a `use:` list of named profiles. Effect
+ceilings are not policy fields: a package caps effects with
+`authority: { deny: […] }`, and a module caps them with `#FX(…) module name`.
 
 ```jet
 # package.jet — policy: reads beside bare Package identity
@@ -2612,7 +2623,7 @@ name:     "meter"
 version:  "1.0.0"
 policy:   {
     unsafe: .Deny,
-    effects: { ".": -[]> }
+    expert: .Deny
 }
 
 # Source/sensor.jet — a function writes the memory denial on its signature
@@ -3176,7 +3187,7 @@ exits — deadline first, then cancel.
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
 erased in codegen. Assert or restrict via `-[Net, DB]>` on a signature and
-`#Abilities(Net) { … }` regions.
+`#FX(Net) { … }` regions.
 
 **D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
 owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*: every explicit
@@ -3232,12 +3243,12 @@ the exact call chain, where a checker that says ok to a program the run
 refuses gives two.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
-D-EFF4/5 names are tree roots; a signature/`#Abilities`/`-[!…]>` entry may
+D-EFF4/5 names are tree roots; a signature/`#FX`/`-[!…]>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
 learned once and reused: `-[FS]>` accepts any `FS.*` callee; `-[FS.Read]>`
-rejects a sibling `FS.Write` callee; `#Abilities(FS.Read)` doesn't authorize
+rejects a sibling `FS.Write` callee; `#FX(FS.Read)` doesn't authorize
 `FS.Write`; `-[!FS]>` prohibits the whole `FS.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat names stay
 valid for the ten non-FFI roots — Core stdlib calls are still tagged with a
@@ -3247,7 +3258,7 @@ bare root; leaf precision is a user-declared-contract concept.
 card #1299)*: `effect FS.Read` is a compile-time package declaration. A package
 view contains its own declarations, declarations from loaded dependencies, and
 Prelude leaves. Once a root has one declared leaf, every dotted use under that
-root in effect rows, `#Abilities`, and package budgets must name a declared
+root in effect rows, `#FX`, and package budgets must name a declared
 leaf exactly; E0750 suggests the nearest declaration. Bare roots stay valid.
 A root with no declared leaves stays open for gradual adoption. Declarations
 erase before the IR is built.
@@ -3287,7 +3298,7 @@ trait Renderer { fn render(self) -[GPU]> Image }
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
-`#Abilities(abilities: FS) { … }` authorizes effects in a lexical scope and binds an
+`#FX(authority: FS) { … }` authorizes effects in a lexical scope and binds an
 erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
@@ -3361,9 +3372,10 @@ tier-1); not inside one JIT module. *(rides JIT hot-reload runtime)*
 
 **D-EFFBUDGET1 — Package effect budget**: every build prints a one-line
 effect summary and records per-dependency provenance in the lock.
-`effects: { allow: […], deny: […] }` in `package.jet` enforces the whole graph,
-including the package's own code; E1220 names the offending package, function,
-and effect. `grants: { "dep": [Effect] }` per-dep escape; malformed block E1221.
+`authority: { allow: […], deny: […] }` in `package.jet` enforces the whole
+graph, including the package's own code; E1220 names the offending package,
+function, and effect. `authority: { grants: { "dep": [Effect] } }` is the
+per-dependency escape; a malformed block is E1221.
 
 **D-STREAMYIELD1 — Generators** *(amended by D-CONC-STREAM1=A)*:
 `fn f() Stream<T>` uses `yield expr` to hand a value to the consumer and
@@ -3968,11 +3980,11 @@ bindings + optional user overlay; by-value first, pointers only inside S58.
 |---|---|
 | Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
 | Overlay | `#Extern module c.<lib> { … }` — merged bindgen ∪ overlay, overlay wins |
-| Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
-| Project | `use c.raylib as rl` or `use c.[raylib as rl, sqlite3]` — one form per lib per file |
+| Script | `use rl :: "raylib.h"` — compile-time bind on cache miss |
+| Project | `use rl :: c.raylib` or `use c.[raylib, sqlite3]` — one form per lib per file |
 
 All foreign-language namespaces use the same `.[…]` member-list form as ordinary
-namespaces. Single-library `use <lang>.<lib> as alias` remains valid; there is no
+namespaces. Single-library `use alias :: <lang>.<lib>` remains valid; there is no
 FFI-only import grammar (D-VERDICT-1867-1).
 
 **D-SHAPE-CASE2=A — FFI casing escape: binding modules are exempt zones**
@@ -4189,8 +4201,8 @@ never acknowledges shutdown does not authorize premature release.
 
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
-tier (`use "xxhash.h" as xx` — bind on first compile), project tier
-(`use py.h5instrument as h5`, dep pinned in `package.jet` as
+tier (`use xx :: "xxhash.h"` — bind on first compile), project tier
+(`use h5 :: py.h5instrument`, dep pinned in `package.jet` as
 `<lib>: <lang>@"ref"`), overlay tier (`#Extern module <lang>.<lib> { … }`,
 overlay wins). `jet inspect bind <lang>` is a per-language binder emitting
 inspectable bindings in `.jet/bindings/<lang>/<lib>.jet`. Generated bindings
@@ -4262,7 +4274,7 @@ npm interop = typed first-party stub packages, no `.d.ts` parsing
 (D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 **D-REPLCOREEFFECT1=A (ratified 2026-07-11)**: `jet repl` uses the existing
-effect model for ambient Core calls. An enclosing `#Abilities(root)` supplies
+effect model for ambient Core calls. An enclosing `#FX(root)` supplies
 lexical authority. Interactive sessions then authorize the exact
 `(root, operation, resource)` tuple once or for the in-memory session;
 reusing session authority offers continue or revoke before execution.
@@ -4270,7 +4282,7 @@ reusing session authority offers continue or revoke before execution.
 Non-TTY and transcript sessions never prompt and deny effects without the
 matching allow flag. Filesystem operations stay within the REPL project root
 and reject absolute paths, parent traversal, and symlinks. `Exec.Exit` always
-gets its own consequence prompt interactively and needs both `#Abilities(Exec)`
+gets its own consequence prompt interactively and needs both `#FX(Exec)`
 and `--allow-exec` outside a TTY.
 
 **D-FE-REPL-HISTORY1=A (ratified 2026-07-11)**: `jet repl` persists the
@@ -4304,7 +4316,7 @@ exits from an empty prompt.
 **S9 — Print**: `print` (adds newline).
 
 **S51 — Core library**: exported as the `core` module — `use core.files`,
-`use core.term as term`; dot paths select submodules; never quoted paths. `core`
+`use term :: core.term`; dot paths select submodules; never quoted paths. `core`
 is compiler-reserved (see D-CORENS1).
 
 **D-GAME1 / D-GAME2 / D-GAME3 — Game stack** *(ratified 2026-07-05/06,
@@ -4397,7 +4409,7 @@ the whole-file one-shot is `append_all(path, text)`; the streaming handle's
 D-ENC-YAML1)*: one format-agnostic data model. `#Codable` (≡
 `#[Encode, Decode]`), `#Encode`, `#Decode` derives — a built-in compiler
 field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
-(`core.encoding.{json,csv,toml,yaml}`); encode verbs `to_string` /
+(`core.encoding.[json,csv,toml,yaml]`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
 binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
 `encode`/`decode` verbs over `Dyn`
@@ -4484,7 +4496,7 @@ running: `Int` mixed with `Float` gives `Float`, `/` always gives `Float`, and
 any other mismatch stops naming both kinds. `==`/`!=` compare contents and keep
 `Int` and `Float` distinct; `< <= > >=` mix numbers, compare `Text` and `Bytes`
 in order and `DateTime` by instant, and stop on other kinds. A `Dyn` is never a
-condition (E0170). Its own members are `get`, `has`, `keys`, `remove`, `len`,
+condition (E0173). Its own members are `get`, `has`, `keys`, `remove`, `len`,
 `decode`, `to_text`, `field`, `at`, `int`, `float`, `text`, `bool`,
 `equal_unordered`, and `encode`; a field with one of those names is reached
 with `row["len"]` (E0171). Printing shows a value's `to_text()` and containers
@@ -4523,7 +4535,7 @@ index, not a substitute for that law.
   D-TERM1's `core.term` remains the direct raw-key bridge.
   *Note (D-CORE-TREE1=A, D-CORE-IO-BUF1=A)*: `core.io` is retired. The stream
   handles, `Reader`, `Writer`, and terminal capabilities named above live in
-  `core.term` (`use core.term as io` keeps the `io.` spellings); there is no
+  `core.term` (`use io :: core.term` keeps the `io.` spellings); there is no
   `core.io` module.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
@@ -5008,7 +5020,7 @@ separate.
 `.Val` spells the same behavior. `List.remove(index, .Slot)` removes by
 position and retains the existing bounds diagnostic. The old one-argument index
 meaning is retired, and every in-repo caller uses `.Slot` where positional
-removal is intended. `RemoveBy.{Val, Slot}` is the closed selector type; no
+removal is intended. `RemoveBy.[Val, Slot]` is the closed selector type; no
 parallel `remove_value` or `remove_at` names ship. Map removal is unchanged.
 
 **D-FIELDDEF1=C — field defaults ride the type (amended by D-DEFAULT-SHAPE1=B)** *(ratified 2026-07-31, card #1367)*: the field-default mechanism covers wire/CLI absence and omitted `Type{ … }` construction fields. The current spelling is `field: T{expr}`, shared with parameter defaults; `#Default(expr)` is retired (E0375), defaults must be compile-time constants (E2414), and required fields are those without `{…}`.
@@ -5091,7 +5103,7 @@ HTTP route parameters use `:name` and final catch-alls use `*name`
 separate transport upgrade, and WebSocket belongs to `core.ws` per D-WS1=B
 (D-HTTPLIB1–3, D-ROUTE1).
 Compression
-`core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
+`core.compress.[gzip,zstd]` (D-CODECS1). Measurement-with-uncertainty in
 `core.science.measurement` (D-HONESTNUM1 shipped/partial; #310 verifies module
 map truth). **D-OPTGC1=A — scoped opt-in tracing GC** *(ratified 2026-07-15,
 card #646)*: GC is magic inside an opted scope, using D-MARK-SCOPE1 from
@@ -5481,7 +5493,7 @@ does not invent activation evidence.
 
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`package.jet`** (bare `name:`/`version:` identity + `packages:` +
-`deps:` + `targets:` + `effects:`); `env.jet` owns named source aliases
+`deps:` + `targets:` + `authority:`); `env.jet` owns named source aliases
 (`sources: { name: target@provider }`) and environment facts; other `.jet`
 files contribute Configs; `module workspace` is discovered by declaration (`members:` may run
 comptime — inline lists, `find("./dir")`, or an expression referencing a
@@ -5682,7 +5694,13 @@ execution waits on sandbox/provenance proof. D-BUILDSCHED1=A: the scheduler is
 deterministic with automatic parallelism and named resource pools (`cpu`,
 `memory`, `linker`, `console`, `gpu`). D-BUILDQUERY1=A: graph inspection is
 `jet inspect graph`, `jet inspect query build`, and `jet inspect explain-build <target/file/action>`,
-with the LSP using the same graph/provenance model.
+with the LSP using the same graph/provenance model. D-EXPLAIN-NORECORD1=A
+(ratified 2026-11-01, #4893): `jet inspect explain-build` always lists the
+planned steps (kind, key, subject, inputs) and lists measured steps only when a
+build record exists. With no record it exits 0, prints `no build recorded for
+<program> yet; planned steps:` and the planned rows, and its JSON has
+`nodes: []` plus the always-present `planned` list; no time or reason is
+printed for a step that has not run. A record for another program keeps E2104.
 
 **D-FFI-BUILD1=A — explicit preview and acceptance activate imported builds**
 *(ratified 2026-09-05, #2933)*:
@@ -7184,7 +7202,10 @@ available in dev and release binaries; `#Job(.Internal)` jobs are dev-only.
 The first program word selects a job before the ordinary `fn run` CLI parser;
 `jet run <entry> -- <name> [args…]` uses the same selection. Job names are
 reserved by the shared command registry (D-JET-VERBS1=A), and two jobs may not collide at one scope.
-`.Internal` jobs remain callable from code and schedulers, never from argv.
+A `.Dev` or `.Ship` job may not share its word with a `#CLI` command of its
+module; the check error E0928 names both lines.
+`.Internal` jobs remain callable from code and schedulers, never from argv, so
+they never clash.
 There are no flag aliases, and a release binary reports non-shipped jobs as
 unknown commands.
 
@@ -7568,12 +7589,11 @@ target.
 
 The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
-- `Compiler/Prelude/Markers.jet` holds one `marker Name(params…)`
-  declaration per rule, in the ratified D-META-FORM1=A / D-MARKER-SITES1=B
-  form, with D-DECL-META1=A's `$` metadata sigil. A plain parameter
-  is an argument the use site writes; a `$`-marked parameter is a fact about
-  the rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
-  `$scopes`, `$companion`, `$retired`.
+- `Compiler/Prelude/Markers.jet` holds one marker struct per rule, in the
+  D-DECL-TYPES1=A form: the struct's fields are the arguments the use site
+  writes, and its `impl Marker { … }` block holds the rule's settings as
+  `name :: value` lines: `sites`, `repeatable`, `owns_menu`, `inherits`,
+  `resolution`, `scopes` and `companion`.
 - `Compiler/Prelude/Effects.jet` holds one `effect Name`
   declaration per effect root.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
@@ -7617,15 +7637,14 @@ dependency, source, and expert boundaries. The canonical fields are:
 
 ```jet
 policy: {
-    effects: { "src": -[IO.Read]> },
     unsafe: .Paths(["src/ffi"]),
     expert: .Deny,
     deps: .List(["serde"])
 }
 ```
 
-`effects` maps project-relative source paths to positive effect ceilings. The
-longest matching path wins, and an empty ceiling (`-[]>`) is pure. `unsafe` is
+Effect ceilings are not a policy field: D-EFFECT-RUNGS1=A caps a module
+with `#FX(…) module name` and a package with `authority:`. `unsafe` is
 absent, `.Deny`, or a normalized project-relative `.Paths([...])` allow-list
 for `#Unsafe` gates. `expert` is absent, `.Deny`, or `.Allow`; `.Deny` rejects
 expert-only constructs such as `#Shield`, `#Context`, `#Region`, `#Transact`,
@@ -7637,7 +7656,7 @@ list entries normalize to one sorted value. `.Allow` is not a valid
 
 The parser reports malformed package policy as `E1206`. A valid policy
 violation is a compile/check error `E2960` naming the policy key, rejected
-construct or effect, and project path. `jet inspect guarantees` projects the
+construct, and project path. `jet inspect guarantees` projects the
 same normalized values, preserving absent keys and explicit empty deny lists;
 it never infers or silently widens a boundary.
 
@@ -7740,7 +7759,7 @@ fallible result, add facts, or stay undenied. The row is compile-time only and
 does not add a runtime effect mechanism or an execution-tier exception.
 
 **2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
-  vocabulary only as a deny-only row: no positive signature, `#Abilities`, or grant
+  vocabulary only as a deny-only row: no positive signature, `#FX`, or grant
   may name it. Positive naming is E0751 (`Panic can't be granted, only denied`);
   `-[!Panic]>`, manifest denial, E0749, and `#Pre`/refinement discharge remain
 valid. `check_panic_call` contributes the existing reachability sentinel, and

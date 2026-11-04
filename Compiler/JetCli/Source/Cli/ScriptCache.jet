@@ -4,28 +4,33 @@
 // slot, named by the profile and the entry's path. The slot's record names
 // its kept program and what that program was built from:
 // - the toolchain: this compiler, its runtime pack and the Core sources, by
-//   file identity, and whether JET_CHECKED_ALLOC=1 checks the build;
+//   file identity, and the build options (`checked_alloc` among them);
 // - a hash of the schema snapshots its checks read, of every file of its
 //   authorized source snapshot and of the source tree's shape (its
-//   directories and source names; other files a compile never reads).
+//   directories and source names; other files a compile never reads), and
+//   of the entry path as the command wrote it: the program's fault report
+//   finds its source lines through the compilation directory that path
+//   names (Host.jet jet_cli_debug_directory), relative to where it ran.
 // A rerun whose toolchain and sources match the record runs the program and
 // marks the record used. Any other compile replaces the slot, so the cache
 // holds one program per entry file, and at most JET_CLI_SCRIPT_KEEP_MAX
 // slots, the most recently used. A compile that read a comptime input
 // (`embed_file`, `embed_bytes`, `find`) keeps nothing: those files lie
 // outside the snapshot, so the record would not name them.
-use core.crypto as script_crypto
-use core.files as cli_files
-use core.sys as cli_sys
-use jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
-use jet_driver.[
-    JetDriverAuthorizedSourceSnapshot,
-    JetDriverComptimeInputLog,
-    JetDriverComptimeInputRecord,
-    JetDriverVerbOutput,
-    schema_cache_dir,
-]
-use jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
+use {
+    script_crypto :: core.crypto
+    cli_files :: core.files
+    cli_sys :: core.sys
+    jet_backend.[X64Executable, x64_executable_keep, x64_executable_kept]
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverComptimeInputLog,
+        JetDriverComptimeInputRecord,
+        JetDriverVerbOutput,
+        schema_cache_dir,
+    ]
+    jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key]
+}
 
 // Names the kept-program records; a new layout is a new name.
 JET_CLI_SCRIPT_RECORD :: "jet.script-run/v3"
@@ -76,8 +81,6 @@ fn jet_cli_script_toolchain(identity: String, options: BuildOptions) -> JetCLISc
         "{executable} {jet_cli_script_file_identity(executable_stat)}",
         jet_cli_host_triple(cli_sys.arch(), cli_sys.name()),
         build_options_key(options),
-        // A checked build links the checked heap (jet_cli_checked_alloc).
-        "checked_alloc {jet_cli_checked_alloc()}",
         "{pack} {jet_cli_script_file_identity(pack_stat)}",
         toolchain,
     }
@@ -122,9 +125,10 @@ fn jet_cli_script_schema_inputs(root: String) -> String {
     rows.join("\n")
 }
 
-// The hash of the sources a compile of `snapshot` reads.
-fn jet_cli_script_sources(snapshot: JetDriverAuthorizedSourceSnapshot) -> String {
+// The hash of the sources a compile of `snapshot` reads, entered as `entered`.
+fn jet_cli_script_sources(entered: String, snapshot: JetDriverAuthorizedSourceSnapshot) -> String {
     framed := [U8]{}
+    jet_cli_script_frame(&framed, entered)
     jet_cli_script_frame(&framed, snapshot.entry_path)
     jet_cli_script_frame(&framed, jet_cli_script_schema_inputs(snapshot.roots[0].canonical_path))
     loop root in snapshot.roots {
@@ -270,14 +274,14 @@ fn jet_cli_script_trim(directory: String) {
 
 // The keeper of a `jet run` compile of `snapshot`; None keeps nothing (no
 // compiler identity, or a toolchain that can't be read).
-fn jet_cli_script_keeper(options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIScriptKeep? {
+fn jet_cli_script_keeper(entered: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLIScriptKeep? {
     identity :: jet_cli_compiler_identity() ?? return None
     toolchain :: jet_cli_script_toolchain(identity, options) ?? return None
     Val(JetCLIScriptKeep{
         slot: jet_cli_script_slot(options, snapshot.entry_path),
         toolchain: toolchain.rows,
         core_files: toolchain.core_files,
-        sources: jet_cli_script_sources(snapshot),
+        sources: jet_cli_script_sources(entered, snapshot),
         input_log: shared JetDriverComptimeInputLog{records: [JetDriverComptimeInputRecord]{}},
     })
 }

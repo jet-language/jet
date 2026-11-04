@@ -38,17 +38,17 @@ test("replaceSection swaps only the marked lines", () => {
   assert.throws(() => replaceSection("no markers\n", "", "x.js"), /x\.js has no/);
 });
 
-test("retired markers are not highlighted as active rules", () => {
+test("only marker structs are highlighted as active rules", () => {
   const root = fixtureRoot();
   try {
     const markers = join(root, "Compiler/Prelude/Markers.jet");
-    writeFileSync(markers, `${readFileSync(markers, "utf8")}\nmarker Zzretired($sites: [.Function], $retired: "#Other")\nmarker Zzactive($sites: [.Function])\n`);
+    writeFileSync(markers, `${readFileSync(markers, "utf8")}\nstruct Zzplain {\n    value: Int\n}\n\nstruct Zzactive {\n    impl Marker {\n        sites :: [.Function]\n    }\n}\n`);
     const names = readActiveMarkers(root);
     assert.ok(names.includes("Zzactive"));
-    assert.ok(!names.includes("Zzretired"));
+    assert.ok(!names.includes("Zzplain"));
     const tokens = readHighlightTokens(root);
     assert.match(renderTreeSitter(tokens), /JET_HIGHLIGHT_MARKER_RULE = \[[^\n]*"Zzactive"/);
-    assert.doesNotMatch(renderZed(tokens, readAnonymousTokens(root)), /Zzretired/);
+    assert.doesNotMatch(renderZed(tokens, readAnonymousTokens(root)), /Zzplain/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

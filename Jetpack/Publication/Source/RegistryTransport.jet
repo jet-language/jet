@@ -3,11 +3,13 @@
 // (Registry/RegistryIdentity.jet).
 // Every resolved answer must pass Core's strict public-destination predicates
 // (ip.is_public_destination / ip.ipv6_is_public_destination). Full Fetch is #4262.
-use jet_pkg_model.[PublicationRegistryConfig, pkg_bytes_space_width, pkg_bytes_text, pkg_hex_bytes, publication_registry_url_has_credentials]
-use jetpack_foundation.[foundation_hardened_git_command, foundation_hardened_ssh_command]
-use core.http.client as publication_dns
-use core.net.ip as ip
-use core.sys as sys
+use {
+    jet_pkg_model.[PublicationRegistryConfig, pkg_bytes_space_width, pkg_bytes_text, pkg_hex_bytes, publication_registry_url_has_credentials]
+    jetpack_foundation.[foundation_hardened_git_command, foundation_hardened_ssh_command]
+    publication_dns :: core.http.client
+    ip :: core.net.ip
+    sys :: core.sys
+}
 
 #Error
 struct PublicationRegistryAuthorityError {

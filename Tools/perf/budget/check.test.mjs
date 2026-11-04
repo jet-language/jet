@@ -90,6 +90,26 @@ test("a wall-only trace is measured on the wall clock per --lines", () => {
   assert.deepEqual(row(out, "P15").slice(3, 7), ["0", "800", "0.0x", "ok"]);
 });
 
+test("always-on checks: subtotal printed; a full-unit trace without one fails", () => {
+  const checks = ["sema.bodies", "sema.effects", "sema.failure", "lower", "ir.lint", "ir.object"];
+  const trace = (kinds) => writeTrace([
+    counter("parse.user_lines", 1_000_000),
+    ...kinds.flatMap((kind, index) => span(kind, index * 1000, index * 1000 + 500, 1_000_000)),
+  ]);
+  const full = run(trace(checks), "--column", "225K");
+  assert.equal(full.status, 0, full.out);
+  // Each always-on row ran 1 ms over 1,000,000 lines.
+  assert.match(full.out, /always-on checks \(P5a\+P5b, P5c, P5d, P9, P11\): 5 ns\/line, budget 29,200 \(53\.7% of the 225K work sum\)/);
+  assert.match(full.out, /PASS: within the 225K budget/);
+  const noLint = run(trace(checks.filter((kind) => kind !== "ir.lint")), "--column", "225K");
+  assert.equal(noLint.status, 1, noLint.out);
+  assert.match(noLint.out, /missing always-on spans in a full-unit trace: P9 ir\.lint \(IR consistency check/);
+  assert.match(noLint.out, /FAIL: an always-on check did not run/);
+  // A trace that stopped before code generation (no `lower`) is not a full unit.
+  const checkOnly = run(trace(["sema.bodies", "sema.effects", "sema.failure"]), "--column", "225K");
+  assert.equal(checkOnly.status, 0, checkOnly.out);
+});
+
 test("usage errors exit 64", () => {
   assert.equal(spawnSync(process.execPath, [checker], { encoding: "utf8" }).status, 64);
   assert.equal(run(writeTrace([]), "--column", "2M").status, 64);

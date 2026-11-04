@@ -19,8 +19,10 @@ fn rt_journey_destructor_address() -> I64 {
     rt_text_store(closure, I64{1})
     rt_text_store(wrapping(closure + I64{8}), rt_journey_destructor_address())
     rt_text_store(wrapping(closure + I64{16}), I64{0})
-    journey_tls_key = jet_rt_tls_key_new(closure)
-    journey_report_wire_word = jet_rt_alloc(I64{8}, I64{8})
+    #Unsafe("runtime-init runs before any other thread exists") {
+        journey_tls_key = jet_rt_tls_key_new(closure)
+        journey_report_wire_word = jet_rt_alloc(I64{8}, I64{8})
+    }
     sync_store(journey_report_wire_word, I64{0})
 }
 fn journey_tls_value() -> I64 {

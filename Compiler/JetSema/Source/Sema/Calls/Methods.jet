@@ -19,6 +19,7 @@ use jet_foundation.[
     NamedSpan,
     OrFallback,
     Stmt,
+    StrFormat,
     StrPart,
     Span,
     SymbolID,
@@ -35,6 +36,9 @@ use jet_foundation.[
     builtin_method_receiver_accepts,
     core_source_receiver_method,
     core_source_receiver_method_routes,
+    app_route_file_address,
+    AppRouteRoot,
+    diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
     sema_collection_is_list,
@@ -934,6 +938,13 @@ fn sema_app_returns_unit(ty: Type?) -> Bool Never! {
     }
 }
 
+// Whether a handler's declared result fails with a domain of its own rather
+// than the open `Err`.
+fn sema_app_typed_failure(ty: Type) -> Bool Never! {
+    if ty == .Result(_, failure) -> return failure != (Type.Named{name: "Err"})
+    false
+}
+
 // The success type a handler declares (`T` of `T E!`).
 fn sema_app_success_type(ty: Type) -> Type Never! {
     if ty == .Result(ok, _) -> return ok
@@ -989,13 +1000,26 @@ fn sema_app_handler_adapter(method: String, name: String, function: SemaRegistra
         &body.push(Stmt.Val{binding: ast_binding(local, span, false, value, None)})
         &handler_args.push(sema_app_arg(sema_app_ident(local, span), AccessConvention.Read, span))
     }
-    handler_call :: Expr.Call{call: Call{name: name, name_span: span, type_args: [Type]{}, args: handler_args}, id: AST_NODE_GENERATED}
+    direct_call :: Expr.Call{call: Call{name: name, name_span: span, type_args: [Type]{}, args: handler_args}, id: AST_NODE_GENERATED}
+    // A handler's own failure domain (`-> T OrderError!`) has no conversion
+    // into the adapter's `Err`; it answers the request as a failed reply,
+    // which the route's error boundary renders.
+    typed_failure :: if function.declaration.return_type == {
+        .Val(declared) -> sema_app_typed_failure(sema_type_resolve_declared(graph, declared, function.symbol.module_name))
+        .None -> false
+    }
+    failure_text :: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "the `{name}` handler failed: "}, StrPart.Interp{expr: sema_app_ident("err", span), format: StrFormat.Display}}, span: span, id: AST_NODE_GENERATED}
+    failed :: sema_app_call_method(call, "__failed", [Type]{}, [CallArg]{sema_app_arg(failure_text, AccessConvention.Read, span)}, span)
+    handler_call :: if typed_failure -> Expr.OrFallback{value: direct_call, fallback: OrFallback.Return{value: Val(Expr.Ok{value: failed, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED} else -> direct_call
     reply := sema_app_call_method(call, "__done", [Type]{}, [CallArg]{}, span)
     if method == "mount" || sema_app_returns_unit(function.declaration.return_type) {
         &body.push(Stmt.Expr{expr: handler_call})
     } else {
         wrap :: if method == "loader" || server -> "__json" else -> "__page"
-        reply = sema_app_call_method(call, wrap, [Type]{}, [CallArg]{sema_app_arg(handler_call, AccessConvention.Read, span)}, span)
+        // `__json` encodes the handler's success value; naming it keeps a
+        // failing handler (`-> T E!`) from leaving `Value` uninferred.
+        wrap_types :: if wrap == "__json" && function.declaration.return_type == .Val(declared) -> [Type]{sema_app_success_type(sema_type_resolve_declared(graph, declared, function.symbol.module_name))} else -> [Type]{}
+        reply = sema_app_call_method(call, wrap, wrap_types, [CallArg]{sema_app_arg(handler_call, AccessConvention.Read, span)}, span)
     }
     &body.push(Stmt.Expr{expr: reply})
     call_param :: LambdaParam{name: call, name_span: span, ty: None, ty_span: None}
@@ -1062,9 +1086,238 @@ fn sema_app_route_binding(method: String, handler: Expr, environment: SemaScopeE
     parts.join(";")
 }
 
+// The text of a plain string literal with no interpolation.
+fn sema_app_literal_text(expression: Expr) -> String? Never! {
+    if expression == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == .Lit(value) { text = "{text}{value}" } else { return None }
+        }
+        return Val(text)
+    }
+    None
+}
+
+// One route the App chain registers: its canonical path, where it came from
+// (`builder` or the convention file), the span it reports at, and whether a
+// `.routes(from:)` convention file made it.
+struct SemaAppRouteRegistration {
+    path: String
+    provenance: String
+    span: Span
+    convention: Bool
+}
+
+struct SemaAppRoutePart {
+    kind: Int
+    name: String
+}
+
+// The App graph's route check at one registering call. Every registration
+// the call makes is checked against the registrations earlier in its builder
+// chain and its own earlier files, so each pair is checked once, at the later
+// call. A pair reports as the graph orders it: builder entries before
+// convention files, and otherwise in chain order.
+fn sema_app_check_route_registrations(receiver: Expr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
+    if args.len() == 0 -> return
+    text :: sema_app_literal_text(args[0].expr) ?? return
+    roots :: sema_app_route_roots(environment, graph)
+    current := [SemaAppRouteRegistration]{}
+    if method == "routes" {
+        if args.len() != 1 -> return
+        current = sema_app_expand_route_root(roots, text, span, &diagnostics)
+    } else {
+        &current.push(SemaAppRouteRegistration{path: sema_app_canonical_route_path(text), provenance: "builder", span: span, convention: false})
+    }
+    pool := [SemaAppRouteRegistration]{}
+    sema_app_chain_registrations(receiver, roots, &pool)
+    loop registration in current {
+        if sema_app_route_conflict(pool, registration, &diagnostics) -> next
+        &pool.push(registration)
+    }
+}
+
+fn sema_app_route_conflict(pool: [SemaAppRouteRegistration], registration: SemaAppRouteRegistration, diagnostics: &[Diagnostic]) -> Bool {
+    loop previous in pool {
+        if previous.path != registration.path -> next
+        swap :: previous.convention && !registration.convention
+        first :: if swap -> registration else -> previous
+        second :: if swap -> previous else -> registration
+        row :: diagnostic_registry_row("E2807") ?? panic("E2807 must have a registry row")
+        &diagnostics.push(sema_error("E2807", second.span, "Route `{second.path}` is registered both by `{first.provenance}` and `{second.provenance}`", row.why, row.fix))
+        if first.span != second.span {
+            &diagnostics.push(sema_error("E2807", first.span, "Earlier registration of route `{first.path}`", "both spans are kept so the provenance of each registration stays visible", "delete or rename this registration"))
+        }
+        return true
+    }
+    loop previous in pool {
+        if !sema_app_routes_overlap(previous.path, registration.path) -> next
+        if sema_app_route_static_parts(previous.path) != sema_app_route_static_parts(registration.path) || sema_app_route_parts(previous.path).len() != sema_app_route_parts(registration.path).len() -> next
+        swap :: previous.convention && !registration.convention
+        first :: if swap -> registration else -> previous
+        second :: if swap -> previous else -> registration
+        &diagnostics.push(sema_error("E2807", second.span, "Routes `{first.path}` and `{second.path}` are ambiguous", "the route graph matches static parts before dynamic ones, so two equally specific overlapping patterns have no deterministic owner", "make one pattern more specific, or remove the duplicate dynamic shape"))
+        return true
+    }
+    false
+}
+
+// The routes the builder chain ending at `expression` registers, in chain
+// order. Convention files a root cannot route are left out; their own call
+// reports them.
+fn sema_app_chain_registrations(expression: Expr, roots: [AppRouteRoot], registrations: &[SemaAppRouteRegistration]) {
+    if expression == .MethodCall(receiver, method, method_span, _, _, args, _) {
+        sema_app_chain_registrations(receiver, roots, &registrations)
+        if args.len() == 0 -> return
+        text :: sema_app_literal_text(args[0].expr) ?? return
+        if method == "routes" && args.len() == 1 {
+            unreported := [Diagnostic]{}
+            loop registration in sema_app_expand_route_root(roots, text, method_span, &unreported) {
+                if !sema_app_route_conflict(registrations, registration, &unreported) -> &registrations.push(registration)
+            }
+        } else if method == "route" || method == "page" || method == "layout" {
+            registration :: SemaAppRouteRegistration{path: sema_app_canonical_route_path(text), provenance: "builder", span: method_span, convention: false}
+            unreported := [Diagnostic]{}
+            if !sema_app_route_conflict(registrations, registration, &unreported) -> &registrations.push(registration)
+        }
+    }
+}
+
+// The routes the convention files under one `.routes(from:)` root register,
+// reporting each file the root cannot route (E2806).
+fn sema_app_expand_route_root(roots: [AppRouteRoot], name: String, span: Span, diagnostics: &[Diagnostic]) -> [SemaAppRouteRegistration] {
+    registrations := [SemaAppRouteRegistration]{}
+    found := AppRouteRoot?{None}
+    loop root in roots {
+        if root.root == name && root.found -> found = Val(root)
+    }
+    root :: found ?? {
+        &diagnostics.push(sema_error("E2806", span, "`.routes(from: \"{name}\")` directory does not exist", "file routing expands only an explicit builder root; a missing directory cannot invent endpoints", "create `{name}/`, or remove the `.routes(from:)` line"))
+        return registrations
+    }
+    loop file in root.files {
+        provenance :: "{name}/{file.path}"
+        if !file.has_page {
+            row :: diagnostic_registry_row("E2806") ?? panic("E2806 must have a registry row")
+            &diagnostics.push(sema_error("E2806", span, "Convention file `{provenance}` has no `fn page`", row.why, row.fix))
+            next
+        }
+        address :: app_route_file_address(file.path)
+        if address.bad_part == .Val(part) {
+            &diagnostics.push(sema_error("E2806", span, "Convention file `{provenance}` has an unsupported bracket part `{part}`", "a bracket part must be one whole `[name]` that captures one address part", "rename the part to `[name]`, such as `[id]`"))
+            next
+        }
+        &registrations.push(SemaAppRouteRegistration{path: address.path, provenance: provenance, span: span, convention: true})
+    }
+    registrations
+}
+
+// The convention roots the current module's driver pass read.
+fn sema_app_route_roots(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> [AppRouteRoot] {
+    row :: sema_app_module_row(environment, graph)
+    if row < 0 -> return [AppRouteRoot]{}
+    graph.modules[row].program.app_route_roots
+}
+
+// `{name}` parts are spelled `:name` in the graph.
+fn sema_app_canonical_route_path(path: String) -> String {
+    parts := [String]{}
+    loop segment in path.split("/") {
+        if segment.len() > 2 && segment.starts_with("{{") && segment.ends_with("}}") {
+            &parts.push(":{segment.slice(1, segment.len() - 1)}")
+        } else {
+            &parts.push(segment)
+        }
+    }
+    parts.join("/")
+}
+
+// Each address part: 0 static, 1 `:name`, 2 `*name` catch-all.
+fn sema_app_route_parts(path: String) -> [SemaAppRoutePart] {
+    parts := [SemaAppRoutePart]{}
+    loop segment in sema_app_canonical_route_path(path).split("/") {
+        if segment == "" -> next
+        if segment.starts_with("*") {
+            &parts.push(SemaAppRoutePart{kind: 2, name: segment.slice(1, segment.len())})
+        } else if segment.starts_with(":") {
+            &parts.push(SemaAppRoutePart{kind: 1, name: segment.slice(1, segment.len())})
+        } else {
+            &parts.push(SemaAppRoutePart{kind: 0, name: segment})
+        }
+    }
+    parts
+}
+
+fn sema_app_route_static_parts(path: String) -> Int {
+    count := 0
+    loop part in sema_app_route_parts(path) {
+        if part.kind == 0 -> count += 1
+    }
+    count
+}
+
+fn sema_app_routes_overlap(left_path: String, right_path: String) -> Bool {
+    left :: sema_app_route_parts(left_path)
+    right :: sema_app_route_parts(right_path)
+    left_catch :: left.len() > 0 && left[left.len() - 1].kind == 2
+    right_catch :: right.len() > 0 && right[right.len() - 1].kind == 2
+    if !left_catch && !right_catch && left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        if index >= right.len() -> break
+        if left[index].kind == 2 || right[index].kind == 2 -> return true
+        if left[index].kind == 0 && right[index].kind == 0 && left[index].name != right[index].name -> return false
+    }
+    left.len() == right.len() || left_catch || right_catch
+}
+
+// The App graph route check for a registering call on an App builder. It runs
+// beside the method's own check: `.routes(from:)` is Core's declared method,
+// so the check site calls it before declared-method resolution.
+fn sema_call_app_route_registrations(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    receiver_type :: sema_call_resolved_type(receiver_value.ty, environment, program)
+    if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return
+    graph :: program.registration_graph ?? return
+    sema_app_check_route_registrations(receiver, method, args, span, environment, graph, &diagnostics)
+}
+
+// The App capability check for a browser feature: `.csr`, `.island` and the
+// hydration modes need target JS (a `Web` or `JS` build). The target is the
+// enclosing function's `#Target(JS|Wasm)` pin, else its file's `#Target`;
+// an unpinned function has no resolved web target yet and is not checked.
+fn sema_call_app_browser_feature(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
+    receiver_type :: sema_call_resolved_type(receiver_value.ty, environment, program)
+    if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return
+    graph :: program.registration_graph ?? return
+    row :: sema_app_module_row(environment, graph)
+    if row < 0 -> return
+    source :: graph.modules[row].program
+    target := ""
+    loop item in source.items {
+        if item == .Func(function) && function.name == function_name && function.web_marker == .Val(marker) {
+            target = if marker == .JS -> "JS" else -> "Wasm"
+        }
+    }
+    if target == "" && source.web_target_ceiling == .Val(bucket) -> target = sema_web_bucket_name(bucket)
+    if target == "" && (source.default_target ?? "") == "web" -> target = "Web"
+    if target == "" || target == "JS" || target == "Web" -> return
+    entry :: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
+    what :: entry.what.replace("{{feature}}", method).replace("{{required}}", "JS").replace("{{target}}", target)
+    &diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
+}
+
+// The registration row of the module being checked, -1 when it has none.
+fn sema_app_module_row(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int {
+    if environment.module_row >= 0 && environment.module_row < graph.modules.len() && graph.modules[environment.module_row].module_identity == environment.module_identity -> return environment.module_row
+    loop (index, entry) in graph.modules {
+        if entry.module_identity == environment.module_identity -> return index
+    }
+    -1
+}
+
 fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type :: sema_call_resolved_type(receiver_value.ty, environment, program)
     if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method == "route" || method == "page" || method == "layout" -> sema_call_app_route_registrations(receiver, receiver_value, method, args, span, environment, program, &diagnostics)
     arity :: sema_app_handler_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     graph :: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -1075,6 +1328,12 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
     }
     boundary :: method == "pending" || method == "not_found" || method == "error"
     handler_index :: if boundary -> 0 else -> 1
+    if (method == "route" || method == "page" || method == "layout") && sema_http_mux_callee(args[handler_index].expr) == None {
+        row :: diagnostic_registry_row("E2810") ?? panic("E2810 must have a registry row")
+        path :: sema_app_literal_text(args[0].expr) ?? "/"
+        &diagnostics.push(sema_error("E2810", span, "`{method}` `{path}` is not a statically known handler", row.why, row.fix))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     handler :: sema_app_named_handler(method, args[handler_index], environment, program, scopes, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     adapter_expr :: sema_app_handler_adapter(method, handler.name, handler.function, graph, args[handler_index].span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     adapter :: sema_app_arg(adapter_expr, AccessConvention.Move, args[handler_index].span)
@@ -1480,6 +1739,10 @@ fn sema_call_missing_method_diagnostic(receiver: Type, method: String, actual: I
         loop bound in param.bounds {
             segments :: bound.key.split(":").to_list()
             &bound_names.push("`{segments[segments.len() - 1]}`")
+        }
+        if sema_variadic_bound_slot_parameter(type_name_value) == .Val(pack) {
+            traits :: if bound_names.len() == 0 -> "no trait" else -> bound_names.join(" + ")
+            return sema_error("E0102", span, "an element of `{pack}` has no method `{method}`", "each element of `{pack}` is known only through its bounds ({traits}), and none of them provides `{method}`", "call a method from {traits}, or add a trait that defines `{method}` to `{pack}`'s bound list")
         }
         why :: if bound_names.len() == 0 -> "type parameter `{type_name_value}` has no bound that provides `{method}`" else -> "none of type parameter `{type_name_value}`'s bounds ({bound_names.join(" + ")}) provides `{method}`"
         fix :: if bound_names.len() == 0 -> "add a trait bound that defines `{method}`, or use a method available on `{type_name_value}`" else -> "add a bound that defines `{method}`, or use a method from {bound_names.join(" + ")}"

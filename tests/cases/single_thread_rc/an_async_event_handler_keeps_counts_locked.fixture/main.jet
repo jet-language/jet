@@ -1,0 +1,18 @@
+use event :: core.event
+
+fn names(count: Int) -> [String] {
+    out := [String]{}
+    loop k in 0..<count -> &out.push("name {k}")
+    out
+}
+
+fn run() {
+    first :: names(3)
+    second :: first.copy()
+    app :: event.scope()
+    saved :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    saved.on(app, (n: Int) -> print(n))
+    report :: saved.emit_async(first.len() + second.len()).join() ?? panic("dispatch")
+    print(report.delivered_handlers())
+    app.cancel()
+}

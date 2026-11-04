@@ -32,13 +32,13 @@ function command(jet, args, { prefix, cwd, env, execute = spawnSync, timeout = N
 export function runNativeLibrary({ jet, file, prefix, lifecycle = prefix + '.lifecycle.list', exports: exportsFile = null, env = process.env, cwd = dirname(file), execute, timeout }) {
     mkdirSync(dirname(lifecycle), { recursive: true });
     if (!existsSync(lifecycle)) writeFileSync(lifecycle, runtimeLifecycleList(parseRuntimeExports(readFileSync(file, 'utf8'), file)));
-    for (const suffix of ['.o', '.exports', '.abi.json', '.issues']) rmSync(prefix + suffix, { force: true });
+    for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues']) rmSync(prefix + suffix, { force: true });
     const hookEnv = { ...nativeTransportEnvironment(env), JET_FRONT_LIBRARY_OBJECT_OUTPUT: resolve(prefix), JET_FRONT_LIBRARY_LIFECYCLE: resolve(lifecycle) };
     if (exportsFile) hookEnv.JET_FRONT_LIBRARY_EXPORTS = resolve(exportsFile);
     const run = command(jet, ['check', resolve(file)], { prefix, cwd, env: hookEnv, execute, timeout });
     let problem = nativeCommandProblem(run);
     if (existsSync(prefix + '.issues')) problem = { verdict: 'no-artifact', detail: readFileSync(prefix + '.issues', 'utf8') };
-    if (!problem) for (const suffix of ['.o', '.exports', '.abi.json']) if (!existsSync(prefix + suffix)) {
+    if (!problem) for (const suffix of ['.o', '.exports', '.abi.json', '.threads']) if (!existsSync(prefix + suffix)) {
         problem = { verdict: 'no-artifact', detail: `native library hook omitted ${suffix}` };
         break;
     }

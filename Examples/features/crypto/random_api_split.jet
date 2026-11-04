@@ -6,11 +6,13 @@ package {
 // D-RANDSPLIT1=A: separate PRNG (core.math.random) and CSPRNG (core.crypto.random).
 // core.math.random.bytes — fast, seedable, NOT cryptographically secure.
 // core.crypto.random.bytes — cryptographically secure (/dev/urandom).
-use core.math.random as random
-use core.crypto.random as crypto_rand
-// D-ONCE-LAYER1=B: core.crypto is the typed rung; core.crypto.expert is the raw-byte rung.
-use core.crypto as crypto
-use core.crypto.expert as expert
+use {
+    random :: core.math.random
+    crypto_rand :: core.crypto.random
+    // D-ONCE-LAYER1=B: core.crypto is the typed rung; core.crypto.expert is the raw-byte rung.
+    crypto :: core.crypto
+    expert :: core.crypto.expert
+}
 
 fn run() {
     // PRNG bytes: simulation, testing, shuffles.

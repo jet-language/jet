@@ -4,8 +4,10 @@
 // The provisioned SDK compiles the input and a reflection inspector. Generated
 // `[UnmanagedCallersOnly]` entry points retain managed objects through bounded
 // `GCHandle` ownership; a std-only C bridge embeds CoreCLR through hostfxr.
-use core.files as files
-use core.sys as sys
+use {
+    files :: core.files
+    sys :: core.sys
+}
 
 DOTNET_BIND_SCHEMA :: "jet-dotnet-bind-v1"
 DOTNET_TOOL_ACTION :: "rejected the .NET binding input"
@@ -214,7 +216,7 @@ fn pkg_dotnet_render_jet(lib: String, surface: DotNetSurface) -> String Never! {
         handle :: if method.is_static -> "" else -> if method.params.len() > 0 -> "handle: Int, " else -> "handle: Int"
         out = "{out}    fn {method.name}({handle}{pkg_dotnet_jet_params(method.params)}) -> {method.result.jet()} = \"{abi}_{method.name}\"\n"
     }
-    out = "{out}}}\nuse c.{abi} as abi\n\nstruct Handle {{ value: Int }}\n#Error\nenum DotNetError {{ Exception InvalidHandle ResourceLimit }}\n\n"
+    out = "{out}}}\nuse abi :: c.{abi}\n\nstruct Handle {{ value: Int }}\n#Error\nenum DotNetError {{ Exception InvalidHandle ResourceLimit }}\n\n"
     out = "{out}fn error(code: Int) -[]> DotNetError Never! {{ if code == 2 {{ return DotNetError.InvalidHandle }} if code == 3 {{ return DotNetError.ResourceLimit }} return DotNetError.Exception }}\n\n"
     out = "{out}fn new({pkg_dotnet_jet_params(surface.ctor)}) -[FFI.DotNet]> Handle DotNetError! {{\n    value :: abi.new({pkg_dotnet_args(surface.ctor.len())})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n"
     out = "{out}fn close(^handle: Handle) -[FFI.DotNet]> {{}}\n\nimpl Handle.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        if abi.take_error() != 0 {{ panic(\".NET handle close failed\") }}\n    }}\n}}\n\n"

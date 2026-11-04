@@ -83,7 +83,7 @@ package {
     authority: { allow: [FFI, IO] }
 }
 
-use "math.h" as m
+use m :: "math.h"
 
 fn run() {
     print(m.cos(0.0))
@@ -120,7 +120,7 @@ pub fn main() void {
 Where Jet is ahead: the call is pure (`-[]>`) because the libm pack says so. That means `cos` can
 be called from a pure function, and from comptime (G17). In Zig it is an opaque extern call.
 
-Status: **PARTIAL**. `use "x.h" as m` and scalar calls exist: `Examples/features/lowlevel/ffi.jet`
+Status: **PARTIAL**. `use m :: "x.h"` and scalar calls exist: `Examples/features/lowlevel/ffi.jet`
 and `cbind/`, with the hand-written header parser in
 `Jetpack/PackageModel/Source/Foreign/C/HeaderParser.jet`. D-CIMPORT1's pinned Clang reader, the
 libm pack, and pure effect facts are PROPOSED or unbuilt. The CINPUT1 ballot recorded E0102 for a
@@ -141,7 +141,7 @@ package {
     deps: { sqlite3: c@nixpkgs:sqlite }
 }
 
-use c.sqlite3 as sql
+use sql :: c.sqlite3
 
 struct Note {
     id: Int
@@ -312,7 +312,7 @@ package {
     deps: { geom: c@"native/geom" }
 }
 
-use c.geom as g
+use g :: c.geom
 
 fn run() {
     v :: g.vec2_add(g.Vec2{x: 1.0, y: 2.0}, g.Vec2{x: 0.5, y: 0.5})
@@ -409,7 +409,7 @@ package {
     authority: { allow: [FFI, IO] }
 }
 
-use "stdlib.h" as libc
+use libc :: "stdlib.h"
 
 struct Row {
     name: String
@@ -470,7 +470,7 @@ package {
     deps: { ticker: c@"native/ticker" }
 }
 
-use c.ticker as tk
+use tk :: c.ticker
 
 fn run() {
     seen := 0
@@ -554,8 +554,10 @@ package {
     deps: { png: c@nixpkgs:libpng }
 }
 
-use "string.h" as cstr
-use c.png as png
+use {
+    cstr :: "string.h"
+    png :: c.png
+}
 
 fn run() {
     // 1. malloc'd return: Jet copies the text, then calls free() once.
@@ -656,7 +658,7 @@ package {
     deps: { inventory: cpp@"native" }
 }
 
-use cpp.inventory as inv
+use inv :: cpp.inventory
 
 fn run() {
     shelf := inv.Inventory.new(owner: "nate")?       // `:=`: add() writes the shelf
@@ -741,7 +743,7 @@ package {
     deps: { regex: rust@"regex@1.11" }
 }
 
-use rust.regex as re
+use re :: rust.regex
 
 fn run() {
     pattern :: re.Regex.new("(\\w+)@(\\w+)\\.com")?
@@ -810,7 +812,7 @@ package {
     deps: { numpy: py@">=1.26" }
 }
 
-use py.numpy as np
+use np :: py.numpy
 
 fn run() {
     samples :: [F64]{2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0}
@@ -874,8 +876,10 @@ package {
     deps: { chartjs: js@"chart.js@4.4" }
 }
 
-use js.chartjs as charts
-use js.browser as web
+use {
+    charts :: js.chartjs
+    web :: js.browser
+}
 
 fn run() {
     canvas :: web.document.get_element_by_id<web.HTMLCanvasElement>("sales") ?? panic("no #sales canvas")
@@ -1160,7 +1164,7 @@ isolate: { fastimg: .Wasm }          // PROPOSED: the only line that changed
 
 ```jet
 // thumbs/run.jet  (identical with or without the isolate line)
-use c.fastimg as fi
+use fi :: c.fastimg
 
 fn run() {
     loop path in ["ok.png", "evil.png", "ok2.png"] {
@@ -1319,8 +1323,10 @@ package {
     authority: { allow: [FFI, FS, IO] }
 }
 
-use core.ffi
-use core.plugin as plugin
+use {
+    core.ffi
+    plugin :: core.plugin
+}
 
 // A native plugin: the expected signature is a Jet type, checked against the plugin's contract note.
 fn native_version(path: String) -> I32 ffi.FFIError! {
@@ -1510,9 +1516,11 @@ fn Statement.column_text(self, col: I32) -> View<str> from self {
 The same row written by hand in a project that has no pack:
 
 ```jet
-use "sqlite3.h" as sql3
-use core.ffi
-use core.mem
+use {
+    sql3 :: "sqlite3.h"
+    core.ffi
+    core.mem
+}
 
 fn column_text(stmt: sql3.Statement, col: I32) -> View<str> from stmt {
     #Unsafe("sqlite3_column_text is valid until the next step/reset/finalize on stmt; stmt is borrowed for the view's life") {
@@ -1531,7 +1539,7 @@ D-FFI-COMPTIME1). `XXH64` takes `const void*, size_t, uint64_t`; the pointer and
 to one `[U8]`, so the Jet row has only fixed-width types:
 
 ```jet
-use c.xxhash as xx                          // xxhash's C source comes from Jetpack
+use xx :: c.xxhash // xxhash's C source comes from Jetpack
 
 KEYWORD_HASHES :: comptime {
     loop k in ["fn", "loop", "use", "struct"] -> xx.XXH64(k.bytes(), seed: 0)
@@ -1576,7 +1584,7 @@ deps: { raylib: c@nixpkgs:raylib }
 
 ```jet
 // dodge/run.jet
-use c.raylib as rl
+use rl :: c.raylib
 
 struct Rock {
     pos: rl.Vector2
@@ -1702,12 +1710,14 @@ Rules that hold at every layer:
 G17 show them in use.
 
 ```jet
-use "png.h" as png
-use "fcntl.h" as libc
-use "stdlib.h" as stdlib
-use "job.h" as libjob
-use core.ffi
-use core.mem
+use {
+    png :: "png.h"
+    libc :: "fcntl.h"
+    stdlib :: "stdlib.h"
+    libjob :: "job.h"
+    core.ffi
+    core.mem
+}
 
 comptime {
     shape :: ffi.layout<png.png_color>(target: $build.target)     // safe, comptime: size, align, field offsets

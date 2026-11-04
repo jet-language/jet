@@ -5,10 +5,12 @@
 // build, each counted loop sema's loop proof covers as it lowered
 // (ir_loop_proof_rows), the main the build gives the program (JetIR
 // EntryOwned.jet) and the invocation's selected canonical-pass gaps.
-use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
-use jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
-use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_entry_root_need, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
-use core.sys as decisions_sys
+use {
+    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
+    jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
+    jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_entry_root_need, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
+    decisions_sys :: core.sys
+}
 
 struct JetCLIDecisions {
     report: IROptReport
@@ -28,7 +30,7 @@ struct JetCLIDecisions {
 // `--optimize=full`) over them; or the refusal of a flag.
 fn jet_cli_decisions_options(options: [String], release: Bool) -> BuildOptionsResolved Never! {
     written := [BuildOptionChoice]{}
-    if release -> &written.push(jet_cli_stock_release_choice())
+    if release -> &written.extend(jet_cli_stock_release_choices())
     if build_option_flags(options) == {
         .Refused(code, what, fix) -> return BuildOptionsResolved.Refused{code: code, what: what, fix: fix}
         .Resolved(given, _) -> loop flag in given.written -> &written.push(flag.copy())

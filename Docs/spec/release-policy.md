@@ -132,7 +132,7 @@ battery against rustls and OpenSSL test vectors. Server TLS is an explicit
 named option on `core.http.server`:
 
 ```text
-use core.http.server as server
+use server :: core.http.server
 
 fn run() {
     cert := "server.crt"
@@ -161,7 +161,7 @@ release status: prerelease
 release disposition: current
 release readiness: not-ready
 1.0 compatibility policy: future-1.0 (planned; not active)
-supported editions: 2026, 2027, 2028 (newest: 2028)
+supported editions: 2026 (newest: 2026)
 registry protocol: v1
 ```
 

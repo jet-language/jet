@@ -725,8 +725,9 @@ fn sema_type_graph_declares_assoc_type(graph: SemaRegistrationGraph, name: Strin
 
 // Whether `ty`, a parameter type an argument is checked against, spells a
 // name the caller cannot resolve and no module declares as a type or a type
-// parameter. The declaration that wrote it already reported E0119, so the
-// argument's mismatch against it is no second error (#6294).
+// parameter, or a function type whose effect row names an unknown effect. The
+// declaration that wrote it already reported E0119, so the argument's
+// mismatch against it is no second error (#6294, #5540).
 fn sema_type_names_undeclared(graph: SemaRegistrationGraph, caller: Int, ty: Type, generic_names: [String]) -> Bool {
     if ty == {
         .Named(name) -> sema_type_written_name_unknown(graph, caller, name, generic_names) && !sema_type_graph_declares_name(graph, name)
@@ -749,6 +750,18 @@ fn sema_type_names_undeclared(graph: SemaRegistrationGraph, caller: Int, ty: Typ
             loop member in members {
                 if sema_type_names_undeclared(graph, caller, member, generic_names) -> return true
             }
+            false
+        }
+        .Fn(params, ret, effect_bound, _, _, _) -> {
+            loop entry in effect_bound ?? [] {
+                if entry.name.starts_with("..") -> next
+                raw :: if entry.name.starts_with("!") -> entry.name.split("!").to_list()[1] else -> entry.name
+                if sema_effect_parse_name(raw) == None -> return true
+            }
+            loop param in params {
+                if sema_type_names_undeclared(graph, caller, param, generic_names) -> return true
+            }
+            if ret == .Val(returned) -> return sema_type_names_undeclared(graph, caller, returned, generic_names)
             false
         }
         else -> false
@@ -1497,6 +1510,7 @@ fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, boun
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
     if generic_satisfied != None -> return generic_satisfied
+    if bound_name.starts_with("Quantity<") -> return Val(sema_registration_quantity_bound_satisfied(graph, actual_resolved, bound_name))
     // An exact number (a `3.5` literal is a Decimal) interpolates through its
     // Core Display, so it is Renderable even where core.math declares no row.
     if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") -> return Val(true)

@@ -1,0 +1,19 @@
+# Card #6477: a call into foreign code that is not a vetted libc leaf could
+# start a thread or install a handler the compiler cannot see, so the program
+# keeps every inline reference count update lock-prefixed.
+fixture: an_unvetted_foreign_call_keeps_counts_locked.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --release --debug-info=true main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "6\n"
+when arch x86_64
+when tool objdump
+step: objdump -d --no-show-raw-insn --disassemble=main_run .jet/build/main
+exit: 0
+stdout: ~ "lock incq" # card #6477: `getpid` is not a vetted libc leaf
+stdout: !~ "\tincq" # card #6477: no count update is unlocked after an unvetted foreign call
+end when
+end when

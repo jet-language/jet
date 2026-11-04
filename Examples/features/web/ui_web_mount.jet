@@ -1,0 +1,32 @@
+// A reactive core.ui counter built for the web. `ui.mount` paints the tree
+// into the page's `#jet-app` element, one element per leaf at its frame; a
+// button click runs its Jet handler, and the effect's repaint replaces the
+// elements.
+package {
+    name: "ui_web_mount"
+    authority: { allow: [Browser, Mem.Alloc] }
+}
+
+use {
+    ui :: core.ui
+    reactive :: core.reactive
+}
+
+#Target(Web)
+fn run() {
+    clicks :: reactive.signal(0)
+    backend :: ui.null_backend()
+    ui.reactive_render(() -> {
+        current :: clicks.get()
+        tree :: ui.box([
+            ui.node_color("count: {current}", 120.0, 32.0, "#3366ff"),
+            ui.button("increment") {
+                clicks.set(clicks.get() + 1)
+            },
+            ui.button("reset") {
+                clicks.set(0)
+            }
+        ])
+        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 240.0, 120.0))
+    })
+}

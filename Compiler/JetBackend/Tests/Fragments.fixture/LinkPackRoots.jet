@@ -1,6 +1,6 @@
 // Real GNU-as objects, not a hand-built LinkContext or a mocked export registry.
 // run-runtime-pack-roots.mjs prepares the isolated input files.
-use core.files as files
+use files :: core.files
 
 fn pack_roots_symbol(c: LinkContext, name: String) -> Int Never! {
     loop k in 1..<c.obj_sym_count[0] {
@@ -81,8 +81,8 @@ fn run() {
     broken :: x64_link_runtime_pack([String]{"runtime.o", "missing.o", "runtime.a"}, ^[[U8]]{object, missing, archive}, [String]{})
     found_missing := false
     loop error in broken.errors {
-        if error.contains("undefined symbol `jet_ws_connect`") -> found_missing = true
+        if error.contains("undefined symbol `jet_rt_fixture_absent_provider`") -> found_missing = true
     }
-    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted a non-native WebSocket member without its provider")
+    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted a member without its provider")
     print("runtime pack object roots: pass")
 }

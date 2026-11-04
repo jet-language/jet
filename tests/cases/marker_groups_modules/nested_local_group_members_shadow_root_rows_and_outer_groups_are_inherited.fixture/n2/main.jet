@@ -1,8 +1,28 @@
-marker LibraryNote(value: Int, $sites: [.Function])
-marker Fast = #[LibraryNote(7), Scalar]
+struct LibraryNote {
+    value: Int
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+struct Fast {
+    impl Marker {
+        group :: #[LibraryNote(7), Scalar]
+    }
+}
 module inner {
-marker LibraryNote(value: String, $sites: [.Function])
-marker Fast = #[LibraryNote("inner"), Inline]
+struct LibraryNote {
+    value: String
+
+    impl Marker {
+        sites :: [.Function]
+    }
+}
+struct Fast {
+    impl Marker {
+        group :: #[LibraryNote("inner"), Inline]
+    }
+}
 #Fast fn direct() {}
 }
 fn run() {}

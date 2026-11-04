@@ -105,9 +105,9 @@ capture: stem = text file selected.txt
 cap:stem: nonempty # original ed77c235f tests/agent_workloads.rs:556-593 adapter_stem returns a named source or panics for an unknown task
 copy: {root}/tests/agent_workloads/{cap:expected_path} expected.out
 capture: expected = text file expected.out
-copy: {root}/tests/agent_workloads/{cap:input} input.before
-when dir-readable input.before: capture: before = tree-contents input.before recursive
-when !dir-readable input.before: capture: before = sha256 file input.before
+mkdir: input.before
+copy: {root}/tests/agent_workloads/{cap:input} input.before/input
+capture: before = tree-contents input.before recursive
 when !env-set JET_CORPUS_BASELINE_DIR
 mkdir: run_jet
 copy: sources/{cap:stem}.jet run_jet/{cap:stem}.jet
@@ -133,25 +133,15 @@ exit: 0
 stdout: = "{cap:expected}"
 stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
 stdout: == jet_cold
-copy: {root}/tests/agent_workloads/{cap:input} input.after
-when dir-readable input.after: capture: after = tree-contents input.after recursive
-when !dir-readable input.after: capture: after = sha256 file input.after
+mkdir: input.after
+copy: {root}/tests/agent_workloads/{cap:input} input.after/input
+capture: after = tree-contents input.after recursive
 cap:after: = "{cap:before}"
 remove: input.after
 remove: run_jet/package.jet
 remove: run_jet/{cap:stem}.jet
-file: run_jet/.jet is-dir
-file: run_jet/.jet not-symlink
-file: run_jet/.jet/build is-dir
-file: run_jet/.jet/build not-symlink
-file: run_jet/.jet/build/{cap:stem} is-file
-entries: run_jet name != ".jet" = 0
-entries: run_jet/.jet name != "build" = 0
-entries: run_jet/.jet/build name != "{cap:stem}" name != "{cap:stem}.rs" = 0
-for file run_jet/.jet/build as artifact
-file: {artifact.path} is-file
-file: {artifact.path} not-symlink
-end for
+entries: run_jet name != ".jet" = 0 # original predicate
+entries: run_jet recursive = 0 # `jet run` writes no executable into the package (Docs/spec/spec.md:3947), so the wrapper dir is left empty like run_bash
 remove: run_jet
 end when
 mkdir: run_bash
@@ -174,10 +164,10 @@ exit: 0
 stdout: = "{cap:expected}"
 stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
 stdout: == bash_cold
-copy: {root}/tests/agent_workloads/{cap:input} input.after
-when dir-readable input.after: capture: after = tree-contents input.after recursive
-when !dir-readable input.after: capture: after = sha256 file input.after
-cap:after: = "{cap:before}"
+mkdir: input.after
+copy: {root}/tests/agent_workloads/{cap:input} input.after/input
+capture: after_bash = tree-contents input.after recursive
+cap:after_bash: = "{cap:before}"
 remove: input.after
 entries: run_bash recursive = 0
 remove: run_bash
@@ -201,15 +191,15 @@ exit: 0
 stdout: = "{cap:expected}"
 stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
 stdout: == python_cold
-copy: {root}/tests/agent_workloads/{cap:input} input.after
-when dir-readable input.after: capture: after = tree-contents input.after recursive
-when !dir-readable input.after: capture: after = sha256 file input.after
-cap:after: = "{cap:before}"
+mkdir: input.after
+copy: {root}/tests/agent_workloads/{cap:input} input.after/input
+capture: after_python = tree-contents input.after recursive
+cap:after_python: = "{cap:before}"
 remove: input.after
 entries: run_python recursive = 0
 remove: run_python
 mkdir: run_node
-step node_cold: node {root}/tests/agent_workloads/adapters/{cap:stem}.js {root}/tests/agent_workloads/{cap:input}
+step node_cold: node {root}/tests/agent_workloads/adapters/{cap:stem}.mjs {root}/tests/agent_workloads/{cap:input}
 env: JET_CORPUS_JET={jet}
 env: JET_CORPUS_JETPACK={jetpack}
 env: JET_CORPUS_TASK={cap:id}
@@ -218,7 +208,7 @@ limit: time=120
 exit: 0
 stdout: = "{cap:expected}"
 stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2702 cold !limit_exceeded
-step node_warm: node {root}/tests/agent_workloads/adapters/{cap:stem}.js {root}/tests/agent_workloads/{cap:input}
+step node_warm: node {root}/tests/agent_workloads/adapters/{cap:stem}.mjs {root}/tests/agent_workloads/{cap:input}
 env: JET_CORPUS_JET={jet}
 env: JET_CORPUS_JETPACK={jetpack}
 env: JET_CORPUS_TASK={cap:id}
@@ -228,10 +218,10 @@ exit: 0
 stdout: = "{cap:expected}"
 stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
 stdout: == node_cold
-copy: {root}/tests/agent_workloads/{cap:input} input.after
-when dir-readable input.after: capture: after = tree-contents input.after recursive
-when !dir-readable input.after: capture: after = sha256 file input.after
-cap:after: = "{cap:before}"
+mkdir: input.after
+copy: {root}/tests/agent_workloads/{cap:input} input.after/input
+capture: after_node = tree-contents input.after recursive
+cap:after_node: = "{cap:before}"
 remove: input.after
 entries: run_node recursive = 0
 remove: run_node

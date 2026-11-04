@@ -1,8 +1,8 @@
 Error [E0511]: `ExpiringValue.force` bypasses expiry checking
-  --> tests/ui/expiring_force_unwrap.jet:9:15
+  --> tests/ui/expiring_force_unwrap.jet:11:16
     |
-  9 |     _ :: item.force(clk)
-    |               ^^^^^
+ 11 |     _ :: &item.force(clk)
+    |                ^^^^^
  Why: TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly
- Fix: Use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead
+ Fix: Use `.get(clock)` and handle `Expired`
 More: jet-lang.dev/e/E0511

@@ -1,7 +1,9 @@
-use core.files as files
-use core.sys as sys
-use core.process as process
-use core.time as time
+use {
+    files :: core.files
+    sys :: core.sys
+    process :: core.process
+    time :: core.time
+}
 
 fn cases_test_root(label: String) -> String {
     path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-cases-{process.current_pid()}-{label}")
@@ -157,6 +159,13 @@ fn cases_test_source(root: String, name: String, text: String) {
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstdout: ~ invalid\n")
     assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "REFUSED")
     files.remove_all(root) ?? panic("remove known-failing case scratch")
+}
+
+#Test("a child that exits without reading its scripted input is an owned failure, a kit fault is not") {
+    unread :: kit_exec_input_detail("terminal input: closed during write `process stdin`: process stdin closed", 0, "")
+    assert(kit_cases_owned_failure(kit_expect_verdict("ERROR", unread)))
+    assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "spawn: no such file")))
+    assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "wait: interrupted")))
 }
 
 #Test("processes a case leaves running in its scratch are stopped before the scratch goes") {

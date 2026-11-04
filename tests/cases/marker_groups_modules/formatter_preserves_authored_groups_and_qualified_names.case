@@ -1,5 +1,5 @@
 # tests/marker_groups_modules.rs::formatter_preserves_authored_groups_and_qualified_names at tests/marker_groups_modules.rs:205; hand-port
-# Claim: jet fmt keeps the authored group marker declaration 'marker Fast = #[Inline(.Always), Scalar]' (tests/marker_groups_modules.rs:206-211)
+# Claim: jet fmt keeps the authored marker group 'group :: #[Inline(.Always), Scalar]' in its `impl Marker` block (tests/marker_groups_modules.rs:206-211)
 # Claim: jet fmt keeps the group application '#Fast' and the qualified '#Lib.LibraryNote("fixed")' (tests/marker_groups_modules.rs:206-211)
 # Claim: formatting the output again yields identical text (tests/marker_groups_modules.rs:206-211, idempotence check)
 # Not ported: jet::format_source Rust API string-equality call (tests/marker_groups_modules.rs:206-211); the CLI formatter is the Jet-visible equivalent
@@ -11,7 +11,7 @@ step: jet fmt main.jet
 exit: 0 # tests/marker_groups_modules.rs:206-211 jet fmt formats main.jet in place
 step: sh {work}/step-2.sh
 exit: 0 # formatted file contents read back with cat (jet fmt formats in place)
-stdout: ~ "marker Fast = #[Inline(.Always), Scalar]" # formatted file contents read back with cat (jet fmt formats in place)
+stdout: ~ "    impl Marker {\n        group :: #[Inline(.Always), Scalar]\n    }" # formatted file contents read back with cat (jet fmt formats in place)
 stdout: ~ "#Fast" # formatted file contents read back with cat (jet fmt formats in place)
 stdout: ~ "#Lib.LibraryNote(\"fixed\")" # formatted file contents read back with cat (jet fmt formats in place)
 step: jet fmt --check main.jet

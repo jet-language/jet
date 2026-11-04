@@ -38,19 +38,41 @@ fn rt_text_data(value: I64) -> I64 { rt_text_word(value) }
 
 fn rt_text_len(value: I64) -> I64 { rt_text_word(wrapping(value + I64{8})) }
 
-// Whole machine words first (x86 permits unaligned word access), then the
-// byte tail: a string copy is one load/store pair per 8 bytes, not per byte.
-// The ranges never overlap (callers copy into a fresh or grown buffer).
+// Four machine words a step, then single words (x86 permits unaligned word
+// access), then the byte tail: a string copy is one load/store pair per 8
+// bytes, not per byte, and the loop's own count and branch are paid once per
+// 32 bytes. A copy of 8 bytes or more ends with the word ending at `len`,
+// which rewrites bytes already copied with the same values. The ranges never
+// overlap (callers copy into a fresh or grown buffer).
 fn rt_text_bytes_copy(target: I64, source: I64, len: I64) {
     at := I64{0}
+    blocks :: len - len % I64{32}
+    loop at < blocks {
+        from :: wrapping(source + at)
+        to :: wrapping(target + at)
+        first :: rt_text_word(from)
+        second :: rt_text_word(wrapping(from + I64{8}))
+        third :: rt_text_word(wrapping(from + I64{16}))
+        fourth :: rt_text_word(wrapping(from + I64{24}))
+        rt_text_store(to, first)
+        rt_text_store(wrapping(to + I64{8}), second)
+        rt_text_store(wrapping(to + I64{16}), third)
+        rt_text_store(wrapping(to + I64{24}), fourth)
+        at = wrapping(at + I64{32})
+    }
     words :: len - len % I64{8}
     loop at < words {
         rt_text_store(wrapping(target + at), rt_text_word(wrapping(source + at)))
-        at += I64{8}
+        at = wrapping(at + I64{8})
+    }
+    if (at < len && words > I64{0}) {
+        last :: wrapping(len - I64{8})
+        rt_text_store(wrapping(target + last), rt_text_word(wrapping(source + last)))
+        return
     }
     loop at < len {
         rt_text_put(wrapping(target + at), rt_text_byte(wrapping(source + at)))
-        at += I64{1}
+        at = wrapping(at + I64{1})
     }
 }
 
@@ -98,7 +120,7 @@ fn rt_text_immortal(value: I64) -> Bool {
 
 fn rt_text_copy(ptr: I64, len: I64) -> I64 {
     header :: rt_text_header_alloc()
-    data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    data :: if (len == I64{0}) -> I64{1} else -> alloc_bytes(len)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
@@ -213,11 +235,20 @@ fn rt_text_reserve_extra(target: I64, old: I64, used: I64, extra: I64) -> I64 {
         (grown < I64{16}) -> I64{16}
         else -> grown
     }
-    data :: jet_rt_alloc(capacity, I64{1})
+    // A direct-mapped buffer grows by mremap: no second buffer, no copy.
+    if (cap != I64{0}) {
+        moved :: alloc_grow_large(old, cap, capacity)
+        if (moved != I64{0}) {
+            rt_text_store(target, moved)
+            rt_text_store(wrapping(target + I64{16}), capacity)
+            return moved
+        }
+    }
+    data :: alloc_bytes(capacity)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{0}
     rt_text_bytes_copy(data, old, used)
     before :: jet_rt_session_status()
-    if (cap != I64{0}) -> jet_rt_free(old, cap, I64{1})
+    if (cap != I64{0}) -> free_bytes(old, cap)
     if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
         jet_rt_free(data, capacity, I64{1})
         return I64{0}
@@ -246,9 +277,12 @@ fn rt_text_append_raw_word(target: I64, word: I64, count: I64) {
     used :: rt_text_len(target)
     data :: rt_text_reserve_extra(target, rt_text_data(target), used, count)
     if (data == I64{0}) -> return
+    // The bytes of `word`, low first: a constant shift per byte.
+    rest := word
     at := I64{0}
     loop at < count {
-        rt_text_put(wrapping(data + used + at), (word >> (at * I64{8})).bit_and(I64{255}))
+        rt_text_put(wrapping(data + used + at), rest.bit_and(I64{255}))
+        rest = rest >> I64{8}
         at += I64{1}
     }
     rt_text_store(wrapping(target + I64{8}), used + count)
@@ -275,11 +309,11 @@ fn rt_text_push_scalar(target: I64, scalar: I64) {
         grown :: if (cap <= I64{4611686018427387903}) -> cap * I64{2} else -> used + width
         capacity :: if (grown < I64{16}) -> I64{16} else -> grown
         old :: rt_text_data(target)
-        data :: jet_rt_alloc(capacity, I64{1})
+        data :: alloc_bytes(capacity)
         if (data == I64{0} && jet_rt_session_propagate() != I64{0}) -> return
         rt_text_bytes_copy(data, old, used)
         before :: jet_rt_session_status()
-        if (cap != I64{0}) { jet_rt_free(old, cap, I64{1}) }
+        if (cap != I64{0}) { free_bytes(old, cap) }
         if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
             jet_rt_free(data, capacity, I64{1})
             return
@@ -297,10 +331,14 @@ fn rt_text_push_scalar(target: I64, scalar: I64) {
                 (width == I64{3}) -> I64{224}
                 else -> I64{240}
             }
-            rt_text_put(data, prefix.bit_or((value >> ((width - I64{1}) * I64{6}))))
+            // The scalar's bits, six to a byte from the top: the count stays
+            // a multiple of 6 inside 0..18.
+            shift := (width - I64{1}) * I64{6}
+            rt_text_put(data, prefix.bit_or((value >> shift)))
             at := I64{1}
-            loop at < width {
-                rt_text_put(wrapping(data + at), I64{128}.bit_or(((value >> ((width - at - I64{1}) * I64{6})).bit_and(I64{63}))))
+            loop shift >= (I64{6}) {
+                shift = wrapping(shift - I64{6})
+                rt_text_put(wrapping(data + at), I64{128}.bit_or(((value >> shift).bit_and(I64{63}))))
                 at += I64{1}
             }
         }
@@ -370,7 +408,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     }
     len :: left_len + right_len
     header :: rt_text_header_alloc()
-    data :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    data :: if (len == I64{0}) -> I64{1} else -> alloc_bytes(len)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
@@ -389,7 +427,22 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
 // shared or static `left` keeps its bytes: the result is a fresh owner (as
 // jet_rt_string_concat) and this owner of `left` is released. On a stop
 // `left` is still owned by the variable and the result is 0.
+// Fast path (ScriptBench w12, #6080): a sole heap owner whose spare capacity
+// already holds `right` is written here with one count load and no further
+// call but the copy. Spare capacity rules out a static text (cap 0), and the
+// buffer stays put, so a borrowed window of `left` needs no alias fixup.
 #Export(c) fn jet_rt_string_append(left: I64, right: I64) -> I64 {
+    extra :: rt_text_len(right)
+    used :: rt_text_len(left)
+    if (extra > I64{0} && extra <= rt_text_word(wrapping(left + I64{16})) - used) {
+        count :: rc_load(wrapping(left - I64{8}))
+        if (count >= I64{0} && count.bit_and(RC_OWNER_BITS) == I64{1}) {
+            rt_text_store(wrapping(left + I64{24}), I64{0})
+            rt_text_bytes_copy(wrapping(rt_text_data(left) + used), rt_text_data(right), extra)
+            rt_text_store(wrapping(left + I64{8}), used + extra)
+            return left
+        }
+    }
     if (rt_text_immortal(left) || !jet_rt_rc_unique(wrapping(left - I64{8}))) {
         joined :: jet_rt_string_concat(left, right)
         if (joined == I64{0}) -> return I64{0}
@@ -427,40 +480,63 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     if !jet_rt_rc_release(wrapping(value - I64{8})) -> return
     cap :: rt_text_word(wrapping(value + I64{16}))
     before :: jet_rt_session_status()
-    if (cap != I64{0}) { jet_rt_free(rt_text_data(value), cap, I64{1}) }
+    if (cap != I64{0}) { free_bytes(rt_text_data(value), cap) }
     if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) -> return
     rt_text_header_free(value)
 }
 
 // Equal and ordered comparisons skip equal 8-byte words. In the first word
 // that differs, the first differing byte is the lowest nonzero byte of the
-// two words' XOR (little-endian), found by halving, so it is the byte the
-// byte-by-byte scan would stop at. Offsets stay within `len`, so the sums
-// wrap unchecked.
+// two words' XOR (little-endian), found by halving (rt_text_low_byte), so it
+// is the byte the byte-by-byte scan would stop at. A tail under 8 bytes is
+// one more word: with 8 bytes or more before it, the word ending at `len`,
+// whose bytes before the tail are equal; otherwise, when each side's word
+// stays inside one page (the page holds the side's bytes, so it is mapped),
+// the words at the start masked to the `len` bytes. Offsets stay within
+// `len`, so the sums wrap unchecked.
 fn rt_text_first_difference(left: I64, right: I64, len: I64) -> I64 {
     // Shared owners (and a text compared with itself) hold one buffer.
     if (left == right) -> return len
     at := I64{0}
     words :: wrapping(len - len.bit_and(I64{7}))
     loop at < words {
-        diff := rt_text_word(wrapping(left + at)).bit_xor(rt_text_word(wrapping(right + at)))
-        if (diff != I64{0}) {
-            if (diff.bit_and(I64{4294967295}) == I64{0}) {
-                at = wrapping(at + I64{4})
-                diff = diff >> I64{32}
-            }
-            if (diff.bit_and(I64{65535}) == I64{0}) {
-                at = wrapping(at + I64{2})
-                diff = diff >> I64{16}
-            }
-            if (diff.bit_and(I64{255}) == I64{0}) -> at = wrapping(at + I64{1})
-            return at
-        }
+        diff :: rt_text_word(wrapping(left + at)).bit_xor(rt_text_word(wrapping(right + at)))
+        if (diff != I64{0}) -> return wrapping(at + rt_text_low_byte(diff))
         at = wrapping(at + I64{8})
+    }
+    if (at < len) {
+        if (words > I64{0}) {
+            last :: wrapping(len - I64{8})
+            diff :: rt_text_word(wrapping(left + last)).bit_xor(rt_text_word(wrapping(right + last)))
+            if (diff == I64{0}) -> return len
+            return wrapping(last + rt_text_low_byte(diff))
+        }
+        if (left.bit_and(I64{4095}) <= I64{4088} && right.bit_and(I64{4095}) <= I64{4088}) {
+            // No whole word: len is 1..7, so its low bits are len.
+            diff :: rt_text_word(left).bit_xor(rt_text_word(right)).bit_and(wrapping((I64{1} << (len.bit_and(I64{7}) * I64{8})) - I64{1}))
+            if (diff == I64{0}) -> return len
+            return rt_text_low_byte(diff)
+        }
     }
     loop at < len && rt_text_byte(wrapping(left + at)) == rt_text_byte(wrapping(right + at)) {
         at = wrapping(at + I64{1})
     }
+    at
+}
+
+// The index of the lowest nonzero byte of the nonzero word `diff`.
+fn rt_text_low_byte(diff: I64) -> I64 {
+    at := I64{0}
+    rest := diff
+    if (rest.bit_and(I64{4294967295}) == I64{0}) {
+        at = I64{4}
+        rest = rest >> I64{32}
+    }
+    if (rest.bit_and(I64{65535}) == I64{0}) {
+        at = wrapping(at + I64{2})
+        rest = rest >> I64{16}
+    }
+    if (rest.bit_and(I64{255}) == I64{0}) -> at = wrapping(at + I64{1})
     at
 }
 
@@ -520,7 +596,11 @@ fn rt_text_ascii_end(data: I64, from: I64, stop: I64) -> I64 {
 
 // The Unicode scalars in the `len` UTF-8 bytes at `data`: every byte but a
 // continuation byte (10xxxxxx) starts one. Blocks of four words that are all
-// ASCII hold none, so only the other words are counted.
+// ASCII hold none, so only the other words are counted. A tail under 8 bytes
+// is one more word, as in rt_text_first_difference: with 8 bytes or more
+// before it, the word ending at `stop` with its already counted bytes
+// shifted out; otherwise, when the word at `data` stays inside the page
+// holding the bytes (so it is mapped), that word masked to the `len` bytes.
 fn rt_text_scalars(data: I64, len: I64) -> I64 {
     continuations := I64{0}
     at := data
@@ -539,6 +619,17 @@ fn rt_text_scalars(data: I64, len: I64) -> I64 {
         continuations += rt_text_continuations(at)
         at += I64{8}
     }
+    tail :: stop - at
+    if (tail > I64{0}) {
+        if (len >= I64{8}) {
+            // The counted bytes shift out; the sign fill (0x00 or 0xFF) has no continuation byte.
+            last :: rt_text_word(wrapping(stop - I64{8})) >> ((I64{8} - tail) * I64{8})
+            return len - continuations - rt_text_continuation_count(last)
+        }
+        if (data.bit_and(I64{4095}) <= I64{4088}) {
+            return len - continuations - rt_text_continuation_count(rt_text_word(data).bit_and((I64{1} << (len * I64{8})) - I64{1}))
+        }
+    }
     loop {
         if (at >= stop) -> break
         if (rt_text_byte(at).bit_and(I64{192}) == I64{128}) -> continuations += I64{1}
@@ -547,11 +638,12 @@ fn rt_text_scalars(data: I64, len: I64) -> I64 {
     len - continuations
 }
 
-// The continuation bytes in the word at `at`: a byte's bit 7 shifted onto
-// its bit 6 and its own bit 6 clear flags one; the flags are summed by
-// halves.
-fn rt_text_continuations(at: I64) -> I64 {
-    word :: rt_text_word(at)
+// The continuation bytes in the word at `at`.
+fn rt_text_continuations(at: I64) -> I64 { rt_text_continuation_count(rt_text_word(at)) }
+
+// The continuation bytes in `word`: a byte's bit 7 shifted onto its bit 6
+// and its own bit 6 clear flags one; the flags are summed by halves.
+fn rt_text_continuation_count(word: I64) -> I64 {
     flags := ((word >> I64{1}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{4629771061636907072})) >> I64{6}
     flags += flags >> I64{32}
     flags += flags >> I64{16}
@@ -629,9 +721,111 @@ fn rt_text_maximal_suffix(pattern: I64, len: I64, reverse: Bool, order: Bool) ->
     (split: suffix + I64{1}, period: period)
 }
 
+// A one-byte needle needs no two-way setup: the first (or last) equal byte
+// at or after `start`, eight bytes per word forward. A word holds the byte
+// when the word XOR the byte in every lane has a zero lane, and its lowest
+// flagged lane is the first such byte (a borrow only runs upward from a zero
+// lane). The tail under 8 bytes is the word ending at `len`, its lanes before
+// `at` shifted out; its zero lanes come from the exact per-lane test, which
+// has no borrow, since bytes before `at` may hold the byte when `at` is
+// `start`.
+fn rt_text_find_byte(data: I64, len: I64, target: I64, start: I64, last: Bool) -> I64 {
+    if last {
+        at := len
+        loop at > start {
+            at -= I64{1}
+            if (rt_text_byte(wrapping(data + at)) == target) -> return at
+        }
+        return I64{-1}
+    }
+    spread :: wrapping(target * I64{72340172838076673})
+    at := start
+    limit :: wrapping(len - I64{8})
+    loop at <= limit {
+        word :: rt_text_word(wrapping(data + at)).bit_xor(spread)
+        found :: wrapping(word - I64{72340172838076673}).bit_and(word.bit_not()).bit_and(I64{-9187201950435737472})
+        if (found != I64{0}) -> return wrapping(at + rt_text_low_byte(found))
+        at += I64{8}
+    }
+    if (at < len && len >= I64{8}) {
+        word :: rt_text_word(wrapping(data + limit)).bit_xor(spread)
+        low :: I64{9187201950435737471}
+        zero :: wrapping(word.bit_and(low) + low).bit_or(word).bit_or(low).bit_not()
+        found :: (zero >> ((at - limit) * I64{8})).bit_and(wrapping((I64{1} << ((len - at) * I64{8})) - I64{1}))
+        if (found == I64{0}) -> return I64{-1}
+        return wrapping(at + rt_text_low_byte(found))
+    }
+    loop at < len {
+        if (rt_text_byte(wrapping(data + at)) == target) -> return at
+        at += I64{1}
+    }
+    I64{-1}
+}
+
+// A forward search for a needle of two bytes or more filters windows by
+// their first and last bytes, eight windows per two word loads: lane i of
+// (word at `at` XOR the first byte in every lane) OR (word at `at + n - 1`
+// XOR the last byte in every lane) is zero exactly when window `at + i`
+// starts and ends as the needle does. The zero-lane test may also flag
+// lanes above a zero lane, never below one, so the lowest flagged lane is a
+// true candidate, which is compared whole. The answer is the first match,
+// -1 for none, or `-2 - at` once the compares outrun twice the bytes the
+// filter has passed plus 256: no window before `at` matches, and the
+// two-way search takes over from there, so the whole stays linear.
+fn rt_text_find_paired(data: I64, len: I64, pattern: I64, n: I64, start: I64) -> I64 {
+    ones :: I64{72340172838076673}
+    back :: wrapping(n - I64{1})
+    first :: rt_text_byte(pattern)
+    final :: rt_text_byte(wrapping(pattern + back))
+    head :: wrapping(first * ones)
+    tail :: wrapping(final * ones)
+    limit :: len - n
+    spent := I64{0}
+    at := start
+    loop wrapping(at + I64{7}) <= limit {
+        window :: wrapping(data + at)
+        x :: rt_text_word(window).bit_xor(head).bit_or(rt_text_word(wrapping(window + back)).bit_xor(tail))
+        hits :: wrapping(x - ones).bit_and(x.bit_not()).bit_and(I64{-9187201950435737472})
+        if (hits == I64{0}) {
+            at = wrapping(at + I64{8})
+            next
+        }
+        // The lowest flagged lane k: the lowest set bit is bit 8k+7, and the
+        // top byte of (1 << 8k) * 0x0001020304050607 is k.
+        low :: (hits.bit_and(wrapping(I64{0} - hits)) >> I64{7}).bit_and(ones)
+        candidate :: wrapping(at + (wrapping(low * I64{283686952306183}) >> I64{56}))
+        k := I64{1}
+        loop k < back && rt_text_byte(wrapping(data + candidate + k)) == rt_text_byte(wrapping(pattern + k)) {
+            k = wrapping(k + I64{1})
+        }
+        if (k >= back) -> return candidate
+        spent = wrapping(spent + k)
+        if (spent > wrapping(wrapping(candidate - start) * I64{2} + I64{256})) -> return wrapping(I64{-2} - candidate)
+        at = wrapping(candidate + I64{1})
+    }
+    loop at <= limit {
+        if (rt_text_byte(wrapping(data + at)) == first && rt_text_byte(wrapping(data + at + back)) == final) {
+            k := I64{1}
+            loop k < back && rt_text_byte(wrapping(data + at + k)) == rt_text_byte(wrapping(pattern + k)) {
+                k = wrapping(k + I64{1})
+            }
+            if (k >= back) -> return at
+        }
+        at = wrapping(at + I64{1})
+    }
+    I64{-1}
+}
+
 fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
     if start > len || n > len - start -> return I64{-1}
     if (n == I64{0}) { return if last -> len else -> start }
+    if (n == I64{1}) -> return rt_text_find_byte(data, len, rt_text_byte(pattern), start, last)
+    from := start
+    if !last {
+        found :: rt_text_find_paired(data, len, pattern, n, start)
+        if (found >= I64{-1}) -> return found
+        from = wrapping(I64{-2} - found)
+    }
     first :: rt_text_maximal_suffix(pattern, n, last, true)
     second :: rt_text_maximal_suffix(pattern, n, last, false)
     split := first.split
@@ -655,8 +849,8 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
         period = if split > n - split -> split else -> n - split
         period += I64{1}
     }
-    hay :: wrapping(data + start)
-    available :: len - start
+    hay :: wrapping(data + from)
+    available :: len - from
     position := I64{0}
     memory := I64{0}
     loop position <= available - n {
@@ -673,7 +867,7 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
         loop at > memory && rt_text_search_byte(pattern, n, at - I64{1}, last) == rt_text_search_byte(hay, available, position + at - I64{1}, last) {
             at -= I64{1}
         }
-        if at <= memory -> return start + (if last -> available - position - n else -> position)
+        if at <= memory -> return from + (if last -> available - position - n else -> position)
         position += period
         if periodic -> memory = n - period
     }
@@ -699,7 +893,7 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
 
 fn rt_text_builder_with_capacity(cap: I64) -> I64 {
     header :: rt_text_header_alloc()
-    data :: if (cap == I64{0}) -> I64{1} else -> jet_rt_alloc(cap, I64{1})
+    data :: if (cap == I64{0}) -> I64{1} else -> alloc_bytes(cap)
     if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
@@ -736,8 +930,16 @@ fn rt_text_take_unique_buffer(value: I64) -> I64 {
     rt_text_append(target, rt_text_data(value), rt_text_len(value))
 }
 
-#Export(c) fn jet_rt_string_builder_push_static(target: I64, ptr: I64, len: I64) {
-    at := I64{0}
+// Pushes `len` bytes the caller guarantees are UTF-8: a compiled program's
+// literal (JetIR Build.jet ir_static_text interns a String's bytes) or a
+// String's own data.
+#Export(c) fn jet_rt_string_builder_push_static(target: I64, ptr: I64, len: I64) { rt_text_append(target, ptr, len) }
+
+// Pushes `len` host bytes of no known encoding, each invalid UTF-8 sequence
+// as U+FFFD (rt_text_lossy).
+fn rt_text_push_lossy(target: I64, ptr: I64, len: I64) {
+    // An ASCII byte is one valid scalar, so the ASCII run needs no decoding.
+    at := rt_text_ascii_end(ptr, I64{0}, len)
     loop at < len {
         width :: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
         if (width < I64{0}) { break }
@@ -792,10 +994,12 @@ fn rt_text_trim(value: I64) -> I64 {
 #Export(c) fn jet_string_before(value: I64, needle: I64) -> I64 { rt_text_before(value, needle) }
 
 fn rt_text_push_word(target: I64, word: I64, len: I64) {
+    rest := word
     at := I64{0}
     loop at < len {
-        rt_text_push_scalar(target, (word >> (at * I64{8})).bit_and(I64{255}))
+        rt_text_push_scalar(target, rest.bit_and(I64{255}))
         if (jet_rt_session_propagate() != I64{0}) -> return
+        rest = rest >> I64{8}
         at += I64{1}
     }
 }
@@ -862,9 +1066,7 @@ fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I6
         rt_text_push_word(message, I64{7814625461667783011}, I64{8})
         rt_text_push_word(message, I64{543515497}, I64{4})
         rt_text_push_number(message, count)
-        rt_text_push_word(message, I64{8386654074982392608}, I64{8})
-        rt_text_push_word(message, I64{7885647255505695333}, I64{8})
-        rt_text_push_word(message, I64{32}, I64{1})
+        jet_rt_string_builder_push(message, rt_static_text(" characters from "))
         rt_text_push_number(message, start)
         rt_text_push_word(message, I64{544175136}, I64{4})
         rt_text_push_number(message, end)
@@ -899,8 +1101,11 @@ fn text_iter_state(text: I64, separator: I64) -> I64 {
     state
 }
 
-fn text_iter_pull(state: I64) -> I64 {
-    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return I64{0} }
+// Stores the next piece, an owned String, in output and returns true, or
+// returns false once the text is exhausted. The iterator's items are these
+// Strings, so output is a String word slot (iter_pull_kernel kind 25).
+fn text_iter_pull(state: I64, output: I64) -> Bool {
+    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return false }
     text :: rt_text_word(state)
     sep :: rt_text_word(wrapping(state + I64{8}))
     len :: rt_text_len(text)
@@ -933,9 +1138,8 @@ fn text_iter_pull(state: I64) -> I64 {
             }
         }
     }
-    slot :: jet_rt_alloc(I64{8}, I64{8})
-    rt_text_store(slot, rt_text_slice(text, start, end))
-    slot
+    rt_text_store(output, rt_text_slice(text, start, end))
+    true
 }
 
 fn text_iter_drop(state: I64) {

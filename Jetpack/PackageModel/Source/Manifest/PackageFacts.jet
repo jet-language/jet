@@ -3,12 +3,14 @@
 // `ConfigFacts` is a typed contribution to it. Both are plain data: parsing is
 // structural (PackageParse.jet), composition deterministic (Compose.jet), and
 // filesystem resolution goes through the authority resolver (PackageLoad.jet).
-use jetpack_foundation.[OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE]
-use jet_foundation.[
-    EvidenceFacet, EvidenceKind, EvidenceOutcome, EvidenceRecord, AllocatorPolicy,
-    RuntimeLayer, PolicyDeclaration, evidence_outcome_is_failure,
-    evidence_record_is_expected_failure, evidence_record_is_unexpected_pass,
-]
+use {
+    jetpack_foundation.[OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE]
+    jet_foundation.[
+        EvidenceFacet, EvidenceKind, EvidenceOutcome, EvidenceRecord, AllocatorPolicy,
+        RuntimeLayer, PolicyDeclaration, evidence_outcome_is_failure,
+        evidence_record_is_expected_failure, evidence_record_is_unexpected_pass,
+    ]
+}
 
 enum PackageOutputKind {
     Library
@@ -309,9 +311,6 @@ struct PackagePolicy {
     declarations: [PolicyDeclaration]
     // `None` means no `lints:` block at all.
     lints_deny: [String]?
-    // Closed effect ceilings keyed by project-relative module path; each set
-    // is sorted, and an empty set is an explicit pure ceiling.
-    effects: [String: [String]]
     // `None`: no unsafe rule; empty: `.Deny`; otherwise `.Paths([...])`.
     unsafe_paths: [String]?
     // `None`: no rule; false: `.Deny`; true: `.Allow`.
@@ -330,7 +329,6 @@ struct PackagePolicy {
         PackagePolicy{
             declarations: [PolicyDeclaration]{},
             lints_deny: None,
-            effects: [String: [String]]{},
             unsafe_paths: None,
             expert: None,
             deps: None,

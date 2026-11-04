@@ -1,0 +1,15 @@
+Error [E0749]: `rates` reaches the `FS.Read` effect, which module `pricing` denies
+  --> tests/ui/effects/module_cap_denial_is_e0749.jet:5:8
+    |
+  5 |     fn rates() -> String { fs.read("rates.txt") ?? "" }
+    |        ^^^^^
+  --> tests/ui/effects/module_cap_denial_is_e0749.jet:3:1
+    |
+  3 | #FX(!Net, !FS)
+    | ^^^^^^^^^^^^^^ module `pricing` is capped here
+ Why: The module's `#FX(…)` cap denies `FS` to every function inside it and every callee it can reach
+ Fix: Remove the call that introduces `FS.Read`, move `rates` out of module `pricing`, or drop `!FS` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: rates
+ Scope chain: module pricing
+More: jet-lang.dev/e/E0749

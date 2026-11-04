@@ -1,112 +1,118 @@
 // Pratt expressions preserve retired arithmetic precedence solely to produce
 // behavior-preserving method repairs.
-use jet_foundation.[
-    AccessConvention,
-    BinOp,
-    ByteTextPart,
-    Call,
-    CallArg,
-    CallLabel,
-    Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
-    EnumLitArg,
-    Expr,
-    ExprField,
-    ExprMember,
-    ExprPair,
-    IndexKind,
-    Lambda,
-    LambdaBody,
-    LambdaParam,
-    NamedSpan,
-    OrFallback,
-    PlaceAccess,
-    Span,
-    Stmt,
-    StrFormat,
-    StrPart,
-    TextEdit,
-    TryConvert,
-    TupleField,
-    Type,
-    TypedLitBody,
-    UnOp,
-    UnitFormat,
-    ast_empty_call_arg_flags,
-    ast_empty_lambda_meta,
-    diagnostic_from_registry,
-    diagnostic_with_edit_grade,
-    expr_span,
-    diagnostic_with_edit,
-]
-use jet_lexer.[
-    STRING_PART_BYTE,
-    STRING_PART_INTERPOLATION,
-    STRING_PART_TEXT,
-    TOKEN_AMP,
-    TOKEN_AND_AND,
-    TOKEN_BANG,
-    TOKEN_BREAK,
-    TOKEN_CARET,
-    TOKEN_CHAR,
-    TOKEN_COLON,
-    TOKEN_COMMA,
-    TOKEN_COMPARE,
-    TOKEN_DOT,
-    TOKEN_DOT_DOT,
-    TOKEN_DOT_DOT_DOT,
-    TOKEN_DOT_DOT_LT,
-    TOKEN_EOF,
-    TOKEN_EQ,
-    TOKEN_EQ_EQ,
-    TOKEN_FALSE,
-    TOKEN_FLOAT,
-    TOKEN_GE,
-    TOKEN_GT,
-    TOKEN_HASH,
-    TOKEN_IDENT,
-    TOKEN_INT,
-    TOKEN_KW_COPY,
-    TOKEN_KW_IF,
-    TOKEN_KW_IT,
-    TOKEN_KW_LOOP,
-    TOKEN_KW_TAG,
-    TOKEN_KW_USE,
-    TOKEN_LBRACE,
-    TOKEN_LBRACKET,
-    TOKEN_LE,
-    TOKEN_LPAREN,
-    TOKEN_LT,
-    TOKEN_MINUS,
-    TOKEN_NOT_EQ,
-    TOKEN_NULL,
-    TOKEN_OR_OR,
-    TOKEN_PERCENT,
-    TOKEN_PERCENT_PERCENT,
-    TOKEN_PLUS,
-    TOKEN_QUESTION,
-    TOKEN_QUESTION_DOT,
-    TOKEN_QUESTION_QUESTION,
-    TOKEN_RAW_STRING,
-    TOKEN_RBRACE,
-    TOKEN_RBRACKET,
-    TOKEN_RETURN,
-    TOKEN_RPAREN,
-    TOKEN_SELF,
-    TOKEN_SEMI,
-    TOKEN_SHL,
-    TOKEN_SHR,
-    TOKEN_SLASH,
-    TOKEN_SLASH_PERCENT,
-    TOKEN_STAR,
-    TOKEN_STRING,
-    TOKEN_TILDE,
-    TOKEN_TRUE,
-    TOKEN_UNIT_NUMBER,
-    StringPart,
-    Token,
-]
+use {
+    jet_foundation.[
+        AccessConvention,
+        AppliedRuleApplication,
+        BinOp,
+        ByteTextPart,
+        Call,
+        CallArg,
+        CallLabel,
+        Diagnostic,
+        DiagnosticFixApplicability,
+        DiagnosticFixSafety,
+        EnumLitArg,
+        Expr,
+        ExprField,
+        ExprMember,
+        ExprPair,
+        IndexKind,
+        Marker,
+        Lambda,
+        LambdaBody,
+        LambdaParam,
+        NamedSpan,
+        OrFallback,
+        PlaceAccess,
+        RuleSite,
+        Span,
+        Stmt,
+        StrFormat,
+        StrPart,
+        TextEdit,
+        TryConvert,
+        TupleField,
+        Type,
+        TypedLitBody,
+        UnOp,
+        UnitFormat,
+        ast_empty_call_arg_flags,
+        ast_empty_lambda_meta,
+        diagnostic_from_registry,
+        diagnostic_with_edit_grade,
+        expr_span,
+        diagnostic_with_edit,
+        marker_registered,
+    ]
+    jet_lexer.[
+        STRING_PART_BYTE,
+        STRING_PART_INTERPOLATION,
+        STRING_PART_TEXT,
+        TOKEN_AMP,
+        TOKEN_AND_AND,
+        TOKEN_BANG,
+        TOKEN_BREAK,
+        TOKEN_CARET,
+        TOKEN_CHAR,
+        TOKEN_COLON,
+        TOKEN_COMMA,
+        TOKEN_COMPARE,
+        TOKEN_DOT,
+        TOKEN_DOT_DOT,
+        TOKEN_DOT_DOT_DOT,
+        TOKEN_DOT_DOT_LT,
+        TOKEN_EOF,
+        TOKEN_EQ,
+        TOKEN_EQ_EQ,
+        TOKEN_FALSE,
+        TOKEN_FLOAT,
+        TOKEN_GE,
+        TOKEN_GT,
+        TOKEN_HASH,
+        TOKEN_IDENT,
+        TOKEN_INT,
+        TOKEN_KW_COPY,
+        TOKEN_KW_IF,
+        TOKEN_KW_IT,
+        TOKEN_KW_LOOP,
+        TOKEN_KW_TAG,
+        TOKEN_KW_USE,
+        TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LE,
+        TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_MINUS,
+        TOKEN_NOT_EQ,
+        TOKEN_NULL,
+        TOKEN_OR_OR,
+        TOKEN_PERCENT,
+        TOKEN_PERCENT_PERCENT,
+        TOKEN_PLUS,
+        TOKEN_QUESTION,
+        TOKEN_QUESTION_DOT,
+        TOKEN_QUESTION_QUESTION,
+        TOKEN_RAW_STRING,
+        TOKEN_RBRACE,
+        TOKEN_RBRACKET,
+        TOKEN_RETURN,
+        TOKEN_RPAREN,
+        TOKEN_SELF,
+        TOKEN_SEMI,
+        TOKEN_SHL,
+        TOKEN_SHR,
+        TOKEN_SLASH,
+        TOKEN_SLASH_PERCENT,
+        TOKEN_STAR,
+        TOKEN_STRING,
+        TOKEN_TILDE,
+        TOKEN_TRUE,
+        TOKEN_UNIT_NUMBER,
+        StringPart,
+        Token,
+    ]
+}
 
 MAX_EXPRESSION_DEPTH :: 256
 
@@ -365,14 +371,14 @@ fn parser_check_mixed_logic(state: &JetParserState, operand: ParsedExpr) {
     &state.diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: operand.span, new_text: grouped}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
 
-// E0941 (D-COPY-WORD1=A): the retired prefix copy sigil. The Safe fix
+// E0941: the retired prefix copy sigil. The Safe fix
 // rewrites `~operand` to `operand.copy()`, parenthesized when the operand is
 // not a postfix chain; without operand text the fix stays prose.
 fn parser_report_retired_copy_sigil(state: &JetParserState, sigil: Span, full: Span) {
     operand_text :: parser_source_slice(state, sigil.end, full.end).trim()
     shown :: if operand_text == "" -> "x" else -> operand_text
     replacement :: if parser_is_postfix_operand(shown) -> "{shown}.copy()" else -> "({shown}).copy()"
-    diagnostic :: diagnostic_from_registry("E0941", Val(sigil), "the `~` copy sigil is retired; a copy is the method `x.copy()`", "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` (D-COPY-WORD1), so a copy reads as a word and chains like any method", "write `{replacement}`")
+    diagnostic :: diagnostic_from_registry("E0941", Val(sigil), "the `~` copy sigil is retired; a copy is the method `x.copy()`", "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()`, so a copy reads as a word and chains like any method", "write `{replacement}`")
     if operand_text == "" {
         &state.diagnostics.push(diagnostic)
         return
@@ -642,7 +648,7 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
     token :: parser_current(&state)
     kind :: token.kind
     word :: if kind == TOKEN_IDENT -> parser_value(state, token) else -> ""
-    if kind == TOKEN_IDENT && word == "task" -> return parser_parse_task_surface(&state, depth + 1)
+    if kind == TOKEN_IDENT && word == "task" && parser_task_surface_ahead(&state) -> return parser_parse_task_surface(&state, depth + 1)
     // `shared expr` is the one shared-cell construction
     // form. `shared` stays an ordinary name unless the next token opens a
     // value; the cell is the `Shared.new` call shape every tier lowers, and
@@ -682,13 +688,13 @@ fn parser_parse_prefix(state: &JetParserState, depth: Int, allow_struct_lit: Boo
         span := parser_cover(token.span, operand.span)
         return ParsedExpr{expr: Expr.Unary{op: op, operand: operand.expr, span: span, id: parser_node_id(&state)}, span: span}
     }
-    // D-COPY-WORD1=A: the prefix `~x` sigil and the `copy x` word are
+    // The prefix `~x` sigil and the `copy x` word are
     // retired; a copy is the built-in method `x.copy()`. Teach (E0941 with a
     // Safe rewrite, E0991 in prose), then recover as the copy so parsing
     // continues.
     if kind == TOKEN_TILDE || kind == TOKEN_KW_COPY {
         parser_bump(&state)
-        if kind == TOKEN_KW_COPY -> parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` (D-COPY-WORD1) — so all code reads the same", "write `name.copy()` in place of `copy name`")
+        if kind == TOKEN_KW_COPY -> parser_add_error_code(&state, "E0991", token.span, "`copy` is now the method `x.copy()`", "Jet has exactly one spelling for a copy — the built-in method `.copy()` — so all code reads the same", "write `name.copy()` in place of `copy name`")
         operand :: parser_parse_expression_restricted(&state, 13, depth + 1, allow_struct_lit, stop_before_comparison)
         span := parser_cover(token.span, operand.span)
         if kind == TOKEN_TILDE -> parser_report_retired_copy_sigil(&state, token.span, span)
@@ -891,6 +897,14 @@ fn parser_parse_marker_value(state: &JetParserState, depth: Int, allow_struct_li
         "Todo" -> return ParsedExpr{expr: Expr.Todo{span: head_span, expected_type: None, id: parser_node_id(&state)}, span: head_span}
         "Add" | "Mul" | "Min" | "Max" -> return ParsedExpr{expr: Expr.ReduceMarker{name: name, span: head_span, id: parser_node_id(&state)}, span: head_span}
         else -> {}
+    }
+    // A marker with no value after it is no tag application: an unregistered
+    // name applies to the expression site, where sema reports it from the shared
+    // applied-rule vocabulary (E0927) like every other unknown marker.
+    if !parser_starts_expression(parser_current_kind(&state)) && !marker_registered(name) {
+        marker :: Marker{name: name, negated: false, name_span: Span{start: first.span.start, end: name_end}, args: [], arg_labels: [], span: head_span, ct: None}
+        &state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(head_span), site: Val(RuleSite.Expression)})
+        return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(&state)}, span: head_span}
     }
     applied := name
     if name == "Tainted" {
@@ -1406,6 +1420,22 @@ fn parser_task_spawn(state: &JetParserState, head: Span, take_names: [NamedSpan]
     parser_task_call(&state, head, "task.spawn", head, body_lambda, body_span)
 }
 
+// Only the complete `task` surface spawns: `task {`, `task ^name`, a
+// `task.all/race/any/group/timeout` selector, or an atom or control operand.
+// Followed by `(`, `[`, another `.`, or an operator, `task` is an ordinary name.
+fn parser_task_surface_ahead(state: &JetParserState) -> Bool Never! {
+    next :: parser_kind_at(&state, 1)
+    if next == TOKEN_LBRACE || next == TOKEN_CARET -> return true
+    if next == TOKEN_DOT {
+        selector :: parser_lookahead(&state, 2)
+        if selector.kind != TOKEN_IDENT -> return false
+        name :: parser_value(state, selector)
+        return name == "all" || name == "race" || name == "any" || name == "group" || name == "timeout"
+    }
+    if next == TOKEN_LPAREN || next == TOKEN_LBRACKET || next == TOKEN_MINUS || next == TOKEN_BANG || next == TOKEN_STAR || next == TOKEN_AMP -> return false
+    parser_starts_expression(next)
+}
+
 // One `task` word owns single-task
 // spawn (`task { … }`, `task ^name { … }`, `task value`), `task.timeout(d)`
 // and the `all`/`race`/`any` combinators. Named `task.all` branches build a
@@ -1426,10 +1456,6 @@ fn parser_parse_task_surface(state: &JetParserState, depth: Int) -> ParsedExpr {
             close :: parser_expect(&state, TOKEN_RPAREN, "to finish `task.timeout`")
             span :: parser_cover(head, close.span)
             return ParsedExpr{expr: parser_task_call(&state, head, "task.timeout", selector.span, argument.expr, argument.span), span: span}
-        }
-        if name != "all" && name != "race" && name != "any" {
-            parser_add_error(&state, selector.span, "unknown task selector `{name}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`")
-            return ParsedExpr{expr: Expr.Unit{span: head, id: parser_node_id(&state)}, span: head}
         }
         open :: parser_expect(&state, TOKEN_LBRACE, "after the task selector")
         named := [TupleField]{}

@@ -1,11 +1,14 @@
-// Plain native execution. Authority-bound execution remains fail-closed until
-// the native isolation engine exists; a plain bwrap argv is ordinary execution.
+// Native execution. An authority-bound spec launches as its bubblewrap
+// sandbox spec (ProcessExecutionAuthority); the child keeps the bound spec
+// for its receipt.
 // ExecutionChild160: mutex0 refs8 Child72*16 owned Spec136*24 worker32 done40
-// receipt48 error56 reserved64 startNs72 output80 errors88 captured96 timeout104
+// receipt48 error56 waiter64 startNs72 output80 errors88 captured96 timeout104
 // limit112 stop120 stdoutPipe128 stderrPipe136 stdoutAt144 stderrAt152.
-// Worker owns one ref; every public alias owns one ref. Each pipe is the
-// Pipe40 cell the child lends as `child.stdout` / `child.stderr`, made on
-// first use; each At is how far its readers have consumed that capture.
+// Worker owns one ref; every public alias owns one ref. waiter is the park
+// slot (one reference) of the first explicit waiter, woken when done is set.
+// Each pipe is the Pipe40 cell the child lends as `child.stdout` /
+// `child.stderr`, made on first use; each At is how far its readers have
+// consumed that capture.
 PROCESS_EXECUTION_BYTES :: I64{160}
 PROCESS_EXECUTION_STDOUT :: I64{128}
 PROCESS_EXECUTION_STDERR :: I64{136}
@@ -15,11 +18,13 @@ fn process_execution_now() -> I64 { sync_now_ns() }
 fn process_execution_launch(spec: I64, collect: Bool, err: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{0})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    if (fd_word(spec, PROCESS_SPEC_POLICY_WIRE) != I64{0}) {
-        _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn")), err)
-        return I64{0}
+    sandboxed := I64{0}
+    if process_authority_bound(spec) {
+        sandboxed = process_authority_sandbox(spec, err)
+        if (sandboxed == I64{0}) -> return I64{0}
     }
-    native :: process_execution_launch_native(spec, err)
+    native :: process_execution_launch_native(if (sandboxed == I64{0}) -> spec else -> sandboxed, err)
+    jet_rt_handle_drop_process_spec(sandboxed)
     if (native == I64{0}) -> return I64{0}
     child :: jet_rt_alloc(PROCESS_EXECUTION_BYTES, I64{8})
     coll_zero(child, PROCESS_EXECUTION_BYTES)
@@ -54,9 +59,12 @@ fn process_execution_launch_input(spec: I64, input: I64, collect: Bool, err: I64
     jet_rt_handle_drop_process_spec(prepared)
     child
 }
-#Export(c) fn jet_process_spec_plan(spec: I64, _ok: I64, err: I64) -> I64 {
-    if (fd_word(spec, PROCESS_SPEC_POLICY_WIRE) == I64{0}) -> return process_execution_invalid(spec, rt_static_text("ProcessSpec.plan() requires an authority policy from .under(...)"), err)
-    process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn")), err)
+#Export(c) fn jet_process_spec_plan(spec: I64, ok: I64, err: I64) -> I64 {
+    if !process_authority_bound(spec) -> return process_execution_invalid(spec, rt_static_text("ProcessSpec.plan() requires an authority policy from .under(...)"), err)
+    plan :: process_authority_plan(spec, I64{0}, err)
+    if (plan == I64{0}) -> return I64{0}
+    fd_put(ok, I64{0}, plan)
+    I64{1}
 }
 #Export(c) fn jet_process_spec_spawn(spec: I64, ok: I64, err: I64) -> I64 {
     child :: process_execution_launch(spec, true, err)

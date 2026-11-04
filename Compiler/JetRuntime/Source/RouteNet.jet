@@ -53,8 +53,9 @@ NET_UDP_PACKET_BYTES :: I64{96}
 #Export(c) fn jet_net_raw_udp_packet_addr(packet: I64) -> I64 { net_copy(packet, I64{56}) }
 
 // recv_from into a 65535-byte buffer, waiting on WouldBlock/Interrupted
-// under the socket's deadline; keep min(n, cap) bytes, truncated when n > cap.
-fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, output: I64, error: I64) -> I64 {
+// under the explicit deadline when `explicit`, else the socket's; keep
+// min(n, cap) bytes, truncated when n > cap.
+fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, explicit: Bool, deadline: I64, output: I64, error: I64) -> I64 {
     operation :: rt_static_text("udp receive")
     if !net_udp_open(value, operation, error) -> return I64{0}
     native :: jet_int_owned_to_i64(limit)
@@ -63,7 +64,10 @@ fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, output:
     if (!positive && native < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("udp receive limit must be non-negative")), I64{0}, error)
     cap :: if (native < ceiling) -> native else -> ceiling
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_udp_deadline(value, wrapping(scratch + I64{32}))
+    if !net_udp_deadline_enter(value, explicit, deadline, operation, wrapping(scratch + I64{32}), error) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return I64{0}
+    }
     buffer :: jet_rt_alloc(I64{65535} * RT_HOST_U8_STRIDE, I64{8})
     packet :: jet_rt_alloc(NET_UDP_PACKET_BYTES, I64{8})
     thread_zero(packet, NET_UDP_PACKET_BYTES)
@@ -101,10 +105,16 @@ fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, output:
 
 // NetHTTP.rs:2809: a positive limit, kept bytes capped at 1 MiB.
 #Export(c) fn jet_net_udp_recv_from(value: I64, limit: I64, output: I64, error: I64) -> I64 {
-    net_udp_receive(value, limit, true, I64{1048576}, output, error)
+    net_udp_receive(value, limit, true, I64{1048576}, false, I64{0}, output, error)
 }
 
 // NetHTTP.rs:2905: a non-negative limit, kept bytes capped at 65535.
 #Export(c) fn jet_net_udp_receive(value: I64, limit: I64, output: I64, error: I64) -> I64 {
-    net_udp_receive(value, limit, false, I64{65535}, output, error)
+    net_udp_receive(value, limit, false, I64{65535}, false, I64{0}, output, error)
+}
+
+// UdpSocket::receive(max_bytes, deadline:): the same receive under the
+// explicit deadline instead of the socket's timeout.
+#Export(c) fn jet_net_udp_receive_deadline(value: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    net_udp_receive(value, limit, false, I64{65535}, true, deadline, output, error)
 }

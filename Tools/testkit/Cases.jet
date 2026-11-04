@@ -1,4 +1,4 @@
-use core.files as files
+use files :: core.files
 
 // A case is a public-CLI scenario, not a program entry. Descend through
 // groups and fixture directories alike; only .case files are entries.
@@ -96,7 +96,11 @@ fn kit_cases_known_verdict(outcome: KitOutcome, annotation: String) -> KitOutcom
     result
 }
 
+// A failure the product owns, which a ledger row may annotate. Beyond FAIL,
+// that is an ICE, a signal death, or a child that exited without reading its
+// scripted input (the product left before the case could drive it), never a
+// kit fault such as a spawn or wait error.
 fn kit_cases_owned_failure(verdict: KitVerdict) -> Bool {
     if verdict.status == "FAIL" -> return true
-    verdict.status == "ERROR" && (verdict.detail.contains("internal compiler error (exit 101)") || verdict.detail.contains("child terminated by signal"))
+    verdict.status == "ERROR" && (verdict.detail.contains("internal compiler error (exit 101)") || verdict.detail.contains("child terminated by signal") || verdict.detail.contains("without reading it"))
 }

@@ -2288,12 +2288,16 @@ fn sema_ownership_is_share_site(state: SemaOwnershipState, span: Span) -> Bool N
 // (`mark_moved(name)`), so a read payload or view binding moved by name
 // qualifies even though its places chase to projections of its source. The
 // function check confirms the copy against the registry before using it.
-fn sema_ownership_move_origin(expr: Expr, ty: Type, consumer: String, unmarked: Bool) -> SemaOwnershipMoveOrigin {
+// A one-pass source (Iter, Stream, Body) has no copy to give, and
+// `copies: .Explicit` forbids the hidden copy, so either keeps the move and a
+// later use is E0121.
+fn sema_ownership_move_origin(expr: Expr, ty: Type, consumer: String, unmarked: Bool, copies_explicit: Bool) -> SemaOwnershipMoveOrigin {
     plain_name := if expr == {
         .Ident(_, _, _) -> true
         else -> false
     }
-    share_ty :: if unmarked && plain_name && sema_ownership_type_cloneable(ty) != (Val(false)) -> Val(ty) else -> None
+    shareable :: unmarked && plain_name && !copies_explicit && !sema_call_reflection_one_pass(ty) && sema_ownership_type_cloneable(ty) != (Val(false))
+    share_ty :: if shareable -> Val(ty) else -> None
     moved_ty :: if plain_name -> Val(ty) else -> None
     SemaOwnershipMoveOrigin{span: expr_span(expr), consumer: consumer, share_ty: share_ty, moved_ty: moved_ty}
 }
@@ -2367,6 +2371,14 @@ fn sema_ownership_diag_moved(place: String, origin: SemaOwnershipMoveOrigin, spa
     )
     labeled :: diagnostic_with_label(^diagnostic, origin.label_span ?? origin.span, label)
     if origin.moved_ty == .Val(ty) && sema_call_reflection_one_pass(ty) -> return diagnostic_with_detail(^labeled, sema_ownership_one_pass_note(place, ty))
+    // A value consumed by `close` is a Close resource that is now closed: it
+    // has no copy to give, so a note says to acquire a new one instead.
+    if consumer == "`close`" && origin.moved_ty == .Val(ty) {
+        if ty == {
+            .Named(name) | .Apply(name, _) -> return diagnostic_with_detail(^labeled, " Note: acquire a new `{sema_call_reflection_leaf_name(name)}` resource; closed resources cannot be copied or reused")
+            else -> {}
+        }
+    }
     labeled
 }
 
@@ -2673,9 +2685,15 @@ fn sema_ownership_carrier_loan_exempt(state: &SemaOwnershipState, expr: Expr, pl
 
 fn sema_ownership_active_view_conflict(state: &SemaOwnershipState, place: SemaOwnershipPlace, access: AccessConvention) -> Bool Never! {
     loop fact in state.views {
-        if fact.active && !fact.invalidated && !fact.contested && sema_ownership_places_overlap(fact.source, place) && (fact.access == AccessConvention.Write || access == AccessConvention.Write) -> return true
+        if fact.active && !fact.invalidated && !fact.contested && sema_ownership_places_overlap(fact.source, place) && sema_ownership_view_access_conflicts(fact.access, access) -> return true
     }
     false
+}
+
+// A live read view tolerates other reads only: a write or a move of its owner
+// would invalidate what it looks into.
+fn sema_ownership_view_access_conflicts(view: AccessConvention, access: AccessConvention) -> Bool Never! {
+    view == AccessConvention.Write || access == AccessConvention.Write || access == AccessConvention.Move
 }
 
 fn sema_ownership_mark_views_contested(state: &SemaOwnershipState, first: Int) Never! {
@@ -2686,8 +2704,19 @@ fn sema_ownership_conflicting_view_for_expr(state: &SemaOwnershipState, place: S
     loop carrier in state.views {
         if carrier.active && carrier.contested && sema_ownership_view_fact_matches_expr(carrier, expr, scopes) -> return None
     }
+    // Moving a view binding moves the view, not the owner it looks into, so
+    // it conflicts with other views as a read of their source does.
+    effective := access
+    if access == AccessConvention.Move {
+        loop carrier in state.views {
+            if carrier.active && !carrier.invalidated && sema_ownership_view_fact_matches_expr(carrier, expr, scopes) {
+                effective = AccessConvention.Read
+                break
+            }
+        }
+    }
     loop fact in state.views {
-        if !fact.active || fact.invalidated || fact.contested || !sema_ownership_places_overlap(fact.source, place) || (fact.access != AccessConvention.Write && access != AccessConvention.Write) -> next
+        if !fact.active || fact.invalidated || fact.contested || !sema_ownership_places_overlap(fact.source, place) || !sema_ownership_view_access_conflicts(fact.access, effective) -> next
         through_ancestor := false
         loop carrier in state.views {
             if carrier.active && !carrier.invalidated && sema_ownership_view_fact_matches_expr(carrier, expr, scopes) && sema_ownership_place_extends(carrier.source, place) && (carrier.seq == fact.seq || sema_ownership_view_descends_from(state, carrier, fact.seq)) {
@@ -3063,7 +3092,7 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
         move_ty = info.symbol.ty ?? Type.Named{name: "Unit"}
     }
     if !sema_ownership_type_is_copy(move_ty) {
-        origin := sema_ownership_move_origin(expr, move_ty, consumer, unmarked)
+        origin := sema_ownership_move_origin(expr, move_ty, consumer, unmarked, scopes.copies_explicit)
         // A `#SingleUse` value keeps its exact move; it never copies.
         if sema_single_use_key(state, places[0].root_key) -> origin.share_ty = None
         loop place in sema_ownership_moved_record_places(expr, places, scopes, unmarked) -> &state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})

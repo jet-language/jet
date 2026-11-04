@@ -1,8 +1,10 @@
 // Exact compiler-value contract from Collections.rs::build_context_method_*.
 // This table is arity-polymorphic; Core owns the session semantics, not sema.
-use jet_foundation.[AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_accepts, build_option_argument, build_option_list_value, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
-use jet_parser.[jfmt_format_program_with_tokens]
-use jet_lexer.[Token]
+use {
+    jet_foundation.[AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_accepts, build_option_argument, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
+    jet_parser.[jfmt_format_program_with_tokens]
+    jet_lexer.[Token]
+}
 
 struct SemaBuildContextMethodContract {
     parameters: [Type]
@@ -285,10 +287,11 @@ fn sema_build_option_literal(expr: Expr) -> String? {
 // value, as the fix of a malformed call.
 fn sema_build_option_call_shape(method: String, name: String, pinned: Bool) -> String Never! {
     row :: build_option_row(name) ?? return "b.pin(.optimize, .Full)"
+    values :: build_option_method_values(row)
     example :: if row.kind == {
         .Text -> "\"dist\""
         .List -> "[\"z\"]"
-        else -> build_option_argument(row, row.values[row.values.len() - 1])
+        else -> build_option_argument(row, values[values.len() - 1])
     }
     if pinned -> return "b.pin(.{name}, {example})"
     "b.{method}({example})"

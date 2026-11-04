@@ -1,10 +1,12 @@
 // Original observer: build_sandbox.rs:1366-1385,1446-1449.
-use core.net as net
-use core.time as time
-use core.files as files
-use core.process as process
+use {
+    net :: core.net
+    time :: core.time
+    files :: core.files
+    process :: core.process
+}
 fn run() {
-    args :: process.argv().skip(1).to_list()
+    args :: process.args()
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("bind observer")
     port :: net.socket_port(net.listener_local_socket_addr(listener) ?? panic("address"))
     files.write(args[0], "{port}") ?? panic("publish port")

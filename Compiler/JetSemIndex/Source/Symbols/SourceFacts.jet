@@ -5,11 +5,10 @@
 use jet_foundation.[
     Item,
     Type,
-    Expr,
     Span,
     NameFacts,
     type_name,
-    expr_span,
+    marker_decl_signature,
     failure_contract_shown_return,
     failure_contract_shown_type,
     failure_contract_source,
@@ -342,47 +341,16 @@ fn semantic_shape(name: String, kind: SymKind, owner: String?, names: NameFacts,
 
 // Rust marker_declaration_signature: exact top-level checked AST name+span,
 // not a source parser. The same module source supplies only expression spelling.
+// A marker struct and its rule share one name span, so both definitions show
+// the marker signature.
 fn semantic_marker_declaration_signature(items: [Item], def: SymDef, source: String) -> String? Never! {
-    if !def.identity.starts_with("rule:") -> return None
     loop item in items {
         if item == .MarkerDecl(declaration) {
             if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end -> next
-            parts := [String]{}
-            loop parameter in declaration.params {
-                if parameter.ty == {
-                    .Val(ty) -> {
-                        variadic :: if parameter.variadic -> "..." else -> ""
-                        default :: if parameter.value == {
-                            .Val(value) -> "{{{semantic_marker_expr_source(source, value)}}}"
-                            .None -> ""
-                        }
-                        &parts.push("{parameter.name}: {variadic}{type_name(ty)}{default}")
-                    }
-                    .None -> {
-                        value :: if parameter.value == {
-                            .Val(value) -> semantic_marker_expr_source(source, value)
-                            .None -> "…"
-                        }
-                        &parts.push("{parameter.name}: {value}")
-                    }
-                }
-            }
-            return Val("marker {declaration.name}({parts.join(", ")})")
+            return Val(marker_decl_signature(declaration, source))
         }
     }
     None
-}
-fn semantic_marker_expr_source(source: String, expression: Expr) -> String Never! {
-    semantic_marker_span_source(source, expr_span(expression))
-}
-fn semantic_marker_span_source(source: String, span: Span) -> String Never! {
-    bytes :: source.bytes()
-    if span.start < 0 || span.end < span.start || span.end > bytes.len() -> return "…"
-    selected := bytes[span.start..<span.end] // #4303
-    value :: String.from_bytes(selected) ?? return "…"
-    trimmed := value.trim() // #4303
-    if trimmed != "" -> return trimmed
-    "…"
 }
 
 // Rust source_docs: adjacent /// lines only, first nonempty non-Example summary,

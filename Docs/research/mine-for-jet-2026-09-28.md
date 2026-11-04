@@ -83,7 +83,7 @@ day. D-HONEST-SIG1 (#3710) is open, and the sync-engine design sits on #3709.
 | D10 | Six browser examples print API names ("This example only documents the API") instead of calling the API. | #3704 |
 
 Papercuts logged: E0113's fix for `n / 2` says only "Use Int here". E0107
-suggests `use core as core`. The E1803 Why line and prompt show raw facts and
+suggests `use core :: core`. The E1803 Why line and prompt show raw facts and
 a JSON array.
 
 ## Owner notes, answered

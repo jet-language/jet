@@ -52,8 +52,10 @@ command failure, shape/width mismatch, and message-limit failure.
 A host program can use the generated module in the normal effect-declared loop:
 
 ```jet
-use octave.scale as scale
-use core.compute as compute
+use {
+    scale :: octave.scale
+    compute :: core.compute
+}
 
 fn run() -[FFI.Octave, GPU, IO]> {
     session :: scale.open() ?? panic("Octave sidecar did not start")

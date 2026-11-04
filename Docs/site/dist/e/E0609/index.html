@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Import it from inside its enclosing module, or remove `priv` from the module.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0609</code>: <code>tests/ui/module_inline_private.stderr</code>.</p>
-<pre class="diag">Error [E0609]: `helper` is private in module `math`
-  --&gt; tests/ui/module_inline_private.jet:5:18
+<p>First UI snapshot mentioning <code>E0609</code>: <code>tests/ui/core_crypto_fd_import_is_private.stderr</code>.</p>
+<pre class="diag">Error [E0609]: `JetcFd` is private in module `core.crypto`
+  --&gt; core_crypto_fd_import_is_private.jet:4:1
     |
-  5 | fn run() { print(math.helper(5)) }
-    |                  ^^^^
- Why: Only `pub` items in an inline module are reachable from outside it
- Fix: Add `pub` before `fn helper` in module `math`
+  4 | use core.crypto.[JetcFd]
+    | ^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A Core module&#39;s API is the names it exports; its other types and helpers belong to Core alone
+ Fix: Use what `core.crypto` exports instead
 More: jet-lang.dev/e/E0609
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

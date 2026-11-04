@@ -2,9 +2,11 @@
 // An explicit `^` move never lowers to a copy: a call argument `^p` / `^p.f`
 // on a read parameter is E0201, `^xs[i]` is E0225, and on an owned root it
 // is a checked move.
-use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
-use jet_cli.[jet_cli_compile_file]
-use jet_foundation.[DIAGNOSTIC_ERROR]
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR]
+}
 
 fn move_mark_fixture_reject(file: String, code: String) {
     checked :: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)

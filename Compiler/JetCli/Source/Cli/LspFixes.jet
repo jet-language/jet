@@ -1,6 +1,8 @@
 // Source/LSP/Check.rs fix projections shared by CLI fixes and code actions.
-use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, TextEdit]
-use jet_driver.[jet_driver_apply_edits]
+use {
+    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, TextEdit]
+    jet_driver.[jet_driver_apply_edits]
+}
 
 struct JetCLIFix {
     title: String
@@ -13,6 +15,15 @@ struct JetCLIFixApply {
     source: String
     applied: Int
     deferred: Int
+}
+
+// A fix `jet fix` did not apply (FixCommands.jet), and why: one that needs
+// review (`--all` applies it), or one whose edited file no longer checks.
+// The fix log records each (jet_cli_fix_log).
+struct JetCLIFixSkip {
+    title: String
+    edit: TextEdit
+    reason: String
 }
 
 fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {

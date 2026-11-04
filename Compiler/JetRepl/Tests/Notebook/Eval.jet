@@ -72,7 +72,7 @@ fn notebook_eval_test_turn(session: Session, source: String, preloaded: Bool) ->
 #Test("notebook_eval_failed_import_removes_trial_source") {
     session := Session.new()
     before :: session.import_srcs.len()
-    result :: notebook_eval_test_turn(&session, "use nonexistent_notebook_module as missing", false)
+    result :: notebook_eval_test_turn(&session, "use missing :: nonexistent_notebook_module", false)
     assert_eq(result.status, ReplTurnStatus.Error)
     assert_eq(session.import_srcs.len(), before)
     assert(session.scope.is_empty())

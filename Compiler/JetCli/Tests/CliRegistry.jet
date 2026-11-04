@@ -4,14 +4,16 @@
 // self_update_keyless_override_is_registered_for_help_and_completions) and the
 // retired-marker explanation (Explain.rs marker_explain_reports_typed_signature_and_retirement),
 // run on the Jet-built CLI.
-use jet_cli.[
-    JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
-    jet_cli_completions_bash, jet_cli_completions_fish, jet_cli_completions_powershell,
-    jet_cli_completions_zsh, jet_cli_group_usage, jet_cli_handler_index,
-    jet_cli_is_canonical_top_level, jet_cli_is_known_flag, jet_cli_man_page, jet_cli_moved_command,
-    jet_cli_nested_command, jet_cli_rule_explanation, jet_cli_rule_named, jet_cli_syntax_lookup,
-]
-use jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, marker_source_read]
+use {
+    jet_cli.[
+        JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
+        jet_cli_completions_bash, jet_cli_completions_fish, jet_cli_completions_powershell,
+        jet_cli_completions_zsh, jet_cli_group_usage, jet_cli_handler_index,
+        jet_cli_is_canonical_top_level, jet_cli_is_known_flag, jet_cli_man_page, jet_cli_moved_command,
+        jet_cli_nested_command, jet_cli_rule_explanation, jet_cli_rule_named, jet_cli_syntax_lookup,
+    ]
+    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, marker_source_read]
+}
 
 fn cli_registry_require(ok: Bool, what: String) Never! {
     if !ok -> panic(what)
@@ -110,20 +112,24 @@ fn cli_registry_flag_copy() Never! {
     }
 }
 
-// Prelude/Markers.jet rows (verbatim) through the one rule explanation.
+// Prelude/Markers.jet marker types through the one rule explanation. A
+// comment, a variadic last field and a group exercise the reader's shape.
 fn cli_registry_explain_markers() Never! {
-    rules :: marker_source_read("marker Pure($sites: [.Function, .Method], $retired: \"-[]>\")\nmarker Inline(mode: InlineMode{{.Hint}}, $sites: [.Function, .Method, .Constant])\n")
+    rules :: marker_source_read("struct Pure {{\n    impl Marker {{\n        sites :: [.Function, .Method]\n    }}\n}}\n\n// struct Hidden {{ impl Marker {{ sites :: [.Block] }} }}\nstruct Inline {{\n    mode: InlineMode{{.Hint}}\n\n    impl Marker {{\n        sites :: [.Function, .Method, .Constant]\n    }}\n}}\n\nstruct Scope {{\n    effects: [Effect]\n\n    impl Marker {{\n        sites :: [.Block]\n        repeatable :: true\n    }}\n}}\n\nstruct Fast {{\n    impl Marker {{\n        group :: #[Inline(.Always)]\n    }}\n}}\n")
+    cli_registry_require(rules.len() == 3, "the reader keeps the three rule types and skips the comment and the group")
     pure :: jet_cli_rule_named(rules, "Pure") ?? panic("Pure rule row")
     inline :: jet_cli_rule_named(rules, "Inline") ?? panic("Inline rule row")
+    scope :: jet_cli_rule_named(rules, "Scope") ?? panic("Scope rule row")
     inline_explanation :: jet_cli_rule_explanation(inline)
     cli_registry_require(inline_explanation.meaning == "`#Inline(mode: InlineMode{{.Hint}})`", "Inline typed signature")
-    cli_registry_require(inline_explanation.stage == "rule applicability" && !(inline_explanation.what ?? "").contains("status: Retired"), "Inline is a live rule")
-    cli_registry_require((inline_explanation.what ?? "") == "arguments: optional; repeatable: false; status: Active; attachment sites: [Function, Method, Constant]. Argument declarations: `core.compiler.lang.InlineMode`.", "Inline rule facts")
+    cli_registry_require(inline_explanation.stage == "rule applicability", "Inline is a rule")
+    cli_registry_require((inline_explanation.what ?? "") == "arguments: optional; repeatable: false; attachment sites: [Function, Method, Constant]. Argument declarations: `core.compiler.lang.InlineMode`.", "Inline rule facts")
     pure_explanation :: jet_cli_rule_explanation(pure)
-    cli_registry_require((pure_explanation.what ?? "").contains("status: Retired"), "Pure is retired")
-    cli_registry_require((pure_explanation.fix ?? "") == "replace it with `-[]>`", "Pure names its replacement")
-    cli_registry_require((pure_explanation.what ?? "") == "arguments: none; repeatable: false; status: Retired {{ replacement: \"-[]>\" }}; attachment sites: [Function, Method].", "Pure rule facts")
+    cli_registry_require((pure_explanation.what ?? "") == "arguments: none; repeatable: false; attachment sites: [Function, Method].", "Pure rule facts")
     cli_registry_require((pure_explanation.why ?? "") == "resolution is SiteBound; site-bound authority never becomes ambient policy", "site-bound resolution")
+    scope_explanation :: jet_cli_rule_explanation(scope)
+    cli_registry_require(scope_explanation.meaning == "`#Scope(Effect...)`", "Scope variadic signature")
+    cli_registry_require((scope_explanation.what ?? "").starts_with("arguments: required; repeatable: true; attachment sites: [Block]."), "Scope rule facts")
     // The dictionary rows route to the rule row, never to the placeholder.
     names :: [String]{"Pure", "#Pure", "Inline"}
     loop name in names {

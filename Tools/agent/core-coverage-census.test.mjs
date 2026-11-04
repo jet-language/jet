@@ -56,16 +56,19 @@ test("return types preserve builtin, prelude and compound spellings", () => {
     ["Bool", "Int", "String", "Float", "[String]", "[String: Int]", "Int?", "Duration", "(name: String, n: Int)"]);
 });
 
-test("calls resolve fully qualified, module aliases, member imports and generics", () => {
-  assert.deepEqual(ids(`use core.text as words
-    use core.text.[split as pieces]
-    fn run() { words.trim("a"); core.text.trim("b"); pieces<Int>(1) }`),
-  ["core.text.trim", "core.text.trim", "core.text.split"]);
+test("calls resolve fully qualified, alias rows, member imports, use blocks and generics", () => {
+  assert.deepEqual(ids(`use {
+        words :: core.text
+        pieces :: core.text.split
+        core.math.[trim]
+    }
+    fn run() { words.trim("a"); core.text.trim("b"); pieces<Int>(1); trim() }`),
+  ["core.text.trim", "core.text.trim", "core.text.split", "core.math.trim"]);
   assert.deepEqual(ids("use core.text\nfn trim() {}\nfn run() { text.trim(\"a\") }"), ["core.text.trim"]);
 });
 
 test("comments, strings, references and declarations do not count as calls", () => {
-  assert.deepEqual(ids(`use core.text as t
+  assert.deepEqual(ids(`use t :: core.text
     // t.unused()
     /* t.unused() */
     text :: "t.unused()"
@@ -76,15 +79,15 @@ test("comments, strings, references and declarations do not count as calls", () 
 });
 
 test("scoped aliases do not escape a block or credit a same-named module", () => {
-  assert.deepEqual(ids(`use core.text as t
+  assert.deepEqual(ids(`use t :: core.text
     fn run() {
-      { use core.math as t; t.trim() }
+      { use t :: core.math; t.trim() }
       t.trim("a")
     }`), ["core.math.trim", "core.text.trim"]);
 });
 
 test("qualified types, typed receivers, inferred constructors and chained calls", () => {
-  assert.deepEqual(ids(`use core.crypto as crypto
+  assert.deepEqual(ids(`use crypto :: core.crypto
     use core.crypto.[Hasher]
     fn run(h: Hasher) {
       h.digest()
@@ -96,12 +99,12 @@ test("qualified types, typed receivers, inferred constructors and chained calls"
 });
 
 test("embedded host programs isolate alias environments and ignore host comments", () => {
-  const programs = embeddedPrograms(`// r#"use core.text as t; t.unused()"#
-    let first = r#"use core.text as t
+  const programs = embeddedPrograms(`// r#"use t :: core.text; t.unused()"#
+    let first = r#"use t :: core.text
       fn run() { t.trim(\"a\") }"#;
-    let second = r##"use core.math as t
+    let second = r##"use t :: core.math
       fn run() { t.trim() }"##;
-    let third = "use core.text as t\\nfn run() { t.split<Int>(1) }";
+    let third = "use t :: core.text\\nfn run() { t.split<Int>(1) }";
     let message = "core.text.unused()";
     let fourth = r"fn run() { core.text.trim() }";
   `);
@@ -127,7 +130,7 @@ function fixture(t) {
     fn example_only() {}
     fn test_only() {}
   `);
-  put("Examples/features/basics/demo.jet", "use core.demo as d\nfn run() { d.example_only(); d.example_only() }");
+  put("Examples/features/basics/demo.jet", "use d :: core.demo\nfn run() { d.example_only(); d.example_only() }");
   put("Examples/features/expected/fake.jet", "fn run() { core.demo.unused() }");
   put("tests/demo.rs", 'let program = r#"fn run() { core.demo.test_only() }"#;');
   return { root, put };

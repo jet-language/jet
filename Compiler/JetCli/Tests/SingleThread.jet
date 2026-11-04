@@ -1,0 +1,120 @@
+// The thread receipt (JetIR BuildLibrary.jet ir_thread_exports) and the
+// single-thread decision over it (Host.jet jet_cli_single_thread): a program
+// keeps the locked RC forms unless the receipt proves it never runs a
+// second thread.
+use {
+    jet_cli.[JetCLIRuntimeExports, jet_cli_single_thread]
+    jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IR_PLUGIN_GUEST_PREFIX, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_thread_exports]
+}
+
+fn single_thread_test_fn(m: &IRModule, name: String, runtime: [String], calls: [Int], addresses: [Int]) -> IRFunction {
+    f := ir_function_new(name, name, name, "main.jet", 1)
+    loop symbol in runtime {
+        row :: ir_intern_name(&m, symbol)
+        _ :: ir_emit(&f, IROp.CallRuntime, -1, row, 0, 0, 1)
+    }
+    loop callee in calls -> _ := ir_emit(&f, IROp.Call, -1, callee, 0, 0, 1)
+    loop callee in addresses -> _ := ir_emit(&f, IROp.FunctionAddress, -1, callee, -1, -1, 1)
+    f
+}
+
+fn single_thread_test_program(runtime: [String]) -> IRModule {
+    m := ir_module_new()
+    f :: single_thread_test_fn(&m, "run", runtime, [Int]{}, [Int]{})
+    &m.functions.push(f)
+    m
+}
+
+fn single_thread_test_runtime(receipt: String?) -> JetCLIRuntimeExports {
+    threads := [U8]?{None}
+    if receipt == .Val(text) -> threads = Val(text.bytes())
+    JetCLIRuntimeExports{key: "test", exports: [U8]{}, threads: threads, failure: None}
+}
+
+fn single_thread_test_export(function: Int, symbol: String, init_priority: Int) -> IRLibraryExport {
+    IRLibraryExport{function: function, symbol: symbol, init_priority: init_priority, fini_priority: -1, guards: [Int]{}}
+}
+
+#Test("the thread receipt names each export that reaches a thread start, a signal handler or a library load") {
+    m := ir_module_new()
+    start :: single_thread_test_fn(&m, "start", ["pthread_create"], [Int]{}, [Int]{})
+    &m.functions.push(start)
+    spawn :: single_thread_test_fn(&m, "spawn", [String]{}, [Int]{0}, [Int]{})
+    &m.functions.push(spawn)
+    plain :: single_thread_test_fn(&m, "plain", ["jet_rt_alloc"], [Int]{}, [Int]{})
+    &m.functions.push(plain)
+    address :: single_thread_test_fn(&m, "address", [String]{}, [Int]{}, [Int]{0})
+    &m.functions.push(address)
+    routed :: single_thread_test_fn(&m, "routed", ["jet_rt_spawn"], [Int]{}, [Int]{})
+    &m.functions.push(routed)
+    handler :: single_thread_test_fn(&m, "handler", ["signal"], [Int]{}, [Int]{})
+    &m.functions.push(handler)
+    load :: single_thread_test_fn(&m, "load", ["dlopen"], [Int]{}, [Int]{})
+    &m.functions.push(load)
+    exports :: [IRLibraryExport]{
+        single_thread_test_export(1, "jet_rt_spawn", -1),
+        single_thread_test_export(2, "jet_rt_plain", 0),
+        single_thread_test_export(3, "jet_rt_address", -1),
+        single_thread_test_export(4, "jet_rt_routed", -1),
+        single_thread_test_export(5, "jet_rt_handler", -1),
+        single_thread_test_export(6, "jet_rt_load", -1),
+    }
+    assert_eq(ir_thread_exports(m, exports), ["jet_rt_address", "jet_rt_handler", "jet_rt_load", "jet_rt_routed", "jet_rt_spawn"])
+    // An unguarded lifecycle hook runs in every program that links the runtime.
+    hooked :: [IRLibraryExport]{single_thread_test_export(2, "jet_rt_plain", 0), single_thread_test_export(5, "jet_rt_handler", 0)}
+    assert_eq(ir_thread_exports(m, hooked), ["*"])
+    // A guarded one runs when the program keeps its guard storage (data row
+    // 7): every export that can reach that storage is listed.
+    keeper := single_thread_test_fn(&m, "keeper", [String]{}, [Int]{}, [Int]{})
+    _ := ir_emit(&keeper, IROp.DataAddress, -1, 7, -1, -1, 1)
+    &m.functions.push(keeper)
+    other := single_thread_test_fn(&m, "other", [String]{}, [Int]{}, [Int]{})
+    _ := ir_emit(&other, IROp.DataAddress, -1, 8, -1, -1, 1)
+    &m.functions.push(other)
+    guarded :: [IRLibraryExport]{
+        IRLibraryExport{function: 5, symbol: "jet_rt_handler", init_priority: 3, fini_priority: -1, guards: [Int]{7}},
+        single_thread_test_export(7, "jet_rt_keeper", -1),
+        single_thread_test_export(8, "jet_rt_other", -1),
+    }
+    assert_eq(ir_thread_exports(m, guarded), ["jet_rt_handler", "jet_rt_keeper"])
+}
+
+#Test("a program without a readable thread receipt keeps the locked RC forms") {
+    m :: single_thread_test_program(["jet_rt_alloc"])
+    assert(!jet_cli_single_thread(m, single_thread_test_runtime(None), [String:Bool]{}))
+    assert(jet_cli_single_thread(m, single_thread_test_runtime(Val("jet_rt_native_task_spawn")), [String:Bool]{}))
+}
+
+#Test("a call of an export the receipt names, its main's or any under `*` keeps the locked RC forms") {
+    receipt :: "jet_rt_native_task_spawn\njet_rt_process_signal_install"
+    assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_alloc", "jet_rt_native_task_spawn"]), single_thread_test_runtime(Val(receipt)), [String:Bool]{}))
+    assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_process_signal_install"]), single_thread_test_runtime(Val(receipt)), [String:Bool]{}))
+    assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_alloc"]), single_thread_test_runtime(Val("*")), [String:Bool]{}))
+    assert(!jet_cli_single_thread(single_thread_test_program(["jet_rt_alloc"]), single_thread_test_runtime(Val("jet_rt_main")), [String:Bool]{}))
+}
+
+#Test("only a vetted libc leaf keeps a foreign call single-threaded") {
+    foreign := [String:Bool]{}
+    foreign["strlen"] = true
+    foreign["qsort"] = true
+    assert(jet_cli_single_thread(single_thread_test_program(["strlen"]), single_thread_test_runtime(Val("")), foreign))
+    assert(!jet_cli_single_thread(single_thread_test_program(["qsort"]), single_thread_test_runtime(Val("")), foreign))
+}
+
+#Test("a plugin keeps the locked RC forms") {
+    m := single_thread_test_program([String]{})
+    &m.functions.push(ir_function_new("guest", "{IR_PLUGIN_GUEST_PREFIX}guest.wasm>", "guest", "", 1))
+    assert(!jet_cli_single_thread(m, single_thread_test_runtime(Val("")), [String:Bool]{}))
+}
+
+#Test("a program's own `#FFI(asm)` leaf keeps the locked RC forms; the compiler's stop poll does not") {
+    m := single_thread_test_program([String]{})
+    poll := ir_function_new("jet_ir_stop_poll", "jet_ir_stop_poll#asm", "jet_ir_stop_poll", "", 0)
+    poll.asm = Val(IRAsmLeaf{code: [U8]{}, regs: [Int]{}, result: 0})
+    &m.functions.push(poll)
+    assert(jet_cli_single_thread(m, single_thread_test_runtime(Val("")), [String:Bool]{}))
+    leaf := ir_function_new("pause", "main.jet::pause#asm", "main_pause__asm", "main.jet", 3)
+    leaf.asm = Val(IRAsmLeaf{code: [U8]{0xf3, 0x90}, regs: [Int]{}, result: -1})
+    &m.functions.push(leaf)
+    assert(!jet_cli_single_thread(m, single_thread_test_runtime(Val("")), [String:Bool]{}))
+}

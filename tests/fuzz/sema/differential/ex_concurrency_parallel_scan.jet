@@ -8,11 +8,13 @@
 //
 // Interactive prompts:
 //   INTERACTIVE=1 nix develop -c jet run Examples/features/concurrency/parallel_scan.jet
-use core.tasks as tasks
-use core.files as fs
-use core.term as io
-use core.process as process
-use core.sys as env
+use {
+    tasks :: core.tasks
+    fs :: core.files
+    io :: core.term
+    process :: core.process
+    env :: core.sys
+}
 
 fn count_lines(text: String) -> Int { text.lines().len() }
 
@@ -32,7 +34,7 @@ fn default_paths() -> [String] {
 }
 
 fn paths_from_args() -> [String] {
-    return process.argv().skip(1).to_list()
+    return process.args()
 }
 
 fn paths_from_prompt() -> [String] {

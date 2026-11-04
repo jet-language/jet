@@ -53,10 +53,13 @@ fn jetlib_test_digest(stamp: JetLibStamp, payload: [U8]) Err! {
     stamp :: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity())
     assert_eq(jetlib_test_decode_stamp(stamp.encode_bytes()) ?? panic("decode"), stamp)
 }
+// The artifact's payload view borrows `payload`, as decode borrows its bytes.
+fn jetlib_test_artifact(payload: [U8]) -> JetLibArtifact Never! from payload {
+    JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity()), payload: payload[0..<payload.len()]}
+}
 #Test("jetlib artifact round trip keeps native payload opaque") {
     payload :: "native-shared-object".bytes()
-    payload_view :: payload[0..<payload.len()]
-    artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity()), payload: payload_view}
+    artifact :: jetlib_test_artifact(payload)
     bytes :: artifact.encode_bytes()
     decoded :: JetLibArtifact.decode_bytes(bytes, pkg_test_jetlib_identity().host_max, false) ?? panic("decode")
     assert_eq(decoded.stamp, artifact.stamp)
@@ -65,8 +68,7 @@ fn jetlib_test_digest(stamp: JetLibStamp, payload: [U8]) Err! {
 }
 #Test("jetlib artifact rejects a truncated payload") {
     payload :: "native-shared-object".bytes()
-    payload_view :: payload[0..<payload.len()]
-    artifact :: JetLibArtifact{stamp: JetLibStamp.for_this_compiler([String]{}, pkg_test_jetlib_identity()), payload: payload_view}
+    artifact :: jetlib_test_artifact(payload)
     bytes := artifact.encode_bytes()
     _ :: &bytes.pop() ?? panic("nonempty artifact")
     if JetLibArtifact.decode_bytes(bytes, pkg_test_jetlib_identity().host_max, false) == {

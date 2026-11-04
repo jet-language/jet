@@ -82,6 +82,9 @@ fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
     }
 }
 
+// A source that can be read once: an iterator or stream, or core.http's
+// request `Body` and its chunk reader (by their Core identity, so a user type
+// with the same name is an ordinary value).
 fn sema_call_reflection_one_pass(ty: Type) -> Bool Never! {
     if ty == {
         .Apply(name, _) -> {
@@ -90,7 +93,7 @@ fn sema_call_reflection_one_pass(ty: Type) -> Bool Never! {
         }
         .Named(name) -> {
             leaf :: sema_call_reflection_leaf_name(name)
-            leaf == "Body" || leaf == "HTTPBodyChunks"
+            core_identity_in_module(name, "core.http") && (leaf == "Body" || leaf == "HTTPBodyChunks")
         }
         else -> false
     }

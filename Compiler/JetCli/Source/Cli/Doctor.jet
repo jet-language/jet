@@ -2,24 +2,26 @@
 // adds the registry check and `--fix` applies the auto-fixable problems, then
 // reports again. `--target <machine>` adds the declared target machine. A real
 // problem ends with the L2101 advisory and exit 1.
-use core.files as doctor_files
-use core.process as doctor_process
-use core.sys as doctor_sys
-use jet_driver.[
-    JetDriverVerbOutput,
-    JET_DRIVER_EXIT_USAGE,
-    JET_DRIVER_EXIT_USER_ERROR,
-    JET_DRIVER_TARGET_MACHINE_NAMES,
-    jet_driver_explain_pointer_line,
-    jet_driver_target_machine_by_name,
-]
-use jet_foundation.[diagnostic_theme_paint]
-use jet_pkg_model.[
-    pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
-    publication_resolve_publish_registry,
-]
-use jetpack_artifact_store.[ArtifactStore]
-use jetpack_foundation.[HANGAR_DIR]
+use {
+    doctor_files :: core.files
+    doctor_process :: core.process
+    doctor_sys :: core.sys
+    jet_driver.[
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        JET_DRIVER_TARGET_MACHINE_NAMES,
+        jet_driver_explain_pointer_line,
+        jet_driver_target_machine_by_name,
+    ]
+    jet_foundation.[diagnostic_theme_paint]
+    jet_pkg_model.[
+        pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
+        publication_resolve_publish_registry,
+    ]
+    jetpack_artifact_store.[ArtifactStore]
+    jetpack_foundation.[HANGAR_DIR]
+}
 
 // Health of one checked thing.
 enum JetCLIDoctorHealth {

@@ -1,16 +1,18 @@
 module backend {
 }
 
-use core.auth as auth
-use core.crypto as crypto
-use core.db as db
-use core.http.client as http_client
-use core.http.server as http_server
-use core.log as log
-use core.service as service
-use core.encoding.json as json
-use core.web as web
-use core.time as time
+use {
+    auth :: core.auth
+    crypto :: core.crypto
+    db :: core.db
+    http_client :: core.http.client
+    http_server :: core.http.server
+    log :: core.log
+    service :: core.service
+    json :: core.encoding.json
+    web :: core.web
+    time :: core.time
+}
 
 #Codable
 struct RequestID {
@@ -250,7 +252,7 @@ fn pool_fixture(path: String) -> PoolReceipt {
 }
 
 
-fn queue_state(delivery: ^Delivery) -[DB]> String {
+fn queue_state(delivery: ^Delivery) -[FS.Read, FS.Write]> String {
     state :: delivery.status() ?? return "unknown"
     if state == {
         .Pending -> return "pending"

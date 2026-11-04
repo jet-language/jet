@@ -52,7 +52,7 @@ if (registered.length !== 23 || registered.some(kernel => !kernels.includes(kern
 if (new Set(cases.map(row => row.id)).size !== cases.length) throw Error('duplicate case id');
 const quote = text => JSON.stringify(text);
 const jetArg = arg => arg.kind === 'text' ? quote(arg.value.replace(/\{/g, '{{').replace(/\}/g, '}}')) : arg.value;
-const jet = `use fmt_source as fmt\nfn run() {\n${cases.map(row => `    print("CASE ${row.id}")\n    print(fmt.${members[row.kernel] ?? row.kernel}(${row.args.map(jetArg).join(', ')}))\n    print("END ${row.id}")`).join('\n')}\n}\n`;
+const jet = `use fmt :: fmt_source\nfn run() {\n${cases.map(row => `    print("CASE ${row.id}")\n    print(fmt.${members[row.kernel] ?? row.kernel}(${row.args.map(jetArg).join(', ')}))\n    print("END ${row.id}")`).join('\n')}\n}\n`;
 function run(binary, args, name, cwd = out) {
   const result = spawnSync(binary, args, { cwd, encoding: 'utf8', maxBuffer: 1 << 27, timeout: 0 });
   writeFileSync(join(out, `${name}.stdout`), result.stdout ?? '');

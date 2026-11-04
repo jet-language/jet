@@ -133,9 +133,15 @@ fn x64_mov_rr(code: &[U8], dst: Int, src: Int) Never! {
     x64_modrm_reg(&code, src, dst)
 }
 
-// mov dst, imm: sign-extended imm32 (REX.W C7 /0) or the 64-bit movabs (REX.W B8+r).
+// mov dst, imm: a value in 0..<2^32 as the zero-extending mov r32, imm32
+// (B8+r, REX.B for r8-r15), another sign-extended imm32 as REX.W C7 /0, and
+// the rest as the 64-bit movabs (REX.W B8+r). No form touches the flags.
 fn x64_mov_ri(code: &[U8], dst: Int, value: Int) Never! {
-    if x64_fits_i32(value) {
+    if value >= 0 && value <= 4294967295 {
+        if dst >= 8 -> x64_byte(&code, 0x41)
+        x64_byte(&code, 0xb8 + ((dst).bit_and(7)))
+        x64_u32(&code, value)
+    } else if x64_fits_i32(value) {
         x64_rex(&code, true, 0, dst)
         x64_byte(&code, 0xc7)
         x64_modrm_reg(&code, 0, dst)
@@ -242,11 +248,12 @@ fn x64_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
     x64_modrm_mem(&code, src, base, disp)
 }
 
-// lock inc / lock dec qword [base + disp] (F0 REX.W FF /0, /1): one atomic
-// step of a count word. ZF is set when the result is zero; OF is set when an
-// inc wraps past the largest value.
-fn x64_lock_step(code: &[U8], base: Int, disp: Int, increment: Bool) Never! {
-    x64_byte(&code, 0xf0)
+// inc / dec qword [base + disp] (REX.W FF /0, /1), with the lock prefix (F0)
+// when `locked`: one step of a count word, atomic when locked. ZF is set
+// when the result is zero; OF is set when an inc wraps past the largest
+// value.
+fn x64_count_step(code: &[U8], base: Int, disp: Int, increment: Bool, locked: Bool) Never! {
+    if locked -> x64_byte(&code, 0xf0)
     x64_rex(&code, true, 0, base)
     x64_byte(&code, 0xff)
     x64_modrm_mem(&code, if increment -> 0 else -> 1, base, disp)
@@ -557,14 +564,26 @@ enum X64FloatOp { Add Sub Mul Div Sqrt }
 // addsd/subsd/mulsd/divsd/sqrtsd dst, src (F2 0F 58|5C|59|5E|51 /r), or with
 // `single` addss/subss/mulss/divss/sqrtss (F3 0F 58|5C|59|5E|51 /r).
 fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
-    opcode :: if op == {
+    x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, x64_float_opcode(op), dst, src)
+}
+
+// The same with the source operand at [base + disp].
+fn x64_float_op_mem(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, base: Int, disp: Int) Never! {
+    x64_byte(&code, if single -> 0xf3 else -> 0xf2)
+    if dst >= 8 || base >= 8 -> x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, x64_float_opcode(op))
+    x64_modrm_mem(&code, dst, base, disp)
+}
+
+fn x64_float_opcode(op: X64FloatOp) -> Int Never! {
+    if op == {
         .Add -> 0x58
         .Sub -> 0x5c
         .Mul -> 0x59
         .Div -> 0x5e
         .Sqrt -> 0x51
     }
-    x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, opcode, dst, src)
 }
 
 // ucomisd left, right (66 0F 2E /r): ZF, PF and CF all set when unordered.

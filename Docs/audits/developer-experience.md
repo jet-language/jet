@@ -80,7 +80,7 @@ defaults: { run: app };
 The role home can contain the existing entry and job forms:
 
 ```jet
-use core.web as web
+use web :: core.web
 #Target(Web)
 
 fn run() App -> {
@@ -134,7 +134,7 @@ The default is dev-only, loopback-only, payload-free observation. A site must ex
 A panel is a Jet function that returns `core.ui` nodes from typed devtools state. The marker spelling remains the D-DX-PLUGIN1 naming menu; the following uses one proposed option:
 
 ```jet
-use core.ui as ui
+use ui :: core.ui
 
 // proposed: `#Panel` is a marker option from D-DX-PLUGIN1; `DevtoolsFacts` is typed protocol state.
 #Panel
@@ -250,9 +250,11 @@ reset: none
 The native server uses existing HTTP and task forms, then applies the same reload law:
 
 ```jet
-use core.http.server as server
-use core.net as net
-use core.tasks as tasks
+use {
+    server :: core.http.server
+    net :: core.net
+    tasks :: core.tasks
+}
 
 fn handle(req: HTTPRequest) HTTPResponse HTTPError! -> {
     return Ok(server.response(200, "orders"))
@@ -286,7 +288,7 @@ The developer writes one route graph. The compiler reads data dependencies and i
 The four-route Orders app uses the existing web builder surface:
 
 ```jet
-use core.web as web
+use web :: core.web
 #Target(Web)
 
 fn home() WebPage -> web.page("Orders", "Track every order")
@@ -379,8 +381,10 @@ fn run() {
 The suite's proposed Orders API keeps invalidation tied to a read footprint rather than a hand-maintained key list:
 
 ```jet
-use core.web as web
-use app
+use {
+    web :: core.web
+    app
+}
 
 // proposed: Query derives its cache identity and footprint from the checked callback.
 orders :: web.query("orders.list", () -> app.live("orders", "{status:pending,page:1}"))
@@ -443,9 +447,11 @@ Owner visual acceptance uses real programs in the six states: ready, building, e
 This is the complete Orders program at the end of e14. Existing lines use the verified Jet builder and UI forms. Proposed suite and derived-rendering lines carry an explicit comment at first use.
 
 ```jet
-use core.web as web
-use core.ui as ui
-use core.reactive as reactive
+use {
+    web :: core.web
+    ui :: core.ui
+    reactive :: core.reactive
+}
 #Target(Web)
 
 struct Order {
@@ -482,8 +488,10 @@ fn run() App -> {
 The application-level suite is proposed code over that existing graph:
 
 ```jet
-use core.web as web
-use app
+use {
+    web :: core.web
+    app
+}
 
 // proposed: Query derives `orders.list` identity, DB.Read footprint, and cache state.
 orders :: web.query("orders.list", () -> app.live("orders", "{status:pending,page:1}"))

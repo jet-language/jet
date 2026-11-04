@@ -2,8 +2,10 @@
 // SPEED-500K budget checker: reads a compiler trace (JET_TRACE_FILE) and the
 // per-phase budget table (Tools/perf/budget/budget.json, the ns/line columns
 // of SPEED-500K.md §1) and prints, per phase, its time, its ns per source
-// line, the budget of the chosen milestone column and the ratio. Exits 1 when
-// any phase is over its budget.
+// line, the budget of the chosen milestone column and the ratio, then the
+// subtotal of the always-on check rows. Exits 1 when any phase is over its
+// budget, or when a full-unit trace (it has a `lower` span) lacks an always-on
+// check span.
 //
 //   jet Tools/perf/budget/Check.jet <trace> [--column 225K|500K|1M]
 //        [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]
@@ -26,11 +28,13 @@
 //
 // Numbers follow the trace's JSON doubles: seconds and ratios print with
 // round-half-up fixed decimals, counts rounded half up with `,` grouping.
-use core.encoding.json as json
-use core.files as files
-use core.math as math
-use core.process as process
-use core.term as term
+use {
+    json :: core.encoding.json
+    files :: core.files
+    math :: core.math
+    process :: core.process
+    term :: core.term
+}
 
 DEFAULT_BUDGET :: "Tools/perf/budget/budget.json"
 ZERO :: Float{0.0}
@@ -897,6 +901,38 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
     &out.push("")
     &out.push(table([String]{"row", "phase", "seconds", "ns/line", "budget", "ratio", "status"}, cells))
 
+    // D-SPEED-CHECKS1=A: the always-on checks (budget.json `always_on` rows)
+    // stay in every default build, each run once, and a missed milestone
+    // ships its measured number. Print their subtotal. A full-unit trace (the
+    // compile reached code generation: it has a `lower` span) must carry every
+    // always-on span, or a check left the build.
+    missing_check := false
+    always_ids := [String]{}
+    always_ns := ZERO
+    always_budget := ZERO
+    missing := [String]{}
+    full_unit :: has_span(spans, "lower")
+    loop entry in measured {
+        if field(entry.row, "always_on") == .Val(always) {
+            id :: js_string(field(entry.row, "id"))
+            &always_ids.push(id)
+            if entry.present -> always_ns = always_ns + entry.ns
+            always_budget = always_budget + number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
+            loop kind in texts(field(always, "spans")) {
+                if !has_span(spans, kind) -> &missing.push("{id} {kind} ({js_string(field(always, "check"))})")
+            }
+        }
+    }
+    if always_ids.len() > 0 {
+        share :: Float{100.0} * always_budget / budget_sum
+        &out.push("")
+        &out.push("always-on checks ({always_ids.join(", ")}): {grouped(always_ns / lines)} ns/line, budget {grouped(always_budget)} ({fixed(share, 1)}% of the {column} work sum)")
+        if missing.len() > 0 && full_unit {
+            &out.push("missing always-on spans in a full-unit trace: {missing.join("; ")}")
+            missing_check = true
+        }
+    }
+
     // Work counters per natural unit (budgets at the 1M column only).
     unit_rows := [[String]]{}
     loop entry in measured {
@@ -973,8 +1009,18 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
         loop note in sorted -> &out.push("note: {note}")
     }
     &out.push("")
-    &out.push(if failed -> "FAIL: over the {column} budget" else -> "PASS: within the {column} budget")
-    Outcome{out: out, err: [String]{}, code: if failed -> 1 else -> 0}
+    reasons := [String]{}
+    if failed -> &reasons.push("over the {column} budget")
+    if missing_check -> &reasons.push("an always-on check did not run")
+    &out.push(if reasons.len() > 0 -> "FAIL: {reasons.join("; ")}" else -> "PASS: within the {column} budget")
+    Outcome{out: out, err: [String]{}, code: if reasons.len() > 0 -> 1 else -> 0}
+}
+
+fn has_span(spans: [Span], kind: String) -> Bool Never! {
+    loop span in spans {
+        if span.kind_is_text && span.kind == kind -> return true
+    }
+    false
 }
 
 // readFileSync's failure as node reports it (the path as given).
@@ -1114,6 +1160,30 @@ fn tail(cells: [String], from: Int, to: Int) -> String Never! {
     assert(outcome.out.join("\n").contains("clock:   wall"))
     assert_eq(tail(test_row(outcome.out, "P3"), 2, 7), "2.00|2,000,000|1,800|1111.1x|OVER")
     assert_eq(tail(test_row(outcome.out, "P15"), 3, 7), "0|800|0.0x|ok")
+}
+
+fn test_always_on_trace(kinds: [String]) -> String Never! {
+    events := [String]{test_counter("parse.user_lines", 1000000)}
+    loop index in 0..<kinds.len() {
+        loop event in test_span(kinds[index], index * 1000, index * 1000 + 500, 1000000, kinds[index]) -> &events.push(event)
+    }
+    test_trace(events)
+}
+
+#Test("always-on checks: subtotal printed; a full-unit trace without one fails") {
+    options :: test_options([String]{"t", "--column", "225K"})
+    full :: report(options, test_budget(), test_always_on_trace([String]{"sema.bodies", "sema.effects", "sema.failure", "lower", "ir.lint", "ir.object"}))
+    assert_eq(full.code, 0)
+    // Each always-on row ran 1 ms over 1,000,000 lines.
+    assert(full.out.join("\n").contains("always-on checks (P5a+P5b, P5c, P5d, P9, P11): 5 ns/line, budget 29,200 (53.7% of the 225K work sum)"))
+    assert(full.out.join("\n").contains("PASS: within the 225K budget"))
+    no_lint :: report(options, test_budget(), test_always_on_trace([String]{"sema.bodies", "sema.effects", "sema.failure", "lower", "ir.object"}))
+    assert_eq(no_lint.code, 1)
+    assert(no_lint.out.join("\n").contains("missing always-on spans in a full-unit trace: P9 ir.lint (IR consistency check"))
+    assert(no_lint.out.join("\n").contains("FAIL: an always-on check did not run"))
+    // A trace that stopped before code generation (no `lower`) is not a full unit.
+    check_only :: report(options, test_budget(), test_always_on_trace([String]{"sema.bodies", "sema.effects", "sema.failure"}))
+    assert_eq(check_only.code, 0)
 }
 
 #Test("usage errors exit 64") {

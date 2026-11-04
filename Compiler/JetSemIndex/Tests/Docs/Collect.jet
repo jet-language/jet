@@ -150,7 +150,7 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
 }
 
 #Test("doc_collect_pubfile_leaf_declarations_keep_exact_special_visibility") {
-    source :: "#MustUse\nToken :: distinct Int\nCount :: Int\n#UnitFamily(Currency) {{ usd, eur }}\ntag Safe {{ deny: [console] }}\neffect Clock\nmarker Checked($sites: [.Block]) {{}}\nfact Known()\nANSWER :: 42\nfn run() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
+    source :: "#MustUse\nToken :: distinct Int\nCount :: Int\n#UnitFamily(Currency) {{ usd, eur }}\ntag Safe {{ deny: [console] }}\neffect Clock\nstruct Checked {{\n    impl Marker {{\n        sites :: [.Block]\n    }}\n}}\nfact Known()\nANSWER :: 42\nfn run() {{}}\n#Test(\"ignored test\") {{ assert(true) }}\n"
     rows := [DocItem]{}
     impls := [DocImpl]{}
     doc_collect_test_source(source, &rows, &impls)
@@ -163,7 +163,9 @@ fn doc_collect_test_item(rows: [DocItem], qualified_name: String, kind: String) 
     assert(rows[currency].signature.contains("Currency"))
     assert(rows[doc_collect_test_item(rows, "Safe", "tag")].public)
     assert(!rows[doc_collect_test_item(rows, "Clock", "effect")].public)
-    assert(rows[doc_collect_test_item(rows, "Checked", "marker")].public)
+    // A marker documents as its struct; its companion declaration adds no row.
+    assert(rows[doc_collect_test_item(rows, "Checked", "struct")].public)
+    loop row in rows -> assert(row.kind != "marker")
     assert(rows[doc_collect_test_item(rows, "Known", "fact")].public)
     assert(!rows[doc_collect_test_item(rows, "ANSWER", "const")].public)
     assert_eq(rows.len(), 9)

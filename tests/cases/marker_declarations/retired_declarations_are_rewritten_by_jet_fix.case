@@ -1,0 +1,19 @@
+# Claim: the retired `marker Name(…)` and `marker Name = #[…]` declarations are E0381
+# Claim: `jet fix` applies E0381's behavior-preserving edit, rewriting each into its marker struct
+# Claim: the rewritten file is already canonical (`jet fmt --check`) and runs with the same markers
+fixture: retired_declarations_are_rewritten_by_jet_fix.fixture
+env: NO_COLOR=1
+step: jet check retired.jet
+exit: 1
+stderr: ~ "Error [E0381]: `marker Traced` is a retired declaration" # the parameter-list form is E0381
+stderr: ~ "Error [E0381]: `marker Fast` is a retired declaration" # the group form is E0381
+stderr: ~ "2 problems found" # both declarations are reported in one run
+step: jet fix retired.jet
+exit: 0
+stdout+stderr: ~ "retired.jet: applied 2 fixes" # both edits are behavior-preserving, so a plain run applies them
+file: retired.jet = retired_declarations_are_rewritten_by_jet_fix.fixed.bytes
+step: jet fmt --check retired.jet
+exit: 0
+step: jet run retired.jet
+exit: 0
+stdout: = "42\n"

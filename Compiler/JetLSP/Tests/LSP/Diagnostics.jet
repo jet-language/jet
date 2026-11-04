@@ -7,14 +7,16 @@
 // stale v1/v2, comma/Formatting and four-input Rust goldens (Rust TANDEM).
 // Original crypto/data byte contracts, cause identity and module corpus stay;
 // no compatibility wire or registry fork is introduced.
-use jet_foundation.[DiagnosticCryptoMisuseReason, DiagnosticStructured, DiagnosticOrigin, TextEdit, DIAGNOSTIC_ERROR, diagnostic_from_registry, diagnostic_with_origin, diagnostic_with_structured_edit, sha256_hex]
-use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts]
-use jet_eval.[jet_eval_default_config]
-use jet_pkg_model.[BuildStamp]
-use jet_queries.[QueryKey, FileKey, InputKey]
-use core.encoding.[Dyn]
-use jet_parser.[parse_source]
-use core.encoding.json as lsp_diag_test_json
+use {
+    jet_foundation.[DiagnosticCryptoMisuseReason, DiagnosticStructured, DiagnosticOrigin, TextEdit, DIAGNOSTIC_ERROR, diagnostic_from_registry, diagnostic_with_origin, diagnostic_with_structured_edit, sha256_hex]
+    jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts]
+    jet_eval.[jet_eval_default_config]
+    jet_pkg_model.[BuildStamp]
+    jet_queries.[QueryKey, FileKey, InputKey]
+    core.encoding.[Dyn]
+    jet_parser.[parse_source]
+    lsp_diag_test_json :: core.encoding.json
+}
 
 fn lsp_diag_test_path(path: String) -> lsp_diag_path.OsPath Never! {
     lsp_diag_path.from_text(path, lsp_diag_path.PathPlatform.Unix)

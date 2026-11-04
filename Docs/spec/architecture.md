@@ -154,6 +154,19 @@ layouts are recorded in `runtime.abi.json`; its symbols must match the checked
 export inventory. Compiler crashes and failed ABI witnesses remain failed
 evidence, never a native-runtime semantic verdict.
 
+The runtime library build also writes `runtime.threads`, the thread receipt:
+the exports whose call can reach a thread start (`pthread_create`), a
+returning signal handler (`signal`) or a library load (`dlopen`) through the
+runtime's own calls and function addresses, one per line. A lifecycle hook
+that can reach one runs whenever the program keeps one of its guard
+storages, so the exports that can reach such a storage are listed too; the
+receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
+(`jet-native-runtime/v2`) and every pack reader verifies it. `jet build`
+selects a program's inline RC updates without the lock prefix only when
+that receipt was read, neither the program nor its `main` calls an export it
+names, every foreign C call is a vetted libc leaf, and the program has no
+foreign assembly and no plugin; otherwise the updates stay locked.
+
 Runtime-pack roots are the public defined C-ABI globals of standalone Jet
 runtime objects and explicit extra roots. The Jet object writer publishes
 checked exports as globals and private functions as locals. Undefined symbols,
@@ -203,9 +216,18 @@ storage's data section; the pack keeps the link. Jet's linker
 one of its guards, so a program that touches no service state runs and links
 none of its startup. A guarded hook may run once per kept guard and therefore
 starts idempotently. System linkers ignore the flag and keep every hook, as
-does the runtime image, whose exports are all live. Code a service runs only
+do the runtime image and the web runtime partition, whose exports are all
+live but the checked allocator's link entry and hook
+(`CHECKED_ALLOC_RUNTIME_EXPORTS`, `--checked-alloc`; a checked native program
+links the pack in full, and a web build has no checked allocator). Code a
+service runs only
 when used is installed by its hook as a code word (`rt_*_address()`), never
-called from always-live startup or exit paths.
+called from always-live startup or exit paths. A hook takes no parameters and
+returns nothing. The one exception is an init hook, which may instead take the
+init array's `(argc, argv, envp)` as three `I64`. This is how a decision gets
+made on every entry, including a foreign C host that never calls
+`jet_rt_host_arguments`. A web module has no process arguments, so it passes
+three zeros.
 
 `RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
 its only home: its route, record and import rows are edited by hand, sorted,
@@ -308,7 +330,10 @@ previous run: `green:key` (same check key), `red:source`,
 `red:dependency:<identity>`, `red:toolchain`, or `red:new`, with `+cutoff`
 when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
-owns node identity and dependencies, while the store owns run evidence.
+owns node identity and dependencies, while the store owns run evidence. A
+program with no recorded run still reports the planned nodes (kind, key,
+subject, inputs) under a header saying no build was recorded, and exits 0;
+a node that has not run carries no duration and no reason.
 
 ### The IR and IR Lint (middle end)
 

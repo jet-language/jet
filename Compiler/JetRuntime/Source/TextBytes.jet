@@ -30,9 +30,27 @@ fn text_bytes_push(target: I64, data: I64, start: I64, count: I64) {
 fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
     at := I64{0}
     loop at < length {
-        // Packed ASCII words (no byte with the high bit) are valid as a whole.
-        if (RT_HOST_U8_STRIDE == I64{1} && length - at >= I64{8} && rt_text_word(wrapping(data + at)).bit_and(I64{-9187201950435737472}) == I64{0}) {
-            at += I64{8}
+        // Packed ASCII words (no byte with the high bit) are valid as a whole,
+        // and so is an ASCII byte of the tail: rt_text_valid_width's width 1
+        // for a lead below 128, without the call. A tail under 8 bytes whose
+        // word stays inside one page is one load masked to the tail: the
+        // page holds the tail's bytes, so it is mapped, and the mask drops
+        // the bytes past them; an all-ASCII tail ends the check.
+        rest :: wrapping(length - at)
+        if (RT_HOST_U8_STRIDE == I64{1}) {
+            if (rest >= I64{8}) {
+                if (rt_text_word(wrapping(data + at)).bit_and(I64{-9187201950435737472}) == I64{0}) {
+                    at = wrapping(at + I64{8})
+                    next
+                }
+            } else if (wrapping(data + at).bit_and(I64{4095}) <= I64{4088}) {
+                // rest is 1..7 here, so its low bits are rest.
+                tail :: rt_text_word(wrapping(data + at)).bit_and(wrapping((I64{1} << (rest.bit_and(I64{7}) * I64{8})) - I64{1}))
+                if (tail.bit_and(I64{-9187201950435737472}) == I64{0}) -> return I64{0}
+            }
+        }
+        if (host_u8_get(data, at) < I64{128}) {
+            at = wrapping(at + I64{1})
             next
         }
         width :: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
@@ -56,8 +74,10 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
     I64{0}
 }
 
-// Exact copy of length native List<U8> elements into a fresh owned text.
+// Exact copy of length native List<U8> elements into a fresh owned text:
+// packed elements are the text's bytes, copied whole (rt_text_copy).
 fn text_bytes_owned(data: I64, length: I64) -> I64 {
+    if (RT_HOST_U8_STRIDE == I64{1}) -> return rt_text_copy(data, length)
     result :: rt_text_builder_with_capacity(length)
     text_bytes_push(result, data, I64{0}, length)
     result
@@ -118,7 +138,7 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
         rt_text_capacity_stop()
         return I64{0}
     }
-    bytes :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    bytes :: jet_rt_alloc_8(length * RT_HOST_U8_STRIDE)
     data :: rt_text_data(value)
     if (RT_HOST_U8_STRIDE == I64{1}) {
         jet_rt_mem_move(bytes, data, length)

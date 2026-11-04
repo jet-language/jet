@@ -1,40 +1,67 @@
-// Branch relaxation for one selected function (X64Select.jet). Selection
-// emits every branch inside the function in its rel32 form (jmp E9 cd, jcc
-// 0F 80+cc cd) and patches it once its target is known (ir_x64_patch, which
-// lists the branch). Afterwards this pass gives each listed branch whose
-// target is within reach the rel8 form (jmp EB cb, jcc 70+cc cb) and moves
-// the code after it up.
+// Branch relaxation and loop alignment for one selected function
+// (X64Select.jet). Selection emits every branch inside the function in its
+// rel32 form (jmp E9 cd, jcc 0F 80+cc cd) and patches it once its target is
+// known (ir_x64_patch, which lists the branch). Afterwards this pass gives
+// each listed branch whose target is within reach the rel8 form (jmp EB cb,
+// jcc 70+cc cb) and moves the code after it up, and puts no-ops before each
+// listed loop head so that the head starts on its alignment
+// (ir_x64_loop_align) in the relaxed code.
 //
 // The pass starts from every branch long and shortens, to a fixed point,
-// each branch whose displacement fits in a signed byte with the branches
-// shortened so far: shortening only brings code closer together, so a
-// branch that fits stays fitting, and a branch left long only ever needed
-// it. Offsets the code was laid out at map to the relaxed code by
-// ir_x64_relaxed_at; the caller moves its relocations, line rows, debug
-// positions and frame-description offsets with it. Code that is not a
-// listed branch (calls and tail jumps, whose rel32 a relocation fills) is
-// copied unchanged.
+// each branch whose displacement fits in a signed byte in the layout so far.
+// Without loop heads shortening only brings code closer together, so a
+// branch that fits stays fitting. A head's padding, though, can grow when
+// the code before it shrinks, and push a short branch across it out of
+// reach: such a branch goes back to long for good, so the passes end, and
+// no short branch is left out of reach. Offsets the code was laid out at
+// map to the relaxed code by ir_x64_relaxed_at; the caller moves its
+// relocations, line rows, debug positions and frame-description offsets with
+// it. Code that is not a listed branch (calls and tail jumps, whose rel32 a
+// relocation fills) is copied unchanged.
 
-use jet_backend.[x64_patch_rel32]
+use jet_backend.[X64_FUNCTION_ALIGN, x64_nops, x64_patch_rel32]
 
 // The relaxed layout: each listed branch (by its rel32 field, in code
 // order) with the instruction's first offset and its length in the old
-// layout, whether it is short now, and how many bytes the code up to and
-// including each branch shrank by.
+// layout, whether it is short now, whether it may not be (an earlier pass
+// found it out of reach), and how many bytes the code up to and including
+// each branch shrank by; each loop head (old offset, in code order) with
+// its loop's end, the no-ops before it, and how many bytes of no-ops the
+// code up to and including it gained; and the largest alignment a head
+// takes, the function's own (at least X64_FUNCTION_ALIGN).
 struct IRX64Relax {
     sites: [Int]
     starts: [Int]
     lengths: [Int]
     short: [Bool]
+    stays_long: [Bool]
     shrunk: [Int]
+    heads: [Int]
+    ends: [Int]
+    pads: [Int]
+    padded: [Int]
+    align: Int
+}
+
+// A loop head starts on the functions' alignment, as LLVM's x86 loop
+// alignment does; a loop of at most IR_X64_LOOP_WINDOW bytes (the core's
+// fetch window, half a cache line) that a 16-byte start could leave across
+// two windows starts on a window instead, so it is fetched whole each
+// iteration and never crosses a cache line.
+IR_X64_LOOP_WINDOW :: 32
+
+fn ir_x64_loop_align(length: Int) -> Int Never! {
+    if length > X64_FUNCTION_ALIGN && length <= IR_X64_LOOP_WINDOW -> IR_X64_LOOP_WINDOW else -> X64_FUNCTION_ALIGN
 }
 
 // Relaxes the branches whose rel32 fields `sites` lists (in any order,
-// repeats allowed) in `code`, in place, and returns the layout map.
-fn ir_x64_relax(code: &[U8], sites: [Int]) -> IRX64Relax Never! {
+// repeats allowed) in `code`, in place, aligns the loop heads `heads` (old
+// offsets of instruction starts, in any order, no loop inside another),
+// each loop ending at `ends` (the same index), and returns the layout map.
+fn ir_x64_relax(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
     ordered := sites.copy()
     &ordered.sort()
-    r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, shrunk: [Int]{}}
+    r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
     targets := [Int]{}
     loop site in ordered {
         if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
@@ -43,40 +70,79 @@ fn ir_x64_relax(code: &[U8], sites: [Int]) -> IRX64Relax Never! {
         &r.starts.push(if jump -> site - 1 else -> site - 2)
         &r.lengths.push(if jump -> 5 else -> 6)
         &r.short.push(false)
+        &r.stays_long.push(false)
         &r.shrunk.push(0)
         &targets.push(site + 4 + ir_x64_rel32_at(code, site))
     }
-    // Each pass decides on the shortenings of the passes before it: a
-    // branch that fits then fits after them too, as more short branches
-    // only bring its target closer.
+    // The heads in code order (few per function).
+    loop (index, head) in heads {
+        &r.heads.push(head)
+        &r.ends.push(ends[index])
+        &r.pads.push(0)
+        &r.padded.push(0)
+        at := r.heads.len() - 1
+        loop at > 0 && r.heads[at - 1] > r.heads[at] {
+            moved :: r.heads[at - 1]
+            r.heads[at - 1] = r.heads[at]
+            r.heads[at] = moved
+            ended :: r.ends[at - 1]
+            r.ends[at - 1] = r.ends[at]
+            r.ends[at] = ended
+            at -= 1
+        }
+    }
     changed := true
     loop changed {
         changed = false
+        ir_x64_relax_pad(&r)
+        // A short branch the padding pushed out of reach goes back to long.
+        loop index in 0..<r.sites.len() {
+            if !r.short[index] -> next
+            end :: r.starts[index] + r.lengths[index]
+            reach :: ir_x64_relaxed_at(r, targets[index]) - ir_x64_relaxed_end(r, end)
+            if reach < -128 || reach > 127 {
+                r.short[index] = false
+                r.stays_long[index] = true
+                changed = true
+            }
+        }
+        if changed {
+            ir_x64_relax_shrink(&r)
+            next
+        }
         shorten := [Int]{}
         loop index in 0..<r.sites.len() {
-            if r.short[index] -> next
+            if r.short[index] || r.stays_long[index] -> next
             end :: r.starts[index] + r.lengths[index]
             saving :: r.lengths[index] - 2
             // Where this branch would end, and its target would be, were it
             // short too.
-            from :: ir_x64_relaxed_at(r, end) - saving
+            from :: ir_x64_relaxed_end(r, end) - saving
             to :: ir_x64_relaxed_at(r, targets[index]) - (if targets[index] >= end -> saving else -> 0)
             reach :: to - from
             if reach >= -128 && reach <= 127 -> &shorten.push(index)
         }
         loop index in shorten -> r.short[index] = true
         if shorten.len() > 0 {
-            total := 0
-            loop index in 0..<r.sites.len() {
-                if r.short[index] -> total += r.lengths[index] - 2
-                r.shrunk[index] = total
-            }
+            ir_x64_relax_shrink(&r)
             changed = true
         }
     }
     out := [U8]{}
     copied := 0
-    loop index in 0..<r.sites.len() {
+    branch := 0
+    head := 0
+    loop branch < r.sites.len() || head < r.heads.len() {
+        // A head's no-ops go before a branch that starts there.
+        if head < r.heads.len() && (branch >= r.sites.len() || r.heads[head] <= r.starts[branch]) {
+            loop at in copied..<r.heads[head] -> &out.push(code[at])
+            copied = r.heads[head]
+            x64_nops(&out, r.pads[head])
+            head += 1
+            next
+        }
+        index :: branch
+        branch += 1
         start :: r.starts[index]
         loop at in copied..<start -> &out.push(code[at])
         end :: r.starts[index] + r.lengths[index]
@@ -104,15 +170,54 @@ fn ir_x64_relax(code: &[U8], sites: [Int]) -> IRX64Relax Never! {
     r
 }
 
+// How many bytes the code up to and including each branch shrank by, from
+// the branches short now.
+fn ir_x64_relax_shrink(r: &IRX64Relax) Never! {
+    total := 0
+    loop index in 0..<r.sites.len() {
+        if r.short[index] -> total += r.lengths[index] - 2
+        r.shrunk[index] = total
+    }
+}
+
+// Each head's no-ops in the layout of the branches short now, in code
+// order: the head's place after the shrinking and the no-ops before it,
+// and its loop's length there (no head is inside it).
+fn ir_x64_relax_pad(r: &IRX64Relax) Never! {
+    total := 0
+    loop index in 0..<r.heads.len() {
+        at :: r.heads[index] - ir_x64_relax_shrunk(r, r.heads[index]) + total
+        length :: r.ends[index] - ir_x64_relax_shrunk(r, r.ends[index]) + total - at
+        align :: ir_x64_loop_align(length)
+        if align > r.align -> r.align = align
+        r.pads[index] = (align - at % align) % align
+        total += r.pads[index]
+        r.padded[index] = total
+    }
+}
+
 // The signed rel32 field at `at`.
 fn ir_x64_rel32_at(code: [U8], at: Int) -> Int Never! {
     word :: Int.from_u8(code[at]).bit_or((Int.from_u8(code[at + 1]) << 8)).bit_or((Int.from_u8(code[at + 2]) << 16)).bit_or((Int.from_u8(code[at + 3]) << 24))
     if word >= 2147483648 -> word - 4294967296 else -> word
 }
 
-// Where offset `at` of the old layout, an instruction boundary, is in the
-// relaxed code: every short branch that ends at or before it moved it up.
+// Where offset `at` of the old layout, an instruction start, is in the
+// relaxed code: every short branch that ends at or before it moved it up,
+// and the no-ops of every head at or before it moved it down (a head's
+// own instruction starts after them).
 fn ir_x64_relaxed_at(r: IRX64Relax, at: Int) -> Int Never! {
+    at - ir_x64_relax_shrunk(r, at) + ir_x64_relax_padded(r, at, true)
+}
+
+// Where an instruction that ends at offset `at` of the old layout ends in
+// the relaxed code: before the no-ops of a head at `at`.
+fn ir_x64_relaxed_end(r: IRX64Relax, at: Int) -> Int Never! {
+    at - ir_x64_relax_shrunk(r, at) + ir_x64_relax_padded(r, at, false)
+}
+
+// How many bytes the short branches ending at or before `at` shrank by.
+fn ir_x64_relax_shrunk(r: IRX64Relax, at: Int) -> Int Never! {
     // The last branch ending at or before `at`.
     low := 0
     high := r.sites.len()
@@ -124,5 +229,60 @@ fn ir_x64_relaxed_at(r: IRX64Relax, at: Int) -> Int Never! {
             high = middle
         }
     }
-    if low == 0 -> at else -> at - r.shrunk[low - 1]
+    if low == 0 -> 0 else -> r.shrunk[low - 1]
+}
+
+// The no-op bytes of the heads before `at` (and at it, when `inclusive`).
+fn ir_x64_relax_padded(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
+    low := 0
+    high := r.heads.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if r.heads[middle] < at || (inclusive && r.heads[middle] == at) {
+            low = middle + 1
+        } else {
+            high = middle
+        }
+    }
+    if low == 0 -> 0 else -> r.padded[low - 1]
+}
+
+// A forward jmp over three filler bytes and a loop of 20 bytes and a jmp
+// back to its head: both jumps go short, the 22-byte loop starts on a
+// 32-byte window, and the forward jump lands after it.
+#Test("A small loop's head starts on its window after the branches before it shrink") {
+    code := [U8]{0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90}
+    loop _ in 0..<20 -> &code.push(U8{0x90})
+    &code.push(U8{0xe9})
+    loop _ in 0..<4 -> &code.push(U8{0})
+    x64_patch_rel32(&code, 1, 33)
+    x64_patch_rel32(&code, 29, 8)
+    r :: ir_x64_relax(&code, [Int]{1, 29}, [Int]{8}, [Int]{33})
+    assert_eq(r.align, 32)
+    assert_eq(ir_x64_relaxed_at(r, 8), 32)
+    assert_eq(code.len(), 54)
+    assert_eq(Int.from_u8(code[0]), 0xeb)
+    assert_eq(Int.from_u8(code[1]), 52)
+    assert_eq(Int.from_u8(code[52]), 0xeb)
+    assert_eq(Int.from_u8(code[53]), 256 - 22)
+    loop at in 32..<52 -> assert_eq(Int.from_u8(code[at]), 0x90)
+}
+
+// A forward jmp over 117 filler bytes and a one-byte loop: short, it would
+// grow the head's padding from 6 to 9 bytes and land 129 bytes on, so it
+// stays long, and the head still starts on 16.
+#Test("A branch the head's padding pushes out of reach stays long") {
+    code := [U8]{0xe9, 0, 0, 0, 0}
+    loop _ in 0..<118 -> &code.push(U8{0x90})
+    &code.push(U8{0xe9})
+    loop _ in 0..<4 -> &code.push(U8{0})
+    x64_patch_rel32(&code, 1, 128)
+    x64_patch_rel32(&code, 124, 122)
+    r :: ir_x64_relax(&code, [Int]{1, 124}, [Int]{122}, [Int]{128})
+    assert_eq(r.align, 16)
+    assert_eq(ir_x64_relaxed_at(r, 122), 128)
+    assert_eq(code.len(), 131)
+    assert_eq(Int.from_u8(code[0]), 0xe9)
+    assert_eq(ir_x64_rel32_at(code, 1), 126)
+    assert_eq(Int.from_u8(code[129]), 0xeb)
 }

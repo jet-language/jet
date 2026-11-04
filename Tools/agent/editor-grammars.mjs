@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Render the generated lexical sections of the editor grammars.
 //
-// Highlights.jet (JET_HIGHLIGHT_TOKENS) and Prelude/Markers.jet (active
-// `marker` rows) are the authority. This tool reads their Jet text and
+// Highlights.jet (JET_HIGHLIGHT_TOKENS) and Prelude/Markers.jet (its marker
+// structs) are the authority. This tool reads their Jet text and
 // replaces the BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS block in each grammar;
 // it keeps no second token inventory. Which words tree-sitter parses as
 // anonymous literals comes from the generated src/node-types.json.
@@ -146,18 +146,23 @@ function readSyntaxConstants(root) {
   return constants;
 }
 
-// Active rule names: every `marker Name(...)` row without a `$retired` fact.
+// Active rule names: every top-level `struct Name { … impl Marker { … } }`.
 export function readActiveMarkers(root = ROOT) {
   const names = [];
-  for (const raw of readSource(MARKERS, root).split("\n")) {
-    const line = raw.trim();
-    if (!line.startsWith("marker ")) continue;
-    const open = line.indexOf("(");
-    if (open < 0) fail(`marker declaration without a parameter list: ${line}`);
-    if (/\$retired\s*:/.test(line)) continue;
-    names.push(line.slice("marker ".length, open).trim());
+  let current = null;
+  for (const line of readSource(MARKERS, root).split("\n")) {
+    if (line.startsWith("struct ")) {
+      const open = line.indexOf("{");
+      if (open < 0) fail(`marker struct without a body: ${line}`);
+      current = line.slice("struct ".length, open).trim();
+    } else if (line.startsWith("}")) {
+      current = null;
+    } else if (current !== null && line.trim().startsWith("impl Marker")) {
+      names.push(current);
+      current = null;
+    }
   }
-  if (names.length === 0) fail(`no marker declarations in ${MARKERS}`);
+  if (names.length === 0) fail(`no marker structs in ${MARKERS}`);
   return names;
 }
 

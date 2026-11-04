@@ -8,7 +8,7 @@ package {
         term: .Library{ entry: term }
     }
 }
-use core as core
+use core :: core
 // core.term — the connected terminal.
 //
 // `print` / `eprint` write UTF-8. `input` / `readline` / `read_until` read
@@ -104,9 +104,13 @@ fn print(text: String) Never! -[IO, Time.Wait]> {
     &out.write_line(text).drop("stdout write")
 }
 
+// The write's failure is discarded, so eprint skips stdio_write's IOError:
+// the same IO.Write checkpoint, then the same raw write (stderr ignores
+// `flush`; stdio_write passes true for any nonempty text), whose cause text
+// is dropped unread.
 fn eprint(text: String) Never! -[IO, Time.Wait]> {
-    out := stderr()
-    &out.write("{text}\n").drop("stderr write")
+    if core.term.__stdio_fault("IO.Write") -> return
+    _ :: core.term.__stdio_write("{text}\n", false, true, true)
 }
 
 // IoLineStream.rs jet_std_io_input: the prompt is written and flushed, then
@@ -596,7 +600,7 @@ fn stdio_terminal(stderr: Bool) -> Bool Never! {
 fn stdio_write(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
     resource :: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
-    flush :: text.len() > 0 || newline || stdio_terminal(stderr)
+    flush :: !text.is_empty() || newline || stdio_terminal(stderr)
     stdio_result(core.term.__stdio_write(text, newline, stderr, flush), .Write, resource)
 }
 

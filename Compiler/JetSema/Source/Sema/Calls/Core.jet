@@ -18,6 +18,9 @@ use jet_foundation.[
     CoreCallTypeConstraint,
     CoreCallTypeParameter,
     CoreTypedCallSignature,
+    CoreUnbuiltRow,
+    core_unbuilt_call,
+    core_unbuilt_handle,
     Diagnostic,
     diagnostic_registry_row,
     Effect,
@@ -149,6 +152,15 @@ fn sema_call_core_import_member(target: SemaCallImportTarget, requested_member: 
     Val(requested_member)
 }
 
+// The loaded module whose source functions a Core import calls. A member
+// that names a Core submodule (`use core.files`) binds the module by name,
+// not by a loaded identity, so its source rows are found by that name.
+fn sema_call_core_import_source_identity(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallImportTarget) -> String? {
+    graph :: program.registration_graph ?? return None
+    if sema_registration_module_index(graph, target.module_identity) != None -> return Val(target.module_identity)
+    sema_call_core_module_identity(environment, program, target.module_name)
+}
+
 // An import is usable only while its exact registered binding remains the
 // visible lexical binding for the local alias.
 fn sema_call_core_import_is_unshadowed(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, target: SemaCallImportTarget) -> Bool Never! {
@@ -211,37 +223,26 @@ fn sema_call_core_vault_build_time_gate(module_name: String, member: String, spa
     true
 }
 
-// A Core call whose implementation no `jet` has yet (R2(b)): the feature it
-// needs and the card that ports it. Its runtime is missing, so building the
-// call would stop inside the compiler; sema reports E2104 at the call instead.
-fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: String, card: Int)? Never! {
-    if module_name == "core.net.ws" && (member == "connect" || member == "upgrade") {
-        return Val((feature: "the WebSocket runtime (connections and messages)", card: 4957))
-    }
-    if module_name == "core.mod" && member == "load" -> return Val((feature: "the module loader runtime and its grants", card: 5993))
-    if module_name == "core.web.browser" && sema_call_core_browser_runtime_member(member) -> return Val((feature: SEMA_BROWSER_RUNTIME_FEATURE, card: SEMA_BROWSER_RUNTIME_CARD))
-    None
+// E2104 for a user call of a Core surface no `jet` has built yet (R2(b)).
+// The surface's runtime is missing, so building the call would stop inside the
+// compiler; sema reports E2104 at the call instead. The surface, its feature
+// and its card come from the one table of unbuilt surfaces (CORE_UNBUILT_ROWS).
+fn sema_call_core_unbuilt_error(callee: String, row: CoreUnbuiltRow, span: Span) -> Diagnostic Never! {
+    sema_error("E2104", span, "`{callee}` is not built yet", "This `jet` has no implementation of {row.feature} yet, and no other `jet` can run it.", "Remove the `{callee}` call for now; {row.feature} needs its Jet implementation first (card #{row.card}).")
 }
 
-// The browser automation runtime (the live protocol session and the test
-// report renderers) is not in the runtime pack, so the Core members that open
-// a session or render a report, and every Browser handle method, are unbuilt.
-SEMA_BROWSER_RUNTIME_FEATURE :: "the browser automation runtime (sessions and test reports)"
-SEMA_BROWSER_RUNTIME_CARD :: 4954
-
-fn sema_call_core_browser_runtime_member(member: String) -> Bool Never! {
-    member == "connect" || member == "connect_profile" || member == "connect_browser_profile" || member == "report_json" || member == "report_text" || member == "report_html" || member == "write_report"
-}
-
-// E2104 at a checked user call of a Browser handle method: its runtime route
-// is the unbuilt browser automation runtime (sema_call_core_unbuilt).
-fn sema_call_core_browser_method_unbuilt(owner: String, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+// E2104 at a checked user call of a method (or the static `new`) of an
+// unbuilt handle type (core_unbuilt_handle); true when reported. Core's own
+// source may still name it; only a call from user code is refused, and only
+// by a compile that lowers it (sema_refuses_unbuilt).
+fn sema_call_core_handle_unbuilt(owner: String, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
     if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return false
-    &diagnostics.push(sema_error("E2104", span, "`{owner}.{method}` is not built yet", "This `jet` has no implementation of {SEMA_BROWSER_RUNTIME_FEATURE} yet, and no other `jet` can run it.", "Remove the `{owner}.{method}` call for now; {SEMA_BROWSER_RUNTIME_FEATURE} needs its Jet implementation first (card #{SEMA_BROWSER_RUNTIME_CARD})."))
+    row :: core_unbuilt_handle(owner) ?? return false
+    &diagnostics.push(sema_call_core_unbuilt_error("{owner}.{method}", row, span))
     true
 }
 
-// A user call of an unbuilt Core feature (sema_call_core_unbuilt): noted
+// A user call of an unbuilt Core call (core_unbuilt_call): noted
 // where the call resolves its Core member, settled once the call is checked.
 struct SemaCoreUnbuiltCall {
     module_name: String
@@ -254,7 +255,7 @@ struct SemaCoreUnbuiltCall {
 // by a compile that lowers it (sema_refuses_unbuilt).
 fn sema_call_core_unbuilt_note(module_name: String, member: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, unbuilt: &SemaCoreUnbuiltCall?) Never! {
     if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return
-    if sema_call_core_unbuilt(module_name, member) == None -> return
+    if core_unbuilt_call(module_name, member) == None -> return
     unbuilt = Val(SemaCoreUnbuiltCall{module_name: module_name, member: member, span: span})
 }
 
@@ -267,9 +268,9 @@ fn sema_call_core_unbuilt_note(module_name: String, member: String, span: Span, 
 fn sema_call_core_unbuilt_settle(unbuilt: SemaCoreUnbuiltCall?, before: Int, diagnostics: &[Diagnostic]) Never! {
     call :: unbuilt ?? return
     if sema_has_error_since(diagnostics, before) -> return
-    missing :: sema_call_core_unbuilt(call.module_name, call.member) ?? return
+    row :: core_unbuilt_call(call.module_name, call.member) ?? return
     short :: call.module_name.slice(call.module_name.rfind(".") + 1, call.module_name.len())
-    &diagnostics.push(sema_error("E2104", call.span, "`{short}.{call.member}` is not built yet", "This `jet` has no implementation of {missing.feature} yet, and no other `jet` can run it.", "Remove the `{short}.{call.member}` call for now; {missing.feature} needs its Jet implementation first (card #{missing.card})."))
+    &diagnostics.push(sema_call_core_unbuilt_error("{short}.{call.member}", row, call.span))
 }
 
 // The typed vault surface: the safe `get` read and the KeyRef lifecycle, whose
@@ -477,6 +478,7 @@ fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) 
     if module_name == "core.time.expiring" && member == "new" -> return sema_error("E1004", span, "`expiring.new` is not a Core member", "fresh values use a type-owned `new` constructor", "use `ExpiringValue.new(value, ttl, clock)`")
     if module_name == "core.event" && member == "policy_async" -> return sema_error("E1004", span, "`event.policy_async` is not a Core member", "a synchronous `Event<T>` cannot provide real queued dispatch; `AsyncEvent<T, E>` is the sole asynchronous event model", "use `event.async_result<T, E>(AsyncPolicy.{{ capacity: n, overflow: .Block }}, FailurePolicy.Collect)`")
     if module_name == "core.crypto" && member == "constant_time_eq" -> return sema_error("E1004", span, "`crypto.constant_time_eq` is not a Core member", "`eq` is not one of Jet's blessed API abbreviations", "use `crypto.constant_time_equal_bytes(a, b)`")
+    if module_name == "core.process" && member == "argv" -> return sema_error("E1004", span, "`process.argv` is not a Core member", "`process.args()` is the one list of the program's words, without the program name", "use `process.args()` for the words and `sys.executable()` for the program path")
     if module_name == "core.crypto" && member.ends_with("_bytes") {
         algorithm :: member.removesuffix("_bytes")
         digest :: if algorithm == {
@@ -666,7 +668,11 @@ fn sema_call_core_resolve_import_route(environment: SemaScopeEnvironment, progra
     // `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
     variadic_term :: imported.module_name == "core.term" && (member == "print" || member == "eprint" || member == "progress") && actual_arity != 1
-    source :: if sema_compiler_services_is_compiler_query(imported.module_name, member) || variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_source_target(environment, program, imported.module_identity, member, type_args, span, false, &diagnostics)
+    source_identity :: if sema_compiler_services_is_compiler_query(imported.module_name, member) || variadic_term || sema_call_core_has_explicit_source_target(imported.module_name, member) || sema_call_core_native_resource_consumer(imported.module_name, member, first_is_move) -> None else -> sema_call_core_import_source_identity(environment, program, imported)
+    source :: if source_identity == {
+        .Val(identity) -> sema_call_core_source_target(environment, program, identity, member, type_args, span, false, &diagnostics)
+        .None -> None
+    }
     if source == {
         .Val(target) -> return Val(SemaCoreCallRoute.Source{target: target})
         .None -> {}
@@ -1271,6 +1277,12 @@ fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
         &diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
+        return None
+    }
+    // The start vector stays private to Core source; the generated `#CLI`
+    // entry reads it through `core.args`.
+    if record.module_name == "core.process" && record.member == "argv" && !environment.source_file.starts_with("<corelib>/") {
+        &diagnostics.push(sema_call_core_unknown_item("core.process", "argv", span))
         return None
     }
     if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {

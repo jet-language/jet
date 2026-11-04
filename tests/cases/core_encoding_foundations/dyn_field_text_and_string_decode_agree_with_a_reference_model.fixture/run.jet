@@ -1,0 +1,100 @@
+// Each line of cases.txt is `doc<TAB>keys`: an encoded document (an Object
+// is {"o":[[key,value],...]} so keys may repeat, an Array {"a":[...]}) and
+// a JSON array of String keys. Every key is read with field(), its value
+// with text() and decode<String>(); the root with text(), decode<String>()
+// and a derived Decode of Rec.
+package {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc, FS.Read] }
+}
+
+use {
+    fs :: core.files
+    json :: core.encoding.json
+}
+
+#Codable
+struct Rec {
+    name: String
+    tag: String
+}
+
+fn reasons(errors: [FieldError]) -> String {
+    parts :: loop error in errors -> "{error.path}:{error.reason}"
+    parts.join(";")
+}
+
+fn shown(value: Dyn) -> String {
+    json.to_string(value) ?? "<unrenderable>"
+}
+
+fn build(encoded: Dyn) -> Dyn {
+    if encoded == {
+        .Object(entries) -> {
+            if entries.len() != 1 -> panic("encoded node")
+            items :: if entries[0].value == {
+                .Array(values) -> values
+                else -> panic("encoded items")
+            }
+            if entries[0].key == "a" {
+                values :: loop item in items -> build(item)
+                return Dyn.Array(values)
+            }
+            pairs := [(key: String, value: Dyn)]{}
+            loop item in items {
+                if item == .Array(pair) {
+                    key :: if pair[0] == {
+                        .Text(k) -> k
+                        else -> panic("encoded key")
+                    }
+                    &pairs.push((key: key, value: build(pair[1])))
+                }
+            }
+            return Dyn.Object(pairs)
+        }
+        else -> return encoded.copy()
+    }
+}
+
+fn run() {
+    raw :: fs.read("cases.txt") ?? panic("read failed")
+    loop line in raw.split("\n") {
+        parts :: line.split("\t").to_list()
+        if parts.len() < 2 -> next
+        tree :: build(json.parse(parts[0]) ?? panic("bad doc {parts[0]}"))
+        keys :: json.parse(parts[1]) ?? panic("bad keys {parts[1]}")
+        out := [String]{}
+        if keys == .Array(items) {
+            loop item in items {
+                key :: item.text() ?? panic("key")
+                if tree.field(key) == {
+                    .Ok(value) -> {
+                        text :: if value.text() == {
+                            .Ok(t) -> "t={t}"
+                            .Err(e) -> "te={reasons(e)}"
+                        }
+                        decoded :: if value.decode<String>() == {
+                            .Ok(t) -> "d={t}"
+                            .Err(e) -> "de={reasons(e)}"
+                        }
+                        &out.push("ok {shown(value)} {text} {decoded}")
+                    }
+                    .Err(e) -> &out.push("err {reasons(e)}")
+                }
+            }
+        }
+        root_text :: if tree.text() == {
+            .Ok(t) -> "t={t}"
+            .Err(e) -> "te={reasons(e)}"
+        }
+        root_decoded :: if tree.decode<String>() == {
+            .Ok(t) -> "d={t}"
+            .Err(e) -> "de={reasons(e)}"
+        }
+        rec :: if tree.decode<Rec>() == {
+            .Ok(r) -> "rec={r.name}/{r.tag}"
+            .Err(e) -> "rece={reasons(e)}"
+        }
+        print("{out.join(" | ")} || {root_text} {root_decoded} {rec} || {shown(tree)}")
+    }
+}

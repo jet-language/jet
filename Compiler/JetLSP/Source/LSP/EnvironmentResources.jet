@@ -2,15 +2,17 @@
 // This read-only resource projects `jet env info --json`, never evaluates a
 // second environment model. OSPath preserves native workspace/executable/cwd
 // identities. Core owns filesystem/process/error/cleanup laws (#4494/#4483).
-use core.encoding.[Dyn]
-use core.files.runtime.kernel_path_components.[OSPath]
-use core.files.runtime.kernel_path_components as lsp_env_path
-use core.files.host.retained_descriptor as lsp_env_files
-use core.sys.host.os_path_ingress as lsp_env_sys
-use core.process.host.native_process as lsp_env_process
-use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
-use jetpack.[ENV_FILE, env_hook_find_env_root]
-use jetpack_foundation.[ENV_FILE]
+use {
+    core.encoding.[Dyn]
+    core.files.runtime.kernel_path_components.[OSPath]
+    lsp_env_path :: core.files.runtime.kernel_path_components
+    lsp_env_files :: core.files.host.retained_descriptor
+    lsp_env_sys :: core.sys.host.os_path_ingress
+    lsp_env_process :: core.process.host.native_process
+    jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
+    jetpack.[ENV_FILE, env_hook_find_env_root]
+    jetpack_foundation.[ENV_FILE]
+}
 
 LSP_ENVIRONMENT_RESOURCE_URI :: "jet://environment"
 LSP_ENVIRONMENT_RESOURCE_MIME_TYPE :: "application/json"

@@ -1,0 +1,13 @@
+// A whole number that meets a Float converts with an exact check, so a value
+// no Float holds stops. `approx(n)` is the expert escape: it rounds to the
+// nearest Float on purpose, with no check, wherever the Float then goes.
+fn half(x: Float) -> Float { x / 2.0 }
+
+fn run() {
+    exact :: 9007199254740993 // 2^53 + 1: no Float holds it exactly
+    price :: Float{0.25}
+    print("approx: {approx(exact)}")
+    print("passed to a Float parameter: {half(approx(exact))}")
+    print("Float + approx: {price + approx(exact)}")
+    print("approx * Float: {approx(exact) * price}")
+}
