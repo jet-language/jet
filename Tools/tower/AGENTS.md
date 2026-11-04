@@ -176,6 +176,19 @@ only scratch output (`$JET_SCRATCH_ROOT`, `~/.cache`, `/tmp`) is refused, and
 `--phase done` re-checks every row (`E_EVIDENCE`). The guard applies when the
 project root is a git work tree holding one of those branches.
 
+No board text names this machine's home, user, host, email or mounts
+(#6564 c5). Every write is checked against the rule table in
+`app/personal-info.mjs`, which Tower builds from the machine it runs on. A write
+that adds a match is refused (`E_PERSONAL_INFO`), and the error shows the text
+to write instead, such as `$JET_SCRATCH_ROOT/lanes/X/run.log` or `~/.cache/...`.
+Text already on the board does not block other writes. `tower redact` is a dry
+run that counts old matches per section and per rule. `tower redact --apply --by
+X` rewrites them all in one write, ratified decisions included, and logs one
+`board.redact` event naming the rule table. This is the one change ratified
+text may take, because the owner ordered it and it keeps the meaning.
+`Tools/agent/personal-info-guard.sh` applies the same table to every checked-in
+file, and `lane-check.sh` runs it first.
+
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
 with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real
 environment the harness cannot replace. **Never** for technical correctness,
@@ -317,6 +330,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 | Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |
 | Durable evidence | non-owner meets, verifies or closes with a row whose evidence names no commit on `dev`/`master` or cites only scratch output | `E_EVIDENCE` | land the change and cite its commit, or `--kind` `decision`, `duplicate` or `obsolete` with the decision, card or reason |
+| Personal information | any write that adds this machine's home path, user or host name, git email or name, or a mount such as `$JET_SCRATCH_ROOT` | `E_PERSONAL_INFO` | write the neutral text the error shows (`~`, `$JET_SCRATCH_ROOT`, `user`, `devhost`); clean old text with `tower redact --apply --by X` |
 | Closure progression | any claim or brief while an active card has all criteria settled and no open gate | `E_CLOSE_READY` | close, reopen, or block the closure-ready card |
 | Milestone closeout | closeout begins before linked cards are done, or milestone verify lacks its token or verified criteria | `E_MILESTONE` | finish and close cards, freeze source, open token, run review |
 

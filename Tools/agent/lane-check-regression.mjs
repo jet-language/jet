@@ -8,6 +8,9 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const source = fileURLToPath(new URL('./lane-check.sh', import.meta.url));
+// lane-check runs the personal-info guard first; the guard reads Tower's rule table.
+const guard = fileURLToPath(new URL('./personal-info-guard.sh', import.meta.url));
+const rules = fileURLToPath(new URL('../tower/app/personal-info.mjs', import.meta.url));
 const parent = process.argv[2] ?? os.tmpdir();
 assert(path.resolve(parent) !== '/tmp' && !path.resolve(parent).startsWith('/tmp/'),
   'Use disk-backed fixture scratch');
@@ -15,8 +18,11 @@ const root = fs.mkdtempSync(path.join(parent, 'jet-lane-regression.'));
 const repo = path.join(root, 'repo');
 const bin = path.join(root, 'bin');
 fs.mkdirSync(path.join(repo, 'Tools/agent'), {recursive: true});
+fs.mkdirSync(path.join(repo, 'Tools/tower/app'), {recursive: true});
 fs.mkdirSync(bin);
 fs.copyFileSync(source, path.join(repo, 'Tools/agent/lane-check.sh'));
+fs.copyFileSync(guard, path.join(repo, 'Tools/agent/personal-info-guard.sh'));
+fs.copyFileSync(rules, path.join(repo, 'Tools/tower/app/personal-info.mjs'));
 // The memory-capped scope is a pass-through here: drop systemd-run's options.
 fs.writeFileSync(path.join(bin, 'systemd-run'), '#!/usr/bin/env bash\nwhile [ "$#" -gt 0 ]; do case "$1" in -p) shift 2 ;; -*) shift ;; *) break ;; esac; done\nexec "$@"\n', {mode: 0o755});
 fs.writeFileSync(path.join(bin, 'jet'), `#!/usr/bin/env bash
@@ -102,5 +108,21 @@ for (const [name, mode, args, expected] of [
   outcomes.push({name, actualRc: result.status, actualSignal: result.signal,
     log, terminalRcRecorded: fs.existsSync(`${log}.rc`),
     bytes: Buffer.byteLength(text), regression: 'PASS'});
+}
+// The personal-info guard runs first and refuses a checkout naming this machine's home.
+{
+  const scratch = path.join(root, 'personal-info');
+  fs.mkdirSync(scratch);
+  const leak = path.join(repo, 'leak.md');
+  fs.writeFileSync(leak, `notes kept in ${os.homedir()}/notes\n`);
+  const result = spawnSync('bash', [path.join(repo, 'Tools/agent/lane-check.sh'), 'focused.jet'], {encoding: 'utf8', timeout: 10000,
+    env: {...process.env, PATH: `${bin}:${process.env.PATH}`, JET_TEST_SCRATCH: scratch, XDG_CACHE_HOME: path.join(root, 'cache'),
+      JET: path.join(bin, 'jet'), LANE_FIXTURE: 'success', LANE_ARGS_PATH: path.join(scratch, 'args.txt')}});
+  fs.renameSync(leak, path.join(scratch, 'leak.md'));
+  assert.equal(result.status, 1, `personal-info: ${result.stderr}`);
+  assert(result.stdout.includes('CHECK FAILED — personal or machine information'), result.stdout);
+  assert(result.stderr.includes('leak.md:1:'), result.stderr);
+  assert(!fs.existsSync(path.join(scratch, 'args.txt')), 'personal-info: refused before any compiler run');
+  outcomes.push({name: 'personal-info', actualRc: result.status, regression: 'PASS'});
 }
 console.log(JSON.stringify({scope: 'Real lane shell with fixture children only', outcomes, green: true}, null, 2));

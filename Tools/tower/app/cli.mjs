@@ -18,6 +18,7 @@ import { findDuplicateCandidates } from './card-matching.mjs';
 import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
+import { machinePersonalInfo } from './personal-info.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -156,6 +157,7 @@ const COMMAND_FLAGS = {
   repair: { verbs: {
     apply: by('manifest', 'dryRun', 'expectRev'),
   }},
+  redact: { flags: by('apply', 'expectRev') },
   events: { flags: ['limit'] },
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
@@ -199,7 +201,7 @@ const FLAG_VALUE = {
   unarchive: null, archived: null, draft: null, drafts: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
-  manifest: 'FILE', dryRun: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
+  manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
   hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE',
 };
@@ -1251,6 +1253,28 @@ function cmdRepair(store, { pos, flags }) {
     result);
 }
 
+// #6564 c5: without --apply this is a dry run that changes nothing. The rule
+// table comes from this machine (personal-info.mjs); run it where the board's
+// text was written, with JET_SCRATCH_ROOT set, so every rule maps as shown.
+function cmdRedact(store, { flags }) {
+  const matcher = machinePersonalInfo();
+  const table = matcher.rules.map(rule => `  ${rule.label}: ${rule.kind === 'word' ? 'word ' : ''}${rule.find} → ${rule.replace}`);
+  const show = (report, head) => [
+    head,
+    `rule table ${report.ruleTable}:`, ...table,
+    'spans per section:', ...Object.entries(report.sections).map(([name, n]) => `  ${name}: ${n}`),
+    'spans per rule:', ...Object.entries(report.rules).map(([label, n]) => `  ${label}: ${n}`),
+  ].join('\n');
+  if (!flags.apply) {
+    const { state, history } = store.loadPair();
+    const report = db.redactBoardCopy(state, history, matcher);
+    return out(flags, show(report, `dry run: ${report.total} spans would be redacted; rerun with --apply --by X to write`), { ...report, applied: false });
+  }
+  if (!flags.by || flags.by === true) throw new TowerError('E_USAGE', 'redact --apply needs --by <agent>');
+  const { result, state } = store.mutate((s, cfg, history) => db.applyRedaction(s, history, flags.by, matcher), { expectRev: flags.expectRev });
+  return out(flags, show(result, `redacted ${result.total} spans at rev ${state.meta.rev}`), { ...result, applied: true, rev: state.meta.rev });
+}
+
 function cmdEvents(store, { flags }) {
   const s = store.load();
   const es = s.events.slice(0, Number(flags.limit || 30));
@@ -1371,6 +1395,7 @@ ${HELP_SURFACE}
     frozen write guard (E_OWNER_LANE), ratified-decision delete guard (E_HAS_RATIFIED),
     building-release handoff (E_HANDOFF), nonempty card exit criteria (E_CRITERIA),
     durable criterion evidence: a commit on dev or master, or --kind decision|duplicate|obsolete (E_EVIDENCE),
+    no personal or machine information in new text; \`tower redact\` cleans old text (E_PERSONAL_INFO),
     and explicit milestone review (E_MILESTONE).
 `;
 
@@ -1477,6 +1502,7 @@ export async function run(argv) {
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
       case 'repair':    return cmdRepair(store, sub);
+      case 'redact':    return cmdRedact(store, sub);
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'board':     return cmdBoard(store, sub);

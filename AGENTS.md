@@ -246,7 +246,8 @@ Committed files carry no personal or machine information: no home paths, user
 or host names, personal emails or machine mounts. Write a placeholder instead,
 such as `$HOME`, `$USER`, `$JET_SCRATCH_ROOT` or `$JET_STATE_ROOT`; fixtures
 use the example account `user` on `devhost`. This holds for recorded evidence
-too (#6564 c5).
+too. `Tools/agent/lane-check.sh` refuses a checkout that breaks it, through
+`Tools/agent/personal-info-guard.sh` (#6564 c5).
 
 ## Adversarial design review
 

@@ -26,6 +26,7 @@ import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
 import { checkBoard, commitBoard } from './board-git.mjs';
 import { migrateRecommendationLosses, migrateReviewPasses } from './migrate.mjs';
+import { machinePersonalInfo, personalInfoAdded, redactBoard, tallyValue } from './personal-info.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
   formatHardeningEvidence, normalizeHardeningFixture, prepareHardening,
@@ -327,7 +328,13 @@ export function openStore(dataDir) {
       const historyView = new Proxy(history, Object.fromEntries(Reflect.ownKeys(Reflect)
         .filter(k => typeof Reflect[k] === 'function')
         .map(k => [k, (...args) => { touch(); return Reflect[k](...args); }])));
+      // #6564 c5: tally personal-info spans before the write so the write may
+      // keep (or redact) old ones but never add one.
+      const personal = machinePersonalInfo();
+      const personalBefore = personal.rules.length ? tallyValue(s, personal) : null;
       const result = fn(s, config, historyView);
+      const personalIssue = personalBefore && personalInfoAdded(personal, personalBefore, s);
+      if (personalIssue) fail('E_PERSONAL_INFO', personalIssue);
       let historyWritten = pair.historyMigrated || (historyBefore !== null && JSON.stringify(history) !== historyBefore);
       if (historyWritten) writeJSONHeld(root, 'history.json', history);
       // #461: single chokepoint — every write gets a chance to retire aged-out
@@ -1444,6 +1451,23 @@ const checkRefs = (val) => {
 export function logEvent(s, { by = 'agent', action, ref = null, note = '', draft = false }) {
   s.events.unshift({ at: now(), by, action, ref, note, ...(draft ? { draft: true } : {}) });
   if (s.events.length > 2000) s.events.length = 2000;
+}
+
+// `tower redact --apply` (#6564 c5): one write that rewrites every personal or
+// machine span in tower.json and history.json with its neutral form, and one
+// event that names the rule table and the per-section counts.
+export function applyRedaction(s, history, by, matcher = machinePersonalInfo()) {
+  const report = redactBoard(s, history, matcher);
+  if (report.total) {
+    const sections = Object.entries(report.sections).map(([name, n]) => `${name} ${n}`).join(', ');
+    logEvent(s, { by, action: 'board.redact', note: `${report.ruleTable}: ${report.total} spans redacted (${sections})` });
+  }
+  return report;
+}
+
+// The dry run: the same counts over copies, so the board is not touched.
+export function redactBoardCopy(s, history, matcher = machinePersonalInfo()) {
+  return redactBoard(structuredClone(s), structuredClone(history), matcher);
 }
 
 // ---- mutations: cards ------------------------------------------------------

@@ -70,6 +70,9 @@ approved contract is not a ballot.
   output alone is refused (`E_EVIDENCE`). A row with no code to land declares
   `--kind decision|duplicate|obsolete` and names the ratified decision, the
   surviving card, or the reason.
+- Board text never names this machine's home, user, host, email or mounts
+  (#6564 c5). Write `~`, `$JET_SCRATCH_ROOT`, `user` or `devhost` instead; a
+  write that adds one is refused (`E_PERSONAL_INFO`) with the text to use.
 - End each batch of board writes with `tower board commit --by <agent>`;
   `tower board check` must pass before you hand off.
 

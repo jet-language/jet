@@ -11,7 +11,8 @@
 # by $JET. The default run checks the whole compiler project (Compiler/, the
 # unit the native self-host builds) with JET_KEEP_GOING=1, so every error in
 # every item is reported at once. A path argument checks that file or project
-# instead.
+# instead. Every mode first runs personal-info-guard.sh, which refuses any file
+# naming this machine's home, user, host, email or mounts (#6564 c5).
 #
 # What this is NOT: it does not run tests, does not run formatters, does not
 # regenerate artifacts, does not build a compiler. Those stay with the
@@ -30,6 +31,11 @@ set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
 repo="$PWD"
+
+if ! bash Tools/agent/personal-info-guard.sh "$repo"; then
+  echo "CHECK FAILED — personal or machine information in the checkout (see above)"
+  exit 1
+fi
 
 if [ "${1:-}" = "--runtime-generators" ]; then
   if [ "$#" -ne 1 ]; then
