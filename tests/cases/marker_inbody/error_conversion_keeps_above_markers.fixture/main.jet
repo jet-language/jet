@@ -1,0 +1,39 @@
+// A marker written above an error conversion is its impl's marker: one that
+// only an impl takes is accepted, and the conversion still runs.
+struct Audited {
+    impl Marker {
+        sites :: [.Impl]
+    }
+}
+
+#Error
+enum FileErr {
+    NotFound(String)
+}
+
+#Error
+enum AppErr {
+    File(FileErr)
+}
+
+#Audited
+impl FileErr -> AppErr { AppErr.File(self) }
+
+fn read_config(path: String) -> String FileErr! {
+    if path == "" -> return Err(FileErr.NotFound("(empty path)"))
+    Ok("42")
+}
+
+fn load(path: String) -> String AppErr! {
+    raw :: read_config(path)
+    Ok(raw)
+}
+
+fn run() {
+    print(load("config.txt") ?? "none")
+    if load("") == {
+        .Ok(value) -> { print(value) }
+        .Err(_error) -> { print("converted") }
+        else -> {}
+    }
+}

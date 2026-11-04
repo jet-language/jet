@@ -238,6 +238,10 @@ fn sema_policy_unsupported_applications(program: Program) -> [AppliedRuleApplica
         // html_path (the web output's companion page), which are checked on
         // their own.
         if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude" || application.marker.name == "HTML") -> next
+        // An error conversion's markers stay its impl's markers after the
+        // conversion became its routine (sema_error_conversion_items), and are
+        // checked as every impl's markers are.
+        if application.site == .Val(site) && site == RuleSite.Impl -> next
         if sema_policy_statement_form(application) -> next
         if application.marker.name != "Allow" -> &unsupported.push(application)
     }

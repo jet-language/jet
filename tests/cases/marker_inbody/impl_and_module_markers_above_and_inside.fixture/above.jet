@@ -1,0 +1,28 @@
+// The same program as inside.jet, with each marker of an impl written inside
+// a type body written above it.
+trait Backend {
+    fn label(self) -> String
+}
+
+struct Meters {
+    value: Int
+
+    #Commutative
+    impl Add(Int) {
+        fn add(self, other: Int) -> Meters { Meters{value: self.value + other} }
+    }
+}
+
+struct LinuxBackend {
+    name: String
+
+    #Target(OS.Linux)
+    impl Backend {
+        fn label(self) -> String { "linux: {self.name}" }
+    }
+}
+
+fn run() {
+    print((2 + Meters{value: 1}).value)
+    print(LinuxBackend{name: "a"}.label())
+}

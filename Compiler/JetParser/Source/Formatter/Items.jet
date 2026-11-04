@@ -642,6 +642,20 @@ fn jfmt_write_verbatim(f: &JetFmt, start: Int, end: Int, newline: Bool) {
     jfmt_skip_verbatim_comments(&f, end)
 }
 
+// A verbatim item whose body holds `#X :: value` lines: the text between
+// them is copied, and each line prints as the formatter prints marker lines.
+fn jfmt_write_verbatim_marker_lines(f: &JetFmt, start: Int, end: Int, markers: [Marker]) {
+    cursor := start
+    loop marker in jfmt_inside_markers(markers) {
+        if marker.span.start < cursor || marker.span.end > end -> next
+        text :: jfmt_src_text(f, cursor, marker.span.start)
+        jfmt_write(&f, text)
+        jfmt_fmt_inbody_marker(&f, marker)
+        cursor = marker.span.end
+    }
+    jfmt_write_verbatim(&f, cursor, end, false)
+}
+
 fn jfmt_fmt_item(f: &JetFmt, item: Item) {
     if item == {
         .Func(value) -> jfmt_fmt_func(&f, value)
@@ -691,7 +705,8 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         // Stage 1a: JetOS contribution modules retain their source-level
         // contribution shape; inline code modules use the typed formatter.
         .Module(m) -> {
-            if !jfmt_fmt_perf_module(&f, m) -> jfmt_write_verbatim(&f, m.span.start, m.span.end, false)
+            jfmt_fmt_above_markers(&f, m.markers)
+            if !jfmt_fmt_perf_module(&f, m) -> jfmt_write_verbatim_marker_lines(&f, m.span.start, m.span.end, m.markers)
         }
         // S59: C FFI modules contain typed foreign declarations. Format their
         // Jet signatures while leaving the foreign symbol strings untouched.
@@ -707,6 +722,7 @@ fn jfmt_fmt_item(f: &JetFmt, item: Item) {
         // Error conversion declarations are emitted verbatim.
         .ErrorConv(ec) -> {
             text :: jfmt_src_text(f, ec.body_span.start, ec.body_span.end)
+            jfmt_fmt_above_markers(&f, ec.markers)
             jfmt_write(&f, "impl ")
             jfmt_write(&f, ec.from_ty)
             jfmt_write(&f, " ")
@@ -1089,6 +1105,8 @@ fn jfmt_perf_lit(value: ContribValue) -> PerfLit? Never! {
 fn jfmt_fmt_perf_module(f: &JetFmt, declaration: ModuleDecl) -> Bool {
     if declaration.sources.len() > 0 || declaration.imports.len() > 0 || declaration.members.len() > 0 || declaration.contributions.len() != 1 -> return false
     if jfmt_span_has_comment(f, declaration.span.start, declaration.span.end) -> return false
+    // Marker lines in the body keep their place in the verbatim text.
+    if jfmt_inside_markers(declaration.markers).len() > 0 -> return false
     contribution :: declaration.contributions[0]
     if contribution.namespace != Namespace.Perf -> return false
     perf :: jfmt_perf_lit(contribution.value) ?? return false
@@ -1218,6 +1236,7 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
             next
         }
         m :: t.methods[member.index]
+        jfmt_fmt_callable_markers(&f, m.markers)
         jfmt_write(&f, "fn ")
         jfmt_write(&f, m.name)
         jfmt_write(&f, "(")
@@ -1252,7 +1271,8 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
             jfmt_write(&f, " {{")
             jfmt_newline(&f)
             f.indent += 1
-            jfmt_fmt_block_stmts(&f, body)
+            // Marker lines print where they were written.
+            jfmt_fmt_block_lines(&f, body, jfmt_inside_markers(m.markers))
             f.indent -= 1
             jfmt_end_block(&f)
         }
@@ -1637,8 +1657,11 @@ fn jfmt_empty_body_inline(f: JetFmt, span: Span) -> Bool Never! {
     jfmt_items_find(body, "//".bytes(), 0) == None && jfmt_items_find(body, "/*".bytes(), 0) == None
 }
 
-fn jfmt_fmt_func(f: &JetFmt, func: Func) {
-    above :: jfmt_above_markers(func.markers)
+// The markers written above a function or a trait method signature: one
+// marker before `fn` on its line, unless it is one that keeps its own line,
+// and several as one list.
+fn jfmt_fmt_callable_markers(f: &JetFmt, markers: [Marker]) {
+    above :: jfmt_above_markers(markers)
     if above.len() == 1 {
         jfmt_write(&f, "#")
         jfmt_fmt_marker(&f, above[0])
@@ -1650,6 +1673,10 @@ fn jfmt_fmt_func(f: &JetFmt, func: Func) {
     } else if above.len() > 1 {
         jfmt_fmt_marker_group(&f, above, "#", false)
     }
+}
+
+fn jfmt_fmt_func(f: &JetFmt, func: Func) {
+    jfmt_fmt_callable_markers(&f, func.markers)
     // (card #2789), respelled by preserve
     // the build-time callable mark on capability constructors. It sits after
     // any markers, directly before `fn`, exactly where `method_in_type` reads it.
@@ -2167,20 +2194,31 @@ fn jfmt_fmt_enum(f: &JetFmt, e: EnumDef) {
     jfmt_newline(&f)
     derives_decode :: jfmt_has_name(e.derives, "Decode")
     f.indent += 1
-    // Marker lines written before the first variant print there; the rest
-    // are members after the variants.
+    // Marker lines keep their place among the variants: each prints before
+    // the variant that follows it, and those after the last variant are
+    // members after the variants. A grouped enum prints the lines written
+    // before its first variant there and the rest as members.
     first_variant :: if e.variants.len() > 0 -> e.variants[0].name_span.start else -> e.span.end
-    loop marker in e.type_markers {
-        if !marker.inside || marker.span.start > first_variant -> next
-        jfmt_fmt_marker_line(&f, marker)
-        jfmt_newline(&f)
-    }
+    last_placed :: if e.variants.len() == 0 -> -1 else if e.groups.len() == 0 -> e.variants[e.variants.len() - 1].name_span.start else -> first_variant
     if e.groups.len() == 0 {
+        previous := -1
         loop index in 0..<e.variants.len() {
             if index > 0 -> jfmt_newline(&f)
+            start :: e.variants[index].name_span.start
+            loop marker in e.type_markers {
+                if !marker.inside || marker.span.start <= previous || marker.span.start > start -> next
+                jfmt_fmt_marker_line(&f, marker)
+                jfmt_newline(&f)
+            }
+            previous = start
             jfmt_fmt_variant(&f, e.variants[index], derives_decode)
         }
     } else {
+        loop marker in e.type_markers {
+            if !marker.inside || marker.span.start > first_variant -> next
+            jfmt_fmt_marker_line(&f, marker)
+            jfmt_newline(&f)
+        }
         jfmt_fmt_enum_grouped(&f, e, derives_decode)
     }
     members := [JetFmtMember]{}
@@ -2188,7 +2226,7 @@ fn jfmt_fmt_enum(f: &JetFmt, e: EnumDef) {
     loop index in 0..<e.methods.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: e.methods[index].span.start})
     if e.effect_impl == .Val(declared) -> &members.push(JetFmtMember{kind: JFMT_MEMBER_EFFECT_IMPL, index: 0, start: declared.span.start})
     loop index in 0..<e.type_markers.len() {
-        if e.type_markers[index].inside && e.type_markers[index].span.start > first_variant -> &members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER, index: index, start: e.type_markers[index].span.start})
+        if e.type_markers[index].inside && e.type_markers[index].span.start > last_placed -> &members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER, index: index, start: e.type_markers[index].span.start})
     }
     body :: JetFmtTypeBody{state: None, fields: [Field]{}, cli_bindings: [CLICommandBinding]{}, trait_impls: e.trait_impls, methods: e.methods, validate_body: [Stmt]{}, effect_impl: e.effect_impl, markers: e.type_markers}
     jfmt_fmt_type_body_members(&f, jfmt_sort_members(members), body, derives_decode, e.variants.len() > 0)

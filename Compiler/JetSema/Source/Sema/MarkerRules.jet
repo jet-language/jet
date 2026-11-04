@@ -1390,6 +1390,17 @@ fn sema_marker_rules_function_applications(function: Func, site: RuleSite, appli
     sema_marker_rules_attach(function.markers, function.name_span, site, &applications)
 }
 
+// An impl's markers that are rule applications: the parser owns
+// `#Target(OS.…)` on an impl as its OS gate.
+fn sema_marker_rules_impl_markers(markers: [Marker], os_target: String?) -> [Marker] Never! {
+    kept := [Marker]{}
+    loop marker in markers {
+        if marker.name == "Target" && os_target != None -> next
+        &kept.push(marker)
+    }
+    kept
+}
+
 fn sema_marker_rules_item_applications(item: Item, applications: &[AppliedRuleApplication]) Never! {
     if item == {
         .Func(function) -> sema_marker_rules_function_applications(function, RuleSite.Function, &applications)
@@ -1398,7 +1409,7 @@ fn sema_marker_rules_item_applications(item: Item, applications: &[AppliedRuleAp
             loop field in definition.fields -> sema_marker_rules_attach(field.serde_markers, field.name_span, RuleSite.Field, &applications)
             loop method in definition.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
             loop implementation in definition.trait_impls {
-                sema_marker_rules_attach(implementation.markers, implementation.trait_span, RuleSite.Impl, &applications)
+                sema_marker_rules_attach(sema_marker_rules_impl_markers(implementation.markers, implementation.os_target), implementation.trait_span, RuleSite.Impl, &applications)
                 loop method in implementation.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
             }
         }
@@ -1407,25 +1418,20 @@ fn sema_marker_rules_item_applications(item: Item, applications: &[AppliedRuleAp
             loop variant in definition.variants -> sema_marker_rules_attach(variant.serde_markers, variant.name_span, RuleSite.Variant, &applications)
             loop method in definition.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
             loop implementation in definition.trait_impls {
-                sema_marker_rules_attach(implementation.markers, implementation.trait_span, RuleSite.Impl, &applications)
+                sema_marker_rules_attach(sema_marker_rules_impl_markers(implementation.markers, implementation.os_target), implementation.trait_span, RuleSite.Impl, &applications)
                 loop method in implementation.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
             }
         }
         .Distinct(definition) -> sema_marker_rules_attach(definition.type_markers, definition.name_span, RuleSite.Type, &applications)
         .Impl(implementation) -> {
-            // The parser owns `#Target(OS.…)` on an impl as its OS gate.
-            markers := [Marker]{}
-            loop marker in implementation.markers {
-                if marker.name == "Target" && implementation.os_target != None -> next
-                &markers.push(marker)
-            }
-            sema_marker_rules_attach(markers, implementation.type_span, RuleSite.Impl, &applications)
+            sema_marker_rules_attach(sema_marker_rules_impl_markers(implementation.markers, implementation.os_target), implementation.type_span, RuleSite.Impl, &applications)
             loop method in implementation.methods -> sema_marker_rules_function_applications(method, RuleSite.Method, &applications)
         }
         .Trait(definition) -> {
             sema_marker_rules_attach(definition.markers, definition.name_span, RuleSite.Trait, &applications)
             loop method in definition.methods -> sema_marker_rules_attach(method.markers, method.name_span, RuleSite.Method, &applications)
         }
+        .Module(declaration) -> sema_marker_rules_attach(declaration.markers, declaration.name_span, RuleSite.Module, &applications)
         .CodeModule(code_module) -> {
             // The parser owns `#FX` on a module as its effect cap.
             markers := [Marker]{}

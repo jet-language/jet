@@ -5,6 +5,7 @@
 use {
     jet_foundation.[
         AccessConvention,
+        AppliedRuleApplication,
         BodyNode,
         CallArg,
         Diagnostic,
@@ -19,6 +20,7 @@ use {
         Marker,
         Param,
         ParamZone,
+        RuleSite,
         Span,
         Stmt,
         StrPart,
@@ -195,9 +197,11 @@ fn sema_error_conversion_function(name: String, from_span: Span, to_ty: String, 
 // E2418 cycle and E2419 ambiguity. An accepted conversion becomes its checked
 // routine; a rejected one is removed so it never reaches lowering. `items` is
 // rewritten in place, and a list without a conversion is left untouched.
+// The markers above each conversion join `facts` at its Impl site, since the
+// item they were written on is gone after this.
 // `package_types` are the names a sibling member file of the same package declares that
 // this file reaches: types of the package itself for the orphan rule (S28).
-fn sema_error_conversion_items(items: &[Item], package_types: [String], diagnostics: &[Diagnostic]) {
+fn sema_error_conversion_items(items: &[Item], facts: &[AppliedRuleApplication], package_types: [String], diagnostics: &[Diagnostic]) {
     has_conversion :: loop index in 0..<items.len() {
         if items[index] == .ErrorConv(_) -> break true
     } ?? false
@@ -212,6 +216,7 @@ fn sema_error_conversion_items(items: &[Item], package_types: [String], diagnost
     loop items.len() > 0 {
         item := &items.pop() ?? break
         if item == .ErrorConv(definition) {
+            loop marker in definition.markers -> &facts.push(AppliedRuleApplication{marker: marker, target: Val(definition.from_span), site: Val(RuleSite.Impl)})
             routine := sema_error_conversion_routine(definition, local_types, &edges, &diagnostics) ?? next
             &output.push(^routine)
             next
