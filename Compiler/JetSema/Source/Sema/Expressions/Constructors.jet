@@ -28,6 +28,7 @@ use {
         SymbolKind,
         TComptimeValue,
         TFieldRef,
+        TNarrowOutcome,
         Type,
         TypeParam,
         TypeTupleField,
@@ -2080,6 +2081,10 @@ fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, env
 }
 
 fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // An overflow word written around this literal (sema_call_check_special_overflow)
+    // covers this conversion alone, so it is taken before the body is checked.
+    word :: context.overflow_word
+    context.overflow_word = None
     if head == .Val(written) {
         if sema_expression_variant_head(written, environment, program, &scopes) == .Val(variant_head) {
             owner_args :: if sema_expr_unwrap_tag(written) == { .Apply(_, rows) -> rows else -> [Type]{} }
@@ -2200,6 +2205,9 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             // written (`Regex{…}`, which `use core.regex` may resolve to the
             // source-owned record) or inferred from a Regex-typed slot (`{…}`).
             if sema_expression_is_regex_head(result_head) || sema_expression_is_regex_head(written_head) -> return sema_expression_typed_literal_regex(value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if word == .Val(name) {
+                if sema_expression_typed_literal_word_literal(name, result_head, value, &diagnostics) -> return None
+            }
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
@@ -2209,6 +2217,11 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
+                outcome :: sema_expr_narrow_outcome(word)
+                if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
+                    narrowed :: sema_expr_narrowing_with(converted, outcome, line)
+                    return sema_expr_expected_owned(^narrowed, expected, environment, program, &diagnostics)
+                }
             }
             // `Millimeter{ 4meter }` converts another unit of the family.
             if sema_expr_unit_implicit_applies(result_head, converted.ty, environment, program) {
@@ -2221,6 +2234,9 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
         }
         .Elements(elements) -> if elements.len() == 1 {
             value := elements[0]
+            if word == .Val(name) {
+                if sema_expression_typed_literal_word_literal(name, result_head, value, &diagnostics) -> return None
+            }
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
@@ -2230,6 +2246,11 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
+                outcome :: sema_expr_narrow_outcome(word)
+                if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
+                    narrowed :: sema_expr_narrowing_with(converted, outcome, line)
+                    return sema_expr_expected_owned(^narrowed, expected, environment, program, &diagnostics)
+                }
             }
             if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, &scopes, &diagnostics) -> return None
             typed :: sema_expr_expected(converted, Val(result_head), environment, program, &diagnostics) ?? return None
@@ -2281,4 +2302,46 @@ fn sema_expression_typed_literal_integer_literal(value: Expr) -> Bool Never! {
         .Unary(op, inner, _, _) -> op == UnOp.Neg && sema_expression_typed_literal_integer_literal(inner)
         else -> false
     }
+}
+
+// The exact value of a bare written integer (`200`, `-129`, `(7)`), or None.
+fn sema_expression_typed_literal_written_integer(value: Expr) -> Int? Never! {
+    if value == {
+        .Int(integer, _, width, raw, _) -> if width == None -> return Val(sema_expr_exact_integer_literal(integer, raw))
+        .Paren(inner, _, _) -> return sema_expression_typed_literal_written_integer(inner)
+        .Unary(op, inner, _, _) -> {
+            if op == UnOp.Neg {
+                number :: sema_expression_typed_literal_written_integer(inner) ?? return None
+                return Val(-number)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// Inside an overflow word, a written literal the fixed-width head can't hold
+// is still refused (E1003): the word decides what a value that doesn't fit
+// becomes, and a literal's value is already known, so the fix names what the
+// word would give. True when it was refused.
+fn sema_expression_typed_literal_word_literal(word: String, head: Type, value: Expr, diagnostics: &[Diagnostic]) -> Bool Never! {
+    number :: sema_expression_typed_literal_written_integer(value) ?? return false
+    if head == .IntN(signed, bits) {
+        if sema_expr_integer_fits(number, signed, bits) -> return false
+        bounds :: sema_expr_integer_range(signed, bits)
+        spelling :: type_name(head)
+        open :: "{{"
+        close :: "}}"
+        modulus :: 1 << bits
+        low_bits := (number - bounds.lo) % modulus
+        if low_bits < 0 -> low_bits += modulus
+        given :: if word == {
+            "wrapping" -> "`{spelling}{open}{low_bits + bounds.lo}{close}`"
+            "saturating" -> if number < bounds.lo -> "`{spelling}{open}{bounds.lo}{close}`" else -> "`{spelling}{open}{bounds.hi}{close}`"
+            else -> "`None`"
+        }
+        &diagnostics.push(sema_error("E1003", expr_span(value), "`{number}` doesn't fit in `{spelling}`, which holds {bounds.lo}..{bounds.hi}", "`{word}` decides what a value that doesn't fit becomes, but a written literal is known now, so it must fit", "write {given}, which is what `{word}` gives for {number}"))
+        return true
+    }
+    false
 }

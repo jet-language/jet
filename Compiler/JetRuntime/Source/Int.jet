@@ -143,7 +143,7 @@ fn int_fits(value: I64, bound: U64) -> Bool {
     at := length
     loop at > (I64{0}) {
         at -= I64{1}
-        limb :: U64{int_limb(value, at)}
+        limb :: wrapping(U64{int_limb(value, at)})
         if (limb > bound || magnitude > (bound - limb) /% U64{1000000000}) { return false }
         magnitude = magnitude * U64{1000000000} + limb
     }

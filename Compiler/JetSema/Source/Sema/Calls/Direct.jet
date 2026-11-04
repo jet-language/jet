@@ -38,7 +38,7 @@ struct SemaDirectSpecialCheck {
 }
 
 fn sema_call_special_diagnostic(name: String, span: Span) -> Diagnostic {
-    sema_error("E1005", span, "`{name}` must wrap a single integer `+`, `-`, `*`, or `/`", "the overflow opt-ins apply to one arithmetic operation on whole numbers", "write it around one operation, e.g. `{name}(a + b)`")
+    sema_error("E1005", span, "`{name}` must wrap a single integer `+`, `-`, `*`, or `/`, or one narrowing conversion", "the overflow opt-ins apply to one arithmetic operation on whole numbers, or to one conversion to a fixed width that can't hold every value of its source", "write it around one operation or conversion, e.g. `{name}(a + b)` or `{name}(U8{{count}})`")
 }
 
 fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -52,6 +52,9 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
     if argument.expr == .Binary(op, _, _, _, _) {
         if sema_call_is_overflow_operation(op) -> operation = Val(op)
     }
+    // `wrapping(U8{x})`: the word chooses what one narrowing typed-literal
+    // conversion gives a value that doesn't fit.
+    if operation == None && argument.expr == .TypedLit(_, _, _, _) -> return sema_call_check_special_overflow_conversion(call, argument.expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     operation_value :: operation ?? {
         _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_special_diagnostic(call.name, call.name_span))
@@ -83,6 +86,25 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
     line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
     result_ty :: if call.name == "checked" -> Type.Option{inner: lhs_value.ty} else -> lhs_value.ty
     value :: sema_tree_node(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, lhs: lhs_value, rhs: rhs_value}, call.name_span)
+    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: checked}
+}
+
+fn sema_call_check_special_overflow_conversion(call: Call, argument: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    gate :: sema_call_direct_gate(call.name, scopes) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    gate_scope :: sema_call_enter_gate(&scopes, gate)
+    // The typed literal takes the word on entry (sema_expression_typed_literal).
+    context.overflow_word = Val(call.name)
+    checked_argument :: sema_check_expression(argument, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.overflow_word = None
+    sema_call_leave_gate(&scopes, gate_scope)
+    value :: checked_argument ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    // Only a narrowing conversion took the word; around any other the word
+    // changes nothing, so it is refused.
+    if !sema_expr_is_narrowing(value) {
+        &diagnostics.push(sema_call_special_diagnostic(call.name, call.name_span))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }

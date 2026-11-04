@@ -592,11 +592,11 @@ fn raylib_parse_i64(data: I64, start: I64, end: I64, out: I64) -> Bool {
     loop at < end {
         digit :: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) -> return false
-        if (value > (limit - U64{digit}) /% U64{10}) -> return false
-        value = value * U64{10} + U64{digit}
+        if (value > (limit - wrapping(U64{digit})) /% U64{10}) -> return false
+        value = value * U64{10} + wrapping(U64{digit})
         at += I64{1}
     }
-    rt_text_store(out, if negative -> I64{0} - I64{value} else -> I64{value})
+    rt_text_store(out, if negative -> I64{0} - wrapping(I64{value}) else -> wrapping(I64{value}))
     true
 }
 

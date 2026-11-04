@@ -4098,8 +4098,10 @@ hooks may opt into reverse lookup with `#Commutative`, as in
 declared operand order. The exact foundations example exercises both operand
 orders without changing its integer or rational representation.
 
-Plain arithmetic on a fixed-width integer traps on overflow. Use one of the
-explicit operation policies when wrapping or clamping is part of the contract:
+Plain arithmetic on a fixed-width integer traps on overflow, and a typed-literal
+conversion to a fixed width that can't hold every source value (`U8{count}`,
+`I32{wide}`) stops with **E3010** when the value doesn't fit. Use one of the
+explicit policies when wrapping or clamping is part of the contract:
 
 | Form | Result | Description |
 |---|---|---|
@@ -4107,12 +4109,20 @@ explicit operation policies when wrapping or clamping is part of the contract:
 | `wrapping(a + b)` | `T` | Wrap in the operand's width. |
 | `saturating(a + b)` | `T` | Clamp to the operand's bounds. |
 | `checked(a + b)` | `Option<T>` | Return no value on overflow. |
+| `T{x}` | `T` | Stop with E3010 if `x` is outside `T`. |
+| `wrapping(T{x})` | `T` | Keep the low bits of `x` in `T`'s width. |
+| `saturating(T{x})` | `T` | Clamp `x` to `T`'s bounds. |
+| `checked(T{x})` | `Option<T>` | Return no value when `x` is outside `T`. |
 | `value.wrapping_add(other)` | `T` | Receiver form of wrapping addition. |
 | `value.saturating_add(other)` | `T` | Receiver form of saturating addition. |
 | `value.checked_add(other)` | `Option<T>` | Receiver form of checked addition. |
 
-The wrappers accept exactly one integer arithmetic operation; another expression
-reports **E1005**. Integer types expose `MIN`, `MAX`, `count_ones`,
+The wrappers accept exactly one integer arithmetic operation or one narrowing
+conversion; another expression, including a conversion that can't fail,
+reports **E1005**. A wrapper covers only the operation or conversion it is
+written around. A written literal must fit its destination even inside a
+wrapper (**E1003**, whose fix names the value the wrapper would give).
+Integer types expose `MIN`, `MAX`, `count_ones`,
 `count_zeros`, `leading_zeros`, and `trailing_zeros`. Float types expose
 `INFINITY`, `NEG_INFINITY`, `NAN`, and `EPSILON`, plus `is_nan`, `is_infinite`,
 and `is_finite`. Named bit methods preserve operand width. A shift keeps its

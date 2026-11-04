@@ -695,6 +695,10 @@ struct SemaCheckContext {
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
+    // The overflow word (`wrapping`, `saturating` or `checked`) written
+    // directly around the typed-literal conversion being checked. The
+    // conversion takes it on entry, so it never reaches a nested expression.
+    overflow_word: String?{None}
     // The body being checked is compiler-generated scaffolding (a derived
     // codec or protocol method, a field policy wrapper) that spells every
     // carrier out: a call root keeps its Result and an unmarked writing

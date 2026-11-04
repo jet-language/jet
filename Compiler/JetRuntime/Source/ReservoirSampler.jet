@@ -44,8 +44,8 @@
     state = state.bit_xor(state << U64{17})
     data_tree_store(wrapping(value + RESERVOIR_RNG), iter_signed(state))
     index :: state % count
-    if (index < U64{limit}) {
-        slot :: wrapping(data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + I64{index} * DATA_TREE_ELEMENT_BYTES)
+    if (index < wrapping(U64{limit})) {
+        slot :: wrapping(data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + wrapping(I64{index}) * DATA_TREE_ELEMENT_BYTES)
         replacement :: jet_rt_string_clone(text)
         jet_rt_string_drop(data_tree_word(slot))
         data_tree_store(slot, replacement)
@@ -71,7 +71,7 @@
     loop count /% divisor >= (U64{10}) { divisor *= U64{10} }
     loop {
         digit :: (count /% divisor) % U64{10}
-        rt_text_push_word(text, I64{digit} + I64{48}, I64{1})
+        rt_text_push_word(text, wrapping(I64{digit}) + I64{48}, I64{1})
         if (divisor == U64{1}) -> break
         divisor = divisor /% U64{10}
     }

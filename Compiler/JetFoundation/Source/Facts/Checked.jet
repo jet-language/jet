@@ -746,6 +746,10 @@ enum TNumericOp {
     CastAs(dst_rust: String)
     CheckedIntToFloat(source_signed: Bool, target_f32: Bool, line: Int)
     CheckedIntToFixed(host_kind: Int, line: Int)
+    // A fixed-width integer, or an exact Int, converted to a fixed-width type
+    // that can't hold every source value: `outcome` is what a value outside
+    // the destination yields, and `line` is where its stop is reported.
+    FixedNarrow(outcome: TNarrowOutcome, line: Int)
     TryFrom(host_kind: Int)
     FloatToInt(host_kind: Int)
     FloatNarrow
@@ -753,6 +757,16 @@ enum TNumericOp {
     ToShow
     EuclideanDiv
     EuclideanRem
+}
+
+// What a narrowing integer conversion yields for a value the destination
+// can't hold: the E3010 stop, the low bits (`wrapping`), the nearest bound
+// (`saturating`), or no value (`checked`, whose result is `T?`).
+enum TNarrowOutcome {
+    Stop
+    Wrap
+    Saturate
+    Absent
 }
 
 struct TPanicLoc {

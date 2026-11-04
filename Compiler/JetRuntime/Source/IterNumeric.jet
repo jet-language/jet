@@ -1,11 +1,11 @@
 // Numeric terminals retain the reference's collect-before-reduce ordering.
 // Fixed-width integers sum into two machine words, then round only once.
 fn iter_unsigned(word: I64) -> U64 {
-    U64{word.bit_and(I64{9223372036854775807})}.bit_or((if (word < I64{0}) -> U64{9223372036854775808} else -> U64{0}))
+    wrapping(U64{word.bit_and(I64{9223372036854775807})}).bit_or((if (word < I64{0}) -> U64{9223372036854775808} else -> U64{0}))
 }
 
 fn iter_signed(word: U64) -> I64 {
-    I64{word.bit_and(U64{9223372036854775807})}.bit_or((if (word >= U64{9223372036854775808}) -> I64{-9223372036854775808} else -> I64{0}))
+    wrapping(I64{word.bit_and(U64{9223372036854775807})}).bit_or((if (word >= U64{9223372036854775808}) -> I64{-9223372036854775808} else -> I64{0}))
 }
 
 // Signed i128-as-f64 rounding, ties to even. Per-element Float conversion
@@ -65,7 +65,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         at += I64{1}
     }
     jet_rt_native_iter_drop(node)
-    if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, U64{length})
+    if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, wrapping(U64{length}))
 }
 
 #Export(c) fn jet_rt_native_iter_average_int(source: I64) -> Float {
@@ -100,7 +100,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
                 word = (word << (I64{64} - width)) >> (I64{64} - width)
             }
             bits := iter_unsigned(word)
-            if (width < I64{64} && kind == I64{3}) { bits = bits.bit_and((U64{1} << U64{width}) - U64{1}) }
+            if (width < I64{64} && kind == I64{3}) { bits = bits.bit_and((U64{1} << wrapping(U64{width})) - U64{1}) }
             added :: wrapping(lo + bits)
             hi = wrapping(hi + (if (kind == I64{2} && word < I64{0}) -> I64{-1} else -> I64{0}) + (if added < lo -> I64{1} else -> I64{0}))
             lo = added
@@ -109,7 +109,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         sum = iter_wide_float(hi, lo)
     }
     jet_rt_native_iter_drop(node)
-    if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, U64{length})
+    if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, wrapping(U64{length}))
 }
 
 // SimdLanes.rs:683-717,785-794: seed lane zero, source i in lane i&7,

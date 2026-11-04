@@ -1,8 +1,8 @@
-Error [jet.InvalidOverflowOptIn]: `wrapping` must wrap a single integer `+`, `-`, `*`, or `/`
+Error [jet.InvalidOverflowOptIn]: `wrapping` must wrap a single integer `+`, `-`, `*`, or `/`, or one narrowing conversion
   --> tests/ui/overflow_optin_misuse.jet:3:11
     |
   3 |     print(wrapping(x))
     |           ^^^^^^^^
- Why: The overflow opt-ins apply to one arithmetic operation on whole numbers
- Fix: Write it around one operation, e.g. `wrapping(a + b)`
+ Why: The overflow opt-ins apply to one arithmetic operation on whole numbers, or to one conversion to a fixed width that can't hold every value of its source
+ Fix: Write it around one operation or conversion, e.g. `wrapping(a + b)` or `wrapping(U8{count})`
 More: jet-lang.dev/e/E1005

@@ -43,6 +43,7 @@ use {
         TIntegerBounds,
         TIntegerWidth,
         TMethodRef,
+        TNarrowOutcome,
         TNumericOp,
         TPatternPosition,
         TStrFormat,
@@ -354,6 +355,53 @@ fn sema_expr_numeric_host_kind(ty: Type) -> Int? {
     None
 }
 
+// Whether every value of the fixed-width integer `source` is a value of the
+// fixed-width integer `destination`, so converting needs no range check.
+fn sema_expr_fixed_holds(destination: Type, source: Type) -> Bool {
+    if destination == .IntN(destination_signed, destination_bits) {
+        if source == .IntN(source_signed, source_bits) {
+            if destination_signed == source_signed -> return destination_bits >= source_bits
+            return destination_signed && destination_bits > source_bits
+        }
+    }
+    false
+}
+
+// The outcome an overflow word gives the narrowing conversion it wraps.
+fn sema_expr_word_outcome(word: String) -> TNarrowOutcome? Never! {
+    if word == "wrapping" -> return Val(TNarrowOutcome.Wrap)
+    if word == "saturating" -> return Val(TNarrowOutcome.Saturate)
+    if word == "checked" -> return Val(TNarrowOutcome.Absent)
+    None
+}
+
+// What a narrowing typed-literal conversion yields for a value that doesn't
+// fit: the outcome of the overflow word written around it, else the E3010
+// stop.
+fn sema_expr_narrow_outcome(word: String?) -> TNarrowOutcome Never! {
+    name :: word ?? return TNarrowOutcome.Stop
+    sema_expr_word_outcome(name) ?? TNarrowOutcome.Stop
+}
+
+// Whether `converted` is a narrowing conversion: to a fixed width from Int,
+// or from a fixed width that can't hold its source.
+fn sema_expr_is_narrowing(converted: TExpr) -> Bool Never! {
+    if converted.kind == .NumericMethod(_, operation) {
+        return operation == .CheckedIntToFixed(_, _) || operation == .FixedNarrow(_, _)
+    }
+    false
+}
+
+// The narrowing conversion `converted` (sema_expr_is_narrowing) taking
+// `outcome` for a value that doesn't fit; `Absent` makes its type `T?`.
+fn sema_expr_narrowing_with(converted: TExpr, outcome: TNarrowOutcome, line: Int) -> TExpr Never! {
+    ty :: if outcome == TNarrowOutcome.Absent -> Type.Option{inner: converted.ty} else -> converted.ty
+    if converted.kind == .NumericMethod(receiver, _) {
+        return TExpr{ty: ty, kind: TExprKind.NumericMethod{receiver: receiver, operation: TNumericOp.FixedNarrow{outcome: outcome, line: line}}, span: converted.span}
+    }
+    panic("sema_expr_narrowing_with: not a narrowing conversion")
+}
+
 fn sema_expr_integer_literal_value(value: TExpr) -> Int? {
     if value.kind == {
         .IntLit(number, width) -> if width == None -> return Val(number)
@@ -392,6 +440,12 @@ fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: In
     if destination_is_fixed && source == Type.Int {
         host_kind :: sema_expr_numeric_host_kind(destination) ?? return None
         operation = Val(TNumericOp.CheckedIntToFixed{host_kind: host_kind, line: line})
+    }
+    // A fixed-width source the destination can't hold every value of is
+    // range-checked where it converts, and stops with E3010 when it doesn't
+    // fit, exactly as a conversion from Int does.
+    if destination_is_fixed && operation == None && source == .IntN(_, _) && !sema_expr_fixed_holds(destination, source) {
+        operation = Val(TNumericOp.FixedNarrow{outcome: TNarrowOutcome.Stop, line: line})
     }
     if operation == None {
         if {

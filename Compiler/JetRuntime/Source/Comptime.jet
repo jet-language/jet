@@ -152,7 +152,7 @@ fn comptime_publish_locked(kind: I64, status: I64) {
     frame :: comptime_stop_frame(record, sync_load(wrapping(comptime_root + I64{40})) != I64{0})
     sync_mutex_unlock(comptime_root)
     comptime_frame_write(frame)
-    U32{status}
+    wrapping(U32{status})
 }
 
 #Export(c) fn jet_rt_execution_begin(fuel: I64, depth: I64, comptime_mode: I64) -> Bool {
@@ -378,7 +378,7 @@ fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U
         _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     jet_rt_free(scratch, I64{192}, I64{8})
-    U32{status}
+    wrapping(U32{status})
 }
 
 fn comptime_channel_write(fd: I64, data: I64, length: I64) {

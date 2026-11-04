@@ -230,10 +230,10 @@ fn codec_integer_text(lexeme: I64, out: I64) -> I64 {
         magnitude := U64{0}
         loop at < end {
             digit :: rt_text_byte(wrapping(data + at)) - I64{48}
-            if (digit < I64{0} || digit > I64{9} || magnitude > (limit - U64{digit}) /% U64{10}) {
+            if (digit < I64{0} || digit > I64{9} || magnitude > (limit - wrapping(U64{digit})) /% U64{10}) {
                 return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal exponent is out of range")))
             }
-            magnitude = magnitude * U64{10} + U64{digit}
+            magnitude = magnitude * U64{10} + wrapping(U64{digit})
             if (exponent > I64{1000000}) { exponent_large = true } else { exponent = exponent * I64{10} + digit }
             at += I64{1}
         }

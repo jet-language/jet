@@ -150,11 +150,11 @@ fn encoding_parse_unsigned(data: I64, start: I64, end: I64, limit: U64) -> I64 {
     loop at < end {
         digit :: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) -> return I64{-1}
-        if (value > (limit - U64{digit}) /% U64{10}) -> return I64{-1}
-        value = value * U64{10} + U64{digit}
+        if (value > (limit - wrapping(U64{digit})) /% U64{10}) -> return I64{-1}
+        value = value * U64{10} + wrapping(U64{digit})
         at += I64{1}
     }
-    I64{value}
+    wrapping(I64{value})
 }
 
 // std::env::var(name).ok().and_then(|v| v.parse().ok()); -1 when absent.

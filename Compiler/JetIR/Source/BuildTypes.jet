@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use {
-    jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+    jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -3724,13 +3724,14 @@ fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> 
 fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TNumericOp, span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    if operation == .CheckedIntToFixed(_, _) {
+    if operation == .CheckedIntToFixed(_, _) || operation == .FixedNarrow(_, _) {
         // A sized literal that fits is the fixed word itself: no exact Int is
         // built, nothing runs. A U64 above I64 range is its bit pattern. This
         // is also what keeps the runtime's own kernels
         // (jet_int_checked_fixed), written with sized literals, from calling
-        // themselves.
-        if ir_int_literal(p, b, receiver) == .Val(value) {
+        // themselves. A `checked` conversion's result is an Option instead.
+        absent :: if operation == .FixedNarrow(outcome, _) -> outcome == TNarrowOutcome.Absent else -> false
+        if ir_int_literal(p, b, receiver) == .Val(value) && !absent {
             if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, ir_wide_word(value))
         }
     }
@@ -3753,6 +3754,12 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
             site :: if line > 0 -> line else -> b.line
             loop arg in ir_location(&m, &b, site) -> &args.push(arg)
             result :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_fixed"), args, target)
+            ir_release(&m, &b, value)
+            return result
+        }
+        .FixedNarrow(outcome, line) -> {
+            site :: if line > 0 -> line else -> b.line
+            result :: ir_fixed_narrow(&m, p, &b, value, ty, outcome, site, span)
             ir_release(&m, &b, value)
             return result
         }
@@ -3829,11 +3836,8 @@ fn ir_float_predicate(m: &IRModule, b: &IRBuilder, value: Int, method: String, t
 
 // `U8.from_int(x)`, `I32.from_u64(w)` and the other narrowing integer
 // conversions: Ok(value) when the exact or fixed-width source fits the
-// target's range, else Err of the text "value doesn't fit in destination
-// type". A fixed source is read as its extended 64-bit word (a U64 at or
-// above 2^63 reads negative, so `>= 0` bounds both an unsigned target and a
-// U64 source); an exact source compares exactly, and above I64.MAX a U64
-// target takes the bits of x - 2^64.
+// target's range (ir_fixed_in_range), else Err of the text "value doesn't fit
+// in destination type".
 fn ir_try_from(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
     unsupported :: "Prelude conversion try_from into {ir_type_name(ty)} is not lowered at O0 yet"
     ok_ty :: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, unsupported) }
@@ -3845,16 +3849,39 @@ fn ir_try_from(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, 
     t_bits :: m.types[ok_row].bits
     if t_bits < 1 || t_bits > 64 -> return ir_fail_slot(&b, span, unsupported)
     source :: m.types[b.f.slot_type[value]]
-    exact :: source.kind == .Int
-    if !exact && (source.kind != .Word || source.bits > 64) -> return ir_fail_slot(&b, span, unsupported)
+    if source.kind != .Int && (source.kind != .Word || source.bits > 64) -> return ir_fail_slot(&b, span, unsupported)
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    fits :: ir_fixed_in_range(&m, &b, value, t_signed, t_bits)
+    found :: ir_fresh_temp(&m, &b, result_row)
+    ir_open_if(&b.f, fits, b.line)
+    word :: ir_fixed_fit_word(&m, &b, value, t_signed, t_bits)
+    converted :: ir_numeric_cast(&m, p, &b, word, ok_row, span)
+    success :: ir_result_box(&m, p, &b, ty, true, converted)
+    ir_emit(&b.f, IROp.Copy, found, success, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    string_row :: ir_string_row(&m)
+    text :: ir_temp(&m, &b, string_row)
+    message :: ir_intern_text(&m, "value doesn't fit in destination type")
+    ir_emit(&b.f, IROp.ConstText, text, message, -1, -1, b.line)
+    failure :: ir_result_box(&m, p, &b, ty, false, text)
+    ir_emit(&b.f, IROp.Copy, found, failure, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    found
+}
+
+// Whether the integer `value` (an exact Int, or a fixed word of at most 64
+// bits) is a value of the fixed width `t_signed`/`t_bits`: a Bool slot. A
+// fixed source is read as its extended 64-bit word (a U64 at or above 2^63
+// reads negative, so `>= 0` bounds both an unsigned target and a U64
+// source); an exact source compares exactly.
+fn ir_fixed_in_range(m: &IRModule, b: &IRBuilder, value: Int, t_signed: Bool, t_bits: Int) -> Int Never! {
+    source :: m.types[b.f.slot_type[value]]
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     word_row :: ir_word_row(&m)
     lowest :: if t_bits == 64 -> (if t_signed -> -9223372036854775807 - 1 else -> 0) else -> (if t_signed -> 0 - (1 << (t_bits - 1)) else -> 0)
     highest :: if t_bits == 64 -> 9223372036854775807 else -> (if t_signed -> (1 << (t_bits - 1)) - 1 else -> (1 << t_bits) - 1)
     fits :: ir_temp(&m, &b, bool_row)
-    word :: ir_temp(&m, &b, word_row)
-    if exact {
+    if source.kind == .Int {
         int_row :: b.f.slot_type[value]
         low :: ir_int_constant(&m, &b, int_row, lowest)
         high := -1
@@ -3872,64 +3899,162 @@ fn ir_try_from(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, 
         ir_end(&b.f, b.line)
         ir_release(&m, &b, low)
         ir_release(&m, &b, high)
+        return fits
+    }
+    wide :: ir_copy_word(&m, &b, value, word_row)
+    source_u64 :: !source.signed && source.bits == 64
+    if t_bits == 64 && t_signed == !source_u64 {
+        ir_emit(&b.f, IROp.Const, fits, 1, -1, -1, b.line)
+    } else if t_bits == 64 {
+        zero :: ir_const_like(&m, &b, wide, 0)
+        ir_emit(&b.f, IROp.Ge, fits, wide, zero, -1, b.line)
     } else {
-        wide :: ir_copy_word(&m, &b, value, word_row)
-        ir_emit(&b.f, IROp.Copy, word, wide, -1, -1, b.line)
-        source_u64 :: !source.signed && source.bits == 64
-        if t_bits == 64 && t_signed == !source_u64 {
-            ir_emit(&b.f, IROp.Const, fits, 1, -1, -1, b.line)
-        } else if t_bits == 64 {
-            zero :: ir_const_like(&m, &b, wide, 0)
-            ir_emit(&b.f, IROp.Ge, fits, wide, zero, -1, b.line)
-        } else {
-            ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
-            low :: ir_const_like(&m, &b, wide, lowest)
-            above :: ir_bool_op(&m, &b, IROp.Ge, wide, low)
-            ir_open_if(&b.f, above, b.line)
-            high :: ir_const_like(&m, &b, wide, highest)
-            below :: ir_bool_op(&m, &b, IROp.Le, wide, high)
-            ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
-            ir_end(&b.f, b.line)
-        }
+        ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
+        low :: ir_const_like(&m, &b, wide, lowest)
+        above :: ir_bool_op(&m, &b, IROp.Ge, wide, low)
+        ir_open_if(&b.f, above, b.line)
+        high :: ir_const_like(&m, &b, wide, highest)
+        below :: ir_bool_op(&m, &b, IROp.Le, wide, high)
+        ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
+        ir_end(&b.f, b.line)
     }
-    found :: ir_fresh_temp(&m, &b, result_row)
-    ir_open_if(&b.f, fits, b.line)
-    if exact {
-        if t_bits == 64 && !t_signed {
-            int_row :: b.f.slot_type[value]
-            signed_max :: ir_int_constant(&m, &b, int_row, 9223372036854775807)
-            low_half :: ir_bool_op(&m, &b, IROp.Le, value, signed_max)
-            ir_release(&m, &b, signed_max)
-            ir_open_if(&b.f, low_half, b.line)
-            direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
-            ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
-            ir_else(&b.f, b.line)
-            modulus :: ir_fresh_temp(&m, &b, int_row)
-            ir_emit(&b.f, IROp.ConstBigInt, modulus, ir_intern_name(&m, "18446744073709551616"), -1, -1, b.line)
-            shifted :: ir_fresh_temp(&m, &b, int_row)
-            ir_emit(&b.f, IROp.Sub, shifted, value, modulus, IR_OVERFLOW_TRAP, b.line)
-            wrapped :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{shifted}, word_row)
-            ir_emit(&b.f, IROp.Copy, word, wrapped, -1, -1, b.line)
-            ir_release(&m, &b, shifted)
-            ir_release(&m, &b, modulus)
-            ir_end(&b.f, b.line)
-        } else {
-            direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
-            ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
-        }
-    }
-    converted :: ir_numeric_cast(&m, p, &b, word, ok_row, span)
-    success :: ir_result_box(&m, p, &b, ty, true, converted)
-    ir_emit(&b.f, IROp.Copy, found, success, -1, -1, b.line)
+    fits
+}
+
+// The 64-bit word of `value`, emitted where ir_fixed_fits holds: a fixed
+// source's extended word, or an exact Int's value, where a U64 target above
+// I64.MAX takes the bits of x - 2^64.
+fn ir_fixed_fit_word(m: &IRModule, b: &IRBuilder, value: Int, t_signed: Bool, t_bits: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    if m.types[b.f.slot_type[value]].kind != .Int -> return ir_copy_word(&m, &b, value, word_row)
+    if !(t_bits == 64 && !t_signed) -> return ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+    int_row :: b.f.slot_type[value]
+    word :: ir_temp(&m, &b, word_row)
+    signed_max :: ir_int_constant(&m, &b, int_row, 9223372036854775807)
+    low_half :: ir_bool_op(&m, &b, IROp.Le, value, signed_max)
+    ir_release(&m, &b, signed_max)
+    ir_open_if(&b.f, low_half, b.line)
+    direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+    ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
     ir_else(&b.f, b.line)
-    string_row :: ir_string_row(&m)
-    text :: ir_temp(&m, &b, string_row)
-    message :: ir_intern_text(&m, "value doesn't fit in destination type")
-    ir_emit(&b.f, IROp.ConstText, text, message, -1, -1, b.line)
-    failure :: ir_result_box(&m, p, &b, ty, false, text)
-    ir_emit(&b.f, IROp.Copy, found, failure, -1, -1, b.line)
+    modulus :: ir_fresh_temp(&m, &b, int_row)
+    ir_emit(&b.f, IROp.ConstBigInt, modulus, ir_intern_name(&m, "18446744073709551616"), -1, -1, b.line)
+    shifted :: ir_fresh_temp(&m, &b, int_row)
+    ir_emit(&b.f, IROp.Sub, shifted, value, modulus, IR_OVERFLOW_TRAP, b.line)
+    wrapped :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{shifted}, word_row)
+    ir_emit(&b.f, IROp.Copy, word, wrapped, -1, -1, b.line)
+    ir_release(&m, &b, shifted)
+    ir_release(&m, &b, modulus)
     ir_end(&b.f, b.line)
-    found
+    word
+}
+
+// `I32{wide}`, `U8{count}` and the other narrowing typed-literal conversions
+// (TNumericOp.FixedNarrow) of an exact Int or a fixed word: a value in the
+// destination's range converts unchanged. One outside it stops with E3010 at
+// `line` (Stop), keeps its low bits (Wrap), takes the nearest bound
+// (Saturate), or is None (Absent, whose `ty` is the Option). Everything is
+// inline, so the runtime's own narrowing conversions call no route.
+fn ir_fixed_narrow(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, outcome: TNarrowOutcome, line: Int, span: Span) -> Int Never! {
+    absent :: outcome == TNarrowOutcome.Absent
+    destination := -1
+    if absent {
+        inner_ty :: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "checked conversion to {ir_type_name(ty)}") }
+        destination = ir_value_type(&m, p, inner_ty) ?? return ir_type_fail(&b, span, inner_ty)
+    } else {
+        destination = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    }
+    row :: m.types[destination]
+    if row.kind != .Word || row.bits < 1 || row.bits > 64 -> return ir_fail_slot(&b, span, "narrowing conversion to {ir_type_name(ty)}")
+    t_signed :: row.signed
+    t_bits :: row.bits
+    source :: m.types[b.f.slot_type[value]]
+    if source.kind != .Int && (source.kind != .Word || source.bits > 64) -> return ir_fail_slot(&b, span, "narrowing conversion of {ir_type_name(source.ty)}")
+    fits :: ir_fixed_in_range(&m, &b, value, t_signed, t_bits)
+    if absent {
+        option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+        found :: ir_fresh_temp(&m, &b, option_row)
+        ir_option_none(&m, &b, found)
+        ir_open_if(&b.f, fits, b.line)
+        word :: ir_fixed_fit_word(&m, &b, value, t_signed, t_bits)
+        converted :: ir_numeric_cast(&m, p, &b, word, destination, span)
+        made :: ir_option_make(&m, p, &b, option_row, converted, row.size)
+        ir_option_set(&m, &b, found, made)
+        ir_end(&b.f, b.line)
+        return found
+    }
+    result :: ir_temp(&m, &b, destination)
+    ir_open_if(&b.f, fits, b.line)
+    word :: ir_fixed_fit_word(&m, &b, value, t_signed, t_bits)
+    converted :: ir_numeric_cast(&m, p, &b, word, destination, span)
+    ir_emit(&b.f, IROp.Copy, result, converted, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    if outcome == {
+        .Wrap -> {
+            low :: ir_fixed_low_word(&m, &b, value)
+            wrapped :: ir_numeric_cast(&m, p, &b, low, destination, span)
+            ir_emit(&b.f, IROp.Copy, result, wrapped, -1, -1, b.line)
+        }
+        .Saturate -> {
+            lowest :: if t_signed -> 0 - (1 << (t_bits - 1)) else -> 0
+            highest :: if t_signed -> (1 << (t_bits - 1)) - 1 else -> (1 << t_bits) - 1
+            below :: ir_fixed_negative(&m, &b, value)
+            ir_open_if(&b.f, below, b.line)
+            low_bound :: ir_int_constant(&m, &b, destination, ir_wide_word(lowest))
+            ir_emit(&b.f, IROp.Copy, result, low_bound, -1, -1, b.line)
+            ir_else(&b.f, b.line)
+            high_bound :: ir_int_constant(&m, &b, destination, ir_wide_word(highest))
+            ir_emit(&b.f, IROp.Copy, result, high_bound, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+        else -> {
+            args := ir_location(&m, &b, line)
+            loop arg in ir_static_text(&m, &b, "Value doesn't fit in destination type") -> &args.push(arg)
+            _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", args, -1)
+            ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+        }
+    }
+    ir_end(&b.f, b.line)
+    result
+}
+
+// The low 64 bits of the integer `value` as a word: a fixed source's
+// extended word, or an exact Int modulo 2^64.
+fn ir_fixed_low_word(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    if m.types[b.f.slot_type[value]].kind != .Int -> return ir_copy_word(&m, &b, value, word_row)
+    int_row :: b.f.slot_type[value]
+    mask :: ir_fresh_temp(&m, &b, int_row)
+    ir_emit(&b.f, IROp.ConstBigInt, mask, ir_intern_name(&m, "18446744073709551615"), -1, -1, b.line)
+    low :: ir_fresh_temp(&m, &b, int_row)
+    ir_emit(&b.f, IROp.BitAnd, low, value, mask, IR_OVERFLOW_TRAP, b.line)
+    word :: ir_fixed_fit_word(&m, &b, low, false, 64)
+    ir_release(&m, &b, low)
+    ir_release(&m, &b, mask)
+    word
+}
+
+// Whether the integer `value` is below zero: a Bool slot (false for an
+// unsigned word).
+fn ir_fixed_negative(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
+    source :: m.types[b.f.slot_type[value]]
+    if source.kind == .Int {
+        int_row :: b.f.slot_type[value]
+        zero :: ir_int_constant(&m, &b, int_row, 0)
+        negative :: ir_bool_op(&m, &b, IROp.Lt, value, zero)
+        ir_release(&m, &b, zero)
+        return negative
+    }
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    if !source.signed {
+        never :: ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, IROp.Const, never, 0, -1, -1, b.line)
+        return never
+    }
+    word_row :: ir_word_row(&m)
+    wide :: ir_copy_word(&m, &b, value, word_row)
+    zero :: ir_const_like(&m, &b, wide, 0)
+    ir_bool_op(&m, &b, IROp.Lt, wide, zero)
 }
 
 // `Float{n}` / `Float32{n}` of an integer: the integer crosses only when the

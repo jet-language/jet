@@ -1,0 +1,19 @@
+use process :: core.process
+
+// Each sign class narrows a fixed-width value that does not fit; `int` is the
+// same narrowing from an Int; `fits` converts values that do fit, in every class.
+fn narrow(class: String) {
+    wide :: 5000000000
+    if class == {
+        "signed" -> print("{I32{I64{5000000000}}}")
+        "unsigned" -> print("{U8{U16{300}}}")
+        "signed_to_unsigned" -> print("{U32{I64{-1}}}")
+        "unsigned_to_signed" -> print("{I64{U64{18446744073709551615}}}")
+        "int" -> print("{I32{wide}}")
+        else -> print("{I32{I64{-7}}} {I8{I16{-128}}} {U8{U16{255}}} {U32{I64{4294967295}}} {U16{I8{5}}} {I64{U64{9223372036854775807}}}")
+    }
+}
+
+fn run() {
+    narrow(process.args().get(0) ?? "fits")
+}

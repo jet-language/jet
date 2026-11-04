@@ -258,15 +258,15 @@ fn runtime_duration_round(ns: I64, unit: I64, step: I64, mode: I64) -> I64 {
     if (unit_ns == I64{0} || step <= I64{0} || rule < I64{0}) -> return ns
     if (ns == I64{0}) -> return ns
     negative :: ns < I64{0}
-    magnitude :: if negative -> U64{-(ns + I64{1})} + U64{1} else -> U64{ns}
+    magnitude :: if negative -> wrapping(U64{-(ns + I64{1})}) + U64{1} else -> wrapping(U64{ns})
     // A quantum past U64 is more than twice any magnitude (|ns| <= 2^63):
     // the whole part is 0, the rest is below half, and a step up overflows.
-    huge :: U64{step} > U64{18446744073709551615} / U64{unit_ns}
+    huge :: wrapping(U64{step}) > U64{18446744073709551615} / wrapping(U64{unit_ns})
     quantum := U64{0}
     whole := U64{0}
     rest := magnitude
     if !huge {
-        quantum = U64{unit_ns} * U64{step}
+        quantum = wrapping(U64{unit_ns}) * wrapping(U64{step})
         whole = magnitude / quantum
         rest = magnitude % quantum
     }
@@ -293,10 +293,10 @@ fn runtime_duration_round(ns: I64, unit: I64, step: I64, mode: I64) -> I64 {
     if negative {
         if (rounded > U64{9223372036854775808}) -> return ns
         if (rounded == U64{9223372036854775808}) -> return I64{-9223372036854775807 - 1}
-        return -I64{rounded}
+        return -wrapping(I64{rounded})
     }
     if (rounded > U64{9223372036854775807}) -> return ns
-    I64{rounded}
+    wrapping(I64{rounded})
 }
 
 // MathRandomTime.rs:207 jet_duration_round through the C adapter: the
