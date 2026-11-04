@@ -24,6 +24,7 @@ import {
 import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
+import { checkBoard, commitBoard } from './board-git.mjs';
 import { migrateRecommendationLosses, migrateReviewPasses } from './migrate.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
@@ -343,10 +344,26 @@ export function openStore(dataDir) {
     if (committedHistory?.key) historyCache = committedHistory;
     return out;
   };
-  const mutate = (fn, options) => withLock(file, () => mutateLocked(fn, options));
+  // #6563 c4 (board-git.mjs): every boardBatch-th write commits the board pair
+  // while the lock still holds it. A failed commit never fails the write; the
+  // next batch retries and `tower board check` reports the lag.
+  const boardFiles = () => [file, historyFile(dataDir)];
+  const commitBoardLocked = (by) => commitBoard(dataDir, boardFiles(), config, { rev: readConsistentLive().meta.rev, by });
+  const afterWrite = (out) => {
+    const rev = out?.state?.meta?.rev;
+    const batch = Number(config.boardBatch);
+    if (!batch || !Number.isSafeInteger(rev) || rev % batch !== 0) return out;
+    const done = commitBoard(dataDir, boardFiles(), config, { rev });
+    if (!done.committed && !/not in a git work tree|not tracked|board is current/.test(done.reason))
+      process.stderr.write(`tower: board commit skipped at rev ${rev}: ${done.reason}\n`);
+    return out;
+  };
+  const mutate = (fn, options) => withLock(file, () => afterWrite(mutateLocked(fn, options)));
   // Same write, but waits for the lock without blocking the event loop
   // (`tower serve`), and long enough that busy agents never reject it.
-  const mutateAsync = (fn, options) => withLockAsync(file, () => mutateLocked(fn, options));
+  const mutateAsync = (fn, options) => withLockAsync(file, () => afterWrite(mutateLocked(fn, options)));
+  const commitBoardNow = (by) => withLock(file, () => commitBoardLocked(by));
+  const checkBoardNow = () => checkBoard(dataDir, boardFiles(), config, readConsistentLive().meta.rev);
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
   // write from another agent can never be silently reverted. Undo touches
@@ -391,6 +408,7 @@ export function openStore(dataDir) {
 
   return {
     file, dataDir, config, load, loadLive, loadPair, mutate, mutateAsync, restore, restoreArchived, loadHistory,
+    commitBoard: commitBoardNow, checkBoard: checkBoardNow,
     project: () => { const pair = loadPair(); return project(pair.state, config, pair.history); },
   };
 }

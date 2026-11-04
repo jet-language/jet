@@ -66,6 +66,12 @@ approved contract is not a ballot.
 - Close only after integrated focused proof supplies concrete criterion
   evidence and no contradictory blocker remains. Do not add a per-card review,
   duplicate proof, broad suite, or technical `verify` step.
+- Criterion evidence names the landed commit on `dev` or `master`; scratch
+  output alone is refused (`E_EVIDENCE`). A row with no code to land declares
+  `--kind decision|duplicate|obsolete` and names the ratified decision, the
+  surviving card, or the reason.
+- End each batch of board writes with `tower board commit --by <agent>`;
+  `tower board check` must pass before you hand off.
 
 ## Board model
 

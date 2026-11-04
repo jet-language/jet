@@ -39,6 +39,11 @@ export const DEFAULTS = {
   // #6563 c3: a met criterion must name a commit reachable from one of these
   // branches (applies when the project root is a git work tree holding one).
   durableRefs: ['dev', 'master'],
+  // #6563 c4: every boardBatch-th write commits tower.json and history.json
+  // to boardBranch when git tracks them; `tower board check` holds the
+  // committed board to within one batch of the working copy. 0 turns it off.
+  boardBranch: 'master',
+  boardBatch: 25,
 };
 
 // Persist a partial update into the user's config.json (creates it if absent).

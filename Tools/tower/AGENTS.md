@@ -346,6 +346,22 @@ blocks the same as an unfinished card.
 - `tower card claim` prevents two agents double-working a card while its
   24-hour renewable lease is active. An expired lease is never a blocker.
 
+## Committing the board (#6563 c4)
+
+The board is durable only once git has it. Every `config.boardBatch`-th write
+(default 25) commits `tower.json` and `history.json`, and nothing else, to
+`config.boardBranch` (default `master`) while the write lock still holds the
+pair. The owner's `scratch/owner-scratch.md` is never committed. A board git
+does not track, or a checkout on another branch, is left alone. A failed
+commit never fails the write; the next batch retries.
+
+```
+tower board commit --by <agent>   # end of your card-operation batch: commit now
+tower board check                 # exit 1 (E_BOARD_STALE) when the committed
+                                  # board trails the working copy by more than
+                                  # one batch
+```
+
 ## HTTP API (when `tower serve` is up, default :7878)
 
 ```

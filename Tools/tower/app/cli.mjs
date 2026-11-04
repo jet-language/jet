@@ -159,6 +159,7 @@ const COMMAND_FLAGS = {
   events: { flags: ['limit'] },
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
+  board: { verbs: { commit: by(), check: [] } },
 };
 
 const spellFlag = (key) => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
@@ -1289,6 +1290,30 @@ function cmdUndo(store, { flags }) {
   return out(flags, `undid last write — board back to rev ${prev.meta?.rev ?? '?'} content (now rev ${cur.meta.rev + 1})`, { ok: true });
 }
 
+// #6563 c4 (board-git.mjs): `commit` closes an operation batch by committing
+// the board pair now; `check` fails when the committed board trails the
+// working copy by more than one batch.
+function cmdBoard(store, { pos, flags }) {
+  const [verb] = pos;
+  switch (verb) {
+    case 'commit': {
+      if (!flags.by) throw new TowerError('E_USAGE', 'board commit needs --by <agent>');
+      const result = store.commitBoard(flags.by);
+      if (result.committed) return out(flags, `committed board rev ${result.rev} to ${result.branch} as ${result.committed.slice(0, 10)} (${result.paths.join(', ')})`, result);
+      if (/board is current/.test(result.reason)) return out(flags, `board unchanged: ${result.reason}`, result);
+      throw new TowerError('E_BOARD_COMMIT', `board not committed: ${result.reason}`);
+    }
+    case 'check': {
+      const result = store.checkBoard();
+      if (result.reason) throw new TowerError('E_BOARD_COMMIT', `board check: ${result.reason}`);
+      const line = `committed board rev ${result.committedRev} at ${result.branch} ${result.head}; working copy rev ${result.workingRev}: ${result.behind} write${result.behind === 1 ? '' : 's'} behind (batch ${result.batch})`;
+      if (!result.ok) throw new TowerError('E_BOARD_STALE', `${line} — run \`tower board commit --by <agent>\``);
+      return out(flags, `OK ${line}`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown board verb "${verb}" — commit/check`);
+  }
+}
+
 // Installs a post-commit hook that appends any commit mentioning #<num> to
 // that card's log. Silent + always exit 0, so it can never break a commit.
 function cmdGithookInstall(store) {
@@ -1454,6 +1479,7 @@ export async function run(argv) {
       case 'repair':    return cmdRepair(store, sub);
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
+      case 'board':     return cmdBoard(store, sub);
       case 'githook':
         if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);
         return cmdGithookInstall(store);
