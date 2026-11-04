@@ -250,10 +250,13 @@ break each of its claimed strengths. The review is a dated audit in
   puts every gap on a card or ballot.
 
 Missing context is a failed claim, not a pass. A design with a failed claim or
-an open gap stays unbuilt until it is redesigned and reviewed again. A ratified
-ballot authorizes the direction, not the claim; its build card names the
-passing review as its first criterion. Public text may call a design better
-only where a passing review backs that exact claim.
+an open gap stays unbuilt until it is redesigned and reviewed again. As with
+ballots, every downside the review finds is engineered away, and the redesign
+is reviewed again, before the design is presented to the owner as the
+solution; a downside that cannot be removed is named with its cost and its
+best mitigation. A ratified ballot authorizes the direction, not the claim;
+its build card names the passing review as its first criterion. Public text
+may call a design better only where a passing review backs that exact claim.
 
 ## Delegation
 
