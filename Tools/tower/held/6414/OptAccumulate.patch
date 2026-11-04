@@ -1,0 +1,226 @@
+diff --git a/Compiler/JetIR/Source/OptAccumulate.jet b/Compiler/JetIR/Source/OptAccumulate.jet
+new file mode 100644
+index 0000000000..c31f837da2
+--- /dev/null
++++ b/Compiler/JetIR/Source/OptAccumulate.jet
+@@ -0,0 +1,220 @@
++// Accumulation (O2, pass "accumulate", before the call graph's passes): a
++// recursive function whose body ends by adding a value it computed to its
++// own call,
++//
++//     fn g(n: Int) -> Int { if n < 2 -> return n; g(n - 1) + g(n - 2) }
++//
++// makes that last call a pass of a loop instead, carrying the sum so far in
++// an accumulator. An exact Int Add cannot stop and is associative, so adding
++// the earlier value before the call rather than after it gives the same Int,
++// and the calls still run in their order. The body becomes
++//
++//     <g's head as it was: its first If that returns, for OptEntry.jet>
++//     acc := 0; p2 := a clone of p, for each parameter p
++//     loop
++//       <the body reading p2 for p; each `return v` is
++//        `r := acc + v; drop v; drop acc; drop each p2; return r`>
++//       <up to the call, then the stop point after it, then
++//        `t := acc + x; drop acc; acc := t; drop x;
++//        each p2 := its argument (a clone when the caller kept it); br 0`>
++//     end
++//     unreachable
++//
++// Only a body whose parameters are Ints or scalars it never writes, whose
++// last call is outside every construct, and whose returns never return a
++// parameter, is rewritten.
++
++IR_ACCUMULATE_BODY :: 400
++
++fn ir_opt_accumulate(m: IRModule, functions: &[IRFunction], recursive: [Bool]) Never! {
++    clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
++    if clone < 0 -> return
++    loop id in 0..<functions.len() {
++        if recursive[id] -> _ := ir_opt_accumulate_function(m, &functions[id], id, clone)
++    }
++}
++
++// Rewrites function `id` (`f`) as the header comment says; whether it did.
++fn ir_opt_accumulate_function(m: IRModule, f: &IRFunction, id: Int, clone: Int) -> Bool Never! {
++    count :: f.op.len()
++    if f.asm != None || count == 0 || count > IR_ACCUMULATE_BODY || f.result < 0 || m.types[f.result].kind != .Int -> return false
++    loop slot in 0..<f.param_count {
++        if !ir_opt_entry_scalar(m, f, slot) -> return false
++    }
++    // The tail: `add sum <- x, result; drops of x and result; return sum`,
++    // past any Unreachable at the end.
++    last := count - 1
++    loop last >= 0 && f.op[last] == .Unreachable -> last -= 1
++    if last < 0 || f.op[last] != .Return || f.a[last] < 0 -> return false
++    sum :: f.a[last]
++    add := last - 1
++    loop add >= 0 && f.op[add] == .Drop -> add -= 1
++    if add < 0 || f.op[add] != .Add || f.dst[add] != sum || m.types[f.slot_type[sum]].kind != .Int -> return false
++    call := add - 1
++    loop call >= 0 && !(f.op[call] == .Call && f.a[call] == id && f.dst[call] >= 0 && (f.dst[call] == f.a[add] || f.dst[call] == f.b[add])) -> call -= 1
++    if call < 0 || f.c[call] != f.param_count -> return false
++    result :: f.dst[call]
++    x :: if f.a[add] == result -> f.b[add] else -> f.a[add]
++    if x == result || x < f.param_count -> return false
++    dropped_x := false
++    dropped_result := false
++    loop k in (add + 1)..<last {
++        if f.a[k] == x -> dropped_x = true
++        else if f.a[k] == result -> dropped_result = true
++        else -> return false
++    }
++    if !dropped_x || !dropped_result -> return false
++    // The call sits outside every construct; between it and the Add only
++    // drops of its arguments and code that touches none of x, the result
++    // and the sum.
++    open := 0
++    loop k in 0..<call {
++        if f.op[k] == .Block || f.op[k] == .Loop || f.op[k] == .If -> open += 1
++        if f.op[k] == .End -> open -= 1
++    }
++    if open != 0 -> return false
++    args := [Int]{}
++    loop index in f.b[call]..<(f.b[call] + f.c[call]) -> &args.push(f.args[index])
++    consumed := [Bool]{}
++    loop _ in args -> &consumed.push(false)
++    reads := [Int]{}
++    loop k in (call + 1)..<add {
++        if f.op[k] == .Drop && args.contains(f.a[k]) {
++            loop i in 0..<args.len() {
++                if args[i] == f.a[k] -> consumed[i] = true
++            }
++            next
++        }
++        if f.op[k] == .Call && f.a[k] == id -> return false
++        written :: ir_x64_write(f, k)
++        if written == x || written == result || written == sum -> return false
++        ir_x64_reads_into(f, k, &reads)
++        if reads.contains(x) || reads.contains(result) || reads.contains(sum) -> return false
++    }
++    loop i in 0..<args.len() {
++        // A consumed argument is the caller's own value: a slot but a
++        // parameter, dropped once.
++        if consumed[i] && (args[i] < f.param_count || ir_opt_accumulate_drops(f, call + 1, add, args[i]) != 1) -> return false
++    }
++    // No parameter is written, and no Return returns one.
++    loop k in 0..<count {
++        written :: ir_x64_write(f, k)
++        if written >= 0 && written < f.param_count -> return false
++        if f.op[k] == .Return && f.a[k] >= 0 && f.a[k] < f.param_count -> return false
++    }
++    head :: ir_opt_accumulate_head(f)
++    if head >= call -> return false
++    line :: f.code_line[call]
++    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
++    // The head, every slot but the parameters its own.
++    fresh := [Int]{}
++    loop _ in 0..<f.param_count -> &fresh.push(-1)
++    total :: f.slot_type.len()
++    loop slot in f.param_count..<total -> &fresh.push(ir_version_slot(&f, slot))
++    if head > 0 -> ir_version_copy(&f, &code, 0, head - 1, 0, fresh, 0)
++    // The accumulator and the parameters' own copies.
++    sum_type :: f.slot_type[sum]
++    acc :: ir_slot(&f, sum_type, .Local, -1, line)
++    ir_opt_code_put(&code, .Const, acc, 0, -1, -1, line)
++    names := [Int]{}
++    loop slot in 0..<total -> &names.push(-1)
++    loop p in 0..<f.param_count {
++        own :: ir_slot(&f, f.slot_type[p], .Local, f.slot_name[p], line)
++        names[p] = own
++        ir_opt_accumulate_take(&f, &code, m, clone, own, p, line)
++    }
++    ir_opt_code_put(&code, .Loop, -1, -1, -1, -1, line)
++    depth := 0
++    loop k in 0..<call {
++        if f.op[k] == .Return && f.a[k] >= 0 {
++            value :: f.a[k]
++            ret :: ir_slot(&f, sum_type, .Temp, -1, f.code_line[k])
++            ir_opt_code_put(&code, .Add, ret, acc, value, f.c[add], f.code_line[k])
++            ir_opt_code_put(&code, .Drop, -1, value, -1, -1, f.code_line[k])
++            ir_opt_code_put(&code, .Drop, -1, acc, -1, -1, f.code_line[k])
++            ir_opt_accumulate_drop_own(f, &code, m, names, f.code_line[k])
++            ir_opt_code_put(&code, .Return, -1, ret, f.b[k], -1, f.code_line[k])
++            next
++        }
++        ir_version_copy(&f, &code, k, k, 1, names, depth)
++        if f.op[k] == .End -> depth -= 1
++        if f.op[k] == .Block || f.op[k] == .Loop || f.op[k] == .If -> depth += 1
++    }
++    loop k in (call + 1)..<add {
++        if f.op[k] == .Drop && args.contains(f.a[k]) -> next
++        ir_version_copy(&f, &code, k, k, 1, names, depth)
++        if f.op[k] == .End -> depth -= 1
++        if f.op[k] == .Block || f.op[k] == .Loop || f.op[k] == .If -> depth += 1
++    }
++    // Every argument's value first, then the accumulator, then the copies.
++    values := [Int]{}
++    loop i in 0..<args.len() {
++        if consumed[i] {
++            &values.push(args[i])
++            next
++        }
++        held :: ir_slot(&f, f.slot_type[i], .Temp, -1, line)
++        ir_opt_accumulate_take(&f, &code, m, clone, held, ir_version_name(names, args[i]), line)
++        &values.push(held)
++    }
++    step :: ir_slot(&f, sum_type, .Temp, -1, line)
++    ir_opt_code_put(&code, .Add, step, acc, ir_version_name(names, x), f.c[add], line)
++    ir_opt_code_put(&code, .Drop, -1, acc, -1, -1, line)
++    ir_opt_code_put(&code, .Move, acc, step, -1, -1, line)
++    ir_opt_code_put(&code, .Drop, -1, ir_version_name(names, x), -1, -1, line)
++    loop p in 0..<f.param_count {
++        if m.types[f.slot_type[p]].kind == .Int {
++            ir_opt_code_put(&code, .Drop, -1, names[p], -1, -1, line)
++            ir_opt_code_put(&code, .Move, names[p], values[p], -1, -1, line)
++        } else {
++            ir_opt_code_put(&code, .Copy, names[p], values[p], -1, -1, line)
++        }
++    }
++    ir_opt_code_put(&code, .Br, -1, 0, -1, -1, line)
++    ir_opt_code_put(&code, .End, -1, -1, -1, -1, line)
++    ir_opt_code_put(&code, .Unreachable, -1, -1, -1, -1, line)
++    f.op = ^code.op
++    f.dst = ^code.dst
++    f.a = ^code.a
++    f.b = ^code.b
++    f.c = ^code.c
++    f.code_line = ^code.line
++    ir_opt_compact(&f)
++    true
++}
++
++// The instructions of `f`'s head: its tests and the End of its first If,
++// when that If has no Else and its arm ends in a Return (OptEntry.jet's
++// head), else 0.
++fn ir_opt_accumulate_head(f: IRFunction) -> Int Never! {
++    at := 0
++    loop at < f.op.len() && ir_opt_entry_test(f.op[at]) -> at += 1
++    if at >= f.op.len() || f.op[at] != .If || f.b[at] >= 0 -> return 0
++    end :: f.c[at]
++    if end <= at + 1 || f.op[end - 1] != .Return -> return 0
++    end + 1
++}
++
++// How many Drops of `slot` from..<to holds.
++fn ir_opt_accumulate_drops(f: IRFunction, from: Int, to: Int, slot: Int) -> Int Never! {
++    count := 0
++    loop k in from..<to {
++        if f.op[k] == .Drop && f.a[k] == slot -> count += 1
++    }
++    count
++}
++
++// `own` takes a value of its own from `source`: an Int's clone, a scalar's copy.
++fn ir_opt_accumulate_take(f: &IRFunction, code: &IROptCode, m: IRModule, clone: Int, own: Int, source: Int, line: Int) Never! {
++    if m.types[f.slot_type[own]].kind != .Int -> return ir_opt_code_put(&code, .Copy, own, source, -1, -1, line)
++    row :: f.args.len()
++    &f.args.push(source)
++    ir_opt_code_put(&code, .CallRuntime, own, clone, row, 1, line)
++}
++
++// Drops of the parameters' Int copies (`names`).
++fn ir_opt_accumulate_drop_own(f: IRFunction, code: &IROptCode, m: IRModule, names: [Int], line: Int) Never! {
++    loop p in 0..<f.param_count {
++        if m.types[f.slot_type[p]].kind == .Int -> ir_opt_code_put(&code, .Drop, -1, names[p], -1, -1, line)
++    }
++}

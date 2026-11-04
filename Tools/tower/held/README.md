@@ -16,28 +16,36 @@ Each `<card>/README.md` lists its items. For each item it gives:
 A patch uses repo-relative `a/` `b/` paths. Apply it with
 `git apply -p1 <patch>`, or `git apply --3way` when the base has moved on.
 
-When an item lands, delete its files in the landing commit, and delete the
-directory with its last item. The card then cites the landing commit, not this
-path.
+Every held patch is integrated: it lands, it is not parked. An item leaves
+this directory only after its landing commit. That commit deletes the item's
+files (and the directory with its last item) and adds a row to "Landed"
+below. The card then cites the landing commit, not this path.
 
 | Card | Directory | Items |
 |---|---|---|
+| #5910 | `5910/` | SP05b and SP05c: phase-arena work, with its proof logs (recovered 2026-11-04) |
+| #6312 | `6312/` | D-CACHE-CONTROL1=A: the three surviving tests (the compiler half is lost) |
+| #6414 | `6414/` | OptAccumulate: an unwired O2 accumulator pass (recovered 2026-11-04) |
 | #6442 | `6442/` | BugSweep 15n, 19, 20, 21 and 23: Jetpack and driver fixes |
 | #5971 | `5971/` | Main-13: checked fixed-width narrowing (parked: runtime recursion) |
 | #6497 | `6497/` | FFIDesign-1: the generated #CLI parser (pulled: Exec effect on help/version) |
+
+## Landed
+
+No held item has landed yet.
 
 ## Held work that was lost
 
 The 2026-11-04 scratch cleanup deleted these before they were copied here.
 They could not be recovered. Each card keeps its description of the work, so
-the work can be redone from that description.
+the work can be redone from that description. The SP05c patch (#5910) and
+OptAccumulate.jet (#6414), first listed here, were later found in rescued
+copies and are now held above.
 
 | Card | What was held | Where the description is |
 |---|---|---|
 | #3595 | Fixes for three Jetpack/Foundation test roots: missing core.sys/core.process uses, the TreeHashPublication fs effects, and the ReportJSON Dyn assert (`found.patch`) | #3595 log, 2026-10-23 |
-| #5910 | sp05b+sp05c phase-arena work, rebased onto master after integ-post-stage2 with SP02 (`sp05c.patch`) | #5910 c17 |
-| #6312 | D-CACHE-CONTROL1=A, part-built: `mem.stream_store` (x64 `movnti`, IR StreamStore), `$build.cpu.cache_line`, docs rows, a conformance test and two examples. 31 files on base 67fd7fdc47 (`cache-control1-wip.patch`) | #6312 logs 0 and 1 |
-| #6414 | OptAccumulate.jet: an unwired O2 pass that turns a recursive `g(..) + x` tail into an accumulator loop, with no tests (`OptAccumulate.patch`) | #6414 log 16 |
+| #6312 | D-CACHE-CONTROL1=A, part-built: `mem.stream_store` (x64 `movnti`, IR StreamStore), `$build.cpu.cache_line`, docs rows, a conformance test and two examples. 31 files on base 67fd7fdc47 (`cache-control1-wip.patch`). The conformance test and the two examples survived and are held in `6312/` | #6312 logs 0 and 1 |
 
 ## Superseded, not held
 
