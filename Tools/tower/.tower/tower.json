@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90455,
+    "rev": 90469,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61402,6 +61402,16 @@
         {
           "at": "2026-11-04",
           "by": "Main",
+          "text": "c17 scope (Recover, approved by Main, 2026-11-04): jet crash does not exist, and the split release report prints no build id, so the ratified D-RT-DEFECT-REPORT1=A release form is unbuilt. Fix: a release report.S variant that prints the signal line, 'Build <40 hex> (names and lines: jet crash)' and address frames, with no cell larger; a registered jet crash command that finds .jet/symbols/.build-id/xx/rest.debug and prints the o0 text; and the testkit o2 route pipes fault reports through jet crash."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "c17 reworded by Main, 2026-11-04: under ratified D-RELEASE-DEBUG1=A, a --release binary keeps no line table and its own fault report prints addresses (so ?? is correct); names and lines come from jet crash, using the build-id side file. c17 therefore means: the o2 golden for errors/stack_overflow proves the same meaning through jet crash (the binary's report symbolised by jet crash equals the o0 text), with no bytes added to any release image."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
           "text": "c8 (repl memory) parked by Builder 2026-11-04 for the owner's reorder; findings at /mnt/jetscratch/lanes/Main/tmp/qc/repl/FINDINGS.md (to be committed with the fix). Per-turn RSS grows ~190-200 MB per turn already in the parse loop (jet_driver_load: L.preparse -> L.parsed, Loader.jet), plus ~450 MB per turn through comptime and ~670 MB per turn through a full compile. Ruled out: single-thread allocator reuse, task.group worker alloc and free, worker-alloc/main-free, match on a moved enum, partial field moves (all flat). Next: bisect inside the parse wave (jet_driver_parse_wave, parse_claimers, parse_claimed, Loader.jet ~3900) and the per-unit load body (~4364-4796); try one compiler thread to separate thread arenas from a parse leak. The c9 fix is written in tree lanes/Main/t6035 and is to be landed on its own."
         },
         {
@@ -61616,7 +61626,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-04T20:14:03.786Z",
+      "updated": "2026-11-04T20:19:51.553Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -157106,6 +157116,104 @@
   ],
   "events": [
     {
+      "at": "2026-11-04T20:24:03.799Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G24",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:03.200Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G23",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:02.672Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G19",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:02.184Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G25",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:01.662Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G16",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:01.137Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G18",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:00.683Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G17",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:24:00.278Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G20",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:23:59.850Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G22",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:23:59.327Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G21",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:23:58.847Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G15",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:23:58.377Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G14",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-04T20:19:51.553Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T20:17:02.000Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-04T20:14:56.586Z",
       "by": "Main",
       "action": "card.update",
@@ -162904,121 +163012,121 @@
     {
       "id": "G14",
       "title": "1. Hand-off and durability (P0)",
-      "body": "Every closed card is provably durable on dev or master, and a fresh clone is enough for any agent, local or remote, to continue: repo tooling as Jet programs, seeds as GitHub releases, no personal info in committed files, and test suites that finish in about a minute. Owner order 2026-11-04: first (scripting, then web, then developer experience).",
+      "body": "Every closed card is provably durable on dev or master, and a fresh clone is enough for any agent, local or remote, to continue: repo tooling as Jet programs, seeds as GitHub releases, no personal info in committed files, and test suites that finish in about a minute. Owner order 2026-11-04: first.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:18.839Z",
-      "updated": "2026-11-04T18:13:09.602Z",
+      "updated": "2026-11-04T20:23:58.377Z",
       "updatedBy": "Main"
     },
     {
       "id": "G15",
       "title": "2. Finish Rust removal and self-hosting",
-      "body": "The toolchain is already Rust-free and self-hosting (G3 achieved 2026-10-30; the remaining .rs files are benchmark peers, the Zed extension, fixtures and one FFI example). Left: reconcile the stale criteria on #4717 and #3590 against today's code, port the deleted Rust test coverage (#6096), and pass every example on the native path (#4599, see G1). Owner order 2026-11-04: second (scripting, then web, then developer experience).",
+      "body": "The toolchain is already Rust-free and self-hosting (G3 achieved 2026-10-30; the remaining .rs files are benchmark peers, the Zed extension, fixtures and one FFI example). Left: reconcile the stale criteria on #4717 and #3590 against today's code, port the deleted Rust test coverage (#6096), and pass every example on the native path (#4599, see G1). Owner order 2026-11-04: second.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:21.930Z",
-      "updated": "2026-11-04T18:13:10.046Z",
+      "updated": "2026-11-04T20:23:58.847Z",
       "updatedBy": "Main"
     },
     {
       "id": "G16",
-      "title": "3. Effects on types",
-      "body": "Packages, targets, modules and the compiler as effect-typed types, with every effect limit checked (including the 2026-11-04 soundness defects on #6129) and one effect vocabulary. Owner order 2026-11-04: third (scripting, then web, then developer experience).",
+      "title": "8. Effects on types",
+      "body": "Packages, targets, modules and the compiler as effect-typed types, with every effect limit checked (including the 2026-11-04 soundness defects on #6129) and one effect vocabulary. Owner order 2026-11-04: eighth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:25.258Z",
-      "updated": "2026-11-04T18:13:10.532Z",
+      "updated": "2026-11-04T20:24:01.662Z",
       "updatedBy": "Main"
     },
     {
       "id": "G17",
-      "title": "4. Declarations as types and metaprogramming",
-      "body": "Markers, diagnostics, effects, facts and derives are ordinary types with Core traits; markers can sit in bodies; reflection, generation and const generics are complete; Core declares its own host leaves. Owner order 2026-11-04: fourth (scripting, then web, then developer experience).",
+      "title": "6. Declarations as types and metaprogramming",
+      "body": "Markers, diagnostics, effects, facts and derives are ordinary types with Core traits; markers can sit in bodies; reflection, generation and const generics are complete; Core declares its own host leaves. Owner order 2026-11-04: sixth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:26.984Z",
-      "updated": "2026-11-04T18:13:10.995Z",
+      "updated": "2026-11-04T20:24:00.683Z",
       "updatedBy": "Main"
     },
     {
       "id": "G18",
-      "title": "5. Packages, configuration and replacing Nix",
-      "body": "Package roots, typed configuration and environment ownership are closed, and Jet (with Jetpack) replaces Nix: native packages, environments, one-command install, faster than Nix (see G9). Owner order 2026-11-04: fifth (scripting, then web, then developer experience).",
+      "title": "7. Packages, configuration and replacing Nix",
+      "body": "Package roots, typed configuration and environment ownership are closed, and Jet (with Jetpack) replaces Nix: native packages, environments, one-command install, faster than Nix (see G9). Owner order 2026-11-04: seventh.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:34.103Z",
-      "updated": "2026-11-04T18:13:11.507Z",
+      "updated": "2026-11-04T20:24:01.137Z",
       "updatedBy": "Main"
     },
     {
       "id": "G19",
-      "title": "6. Memory safety and soundness",
-      "body": "Memory checks accept every safe program and refuse every unsafe one (including the 2026-11-04 double close), zero leaks, proven task outcomes and cancellation, and closed authority boundaries (see G5). Owner order 2026-11-04: sixth (scripting, then web, then developer experience).",
+      "title": "10. Memory safety and soundness",
+      "body": "Memory checks accept every safe program and refuse every unsafe one (including the 2026-11-04 double close), zero leaks, proven task outcomes and cancellation, and closed authority boundaries (see G5). Owner order 2026-11-04: tenth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:37.154Z",
-      "updated": "2026-11-04T18:13:11.973Z",
+      "updated": "2026-11-04T20:24:02.672Z",
       "updatedBy": "Main"
     },
     {
       "id": "G20",
-      "title": "9. Developer experience: CLI, errors and editor",
-      "body": "Every error in plain words, every registered command and flag built, one settings table for run, build, dev and test, a generated CLI reference, and a working LSP and developer tools. Owner order 2026-11-04: ninth (scripting, then web, then developer experience).",
+      "title": "5. Developer experience: CLI, errors and editor",
+      "body": "Every error in plain words, every registered command and flag built, one settings table for run, build, dev and test, a generated CLI reference, and a working LSP and developer tools. Owner order 2026-11-04: fifth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:41.788Z",
-      "updated": "2026-11-04T18:13:13.492Z",
+      "updated": "2026-11-04T20:24:00.278Z",
       "updatedBy": "Main"
     },
     {
       "id": "G21",
-      "title": "10. Core library completeness",
-      "body": "Core data, collections, codecs and the unbuilt APIs are complete and correct, with no wrong-meaning bugs and every Core call routed in the runtime. Owner order 2026-11-04: tenth (scripting, then web, then developer experience).",
+      "title": "3. Core library completeness",
+      "body": "Core data, collections, codecs and the unbuilt APIs are complete and correct, with no wrong-meaning bugs and every Core call routed in the runtime. Owner order 2026-11-04: third.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:46.919Z",
-      "updated": "2026-11-04T18:13:13.992Z",
+      "updated": "2026-11-04T20:23:59.327Z",
       "updatedBy": "Main"
     },
     {
       "id": "G22",
-      "title": "7. Best scripting language",
-      "body": "Jet beats every peer for scripts: permissions asked once, basics free, and every repo script is Jet (see G7 and G8). Owner order 2026-11-04: seventh (scripting, then web, then developer experience).",
+      "title": "4. Best scripting language",
+      "body": "Jet beats every peer for scripts: permissions asked once, basics free, and every repo script is Jet (see G7 and G8). Owner order 2026-11-04: fourth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:52.919Z",
-      "updated": "2026-11-04T18:13:12.460Z",
+      "updated": "2026-11-04T20:23:59.850Z",
       "updatedBy": "Main"
     },
     {
       "id": "G23",
       "title": "11. Speed and size",
-      "body": "The performance gate passes against every peer and the machine ceiling: measurement gate and dashboards, self-compile memory and time, codegen equal to hand-written assembly, and the smallest binaries (see G4, G10 and G12). Owner order 2026-11-04: eleventh (scripting, then web, then developer experience).",
+      "body": "The performance gate passes against every peer and the machine ceiling: measurement gate and dashboards, self-compile memory and time, codegen equal to hand-written assembly, and the smallest binaries (see G4, G10 and G12). Owner order 2026-11-04: eleventh.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:54.108Z",
-      "updated": "2026-11-04T18:13:14.498Z",
+      "updated": "2026-11-04T20:24:03.200Z",
       "updatedBy": "Main"
     },
     {
       "id": "G24",
       "title": "12. Docs and examples",
-      "body": "Published docs and examples match current syntax and law, and the docs site is generated from executable sources. Owner order 2026-11-04: twelfth (scripting, then web, then developer experience).",
+      "body": "Published docs and examples match current syntax and law, and the docs site is generated from executable sources. Owner order 2026-11-04: twelfth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:57.789Z",
-      "updated": "2026-11-04T18:13:14.992Z",
+      "updated": "2026-11-04T20:24:03.799Z",
       "updatedBy": "Main"
     },
     {
       "id": "G25",
-      "title": "8. Web, end to end, re-measured against competitors",
-      "body": "The web target, server runtime, jet dev experience and framework are fully built, then the 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel with every gap closed or explained. #6553-#6558 are owner-paused. Owner order 2026-11-04: eighth (scripting, then web, then developer experience).",
+      "title": "9. Web, end to end, re-measured against competitors",
+      "body": "The web target, server runtime, jet dev experience and framework are fully built, then the 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel with every gap closed or explained. #6553-#6558 are owner-paused. Owner order 2026-11-04: ninth.",
       "status": "active",
       "log": [],
       "created": "2026-11-04T18:09:58.998Z",
-      "updated": "2026-11-04T18:13:12.951Z",
+      "updated": "2026-11-04T20:24:02.184Z",
       "updatedBy": "Main"
     }
   ]
