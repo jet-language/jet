@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 91150,
+    "rev": 91175,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52346,6 +52346,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 43 criteria from archived #687, #1134, #2101, #2300, #2301, #2911, #2918, #2925, #2935, #2936, #2937, #2938, #2939, #2940, #2941, #2948, #2955, #3157, #3160, #3405, #3478, #3484, #3485, #3580, #4116: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Owner direction 2026-10-23: every improvement that takes the compiler to 30M lines/s must also be applied to codegen, so all code Jet generates is as fast as physically possible without taking control from experts. Rule for the throughput work: each slice is tagged GENERAL (a runtime, codegen or Core mechanism any Jet program gets automatically) or COMPILER-ONLY (a data-structure choice inside the compiler). Prefer GENERAL: implement it once in codegen/runtime/Core and let the compiler benefit as an ordinary Jet program (I8 one mechanism). Examples: non-atomic RC unless shared (#5475), frozen immortal constants (mapfreeze), no reclamation at process end (#5478), escape-proven bump/arena placement (Goose lesson), small-Int fast paths, tag compare (#5473), Shared/queue primitives without futex waits on hot paths, the work-stealing task scheduler, hashed Map instead of binary search (#5474), COW uniqueness at every place (#5480). COMPILER-ONLY wins (interned ids, SoA AST/IR) are each followed by a ticket asking how codegen or Core can give user programs the same (for example Columns<T>/SoA layout, an interned Symbol type, or arenas via escape analysis). Experts keep control via the existing explicit surfaces (layout attributes, #Region, #Unsafe, explicit allocators); defaults stay safe."
@@ -52693,6 +52698,105 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:38:49.537Z"
+        },
+        {
+          "n": 34,
+          "text": "(was #3157 c1) Run the same bounded programs in each supported tier and compare values, active cases and failures [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:50.342Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #3157 c3) Tier fixes preserve the common semantic contract; no tier-specific public enum syntax or fallback is added [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:50.963Z"
+        },
+        {
+          "n": 36,
+          "text": "(was #3160 c1) Observe success/absence/error labels and payload values through each legal boundary, including nested optional/result types [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:51.582Z"
+        },
+        {
+          "n": 37,
+          "text": "(was #3160 c2) Reject ambiguous collapse such as treating a named case, optional unit and structural unit membership as automatically identical [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:52.191Z"
+        },
+        {
+          "n": 38,
+          "text": "(was #3160 c3) If shared reflection/codec generation is adopted, it preserves builtin roles and does not falsely expose an infinite payload value domain as T.cases [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:53.007Z"
+        },
+        {
+          "n": 39,
+          "text": "(was #3405 c1) Tag-only and wildcard enum arms lower without requiring unused payload types; payload-bound arms retain full coverage checks [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:53.635Z"
+        },
+        {
+          "n": 40,
+          "text": "(was #3478 c1) Release/AOT anonymous-union equality and pattern paths use one checked carrier and compile the fixture [precut audit: failing on 9c7ddf1359: probe p3478_union_equality o0=101 o1=101 o2=101]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:54.251Z"
+        },
+        {
+          "n": 41,
+          "text": "(was #3484 c1) Release/AOT anonymous-union enum constants use canonical construction and checked payload typing [precut audit: failing on 9c7ddf1359: probe pu4_union_constant o0=101 o1=101 o2=101]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:54.888Z"
+        },
+        {
+          "n": 42,
+          "text": "(was #3485 c1) Release/AOT structural anonymous-union constants dispatch through checked type identity and compile [precut audit: failing on 9c7ddf1359: probe pu4_union_constant o0=101 o1=101 o2=101]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:55.479Z"
+        },
+        {
+          "n": 43,
+          "text": "(was #3580 c1) Actual warm-cache execution of custom/nested typed entry errors reproduces cold-native/AOT/interpreter payload and context, with proved cache hit and stale/incomplete schema rejection [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:56.091Z"
+        },
+        {
+          "n": 44,
+          "text": "(was #4116 c1) MIREval run-tier features in JetEval: task control, runtime stop codes, run-time I/O (from #3944): implemented, with a focused test or fixture that passes; the command and its result are logged on this card [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:56.698Z"
         }
       ],
       "refs": [
@@ -52713,7 +52817,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-07T15:05:28.935Z",
-      "updated": "2026-11-04T23:38:49.537Z",
+      "updated": "2026-11-04T23:38:57.266Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -77587,6 +77691,123 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:24:48.369Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #268) Prove or remove the internal `jet.raylib` namespace alias [precut audit: failing on 9c7ddf1359: C:corelib/jet_raylib_namespace_is_not_a_core_module_alias KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1002): JSON filter selected no values (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1002))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:57.868Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #292 c1) Native Linux SIGINT invokes every registered core.os.on_interrupt handler through a bounded real runtime proof; macOS/Windows proof is deferred intact to #523 by D-VERDICT-292-1 [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:58.459Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #292 c2) Two or more registrations run additively in registration order for every observed interrupt; no event is stolen or handler lost, and registration is live when on_interrupt returns [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:59.051Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #292 c3) OS callbacks perform only async-safe atomic notification; handler execution occurs on the dispatcher and one panicking handler cannot kill later handlers [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:38:59.643Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #292 c4) Unsupported targets fail honestly; process-lifetime registration semantics are documented; data-only core.os facts remain portable [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:00.243Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #292 c5) Programs not calling on_interrupt contain no interrupt FFI or unsafe runtime machinery; compiler dependencies remain unchanged [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:00.852Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #292 c6) Focused jet-codegen, corelib lifecycle/stripping, native Linux, docs, example, golden, and diff checks pass; deferred macOS/Windows checks live on #523 [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:01.465Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #292 c7) D-ENV-MUTATE1 process-global raw-preserving overlay implements get, fallible set, unset, deterministic vars, EnvError, Unix bytes, Windows UTF-16/case identity, and edition migration without mutating host libc/Windows environment [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:02.062Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #292 c8) Every child process receives one atomic overlay snapshot through env_clear/env/env_remove composition; concurrent mutation cannot tear a launch, raw non-Unicode values survive, and comptime/pure/dev ambient denial remains [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:02.710Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #292 c9) Native Linux facts and SIGINT lifecycle use bounded real runtime proof; both ordered handlers survive first-handler panic. Deferred macOS/Windows matrix is tracked by #523 [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:03.330Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #292 c10) Independent reviewer verifies hostile input, concurrency, child inheritance, host getenv isolation, old/new edition diagnostics, native Linux facts/SIGINT, docs/examples/goldens, and focused env/process/dev tests without static-only proof; macOS/Windows review is #523 [precut audit: failing on 9c7ddf1359: C:corelib/core_os_facts_and_interrupt_hook_compile KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:03.924Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #303) corelib audit: core.db — driver breadth, typed rows, migrations [precut audit: failing on 9c7ddf1359: C:db_policy/typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102))]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:04.673Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #352) Canvas workspace architecture: package/project editing surface [precut audit: failing on 9c7ddf1359: C:corelib/core_os_interrupt_prelude_is_emitted_only_when_used KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004): exit 1; expected 0 (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)); C:web_dev/jet_dev_web_exposes_canvas_panel_and_graph KNOWN-FAILING #6418 `jet…]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:39:05.338Z"
         }
       ],
       "refs": [],
@@ -77598,7 +77819,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-04T18:09:49.679Z",
+      "updated": "2026-11-04T23:39:05.338Z",
       "updatedBy": "Main"
     },
     {
@@ -163301,6 +163522,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T23:39:05.338Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#22 (was #352) Canvas workspace architecture: package/project ed"
+    },
+    {
+      "at": "2026-11-04T23:39:04.674Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#21 (was #303) corelib audit: core.db — driver breadth, typed ro"
+    },
+    {
+      "at": "2026-11-04T23:39:03.924Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#20 (was #292 c10) Independent reviewer verifies hostile input, "
+    },
+    {
+      "at": "2026-11-04T23:39:03.330Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#19 (was #292 c9) Native Linux facts and SIGINT lifecycle use bo"
+    },
+    {
+      "at": "2026-11-04T23:39:02.710Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#18 (was #292 c8) Every child process receives one atomic overla"
+    },
+    {
+      "at": "2026-11-04T23:39:02.062Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#17 (was #292 c7) D-ENV-MUTATE1 process-global raw-preserving ov"
+    },
+    {
+      "at": "2026-11-04T23:39:01.465Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#16 (was #292 c6) Focused jet-codegen, corelib lifecycle/strippi"
+    },
+    {
+      "at": "2026-11-04T23:39:00.852Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#15 (was #292 c5) Programs not calling on_interrupt contain no i"
+    },
+    {
+      "at": "2026-11-04T23:39:00.243Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#14 (was #292 c4) Unsupported targets fail honestly; process-lif"
+    },
+    {
+      "at": "2026-11-04T23:38:59.643Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#13 (was #292 c3) OS callbacks perform only async-safe atomic no"
+    },
+    {
+      "at": "2026-11-04T23:38:59.051Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#12 (was #292 c2) Two or more registrations run additively in re"
+    },
+    {
+      "at": "2026-11-04T23:38:58.459Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#11 (was #292 c1) Native Linux SIGINT invokes every registered c"
+    },
+    {
+      "at": "2026-11-04T23:38:57.868Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c081c9o8",
+      "note": "#10 (was #268) Prove or remove the internal `jet.raylib` namespa"
+    },
+    {
+      "at": "2026-11-04T23:38:57.267Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vsqf8a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T23:38:56.698Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#44 (was #4116 c1) MIREval run-tier features in JetEval: task co"
+    },
+    {
+      "at": "2026-11-04T23:38:56.091Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#43 (was #3580 c1) Actual warm-cache execution of custom/nested "
+    },
+    {
+      "at": "2026-11-04T23:38:55.480Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#42 (was #3485 c1) Release/AOT structural anonymous-union consta"
+    },
+    {
+      "at": "2026-11-04T23:38:54.888Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#41 (was #3484 c1) Release/AOT anonymous-union enum constants us"
+    },
+    {
+      "at": "2026-11-04T23:38:54.251Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#40 (was #3478 c1) Release/AOT anonymous-union equality and patt"
+    },
+    {
+      "at": "2026-11-04T23:38:53.635Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#39 (was #3405 c1) Tag-only and wildcard enum arms lower without"
+    },
+    {
+      "at": "2026-11-04T23:38:53.007Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#38 (was #3160 c3) If shared reflection/codec generation is adop"
+    },
+    {
+      "at": "2026-11-04T23:38:52.191Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#37 (was #3160 c2) Reject ambiguous collapse such as treating a "
+    },
+    {
+      "at": "2026-11-04T23:38:51.582Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#36 (was #3160 c1) Observe success/absence/error labels and payl"
+    },
+    {
+      "at": "2026-11-04T23:38:50.963Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#35 (was #3157 c3) Tier fixes preserve the common semantic contr"
+    },
+    {
+      "at": "2026-11-04T23:38:50.342Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vsqf8a",
+      "note": "#34 (was #3157 c1) Run the same bounded programs in each support"
+    },
     {
       "at": "2026-11-04T23:38:49.537Z",
       "by": "Main",
