@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 91625,
+    "rev": 91650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46985,6 +46985,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 14 criteria from archived #3852: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Landed on dev at 94dacfc354 in GoldC-42 (patch row: criterion/count 1): parallel_check_matches_serial_check re-reasoned verify-intent: --threads 1/8 byte-identical; only the Rust-era golden wording differs"
@@ -47213,6 +47218,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:44:19.320Z"
+        },
+        {
+          "n": 23,
+          "text": "(was #3852 c17) [#3950] Unchanged-build diagnostic receipt replay and explain-build package reasons in JetDriver (parity with Source/CheckReceipt.rs and ReceiptStore.rs) [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:20.611Z"
         }
       ],
       "refs": [],
@@ -47225,7 +47239,7 @@
       "parentId": "c0gomix3",
       "needsAcceptance": false,
       "created": "2026-10-02T19:54:04.358Z",
-      "updated": "2026-11-04T23:44:19.320Z",
+      "updated": "2026-11-04T23:44:21.247Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -50043,6 +50057,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 14 criteria from archived #644, #1197, #2790, #2993, #3446: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
           "at": "2026-10-05",
           "by": "Pip",
           "text": "Docs: proposal Docs/proposals/memory-model-2026-10-05.md and evidence Docs/research/memory-safety-evidence-2026-10-05.md are in the docs tree (master 29ccc04f8 and the next commit). Correction owed in the proposal: it cites a 64-case corpus (final: 87) and counts C36 as a safe extra accept, but the corpus and #4621 classify C36 as a false accept; corpus case 52 does not test push. The evidence doc's Limits section records all three. The paired copy-cost timing (MemEvidence-copybench) failed on environment (CARGO_TARGET_DIR guard, missing bc), so no measured cost ratios exist yet; CopyCut2's perf cells are the next measurement."
@@ -50058,7 +50077,134 @@
           "text": "Evidence landed (MemEvidence, release jet dev-05ea86f65). Corpus $JET_SCRATCH_ROOT/scratch/memcorpus/RESULTS.md: 87 programs (Rust NLL accept 49 / reject 38; Polonius accept 53); Jet agrees on 59; 20 false rejects (top: writing method through a write window E0212+E0202; no mutable map lookup/Entry; no mutable iteration loop p in &ps; @ links unbuilt; no write window into option/enum payload; no swap/take/replace through &; View<str> field/methods gaps; bogus E0121 in task ^tx); 2 static false accepts (cases 36, 62 = #4621, blocked today by a lowering ICE); 6 sound extra accepts. Copy audit $JET_SCRATCH_ROOT/scratch/memcorpus/AUDIT.md (estimates, paired timing job queued): ~920 heap copies where Rust would move, 604 needless ~ copies into read params in Core, 7,600 allocating string literals, closures boxed as Rc<RefCell<Option<Box<dyn FnMut>>>>, whole-list clones to iterate/fold/capture, 45,694 Int retains, 5,444 per-element bounds checks, map.get clones (no get_mut/Entry), shared lock + 2 allocations per access, task ^x clones, print/compare clone, share-on-reuse is eager deep copy. jet audit copies over-reports scalars and misses emitted-code clones. AUDIT.md was not seen by the proposal author; fold it into the K1-K15 card drafts."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #644 c1) #657's common policy ladder is complete; #534's marker migration is inherited transitively through that dependency [precut audit: failing on 9c7ddf1359: U:arena_bounded_open_multiplicity FAIL snapshot mismatch: tests/ui/arena_bounded_open_multiplicity.stderr; U:arena_bounded_transitive_overflow FAIL snapshot mismatch: tests/ui/arena_bounded_transitive_overflow.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:21.852Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #644 c2) Only no_alloc, zero_rc, and arena_bounded are registered and accepted at package, module, function, and block scopes; no high-water fact or spelling exists [precut audit: failing on 9c7ddf1359: U:arena_bounded_open_multiplicity FAIL snapshot mismatch: tests/ui/arena_bounded_open_multiplicity.stderr; U:arena_bounded_transitive_overflow FAIL snapshot mismatch: tests/ui/arena_bounded_transitive_overflow.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:22.522Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #644 c3) Reachability covers dependencies, generics, dynamic dispatch, FFI, and target profiles; strict proof fails unless sealed targets or signed summaries close open-world calls [precut audit: failing on 9c7ddf1359: U:arena_bounded_open_multiplicity FAIL snapshot mismatch: tests/ui/arena_bounded_open_multiplicity.stderr; U:arena_bounded_transitive_overflow FAIL snapshot mismatch: tests/ui/arena_bounded_transitive_overflow.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:23.218Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #644 c4) Allocator/RC facts come from compiler/runtime events: no_alloc rejects allocation, zero_rc rejects retain/release, and arena_bounded reports a proven bound with provenance rather than sampled evidence [precut audit: failing on 9c7ddf1359: U:arena_bounded_open_multiplicity FAIL snapshot mismatch: tests/ui/arena_bounded_open_multiplicity.stderr; U:arena_bounded_transitive_overflow FAIL snapshot mismatch: tests/ui/arena_bounded_transitive_overflow.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:23.825Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #644 c5) Fresh coded diagnostics, UI snapshots, inspect/API/semver projections, examples, AOT/dev parity, independent review, and full verification pass [precut audit: failing on 9c7ddf1359: U:arena_bounded_open_multiplicity FAIL snapshot mismatch: tests/ui/arena_bounded_open_multiplicity.stderr; U:arena_bounded_transitive_overflow FAIL snapshot mismatch: tests/ui/arena_bounded_transitive_overflow.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:24.433Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #1197 c1) A safe function can return a view chosen at runtime from compatible input owners [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:25.086Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #1197 c2) Lists, tuples, options, results, enums, and named aggregates can carry proven read or write views [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:25.704Z"
+        },
+        {
+          "n": 8,
+          "text": "(was #1197 c3) Function values, lambdas, generic callbacks, and trait dispatch preserve returned-view provenance without unsafe code [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:26.340Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #1197 c4) Public API snapshots record source relations and report breaking provenance changes [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:26.948Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #1197 c5) Zero-copy parser and borrowing-deserializer examples work without copies, raw pointers, or user-written lifetime syntax [precut audit: failing on 9c7ddf1359: U:ownership/open_dynamic_trait_view_dispatch_is_rejected FAIL snapshot mismatch: tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.stderr; U:ownership/zero_copy_parser_rejects_locally_owned_source FAIL snapshot mismatch: tests/ui/ownership/zero_copy_parser_rejects_locally_owned_source.stderr; U:ownership/returned_string_view_field_cannot_outlive_local_owner FAIL snapshot mismatch: tests/ui/ownership/returned_string_view_field_cannot_outlive_local_owner.stderr]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:27.551Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #2790 c1) Implementation-only closure: mapped files use the existing read-only view ownership mechanism, return checked view-shaped types through nested Option/Result/Shared carriers, root every borrowed result in the receiver mapping, and route AOT, JIT, interpreter, and applicable web behavior through the same mmap Prelude kernels [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:28.225Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #2993 c1) Fresh compilation reaches the intended removed-ID access rather than exit 101 in MIR verification [precut audit: failing on 9c7ddf1359: C:pool_id_equality/reused_pool_slot_does_not_equal_its_stale_generation FAIL exit 1; expected 0; C:allocator_families/pool_ids_reuse_slots_without_reviving_stale_generations FAIL exit 1; expected 0]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:28.870Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #2993 c2) Removed and reused pool slots preserve generation safety; a valid ID remains usable [precut audit: failing on 9c7ddf1359: C:pool_id_equality/reused_pool_slot_does_not_equal_its_stale_generation FAIL exit 1; expected 0; C:allocator_families/pool_ids_reuse_slots_without_reviving_stale_generations FAIL exit 1; expected 0]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:29.464Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #3446 c1) All canonical network Prelude route rows satisfy strict arity/borrow-mask legality, and the focused concurrency-service service sequence completes without a metadata ICE [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:30.222Z"
+        }
+      ],
       "refs": [
         "D-MEMREF1",
         "D-MEMPROVENANCE2",
@@ -50075,7 +50221,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-04T18:09:41.401Z",
+      "updated": "2026-11-04T23:44:31.539Z",
       "updatedBy": "Main",
       "goals": [
         "G5",
@@ -66355,6 +66501,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-28T20:55:00.021Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #448 c1) One corpus test recursively covers every Jet example and tests/ui fixture using supported source extensions [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:32.871Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #448 c2) The test compares original and formatted parsed token streams and fails on any dropped or semantically changed token while tolerating formatting-only trivia [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:34.137Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #448 c3) A seeded formatter token-deletion mutation is demonstrated to make the corpus test fail, then fully reverted [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-04T23:44:35.441Z"
         }
       ],
       "refs": [],
@@ -66365,8 +66538,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:16.618Z",
-      "updated": "2026-10-28T20:55:02.347Z",
-      "updatedBy": "CardTrim",
+      "updated": "2026-11-04T23:44:35.441Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -70799,11 +70972,11 @@
         {
           "n": 28,
           "text": "cffi-strings: 2 deleted Rust tests have a Jet test covering the same behavior (tests/cffi.rs::cffi_string_returns_are_borrowed_non_null_utf8_and_copied, tests/cffi.rs::cffi_runtime_interior_nul_panics_instead_of_silently_truncating)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "246f568b8e: tests/cases/cffi/cffi_string_returns_are_borrowed_non_null_utf8_and_copied.case (ported-failing #5454) and cffi_runtime_interior_nul_panics_instead_of_silently_truncating.case (PASS)",
+          "at": "2026-11-04T23:44:30.903Z"
         },
         {
           "n": 29,
@@ -70916,38 +71089,38 @@
         {
           "n": 41,
           "text": "cffi-bind-native: 1 deleted Rust tests have a Jet test covering the same behavior (tests/cffi.rs::jet_bind_native_backend_end_to_end)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "246f568b8e: tests/cases/cffi/jet_bind_native_backend_end_to_end.case (ported-failing #6418)",
+          "at": "2026-11-04T23:44:32.259Z"
         },
         {
           "n": 42,
           "text": "cffi-callbacks: 1 deleted Rust tests have a Jet test covering the same behavior (tests/cffi.rs::cffi_named_pure_callback_has_stable_c_symbol)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "246f568b8e: tests/cases/cffi/cffi_named_pure_callback_has_stable_c_symbol.case (ported-failing #6366)",
+          "at": "2026-11-04T23:44:33.515Z"
         },
         {
           "n": 43,
           "text": "cffi-bindgen-nominals: 1 deleted Rust tests have a Jet test covering the same behavior (tests/cffi.rs::generated_c_nominals_share_the_imported_signature_owner)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "246f568b8e: tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case (ported-failing #6366)",
+          "at": "2026-11-04T23:44:34.848Z"
         },
         {
           "n": 44,
           "text": "cffi-manifest-pin: 1 deleted Rust tests have a Jet test covering the same behavior (tests/cffi.rs::inline_ffi_pin_works_inside_manifest_project)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "246f568b8e: tests/cases/cffi/inline_ffi_pin_works_inside_manifest_project.case (ported-failing #6366)",
+          "at": "2026-11-04T23:44:36.065Z"
         },
         {
           "n": 45,
@@ -71235,7 +71408,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-04T22:18:35.344Z",
+      "updated": "2026-11-04T23:44:36.065Z",
       "updatedBy": "Main"
     },
     {
@@ -167499,6 +167672,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T23:44:36.065Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-04T23:44:35.441Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#6 (was #448 c3) A seeded formatter token-deletion mutation is "
+    },
+    {
+      "at": "2026-11-04T23:44:34.848Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-04T23:44:34.137Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#5 (was #448 c2) The test compares original and formatted parse"
+    },
+    {
+      "at": "2026-11-04T23:44:33.515Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-04T23:44:32.871Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#4 (was #448 c1) One corpus test recursively covers every Jet e"
+    },
+    {
+      "at": "2026-11-04T23:44:32.259Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-04T23:44:31.539Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00rqc09",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T23:44:30.903Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-04T23:44:30.222Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#14 (was #3446 c1) All canonical network Prelude route rows sati"
+    },
+    {
+      "at": "2026-11-04T23:44:29.464Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#13 (was #2993 c2) Removed and reused pool slots preserve genera"
+    },
+    {
+      "at": "2026-11-04T23:44:28.870Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#12 (was #2993 c1) Fresh compilation reaches the intended remove"
+    },
+    {
+      "at": "2026-11-04T23:44:28.225Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#11 (was #2790 c1) Implementation-only closure: mapped files use"
+    },
+    {
+      "at": "2026-11-04T23:44:27.551Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#10 (was #1197 c5) Zero-copy parser and borrowing-deserializer e"
+    },
+    {
+      "at": "2026-11-04T23:44:26.948Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#9 (was #1197 c4) Public API snapshots record source relations "
+    },
+    {
+      "at": "2026-11-04T23:44:26.340Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#8 (was #1197 c3) Function values, lambdas, generic callbacks, "
+    },
+    {
+      "at": "2026-11-04T23:44:25.705Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#7 (was #1197 c2) Lists, tuples, options, results, enums, and n"
+    },
+    {
+      "at": "2026-11-04T23:44:25.086Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#6 (was #1197 c1) A safe function can return a view chosen at r"
+    },
+    {
+      "at": "2026-11-04T23:44:24.434Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#5 (was #644 c5) Fresh coded diagnostics, UI snapshots, inspect"
+    },
+    {
+      "at": "2026-11-04T23:44:23.825Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#4 (was #644 c4) Allocator/RC facts come from compiler/runtime "
+    },
+    {
+      "at": "2026-11-04T23:44:23.218Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#3 (was #644 c3) Reachability covers dependencies, generics, dy"
+    },
+    {
+      "at": "2026-11-04T23:44:22.522Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#2 (was #644 c2) Only no_alloc, zero_rc, and arena_bounded are "
+    },
+    {
+      "at": "2026-11-04T23:44:21.852Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00rqc09",
+      "note": "#1 (was #644 c1) #657's common policy ladder is complete; #534'"
+    },
+    {
+      "at": "2026-11-04T23:44:21.247Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dv8dlk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-04T23:44:20.611Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dv8dlk",
+      "note": "#23 (was #3852 c17) [#3950] Unchanged-build diagnostic receipt r"
+    },
     {
       "at": "2026-11-04T23:44:19.320Z",
       "by": "Main",
