@@ -1,0 +1,22 @@
+# The markers of an impl inside a type body and of a module declaration are
+# kept, written above or as a line of the body: the `#Commutative` operator
+# impl and the `#Target(OS.Linux)` impl check and run the same either way, and
+# a module declaration's marker reaches the site check either way.
+fixture: impl_and_module_markers_above_and_inside.fixture
+env: NO_COLOR=1
+step: jet check above.jet
+exit: 0
+step: jet check inside.jet
+exit: 0
+step: jet run above.jet
+exit: 0
+stdout: = impl_and_module_markers_above_and_inside.out
+step: jet run inside.jet
+exit: 0
+stdout: = impl_and_module_markers_above_and_inside.out
+step: jet check module_above.jet
+exit: 1
+stderr: ~ "`#Deprecated` cannot attach at the Module site" # the above-written marker reaches the site check
+step: jet check module_inside.jet
+exit: 1
+stderr: ~ "`#Deprecated` cannot attach at the Module site" # the inside-written marker reaches the same check

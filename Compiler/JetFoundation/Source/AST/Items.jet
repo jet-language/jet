@@ -366,6 +366,9 @@ struct ModuleDecl {
     members: [Expr]
     contributions: [Contribution]
     span: Span
+    // The markers written above `module` and the `#X :: value` lines of its
+    // body, in source order.
+    markers: [Marker]{[Marker]{}}
 }
 
 struct SourceDecl {
@@ -703,6 +706,8 @@ struct TraitImplBlock {
     delegation_field: String?{None}
     // The block's markers: those above `impl`, then its `#X :: value` lines.
     markers: [Marker]{[Marker]{}}
+    // The native OS the block is gated to by `#Target(OS.…)`, as on `ImplDef`.
+    os_target: String?{None}
     // From `impl` through the block's end; None for a generated block.
     span: Span?{None}
 }
@@ -1358,6 +1363,8 @@ struct ErrorConvDef {
     to_span: Span
     body: [Stmt]
     body_span: Span
+    // The markers written above `impl`.
+    markers: [Marker]{[Marker]{}}
 }
 
 struct MigrationDecl {

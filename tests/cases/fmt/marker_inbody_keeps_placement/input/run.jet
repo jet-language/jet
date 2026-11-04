@@ -9,6 +9,46 @@ struct Note {
     text: String
 }
 
+enum Shade {
+    Light
+    #Debug :: false
+    Dark
+    Dim
+}
+
+trait Shape {
+    #MustUse
+    fn area(self) -> Int
+
+    fn twice(self) -> Int {
+        #Inline :: true
+        self.area() * 2
+    }
+}
+
+#Error
+enum ReadErr {
+    Missing
+}
+
+#Error
+enum AppErr {
+    Read(ReadErr)
+}
+
+#Deprecated("old")
+impl ReadErr -> AppErr { AppErr.Read(self) }
+
+#Deprecated("old")
+module tools {
+    sources: { main: "tools.jet" }
+}
+
+module helpers {
+    #Deprecated :: ("old")
+    sources: { main: "helpers.jet" }
+}
+
 fn area(pixel: Pixel) -> Int {
     #Inline :: true
     doubled :: pixel.r * 2

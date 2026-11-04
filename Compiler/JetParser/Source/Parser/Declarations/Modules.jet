@@ -106,12 +106,15 @@ fn parser_module_is_dashed(name: String) -> Bool Never! {
     false
 }
 
+// A module body of sources, imports, members or namespace contributions; the
+// `#X :: value` lines it opens with are its markers.
 fn parser_module_config_body_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_LBRACE -> return false
-    first :: parser_lookahead(&state, 1)
+    at :: parser_skip_inbody_marker_lines(&state, 1)
+    first :: parser_lookahead(&state, at)
     if first.kind != TOKEN_IDENT -> return false
-    if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
-    if parser_kind_at(&state, 2) != TOKEN_COLON -> return false
+    if parser_kind_at(&state, at + 1) == TOKEN_DOT -> return true
+    if parser_kind_at(&state, at + 1) != TOKEN_COLON -> return false
     head :: parser_value(state, first)
     head == "sources" || head == "imports" || head == "members"
 }
@@ -150,9 +153,14 @@ fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: Parsed
     imports := [Expr]{}
     members := [Expr]{}
     contributions := [Contribution]{}
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
+            next
+        }
         if parser_state_section_ahead(&state) {
             section_start :: parser_current(&state).span
             section :: parser_parse_state_section(&state, "", section_start)
@@ -187,7 +195,8 @@ fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: Parsed
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
-    Item.Module{value: ModuleDecl{name: name_head.name, name_span: name_head.span, auto_discovered: !parser_module_name_starts_with_underscore(name_head.name), sources: sources, imports: imports, members: members, contributions: contributions, span: parser_cover(start, close.span)}}
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "module `{name_head.name}`")
+    Item.Module{value: ModuleDecl{name: name_head.name, name_span: name_head.span, auto_discovered: !parser_module_name_starts_with_underscore(name_head.name), sources: sources, imports: imports, members: members, contributions: contributions, span: parser_cover(start, close.span), markers: markers}}
 }
 
 fn parser_parse_module_contribution(state: &JetParserState) -> Contribution {
@@ -696,9 +705,14 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
     perf_compile_workloads_span := Span?{None}
     perf_budgets_seen := false
     perf_list_span := namespace_head.span
+    inside := [Marker]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        if parser_inbody_marker_ahead(&state) {
+            if parser_parse_inbody_marker(&state) == .Val(line) -> &inside.push(line)
+            next
+        }
         before := state.position
         if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parsed_sources :: parser_module_sources(&state)
@@ -762,6 +776,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a role-module body")
+    markers :: parser_merge_inbody_markers(&state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "module `{namespace_head.name}.{role.name}`")
     body_span :: parser_cover(namespace_head.span, close.span)
     if namespace_value == Namespace.Perf && !perf_budgets_seen {
         parser_add_fatal_code(&state, "E2903", role.span, "performance budget role `{role.name}` is not valid", "a performance role requires one `budgets` list", "add `budgets: [Budget{{ ... }}]`")
@@ -778,7 +793,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
         else -> ContribValue.Perf{value: PerfLit{budgets: perf_budgets, budgets_span: perf_budgets_span, compile_workloads: perf_compile_workloads, compile_workloads_span: perf_compile_workloads_span, list_span: perf_list_span, span: body_span}}
     }
     contribution :: Contribution{namespace: namespace ?? Namespace.Env, path: role.name, path_span: role.span, value: value, span: parser_cover(namespace_head.span, close.span)}
-    Item.Module{value: ModuleDecl{name: "{namespace_head.name}.{role.name}", name_span: parser_cover(namespace_head.span, role.span), auto_discovered: !parser_module_name_starts_with_underscore(namespace_head.name), sources: sources, imports: imports, members: [Expr]{}, contributions: [Contribution]{contribution}, span: parser_cover(start, close.span)}}
+    Item.Module{value: ModuleDecl{name: "{namespace_head.name}.{role.name}", name_span: parser_cover(namespace_head.span, role.span), auto_discovered: !parser_module_name_starts_with_underscore(namespace_head.name), sources: sources, imports: imports, members: [Expr]{}, contributions: [Contribution]{contribution}, span: parser_cover(start, close.span), markers: markers}}
 }
 
 struct ModulePerfBudgets {

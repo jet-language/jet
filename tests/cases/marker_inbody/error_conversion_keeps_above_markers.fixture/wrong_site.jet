@@ -1,0 +1,18 @@
+// A marker an impl does not take is refused above an error conversion, as it
+// is above any impl.
+#Error
+enum FileErr {
+    NotFound(String)
+}
+
+#Error
+enum AppErr {
+    File(FileErr)
+}
+
+#Deprecated("old")
+impl FileErr -> AppErr { AppErr.File(self) }
+
+fn run() {
+    print(1)
+}

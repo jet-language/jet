@@ -2324,7 +2324,7 @@ fn parser_parse_trait_impl_block(state: &JetParserState, above: [Marker]) -> Tra
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` to close the trait impl body")
     markers :: parser_merge_inbody_markers(&state, above, inside, start.span.start, close.span.start, "impl `{trait_text}`")
     if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
-    TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants, delegation_field: None, markers: markers, span: Val(parser_cover(start.span, close.span))}
+    TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants, delegation_field: None, markers: markers, os_target: parser_impl_os_target(markers), span: Val(parser_cover(start.span, close.span))}
 }
 
 // `Commutative` among an impl's markers makes it commutative, as the
@@ -2736,10 +2736,10 @@ fn parser_parse_impl(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
         }
         if parser_current_kind(&state) != TOKEN_LBRACE {
             parser_add_error_here(&state, "expected `{{` to open the error-conversion body", "an error conversion body is a block: `impl Source -> Target {{ … }}`", "add `{{` after the target type")
-            return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: [Stmt]{}, body_span: parser_cover(start.span, target.span)}}
+            return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: [Stmt]{}, body_span: parser_cover(start.span, target.span), markers: modifiers.markers}}
         }
         body :: parser_parse_block(&state)
-        return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span}}
+        return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
     }
     // The retired `impl Type: Trait` separator teaches `impl Type.Trait`.
     if !has_trait && parser_current_kind(&state) == TOKEN_COLON {
