@@ -23,6 +23,7 @@ import {
 } from './paths.mjs';
 import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
+import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
 import { migrateRecommendationLosses, migrateReviewPasses } from './migrate.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
@@ -172,6 +173,8 @@ export function openStore(dataDir) {
   Object.defineProperties(config, {
     dataDir: { value: dataDir, enumerable: false },
     projectRoot: { value: projectRoot(dataDir), enumerable: false },
+    // #6563 c3: resolves the commits criterion evidence names (durable.mjs).
+    durability: { value: createCommitResolver(projectRoot(dataDir), config.durableRefs), enumerable: false },
   });
 
   // A repair journal is the two-store commit marker. Normal reads stay
@@ -475,6 +478,8 @@ function validateStoredCriterion(item, index, source) {
   validateStoredString(item.text, `${label}.text`, { nullable: false });
   for (const key of ['metBy', 'verifiedBy', 'evidence', 'at'])
     validateStoredString(item[key], `${label}.${key}`);
+  if (item.closure !== undefined && !CLOSURE_KINDS.includes(item.closure))
+    fail('E_INVALID', `${label}.closure must be one of ${CLOSURE_KINDS.join(', ')}`);
 }
 
 function validateStoredCriteria(criteria, source) {
@@ -1734,6 +1739,10 @@ function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAccept
     fail('E_CRITERIA', `card #${c.num} needs at least one exit criterion before an agent can close it`);
   if (by !== 'owner' && unsettled.length)
     fail('E_CRITERIA', `${unsettled.length} of ${items.length} criteria not met or verified (${unsettled.map(i => i.n).join(',')})`);
+  if (by !== 'owner') {
+    const issues = items.map(i => criterionDurabilityIssue(s, c, i.n, i.closure || 'code', i.evidence, config, null)).filter(Boolean);
+    if (issues.length) fail('E_EVIDENCE', `card #${c.num} cannot close: ${issues.join('; ')}`);
+  }
   // A closed card leaves the board view, which strands any ballot still open on
   // it: the owner can no longer ask about it from the ballot deck. The card's own
   // acceptance ballot is the closing handoff itself, so it does not count.
@@ -1954,13 +1963,71 @@ function mustCriterion(c, n) {
   return item;
 }
 
-export function meetCriterion(s, ref, n, { evidence, by } = {}) {
+// #6563 c3: why a criterion's evidence does not keep the closure promise, or
+// null when it does. A `code` row must name a commit reachable from a durable
+// branch (durable.mjs). The other kinds close without code: `decision` names a
+// ratified decision, `duplicate` names the card it duplicates or merged into,
+// `obsolete` gives the reason. No kind may rest on scratch output alone. With
+// history null (the done gate) the decision and card lookups are skipped: they
+// ran when the row was met, and the target may since have retired.
+function criterionDurabilityIssue(s, c, n, kind, evidence, config, history) {
+  const where = `criterion #${n}`;
+  if (!CLOSURE_KINDS.includes(kind))
+    return `${where}: unknown closure kind "${kind}" (use ${CLOSURE_KINDS.join(', ')})`;
+  const text = String(evidence || '').trim();
+  const resolver = config?.durability;
+  const active = !!resolver?.active();
+  const commits = active ? resolver.commits(text) : [];
+  const durable = commits.some(found => found.ref);
+  const branches = active ? resolver.refs().join(' or ') : '';
+  if (kind === 'code') {
+    if (!active || durable) return null;
+    if (commits.length)
+      return `${where}: commit ${commits.map(found => found.token).join(', ')} is not on ${branches}; land it, then cite the landed commit`;
+    if (SCRATCH_PATH_RE.test(text))
+      return `${where}: evidence cites only scratch output, which is throwaway; land the work and cite its commit on ${branches}`;
+    return `${where}: evidence names no commit on ${branches}; cite the landed commit, or declare --kind decision, duplicate or obsolete`;
+  }
+  if (!text) return `${where}: --kind ${kind} needs --evidence`;
+  if (SCRATCH_PATH_RE.test(text) && !durable)
+    return `${where}: evidence cites scratch output, which is throwaway; land the work and cite its commit${branches ? ` on ${branches}` : ''}`;
+  if (history === null) return null;
+  if (kind === 'decision') {
+    const decisions = [...(s.decisions || []), ...(history?.decisions || [])];
+    const ids = text.match(/\bD-[A-Za-z0-9][A-Za-z0-9-]*/g) || [];
+    if (!ids.some(id => decisions.some(d => d.id === id && d.status === 'ratified')))
+      return `${where}: --kind decision evidence must name the ratified decision (D-...) that settles it`;
+  }
+  if (kind === 'duplicate') {
+    const cards = [...(s.cards || []), ...(history?.cards || [])];
+    const nums = [...text.matchAll(/#(\d+)\b/g)].map(m => Number(m[1])).filter(num => num !== c.num);
+    if (!nums.some(num => cards.some(card => card.num === num)))
+      return `${where}: --kind duplicate evidence must name the card (#N) this one duplicates or merged into`;
+  }
+  return null;
+}
+
+function assertCriterionDurable(s, c, n, kind, evidence, by, config, history) {
+  if (by === 'owner') return;
+  const issue = criterionDurabilityIssue(s, c, n, kind, evidence, config, history ?? {});
+  if (issue) fail('E_EVIDENCE', `card #${c.num} ${issue}`);
+}
+
+// A recorded non-code closure kind; `code` is the default and is not stored.
+function setClosureKind(item, kind) {
+  if (kind === 'code') delete item.closure;
+  else item.closure = kind;
+}
+
+export function meetCriterion(s, ref, n, { evidence, by, kind = 'code' } = {}, config = {}, history = null) {
   const c = mustCard(s, ref);
   const item = mustCriterion(c, n);
   if (!by) fail('E_INVALID', 'meet needs --by <agent>');
+  assertCriterionDurable(s, c, item.n, kind, evidence ?? item.evidence, by, config, history);
   item.status = 'met';
   item.metBy = by;
   if (evidence != null) item.evidence = evidence;
+  setClosureKind(item, kind);
   item.at = now();
   invalidateCardMilestone(s, c);
   touchCard(c, by);
@@ -1969,15 +2036,18 @@ export function meetCriterion(s, ref, n, { evidence, by } = {}) {
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 
-export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
+export function verifyCriterion(s, ref, n, { evidence, by, kind } = {}, config = {}, history = null) {
   const c = mustCard(s, ref);
   const item = mustCriterion(c, n);
   if (!by) fail('E_INVALID', 'verify needs --by <agent>');
   if (item.status === 'open') fail('E_INVALID', `criterion #${n} not met yet — meet it before verifying`);
   if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must differ from the agent that marked it met (${by})`);
+  const closure = kind ?? item.closure ?? 'code';
+  assertCriterionDurable(s, c, item.n, closure, evidence ?? item.evidence, by, config, history);
   item.status = 'verified';
   item.verifiedBy = by;
   if (evidence != null) item.evidence = evidence;
+  setClosureKind(item, closure);
   item.at = now();
   invalidateCardMilestone(s, c);
   touchCard(c, by);
@@ -1996,6 +2066,7 @@ export function reopenCriterion(s, ref, n, { reason, by } = {}) {
   item.metBy = null;
   item.verifiedBy = null;
   item.evidence = '';
+  delete item.closure;
   item.at = now();
   invalidateCardMilestone(s, c);
   touchCard(c, by);

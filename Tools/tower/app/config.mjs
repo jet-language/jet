@@ -36,6 +36,9 @@ export const DEFAULTS = {
   // pass moves it to history.json. Buffer, not a deadline — lets the owner
   // walk back a fresh ratification before it's out of easy reach.
   retireAfterDays: 3,
+  // #6563 c3: a met criterion must name a commit reachable from one of these
+  // branches (applies when the project root is a git work tree holding one).
+  durableRefs: ['dev', 'master'],
 };
 
 // Persist a partial update into the user's config.json (creates it if absent).

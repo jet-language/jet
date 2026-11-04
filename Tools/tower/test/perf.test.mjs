@@ -11,7 +11,9 @@ const dir = mkdtempSync(join(process.cwd(), '.tower-perf-'));
 const initial = empty('Perf');
 initial.meta.completionCursor = '2020-01-01T00:00:00.000Z';
 writeJSON(join(dir, 'tower.json'), initial);
-writeJSON(configFile(dir), { project: 'Perf' });
+// The board sits inside this git checkout; the durable-evidence guard has its
+// own tests (durable-evidence.test.mjs), so this board names no durable refs.
+writeJSON(configFile(dir), { project: 'Perf', durableRefs: [] });
 const store = openStore(dir);
 const PORT = 7977;
 const server = serve(store, PORT, false);

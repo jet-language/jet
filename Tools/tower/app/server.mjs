@@ -129,8 +129,8 @@ const routes = {
   'card/delete':     (s, p, cfg, history, ownerUi) => db.deleteCard(s, p.id,
     { by: p.by, decisions: p.decisions, deleteRatified: p.deleteRatified }, ownerUi),
   'card/criteria-add':    (s, p) => db.addCriterion(s, p.id, p.text, p.by),
-  'card/criteria-meet':   (s, p) => db.meetCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
-  'card/criteria-verify': (s, p) => db.verifyCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
+  'card/criteria-meet':   (s, p, cfg, history) => db.meetCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by, kind: p.kind }, cfg, history),
+  'card/criteria-verify': (s, p, cfg, history) => db.verifyCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by, kind: p.kind }, cfg, history),
   'card/criteria-reopen': (s, p) => db.reopenCriterion(s, p.id, p.n, { reason: p.reason, by: p.by }),
   'decision/add':    (s, p) => db.addDecision(s, p),
   'decision/update': (s, p) => db.updateDecision(s, p.id, p, p.by),
@@ -167,7 +167,7 @@ const routes = {
   'done/clear':      (s, p) => db.clearDoneQueue(s, p),
 };
 
-const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_CLOSE_READY: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400, E_MILESTONE: 409, E_MILESTONE_VERIFY: 400,
+const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_CLOSE_READY: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400, E_EVIDENCE: 409, E_MILESTONE: 409, E_MILESTONE_VERIFY: 400,
   E_BALLOT: 400, E_OWNER_ONLY: 403, E_OWNER_LANE: 403, E_ACCEPTANCE_OWNER_UI: 403, E_HAS_RATIFIED: 409, E_HANDOFF: 400 };
 
 // ---- network trust + acceptance session ------------------------------------

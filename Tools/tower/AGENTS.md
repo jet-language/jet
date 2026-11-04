@@ -151,8 +151,9 @@ Add and progress it:
 
 ```
 tower card criteria '#12' --add "matrix vs full spec, per feature" --by planner
-tower card criteria '#12' --meet 1 --evidence "ran the matrix, 9/9" --by orchestrator
-tower card criteria '#12' --verify 1 --evidence "milestone review confirmed it" --by reviewer
+tower card criteria '#12' --meet 1 --evidence "landed 3f2a9c1e: matrix 9/9" --by orchestrator
+tower card criteria '#12' --verify 1 --evidence "milestone review of 3f2a9c1e confirmed it" --by reviewer
+tower card criteria '#12' --meet 2 --kind decision --evidence "D-CACHE1 ratified A: no code change" --by orchestrator
 tower card criteria '#12' --list
 ```
 
@@ -165,6 +166,15 @@ mark a row `verified`; that reviewer must differ from the agent that marked it
 met (`E_CRITERIA_SELF`). Owner writes keep the legacy closure bypass and record
 `card.criteria-bypass`. Integration and no-known-blocker are orchestration
 evidence, not checklist rows.
+
+A met or verified row promises that its change is durable. Its evidence must
+name a commit reachable from `dev` or `master` (`durableRefs` in config), or
+the row declares a non-code closure with `--kind`: `decision` (names the
+ratified `D-…` that settles it), `duplicate` (names the `#N` it duplicates or
+merged into) or `obsolete` (the evidence is the reason). Evidence that cites
+only scratch output (`/mnt/jetscratch`, `~/.cache`, `/tmp`) is refused, and
+`--phase done` re-checks every row (`E_EVIDENCE`). The guard applies when the
+project root is a git work tree holding one of those branches.
 
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
 with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real
@@ -306,6 +316,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 | Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |
+| Durable evidence | non-owner meets, verifies or closes with a row whose evidence names no commit on `dev`/`master` or cites only scratch output | `E_EVIDENCE` | land the change and cite its commit, or `--kind` `decision`, `duplicate` or `obsolete` with the decision, card or reason |
 | Closure progression | any claim or brief while an active card has all criteria settled and no open gate | `E_CLOSE_READY` | close, reopen, or block the closure-ready card |
 | Milestone closeout | closeout begins before linked cards are done, or milestone verify lacks its token or verified criteria | `E_MILESTONE` | finish and close cards, freeze source, open token, run review |
 

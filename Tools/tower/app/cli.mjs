@@ -78,7 +78,7 @@ const COMMAND_FLAGS = {
     claim: by(),
     release: by('handoff'),
     delete: by(),
-    criteria: by('add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
     log: by('text'),
   }},
   decision: { verbs: {
@@ -551,12 +551,14 @@ function cmdCard(store, { pos, flags }) {
         const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
       }
+      if (flags.kind !== undefined && flags.meet === undefined && flags.verify === undefined)
+        throw new TowerError('E_USAGE', 'card criteria --kind goes with --meet or --verify');
       if (flags.meet !== undefined) {
-        const { result } = store.mutate((s) => db.meetCriterion(s, ref, flags.meet, { evidence: flags.evidence, by }));
+        const { result } = store.mutate((s, cfg, history) => db.meetCriterion(s, ref, flags.meet, { evidence: flags.evidence, by, kind: flags.kind }, cfg, history));
         return out(flags, `criterion #${result.n} met on card #${result.cardNum}`, result);
       }
       if (flags.verify !== undefined) {
-        const { result } = store.mutate((s) => db.verifyCriterion(s, ref, flags.verify, { evidence: flags.evidence, by }));
+        const { result } = store.mutate((s, cfg, history) => db.verifyCriterion(s, ref, flags.verify, { evidence: flags.evidence, by, kind: flags.kind }, cfg, history));
         return out(flags, `criterion #${result.n} verified on card #${result.cardNum}`, result);
       }
       const s = store.load();
@@ -1343,6 +1345,7 @@ ${HELP_SURFACE}
     ballot validation (full/short profile, simple prose, ordered reviews; E_BALLOT), owner-only ratify (E_OWNER_ONLY),
     frozen write guard (E_OWNER_LANE), ratified-decision delete guard (E_HAS_RATIFIED),
     building-release handoff (E_HANDOFF), nonempty card exit criteria (E_CRITERIA),
+    durable criterion evidence: a commit on dev or master, or --kind decision|duplicate|obsolete (E_EVIDENCE),
     and explicit milestone review (E_MILESTONE).
 `;
 
