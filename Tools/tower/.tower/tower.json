@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6566,
-    "rev": 90469,
+    "rev": 90475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27833,8 +27833,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-04T19:54:19.983Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-04T20:29:05.674Z",
+      "updatedBy": "Main",
       "workOrder": 171,
       "goals": []
     },
@@ -34019,8 +34019,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-04T20:00:16.801Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-04T20:29:07.766Z",
+      "updatedBy": "Main",
       "goals": [
         "G17"
       ]
@@ -65372,8 +65372,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-04T19:56:49.737Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-04T20:29:06.782Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0q31aks",
@@ -152497,151 +152497,126 @@
       "id": "D-EFFTYPE-MODVALUE1",
       "cardId": "c09kjhit",
       "group": "other",
-      "title": "Is a module a value you can pass around?",
-      "situation": "You asked us to explore modules as values and show what follows. Review found that the last draft let a module fit a trait by shape alone, while a struct needs an impl. This revision recommends A: a module is a value of its own type, and it fits a trait only through impl inside its body, as a struct does. The old A, matching by shape, is now B. The record is now C, and keeping modules as names is now D.",
-      "gist": "Should a passed module be the module itself, fitting traits through impl or by shape, a record, or a name?",
-      "lesson": "A module groups functions under one name, such as pricing. Its #FX line limits what they may do. A trait lists functions a value must have, and a trait value picks the code while the program runs.",
+      "title": "Is a module a struct with one value, so modules and packages pass like any value?",
+      "situation": "You asked whether modules and packages could be structs too, since markers and effects already are. Yes, and this revision recommends it as A. A module becomes a struct with no fields and exactly one value, named like the module. A file is such a struct, as in Zig, and a package is its root module, whose manifest already builds a Package value. Struct and module bodies then share one set of rules. A module passes, fits a trait and reflects exactly as a struct does. Last time's A, a module as a value of its own kind, is now B. Keeping modules as names is C. Fitting by shape and passing a record are dropped.",
+      "gist": "Should a module be a struct with one value, a value of its own kind, or stay a name?",
+      "lesson": "A module groups functions under one name, such as pricing. A struct is a type with fields, functions and impl blocks. Markers and effects are already structs that implement Core traits.",
       "explainer": "",
-      "story": "Mia keeps two offline rule sets, pricing and discount, each in its own module. Her bill function should take either, and her config picks one while the program runs. She wants to pass the whole module and keep its offline promise.",
-      "inWild": "prep/mv/m3b_two.jet runs today: a generic module billing<R> takes the module pricing and prints 3, though no decision admits module arguments.\nprep/mv/n4_nested_struct.jet: a struct fits a trait through impl PriceRules { ... } in its body and prints 3; n5_struct_shape.jet, the same struct without the impl, is E0905.\nDocs/proposals/effect-types-2026-10-29.md:260 says use sql binds a module value whose type is the package type.\nOCaml: first-class modules are packed against a module type and matched by shape.\nZig: a file is a struct type, passed as a comptime argument.",
-      "detail": "WHAT IS ALREADY RATIFIED\n\nA module caps every function inside it with #FX on its module line (D-EFFECT-RUNGS1 A). What a type parameter does belongs to the caller. It is checked where the instance is written (D-EFFTYPE-MODEL1 A).\n\nGeneric modules take types in <...> and fixed values in (...) (D-CONF-GENSPELL1 A, D-GENMOD-VALUE1 A). The same template with the same arguments is one instance (D-GENMOD-IDENTITY1 A).\n\nA struct implements a trait by writing impl Trait { ... } inside its own body (D-DECL-TYPES1 A). A trait value calls through the trait's row (E0743). Reflection reads T.reflect() while building and reflect.of(x) while running (D-META-REFLECT2 A).\n\nDeclarations are public. Privacy is per module: priv module and priv(package) module exist, and priv on a function is E0413 (D-VIS-MODULE1).\n\n```jet\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")     // runs today, prints 3\nmodule cut :: billing<discount>(\"d\")       // runs today, prints 2\n\nfn run() {\n    print(priced.bill(\"abc\"))\n    print(cut.bill(\"abc\"))\n    // rules :: pricing                    // E0107\n    // f :: pricing.total                  // E0107\n}\n```\n\nWHAT RUNS TODAY\n\nA module already works as a generic module's argument: billing<pricing> prints 3, and billing<discount> prints 2. No decision admits it. #FX(!IO) on a generic module is not checked at all, even for a direct print.\n\nA module used as a value fails with E0107, \"Nothing named pricing exists here\". So do pricing.total as a value and if R == { pricing -> ... }. billing<Int> fails with \"Nothing named R\". A bound <R: PriceRules> refuses every module (E0852).\n\nA struct fits a trait only through an impl. Flat with a matching total and no impl is E0905, whose fix writes the impl. Both impl PriceRules for pricing and module pricing: PriceRules are parse errors.\n\nToday impl PriceRules { ... } outside a type body is accepted as an impl on the trait itself. Its functions can never be called, and calling one through the trait crashes the compiler. No file in the repo writes it.\n\nTHE OWNER'S ASK\n\nYou asked to explore modules as values, update the ballot, and show the implications. The proposal already says that use sql binds a module value whose type is the package type (section 7.3). Packages are types, so a module that is a value of its own type is that same idea one level down.\n\nWHAT THE VALUE IS\n\nIn A and B, the value is the module itself. It holds no data, and its functions are its methods. So pricing.total(\"abc\") already reads as a method call on the value pricing. Its type is never written by name, so the casing law for types is untouched.\n\nIn C, the value is a record: one function pointer per function, copied wherever it goes. D keeps modules as names, and only their functions become values.\n\nHOW A MODULE FITS A TRAIT\n\nIn A, a module fits a trait only by saying so, the way a struct does. It writes impl PriceRules { ... } inside its body, and the trait's functions live in that block. In a file module, the block sits at the top level of the file.\n\nThat spelling has no working meaning today, so A gives it this one. A module that never writes the impl does not fit, so loud cannot pass as PriceRules by accident. The error names the missing impl, and its fix writes it, as E0905 does for a struct.\n\nIn B, a module fits any trait whose functions it has, matched by name, parameter types, result and row. Every function is public, so a helper that happens to match counts. A struct still needs its impl, so B has one rule for structs and another for modules.\n\nSELF\n\nInside a module's impl, self is the module itself. It holds no data, so a function may ignore it. The module's name is its only value, so pricing.total(\"abc\") passes pricing as self, and R.total(text) in billing does the same.\n\nOutside an impl, a module function has no self. Today a first parameter named self there is an ordinary parameter, so pricing.total(\"abc\") reports a missing text. A refuses it, and the fix moves the function into the impl or drops self.\n\nNo parameter can name a module's type, since it has no written name. A function that takes any module of a trait writes rules: PriceRules or <R: PriceRules>. In B, a plain module function matches a trait function by the parameters after self.\n\nSTATE\n\nAn inline module holds only items, so it has no state. A file module can hold globals. Its :: constants are computed while building or once at startup. Its := state must be shared or #Persist, or a write is E0111.\n\nThe value never holds any of it. Every copy of pricing reaches the one set of globals, exactly as pricing.total() does today, so the value stays zero-size. A generic instance's value arguments, such as \"p\", are evaluated while building and belong to the instance's identity (D-GENMOD-IDENTITY1). They are not stored in the value either.\n\nToday a -[]> function can write shared or #Persist state, so two calls print 1, then 2. That breaks the reproducible promise of -[]> (D-DET1) under every option, and it is filed as a defect. Once fixed, a pure trait row also rules out module state writes.\n\nVISIBILITY\n\nA priv module cannot be named outside its enclosing module (E0605), so its value cannot leave it either. A priv(package) module's value stays inside its package. In A, the impl decides which functions serve a trait, so visibility never decides a match. In B, every function of the module is a candidate.\n\nEFFECTS AND POWER\n\nA module value carries a ceiling, never power. Holding pricing grants nothing. Code that calls through it gains the module's row.\n\nIn A, the impl's functions are checked against the trait's row where the impl is written, as a struct's are. In B, the check runs where the module is passed. While building, the row is exact for each module, so bill_each(pricing, t) is pure. #FX(!IO) on billing refuses billing<loud> where the instance is written. While running, the trait's own row bounds every call (E0743).\n\nIDENTITY AND EQUALITY\n\nA module's identity is its declaration, and an instance's identity is its template plus its arguments (D-GENMOD-IDENTITY1). While building, if R == { pricing -> ... } compares modules, as D-TYPESWITCH1 compares types.\n\nWhile running, a trait value has no == today (E0312), and A and B keep that. A trait constant such as name gives each module a readable tag (D-DECL-TYPES1). In C, two records of one module are equal only if function values gain equality, which Jet does not define.\n\nCOMPILE TIME AND RUN TIME\n\nA and B keep both paths with today's machinery. With <R: PriceRules>, each module gets its own copy with direct calls. With rules: PriceRules, the program picks a module while running through the trait's table of functions, as structs already do. C is run time only: every pass builds or copies a record. D has no module path at run time.\n\nREFLECTION\n\nIn A and B, a module reads like any type. While building, pricing.reflect() lists its functions, their rows, its impls and its #FX. While running, reflect.of(rules) names the module behind a trait value.\n\nA marker on a module line receives that module as its target, so the published Marker.expand(self, target: Target) stays as #6129 c44 states. In C, reflection sees a record type, not the module. In D, there is nothing new to reflect.\n\nA FUNCTION NAMED REFLECT\n\nThe name reflect is the compiler's member on every type, and under A and B a module is a type. So a module or a type may not declare its own function named reflect, and the error's fix renames it. Today a struct's reflect method silently hides Rock.reflect(), and no file in the repo declares one.\n\nE0107 AND OTHER ERRORS\n\nUnder A, the E0107 cases above gain a meaning. bill(loud, t) names the missing impl, and billing<Int> names the missing function total at the instance line. E3401 today names the mangled __jet_shouty_dbill, and it must name shouty.bill and loud.total. The unchecked cap on generic modules is fixed under every option.\n\nRATIFIED DECISIONS IT TOUCHES\n\nA extends D-GENMOD-VALUE1 so that modules are admitted arguments, in <...> as today. It applies D-EFFTYPE-MODEL1 to module arguments and the in-body impl of D-DECL-TYPES1 to module bodies. It answers choice point C2 of the proposal: first-class, not named only. D-EFFECT-RUNGS1, D-GENMOD-IDENTITY1, D-IMPLDOT1, D-META-REFLECT2 and D-TYPESWITCH1 stay as they are.\n\nCOST\n\nA adds no runtime record. A module in a trait value should cost what a fieldless struct costs there today; that layout was not measured. The checker gains the module's type, impls in module bodies and generic functions taking modules. B swaps the impl for a shape match. C adds a type form, a parse rule, a runtime record and its errors. D costs only the function-value fix.\n\nBEGINNER AND EXPERT\n\nA beginner keeps writing pricing.total(\"abc\"). To pass a rule set, they add impl PriceRules { ... } to the module, the same step as for a struct, and write bill(pricing, \"abc\"). An expert adds <R: PriceRules> for one copy per module, or builds a module from a module. Then they reflect over either.\n\nTHE QUESTION\n\nShould a passed module be itself and fit traits through impl (A), be itself and fit by shape (B), become a record (C), or stay a name (D)?",
+      "story": "Mia keeps two offline rule sets, pricing and discount, each in its own module. Her bill function should take either, her config picks one while the program runs, and her generic Billing struct should take one too.",
+      "inWild": "probes/D-EFFTYPE-MODVALUE1/m01_struct_body.jet (c865bb06, 2026-11-04): a module body holds a nested struct; prints 3, 3, 5.\nprobes/D-EFFTYPE-MODVALUE1/m02_struct_const.jet and m06_struct_nested.jet: a struct body refuses a constant and a nested struct (E0003).\nprobes/D-EFFTYPE-MODVALUE1/m07_generic_module.jet: billing<pricing>(100) prints 103; m03: a generic struct cannot take the module (E0107).\nprobes/D-EFFTYPE-MODVALUE1/m04_module_value.jet: rules :: pricing is E0107.\nprobes/D-EFFTYPE-MODVALUE1/m05_module_state.jet: a constant in an inline module is unknown to its own function (E0107), a defect.\nDocs/proposals/effect-types-2026-10-29.md:260: use sql binds a module value whose type is the package type.\nZig: every file is a struct type, and @import returns it.",
+      "detail": "YOUR QUESTION\n\nYes, and A recommends it. Markers, effects, facts, derives and errors are already ordinary structs that implement Core traits (D-DECL-TYPES1 A). A puts modules and packages in that same model, so Jet has one way to declare a thing with members.\n\nWHAT A MEANS\n\nA module is a struct with no fields and exactly one value. The value and the module share the name, so pricing is both. Its type has no written name, so no other value of it can be built.\n\nA file is such a struct, as in Zig. A package is its root module. The manifest in package.jet already builds one Package value (D-ECO-FILEROOT1), and use json binds the package's one value.\n\nWHAT IT UNIFIES\n\nOne body rule. A struct body may hold what a module body holds: functions, nested types, constants and impl blocks. Today a struct body refuses a constant and a nested struct (probes m02 and m06). Only shared state lines stay at file level.\n\nOne way to fit a trait: impl Trait { ... } in the body, for structs and modules alike.\n\nOne rule for type parameters. A generic struct takes a module the way a generic module does. Today billing<pricing>(100) works (probe m07), but a generic struct cannot take pricing (probe m03).\n\nOne reflection record, one marker target and one row for structs, modules and packages.\n\nWHAT RUNS TODAY\n\nA module is only a name: rules :: pricing is E0107 (probe m04). A module body holds nested types and functions (probe m01). An inline module refuses a lowercase constant, and its own function cannot read an upper-case one (probe m05), a defect found 2026-11-04.\n\nINIT ORDER AND CYCLES\n\nA module's constants are constants of its type, read as pricing.limit. They are computed while building, once, in dependency order (D-MODCOMPUTE1). A cycle fails with the full chain, as today.\n\nModules may name each other, as struct types do. Packages stay a graph without cycles. Shared state starts exactly as it does today.\n\nPRIVACY\n\npriv keeps its two places, modules and fields (D-VIS-MODULE1). A module is now a member of its enclosing struct, so one rule covers both: only the enclosing declaration and its children can reach it. A priv module's value cannot leave its parent.\n\nSEPARATE COMPILATION\n\nNothing moves. The package stays the unit the compiler checks and caches. Its public surface is its root struct's members, which is what a package already publishes. A dependent sees the same names and rows.\n\nWHILE BUILDING AND WHILE RUNNING\n\nThe value holds no data, so passing it is free. With <R: PriceRules>, each module gets its own copy with direct calls. With rules: PriceRules, the program picks a module while running through the trait table, as for any struct.\n\nBINARY SIZE\n\nA module value is zero bytes. A trait table exists only for a module used as a trait value. Generic copies cost what generic modules cost today. Reflection info ships only when asked for.\n\nSTATE\n\nThe value never holds a module's state. Every copy of pricing reaches the one set of shared or #Persist globals, exactly as pricing.total() does today.\n\nREFLECTION AND MARKERS\n\nreflect(pricing) or pricing.reflect() lists its functions, constants, impls and #FX line. A marker on a module line receives that module as its target, as on a struct. If reflect becomes a plain function, a module may even declare its own reflect.\n\nBEGINNER AND EXPERT\n\nA beginner keeps writing module pricing { ... } and pricing.total(\"abc\"), and never needs the struct idea. When they learn structs, modules come free: one sentence, a module is a struct with one value. An expert passes, stores, reflects and specializes modules exactly as structs.\n\nWHAT B KEEPS APART\n\nB makes a module a value of its own kind. It passes and fits traits as in A. But struct bodies keep today's limits, a generic struct still cannot take a module, and packages stay a separate idea. Two declaration models stay to learn and maintain.\n\nDROPPED\n\nFitting a trait by shape alone gave modules a second rule beside impl, and a helper could match by accident. Passing a record of functions added a new type form and a copy per pass. Both are dropped.\n\nRATIFIED DECISIONS IT TOUCHES\n\nA extends D-DECL-TYPES1 A's model to modules and packages, and the struct body rule to nested types and constants. It admits modules as arguments under D-GENMOD-VALUE1. It answers choice point C2 of the proposal: first-class.\n\nD-MODCOMPUTE1, D-VIS-MODULE1, D-GENMOD-IDENTITY1, D-ECO-FILEROOT1 and D-EFFECT-RUNGS1 stay as they are. The unchecked #FX cap on generic modules is fixed under every option.",
       "options": [
         {
           "key": "A",
-          "name": "A module is a value and fits a trait through impl",
-          "detail": "A module is a value that holds no data, and its functions are its methods. It fits a trait by writing impl Trait { ... } in its body, as a struct does. Then it can be a generic argument while building or a trait value while running. Its row travels with it. Reflection reads it like a type.",
-          "technical": "Sema gives each module a fieldless nominal type, used in value and generic-argument positions. An impl Trait { ... } in a module body, inline or at a file's top level, registers the module as implementing Trait. It goes through the in-body impl path structs use, and self is the zero-size module. A module-to-trait value uses the existing trait table.\n\nGeneric modules admit module arguments under D-GENMOD-VALUE1, and generic functions infer them. Module rows join the instance's row per D-EFFTYPE-MODEL1. The #FX check on generic modules is fixed. A self parameter outside an impl in a module is refused with a move-into-impl fix. A function named reflect on a module or type is refused with a rename fix. E0107 for module values goes away; bill(loud, t) names the missing impl and billing<Int> the missing function.",
-          "code": "// A: a module is a value; it fits a trait through impl, as a struct does\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n#FX(!Net, !FS)\nmodule pricing {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() - 1 }\n    }\n}\n\n// This one prints, so it does IO. It never claims PriceRules.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\n// Beginner: any value whose type implements the trait, chosen at run time.\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: one copy per module, direct calls, the row of that module.\nfn bill_each<R: PriceRules>(rules: R, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: a module built from a module. The cap is checked per instance.\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: pricing is passed as self\n    all :: [PriceRules]{pricing, discount, Flat{}}    // modules and a struct in one list\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2, then 1\n    }\n    print(bill_each(discount, \"abc\"))                 // 2\n    print(priced.bill(\"abc\"))                         // 3\n    // bill(loud, \"abc\")    // refused: loud has no impl PriceRules; the fix adds one\n}"
+          "name": "A module is a struct with one value",
+          "detail": "A module is a struct with no fields and one value of the same name. A file is such a struct, and a package is its root module. Struct and module bodies share one rule. A module passes, fits traits through impl, reflects and takes markers exactly as a struct does.",
+          "technical": "Sema declares each module, file and package root as a fieldless struct type with no written name and one value. Module items become the struct's members, and module constants become type constants. The struct body parser accepts nested types and constants. impl Trait in a module body uses the struct path; self is the zero-size value. Generic struct parameters accept modules under D-GENMOD-VALUE1. A self parameter outside an impl in a module is refused with a move-into-impl fix. E0107 for module values goes away.",
+          "code": "// proposed: a module is a struct with no fields and one value\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n#FX(!Net, !FS)\nmodule pricing {\n    limit :: 3                     // a constant of the type\n    struct Line { cents: Int }     // a nested type\n\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\n// A struct body holds the same items a module body holds.\nstruct Flat {\n    limit :: 1\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\n// Beginner: any value whose type implements the trait, chosen while running.\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: a generic struct takes a module, as a generic module does.\nstruct Billing<R: PriceRules> {\n    extra: Int\n    fn bill(self, text: String) -> Int { R.total(text) + self.extra }\n}\n\n// package.jet already builds one Package value:\n//     name: \"shop\"\n//     deps: { json: \"1.4\" }\n\nfn run() {\n    print(pricing.total(\"abc\"))                       // 3, as today\n    print(bill(pricing, \"abc\"))                       // 3: pricing is passed as self\n    all :: [PriceRules]{pricing, Flat{}}              // a module and a struct in one list\n    print(Billing<pricing>{extra: 100}.bill(\"abc\"))   // 103\n    print(pricing.limit)                              // 3\n}"
         },
         {
           "key": "B",
-          "name": "A module is a value and fits a trait by shape",
-          "detail": "The value is the same as in A. A module fits any trait whose functions it has, with the same names, parameter types, results and rows, and no impl is written. Structs still need their impl.",
-          "technical": "As A, without impls in module bodies. A module matches a trait by name, parameters after self, result and row, checked where it is passed. Every module function is a candidate, since every function is public. The self, reflect and generic-module rules are as in A.",
-          "code": "// B: a module is a value; it fits any trait whose functions it has\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\nfn bill_each<R: PriceRules>(rules: R, text: String) -[]> Int {\n    rules.total(text)\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: matched by shape here\n    all :: [PriceRules]{pricing, discount, Flat{}}\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2, then 1\n    }\n    print(bill_each(discount, \"abc\"))                 // 2\n    print(priced.bill(\"abc\"))                         // 3\n    f :: pricing.total                                // a function value\n    print(f(\"abc\"))                                   // 3\n    // bill(loud, \"abc\")    // refused here: loud.total does IO, the trait says -[]>\n}"
+          "name": "A module is a value of its own kind",
+          "detail": "A module is a value of its own fieldless type and fits a trait through impl in its body, as last time's A. Struct bodies keep today's rules, a generic struct cannot take a module, and packages stay a separate idea.",
+          "technical": "Sema gives each module a fieldless nominal type, used in value and generic-argument positions. An impl Trait { ... } in a module body, inline or at a file's top level, registers the module as implementing Trait. It goes through the in-body impl path structs use, and self is the zero-size module. A module-to-trait value uses the existing trait table.\n\nGeneric modules admit module arguments under D-GENMOD-VALUE1, and generic functions infer them. Module rows join the instance's row per D-EFFTYPE-MODEL1. The #FX check on generic modules is fixed. A self parameter outside an impl in a module is refused with a move-into-impl fix. A function named reflect on a module or type is refused with a rename fix. E0107 for module values goes away; bill(loud, t) names the missing impl and billing<Int> the missing function.",
+          "code": "// proposed (B): a module is a value of its own kind; it fits a trait through impl\ntrait PriceRules {\n    fn total(self, text: String) -[]> Int\n}\n\n#FX(!Net, !FS)\nmodule pricing {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() - 1 }\n    }\n}\n\n// This one prints, so it does IO. It never claims PriceRules.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\n// A struct fits the trait the way it does today.\nstruct Flat {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { 1 }\n    }\n}\n\n// Beginner: any value whose type implements the trait, chosen at run time.\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: one copy per module, direct calls, the row of that module.\nfn bill_each<R: PriceRules>(rules: R, text: String) -[]> Int {\n    rules.total(text)\n}\n\n// Expert: a module built from a module. The cap is checked per instance.\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: pricing is passed as self\n    all :: [PriceRules]{pricing, discount, Flat{}}    // modules and a struct in one list\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2, then 1\n    }\n    print(bill_each(discount, \"abc\"))                 // 2\n    print(priced.bill(\"abc\"))                         // 3\n    // bill(loud, \"abc\")    // refused: loud has no impl PriceRules; the fix adds one\n}"
         },
         {
           "key": "C",
-          "name": "A module passes as a record of its functions",
-          "detail": "A parameter can name a list of functions, as module { fn total(text: String) -[]> Int }. Passing pricing builds a record with one function pointer per listed function. The record's row is the union of its functions' rows.",
-          "technical": "New type form module { fn ... } in the parser, the syntax registry and sema. Structural check of each passed module against the form, and a runtime record of function pointers per pass. New errors for a missing or mismatched function. Reflection sees a record type. The generic-module path and its #FX fix are as in A.",
-          "code": "// C: a module passes as a record of its functions\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\nfn bill(rules: module { fn total(text: String) -[]> Int }, text: String) -[]> Int {\n    rules.total(text)\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing, \"abc\"))                       // 3: a record is built here\n    all :: [module { fn total(text: String) -[]> Int }]{pricing, discount}\n    loop rules in all {\n        print(bill(rules, \"abc\"))                     // 3, then 2\n    }\n    print(priced.bill(\"abc\"))                         // 3\n    f :: pricing.total\n    print(f(\"abc\"))                                   // 3\n    // bill(loud, \"abc\")    // refused: loud.total does IO\n}"
-        },
-        {
-          "key": "D",
           "name": "A module stays a name",
-          "detail": "A module is a name you call through, as today. To pass behaviour, pass a module's function, as pricing.total, or a struct with function fields. This was the first recommendation.",
+          "detail": "A module is a name you call through, as today. To pass behaviour, pass a module's function, as pricing.total, or a struct with function fields. This was the first recommendation, and it is last time's D.",
           "technical": "Module paths stay static. A module function used as a value works instead of failing with E0107, and keeps its inferred row. Generic modules keep taking modules, as today, now admitted by D-GENMOD-VALUE1, with the #FX check fixed. A module in a value position keeps an error, rewritten to say that modules are not values.",
-          "code": "// D: a module stays a name; pass its functions\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\nfn bill(total: fn(String) -[]> Int, text: String) -[]> Int {\n    total(text)\n}\n\n// Several functions travel in a struct with function fields.\nstruct Rules {\n    total: fn(String) -[]> Int\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing.total, \"abc\"))                 // 3\n    all :: [Rules{total: pricing.total}, Rules{total: discount.total}]\n    loop rules in all {\n        print(bill(rules.total, \"abc\"))               // 3, then 2\n    }\n    print(priced.bill(\"abc\"))                         // 3\n    // rules :: pricing     // still an error: a module is not a value\n    // bill(loud.total, \"abc\")   // refused: loud.total does IO\n}"
+          "code": "// proposed (C): a module stays a name; pass its functions\n#FX(!Net, !FS)\nmodule pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\n#FX(!Net, !FS)\nmodule discount {\n    fn total(text: String) -[]> Int { text.len() - 1 }\n}\n\n// This one prints, so it does IO.\nmodule loud {\n    fn total(text: String) -> Int {\n        print(\"pricing {text}\")\n        text.len()\n    }\n}\n\nfn bill(total: fn(String) -[]> Int, text: String) -[]> Int {\n    total(text)\n}\n\n// Several functions travel in a struct with function fields.\nstruct Rules {\n    total: fn(String) -[]> Int\n}\n\n#FX(!IO)\nmodule billing<R>(tag: String) {\n    fn bill(text: String) -> Int { R.total(text) }\n}\n\nmodule priced :: billing<pricing>(\"p\")\n// module shouty :: billing<loud>(\"l\")   // refused: loud does IO, billing denies it\n\nfn run() {\n    print(bill(pricing.total, \"abc\"))                 // 3\n    all :: [Rules{total: pricing.total}, Rules{total: discount.total}]\n    loop rules in all {\n        print(bill(rules.total, \"abc\"))               // 3, then 2\n    }\n    print(priced.bill(\"abc\"))                         // 3\n    // rules :: pricing     // still an error: a module is not a value\n    // bill(loud.total, \"abc\")   // refused: loud.total does IO\n}"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A makes a module what pricing.total already suggests: a value with methods. It fits a trait the one way a struct does, by impl in its body. It reuses traits, generics and reflection, and its limit travels with it.",
+        "why": "A gives Jet one declaration model: markers, effects, modules and packages are all structs. A module then passes, fits traits, reflects and specializes the way a struct already does, with no new syntax and no cost while running.",
         "gains": [
-          "A whole rule set passes as one argument and can be stored in a list.",
-          "Modules and structs fit a trait the same way, so nothing fits by accident.",
-          "Reflection, generics and trait values cover modules with no new query or type form."
+          "One body rule and one trait rule for structs, modules and packages.",
+          "A whole rule set passes as one zero-size value or a generic argument.",
+          "Beginner code is unchanged, and learning structs teaches modules for free."
         ],
         "losses": [
           {
-            "loss": "A module that serves a trait must write impl PriceRules { ... } in its body.",
-            "mitigation": "That is the same one step a struct takes, and the error's fix writes it."
+            "loss": "Struct bodies gain nested types and constants.",
+            "mitigation": "They are the lines modules already accept, and no existing line changes meaning."
           },
           {
-            "loss": "The checker gains a module type, impls in module bodies and generic functions taking modules.",
-            "mitigation": "No runtime record and no new syntax: the impl spelling already parses in a module body."
+            "loss": "A type whose one value shares its name is a new idea.",
+            "mitigation": "Beginners never see it, since pricing.total(\"abc\") reads exactly as before."
           },
           {
-            "loss": "A module or type can no longer declare its own function named reflect.",
-            "mitigation": "No file declares one today, and the error's fix renames it."
+            "loss": "The compiler moves modules onto the struct path.",
+            "mitigation": "That retires the separate module path, so there is one path to maintain."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B fits modules by shape and structs by impl, two rules, and a helper can match by accident."
+            "reason": "B passes modules as values but keeps two declaration models, two body rules and packages apart."
           },
           {
             "key": "C",
-            "reason": "C adds a type form and a runtime record per pass, and reflection would see a record instead of the module."
-          },
-          {
-            "key": "D",
-            "reason": "D keeps modules out of data, so a rule set is split into function fields, and the limit has no single carrier."
+            "reason": "C keeps modules out of data, so a rule set splits into function fields."
           }
         ],
-        "tradeoff": "One impl block per module, for modules that fit wherever structs fit."
+        "tradeoff": "A larger struct body rule, for one model that covers modules and packages."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Prep's draft, because the owner caps agents at three. It found that fitting a trait by shape was a second rule beside the struct's impl, and that state, self, visibility and a function named reflect were unsettled. All are fixed: A now fits through impl in the module body, the shape match is option B, and the detail settles the other four."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Research's draft, because the owner caps agents at four. Findings were that the costs are stated honestly and init order, privacy and separate compilation stay unchanged; the private-field and module-constant bugs it found are filed as defects."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "Should a passed module be itself and fit through impl or by shape, a record, or a name?",
-        "lesson": "A module groups functions, such as pricing. Its #FX line limits them. A trait lists functions a value must have.",
+        "gist": "Should a module be a struct with one value, a value of its own kind, or a name?",
+        "lesson": "A module groups functions, such as pricing. Markers and effects are already structs implementing Core traits.",
         "trio": {
           "current": {
-            "note": "Today a module is only a name; using it as a value is E0107.",
-            "code": "fn run() {\n    print(pricing.total(\"abc\"))\n    // rules :: pricing     // E0107\n}"
+            "note": "Today a module is only a name, and a struct body refuses constants.",
+            "code": "print(pricing.total(\"abc\"))\n// rules :: pricing                // E0107\n// struct Pricing { LIMIT :: 3 }   // E0003"
           },
           "wild": {
-            "lang": "OCaml",
-            "note": "A first-class module is packed and matched by shape.",
-            "code": "let bill (module R : RULES) text = R.total text\nlet () = print_int (bill (module Pricing) \"abc\")"
+            "lang": "Zig",
+            "note": "A Zig file is a struct type, and @import returns it.",
+            "code": "const pricing = @import(\"pricing.zig\");\n\npub fn main() void {\n    _ = pricing.total(\"abc\");\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Itself, through impl",
-            "gist": "A module is a value with methods and fits a trait by impl, as a struct does.",
+            "name": "A struct with one value",
+            "gist": "Modules, files and packages are fieldless structs with one value.",
             "gains": [
-              "Modules work as data and as generic arguments."
+              "One model for structs, modules and packages."
             ],
             "losses": [
-              "Each module writes its impl block."
+              "Struct bodies gain nested types and constants."
             ],
             "proposed": {
-              "code": "module pricing {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))\nall :: [PriceRules]{pricing, discount, Flat{}}"
+              "code": "// proposed\nmodule pricing {\n    limit :: 3\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\nstruct Flat {\n    limit :: 1                     // a struct body holds the same items\n    impl PriceRules { fn total(self, text: String) -[]> Int { 1 } }\n}\n\nall :: [PriceRules]{pricing, Flat{}}\nprint(Billing<pricing>{extra: 100}.bill(\"abc\"))"
             }
           },
           {
             "key": "B",
-            "name": "Itself, by shape",
-            "gist": "A module is a value with methods and fits any trait whose functions it has.",
+            "name": "A value of its own kind",
+            "gist": "A module is a value and fits a trait by impl.",
             "gains": [
-              "No impl block to write."
+              "Modules pass as values."
             ],
             "losses": [
-              "A helper can match a trait by accident."
+              "Two declaration models stay."
             ],
             "proposed": {
-              "code": "module pricing {\n    fn total(text: String) -[]> Int { text.len() }\n}\n\nfn bill(rules: PriceRules, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))     // fits by shape"
+              "code": "// proposed\nmodule pricing {\n    impl PriceRules {\n        fn total(self, text: String) -[]> Int { text.len() }\n    }\n}\n\nall :: [PriceRules]{pricing, Flat{}}\n// a generic struct still cannot take pricing"
             }
           },
           {
             "key": "C",
-            "name": "A record of its functions",
-            "gist": "A parameter lists functions; a passed module becomes a record.",
-            "gains": [
-              "No trait needed for the shape."
-            ],
-            "losses": [
-              "A new type form and a runtime record."
-            ],
-            "proposed": {
-              "code": "fn bill(rules: module { fn total(text: String) -[]> Int }, text: String) -[]> Int {\n    rules.total(text)\n}\n\nprint(bill(pricing, \"abc\"))"
-            }
-          },
-          {
-            "key": "D",
             "name": "Modules stay names",
             "gist": "Pass a module's functions, or a struct of them.",
             "gains": [
@@ -152651,42 +152626,38 @@
               "A rule set splits into function fields."
             ],
             "proposed": {
-              "code": "print(bill(pricing.total, \"abc\"))"
+              "code": "// proposed\nprint(bill(pricing.total, \"abc\"))"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A module becomes a value with methods and fits traits the way structs do.",
+          "why": "One declaration model: markers, effects, modules and packages are all structs.",
           "gains": [
-            "One argument for a whole rule set.",
-            "One way to fit a trait, for modules and structs."
+            "One body rule and one trait rule.",
+            "Modules pass as zero-size values."
           ],
           "losses": [
             {
-              "loss": "Each module writes an impl block.",
-              "mitigation": "The same step as a struct; the fix writes it."
+              "loss": "Struct bodies gain nested types and constants.",
+              "mitigation": "Lines modules already accept."
             },
             {
-              "loss": "More work in the checker.",
-              "mitigation": "No runtime record or new syntax."
+              "loss": "A one-value type is a new idea.",
+              "mitigation": "Beginner code reads as before."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Two rules, and accidental matches."
+              "reason": "Two declaration models stay."
             },
             {
               "key": "C",
-              "reason": "A new type form and a runtime record."
-            },
-            {
-              "key": "D",
               "reason": "Modules stay out of data."
             }
           ],
-          "tradeoff": "One impl block per module, for modules that fit wherever structs fit."
+          "tradeoff": "A larger struct body, for one model that covers modules and packages."
         }
       },
       "draft": false,
@@ -153629,42 +153600,42 @@
       "id": "D-REFLECT-TYPEINFO1",
       "cardId": "c0w7t4qu",
       "group": "other",
-      "title": "Which types keep run-time type info in a build that sets nothing?",
-      "situation": "Already ratified: a program reads a value's fields at run time with `reflect.of(rock)`, and a program that never reflects gets no type-info table at all. Run-time facts are kept only for the types a program asks about, and dead-code removal must not keep unrelated ones by default. A separate ratified build setting copies Jai's menu for run-time type info: `type_info` is `full`, `reachable` or `none`. None of the three words means \"only what the program asks about\", and the setting names no default. So the setting cannot express the ratified default. In Jai, `reachable` keeps info for every type the program uses, which would put `Door`'s info into a game that only ever reflects `Rock`.",
-      "gist": "When a game reflects `Rock` but never `Door`, does the shipped program carry `Door`'s type info?",
-      "lesson": "Run-time type info is kept only for what the program asks about. The build setting's three words must agree with that default.",
+      "title": "With reflect(Rock), which types keep run-time type info by default?",
+      "situation": "You asked that reflect take the type itself, as print(reflect(Rock)), with no .of. This revision does that under every option. reflect(Rock) gives the type's record, and reflect(rock) gives one value's record. reflect(Rock{}) stays legal: it reflects a new Rock built from its defaults, so it shows values as well as the type. The open question is unchanged. Already ratified: a program that never reflects gets no type-info table, and only types a program asks about keep info. A build setting copies Jai's three words, full, reachable and none, and none of them means only what was asked about. Recommended A adds that word, requested, as the default.",
+      "gist": "When a game reflects a rock but never a door, does the door's type info ship?",
+      "lesson": "reflect(Rock) reads a type, and reflect(rock) reads one value. Run-time type info is kept only for what a program asks about, and the build setting must say so.",
       "explainer": "",
-      "story": "Bo ships a small game. The level editor calls `reflect.of(rock)`; nothing ever reflects `Door`. He wants the release binary to carry only what the editor uses, and a way to keep everything for a debug build.",
-      "inWild": "Examples/features/reflection/reflect-value.jet: runtime reflect.of\nCompiler/JetIR/Source/BuildRoutes.jet:4976-5021: per-call-site records, no global table today\ncard #3147 [12]: a program that doesn't reflect emits no reflection table or allocation\ncard #5005 [7]: runtime type-info retention is one of the Jai option families",
-      "detail": "WHAT IS ALREADY DECIDED\n\nD-META-REFLECT2 A: run time exposes type and value facts kept for requested roots. Dead-code elimination must keep explicitly requested metadata without keeping unrelated metadata by default. A program without runtime reflection gets no new table allocation.\n\nD-JAI-BUILDOPT1 A: every Jai build-setting family becomes a typed Build field. Its list includes \"Type_info full, reachable or none\". It names no default.\n\nTHE CONFLICT\n\nThe ratified default, requested roots only, is not one of the three values. In Jai, reachable keeps every type the program uses, which is wider than requested. Choosing any of the three words as the default breaks one record.\n\nWHAT A DOES\n\nThe setting gets a fourth value, requested, and it is the default. reachable and full widen it for debug or tooling builds. none refuses any run-time reflect call at compile time with a registered error naming the setting.\n\nCOST\n\nUnder A, a program with one reflect.of call carries records only for that call's type graph. Paired size cells compare requested against full on the same game.\n\nGENERIC CODE\n\nUnder A and C, a reflect call inside generic code asks about each type the code is instantiated with. So fn show[T](x: T) that calls reflect.of(x), used only with Rock, keeps Rock's info and not Door's.",
+      "story": "Bo ships a small game. Its level editor calls reflect(rock) to list a rock's fields, and nothing ever reflects Door. He wants the release build to carry only what the editor uses, and a full table in a debug build.",
+      "inWild": "probes/D-REFLECT-TYPEINFO1/r01_today.jet (c865bb06, 2026-11-04): today a value reads as reflect.of(rock) and a type as Rock.$fields.\nprobes/D-REFLECT-TYPEINFO1/r02_reflect_type_arg.jet: reflect(Rock) is E0803 today, \"reflect is Unknown, not a function\".\nprobes/D-REFLECT-TYPEINFO1/r03, r04 and r08: a bare type name used as a value crashes the compiler, a defect found 2026-11-04.\nprobes/D-REFLECT-TYPEINFO1/r10: [Int] and Int? already parse as call arguments; Box<Int> parses but loses its <Int>.\nJai: type_info(Rock) and Zig: @typeInfo(Rock) take the type itself.\nCompiler/JetIR/Source/BuildRoutes.jet:4976-5021: per-call-site records, no global table today.",
+      "detail": "THE SPELLING YOU ASKED FOR\n\nEvery option uses one call, reflect, so any vote adopts it. reflect(Rock) gives the type's record: its name, path, fields and markers. reflect(rock) gives one value's record: each field with its value, and .type, which is reflect(Rock).\n\nprint(reflect(Rock)) prints the type's shape, struct Rock { size: Float, hard: Bool }. print(reflect(rock)) prints the value, Rock { size: 1.5, hard: true }.\n\nWHAT reflect(Rock{}) MEANS\n\nIt is legal and means the value form. Rock{} builds a new Rock from its defaults, and reflect reads that value. So reflect(Rock{}).type is reflect(Rock), and its fields also carry 1.0 and true.\n\nIt is not refused, because refusing one kind of argument would be a special case. If a field has no default, Rock{} is E0303 today, and that stays (probe r09). When code reads only .type from it, a lint offers reflect(Rock).\n\nHOW THE ARGUMENT IS READ\n\nName lookup decides, as it does for every name. A type spelling, such as Rock, [Int], Int?, Box<Int> or a generic T, names a type. Anything else is a value. The parser already accepts these as call arguments, though it drops Box's <Int> today (probe r10).\n\nIn generic code, reflect(T) replaces T.reflect(), and each copy reads its own T.\n\nTYPES STAY TYPES\n\nA type is still not an ordinary value. t :: Rock stays an error, and its fix offers reflect(Rock); today it crashes the compiler. User functions take types through <T>, so reflect is the one call that takes a type.\n\nAn effect row already takes either a type or a constant struct literal (D-DECL-TYPES1 A). The earlier @TYPE(T) and @VALUE(value) forms also passed types and values as arguments (D-META-REFLECT2).\n\nMIGRATION\n\njet fix rewrites reflect.of(x) to reflect(x), 44 lines in 21 files today. It rewrites T.reflect() to reflect(T), 34 lines in 25 files. It deletes the alias line use reflect :: core.reflect. The core.reflect module keeps its record types.\n\nThe spelling amends D-METAREFLECT1, D-NAME-REFLECT1, D-ANY-JAI1's of entry and D-META-HASH1's template reads. The record shapes, the type field (D-REFLECT-FIELDTYPE1) and read-only reflection stay. No file declares a function named reflect.\n\nWHAT IS ALREADY DECIDED ABOUT KEEPING INFO\n\nD-META-REFLECT2 A: run time exposes type and value facts kept for requested roots. Dead-code removal must keep requested facts without keeping unrelated ones by default. A program without run-time reflection gets no new table.\n\nD-JAI-BUILDOPT1 A: every Jai build-setting family becomes a typed Build field. Its list includes type_info full, reachable or none. It names no default.\n\nTHE CONFLICT\n\nThe ratified default, requested roots only, is not one of the three words. In Jai, reachable keeps every type the program uses, which is wider. Choosing any of the three words as the default breaks one record.\n\nWHAT COUNTS AS A REQUEST\n\nA reflect call that runs while the program runs requests that type's record and the types its fields reach. reflect(Rock) used only while building requests nothing at run time.\n\nWHAT A DOES\n\nThe setting gets a fourth word, requested, and it is the default. reachable and full widen it for debug or tool builds. none turns any reflect call that runs while the program runs into a compile error naming the setting.\n\nCOST\n\nUnder A, a program with one reflect(rock) call carries records only for Rock's field graph. Paired size cells compare requested against full on the same game.\n\nGENERIC CODE\n\nUnder A and C, a reflect call in generic code asks about each type the code is used with. So fn show<T>(x: T) that calls reflect(x), used only with Rock, keeps Rock's info and not Door's.",
       "options": [
         {
           "key": "A",
           "name": "Add requested, the default",
-          "detail": "With nothing set, only types a program asks about at run time keep info, as already ratified. `reachable` and `full` widen it for debugging or tools, and `none` turns any run-time reflect into a compile error. No program changes.",
-          "technical": "Build.type_info: requested (default) | reachable | full | none. requested retains the type graphs of reflect.of call sites and explicit retain roots. none makes reflect.of a registered compile error naming the setting. Amends D-JAI-BUILDOPT1 A's list; D-META-REFLECT2 A unchanged.",
-          "code": "// package.jet: nothing set, so type_info is requested\nbuild: { game: Build{ } }\n\n// run.jet\nuse reflect :: core.reflect\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect.of(rock).type_name())   // Rock: its info is kept\n    print(Door{}.open)                    // Door's info is not shipped\n}\n\n// a debug build may keep everything\nbuild: { debug: Build{ type_info: full } }"
+          "detail": "With nothing set, only the types a program reflects while running keep info, as already ratified. reachable and full widen it for debugging or tools, and none turns any run-time reflect into a compile error. No program changes beyond the new spelling.",
+          "technical": "Build.type_info: requested (default) | reachable | full | none. requested keeps the type graphs of reflect calls that run while the program runs, plus explicit keep roots. none makes such a call a registered compile error naming the setting. Amends D-JAI-BUILDOPT1 A's list; D-META-REFLECT2 A unchanged. The reflect(x) spelling is shared by every option.",
+          "code": "// proposed: reflect takes a type or a value\n// package.jet: nothing set, so type_info is requested\nbuild: { game: Build{ } }\n\n// run.jet\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect(rock).type.name)   // Rock: its info is kept\n    print(reflect(Rock))             // struct Rock { size: Float }\n    print(Door{}.open)               // Door's info is not shipped\n}\n\n// a debug build may keep everything\nbuild: { debug: Build{ type_info: full } }"
         },
         {
           "key": "B",
           "name": "reachable is the default, as in Jai",
           "detail": "With nothing set, every type the program uses keeps its info, so Door's info ships too. This matches Jai, but a program that reflects one type pays for all of them, against the ratified no-cost rule.",
-          "technical": "Build.type_info: reachable (default) | full | none. D-META-REFLECT2 A's by-default retention rule and #3147 [12] are amended to allow reachable retention whenever any reflect call exists.",
-          "code": "// package.jet: nothing set, so type_info is reachable\nbuild: { game: Build{ } }\n\n// run.jet\nuse reflect :: core.reflect\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect.of(rock).type_name())   // Rock\n    print(Door{}.open)                    // Door's info ships as well\n}"
+          "technical": "Build.type_info: reachable (default) | full | none. D-META-REFLECT2 A's default keep rule is amended to keep every reachable type whenever any reflect call runs. The reflect(x) spelling is shared by every option.",
+          "code": "// proposed: reflect takes a type or a value\n// package.jet: nothing set, so type_info is reachable\nbuild: { game: Build{ } }\n\n// run.jet\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect(rock).type.name)   // Rock\n    print(reflect(Rock))             // struct Rock { size: Float }\n    print(Door{}.open)               // Door's info ships as well\n}"
         },
         {
           "key": "C",
           "name": "Keep three words; reachable means requested",
-          "detail": "No new word. `reachable` is redefined as \"reached by a reflect call\" and is the default. The behaviour is A's, but the word means something different from Jai's.",
-          "technical": "Build.type_info: reachable (default, defined as requested roots) | full | none. Amends D-JAI-BUILDOPT1 A's meaning of reachable only.",
-          "code": "// package.jet: nothing set, so type_info is reachable (= requested)\nbuild: { game: Build{ } }\n\n// run.jet\nuse reflect :: core.reflect\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect.of(rock).type_name())   // Rock\n    print(Door{}.open)                    // Door's info is not shipped\n}"
+          "detail": "No new word. reachable is redefined as \"reached by a reflect call\" and is the default. The behaviour is A's, but the word means something different from Jai's.",
+          "technical": "Build.type_info: reachable (default, defined as requested roots) | full | none. Amends D-JAI-BUILDOPT1 A's meaning of reachable only. The reflect(x) spelling is shared by every option.",
+          "code": "// proposed: reflect takes a type or a value\n// package.jet: nothing set, so type_info is reachable (= requested)\nbuild: { game: Build{ } }\n\n// run.jet\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect(rock).type.name)   // Rock\n    print(reflect(Rock))             // struct Rock { size: Float }\n    print(Door{}.open)               // Door's info is not shipped\n}"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A keeps the ratified rule that unused reflection costs nothing, and still gives Jai's wider settings to builds that want them. No program changes, because the default is what is already promised.",
+        "why": "A keeps the ratified rule that unused reflection costs nothing, and still gives Jai's wider settings to builds that want them. The default is what is already promised, and reflect(Rock) reads the way you asked.",
         "gains": [
           "No reflection cost unless a program reflects.",
           "Debug and tool builds can keep everything with one setting.",
@@ -153693,16 +153664,16 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the Research draft, because the owner caps agents at three. Findings were that the ballot did not say which types generic code asks about, now stated, and that none and full keep their meaning under every option."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Research's draft, because the owner caps agents at four. Findings were that one call spelling now serves every option, as the owner asked, and keeping reflect(Rock{}) legal avoids a special case; the type-as-value crash is filed as a defect."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "When a game reflects `Rock` but never `Door`, does `Door`'s type info ship?",
-        "lesson": "Type info is kept only for what a program asks about; the build setting must say so.",
+        "gist": "When a game reflects a rock but never a door, does the door's type info ship?",
+        "lesson": "reflect(Rock) reads a type and reflect(rock) one value. Type info is kept only for what a program asks about.",
         "trio": {
           "current": {
-            "note": "Today each reflect.of call site builds its own record; there is no table.",
-            "code": "rock :: Rock{}\nprint(reflect.of(rock).type_name())"
+            "note": "Today a value reads as reflect.of(rock), and reflect(Rock) is an error.",
+            "code": "use reflect :: core.reflect\n\nrock :: Rock{}\nprint(reflect.of(rock).type_name())"
           },
           "wild": {
             "lang": "Jai",
@@ -153723,7 +153694,7 @@
               "A fourth setting word."
             ],
             "proposed": {
-              "code": "build: { game: Build{ } }                 // requested\nprint(reflect.of(rock).type_name())       // Rock kept, Door not\nbuild: { debug: Build{ type_info: full } } // keep all"
+              "code": "// proposed\nbuild: { game: Build{ } }                  // requested\nprint(reflect(rock).type.name)             // Rock kept, Door not\nprint(reflect(Rock))                       // struct Rock { size: Float }\nbuild: { debug: Build{ type_info: full } } // keep all"
             }
           },
           {
@@ -153737,7 +153708,7 @@
               "Unreflected types cost size."
             ],
             "proposed": {
-              "code": "build: { game: Build{ } }                 // reachable\nprint(reflect.of(rock).type_name())       // Rock and Door kept"
+              "code": "// proposed\nbuild: { game: Build{ } }                  // reachable\nprint(reflect(rock).type.name)             // Rock and Door kept"
             }
           },
           {
@@ -153751,13 +153722,13 @@
               "Differs from Jai's word."
             ],
             "proposed": {
-              "code": "build: { game: Build{ } }                 // reachable = requested\nprint(reflect.of(rock).type_name())       // Rock kept, Door not"
+              "code": "// proposed\nbuild: { game: Build{ } }                  // reachable = requested\nprint(reflect(rock).type.name)             // Rock kept, Door not"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Keeps the promised zero cost and adds Jai's wider settings as opt-ins.",
+          "why": "Keeps the promised zero cost, adds Jai's wider settings as opt-ins, and reads as reflect(Rock).",
           "gains": [
             "Zero cost unless used.",
             "Opt-in full table."
@@ -153789,80 +153760,84 @@
       "id": "D-REFLECT-EDIT1",
       "cardId": "c0yfcz0w",
       "group": "other",
-      "title": "How does a level editor change a field it found by reflection?",
-      "situation": "Already ratified: a marker is a struct with an `impl Marker` block, and its `expand` writes code for each marked type: `struct Entity { impl Marker { sites :: [.Type]  fn expand(self, target: Target) { ... } } }`. Run-time reflection reads: `reflect.of(rock)` gives typed fields and values, and the ratified model adds no write, cast or constructor by name. `#Patchable` already gives every marked type a typed `Patch`, `apply` and `diff`, which is how undo works today. Jai's editor writes a field through the type table's byte offset. A generic editor still needs some way to set `size` on whatever entity is selected.",
-      "gist": "When the level editor sets a selected Rock's `size` to 2.0, does it call code the Entity marker wrote, or write through the reflected value?",
-      "lesson": "Reflection reads; writes go through ordinary typed code. The question is whether Core reflection also gains a write.",
+      "title": "How does a level editor change a field it knows only by name?",
+      "situation": "You asked why anyone would pick the old A over B. You are right that B is easier to follow: the old A hid each write inside marker code that you never see. B has its own cost, though. It lets any generic function write any field of any type by name, and today only ratified rules stop that. This revision adds a new A with B's short engine code. #Patchable already gives a type typed patches and undo, and it gains a way to build a patch from a field name and text. Only types marked #Patchable change this way, and the engine's signature says so. B keeps its letter. The old marker template is now C, and the JSON round trip is dropped.",
+      "gist": "Does the editor set Rock's size by name through a typed patch, a reflection write, or marker code?",
+      "lesson": "An editor knows a field only by its name, such as size, and must change it on any entity. Reflection reads fields today. #Patchable gives a type a typed patch, apply and undo.",
       "explainer": "",
-      "story": "Ana's level editor shows the fields of the selected entity. A designer types 2.0 into Rock's size. The editor does not know the Rock type, only that it is an entity.",
-      "inWild": "Examples/features/types/patchable.jet:1-19 #Patchable Patch, apply, diff\nExamples/features/serde/json_patch.jet:26 json.patch\nCompiler/JetSema/Source/Sema/Calls/Reflection.jet:222-231 reflect handles: type_name, path, display, fields (read only)",
-      "detail": "WHAT IS ALREADY DECIDED\n\nD-ENUM-CASEMETA1 A: Field.value() returns a typed Value, not a String. There is no new get, read, cast, write-by-name, or constructor operation. Recipients gain no construction or mutation operation.\n\nD-DECL-TYPES1 A: markers are structs with an expand template that may write impls for the marked type. D-META-HASH1 A: #{x} pastes a name or type in that template.\n\nTHE TENSION\n\nThe inquiry asks Jet to cover everything Jai's editor does, and Jai writes fields through reflection. A Core write would reverse the ratified read-only rule.\n\nWHAT A DOES\n\nThe engine's Entity marker writes an Edit impl for each marked type. Each arm is typed code for one field. Core reflection stays read only. A type that is not marked has no Edit impl, so nothing can write its fields by name.\n\nCOST\n\nUnder A the setter is ordinary code. It is dropped when nothing calls it, and costs one string compare per field when it is called.",
+      "story": "Ana's level editor shows the fields of the selected entity. A designer types 2.0 into Rock's size. The editor does not know the Rock type, only the field name and the text.",
+      "inWild": "probes/D-REFLECT-EDIT1/e01_patch_today.jet (c865bb06, 2026-11-04): #Patchable apply and diff set and undo size; prints 2.0, then 1.0.\nprobes/D-REFLECT-EDIT1/e04_generic_cannot_touch.jet: fn keep<T>(value: &T) cannot write value.size today (E0302).\nprobes/D-REFLECT-EDIT1/e06_priv_field.jet: reflection already reads priv fields.\nprobes/D-REFLECT-EDIT1/e02_patch_generic.jet: a T: Patchable bound is not built yet (E0904).\nprobes/D-REFLECT-EDIT1/e08_patch_decode.jet: Rock.Patch cannot be read from text today (E0905).\nprobes/D-REFLECT-EDIT1/e05_marker_template.jet: the marker template of C does not parse today.\nJai: an editor writes a member through its byte offset from the type table.\nUnity: SerializedObject.FindProperty(\"size\") sets a field by name through engine metadata.",
+      "detail": "YOUR QUESTION, ANSWERED\n\nB is easier to reason about than the old A. The old A wrote setter code from a template you never see, with pasted names and a loop unrolled while compiling. B is one visible line. Only ratified rules stood in B's way.\n\nSo B stays on the ballot as B, with its amendments spelled out below. The old A is now C, and it is not recommended.\n\nWHAT B COSTS FOR REASONING\n\nToday a function that takes &T for any T cannot change that value's fields (probe e04). Under B, any such function can write any field of any type by name. A signature no longer tells you which values it may change.\n\nB also reaches priv fields, since reflection already reads them (probe e06). So it needs a new refusal for them, and a way to protect fields whose values must stay in step.\n\nB needs each edited type's field records kept while the program runs. It is also a second way to change fields beside #Patchable, and Jet keeps one way per job.\n\nWHAT A DOES\n\n#Patchable already gives Rock a Rock.Patch whose fields are all optional, plus rock.apply(patch) and Rock.diff for undo (probe e01). A adds one generated function, Rock.Patch.parse(field, text).\n\nIt returns a patch with that one field set, using the field type's own parse. An unknown field, a priv field or bad text gives None. A computed field is already left out of Patch (D-PATCH1).\n\nThe engine writes edit<T: Patchable>, so its signature shows it changes Patchable values. A type without the marker cannot be changed by name, and the error offers to add it. Undo is the existing diff.\n\nWHAT IS BUILT TODAY\n\n#Patchable, apply and diff run today. A T: Patchable bound is not built yet (probe e02), though deriving a marker as a trait is ratified (D-DECL-TYPES1 A). Patch.parse is new, and a Patch cannot be read from text today (probe e08).\n\nRATIFIED RULES\n\nA changes no ratified rule. It extends D-PATCH1 with parse, the way Codable decode already fills fields by name.\n\nB needs three amendments. D-METADEPTH1/2 says \"read-only reflection + derives\" and \"No mutation\". It would allow field writes through a changeable reflected value.\n\nD-ANY-JAI1 says the core.reflect floor has no \"string-named field mutation\", and that get and set \"remain declined\". It would drop those two from the declined list.\n\nD-ENUM-CASEMETA1 A says \"There is no new get, read, cast, write-by-name, or constructor operation\" and \"Recipients gain no construction or mutation operation.\" It would allow write-by-name on a changeable reflected value.\n\nB also needs two new rules: a priv field is refused outside its type's module, and a parse failure leaves the field unchanged.\n\nC, THE OLD A\n\nThe engine's Entity marker writes an Edit impl for each entity type, with one typed branch per field. It changes no rule, but its template is the hardest code here to read. Templates and #{...} pastes are not built yet (probe e05).\n\nDROPPED\n\nThe JSON round trip is dropped. Every edit paid a full encode and decode, and every entity had to be Codable.\n\nCOST\n\nA does one string compare per field inside parse, then the typed apply. It is dropped when nothing calls it. B keeps field records while running for every type an editor touches.",
       "options": [
         {
           "key": "A",
-          "name": "The marker writes typed edit code",
-          "detail": "The engine's Entity marker writes an Edit impl for every entity type: one typed branch per field. The editor calls it through the trait. Core reflection stays read only, as ratified. App code is unchanged.",
-          "technical": "No Core change. Uses expand, #{...} pastes and a compile-time loop over target.fields. Parsing uses each field type's own parse. A field the library excludes (for example with its own Hidden marker) gets no branch.",
-          "code": "// app/run.jet: the same under every option\nuse engine\n\n#engine.Entity\nstruct Rock { size: Float{1.0} }\n\nfn run() {\n    rock := Rock{}\n    engine.edit(&rock, \"size\", \"2.0\")\n    print(rock.size)                       // 2.0\n}\n\n// package engine\npub trait Edit { fn set(&self, field: String, text: String) -> Bool }\n\nstruct Entity {\n    impl Marker {\n        sites :: [.Type]\n        fn expand(self, target: Target) {\n            impl #{target}.Edit {\n                fn set(&self, field: String, text: String) -> Bool {\n                    loop f in target.fields {        // unrolled while compiling\n                        if field == f.name -> {\n                            self.#{f} = #{f.ty}.parse(text) ?? return false\n                            return true\n                        }\n                    }\n                    false\n                }\n            }\n        }\n    }\n}\n\npub fn edit<T: Edit>(value: &T, field: String, text: String) -> Bool {\n    value.set(field, text)\n}"
+          "name": "Build a typed patch by field name",
+          "detail": "#Patchable gains Patch.parse(field, text), which builds a typed patch for one field. The engine applies it with the existing apply, and undo is the existing diff. Only marked types change by name, and the engine's bound says so.",
+          "technical": "Extends D-PATCH1: #Patchable also synthesizes T.Patch.parse(field: String, text: String) -> T.Patch?, one branch per patchable field, using each field type's parse. priv and computed fields never match. Needs the T: Patchable bound from D-DECL-TYPES1 A's derive-as-trait rule (unbuilt, E0904 today). No Core reflection change.",
+          "code": "// proposed: Patch.parse builds a typed patch from a field name\n// app/run.jet\nuse engine\n\n#Patchable\nstruct Rock { size: Float{1.0} }\n\nfn run() {\n    rock := Rock{}\n    engine.edit(&rock, \"size\", \"2.0\")\n    print(rock.size)                       // 2.0\n}\n\n// package engine\nfn edit<T: Patchable>(value: &T, field: String, text: String) -> Bool {\n    patch :: T.Patch.parse(field, text) ?? return false\n    value = value.apply(patch)\n    true\n}\n\n// undo is the existing diff: T.diff(^after, before)"
         },
         {
           "key": "B",
-          "name": "Core reflection gains a write",
-          "detail": "A reflected value can set a field by name: `reflect.of(&value).field(name)?.set_text(text)`. Any holder of a changeable reference can write any field of any type, and the ratified read-only rule is reversed. App code is unchanged.",
-          "technical": "Adds ValueHandle mutation through a borrowed root, a by-name field lookup and a text setter that calls the field type's parse. Amends D-ENUM-CASEMETA1 A. Needs a privacy rule for private fields and a refusal for fields with invariants.",
-          "code": "// app/run.jet: the same under every option\nuse engine\n\n#engine.Entity\nstruct Rock { size: Float{1.0} }\n\nfn run() {\n    rock := Rock{}\n    engine.edit(&rock, \"size\", \"2.0\")\n    print(rock.size)                       // 2.0\n}\n\n// package engine\nuse reflect :: core.reflect\n\nstruct Entity {\n    impl Marker { sites :: [.Type] }\n}\n\npub fn edit<T>(value: &T, field: String, text: String) -> Bool {\n    slot :: reflect.of(&value).field(field) ?? return false   // new write path\n    slot.set_text(text)\n}"
+          "name": "Reflection writes a field",
+          "detail": "A reflected value can set a field by name: reflect.of(&value).field(name)?.set_text(text). The engine needs no marker on the type. Any holder of a changeable reference can write any field of any type, and three ratified rules are reversed.",
+          "technical": "Adds a write through a borrowed reflected value, a by-name field lookup and a text setter that calls the field type's parse. Amends D-METADEPTH1/2, D-ANY-JAI1's declined list and D-ENUM-CASEMETA1 A. Adds a priv-field refusal outside the type's module and needs field records kept while running.",
+          "code": "// proposed: reflection gains a write\n// app/run.jet\nuse engine\n\nstruct Rock { size: Float{1.0} }\n\nfn run() {\n    rock := Rock{}\n    engine.edit(&rock, \"size\", \"2.0\")\n    print(rock.size)                       // 2.0\n}\n\n// package engine\nuse reflect :: core.reflect\n\nfn edit<T>(value: &T, field: String, text: String) -> Bool {\n    slot :: reflect.of(&value).field(field) ?? return false\n    slot.set_text(text)\n}"
         },
         {
           "key": "C",
-          "name": "Edit through the codec",
-          "detail": "The editor encodes the entity to JSON, patches the one field, and decodes it back. It uses only built pieces, but each edit is a full encode and decode, and it needs every entity to be Codable. App code is unchanged.",
-          "technical": "No Core change. Uses json.encode, json.patch and json.decode on #Codable types (Examples/features/serde/json_patch.jet).",
-          "code": "// app/run.jet: the same under every option\nuse engine\n\n#engine.Entity\nstruct Rock { size: Float{1.0} }\n\nfn run() {\n    rock := Rock{}\n    engine.edit(&rock, \"size\", \"2.0\")\n    print(rock.size)                       // 2.0\n}\n\n// package engine\nuse json :: core.encoding.json\n\nstruct Entity {\n    impl Marker { sites :: [.Type] }\n}\n\npub fn edit<T: Codable>(value: &T, field: String, text: String) -> Bool {\n    doc :: json.parse(json.to_string(value) ?? return false) ?? return false\n    ops :: json.parse(\"[{{\\\"op\\\":\\\"replace\\\",\\\"path\\\":\\\"/{field}\\\",\\\"value\\\":{text}}}]\") ?? return false\n    value = json.decode<T>(json.to_string(json.patch(doc, ops) ?? return false) ?? return false) ?? return false\n    true\n}"
+          "name": "The marker writes setter code",
+          "detail": "The engine's Entity marker writes an Edit impl for every entity type: one typed branch per field. The editor calls it through the trait. Core reflection stays read only, but the write hides in a template.",
+          "technical": "No Core change. Uses expand, #{...} pastes and a loop over target.fields unrolled while compiling. Each branch calls its field type's parse. Templates and pastes are unbuilt today (probe e05).",
+          "code": "// proposed: the engine's marker writes an Edit impl\n// app/run.jet\nuse engine\n\n#engine.Entity\nstruct Rock { size: Float{1.0} }\n\nfn run() {\n    rock := Rock{}\n    engine.edit(&rock, \"size\", \"2.0\")\n    print(rock.size)                       // 2.0\n}\n\n// package engine\ntrait Edit { fn set(&self, field: String, text: String) -> Bool }\n\nstruct Entity {\n    impl Marker {\n        sites :: [.Type]\n        fn expand(self, target: Target) {\n            impl #{target}.Edit {\n                fn set(&self, field: String, text: String) -> Bool {\n                    loop f in target.fields {\n                        if field == f.name -> {\n                            self.#{f} = #{f.ty}.parse(text) ?? return false\n                            return true\n                        }\n                    }\n                    false\n                }\n            }\n        }\n    }\n}\n\nfn edit<T: Edit>(value: &T, field: String, text: String) -> Bool {\n    value.set(field, text)\n}"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A gives the editor Jai's power with ordinary typed code and keeps the ratified read-only reflection. Only types that opt in through the marker can be edited by name, and app code is the same under every option.",
+        "why": "A keeps B's short, readable engine code and gives a typed write. Only types marked #Patchable change by name, and the engine's signature says so. Undo comes from the existing diff, and no ratified rule changes.",
         "gains": [
-          "Reflection stays read only, as ratified.",
-          "Each write is typed code for one field, checked like hand-written code.",
-          "Types not marked as entities cannot be written by name."
+          "Engine code is three lines, as readable as B.",
+          "A signature still shows which values a function may change.",
+          "Undo comes free from the existing diff."
         ],
         "losses": [
           {
-            "loss": "Each engine writes its own edit template.",
-            "mitigation": "A Core example and the planned inspector witness show the ten-line template."
+            "loss": "Each editable type writes #Patchable.",
+            "mitigation": "It is one word on the type, and the error offers to add it."
+          },
+          {
+            "loss": "The Patchable bound and Patch.parse are not built yet.",
+            "mitigation": "Both reuse built pieces: the derive-as-trait rule and each field type's parse."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B lets any reference write any field by name, reversing a ratified rule and needing new privacy law."
+            "reason": "B lets any generic function change any field, reverses three ratified rules and needs a new priv refusal."
           },
           {
             "key": "C",
-            "reason": "C costs a full encode and decode per edit and needs every entity to be Codable."
+            "reason": "C hides each write in a template, the hardest code here to read."
           }
         ],
-        "tradeoff": "One library template, for typed writes and unchanged read-only reflection."
+        "tradeoff": "One marker per editable type, for B's short code with typed, visible writes."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the Research draft, because the owner caps agents at three. Findings were that A adds no Core API and that #Patchable stays the undo path, so nothing changed."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Research's draft, because the owner caps agents at four. Findings were that the ballot now admits B beats the old A, and the new A is an explicit opt-in shown in the signature that reverses no ratified rule."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "When the editor sets Rock's `size` to 2.0, does it call code the Entity marker wrote, or write through reflection?",
-        "lesson": "Reflection reads; writes are ordinary typed code. Should Core reflection also write?",
+        "gist": "Does the editor set Rock's size through a typed patch, a reflection write, or marker code?",
+        "lesson": "An editor knows a field only by name. Reflection reads fields; #Patchable gives typed patches and undo.",
         "trio": {
           "current": {
-            "note": "Today a reflected value only reads; #Patchable gives typed patches.",
-            "code": "promote :: Employee.Patch{level: 4}\nemp2 :: Employee{emp.apply(promote.copy())}"
+            "note": "Today #Patchable gives a typed patch, apply and undo.",
+            "code": "rock := Rock{}\nbefore :: rock.copy()\nrock = rock.apply(Rock.Patch{size: Float{2.0}})\nundo :: Rock.diff(^before, rock.copy())"
           },
           "wild": {
             "lang": "Jai",
@@ -153873,72 +153848,72 @@
         "options": [
           {
             "key": "A",
-            "name": "The marker writes typed edit code",
-            "gist": "Entity's expand writes an Edit impl; reflection stays read only.",
+            "name": "Typed patch by field name",
+            "gist": "#Patchable gains Patch.parse; the engine applies the patch.",
             "gains": [
-              "Typed writes.",
-              "Only opted-in types are editable."
+              "Short engine code with a typed write.",
+              "Only marked types change by name."
             ],
             "losses": [
-              "Engines write a template."
+              "Each editable type adds #Patchable."
             ],
             "proposed": {
-              "code": "impl #{target}.Edit {\n    fn set(&self, field: String, text: String) -> Bool {\n        loop f in target.fields {\n            if field == f.name -> { self.#{f} = #{f.ty}.parse(text) ?? return false; return true }\n        }\n        false } }"
+              "code": "// proposed\n#Patchable\nstruct Rock { size: Float{1.0} }\n\nfn edit<T: Patchable>(value: &T, field: String, text: String) -> Bool {\n    patch :: T.Patch.parse(field, text) ?? return false\n    value = value.apply(patch)\n    true\n}"
             }
           },
           {
             "key": "B",
-            "name": "Core reflection gains a write",
-            "gist": "`reflect.of(&v).field(name)?.set_text(text)`.",
+            "name": "Reflection writes a field",
+            "gist": "Any changeable reference can set any field by name.",
             "gains": [
-              "No template."
+              "No marker on the type."
             ],
             "losses": [
-              "Reverses the read-only rule."
+              "Any generic function can change any field."
             ],
             "proposed": {
-              "code": "pub fn edit<T>(value: &T, field: String, text: String) -> Bool {\n    slot :: reflect.of(&value).field(field) ?? return false\n    slot.set_text(text)\n}"
+              "code": "// proposed\nstruct Rock { size: Float{1.0} }\n\nfn edit<T>(value: &T, field: String, text: String) -> Bool {\n    slot :: reflect.of(&value).field(field) ?? return false\n    slot.set_text(text)\n}"
             }
           },
           {
             "key": "C",
-            "name": "Edit through the codec",
-            "gist": "Encode, patch one JSON field, decode.",
+            "name": "Marker writes setter code",
+            "gist": "The Entity marker writes an Edit impl for each type.",
             "gains": [
-              "Built pieces only."
+              "No ratified rule changes."
             ],
             "losses": [
-              "Full encode and decode per edit."
+              "The write hides in template code."
             ],
             "proposed": {
-              "code": "pub fn edit<T: Codable>(value: &T, field: String, text: String) -> Bool {\n    doc :: json.parse(json.to_string(value) ?? return false) ?? return false\n    value = json.decode<T>(json.to_string(json.patch(doc, ops(field, text)) ?? return false) ?? return false) ?? return false\n    true\n}"
+              "code": "// proposed\nimpl #{target}.Edit {\n    fn set(&self, field: String, text: String) -> Bool {\n        loop f in target.fields {\n            if field == f.name -> {\n                self.#{f} = #{f.ty}.parse(text) ?? return false\n                return true\n            }\n        }\n        false\n    }\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Jai's editor power through typed code, with ratified read-only reflection.",
+          "why": "B's short code, but only marked types change by name, and the signature shows it.",
           "gains": [
-            "Typed writes.",
-            "Opt-in editing."
+            "Short engine code.",
+            "Signatures still show what may change."
           ],
           "losses": [
             {
-              "loss": "Engines write a template.",
-              "mitigation": "A Core example shows it."
+              "loss": "Each editable type adds #Patchable.",
+              "mitigation": "One word; the error offers it."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Reverses a ratified rule."
+              "reason": "Any generic function could change any field."
             },
             {
               "key": "C",
-              "reason": "Slow per edit."
+              "reason": "The write hides in a template."
             }
           ],
-          "tradeoff": "One template, for typed, opt-in writes."
+          "tradeoff": "One marker per editable type, for short, typed, visible writes."
         }
       },
       "draft": false,
@@ -156234,9 +156209,11 @@
       "by": "owner",
       "kind": "question",
       "text": "reflect should not require .of method, that reads poorly. reflect should take a \"Type\" arg, so you can pass the type directly as \"print(reflect(Rock))\" or \"print(reflect(Rock{}))\", but preferably without the curly brackets.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-04T19:54:19.983Z"
+      "status": "answered",
+      "answer": "Agreed: every option now uses one call, reflect(Rock) for a type and reflect(rock) for one value, and jet fix retires .of and T.reflect(). reflect(Rock{}) stays legal and reflects a fresh Rock built from its defaults, so its .type is reflect(Rock); refusing it would be a special case. A type is still not an ordinary value, so t :: Rock stays an error whose fix offers reflect(Rock); today that line crashes the compiler. The ballot's question is unchanged: recommended A still makes requested the default for which types keep run-time info.",
+      "created": "2026-11-04T19:54:19.983Z",
+      "answeredAt": "2026-11-04",
+      "answeredBy": "Main"
     },
     {
       "id": "q1vmvgyo",
@@ -156245,9 +156222,11 @@
       "by": "owner",
       "kind": "question",
       "text": "an even deeper extension of this idea, since markers and effects, etc  are all structs now (or at least planned), why not modules and packages? technically considered as structs? see what Im going for?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-04T19:56:49.737Z"
+      "status": "answered",
+      "answer": "Yes, and it wins, so it is now recommended (A): a module is a struct with no fields and one value of the same name. A file is such a struct, as in Zig, and a package is its root module; package.jet already builds its Package value. A module then passes, fits a trait through impl, reflects and takes markers exactly as a struct does, while init order, privacy and separate compilation stay as today. The costs are that struct bodies gain nested types and constants, and a one-value type is a new idea, though beginner code reads as before. Last time's A is now B, keeping modules as names is C, and the shape and record options are dropped.",
+      "created": "2026-11-04T19:56:49.737Z",
+      "answeredAt": "2026-11-04",
+      "answeredBy": "Main"
     },
     {
       "id": "q203be9m",
@@ -156256,9 +156235,11 @@
       "by": "owner",
       "kind": "question",
       "text": "A seems WAY worse than B from an ability to reason about code perspective, why the hell would I choose A over B other than the fact that B conflicts with a ratified rule? if it is a way better solution, then tell me so I can reconsider a potentially wrong earlier determination. Update accordingly",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-04T20:00:16.801Z"
+      "status": "answered",
+      "answer": "You were right: B is easier to reason about than the old A, which hid every write in marker template code, and only ratified rules stood against it. B's cost is that any generic function could write any field of any type by name, reversing the read-only reflection rule (D-METADEPTH1/2, D-ANY-JAI1, D-ENUM-CASEMETA1 A). Re-engineered: the new A keeps B's short engine code but builds a typed patch by name with T.Patch.parse(field, text), then applies it with #Patchable's apply. Only #Patchable types change this way, the T: Patchable bound shows it in the signature, undo comes from diff, and no ratified rule changes. B keeps its letter with its amendments spelled out, the old A is now C, and the JSON round trip is dropped.",
+      "created": "2026-11-04T20:00:16.801Z",
+      "answeredAt": "2026-11-04",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -157115,6 +157096,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-04T20:29:07.766Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q203be9m",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T20:29:07.304Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-REFLECT-EDIT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-04T20:29:06.783Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1vmvgyo",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T20:29:06.228Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EFFTYPE-MODVALUE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-04T20:29:05.674Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q02yzjc5",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T20:29:05.168Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-REFLECT-TYPEINFO1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-11-04T20:24:03.799Z",
       "by": "Main",
