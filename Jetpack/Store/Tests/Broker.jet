@@ -403,3 +403,26 @@ fn store_broker_test_ctx(roots: HangarRoots) -> ProviderCtx Never! {
     net.unix_close(&client).drop("client close")
     store_test_drop_roots(roots)
 }
+
+// A Jetpack root far longer than sockaddr_un's 108 bytes still gets a
+// working private broker socket: the runtime binds and connects through the
+// socket's directory.
+#Test("store broker listens and a client connects under a 200-byte Jetpack root") {
+    roots :: store_test_temp_roots()
+    deep := roots.root
+    loop deep.len() < 200 -> deep = files.join(deep, "a-deep-jetpack-root-segment")
+    layout :: store_broker_user_layout(HangarRoots.at(deep)) ?? panic("layout")
+    assert(layout.socket.len() > 200, "the socket path must exceed sockaddr_un: {layout.socket}")
+    files.create_dir_all(layout.base) ?? panic("broker directory")
+    listener :: net.unix_listen(layout.socket) ?? panic("listen")
+    assert(files.exists(layout.socket), "the socket is bound at its own path")
+    accepting :: task { net.unix_accept(listener) }
+    client := net.unix_connect(layout.socket) ?? panic("connect")
+    stream := accepting.join() ?? panic("accept")
+    net.unix_write_all_bytes(&client, "ping".bytes()) ?? panic("write")
+    got :: net.unix_read_bytes(&stream, 4) ?? panic("read")
+    assert_eq(got, "ping".bytes())
+    net.unix_close(&client).drop("client close")
+    net.unix_close(&stream).drop("server close")
+    store_test_drop_roots(roots)
+}
