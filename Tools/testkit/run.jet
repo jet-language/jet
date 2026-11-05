@@ -896,7 +896,7 @@ fn kit_execute_suites(options: KitOptions, root: String, selected_suites: [Strin
             return kit_execution_refused("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
         }
     }
-    if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch)
+    if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch, entries.any(item -> item.suite == "ui" && item.entry.mode.ends_with("project")))
     version_run :: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
         env.version = kit_steps_version(version_run.stdout) ?? ""
@@ -1060,7 +1060,9 @@ fn kit_history_load(dir: String, suites: [String]) -> [String: KitHistory] {
     history
 }
 
-// Folds this run's measurements into the history and rewrites each suite's file.
+// Folds this run's measurements into the history and rewrites each suite's file. The
+// file is replaced by a rename, without fsync: a history lost in a crash only loses
+// its scheduling hints, and a durable write cost every run a journal flush.
 fn kit_history_save(dir: String, suites: [String], history: [String: KitHistory], results: [KitCaseResult]) {
     merged := history
     loop result in results {
@@ -1074,7 +1076,10 @@ fn kit_history_save(dir: String, suites: [String], history: [String: KitHistory]
             if key.starts_with(prefix) -> &rows.push("{kit_steps_byte_slice(key, prefix.count_bytes(), key.count_bytes())}\t{last.wall_ms}\t{last.peak_kib}")
         }
         &rows.sort_by(row -> row)
-        files.write_atomic(kit_history_file(dir, suite), "{rows.join("\n")}\n".bytes()).drop("a lost history only loses scheduling hints")
+        path :: kit_history_file(dir, suite)
+        staged :: "{path}.{process.current_pid()}.new"
+        files.write(staged, "{rows.join("\n")}\n").drop("a lost history only loses scheduling hints")
+        files.rename(staged, path).drop("a lost history only loses scheduling hints")
     }
 }
 

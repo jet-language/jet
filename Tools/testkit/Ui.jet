@@ -234,17 +234,18 @@ fn kit_ui_fixed_path(path: String) -> String {
     "{kit_steps_byte_slice(path, 0, path.count_bytes() - 4)}.fixed.jet"
 }
 
-// Stage the corpus once under the run's scratch. A project entry compiles in
-// the shared `ui-source` tree, rooted at its own project directory. A loose
-// entry's source root is its whole directory, and the compiler snapshots every
-// `.jet` file under it, so each loose entry is staged alone
+// Stage the corpus under the run's scratch. A project entry compiles in the
+// shared `ui-source` tree, rooted at its own project directory, so the whole
+// corpus is copied there only when `projects` (a project entry is selected). A
+// loose entry's source root is its whole directory, and the compiler snapshots
+// every `.jet` file under it, so each loose entry is staged alone
 // (kit_ui_stage_entry) on top of its directory's support, kept here in
 // `ui-support`.
-fn kit_ui_stage(root: String, scratch: String) {
+fn kit_ui_stage(root: String, scratch: String, projects: Bool) {
     loop directory in ["tests/ui", "tests/ui_lint"] {
         original :: files.join(root, directory)
         if !files.exists(original) -> next
-        kit_exec_copy_tree(original, files.join(files.join(scratch, "ui-source"), directory), true, false)
+        if projects -> kit_exec_copy_tree(original, files.join(files.join(scratch, "ui-source"), directory), true, false)
         _ :: kit_ui_stage_support(root, directory, scratch)
     }
 }
@@ -261,33 +262,31 @@ fn kit_ui_stage_support(root: String, directory: String, scratch: String) -> Boo
     support :: files.join(files.join(scratch, "ui-support"), kit_ui_support_key(directory))
     files.create_dir_all(support) ?? panic("mkdir {support}: {err}")
     children :: files.list_dir(files.join(root, directory)) ?? panic("stage UI {directory}: {err}")
-    stems := [String]{}
-    loop child in children {
-        if !child.is_dir && !child.name.starts_with(".") && kit_ui_loose(child.path, child.name) -> &stems.push(kit_steps_byte_slice(child.name, 0, child.name.count_bytes() - 4))
-    }
-    holds := stems.len() > 0
+    owned :: kit_ui_sidecars(children)
+    holds := owned.len() > 0
     loop child in children {
         if child.name == ".git" || child.name == ".jet" -> next
         name :: if child.name == "state" || child.name == "fixture-state" -> ".jet" else -> child.name
         if {
             child.is_dir && ((!child.name.starts_with(".") && kit_ui_project_entry(child.path) != "") || kit_ui_stage_support(root, files.join(directory, child.name), scratch)) -> holds = true
             child.is_dir -> kit_exec_copy_tree(child.path, files.join(support, name), true, false)
-            !kit_ui_sidecar(stems, child.name) -> kit_exec_copy_file(child.path, files.join(support, child.name))
+            owned.get(child.name) == None -> kit_exec_copy_file(child.path, files.join(support, child.name))
         }
     }
     holds
 }
 
-// Whether the kit owns `name` for one of the loose entries `stems`: its
-// source, its fixed companion or a snapshot.
-fn kit_ui_sidecar(stems: [String], name: String) -> Bool {
-    loop stem in stems {
-        loop suffix in [".jet", ".fixed.jet", ".stderr", ".warn", ".published.snapshot"] {
-            sidecar :: "{stem}{suffix}"
-            if name == sidecar -> return true
-        }
+// The names the kit owns among `children` for their loose entries: each entry's
+// source, its fixed companion and its snapshots. A map, so a directory of n
+// entries stages in O(n), not O(n²).
+fn kit_ui_sidecars(children: [DirEntry]) -> [String: Bool] {
+    owned := [String: Bool]{}
+    loop child in children {
+        if child.is_dir || child.name.starts_with(".") || !kit_ui_loose(child.path, child.name) -> next
+        stem :: kit_steps_byte_slice(child.name, 0, child.name.count_bytes() - 4)
+        loop suffix in [".jet", ".fixed.jet", ".stderr", ".warn", ".published.snapshot"] -> owned["{stem}{suffix}"] = true
     }
-    false
+    owned
 }
 
 // A loose entry's own source tree: its directory's support, the entry and its
