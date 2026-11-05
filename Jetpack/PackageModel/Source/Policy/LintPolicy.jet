@@ -43,11 +43,17 @@ fn pkg_lint_e1293(original: Diagnostic) -> Diagnostic Never! {
     holes :: [(key: String, value: String)]{
         (key: "name", value: name),
         (key: "code", value: original.code),
-        (key: "what", value: original.what),
-        (key: "why", value: why),
-        (key: "fix", value: original.fix)
+        (key: "what_text", value: original.what),
+        (key: "why_text", value: why),
+        (key: "fix_text", value: original.fix)
     }
-    diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
+    denied := diagnostic_from_registry("E1293", original.span, pkg_lint_fill_row(row.what, holes), pkg_lint_fill_row(row.why, holes), pkg_lint_fill_row(row.fix, holes))
+    // The lint's site stays its site.
+    denied.source_path = original.source_path
+    denied.source_offset = original.source_offset
+    denied.source_start = original.source_start
+    denied.origin = original.origin
+    denied
 }
 
 // Replace each `{hole}` of a registry template with its value.

@@ -96,6 +96,7 @@ use {
         CompilerThreads,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
         DeclID,
         DeclTable,
         decl_table_find,
@@ -169,6 +170,8 @@ use {
         pkg_compute_package_effects,
         pkg_effect_enforce,
         pkg_effect_module_owner,
+        pkg_lint_e1293,
+        pkg_lint_policy_is_denied,
     ]
     jet_ir.[IRProgram, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
     jet_eval.[
@@ -277,11 +280,16 @@ fn jet_driver_find_graph_import(imports: [SemaRegistrationImport], source_identi
 // A dependency package is checked as its own package. A dependency with
 // errors fails the importer once per dependency package: its own errors are
 // reported inline, followed by one E0626 naming the package and the check
-// that owns it. A dependency's warnings stay with its own check.
+// that owns it. A dependency's warnings stay with its own check. A lint the
+// entry package's `policy.lints.deny` names fails the build as E1293.
 fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
     entry_root := ""
+    entry_deny := [String]{}
     loop package in load.packages {
-        if package.identity == load.package_identity -> entry_root = package.root_path
+        if package.identity == load.package_identity {
+            entry_root = package.root_path
+            entry_deny = package.policy_lints_deny
+        }
     }
     kept := [Diagnostic]{}
     held := [Diagnostic]{}
@@ -300,7 +308,11 @@ fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostic
             owner_length = package.root_path.len()
         }
         if owner < 0 || load.packages[owner].identity == load.package_identity || load.packages[owner].identity.starts_with("source-root:") {
-            &kept.push(diagnostic)
+            if diagnostic.severity == DIAGNOSTIC_LINT && pkg_lint_policy_is_denied(entry_deny, diagnostic.code) {
+                &kept.push(pkg_lint_e1293(diagnostic))
+            } else {
+                &kept.push(diagnostic)
+            }
             next
         }
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next

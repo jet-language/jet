@@ -1078,6 +1078,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     policy_unsafe_paths := [String]?{None}
     boundaries := [ImportBoundary]{}
     policy_expert := Bool?{None}
+    policy_lints_deny := [String]{}
     name_seen := false
     version_seen := false
     edition_seen := false
@@ -1175,6 +1176,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                             policy_declarations = ^policy.declarations
                             policy_unsafe_paths = ^policy.unsafe_paths
                             policy_expert = policy.expert
+                            policy_lints_deny = policy.lints_deny ?? [String]{}
                             loop declaration_index in 0..<policy_declarations.len() {
                                 policy_declarations[declaration_index].source = root.files[manifest].path
                             }
@@ -1303,7 +1305,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: ^authority_grants, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs, settings: ^settings, profile_settings: ^profile_settings, boundaries: ^boundaries}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: ^authority_grants, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, policy_lints_deny: ^policy_lints_deny, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs, settings: ^settings, profile_settings: ^profile_settings, boundaries: ^boundaries}
 }
 
 // The source text of tokens `start..<end` (comments dropped), and a lone
