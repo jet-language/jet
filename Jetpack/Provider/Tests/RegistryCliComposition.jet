@@ -202,3 +202,90 @@ fn publication_tuf_test_command(root: String, project: String, bare: String, sto
     assert(offline.success, offline.errors)
     files.remove_all(root) ?? panic("cleanup")
 }
+
+// tests/pkg.rs:7666-7869. A verified advisory feed gates the registry fetch
+// before Hangar ingest: an immature release fails E2609 and writes nothing, an
+// exact source exception or a mature clock admits it, and an expired feed
+// still lets an exact lock reuse the same Hangar object.
+fn registry_cli_test_fetch(root: String, consumer: String, bare: String, store: String, now: String) -[Env, Exec, Time]> ProcessReceipt Never! {
+    spec :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).env("JET_ADVISORY_NOW", now)
+    spec.env_remove("JET_ADVISORY_DB").env_remove("JET_ADVISORY_TRUST").env_remove("JET_ADVISORY_PUBLIC_KEY").run() ?? panic("fetch at {now}")
+}
+fn registry_cli_test_entry_with(verification: &StoreVerification, roots: HangarRoots, name: String, version: String, provenance: String) -> StoreEntry? {
+    found := StoreEntry?{None}
+    loop stored in store_list(&verification, roots) {
+        if found == None && stored.name == name && stored.version == version && stored.envelope.provenance.contains(provenance) -> found = Val(stored)
+    }
+    found
+}
+#Test("publication tuf original registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest") {
+    verification := StoreVerification.new()
+    root :: registry_cli_test_root("advisory-freshness")
+    publisher :: files.join(root, "publisher")
+    consumer :: files.join(root, "consumer")
+    publication_tuf_test_project(publisher, "freshlib", "1.2.0")
+    bare :: publication_tuf_test_registry(root, "freshlib", "1.2.0")
+    store :: files.join(root, "legacy-store")
+    files.create_dir_all(store) ?? panic("legacy store")
+    published :: publication_tuf_test_command(root, publisher, bare, store, [String]{"registry", "publish"}).run() ?? panic("publish")
+    assert(published.success, published.errors)
+    files.create_dir_all(files.join(consumer, ".jet")) ?? panic("consumer")
+    manifest_path :: files.join(consumer, "package.jet")
+    plain :: "{publication_tuf_test_manifest("fresh-consumer", "0.1.0")}\ndeps: {{\n    freshlib: freshlib#1.2.0,\n}}\n"
+    files.write(manifest_path, plain) ?? panic("consumer manifest")
+    previous_keys :: sys.get("JET_KEYS_DIR")
+    sys.set("JET_KEYS_DIR", files.join(root, "keys"))
+    generated :: publication_keygen("advisory", false) ?? panic("advisory keygen")
+    feed := PublicationAdvisoryFeed{
+        sequence: 1, issued_at: 100, expires_at: 200000, maturity_seconds: PUBLICATION_DEFAULT_MATURITY_SECONDS,
+        key_id: publication_advisory_key_id(generated.public_key_hex) ?? panic("advisory key id"),
+        public_key: generated.public_key_hex, signature: "",
+        releases: [PublicationAdvisoryRelease]{PublicationAdvisoryRelease{package: "freshlib", version: publication_parse_semver("1.2.0") ?? panic("version"), first_seen: 100, source_class: PublicationSourceClass.ThirdParty}},
+        advisories: [PublicationAdvisory]{}, exceptions: [PublicationAdvisoryException]{}
+    }
+    feed.signature = publication_sign_advisory_feed(feed, generated.seed_path) ?? panic("sign advisory feed")
+    feed_path :: files.join(files.join(consumer, ".jet"), "advisories.db")
+    files.write(feed_path, publication_advisory_feed_text(feed)) ?? panic("write advisory feed")
+    files.write(files.join(files.join(consumer, ".jet"), "advisory-trust"), "public_key={feed.public_key}\nmin_sequence=1\n") ?? panic("write advisory trust")
+    roots :: HangarRoots.at(files.join(root, "jetpack-root"))
+    immature :: registry_cli_test_fetch(root, consumer, bare, store, "200")
+    assert(!immature.success, "an immature registry release must not fetch")
+    assert(immature.errors.contains("E2609"), immature.errors)
+    assert(immature.errors.contains("freshlib#1.2.0"), immature.errors)
+    assert(!files.exists(files.join(files.join(files.join(files.join(consumer, ".jet"), "build"), "deps"), "freshlib")), "an immature release must not materialize")
+    loop stored in store_list(&verification, roots) -> assert(!(stored.name == "freshlib" && stored.version == "1.2.0"), "an immature release must not reach Hangar")
+    files.write(manifest_path, "{plain}\npolicy: {{ exceptions: [PolicyException{{ id: \"JSA-2026-0001\", scope: \"freshlib#1.2.0\", reason: \"urgent security fix\", expires: 9999999999 }}] }}\n") ?? panic("exception manifest")
+    excepted :: registry_cli_test_fetch(root, consumer, bare, store, "200")
+    assert(excepted.success, excepted.errors)
+    assert(registry_cli_test_entry_with(&verification, roots, "freshlib", "1.2.0", "source-policy-exception=id=JSA-2026-0001;scope=freshlib#1.2.0") != None, "an exact source exception must be recorded in Hangar provenance")
+    files.write(manifest_path, plain) ?? panic("plain manifest")
+    lock_path :: files.join(files.join(consumer, ".jet"), "lock")
+    // The Rust fetch resolved without a lock here; drop the exception run's lock.
+    files.remove(lock_path) ?? panic("drop exception lock")
+    mature :: registry_cli_test_fetch(root, consumer, bare, store, "100000")
+    assert(mature.success, mature.errors)
+    lock :: pkg_lock_parse(files.read(lock_path) ?? panic("read lock")) ?? panic("parse canonical lock")
+    locked := false
+    loop package in lock.packages {
+        if package.name == "freshlib" -> locked = true
+    }
+    assert(locked, "a mature release must be locked")
+    entry :: registry_cli_test_entry_with(&verification, roots, "freshlib", "1.2.0", "advisory-feed=sequence=1") ?? panic("a mature release must reach Hangar with its advisory receipt")
+    assert(entry.envelope.provenance.contains("maturity=86400s"), entry.envelope.provenance)
+    stale := feed.copy()
+    stale.expires_at = 150
+    stale.signature = publication_sign_advisory_feed(stale, generated.seed_path) ?? panic("sign stale feed")
+    files.write(feed_path, publication_advisory_feed_text(stale)) ?? panic("write stale feed")
+    reused :: registry_cli_test_fetch(root, consumer, bare, store, "200")
+    assert(reused.success, "an exact lock must remain usable when advisory metadata expires: {reused.errors}")
+    same := false
+    loop stored in store_list(&verification, roots) {
+        if stored.name == "freshlib" && stored.version == "1.2.0" && stored.out == entry.out && stored.envelope.provenance.contains("advisory-feed=sequence=1") -> same = true
+    }
+    assert(same, "an exact lock must reuse the same Hangar object and keep its advisory receipt")
+    if previous_keys == {
+        .Val(value) -> sys.set("JET_KEYS_DIR", value)
+        .None -> { _ :: sys.unset("JET_KEYS_DIR") ?? panic("restore env") }
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
