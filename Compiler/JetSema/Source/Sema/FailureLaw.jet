@@ -796,10 +796,13 @@ fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, g
         if nominal.symbol.name != leaf -> next
         // The module source is read in place at the (rare) diagnostic sites;
         // binding it here copied the whole source text for every carrier.
+        // A member type hoisted out of an inline module is registered under
+        // its generated name; the diagnostic names it as its declaration does.
+        shown :: sema_public_failure_shown_name(graph.modules[row.module_index].source, nominal.symbol.span, leaf)
         if nominal.symbol.visibility < 2 {
             if reported.get(leaf) == None {
                 reported[leaf] = true
-                &diagnostics.push(sema_public_failure_diagnostic(function, leaf, nominal.symbol.span, graph.modules[row.module_index].source))
+                &diagnostics.push(sema_public_failure_diagnostic(function, shown, nominal.symbol.span, graph.modules[row.module_index].source))
             }
             next
         }
@@ -808,9 +811,15 @@ fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, g
             member :: "{leaf}.{field.symbol.name}"
             if field.symbol.visibility >= 2 || reported.get(member) != None -> next
             reported[member] = true
-            &diagnostics.push(sema_public_failure_diagnostic(function, member, field.symbol.span, graph.modules[row.module_index].source))
+            &diagnostics.push(sema_public_failure_diagnostic(function, "{shown}.{field.symbol.name}", field.symbol.span, graph.modules[row.module_index].source))
         }
     }
+}
+
+fn sema_public_failure_shown_name(source: String, span: Span, leaf: String) -> String {
+    shown :: sema_call_histories_span_text(source, span)
+    if shown == "" -> return leaf.copy()
+    shown
 }
 
 fn sema_public_failure_diagnostic(function: String, member: String, span: Span, source: String) -> Diagnostic {

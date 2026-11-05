@@ -367,6 +367,16 @@ fn sema_inline_is_local(rewrite: SemaInlineRewrite, name: String) -> Bool Never!
     false
 }
 
+// `alias.Type` as a value's base (`internal.Failure.Missing`) names the
+// hoisted member type, as a type position spelling `alias.Type` does.
+fn sema_inline_type_path(rewrite: SemaInlineRewrite, base: Expr) -> Expr? Never! {
+    if base == .Field(inner, member, span, node) && inner == .Ident(alias, _, _) {
+        if sema_inline_is_local(rewrite, alias) -> return None
+        if rewrite.types.get("{alias}.{member}") == .Val(.Named(name)) -> return Val(Expr.Ident{name: name, span: span, id: node})
+    }
+    None
+}
+
 fn sema_inline_surface(rewrite: SemaInlineRewrite, name: String) -> SemaInlineModuleSurface? Never! {
     if sema_inline_is_local(rewrite, name) -> return None
     loop surface in rewrite.modules {
@@ -719,7 +729,10 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .RawOf(value, span, node) -> return Expr.RawOf{value: sema_inline_rewrite_expr(&rewrite, value), span: span, id: node}
         .Copy(value, span, node) -> return Expr.Copy{value: sema_inline_rewrite_expr(&rewrite, value), span: span, id: node}
         .Place(value, access, span, node) -> return Expr.Place{value: sema_inline_rewrite_expr(&rewrite, value), access: access, span: span, id: node}
-        .Field(base, member, span, node) -> return Expr.Field{base: sema_inline_rewrite_expr(&rewrite, base), member: member, span: span, id: node}
+        .Field(base, member, span, node) -> {
+            if sema_inline_type_path(rewrite, base) == .Val(type_name) -> return Expr.Field{base: type_name, member: member, span: span, id: node}
+            return Expr.Field{base: sema_inline_rewrite_expr(&rewrite, base), member: member, span: span, id: node}
+        }
         .OptField(base, member, member_span, flatten, span, node) -> return Expr.OptField{base: sema_inline_rewrite_expr(&rewrite, base), member: member, member_span: member_span, flatten: flatten, span: span, id: node}
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> {
             if receiver == .Ident(alias, alias_span, _) {
