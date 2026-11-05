@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92175,
+    "rev": 92182,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73563,6 +73563,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c62 has no port target yet: in the Rust era the struct signature was visible only to the in-process API (CmdSupply.rs:429-433 printed kind and name; ApiFreeze.rs:20-40 snapshotted only pub fns), and Jet has no public-API producer today (Jetpack/Publication/Source/Diff.jet has the types and nothing produces them). The producer requirement is now on #6418; c62 is met with that #Test. Analysis: Prep-2, briefs/6096-c62-blocker.md."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "G15 audit on dev 0d1ea12f79 (Docs/audits/g15-2026-11/VERDICTS-g15-6096-4599.md, commit 125e2e8f89): 1 criteria settled, 34 stay open; each open row names what is left."
@@ -74132,11 +74137,11 @@
         {
           "n": 61,
           "text": "pkg-git-transport: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::git_transport_uses_canonical_public_ip_classifier)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/pkg/git_transport_uses_canonical_public_ip_classifier.case (PASS)",
+          "at": "2026-11-05T00:01:36.069Z"
         },
         {
           "n": 62,
@@ -74150,20 +74155,20 @@
         {
           "n": 63,
           "text": "pkg-vendor-security: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::vendor_rejects_symlink_sources_and_traversal_names)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/pkg/vendor_rejects_symlink_sources_and_traversal_names.case (ported-failing #6418)",
+          "at": "2026-11-05T00:01:36.797Z"
         },
         {
           "n": 64,
           "text": "polyglot-cpp-binder: 1 deleted Rust tests have a Jet test covering the same behavior (tests/polyglot_systems.rs::cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/polyglot_systems/cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface.case (ported-failing #6418)",
+          "at": "2026-11-05T00:01:37.639Z"
         },
         {
           "n": 65,
@@ -74271,7 +74276,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-05T00:01:35.152Z",
+      "updated": "2026-11-05T00:01:48.849Z",
       "updatedBy": "Main"
     },
     {
@@ -84781,6 +84786,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:33:38.449Z"
+        },
+        {
+          "n": 135,
+          "text": "jet fetch and jet fetch --locked are built; tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case passes (stale or missing provider artifact fails E1256 and writes no lock; a good one fetches, projects .jet/bindings/js/plotly.jet, compiles, and verifies byte-identical in locked mode), and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:01:38.392Z"
+        },
+        {
+          "n": 136,
+          "text": "jet registry vendor is built; tests/cases/pkg/vendor_rejects_symlink_sources_and_traversal_names.case and tests/cases/pkg/cli_vendor_dir_flag_relocates.case pass (symlinked sources and traversal-shaped dependency names are refused without touching anything outside the vendor tree), and their known-failing rows are removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:01:39.086Z"
+        },
+        {
+          "n": 137,
+          "text": "jet publish has a Jet public-API producer (PublicAPIItem from the checked package, structs included); a Jetpack/Publication #Test proves #CLI struct Config { port: Int{3000}; required: Int } freezes as struct Config { port: Int; required: Int [positional 0] } (tests/pkg.rs:5948), which meets #6096 c62",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:01:47.906Z"
         }
       ],
       "refs": [],
@@ -84792,7 +84824,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-04T23:33:39.397Z",
+      "updated": "2026-11-05T00:01:47.906Z",
       "updatedBy": "Main"
     },
     {
@@ -171957,6 +171989,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T00:01:48.849Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T00:01:47.906Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#137 jet publish has a Jet public-API producer (PublicAPIItem fro"
+    },
+    {
+      "at": "2026-11-05T00:01:39.086Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#136 jet registry vendor is built; tests/cases/pkg/vendor_rejects"
+    },
+    {
+      "at": "2026-11-05T00:01:38.392Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#135 jet fetch and jet fetch --locked are built; tests/cases/pkg/"
+    },
+    {
+      "at": "2026-11-05T00:01:37.639Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-05T00:01:36.797Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-05T00:01:36.069Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#61"
+    },
     {
       "at": "2026-11-05T00:01:35.152Z",
       "by": "Main",
