@@ -108,6 +108,20 @@ fn env_or(name: String, fallback: String) -[Env]> String Never! {
     value
 }
 
+// The jet binary the lane check runs: $JET, else the first `jet` file on
+// PATH, as an absolute path (LaneCheck.jet needs a binary path, not a
+// command name); "jet" when neither names one.
+fn jet_binary() -[Env, FS]> String Never! {
+    named :: env_or("JET", "jet")
+    if named.contains("/") -> return files.canonicalize(named) ?? named.copy()
+    loop dir in env_or("PATH", "").split(":") {
+        if dir == "" -> next
+        candidate :: files.join(dir, named)
+        if files.is_file(candidate) -> return files.canonicalize(candidate) ?? candidate.copy()
+    }
+    named.copy()
+}
+
 // --- roots (Tools/agent/roots.sh) -------------------------------------------
 
 // The value `${XDG_CONFIG_HOME:-~/.config}/jet/env` assigns to `name`, the
@@ -327,7 +341,7 @@ fn revert(dir: String, applied: [String]) Never! -[Exec, IO, Time.Wait]> {
 // run the personal-information guard first. Error rows are shown as the
 // check prints them.
 fn check(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
-    jet :: env_or("JET", "jet")
+    jet :: jet_binary()
     compiler := false
     targets := [String]{}
     loop path in touched {
