@@ -18,7 +18,6 @@ const put = (name, content) => { const path = join(sandbox, name); mkdirSync(dir
 try {
     for (const path of ['Tools/agent/verify-full.sh', 'Tools/agent/verify-full.mjs', 'Tools/agent/native-suite.mjs']) put(path, readFileSync(join(repo, path)));
     for (const gate of ['closeout-gate', 'core-coverage-census', 'core-module-check']) put(`Tools/agent/${gate}.mjs`, `if (process.env.FIXTURE_MODE === 'closeout' && ${JSON.stringify(gate)} === 'closeout-gate') process.exit(3);\n`);
-    put('Tools/ci/test-shards.sh', '#!/usr/bin/env bash\nprintf "%s\\n" golden ui cases registries\n');
     put('Tools/agent/proof-source.mjs', `import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 export function assertPinnedSource(source, commit) {if(existsSync(source+'/.corrupted'))throw Error('pinned source changed');return {commit};}
