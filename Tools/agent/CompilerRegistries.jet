@@ -34,6 +34,10 @@ TOOL :: "/Tools/agent/CompilerRegistries.jet"
 FLAGS :: [String]{"--jet", "--manifest", "--receipt", "--out", "--runtime", "--shard"}
 SOURCE_LIST :: "Compiler/JetRuntime/sources.list"
 RETIRED :: "Tools/testkit/retired-with-rust.tsv"
+// The testkit cases entry: `jet test Compiler --profile registries`, every
+// case including the opt-in ones, its verdicts in JET_CI_EVIDENCE_DIR.
+KIT_PACKAGE :: "Compiler"
+KIT_PROFILE :: "registries"
 RT :: "Compiler/JetRuntime/Tests/"
 BE :: "Compiler/JetBackend/Tests/"
 TEST_SCHEMA :: "jet.test.v1"
@@ -526,14 +530,11 @@ fn registry_rows(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registry
     rows
 }
 
-// The testkit binary's sources: Tools/testkit (run.jet and its manifest) and
-// the Compiler/JetTestKit engine package it depends on, assembled under their
-// repository-relative paths so the path dependency still resolves.
+// The testkit cases entry's inputs: the Compiler manifest that declares its
+// `registries` profile and the retirement table; the corpus engine is part of
+// the jet under test.
 fn testkit_inventory(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
-    sources := [String]{"Tools/testkit/run.jet", "Tools/testkit/package.jet", "Compiler/JetTestKit/package.jet"}
-    engine := files_under(repo, "Compiler/JetTestKit", ".jet")
-    &engine.sort()
-    loop path in engine -> &sources.push(path)
+    sources := [String]{"{KIT_PACKAGE}/package.jet"}
     &sources.push(RETIRED)
     table :: retirements(repo)
     retired := [Dyn]{}
@@ -1353,13 +1354,7 @@ fn generate(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wait
         &entries.push(Dyn.Object(entry.copy()))
     }
     kit :: testkit_inventory(repo)
-    kit_dir :: "{out}/testkit"
-    loop source in kit.sources {
-        target :: "{kit_dir}/{source}"
-        files.create_dir_all(files.dirname(target)) ?? return fail("`{target}` cannot be prepared: {err}")
-        files.write_bytes(target, files.read_bytes("{repo}/{source}") ?? return fail("`{source}` cannot be read: {err}")) ?? return fail("`{target}` cannot be written: {err}")
-    }
-    kit_entry :: "{kit_dir}/Tools/testkit/run.jet"
+    kit_entry :: "{repo}/{KIT_PACKAGE}/package.jet"
     summary :: "{{\"PASS\":{kit.cases.len()},\"FAIL\":0,\"KNOWN-FAILING\":0,\"UNEXPECTED-PASS\":0,\"UNSUPPORTED\":0,\"SKIP-HOST\":0,\"OPT-IN\":0,\"REFUSED\":0,\"ERROR\":0,\"TIMEOUT\":0,\"suites\":[\"cases\"]}}\n"
     testkit := [String: Dyn]{
         "id": Dyn.Text("testkit/cases"),
@@ -1603,22 +1598,18 @@ fn run_entry(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, je
     stderr := ""
     failure := ""
     if kind == "testkit" {
-        kit_dir :: files.dirname(files.dirname(files.dirname(path)))
         loop source in array_field(field(manifest, "testkit"), "sources") {
             name :: text_field(source, "path")
-            if (sha256_path("{kit_dir}/{name}") ?? "") != text_field(source, "sha256") -> return Err(problem("assembled testkit source changed: {name}"))
+            if (sha256_path("{repo}/{name}") ?? "") != text_field(source, "sha256") -> return Err(problem("testkit input changed: {name}"))
         }
-        project :: files.dirname(path)
-        build :: registry_spec([String]{jet, "build", path}, project, repo, [Setting]{}, timeout_ms).run() ?? return Err(problem("testkit native build cannot start: {err}"))
-        files.write("{stem}.build.stdout", build.output) ?? return Err(problem("`{stem}.build.stdout` cannot be written: {err}"))
-        files.write("{stem}.build.stderr", build.errors) ?? return Err(problem("`{stem}.build.stderr` cannot be written: {err}"))
-        if build.timed_out || build.signal != None || build.code != 0 -> return Err(problem(exit_problem("testkit native build", build, timeout_ms)))
-        report_path :: "{stem}.results.json"
-        scratch :: "{project}/case-scratch"
+        evidence :: "{stem}.evidence"
+        scratch :: "{stem}.scratch"
+        files.create_dir_all(evidence) ?? return Err(problem("`{evidence}` cannot be created: {err}"))
         files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
-        command = [String]{"{project}/.jet/build/run", "cases", "--jet", jet, "--opt-in", "--scratch", scratch, "--results", report_path}
+        command = [String]{jet, "test", KIT_PACKAGE, "--profile", KIT_PROFILE}
         cwd = repo.copy()
-        child :: registry_spec(command, repo, repo, [Setting]{}, timeout_ms).run() ?? return Err(problem("the testkit cannot start: {err}"))
+        settings :: [Setting]{Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()}, Setting{name: "JET_TEST_SCRATCH_DIR", value: scratch.copy()}}
+        child :: registry_spec(command, repo, repo, settings, timeout_ms).run() ?? return Err(problem("the testkit cases cannot start: {err}"))
         stdout = child.output.copy()
         stderr = child.errors.copy()
         if !child.timed_out && child.signal == None {
@@ -1627,11 +1618,12 @@ fn run_entry(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, je
         signal = signal_dyn(child.signal)
         failure = if child.timed_out || child.signal != None || child.code != 0 -> exit_problem("registry", child, timeout_ms) else -> ""
         if failure == "" {
-            report :: read_json(report_path) ?? return Err(err)
+            report :: read_json("{evidence}/cases.json") ?? return Err(err)
             rows :: array_field(report, "results")
             names :: rows.map(row -> text_field(row, "case"))
             expected :: array_field(entry, "caseNames").map(name -> if name == .Text(text) -> text.copy() else -> "")
-            if text_field(report, "jet") != jet || rows.len() != count || rows.any(row -> text_field(row, "status") != "PASS") || sorted_texts(names) != sorted_texts(expected) {
+            ran_by :: files.realpath(text_field(report, "jet")) ?? ""
+            if ran_by != (files.realpath(jet) ?? jet) || rows.len() != count || rows.any(row -> text_field(row, "status") != "PASS") || sorted_texts(names) != sorted_texts(expected) {
                 return Err(problem("testkit cases contain missing, non-PASS, skipped, or unexpected outcomes"))
             }
             result["report"] = report
