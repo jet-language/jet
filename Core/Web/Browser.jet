@@ -147,8 +147,10 @@ struct __BrowserScope {
     closed: Bool
 }
 
-// The session's one WebSocket. A `WsConn` cannot be copied, so every copy of
-// a handle reaches it through this shared cell; the last copy closes it.
+// The session's one WebSocket. Every copy of a handle reaches it through this
+// shared cell, and the last copy closes it. A struct that held the `WsConn`
+// directly would be copied bit-for-bit and dropped twice (#6581); remove this
+// cell once #6581 lands.
 struct __BrowserWire {
     conn: WsConn
 }
@@ -547,8 +549,8 @@ struct BrowserLocked {
     fn binary(self) -> String Never! { self.binary }
     fn protocol(self) -> String Never! { self.protocol }
     fn verify(self) BrowserError! -[FS]> {
-        if !core.web.browser.__is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
-        size :: core.web.browser.__file_size(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
+        if !files.is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
+        size :: files.getsize(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
         if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
         Ok()
     }
@@ -729,10 +731,10 @@ fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
 // `.jet/lock` of the working directory, the project root a program runs from.
 fn locked(engine: String) -[FS, IO]> BrowserLocked BrowserError! {
     if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
-    raw :: core.web.browser.__read_text(".jet/lock") ?? return Err(BrowserError{kind: "missing lock"})
+    raw :: files.read(".jet/lock") ?? return Err(BrowserError{kind: "missing lock"})
     entry :: parse_locked(raw, engine)
-    if !core.web.browser.__is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
-    size :: core.web.browser.__file_size(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
+    if !files.is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
+    size :: files.getsize(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
     if size != entry.size -> return Err(BrowserError{kind: "size mismatch"})
     Ok(entry)
 }
@@ -1581,7 +1583,7 @@ fn write_report(report: BrowserTestReport, path: String) BrowserError! -[FS]> {
         else -> report_text(report)
     }
     write_report_text(path, rendered)
-    if report.ui || report.reporter == "html" -> write_report_text(core.web.browser.__html_path(path), report_html(report))
+    if report.ui || report.reporter == "html" -> write_report_text(files.with_suffix(path, ".html"), report_html(report))
     Ok()
 }
 
@@ -1653,8 +1655,8 @@ fn bounded_text(value: String, limit: Int) -> String Never! {
 }
 
 fn watch_changed(path: String, last_modified_ms: Int) -[FS, Net]> Bool BrowserError! {
-    if core.web.browser.__modified_ms(path) == .Val(fact) -> return Ok(fact > last_modified_ms)
-    Ok(last_modified_ms >= 0)
+    modified :: files.getmtime(path) ?? return Ok(last_modified_ms >= 0)
+    Ok(modified > last_modified_ms)
 }
 
 fn server_stop(server: BrowserTestServer) Never! -[Exec, Time.Wait]> { server.stop() }
@@ -1816,8 +1818,7 @@ fn parse_i64(value: String) -> Int? Never! {
 }
 
 fn config_value(root: String, key: String) -[FS]> String? Never! {
-    path :: core.web.browser.__path_join(root, "browser-tests.conf")
-    raw :: core.web.browser.__read_text(path) ?? return None
+    raw :: files.read(files.join(root, "browser-tests.conf")) ?? return None
     loop line in parse.split(raw, "\n") {
         pair :: parse.split_once(text.trim(line), "=")
         if pair.found && parse.lower(text.trim(pair.head)) == parse.lower(key) -> return Val(text.trim(pair.tail))
@@ -1913,8 +1914,8 @@ fn config_from_snapshot(root: String, env: [(name: [U8], value: [U8])]) -[FS]> B
     validated_timeout :: timeout(timeout_ms)
     reporter :: parse.lower(setting(root, env, "JET_TEST_REPORTER", "reporter") ?? "text")
     if reporter != "text" && reporter != "json" && reporter != "html" -> return Err(BrowserError{kind: "protocol"})
-    artifacts :: setting(root, env, "JET_TEST_ARTIFACTS", "artifacts") ?? core.web.browser.__path_join(root, ".jet/browser-tests/artifacts")
-    report_path :: setting(root, env, "JET_TEST_REPORT", "report") ?? core.web.browser.__path_join(root, ".jet/browser-tests/report.json")
+    artifacts :: setting(root, env, "JET_TEST_ARTIFACTS", "artifacts") ?? files.join(root, ".jet/browser-tests/artifacts")
+    report_path :: setting(root, env, "JET_TEST_REPORT", "report") ?? files.join(root, ".jet/browser-tests/report.json")
     server_url :: env_value(env, "JET_TEST_WEB_SERVER_URL") ?? setting(root, env, "JET_BROWSER_TEST_SERVER_URL", "server-url") ?? ""
     command :: env_value(env, "JET_TEST_WEB_SERVER_CMD") ?? env_value(env, "JET_BROWSER_TEST_SERVER_CMD") ?? config_value(root, "webServer") ?? config_value(root, "web_server") ?? ""
     reuse :: if env_value(env, "JET_TEST_WEB_SERVER_REUSE") != None -> env_bool(env, "JET_TEST_WEB_SERVER_REUSE", false) else -> parse.lower(config_value(root, "server") ?? "") == "reuse"

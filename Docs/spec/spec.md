@@ -3824,9 +3824,8 @@ namespace, so a test profile can't take the name of a stock or declared build
 profile. `tests` is the built-in suite, every `#Test` of the package; stock
 suites are declared in `suites:`, and code suites by `t.suite("<name>", body)`
 in `test.jet`'s `fn test`. A profile naming a suite none of these declares, or
-a name declared twice, is a manifest error (E1215) that `jet check` and every
-command loading the package report, as is a `defaults.test` that names neither
-a test profile nor a Check output.
+a name declared twice, fails the profile run (E1215), as does a
+`defaults.test` that names neither a test profile nor a Check output.
 
 ```text
 test: {

@@ -9,15 +9,12 @@
 // and `defaults: { test: <profile> }` picks the profile a bare `jet test` runs.
 use {
     jetpack_foundation.[BUILD_OPTIMIZE_BASIC, BUILD_OPTIMIZE_FULL, BUILD_OPTIMIZE_NONE]
-    jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_STRING, lex]
 }
 
 TEST_PROFILE_CTOR :: "TestProfile"
 TEST_SUITE_CTOR :: "TestSuite"
 // The built-in suite: every #Test of the package.
 TEST_SUITE_TESTS :: "tests"
-// The file whose `fn test` declares the package's code suites.
-TEST_CODE_SUITES_FILE :: "test.jet"
 // The build profiles every package has without declaring them.
 TEST_STOCK_BUILD_PROFILES :: [String]{"debug", "release", "ci", "hardened"}
 
@@ -276,30 +273,6 @@ impl PackageFacts {
     }
 }
 
-// The code suites a test.jet declares: the literal name of each
-// `.suite("name", …)` call, in source order. Sema refuses a computed name
-// (E0635), so the tokens hold every one without running code.
-fn pkg_test_code_suites(source: String) -> [String] Never! {
-    lexed :: lex(source.bytes())
-    names := [String]{}
-    if lexed.tokens.len() < 4 -> return names
-    loop index in 1..<lexed.tokens.len() {
-        if index + 2 >= lexed.tokens.len() -> break
-        method :: lexed.tokens[index]
-        literal :: lexed.tokens[index + 2]
-        if method.kind != TOKEN_IDENT || lexed.tokens[index - 1].kind != TOKEN_DOT || lexed.tokens[index + 1].kind != TOKEN_LPAREN || literal.kind != TOKEN_STRING -> next
-        if pkg_test_source_bytes(source, method.span.start, method.span.end) != "suite" -> next
-        name :: pkg_test_source_bytes(source, literal.span.start + 1, literal.span.end - 1)
-        if name != "" && !names.contains(name) -> &names.push(name)
-    }
-    names
-}
-
-fn pkg_test_source_bytes(source: String, start: Int, end: Int) -> String Never! {
-    if start < 0 || end < start || end > source.count_bytes() -> return ""
-    String.from_bytes(source.bytes().slice(start, end)) ?? ""
-}
-
 // The refusal of a `test:` body, "" when it parses.
 fn pkg_test_profiles_refusal(body: String) -> String Never! {
     if pkg_parse_test_profiles(body) == {
@@ -381,10 +354,4 @@ fn pkg_test_suites_refusal(body: String) -> String Never! {
     assert_eq(facts.test_suites_refusal([String]{}) ?? "", "test profile `full` names unknown suite `perf` (known: tests, golden)")
     assert_eq(facts.test_suites_refusal([String]{"golden", "perf"}) ?? "", "test suite `golden` is declared twice: in `suites:` of package.jet, and by `t.suite(\"golden\", …)` in test.jet; a suite has one name")
     assert_eq(facts.test_suites_refusal([String]{"tests"}) ?? "", "test suite `tests` is declared twice: as the built-in suite of every #Test, and by `t.suite(\"tests\", …)` in test.jet; a suite has one name")
-}
-
-#Test("code suites are the literal names of `.suite(` calls") {
-    source :: "fn test(t: Test) -> Int {{\n    t.suite(\"perf\", perf_rows)\n    t.suite(\"selfhost\", rows -> rows.pass(\"x\"))\n    suite(\"no\")\n    t.run()\n}}\n"
-    assert_eq(pkg_test_code_suites(source), [String]{"perf", "selfhost"})
-    assert_eq(pkg_test_code_suites(""), [String]{})
 }

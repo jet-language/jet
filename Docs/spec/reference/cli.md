@@ -767,8 +767,7 @@ are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
 failing row's detail is printed. A repeated id fails as `duplicate row id`, and
 a suite that panics or exits non-zero adds the failing row `stopped` with its
 panic message. A profile naming a suite that neither `suites:` nor `test.jet`
-declares, or a name both declare, is a `package.jet` error (E1215) that
-`jet check` reports too.
+declares, or a name both declare, is refused with E1215.
 A corpus suite (`suites: { ui: TestSuite{ ui_corpus: "../tests/ui" } }`,
 or `golden_corpus:` / `cases_corpus:`, a directory relative to `package.jet`)
 fails with E2105 when the directory is missing; otherwise the profile's corpus
