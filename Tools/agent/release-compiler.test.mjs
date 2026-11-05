@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { COMPILER_ALIASES, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName, shardJobs } from './release-compiler.mjs';
+import { COMPILER_ALIASES, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName, shardPool } from './release-compiler.mjs';
 
 const row = (id, tier, status, suite = 'ui') => ({ suite, case: id, tier, status, detail: '' });
 
@@ -36,12 +36,12 @@ test('options collect every problem at once', () => {
     assert.equal(parseArgs(['abc', '--min-gains', '0']).minGains, 0);
 });
 
-test('the shards split the slot memory cap instead of each claiming the host', () => {
-    assert.equal(shardJobs(parseArgs(['abc']), '16G'), 4);
-    assert.equal(shardJobs(parseArgs(['abc']), undefined), 4);
-    assert.equal(shardJobs(parseArgs(['abc', '--shards', '1']), '24G'), 24);
-    assert.equal(shardJobs(parseArgs(['abc', '--shards', '16']), '16G'), 1);
-    assert.equal(shardJobs(parseArgs(['abc', '--jobs', '3']), '64G'), 3);
+test('the shards split the slot memory cap instead of each claiming the whole room', () => {
+    assert.deepEqual(shardPool(parseArgs(['abc']), 4, '16G'), ['--memory', '4G']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 4, undefined), ['--memory', '4G']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 1, '24G'), ['--memory', '24G']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 16, '8G'), ['--memory', '1G']);
+    assert.deepEqual(shardPool(parseArgs(['abc', '--jobs', '3']), 4, '64G'), ['--memory', '16G', '--jobs', '3']);
 });
 
 test('a lost row is one the release passes and the candidate fails on both runs', () => {

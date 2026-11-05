@@ -379,7 +379,13 @@ content-authenticated files under `.jet/receipts`. The record-index JSONL
 snapshot under `.jet/records` is reloaded while holding its directory lock
 before each mutation and replaced atomically with mode `0600`. FIFO eviction
 removes only unreferenced disposable groups; removed artifacts are cleaned up
-after the new index is published, without following links.
+after the new index is published, without following links. The index and the
+`.jet/evidence` reports are per-machine cache: they publish by the same
+exclusive stage and rename but are not flushed to disk, so a crash can lose
+the latest entries but never expose a substituted file. An index that does not
+decode reads as empty, and an evidence report whose bytes differ from its
+content id is replaced by the next publication of that id. Proof artifacts,
+replay captures, receipts, and source transactions stay flushed.
 
 Build-node evidence stays immutable in the machine-wide artifact store. The
 latest record key for each program is workspace state:
@@ -708,7 +714,9 @@ keeps the emitted harness path. Native property generation is refused. Both
 paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
 `JET_TEST_SERIAL`, `JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and
 `JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
-never stdout; after a fatal trap only unreported tests rerun individually,
+never stdout, kept in memory: in the per-user runtime directory
+(`XDG_RUNTIME_DIR`), else `/dev/shm`, and in `.jet/build` only on a host with
+neither. After a fatal trap only unreported tests rerun individually,
 one child per core at a time (fewer when free memory can't hold 1 GiB per
 child; one at a time under `--serial`), reported in test order.
 Output checks run after joins in the same batch process. If that process

@@ -59,6 +59,13 @@ fn kit_parse_options(args: [String]) -> KitOptions {
                     return options
                 }
             }
+            "--memory" -> {
+                options.memory = kit_parse_size(value)
+                if options.memory <= 0 {
+                    options.error = "--memory must be a positive size: bytes, or a count with a K, M or G suffix"
+                    return options
+                }
+            }
             "--bless" -> &options.bless.ids.push(value)
             "--reason" -> options.bless.reason = value
             "--allow-shrink" -> &options.bless.allow_shrink.push(value)
@@ -171,8 +178,11 @@ struct KitOptions {
     list: Bool
     coverage: Bool
     opt_in: Bool{false}
-    // Corpus entries run at once; 0 sizes the pool from the host (kit_execute_jobs).
+    // Corpus entries run at once; 0 is half the scheduler's workers (kit_execute_jobs).
     jobs: Int{0}
+    // Bytes the running entries may claim together; 0 is all the memory the kit may
+    // still claim (kit_execute_budget).
+    memory: Int{0}
     bless: KitBless
     error: String
 }
@@ -905,10 +915,10 @@ fn kit_execute_suites(options: KitOptions, root: String, selected_suites: [Strin
         env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"
     }
     available :: kit_exec_available_memory()
-    jobs :: kit_execute_jobs(options.jobs, entries.len(), sys.cpu_count(), available)
+    jobs :: kit_execute_jobs(options.jobs, entries.len(), kit_execute_workers())
     history_dir :: files.join(state, "history")
     history :: kit_history_load(history_dir, selected_suites)
-    schedule :: kit_execute_schedule(entries, history, jobs, kit_execute_budget(options.jobs, available), available)
+    schedule :: kit_execute_schedule(entries, history, jobs, kit_execute_budget(options.memory, available), available)
     results := [KitCaseResult]{}
     ran_suites := [String]{}
     loop run in kit_execute_entries(entries, schedule, options, env, kit_known_load(root), root, run_scratch) {
@@ -970,27 +980,48 @@ fn kit_job_memory() -> Int { 1073741824 }
 // The run-wide resident-memory guard on each child, in bytes: 8 GiB.
 fn kit_resident_guard() -> Int { 8589934592 }
 
-// The pool size: an explicit --jobs, else one task per core capped so every running entry
-// keeps kit_job_memory() of the host's available memory (0 is unknown); never more tasks
-// than entries and never fewer than one.
-fn kit_execute_jobs(requested: Int, entries: Int, cores: Int, available: Int) -> Int {
-    jobs := requested
-    if jobs <= 0 {
-        jobs = cores
-        if available > 0 && available /% kit_job_memory() < jobs -> jobs = available /% kit_job_memory()
-    }
+// The pool size. Each running entry holds two scheduler workers: the task that reports it
+// (so a panic in the entry still reports it) waits on the entry's own. The default, half
+// the workers, gives every running entry both. An explicit --jobs above the workers is
+// lowered to them: more reporting tasks than workers could leave every worker waiting on
+// an entry that has none. Never more tasks than entries and never fewer than one. Memory,
+// not the task count, then bounds what runs at once: each entry's claim must fit the
+// budget (kit_execute_budget, kit_execute_schedule).
+fn kit_execute_jobs(requested: Int, entries: Int, workers: Int) -> Int {
+    jobs := if requested > 0 -> requested else -> workers >> 1
+    if jobs > workers -> jobs = workers
     if jobs > entries -> jobs = entries
     if jobs < 1 -> jobs = 1
     jobs
 }
 
-// The memory the pool's running entries may claim together, in bytes: the room this
-// process may still claim (0 is unknown), and with an explicit --jobs N no more than N
-// times kit_job_memory(), since a caller that sizes the pool shares the room with others.
+// This program's scheduler workers: the runtime's JET_SCHEDULER_THREADS override when it
+// is a positive count, else one per core.
+fn kit_execute_workers() -> Int {
+    set :: Int.parse(sys.get("JET_SCHEDULER_THREADS") ?? "") ?? 0
+    if set > 0 -> set else -> sys.cpu_count()
+}
+
+// The memory the pool's running entries may claim together, in bytes: an explicit
+// --memory, else all the memory this process may still claim (kit_exec_available_memory;
+// 0 is unknown: no memory gate).
 fn kit_execute_budget(requested: Int, available: Int) -> Int {
-    if requested <= 0 -> return available
-    sized :: requested * kit_job_memory()
-    if available > 0 && available < sized -> available else -> sized
+    if requested > 0 -> requested else -> available
+}
+
+// A --memory size in bytes: a count with an optional binary K, M or G suffix; 0 when
+// malformed or not positive.
+fn kit_parse_size(text: String) -> Int {
+    scale :: if {
+        text.ends_with("K") -> 1024
+        text.ends_with("M") -> 1048576
+        text.ends_with("G") -> 1073741824
+        else -> 1
+    }
+    digits :: if scale > 1 -> text.slice(0, text.len() - 1).copy() else -> text.copy()
+    count :: Int.parse(digits) ?? return 0
+    if count <= 0 -> return 0
+    count * scale
 }
 
 // How the pool runs the corpus: `order` lists corpus indexes longest-first, `weights`
@@ -1291,7 +1322,7 @@ fn kit_gate_execute(options: KitOptions, root: String, suites: [String]) -> KitE
 // reports only that suite, and a failing test lists every failing case of its suite.
 //   JET                  the compiler under test (unset: each suite test reports SKIP-HOST)
 //   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
-//                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --shard I/N,
+//                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --memory SIZE, --shard I/N,
 //                        --scratch DIR, --jetpack BIN, --list, --coverage (ui), --bless ID,
 //                        --bless-all --reason "TEXT", --allow-shrink ID
 //   JET_TEST_SCRATCH_DIR disk-backed scratch outside the checkout (default: kit_scratch_root)
@@ -1322,7 +1353,7 @@ fn test(t: Test) {
 fn run() {
     args :: process.args()
     if args.len() == 0 || args[0] == "--help" {
-        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--jobs N] [--scratch DIR] [--results FILE] [--list] [--opt-in] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
+        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--jobs N] [--memory SIZE] [--scratch DIR] [--results FILE] [--list] [--opt-in] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
         return
     }
     options :: kit_parse_options(args)

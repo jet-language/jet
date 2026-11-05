@@ -79,9 +79,10 @@ fn jet_cli_evidence_persist(cache: &WorkspaceDeclarationCache, report: EvidenceR
 // The encoded `bytes` of `report` as `.jet/evidence/<name>.json` under `root`,
 // published once and never replaced, and indexed as evidence for
 // `target_inputs_sha256`. `protected` exempts the row from history retention.
+// Evidence history is a per-machine cache, stored without flushes.
 fn jet_cli_evidence_persist_at(root: String, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
     if name == "" || name.contains("/") || name.contains("\\") || name == "." || name == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{name}`"))
-    held :: JetCLIRootedDirectory.open(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
     _ :: held.publish_immutable("{name}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
     index := jet_cli_record_index_load(root)
     identity :: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: report.build.toolchain, engine: evidence_producer_name(report.producer)}

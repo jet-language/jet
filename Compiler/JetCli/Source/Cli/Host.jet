@@ -1688,7 +1688,9 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if measure != None -> spec = spec.env("JET_TEST_MEASURE", "1")
     time_limit := Duration?{None}
     if options.time_limit_ms == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
-    run :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, "{binary}.records", time_limit) ?? {
+    // The children's outcome records stay in memory: no test writes the disk.
+    records_path :: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
+    run :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         return jet_cli_ice(err.message)
     }
@@ -1723,7 +1725,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
             }
         }
     }
-    ran :: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts.copy()}, "{binary}.records") ?? {
+    ran :: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts.copy()}, records_path) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         return jet_cli_ice(err.message)
     }

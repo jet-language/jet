@@ -58,13 +58,15 @@ echo "testkit: $TESTKIT"
 cd "$tree" || exit 1
 ID=$(awk 1 "$B/latest/IDENTITY")
 rm -rf "$fs/sc-$suite-$tag"
-# --jobs: the kit inside a build-slot scope must not size its pool from the host's MemAvailable
-# (2026-11-01: four shards of that took the machine into swap and the desktop down). 3 GiB per entry: at 2 GiB
-# (7 jobs in 16G) the cases suite hit the slot's memory-pressure kill.
-slot_mem=${SLOT_MEMORY_MAX:-16G}; slot_mem=${slot_mem%G}
+# The kit sizes its own pool: one entry per core while their memory claims (history peaks) fit the room under
+# the build slot's cgroup caps, which it reads itself (2026-11-01: a pool sized from the host's MemAvailable took
+# the machine into swap). SUITE_JOBS and SUITE_MEMORY (e.g. 8G) override the count and the budget.
+pool=()
+[ -n "${SUITE_JOBS:-}" ] && pool+=(--jobs "$SUITE_JOBS")
+[ -n "${SUITE_MEMORY:-}" ] && pool+=(--memory "$SUITE_MEMORY")
 # Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
 JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=$PWD TMPDIR=$fs/tmp timeout 6800 "$tree/Tools/agent/jet-env" \
-  "$TESTKIT" "$suite" --jet "$sg/jet-$tag/jet" "${jetpack[@]}" --jobs "${SUITE_JOBS:-$((slot_mem / 3))}" "$@" \
+  "$TESTKIT" "$suite" --jet "$sg/jet-$tag/jet" "${jetpack[@]}" "${pool[@]}" "$@" \
   --scratch "$fs/sc-$suite-$tag" > "$sg/$suite-$tag.txt" 2>&1
 rc=$?
 echo "rc=$rc $(awk 'END{print}' "$sg/$suite-$tag.txt" | cut -c1-240)"

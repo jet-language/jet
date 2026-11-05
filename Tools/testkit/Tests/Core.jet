@@ -162,6 +162,40 @@ fn kit_test_core_scratch(label: String) -> String {
     files.remove_all(root) ?? panic("remove pool scratch")
 }
 
+fn kit_test_pool_entry(env: KitEnv, root: String, index: Int) -> KitRun {
+    kit_exec_invoke(env, ["/bin/sh", "-c", "sleep 0.2"], root, files.join(root, "{index}"), "")
+}
+
+// As kit_execute_report: the pool task joins the entry's own task.
+fn kit_test_pool_report(env: KitEnv, root: String, index: Int, done: Sender<Int>) {
+    entry :: task kit_test_pool_entry(env.copy(), root.copy(), index)
+    run :: ^entry.join() ?? kit_exec_failed("the entry task stopped")
+    done.send(run.code)
+}
+
+// Every running entry holds two scheduler workers, its reporting task and its own, and
+// waits on its children itself (kit_exec_wait). A watcher task per child once left every
+// worker of a pool this wide waiting on a watcher that never got one.
+#Test("a pool as wide as the scheduler's workers finishes its guarded children") {
+    root :: cases_test_root("pool-width")
+    env :: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0, resident_limit: 67108864}
+    workers :: kit_execute_workers()
+    jobs :: kit_execute_jobs(4 * workers, 4 * workers, workers)
+    assert_eq(jobs, workers)
+    { sender: done, receiver: finished } :: channel<Int>()
+    seen := 0
+    task.group pool(limit: jobs) {
+        loop index in 0..<jobs -> task kit_test_pool_report(env.copy(), root.copy(), index, done.copy())
+        loop seen < jobs {
+            code :: finished.receive() ?? break
+            assert_eq(code, 0)
+            seen += 1
+        }
+    }
+    assert_eq(seen, jobs)
+    files.remove_all(root) ?? panic("remove pool scratch")
+}
+
 #Test("argv0 replaces only the first usage prefix") {
     assert_eq(kit_expect_argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
 }
@@ -224,27 +258,41 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq(kit_execute_suites(options, "", ["golden"], None).code, 2)
 }
 
-#Test("jobs option refuses non-positive counts and the pool sizes itself from cores and memory") {
+#Test("jobs and memory options refuse non-positive values and the pool takes every core and all the room") {
     assert(kit_parse_options(["golden", "--jobs", "0"]).error != "")
     assert(kit_parse_options(["golden", "--jobs", "x"]).error != "")
     assert_eq(kit_parse_options(["golden", "--jobs", "3"]).jobs, 3)
     assert_eq(kit_parse_options(["golden"]).jobs, 0)
-    slot :: kit_job_memory()
-    assert_eq(kit_execute_jobs(3, 100, 16, 0), 3)
-    assert_eq(kit_execute_jobs(8, 2, 16, 0), 2)
-    assert_eq(kit_execute_jobs(0, 100, 16, 0), 16)
-    assert_eq(kit_execute_jobs(0, 100, 16, 5 * slot + 1), 5)
-    assert_eq(kit_execute_jobs(0, 100, 16, slot /% 2), 1)
-    assert_eq(kit_execute_jobs(0, 0, 16, 0), 1)
+    assert(kit_parse_options(["golden", "--memory", "0"]).error != "")
+    assert(kit_parse_options(["golden", "--memory", "G"]).error != "")
+    assert(kit_parse_options(["golden", "--memory", "-2G"]).error != "")
+    assert_eq(kit_parse_options(["golden", "--memory", "12G"]).memory, 12 * 1073741824)
+    assert_eq(kit_parse_options(["golden", "--memory", "512M"]).memory, 512 * 1048576)
+    assert_eq(kit_parse_options(["golden", "--memory", "64K"]).memory, 65536)
+    assert_eq(kit_parse_options(["golden", "--memory", "4096"]).memory, 4096)
+    assert_eq(kit_parse_options(["golden"]).memory, 0)
+    assert_eq(kit_execute_jobs(3, 100, 16), 3)
+    assert_eq(kit_execute_jobs(8, 2, 16), 2)
+    // Half the workers by default: each running entry holds two.
+    assert_eq(kit_execute_jobs(0, 100, 16), 8)
+    assert_eq(kit_execute_jobs(0, 100, 1), 1)
+    // An explicit count above the workers is lowered to them.
+    assert_eq(kit_execute_jobs(40, 100, 16), 16)
+    assert_eq(kit_execute_jobs(0, 0, 16), 1)
+    gib :: 1073741824
+    // The host keeps a tenth of its memory, at least 1 GiB, beside the pool.
+    assert_eq(kit_exec_host_room(40 * gib, 60 * gib), 34 * gib)
+    assert_eq(kit_exec_host_room(6 * gib, 8 * gib), 5 * gib)
+    assert_eq(kit_exec_host_room(gib /% 2, 8 * gib), 1)
+    assert_eq(kit_exec_host_room(0, 8 * gib), 0)
 }
 
 #Test("the pool runs measured entries longest first and weighs each by its last peak") {
     slot :: kit_job_memory()
     gib :: 1073741824
     assert_eq(kit_execute_budget(0, 16 * gib), 16 * gib)
-    assert_eq(kit_execute_budget(3, 16 * gib), 3 * slot)
-    assert_eq(kit_execute_budget(3, slot), slot)
-    assert_eq(kit_execute_budget(3, 0), 3 * slot)
+    assert_eq(kit_execute_budget(3 * gib, 16 * gib), 3 * gib)
+    assert_eq(kit_execute_budget(0, 0), 0)
     entries :: ["a", "b", "c", "d"].map(name -> KitSelected{entry: KitEntry{path: name, expected: name, project: "", suite: "cases", mode: ""}, suite: "cases"})
     history := [String: KitHistory]{}
     history[kit_history_key("cases", "b")] = KitHistory{wall_ms: 100, peak_kib: 10240}

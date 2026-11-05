@@ -171,8 +171,7 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
         spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
     }
     child := spec.spawn() ?? return kit_exec_failed("spawn: {err}")
-    { sender: done, receiver: watching } :: channel<Int>()
-    watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, env.resident_tree, watching)
+    watched := KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0}
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
@@ -186,8 +185,7 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
         .Val(shape) -> {
             eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
             loop event in kit_exec_terminal_order(shape.events) {
-                remaining :: event.at - started.elapsed().ns
-                if remaining > 0 -> time.sleep(time.duration_ns(remaining))
+                kit_exec_wait(child, &watched, started, event.at)
                 if event.kind == "resize" {
                     session :: child.terminal ?? {
                         if input_error == "" -> input_error = "terminal resize: no terminal session"
@@ -211,13 +209,8 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
         }
         .None -> child.stdin.close()
     }
-    receipt :: child.wait() ?? {
-        done.send(0)
-        _ :: ^watcher.join() ?? KitResident{killed: false, peak: 0}
-        return kit_exec_failed("wait: {err}")
-    }
-    done.send(0)
-    watched :: ^watcher.join() ?? KitResident{killed: false, peak: 0}
+    kit_exec_wait(child, &watched, started, -1)
+    receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
     if env.peaks != "" && watched.peak > 0 {
         files.append_all(env.peaks, "{watched.peak}\n").drop("a missing peak only loses one scheduling weight")
     }
@@ -226,45 +219,58 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
     run
 }
 
-// What the resident-memory watcher saw: whether it stopped the child, and the
-// largest resident size it sampled, in bytes.
+// Waits on this task until the child exits or, when `until` is not negative,
+// until `until` ns after spawn, polling the child and sampling its resident
+// memory meanwhile. A watcher task of its own would need a second scheduler
+// worker beside this waiting one: a pool whose workers all wait on watchers
+// that never get a worker stops.
+fn kit_exec_wait(child: ProcessChild, watched: &KitResident, started: time.Instant, until: Int) {
+    pause := 1
+    loop {
+        at :: started.elapsed().ns
+        if until >= 0 && at >= until -> return
+        exited :: child.exited() ?? return
+        if exited -> return
+        kit_exec_watch_resident(&watched, at)
+        time.sleep(if until >= 0 && until - at < pause * 1000000 -> time.duration_ns(until - at) else -> time.duration_ms(pause))
+        if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
+    }
+}
+
+// The resident-memory guard on one child: the child (`pid` 0 is unwatched),
+// its limit in bytes, whether it counts the child's live descendants (`tree`),
+// when it samples next in ns after spawn, whether it stopped the child, and
+// the largest resident size it sampled, in bytes.
 struct KitResident {
+    pid: Int
+    limit: Int
+    tree: Bool
+    due: Int
     killed: Bool
     peak: Int
 }
 
 // The run-wide memory guard counts resident memory, not address space: a
 // RLIMIT_AS limit fails thread-stack reservations long before the child uses
-// that memory. Polls VmRSS every 100 ms and kills the child above `limit`
-// bytes. Under `tree` (a case's `limit: resident=`) it sums the child and its
-// live descendants and kills them all. A case's `limit: memory=` keeps Core
-// memory_limit.
-fn kit_exec_watch_resident(pid: Int, limit: Int, tree: Bool, done: Receiver<Int>) -> KitResident Never! {
-    watched := KitResident{killed: false, peak: 0}
-    if pid <= 0 -> return watched
-    tick := 0
-    loop {
-        if done.is_ready() -> return watched
-        if tick % 10 == 0 {
-            pids := [Int]{}
-            used :: kit_exec_tree_resident(pid, tree, &pids)
-            if pids.len() == 0 -> return watched
-            if used > watched.peak -> watched.peak = used
-            if used > limit {
-                #Unsafe("the testkit stops its own step child at the resident-memory guard") {
-                    sys.kill(pid, 9) ?? return watched
-                    loop descendant in pids {
-                        if descendant != pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
-                    }
-                }
-                watched.killed = true
-                return watched
-            }
+// that memory. Samples VmRSS every 100 ms (`at` is ns after spawn) and kills
+// the child above `limit` bytes. Under `tree` (a case's `limit: resident=`) it
+// sums the child and its live descendants and kills them all. A case's
+// `limit: memory=` keeps Core memory_limit.
+fn kit_exec_watch_resident(watched: &KitResident, at: Int) Never! {
+    if watched.pid <= 0 || watched.killed || at < watched.due -> return
+    watched.due = at + 100000000
+    pids := [Int]{}
+    used :: kit_exec_tree_resident(watched.pid, watched.tree, &pids)
+    if pids.len() == 0 -> return
+    if used > watched.peak -> watched.peak = used
+    if used <= watched.limit -> return
+    #Unsafe("the testkit stops its own step child at the resident-memory guard") {
+        sys.kill(watched.pid, 9) ?? return
+        loop descendant in pids {
+            if descendant != watched.pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
         }
-        tick += 1
-        time.sleep(10ms)
     }
-    watched
+    watched.killed = true
 }
 
 // The resident bytes of `pid`, plus under `tree` those of its live descendants
@@ -307,12 +313,13 @@ fn kit_exec_kib_field(text: String, field: String) -> Int {
 }
 
 // Memory this process may still claim, in bytes; 0 when unknown. That is the host's
-// MemAvailable, lowered to the room left under every memory.high and memory.max on the
-// cgroup path this process runs in: a build-slot scope caps its suites far below the host,
-// and a pool sized from the host alone overruns the cap and drives the machine into swap.
+// MemAvailable less the kit's headroom (kit_exec_host_room), lowered to the room left under every
+// memory.high and memory.max on the cgroup path this process runs in: a build-slot scope
+// caps its suites far below the host, and a pool sized from the host alone overruns the cap
+// and drives the machine into swap.
 fn kit_exec_available_memory() -> Int {
     meminfo :: files.read("/proc/meminfo") ?? return 0
-    available := kit_exec_kib_field(meminfo, "MemAvailable:")
+    available := kit_exec_host_room(kit_exec_kib_field(meminfo, "MemAvailable:"), kit_exec_kib_field(meminfo, "MemTotal:"))
     membership :: files.read("/proc/self/cgroup") ?? return available
     prefix := ""
     loop part in kit_exec_cgroup_path(membership).split("/") {
@@ -345,6 +352,17 @@ fn kit_exec_room(available: Int, limit: Int, current: Int) -> Int {
     if room < 1 -> room = 1
     if available <= 0 || room < available -> return room
     available
+}
+
+// The host's MemAvailable `available` less the headroom the kit leaves the rest of the
+// machine: a tenth of MemTotal `total`, at least 1 GiB. 0 (unknown) stays 0; a host with
+// no room past the headroom leaves one byte, so the pool runs one entry.
+fn kit_exec_host_room(available: Int, total: Int) -> Int {
+    if available <= 0 -> return 0
+    headroom := total /% 10
+    if headroom < 1073741824 -> headroom = 1073741824
+    if available - headroom < 1 -> return 1
+    available - headroom
 }
 
 fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {

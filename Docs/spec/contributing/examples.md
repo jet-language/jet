@@ -151,11 +151,15 @@ same rule) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
 time and resident peak, and `ffi/` is the FFI cache every run shares.
 Selected entries run in one `task.group`. Measured entries start longest
 first, after every unmeasured one. An entry starts once fewer than `--jobs N`
-run (default one per core, capped so each keeps 1 GiB of the available
-memory) and its claim fits in the memory budget beside the running ones'; the
-first always starts. The claim is half again the entry's last peak (at least
-64 MiB; 1 GiB unmeasured). The budget is the memory the kit may still claim
-under its cgroup caps, or at most N GiB with `--jobs N`. Every child process
+run and its claim fits in the memory budget beside the running ones'; the
+first always starts. Each running entry holds two of the kit's scheduler
+workers (one per core, or `JET_SCHEDULER_THREADS`), so `--jobs` defaults to
+half of them and an explicit count above them is lowered to them. The claim
+is half again the entry's last peak (at least 64 MiB; 1 GiB unmeasured). The
+budget is `--memory SIZE`
+(bytes, or a count with a binary `K`, `M` or `G` suffix), by default all the
+memory the kit may still claim: the host's available memory less a tenth of
+its total (at least 1 GiB), lowered to the room under its cgroup caps. Every child process
 keeps its own timeout and an 8 GiB resident-memory guard, raised to the
 entry's own claim and never above that room; a case's `limit: resident=`
 tightens it. Each entry's verdict diffs and rows

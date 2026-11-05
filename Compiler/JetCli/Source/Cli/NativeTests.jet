@@ -251,6 +251,16 @@ fn jet_native_test_contracts_unique(contracts: [JetNativeTestContract], tests: [
     unique
 }
 
+// Where a run keeps its process-private record files: a memory-backed
+// directory (the per-user runtime directory, else /dev/shm), so a test run's
+// outcomes never reach the disk; `fallback` (the build directory) only on a
+// host with neither. The files are one-shot and removed once read.
+fn jet_cli_native_test_records_dir(fallback: String) -> String Never! {
+    if native_test_sys.get("XDG_RUNTIME_DIR") == .Val(runtime) && runtime.starts_with("/") && native_test_files.is_dir(runtime) -> return runtime
+    if native_test_files.is_dir("/dev/shm") -> return "/dev/shm"
+    fallback.copy()
+}
+
 // Memory each concurrently rerun test child may claim.
 JET_NATIVE_TEST_CHILD_MEMORY :: 1073741824
 

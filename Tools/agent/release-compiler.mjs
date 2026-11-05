@@ -63,14 +63,14 @@ const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x8
 // norust.sh, inline: drop every PATH directory holding cargo, rustc or rustup, refuse if one stays reachable.
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
 const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
-// Memory one running testkit entry may claim (Tools/testkit/run.jet kit_job_memory).
-const KIT_JOB_GIB = 1;
-
-// Entries each shard runs at once: --jobs, else the slot's memory cap split across shards.
-export function shardJobs(options, slotMemory = process.env.SLOT_MEMORY_MAX) {
-    if (options.jobs > 0) return options.jobs;
+// The pool flags of each of `shards` kits sharing one slot: the slot's memory cap split across them (each kit
+// alone would size its budget from the whole cgroup room), and --jobs only when given; the kit's default is
+// one entry per core while their claims fit the budget.
+export function shardPool(options, shards, slotMemory = process.env.SLOT_MEMORY_MAX) {
     const gib = Number.parseInt(slotMemory ?? '', 10) > 0 ? Number.parseInt(slotMemory, 10) : 16;
-    return Math.max(1, Math.floor(gib / KIT_JOB_GIB / options.shards));
+    const pool = ['--memory', `${Math.max(1, Math.floor(gib / shards))}G`];
+    if (options.jobs > 0) pool.push('--jobs', String(options.jobs));
+    return pool;
 }
 
 // ---- pure helpers (release-compiler.test.mjs) ----
@@ -501,7 +501,7 @@ async function suiteRun(ctx, side, suite, extra = []) {
         // Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
         const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.kit, suite, '--jet', compiler.jet, '--scratch', scratch, '--results', join(ctx.work, 'kit', `${tag}.json`)];
         if (!retry) argv.push('--shard', `${index}/${shards}`);
-        argv.push('--jobs', String(retry ? shardJobs({ ...ctx.options, shards: 1 }) : shardJobs(ctx.options)));
+        argv.push(...shardPool(ctx.options, shards));
         if (ctx.options.filter && !retry) argv.push('--filter', ctx.options.filter);
         if (ctx.options.timeout) argv.push('--timeout', String(ctx.options.timeout));
         if (compiler.jetpack) argv.push('--jetpack', compiler.jetpack);
