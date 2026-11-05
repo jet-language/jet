@@ -20,6 +20,7 @@ use jet_foundation.[
     TagMarker,
     Type,
     TypeTupleField,
+    expr_span,
     measure_literal_value,
 ]
 
@@ -524,7 +525,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
         path_valid := path != None
         if path_valid -> path_valid = sema_call_memory_guard_projection_stored(path ?? [TFieldRef]{}, environment, program)
         if !path_valid {
-            &diagnostics.push(sema_error("E0215", args[index].span, "`SharedGuard.{method}` needs a stored field projection", "a projected guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places", "write a direct projection such as `guard.map(value -> value.field)`"))
+            &diagnostics.push(sema_error("E0215", expr_span(args[index].expr), "`SharedGuard.{method}` needs a stored field projection", "a projected guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places", "write a direct projection such as `guard.map(value -> value.field)`"))
         }
         &paths.push(if path_valid -> path else -> None)
         &values.push(Val(callback))
