@@ -296,8 +296,10 @@ fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
 }
 
 // The property test `name` (borrowed) over `invoke`: its owned outcome, as
-// jet_rt_test_unit's. A passing property keeps its last case's stdout; a
-// failing one reports its minimized case.
+// jet_rt_test_unit's, carrying the cases that ran (all of them when it passes,
+// the failing case's number when one fails, 0 on a bad seed). A passing
+// property keeps its last case's stdout; a failing one reports its minimized
+// case.
 #Export(c) fn jet_rt_test_property(name: I64, expected: Bool, _env: I64, invoke: I64) -> I64 {
     ctx :: jet_rt_alloc(PROPERTY_CTX_BYTES, I64{8})
     thread_zero(ctx, PROPERTY_CTX_BYTES)
@@ -306,9 +308,9 @@ fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
     error := property_seed(ctx)
     stdout := test_text_new(I64{0})
     skipped := false
+    ran := I64{0}
     if (error == I64{0}) {
         seed :: trap_word(wrapping(ctx + I64{48}))
-        ran := I64{0}
         loop ran < PROPERTY_CASES {
             ran += I64{1}
             property_case(ctx, invoke, run)
@@ -343,5 +345,5 @@ fn property_report(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
     jet_rt_test_property_inputs(ctx, I64{0})
     property_words_free(ctx, PROPERTY_CTX_BYTES)
     jet_rt_free(run, PROPERTY_RUN_BYTES, I64{8})
-    jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+    test_outcome_new(name, expected, skipped, stdout, error, ran)
 }

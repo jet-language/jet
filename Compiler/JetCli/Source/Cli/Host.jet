@@ -1645,6 +1645,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     // claims alone, without the output checks.
     documented :: if options.docs -> jet_cli_doctest_claims(selected, doctests) else -> selected
     native_tests :: if measure == .Val(measured) -> jet_cli_measure_claims(documented, measured) else -> documented
+    claims := jet_cli_test_claims(native_tests, plan.tests, doctests, file)
     check_names := [String]{}
     checks := [IROutputCheck]{}
     if !options.docs && measure == None {
@@ -1691,10 +1692,12 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
         loop (index, test) in native_tests {
             doctest :: jet_cli_doctest_named(doctest_file, test.name) ?? next
             if index >= wires.len() -> next
-            wires[index] = jet_cli_doctest_settle(wires[index], doctest_file, doctest, color, options.update_snapshots, &rewrites) ?? {
+            mismatches := [JetCLITestStop]{}
+            wires[index] = jet_cli_doctest_settle(wires[index], doctest_file, doctest, color, options.update_snapshots, &rewrites, &mismatches) ?? {
                 cli_files.remove(binary).drop("the native run already failed")
                 return jet_cli_ice(err.message)
             }
+            if mismatches.len() > 0 -> claims[index].mismatch = Val(mismatches[0].copy())
         }
         if rewrites.len() > 0 {
             cli_files.write(doctest_file.path, jet_cli_doctest_rewrite(doctest_file.source, rewrites)) ?? {
@@ -1725,7 +1728,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     stdout :: if show -> ran.output else -> ran.receipt.output
     stderr :: if show -> ran.errors else -> ran.receipt.errors
     if measure == None {
-        outcome :: jet_cli_test_outcome(file, source, options.build, wires, passed, jet_cli_test_claims_floor(snapshot.roots[0])) ?? return jet_cli_ice(err.message)
+        outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, passed, jet_cli_test_claims_floor(snapshot.roots[0])) ?? return jet_cli_ice(err.message)
         notice :: jet_cli_test_persist(outcome.report)
         // Under `--json` the status line is the whole stdout; the report moves to stderr.
         if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n", stderr: "{stdout}{stderr}{notice}", exit_code: exit_code}

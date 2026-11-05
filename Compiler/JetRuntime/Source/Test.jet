@@ -1,8 +1,9 @@
 // Native unit outcomes and reporting use the one E4 text carrier. The Rust
 // tier keeps TEST_PRELUDE; the native pack replaces only these exports.
-// Outcome layout: [flags, owned name, owned stdout, owned stderr] (32 bytes).
-// Flags: ok=1, expected_failure=2, skipped=4. The fifth header field is
-// always '-': a property test (TestProperty.jet) reports through stderr.
+// Outcome layout: [flags, owned name, owned stdout, owned stderr, cases] (40
+// bytes). Flags: ok=1, expected_failure=2, skipped=4. `cases` is the number of
+// generated cases a property test (TestProperty.jet) ran, -1 for any other
+// test; it is the wire header's fifth field, '-' when it is -1.
 // Capture is in TestCapture; unit invocation still needs L8a's stop boundary.
 
 fn test_text_new(length: I64) -> I64 { rt_text_with_length(length, length) }
@@ -23,14 +24,20 @@ fn test_text_drop(text: I64) { jet_rt_string_drop(text) }
 // name is borrowed. stdout and error are owned; null error denotes success.
 // The remaining task adapter collects capture/skip and transfers these handles.
 #Export(c) fn jet_rt_test_unit_outcome(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64) -> I64 {
+    test_outcome_new(name, expected, skipped, stdout, error, I64{-1})
+}
+
+// jet_rt_test_unit_outcome's outcome, carrying a property test's `cases`.
+fn test_outcome_new(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64, cases: I64) -> I64 {
     failed :: error != I64{0}
     ok :: skipped || failed == expected
     flags :: (if ok -> I64{1} else -> I64{0}).bit_or((if expected -> I64{2} else -> I64{0})).bit_or((if skipped -> I64{4} else -> I64{0}))
-    outcome :: jet_rt_alloc(I64{32}, I64{8})
+    outcome :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(outcome, flags)
     trap_store(wrapping(outcome + I64{8}), test_text_clone(name))
     trap_store(wrapping(outcome + I64{16}), stdout)
     trap_store(wrapping(outcome + I64{24}), if failed -> error else -> test_text_new(I64{0}))
+    trap_store(wrapping(outcome + I64{32}), cases)
     outcome
 }
 
@@ -56,8 +63,9 @@ fn test_decimal_bytes(destination: I64, value: I64) -> I64 {
     name_len :: trap_word(wrapping(name + I64{8}))
     stdout_len :: trap_word(wrapping(stdout + I64{8}))
     stderr_len :: trap_word(wrapping(stderr + I64{8}))
-    // At most 3*19 decimal length digits + flags + separators + '-\n'.
-    wire :: test_text_new(I64{64} + name_len + stdout_len + stderr_len)
+    cases :: trap_word(wrapping(outcome + I64{32}))
+    // At most 4*19 decimal digits + flags + separators + '\n'.
+    wire :: test_text_new(I64{96} + name_len + stdout_len + stderr_len)
     data :: trap_word(wire)
     used := test_decimal_bytes(data, trap_word(outcome))
     trap_put(wrapping(data + used), I64{32})
@@ -70,9 +78,15 @@ fn test_decimal_bytes(destination: I64, value: I64) -> I64 {
     used += I64{1}
     used += test_decimal_bytes(wrapping(data + used), stderr_len)
     trap_put(wrapping(data + used), I64{32})
-    trap_put(wrapping(wrapping(data + used) + I64{1}), I64{45})
-    trap_put(wrapping(wrapping(data + used) + I64{2}), I64{10})
-    used += I64{3}
+    used += I64{1}
+    if (cases < I64{0}) {
+        trap_put(wrapping(data + used), I64{45})
+        used += I64{1}
+    } else {
+        used += test_decimal_bytes(wrapping(data + used), cases)
+    }
+    trap_put(wrapping(data + used), I64{10})
+    used += I64{1}
     test_copy_bytes(wrapping(data + used), trap_word(name), name_len)
     used += name_len
     test_copy_bytes(wrapping(data + used), trap_word(stdout), stdout_len)
@@ -88,7 +102,7 @@ fn test_decimal_bytes(destination: I64, value: I64) -> I64 {
     test_text_drop(trap_word(wrapping(outcome + I64{8})))
     test_text_drop(trap_word(wrapping(outcome + I64{16})))
     test_text_drop(trap_word(wrapping(outcome + I64{24})))
-    jet_rt_free(outcome, I64{32}, I64{8})
+    jet_rt_free(outcome, I64{40}, I64{8})
 }
 
 fn test_write_word(fd: I64, word: I64, length: I64) {
@@ -228,16 +242,11 @@ fn test_parse_record(data: I64, end: I64, start: I64, record: I64) {
     name_len :: test_parse_number(data, end, cursor)
     stdout_len :: test_parse_number(data, end, cursor)
     stderr_len :: test_parse_number(data, end, cursor)
-    at := trap_word(cursor)
-    if (end - at < I64{2}) {
+    at := test_parse_cases(data, end, trap_word(cursor))
+    if (at < I64{0}) {
         test_invalid()
         return
     }
-    if (trap_byte(wrapping(data + at)) != I64{45} || trap_byte(wrapping(wrapping(data + at) + I64{1})) != I64{10}) {
-        test_invalid()
-        return
-    }
-    at += I64{2}
     if (name_len > end - at) {
         test_invalid()
         return
@@ -264,6 +273,28 @@ fn test_parse_record(data: I64, end: I64, start: I64, record: I64) {
         return
     }
     trap_store(cursor, at)
+}
+
+// The header's fifth field at `at`: '-', or the decimal count of generated
+// cases a property test ran, then the header's '\n'. The offset after it, or
+// -1 when the field is malformed.
+fn test_parse_cases(data: I64, end: I64, at: I64) -> I64 {
+    if (at < end && trap_byte(wrapping(data + at)) == I64{45}) {
+        if (end - at >= I64{2} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{10}) -> return at + I64{2}
+        return I64{-1}
+    }
+    cursor := at
+    value := I64{0}
+    loop cursor < end {
+        byte :: trap_byte(wrapping(data + cursor))
+        if (byte == I64{10}) { break }
+        digit :: byte - I64{48}
+        if (digit < I64{0} || digit > I64{9} || value > (I64{9223372036854775807} - digit) /% I64{10}) -> return I64{-1}
+        value = value * I64{10} + digit
+        cursor += I64{1}
+    }
+    if (cursor == at || cursor >= end) -> return I64{-1}
+    cursor + I64{1}
 }
 
 fn test_environment(key: I64) -> I64 {

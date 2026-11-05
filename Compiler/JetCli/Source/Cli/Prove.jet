@@ -63,7 +63,10 @@ fn jet_cli_prove(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
         return jet_cli_prove_fail(jet_cli_prove_refusal("E2104", "`jet prove` can't combine `--save` or `--unsave` with capture or replay", "run the save or unsave alone, then capture or replay in a second command", JET_DRIVER_EXIT_USAGE), color, json)
     }
     if (request.capture != None || request.replay != None) && target.members.len() != 1 {
-        listed :: if target.members.len() == 0 -> "none" else -> target.members.join(", ")
+        // Members are shown as the user names files, without the `./` a
+        // package under `.` keeps in report paths.
+        shown :: loop member in target.members -> member.removeprefix("./")
+        listed :: if shown.len() == 0 -> "none" else -> shown.join(", ")
         refusal :: JetCLIProveRefusal{
             code: "E3624",
             what: "replay target cardinality is not one",
@@ -267,12 +270,15 @@ fn jet_cli_prove_collect(directory: String, found: &[String]) JetCLIReadError! -
 }
 
 // `normalized`: a path under the current directory is shown relative to it;
-// empty and `.` components drop, so `./a.jet` and `a.jet` are one member.
+// empty and inner `.` components drop. A leading `.` stays, as Rust's
+// `Path::components` keeps it: `jet prove .` shows `./a.jet`.
 fn jet_cli_prove_normalized(path: String, cwd: String) -> String Never! {
     text := path
     prefix :: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
-    if text.starts_with(prefix) -> text = text.removeprefix(prefix)
+    stripped :: text.starts_with(prefix)
+    if stripped -> text = text.removeprefix(prefix)
     parts := [String]{}
+    if !stripped && (text == "." || text.starts_with("./")) -> &parts.push(".")
     loop part in text.split("/").to_list() {
         if part != "" && part != "." -> &parts.push(part)
     }

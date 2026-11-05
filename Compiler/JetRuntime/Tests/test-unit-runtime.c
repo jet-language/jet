@@ -286,8 +286,19 @@ int main(int argc, char **argv) {
         drop_text(wire);
         return ok ? 0 : 1;
     }
+    if (argc == 2 && strcmp(argv[1], "cases") == 0) {
+        Text *wire = text("1 1 0 0 200\na", 13);
+        bool ok = jet_rt_test_finish_wire(wire);
+        drop_text(wire);
+        return ok ? 0 : 1;
+    }
     if (argc == 2 && strcmp(argv[1], "property") == 0) {
-        Text *wire = text("1 1 0 0 1\na", 11);
+        Text *wire = text("1 1 0 0 x\na", 11);
+        jet_rt_test_finish_wire(wire);
+        return 99;
+    }
+    if (argc == 2 && strcmp(argv[1], "cases-overflow") == 0) {
+        Text *wire = text("1 1 0 0 99999999999999999999\na", 30);
         jet_rt_test_finish_wire(wire);
         return 99;
     }

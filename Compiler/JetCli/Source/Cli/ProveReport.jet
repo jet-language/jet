@@ -97,7 +97,8 @@ struct JetCLIProveFront {
 }
 
 // One test-producer item (`TestItem`): `kind` is the evidence kind code and
-// `state` 0 passed, 1 failed, 2 skipped, 3 unavailable.
+// `state` 0 passed, 1 failed, 2 skipped, 3 unavailable. A property test also
+// carries its run.
 struct JetCLIProveTestItem {
     id: String
     kind: Int
@@ -107,6 +108,17 @@ struct JetCLIProveTestItem {
     code: String
     path: String
     line: Int
+    property: JetCLIProveProperty?{None}
+}
+
+// A property test's run: the generated cases, the failing case's 0-based
+// index (0 when it passed), the seed the cases came from and the minimized
+// inputs of a failure (empty when it passed or shrinking found none).
+struct JetCLIProveProperty {
+    cases: Int
+    case_index: Int
+    seed: Int
+    minimized: String
 }
 
 // The producers' results: items, the evidence they consumed, the producer
@@ -288,7 +300,8 @@ fn jet_cli_prove_identity(target: JetCLIProveTarget, members: [JetCLIProveMember
     })
     // `unavailable_mir_identity`: no checked MIR program identity is exposed.
     mir_fields := [JetCLIProveField]{jet_cli_prove_field("source", source_digest), jet_cli_prove_field("core_abi", core_abi)}
-    loop member in members -> &mir_fields.push(jet_cli_prove_field(member.path, member.sha256))
+    // The member's spelling (`./a.jet` or `a.jet`) doesn't change the identity.
+    loop member in members -> &mir_fields.push(jet_cli_prove_field(member.path.removeprefix("./"), member.sha256))
     &mir_fields.push(jet_cli_prove_field("mir", "unavailable"))
     mir_hash :: jet_cli_prove_digest("jet-proof-mir-unavailable-v1", mir_fields)
     Ok(JetCLIProveIdentity{
@@ -413,7 +426,7 @@ fn jet_cli_prove_error_item(identity: JetCLIProveIdentity, members: [JetCLIProve
         path = jet_cli_prove_normalized(origin.path, cwd)
         source = origin.source.copy()
         loop (index, member) in members {
-            if member.absolute == origin.path || member.path == origin.display {
+            if member.absolute == origin.path || member.path.removeprefix("./") == origin.display.removeprefix("./") {
                 owner = index
                 path = member.path.copy()
             }
@@ -503,11 +516,17 @@ fn jet_cli_prove_fact(identity: JetCLIProveIdentity, member: JetCLIProveMember, 
 // `run_test_producers`: one `jet test` child per compile whose members
 // declare a `#Test`. The child hands its typed evidence report to the file
 // EVIDENCE_REPORT_ENV names; this parent persists it and reads its records.
+// Every property test runs from one seed the report names: JET_PROP_SEED when
+// set, else one derived from the target's inputs, so the same program proves
+// to the same report and a changed program samples new cases. An invalid
+// JET_PROP_SEED reaches the child, whose properties fail naming the range.
 fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String) -> JetCLIProveTests JetCLIProveRefusal! {
     items := [JetCLIProveTestItem]{}
     consumed := [JetCLIRecordLink]{}
     exit_code := JET_DRIVER_EXIT_OK
     errors := ""
+    requested :: cli_sys.get("JET_PROP_SEED")
+    seed :: if requested == .Val(text) -> jet_cli_prove_seed(text) ?? 0 else -> jet_cli_prove_input_seed(identity.input_sha256)
     loop group in groups {
         if !group.has_tests -> next
         entry :: members[group.entry].copy()
@@ -525,7 +544,7 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
         report_path :: jet_cli_rooted_join(scratch.path, "evidence.bin")
         short :: String.from_bytes(entry.sha256.bytes().slice(0, 16)) ?? entry.sha256.copy()
         argv :: [String]{cli_sys.executable(), "test", entry.path, "--serial", "--show-default"}
-        spec :: cli_process.cmd(argv)
+        spec := cli_process.cmd(argv)
             .env(EVIDENCE_REPORT_ENV, report_path)
             .env(EVIDENCE_REPORT_ID_ENV, "prove:{short}")
             .env(EVIDENCE_TOOLCHAIN_ENV, JET_CLI_VERSION)
@@ -536,6 +555,7 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
             .env(EVIDENCE_REVISION_ENV, identity.mir_hash)
             .timeout(120s)
             .output_limit(67108864)
+        if requested == None -> spec = spec.env("JET_PROP_SEED", "{seed}")
         receipt :: spec.run() ?? {
             &items.push(unavailable.copy())
             next
@@ -558,7 +578,7 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
         artifact :: prove_crypto.sha256(bytes).hex()
         jet_cli_evidence_persist_at(identity.authority_root, report, bytes, artifact, report.revision.source, true) ?? return Err(jet_cli_prove_evidence_refusal("couldn't record the test evidence of `{entry.path}`: {err.message}"))
         &consumed.push(JetCLIRecordLink{kind: "evidence", artifact_id: artifact})
-        jet_cli_prove_test_items(identity, members, entry, group.sites, report.records, cwd, &items)
+        jet_cli_prove_test_items(identity, members, entry, group.sites, report.records, cwd, seed, &items)
     }
     Ok(JetCLIProveTests{items: items, consumed: consumed, exit_code: exit_code, errors: errors})
 }
@@ -567,6 +587,45 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
 fn jet_cli_prove_child_exit(code: Int) -> Int Never! {
     if code == JET_DRIVER_EXIT_OK || code == JET_DRIVER_EXIT_USER_ERROR || code == JET_CLI_EXIT_RUNTIME_STOP || code == JET_CLI_EXIT_ICE -> return code
     JET_CLI_EXIT_ICE
+}
+
+// JET_PROP_SEED as the runtime reads it (TestProperty.jet
+// `property_seed_parse`): decimal digits naming an integer below 2^63.
+fn jet_cli_prove_seed(text: String) -> Int? Never! {
+    if text.len() == 0 -> return None
+    loop byte in text.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+    }
+    value :: Int.parse(text) ?? return None
+    if value > 9223372036854775807 -> return None
+    Val(value)
+}
+
+// The seed a `jet prove` property runs from when JET_PROP_SEED is unset: the
+// first 63 bits of a domain-tagged sha256 of the target's input closure.
+fn jet_cli_prove_input_seed(input_sha256: String) -> Int Never! {
+    digest :: prove_crypto.sha256("jet-prove-property-seed-v1\n{input_sha256}").as_bytes()
+    seed := Int.from_u8(digest[0]) %% 128
+    loop index in 1..<8 -> seed = seed * 256 + Int.from_u8(digest[index])
+    seed
+}
+
+#Test("prove property seeds follow the target's inputs") {
+    first :: jet_cli_prove_input_seed("aa")
+    assert_eq(first, jet_cli_prove_input_seed("aa"))
+    assert(first >= 0 && first <= 9223372036854775807)
+    assert(first != jet_cli_prove_input_seed("ab"))
+    assert_eq(jet_cli_prove_seed("9223372036854775807"), Val(9223372036854775807))
+    assert_eq(jet_cli_prove_seed("9223372036854775808"), None)
+    assert_eq(jet_cli_prove_seed("+5"), None)
+}
+
+// The value of a record's attachment `name`, or "".
+fn jet_cli_prove_attachment(record: EvidenceRecord, name: String) -> String Never! {
+    loop attachment in record.attachments {
+        if attachment.name == name -> return attachment.value.copy()
+    }
+    ""
 }
 
 // Exit precedence: an internal error, then a runtime stop, then a failure.
@@ -581,8 +640,9 @@ fn jet_cli_prove_exit_rank(code: Int) -> Int Never! {
 
 // A report's records as test items. A stop record (kind Runtime) is where a
 // failed test stopped; it joins that test's item instead of counting as one.
-// An expected failure that failed passes, and one that passed fails.
-fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProveMember], entry: JetCLIProveMember, sites: [JetCLIProveTestSite], records: [EvidenceRecord], cwd: String, items: &[JetCLIProveTestItem]) Never! {
+// An expected failure that failed passes, and one that passed fails. A
+// property's seed is its failure's, else the run's `seed`.
+fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProveMember], entry: JetCLIProveMember, sites: [JetCLIProveTestSite], records: [EvidenceRecord], cwd: String, seed: Int, items: &[JetCLIProveTestItem]) Never! {
     stops := [JetCLIProveStopRecord]{}
     loop record in records {
         if record.kind != EvidenceKind.Runtime -> next
@@ -611,7 +671,9 @@ fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProve
                 line = site.line
             }
         }
+        // A failure without a stop (a doctest's E2901) keeps its record's code.
         code := "E3001"
+        if record.diagnostics.len() > 0 && diagnostic_registry_row(record.diagnostics[0].code) != None -> code = record.diagnostics[0].code.copy()
         message := record.detail.copy()
         if state == 1 {
             loop index in 0..<stops.len() {
@@ -633,6 +695,17 @@ fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProve
                 else -> {}
             }
         }
+        property := JetCLIProveProperty?{None}
+        if record.kind == EvidenceKind.Property {
+            case_number :: Int.parse(jet_cli_prove_attachment(record, "case")) ?? 0
+            failure_seed :: jet_cli_prove_attachment(record, "seed")
+            property = Val(JetCLIProveProperty{
+                cases: Int.from_u64(record.count),
+                case_index: if case_number > 0 -> case_number - 1 else -> 0,
+                seed: if failure_seed == "" -> seed else -> Int.parse(failure_seed) ?? seed,
+                minimized: jet_cli_prove_attachment(record, "minimized_inputs"),
+            })
+        }
         &items.push(JetCLIProveTestItem{
             id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "{kind}:{record.identity.claim_id}:{record.detail}"),
             kind: kind,
@@ -642,6 +715,7 @@ fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProve
             code: code,
             path: path,
             line: line,
+            property: property,
         })
     }
     // A stop no failed test claimed is still a failed execution.
@@ -679,15 +753,20 @@ fn jet_cli_prove_paths_match(left: String, right: String) -> Bool Never! {
 
 // --- grade, result and report --------------------------------------------------
 
-// `claim_grade`: a failure establishes nothing; passing examples outrank a
-// clean front end.
+// `claim_grade`: a failure establishes nothing; generated cases outrank
+// passing examples, which outrank a clean front end.
 fn jet_cli_prove_grade(proved: Int, failed: Int, tests: [JetCLIProveTestItem]) -> String Never! {
     examples := 0
+    generated := 0
     loop item in tests {
         if item.state == 1 -> return ClaimsGrade.Unchecked.render()
         if (item.kind == 0 || item.kind == 2 || item.kind == 4) && item.state == 0 -> examples += 1
+        if item.property == .Val(run) {
+            if item.state == 0 -> generated += run.cases
+        }
     }
     if failed > 0 -> return ClaimsGrade.Unchecked.render()
+    if generated > 0 -> return ClaimsGrade.Generated(generated).render()
     if examples > 0 -> return ClaimsGrade.Examples(examples).render()
     if proved > 0 -> return ClaimsGrade.Checked.render()
     ClaimsGrade.Unchecked.render()
@@ -759,7 +838,14 @@ fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             indexes = "[{diagnostics.len()}]"
             &diagnostics.push(jet_cli_prove_stop_json(item))
         }
-        body :: "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"{facet}\",\"id\":{foundation_json_quote(item.id)},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":null,\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{if item.line > 1 -> item.line else -> 1},\"path\":{foundation_json_quote(item.path)}}},\"state\":\"{state}\""
+        // A property row counts its generated cases and describes its run.
+        count := 1
+        property := "null"
+        if item.property == .Val(run) {
+            count = run.cases
+            property = jet_cli_prove_property_json(run, item)
+        }
+        body :: "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":{count},\"diagnosticIndexes\":{indexes},\"facet\":\"{facet}\",\"id\":{foundation_json_quote(item.id)},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{if item.line > 1 -> item.line else -> 1},\"path\":{foundation_json_quote(item.path)}}},\"state\":\"{state}\""
         &rows.push(JetCLIProveRow{id: item.id.copy(), kind: kind, producer: producer, outcome: outcome, state: state, body: body})
     }
     loop item in front.warnings {
@@ -782,8 +868,16 @@ fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
     property_passed :: jet_cli_prove_count(tests, [Int]{3}, 0, 0)
     property_failed :: jet_cli_prove_count(tests, [Int]{3}, 1, 1)
     property_skipped :: jet_cli_prove_count(tests, [Int]{3}, 2, 9)
+    property_cases := 0
+    property_shrunk := 0
+    loop item in tests {
+        if item.property == .Val(run) {
+            property_cases += run.cases
+            if item.state == 1 && run.minimized != "" -> property_shrunk += 1
+        }
+    }
     quoted_grade :: foundation_json_quote(grade)
-    summaries :: "{{\"claims\":{{\"grade\":{quoted_grade}}},\"contract\":{{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_passed + doctest_failed + doctest_skipped},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{proved + failed},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":0,\"passed\":{property_passed},\"selected\":{property_passed + property_failed + property_skipped},\"shrunkFailures\":0,\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_passed + unit_failed + unit_skipped},\"skipped\":{unit_skipped}}}}}"
+    summaries :: "{{\"claims\":{{\"grade\":{quoted_grade}}},\"contract\":{{\"declared\":0,\"failed\":0,\"notObserved\":0,\"observed\":0,\"passed\":0,\"selected\":0,\"skipped\":0}},\"deterministicBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_passed + doctest_failed + doctest_skipped},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{proved + failed},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_passed + property_failed + property_skipped},\"shrunkFailures\":{property_shrunk},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{{\"failed\":0,\"met\":0,\"selected\":0,\"skipped\":0,\"unavailable\":0}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_passed + unit_failed + unit_skipped},\"skipped\":{unit_skipped}}}}}"
     target_members :: loop member in identity.members -> "{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}"
     target :: "{{\"inputSha256\":{foundation_json_quote(identity.input_sha256)},\"kind\":{foundation_json_quote(identity.kind)},\"members\":[{target_members.join(",")}],\"mir\":{identity.mir_json},\"root\":{foundation_json_quote(identity.root)}}}"
     triple :: foundation_json_quote(jet_cli_prove_triple())
@@ -840,6 +934,12 @@ fn jet_cli_prove_stop_json(item: JetCLIProveTestItem) -[FS]> String Never! {
     width :: jet_cli_prove_width(line_text)
     shown :: if line_text == .Val(text) -> foundation_json_quote(text) else -> "null"
     "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":{foundation_json_quote(item.code)},\"context\":[],\"frames\":[],\"message\":{foundation_json_quote(item.message)},\"notes\":[],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{width + 1},\"endLine\":{item.line},\"path\":{foundation_json_quote(item.path)},\"sourceLine\":{shown},\"startColumn\":1,\"startLine\":{item.line}}},\"type\":\"runtime\"}}"
+}
+
+// A property row's `property` object (Rust CmdProve.rs `render_report`).
+fn jet_cli_prove_property_json(run: JetCLIProveProperty, item: JetCLIProveTestItem) -> String Never! {
+    trace :: if run.minimized == "" -> "[]" else -> "[{{\"name\":\"minimized_inputs\",\"value\":{foundation_json_quote(run.minimized)}}}]"
+    "{{\"caseIndex\":{run.case_index},\"effectiveSeed\":{run.seed},\"generatedCases\":{run.cases},\"shrinkTrace\":{trace},\"source\":{{\"column\":1,\"line\":{if item.line > 1 -> item.line else -> 1},\"path\":{foundation_json_quote(item.path)}}},\"toolchain\":{{\"jet\":{foundation_json_quote(JET_CLI_VERSION)},\"targetTriple\":{foundation_json_quote(jet_cli_prove_triple())}}}}}"
 }
 
 // `source_line_for`: the 1-based `line` of `path`, when it can be read.
@@ -921,6 +1021,8 @@ fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, te
         failed_tests :: jet_cli_prove_count(tests.items, [Int]{0, 2}, 1, 1)
         skipped :: jet_cli_prove_count(tests.items, [Int]{0, 2}, 2, 9)
         stdout = "{stdout}TESTS    unit: {passed} passed, {failed_tests} failed, {skipped} skipped\n"
+        if jet_cli_prove_count(tests.items, [Int]{4}, 0, 9) > 0 -> stdout = "{stdout}         doctest: {jet_cli_prove_count(tests.items, [Int]{4}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{4}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{4}, 2, 9)} skipped\n"
+        if jet_cli_prove_count(tests.items, [Int]{3}, 0, 9) > 0 -> stdout = "{stdout}         property: {jet_cli_prove_count(tests.items, [Int]{3}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{3}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{3}, 2, 9)} skipped\n"
         loop item in tests.items {
             if item.state != 1 -> next
             stdout = "{stdout}{item.name}: FAIL\n"
@@ -932,7 +1034,13 @@ fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, te
                 indent :: String.from_bytes(text.bytes().slice(0, text.count_bytes() - body.count_bytes())) ?? ""
                 shown = "      {text}\n      {indent}{"^".repeat(jet_cli_prove_width(Val(body.copy())))}\n"
             }
-            stderr = "{stderr}  Stop [{item.code}]: {item.message}\n    --> {item.path}:{item.line}\n{shown}  More: jet-lang.dev/e/{item.code}\n"
+            // A failed property says how to replay it and what it shrank to.
+            replay := ""
+            if item.property == .Val(run) {
+                replay = "  property failed on case {run.case_index + 1} (seed {run.seed}; replay with JET_PROP_SEED={run.seed})\n"
+                if run.minimized != "" -> replay = "{replay}  minimized_inputs: {run.minimized}\n"
+            }
+            stderr = "{stderr}  Stop [{item.code}]: {item.message}\n    --> {item.path}:{item.line}\n{shown}{replay}  More: jet-lang.dev/e/{item.code}\n"
         }
     }
     stdout = "{stdout}RESULT   {result}\n"

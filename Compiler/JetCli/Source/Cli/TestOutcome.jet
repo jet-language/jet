@@ -9,10 +9,10 @@ use {
     receipt_crypto :: core.crypto
     jet_driver.[JetDriverAuthorizedSourceRoot]
     jet_foundation.[
-        BuildOptions, EvidenceBuild, EvidenceExpectation, EvidenceProducerKind, EvidenceReport,
+        BuildOptions, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceProducerKind, EvidenceReport,
         EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
         EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
-        EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, build_options_key,
+        EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, build_options_key,
         evidence_expectation_error_text, evidence_merge_error_text, evidence_record_checked_derivation,
         evidence_record_from_test_codes, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
         evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write,
@@ -27,6 +27,25 @@ struct JetCLITestStop {
     message: String
     file: String
     line: U32
+}
+
+// What the run knows of one test beyond its wire: its evidence kind code (0
+// unit, 3 property, 4 doctest), the file and line a doctest is written at
+// (a unit or property test is recorded against the tested file), and the first
+// claimed value a doctest's output contradicted (E2901).
+struct JetCLITestClaim {
+    kind: Int
+    file: String
+    line: U32
+    mismatch: JetCLITestStop?
+}
+
+// A failed property's report head (TestProperty.jet `property_report`): the
+// failing case's 1-based number, the run seed and the minimized inputs.
+struct JetCLITestPropertyFailure {
+    case_number: Int
+    seed: String
+    minimized: String
 }
 
 struct JetCLITestTally {
@@ -86,6 +105,45 @@ fn jet_cli_test_stop(stderr: String) -> JetCLITestStop? Never! {
     None
 }
 
+// The `property failed on case N of M (seed S; …)` line of a failed property's
+// stderr and the `minimized_inputs: …` line under it.
+fn jet_cli_test_property_failure(stderr: String) -> JetCLITestPropertyFailure? Never! {
+    head :: "property failed on case "
+    lines :: stderr.split("\n").to_list()
+    loop (index, line) in lines {
+        if !line.starts_with(head) -> next
+        bytes :: line.bytes()
+        of :: line.find(" of ")
+        seed_at :: line.find(" (seed ")
+        semi :: line.find("; ")
+        if of <= head.len() || seed_at <= of || semi <= seed_at -> return None
+        number :: Int.parse(jet_cli_test_text(bytes, head.len(), of)) ?? return None
+        seed :: jet_cli_test_text(bytes, seed_at + " (seed ".len(), semi)
+        minimized := ""
+        if index + 1 < lines.len() && lines[index + 1].starts_with("minimized_inputs: ") -> minimized = lines[index + 1].removeprefix("minimized_inputs: ")
+        return Val(JetCLITestPropertyFailure{case_number: number, seed: seed, minimized: minimized})
+    }
+    None
+}
+
+// Each run test's claim, in run order: a doctest by its `doctest at` name, a
+// property by its plan fact (`facts[id - 1]`), else a unit test of `file`.
+fn jet_cli_test_claims(tests: [JetNativeTestCase], facts: [TTestFact], doctests: [JetCLIDoctestFile], file: String) -> [JetCLITestClaim] Never! {
+    claims := [JetCLITestClaim]{}
+    loop test in tests -> &claims.push(jet_cli_test_claim(test, facts, doctests, file))
+    claims
+}
+
+fn jet_cli_test_claim(test: JetNativeTestCase, facts: [TTestFact], doctests: [JetCLIDoctestFile], file: String) -> JetCLITestClaim Never! {
+    loop doctest_file in doctests {
+        doctest :: jet_cli_doctest_named(doctest_file, test.name) ?? next
+        return JetCLITestClaim{kind: 4, file: doctest_file.shown.copy(), line: U32.from_int(doctest.line) ?? U32{0}, mismatch: None}
+    }
+    index :: Int.from_u64(test.id) - 1
+    kind :: if index >= 0 && index < facts.len() && facts[index].kind == TTestKind.Property -> 3 else -> 0
+    JetCLITestClaim{kind: kind, file: file.copy(), line: U32{0}, mismatch: None}
+}
+
 // The tested root's `policy.claims.min` floor, if it declares one.
 fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade? Never! {
     facts :: jet_cli_root_package_facts(root) ?? return None
@@ -93,10 +151,12 @@ fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade
 }
 
 // The run's evidence and status line. `wires` are the settled outcome wires
-// (jet_cli_native_test_wire_parts), `ran_ok` the canonical receipt's verdict
-// (failed output checks included). The claims floor is reported, not enforced:
-// it never changes `ok` or the exit status.
-fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOptions, wires: [String], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
+// (jet_cli_native_test_wire_parts) and `tests` their tests' claims in the
+// same order; a wire past them (an output check) is a unit claim of `file`.
+// `ran_ok` is the canonical receipt's verdict (failed output checks included).
+// The claims floor is reported, not enforced: it never changes `ok` or the
+// exit status.
+fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
     source_revision :: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
     revision_bytes :: source_revision.bytes()
     short :: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision.copy()
@@ -115,8 +175,9 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
     revision :: EvidenceRevision{source: source_revision.copy(), build: build_revision, revision: run_revision}
     report := evidence_report_new(report_id.copy(), EvidenceProducerKind.Test, EvidenceSource{path: file.copy(), line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
     tally := JetCLITestTally{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
-    loop wire in wires {
+    loop (index, wire) in wires {
         parts :: jet_cli_native_test_wire_parts(wire) ?? return Err(err.message)
+        claim :: if index < tests.len() -> tests[index].copy() else -> JetCLITestClaim{kind: 0, file: file.copy(), line: U32{0}, mismatch: None}
         // `ok` is the runtime's verdict against the expectation: an
         // expected-fail test is ok when it fails and not ok when it passes.
         ok :: parts.flags.bit_and(1) != 0
@@ -136,13 +197,26 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
         }
         stop := JetCLITestStop?{None}
         if !skipped && ran_failed -> stop = jet_cli_test_stop(parts.stderr)
-        message :: if stop == .Val(found) -> found.message.copy() else -> ""
+        // A doctest whose output contradicted a claimed value, without a stop.
+        mismatch := JetCLITestStop?{None}
+        if !skipped && ran_failed && stop == None -> mismatch = claim.mismatch.copy()
+        message := ""
+        if stop == .Val(found) -> message = found.message.copy()
+        if mismatch == .Val(found) -> message = found.message.copy()
         state :: if {
             skipped -> 2
             ran_failed -> 1
             else -> 0
         }
-        record := evidence_record_from_test_codes(0, state, parts.name, message, file, U32{0}, report_id, build, revision) ?? return Err(err.message)
+        // A property's record counts its generated cases where others have a line.
+        line :: if claim.kind == 3 -> U32.from_int(parts.cases ?? 0) ?? U32{0} else -> claim.line
+        record := evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
+        if mismatch == .Val(found) -> record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
+        if claim.kind == 3 && state == 1 && jet_cli_test_property_failure(parts.stderr) == .Val(failure) {
+            &record.attachments.push(EvidenceAttachment{name: "case", value: "{failure.case_number}"})
+            &record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed.copy()})
+            if failure.minimized != "" -> &record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized.copy()})
+        }
         if expected_failure && !skipped {
             evidence_record_set_expectation(&record, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))
         }
