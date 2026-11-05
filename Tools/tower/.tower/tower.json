@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6568,
-    "rev": 92400,
+    "rev": 92408,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -64216,6 +64216,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T04:45:52.309Z"
+        },
+        {
+          "n": 54,
+          "text": "(moved from #6035 c7) (Owner 2026-11-04: tests should take seconds, a minute at most for a few thousand, and must not run out of memory unless something leaks) The full ui, golden and cases suites, a few thousand tests, finish in at most about 60 s of wall time on the dev machine, and no test job is killed for memory. Today suite.sh gives each job 3 GiB because 2 GiB was memory-killed, allows a 6800 s timeout, and the cases runs take hours and were OOM-killed on 2026-11-04. Yet the compiler floor is small: jet check and jet run of a hello program take ~180 ms CPU and 15-19 MB peak (Main 2026-11-04, base 52d3e9cf79, systemd-run accounting). Proof: a per-test wall-time and peak-RSS table for every suite, from a testkit report; every outlier fixed at its root (leak, an unbounded fixture, durable-state fsync stalls, engine or jetpack spawn); and a timed full run that meets the budget.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:50:23.359Z"
+        },
+        {
+          "n": 55,
+          "text": "(moved from #6035 c10) Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R3: every compile parses and checks the whole Core closure (66 units, 0.8 s and 700 MiB per call; 72% of ui CPU and 97% of golden CPU). A resident checked Core, or lazy Core modules, make a use core.math check finish under 0.2 s and 150 MiB, with one meaning on every tier. (Also #5910.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:50:24.875Z"
+        },
+        {
+          "n": 56,
+          "text": "(moved from #6035 c11) Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R4: ~270 MiB of each Core compile is Unicode and collation table literals. They become binary assets (embed_bytes relative to Core), with identical results on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:50:26.292Z"
         }
       ],
       "refs": [],
@@ -64225,7 +64252,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-04T20:47:47.255Z",
+      "updated": "2026-11-05T13:50:26.292Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -70773,20 +70800,22 @@
         {
           "n": 7,
           "text": "(Owner 2026-11-04: tests should take seconds, a minute at most for a few thousand, and must not run out of memory unless something leaks) The full ui, golden and cases suites, a few thousand tests, finish in at most about 60 s of wall time on the dev machine, and no test job is killed for memory. Today suite.sh gives each job 3 GiB because 2 GiB was memory-killed, allows a 6800 s timeout, and the cases runs take hours and were OOM-killed on 2026-11-04. Yet the compiler floor is small: jet check and jet run of a hello program take ~180 ms CPU and 15-19 MB peak (Main 2026-11-04, base 52d3e9cf79, systemd-run accounting). Proof: a per-test wall-time and peak-RSS table for every suite, from a testkit report; every outlier fixed at its root (leak, an unbounded fixture, durable-state fsync stalls, engine or jetpack spawn); and a timed full run that meets the budget.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T17:28:33.481Z"
+          "evidence": "Moved to #5910 c54. Owner 2026-11-05: clear the deterministic work first; open-ended memory and speed hill-climbing waits for its goal (G19 memory safety, G23 speed and size).",
+          "at": "2026-11-05T13:50:24.107Z",
+          "closure": "obsolete"
         },
         {
           "n": 8,
           "text": "Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R1: jet repl keeps every turn's compile in memory (Repl.jet:338-348): 773 MiB at 1 turn grows to 5.6 GiB at 9, and suite repl cases reach 4.7-8.3 GB. Per-turn memory stays flat: 9 turns of repl_core_data_query_plans_and_typed_joins under 1 GiB, with a test. (Also #6543.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:21:29.560Z"
+          "evidence": "Moved to #6567 c6. Owner 2026-11-05: clear the deterministic work first; open-ended memory and speed hill-climbing waits for its goal (G19 memory safety, G23 speed and size).",
+          "at": "2026-11-05T13:50:22.565Z",
+          "closure": "obsolete"
         },
         {
           "n": 9,
@@ -70800,20 +70829,22 @@
         {
           "n": 10,
           "text": "Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R3: every compile parses and checks the whole Core closure (66 units, 0.8 s and 700 MiB per call; 72% of ui CPU and 97% of golden CPU). A resident checked Core, or lazy Core modules, make a use core.math check finish under 0.2 s and 150 MiB, with one meaning on every tier. (Also #5910.)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:21:31.152Z"
+          "evidence": "Moved to #5910 c55. Owner 2026-11-05: clear the deterministic work first; open-ended memory and speed hill-climbing waits for its goal (G19 memory safety, G23 speed and size).",
+          "at": "2026-11-05T13:50:25.534Z",
+          "closure": "obsolete"
         },
         {
           "n": 11,
           "text": "Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R4: ~270 MiB of each Core compile is Unicode and collation table literals. They become binary assets (embed_bytes relative to Core), with identical results on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:21:31.977Z"
+          "evidence": "Moved to #5910 c56. Owner 2026-11-05: clear the deterministic work first; open-ended memory and speed hill-climbing waits for its goal (G19 memory safety, G23 speed and size).",
+          "at": "2026-11-05T13:50:27.025Z",
+          "closure": "obsolete"
         },
         {
           "n": 12,
@@ -71297,7 +71328,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T13:44:01.618Z",
+      "updated": "2026-11-05T13:50:27.025Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -91719,6 +91750,15 @@
           "verifiedBy": null,
           "evidence": "520bfbfa0f: AGENTS.md I1 says memory safety includes leak freedom: safe Jet cannot leak memory, and only code inside an #Unsafe block or function may. Docs/spec/philosophy.md design priority 1 says safe Jet cannot leak memory: every value it allocates is freed, and only #Unsafe code may leak.",
           "at": "2026-11-05T13:22:29.621Z"
+        },
+        {
+          "n": 6,
+          "text": "(moved from #6035 c8) Root found by Prep 2026-11-04 for c7 (report $JET_SCRATCH_ROOT/lanes/Main/briefs/6035-c7-perf.md; measured at 5 jobs: ui 256 s, golden 678 s, cases OOM at 16G and 856 s for its last 826 entries at a 19.7 GiB peak). R1: jet repl keeps every turn's compile in memory (Repl.jet:338-348): 773 MiB at 1 turn grows to 5.6 GiB at 9, and suite repl cases reach 4.7-8.3 GB. Per-turn memory stays flat: 9 turns of repl_core_data_query_plans_and_typed_joins under 1 GiB, with a test. (Also #6543.)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:50:21.771Z"
         }
       ],
       "refs": [],
@@ -91729,7 +91769,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-05T13:22:29.621Z",
+      "updated": "2026-11-05T13:50:21.771Z",
       "updatedBy": "Main"
     }
   ],
@@ -172852,6 +172892,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T13:50:27.025Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-05T13:50:26.292Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#56 (moved from #6035 c11) Root found by Prep 2026-11-04 for c7 "
+    },
+    {
+      "at": "2026-11-05T13:50:25.534Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-05T13:50:24.875Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#55 (moved from #6035 c10) Root found by Prep 2026-11-04 for c7 "
+    },
+    {
+      "at": "2026-11-05T13:50:24.107Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-05T13:50:23.359Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#54 (moved from #6035 c7) (Owner 2026-11-04: tests should take s"
+    },
+    {
+      "at": "2026-11-05T13:50:22.565Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-05T13:50:21.771Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#6 (moved from #6035 c8) Root found by Prep 2026-11-04 for c7 ("
+    },
     {
       "at": "2026-11-05T13:49:18.755Z",
       "by": "Main",
