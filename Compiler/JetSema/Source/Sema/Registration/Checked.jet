@@ -2313,9 +2313,6 @@ fn sema_checked_variants(graph: SemaRegistrationGraph, module_row: SemaRegistrat
     style := String?{None}
     rename_all :: sema_checked_marker(definition.serde_markers, "RenameAll")
     if rename_all == .Val(marker) -> style = sema_checked_marker_text(marker)
-    if !sema_checked_wire_style_valid(style) && rename_all == .Val(marker) {
-        &diagnostics.push(sema_error("E2409", marker.span, "the enum rename style is not recognized", "wire casing is one of the checked serde styles", "use camel, kebab, screaming, pascal, or snake"))
-    }
     loop (index, variant) in definition.variants {
         duplicate :: loop previous in 0..<index {
             if definition.variants[previous].name == variant.name -> break true

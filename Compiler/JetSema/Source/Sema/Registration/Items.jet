@@ -88,6 +88,7 @@ use {
         core_module_has_type,
         core_record_literal_fields,
         core_source_owns_type,
+        diagnostic_registry_row,
         expr_span,
         builtin_codec_trait_ref,
         name_count,
@@ -3356,13 +3357,12 @@ fn sema_registration_cli_marker_string(marker: Marker) -> String? {
 }
 
 // (Rust `validate_serde_items`): on every type that derives a codec
-// explicitly, `#Flatten` needs a struct-typed field (E2408), every encoded or
-// decoded field or payload needs a wire form (E2411), and every decoded
-// anonymous union needs one distinct outer wire shape per member (E2415, or
-// E2411 for a member with no known shape). Automatic codecs are selected
-// only for declarations whose fields already qualify. The E2409 casing menu
-// is not part of this pass (an enum reports it while its checked declaration
-// is built).
+// explicitly, a container `#RenameAll(style)` names one of the closed casing
+// styles (E2409), `#Flatten` needs a struct-typed field (E2408), every
+// encoded or decoded field or payload needs a wire form (E2411), and every
+// decoded anonymous union needs one distinct outer wire shape per member
+// (E2415, or E2411 for a member with no known shape). Automatic codecs are
+// selected only for declarations whose fields already qualify.
 fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
     if !sema_registration_serde_any_explicit(items) -> return
     // Keyed wire-form questions: one index per module, not a rescan per field.
@@ -3373,6 +3373,7 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
             encode :: sema_registration_serde_derives(definition.derives, "Encode")
             decode :: sema_registration_serde_derives(definition.derives, "Decode")
             if !encode && !decode -> next
+            sema_registration_serde_rename_all(definition.serde_markers, &diagnostics)
             loop field in definition.fields {
                 skip := false
                 flatten := false
@@ -3393,6 +3394,7 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
             encode :: sema_registration_serde_derives(definition.derives, "Encode")
             decode :: sema_registration_serde_derives(definition.derives, "Decode")
             if !encode && !decode -> next
+            sema_registration_serde_rename_all(definition.serde_markers, &diagnostics)
             loop variant in definition.variants {
                 if variant.payload == {
                     .Unit -> {}
@@ -3407,6 +3409,20 @@ fn sema_registration_serde_items(items: [Item], diagnostics: &[Diagnostic]) {
                 }
             }
         }
+    }
+}
+
+// E2409 (Rust `validate_serde_items`): the container casing menu. A style
+// that is not a name or text is the marker signature's problem (E0930).
+fn sema_registration_serde_rename_all(markers: [Marker], diagnostics: &[Diagnostic]) {
+    loop marker in markers {
+        if marker.name != "RenameAll" -> next
+        style :: sema_checked_marker_text(marker) ?? next
+        if sema_checked_wire_style_valid(Val(style)) -> next
+        span := marker.span
+        if marker.args.len() > 0 && marker.args[0] == .Expr(argument) -> span = expr_span(argument)
+        row :: diagnostic_registry_row("E2409") ?? panic("E2409 has no registry row")
+        &diagnostics.push(sema_error("E2409", span, row.what.replace("{{style}}", style), row.why.replace("{{style}}", style), row.fix.replace("{{style}}", style)))
     }
 }
 

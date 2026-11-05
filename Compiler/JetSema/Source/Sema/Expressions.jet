@@ -5016,8 +5016,11 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         return None
     }
     if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
+        before :: diagnostics.len()
         operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, line)
-        if operator_value != None -> return operator_value
+        // A hook that recurses through its own operator (E0361) has no
+        // missing hook to report as well.
+        if operator_value != None || diagnostics.len() != before -> return operator_value
     }
     comparison := sema_comparability_check_binary(op, lhs, rhs, span, line, environment, program, &diagnostics)
     if comparison.handled {
