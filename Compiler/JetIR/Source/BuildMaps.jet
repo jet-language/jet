@@ -1020,7 +1020,8 @@ fn ir_map_index(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, index: Int
     if ir_failed(b) || key < 0 -> return -1
     address :: ir_map_value_address(&m, p, &b, row, map, key)
     ir_release(&m, &b, key)
-    ir_load_at(&m, &b, address, 0, shape.value.ty)
+    read :: ir_load_at(&m, &b, address, 0, shape.value.ty)
+    ir_end_read_base(&m, p, &b, map, read, span)
 }
 
 // `&map[key]` as a write place: the key's value in the map's own buffer (a

@@ -368,16 +368,25 @@ fn ir_list_extend(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     // A buffer another holder shares is first the source's own.
     ir_make_unique(&m, p, &b, source)
     ir_list_append(&m, p, &b, list, row, source, true)
+    ir_list_retire(&m, &b, source, row, capacity)
+    ir_end(&b.f, b.line)
+}
+
+// Retires the buffer of the List-family header at `list` (row `row`
+// elements in `capacity` slots, capacity above 0), whose elements were all
+// moved out: the buffer is freed and the header cleared, so its drop
+// releases nothing.
+fn ir_list_retire(m: &IRModule, b: &IRBuilder, list: Int, row: Int, capacity: Int) Never! {
+    zero :: ir_word_const(&m, &b, 0)
     stride :: ir_list_stride(m, row)
     if stride > 0 {
         width :: ir_word_const(&m, &b, stride)
         held :: ir_word_op(&m, &b, IROp.Mul, capacity, width)
         align :: ir_word_const(&m, &b, 8)
-        data :: ir_load_word(&m, &b, source, 16)
+        data :: ir_load_word(&m, &b, list, 16)
         _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{data, held, align}, -1)
     }
-    loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, source, offset, zero, b.line)
-    ir_end(&b.f, b.line)
+    loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, list, offset, zero, b.line)
 }
 
 // The elements of the List-family header at `source` copied (`moving`: moved)
@@ -840,8 +849,9 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
     int_row :: ir_type_row(&m, Type.Int) ?? 0
     if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(receiver_ty) != None {
         set_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
-        if ir_set_builtin(&m, p, &b, ty, set_route.symbol, subject, operands, span) == .Val(result) -> return result
-        return ir_fail_slot(&b, span, "set builtin {set_route.symbol}")
+        result :: ir_set_builtin(&m, p, &b, ty, set_route.symbol, subject, operands, span) ?? return ir_fail_slot(&b, span, "set builtin {set_route.symbol}")
+        if mutates || operation == .SetFrom || operation == .SortedSetFrom -> return result
+        return ir_end_builtin_receiver(&m, p, &b, subject, result, span)
     }
     if operation == .PriorityQueueFrom || ir_priority_queue_element(receiver_ty) != None {
         return ir_priority_queue_builtin(&m, p, &b, ty, operation, subject, operands, span)
@@ -850,8 +860,9 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
     if ir_cache_carrier(receiver_ty) != None -> return ir_cache_builtin(&m, p, &b, ty, receiver_ty, operation, subject, operands, span)
     if ir_map_entry_type(receiver_ty) != None {
         map_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
-        if ir_map_builtin(&m, p, &b, ty, map_route.symbol, subject, operands, span) == .Val(result) -> return result
-        return ir_fail_slot(&b, span, "map builtin {map_route.symbol}")
+        result :: ir_map_builtin(&m, p, &b, ty, map_route.symbol, subject, operands, span) ?? return ir_fail_slot(&b, span, "map builtin {map_route.symbol}")
+        if mutates -> return result
+        return ir_end_builtin_receiver(&m, p, &b, subject, result, span)
     }
     if element >= 0 {
         if operation == {
