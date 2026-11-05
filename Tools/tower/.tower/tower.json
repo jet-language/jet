@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92162,
+    "rev": 92182,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20489,11 +20489,11 @@
         {
           "n": 1,
           "text": "`jet cc` and `jet c++` use the pinned Hangar-provisioned compiler, linker, and declared sysroot, never an undeclared host tool; plan, lock, cache key, and receipt name exact identities.",
-          "status": "verified",
-          "metBy": "Main",
-          "verifiedBy": "fable",
-          "evidence": "Read cc.rs:151-182 pinned Hangar toolchain + sysroot + PATH allowlist.",
-          "at": "2026-08-31T17:53:40.650Z"
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:00:55.506Z"
         },
         {
           "n": 2,
@@ -20582,8 +20582,8 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-07-31T13:22:58.178Z",
-      "updated": "2026-11-01T06:57:28.950Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-05T00:00:55.506Z",
+      "updatedBy": "owner",
       "probe": null,
       "visualMedia": [],
       "goals": []
@@ -21356,11 +21356,11 @@
         {
           "n": 2,
           "text": "jetos docs state the install-trust law: what is free, what is sandboxed, what identity signals mean, and what is never a hard gate.",
-          "status": "verified",
-          "metBy": "Main",
-          "verifiedBy": "fable",
-          "evidence": "Read native-jetos.md:95-118 install-trust law.",
-          "at": "2026-08-31T17:52:11.804Z"
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:00:56.164Z"
         },
         {
           "n": 3,
@@ -21414,8 +21414,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T15:13:17.324Z",
-      "updated": "2026-09-29T01:27:17.835Z",
-      "updatedBy": "Pip",
+      "updated": "2026-11-05T00:00:56.164Z",
+      "updatedBy": "owner",
       "probe": null,
       "visualMedia": [],
       "goals": []
@@ -21476,11 +21476,11 @@
         {
           "n": 1,
           "text": "Every case in tests/jetpack_jetos writes its scratch to a gitignored disk path, not /tmp",
-          "status": "verified",
-          "metBy": "Main",
-          "verifiedBy": "fable",
-          "evidence": "Read jetpack_jetos.rs:99-109 and test_scratch_root asserting disk path.",
-          "at": "2026-08-31T17:52:09.874Z"
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:00:56.832Z"
         },
         {
           "n": 2,
@@ -21528,8 +21528,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T16:31:00.092Z",
-      "updated": "2026-09-11T02:47:55.800Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-05T00:00:56.832Z",
+      "updatedBy": "owner",
       "probe": null,
       "visualMedia": [],
       "goals": []
@@ -28193,8 +28193,8 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-04T23:47:56.935Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-04T23:57:15.980Z",
+      "updatedBy": "owner",
       "workOrder": 171,
       "goals": []
     },
@@ -43241,19 +43241,19 @@
           "n": 1,
           "text": "#3987: `jet Fold` is capitalized; ratified D-ECO-TRANSITION1=A names it `jet fold` (2 criteria carried over)",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "owner",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): `jet fold --help` -> \"jet fold — Reverse a recorded Package source transition\" [exit 0]. `jet --help` lists \"jet fold [args]\". `jet Fold` -> \"Error [E2101]: `Fold` isn't a jet command.\" (queue1.out). Carried sub-criteria not listed on the card.",
-          "at": "2026-10-31T15:46:52.854Z"
+          "evidence": "Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). 76b385b498: jet fold --help prints \"jet fold — Reverse a recorded Package source transition\"; jet Fold gives jet.UnknownCommand, rc 2.",
+          "at": "2026-11-05T00:00:57.556Z"
         },
         {
           "n": 2,
           "text": "#3989: `core.tasks` blocking calls declare the `Time` root instead of `Time.Wait` (2 criteria carried over)",
           "status": "met",
-          "metBy": "TowerCloser",
+          "metBy": "owner",
           "verifiedBy": null,
-          "evidence": "Row 2 (#3989) proven. c1: Core/tasks/tasks.jet declares -[Time.Wait]> on run, waitall, waitany, yield_now, recv, get, result, wait and host_yield; core_calls.rs effect_leaf_for gives Time.Wait only for core.tasks.yield_now and no leaf for core.tasks.after/interval, so timeout, sleep and host_sleep_ms (which block on recv(core.tasks.after(...))) correctly keep the Time root that after() needs. c2: on jet-debug-snapshot176, fn receive_one(rx) -[Time.Wait]> Int { tasks.recv(rx) } checks and prints 'received 7' (probe ~/.cache/jet-test-scratch/TowerCloser4/rp/wait_leaf.jet, jet run --allow=Time); goldens concurrency/channel_outcomes, task_controls and tasks pass the cargo golden harness (AOT, proof batch s176 tc_4021_tasks_a-c, rc 0) and match their .out on default jet run.",
-          "at": "2026-10-01T14:17:34.551Z"
+          "evidence": "Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). f2898ba8d5: Core/Tasks/Tasks.jet:68-106 declares -[Time.Wait]> on yield_now, recv, get, result, wait, waitall, waitany and host_yield.",
+          "at": "2026-11-05T00:00:58.233Z"
         },
         {
           "n": 3,
@@ -43285,8 +43285,8 @@
       "parentId": "c00dtttx",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:27.253Z",
-      "updated": "2026-10-31T15:46:52.854Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-05T00:00:58.233Z",
+      "updatedBy": "owner",
       "goals": []
     },
     {
@@ -44305,10 +44305,10 @@
           "n": 5,
           "text": "[#3873] A list of U64 or I64 words in [2^62, 2^63), with low bits matching the exact-Int pointer tag, stores and reads back correctly (no crash) on every level.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "owner",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11 run3 p/u64w4174.jet: [U64]{4611686018427387904, 4611686018427387905, 9223372036854775807} and [I64]{2^62, 2^63-1} print back exactly, exit 0 on o0/o1/o2 and the AOT build (build1.sh: build exit 0, run exit 0)",
-          "at": "2026-10-31T16:48:54.563Z"
+          "evidence": "Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). 76b385b498: probe p4174.jet prints [U64]{2^62, 2^62+1, 2^63-1} and [I64]{2^62, 2^63-1} back exactly on run and run --release.",
+          "at": "2026-11-05T00:00:58.868Z"
         },
         {
           "n": 6,
@@ -44332,10 +44332,10 @@
           "n": 8,
           "text": "[#3985] The crypto/primitive_matrix golden (trimmed copy allowed) passes on every level with correct Err wrapping.",
           "status": "met",
-          "metBy": "Main",
+          "metBy": "owner",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: gold4.sh crypto/primitive_matrix on w9b: o0/o1/o2 \"stdout == .../expected/crypto/primitive_matrix.out\" [exit 0] x3; AOT basic build exit 0 and stdout == primitive_matrix.out [run exit 0]",
-          "at": "2026-10-31T19:52:02.429Z"
+          "evidence": "Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). f2898ba8d5: Examples/features/crypto/primitive_matrix.jet run and release outputs match (4,322 bytes).",
+          "at": "2026-11-05T00:00:59.472Z"
         },
         {
           "n": 9,
@@ -44377,10 +44377,11 @@
           "n": 13,
           "text": "[#4185] Main raises the short D-PHILO-DATA1 ballot; the owner applies the wording or declines.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "owner",
           "verifiedBy": null,
-          "evidence": "Void: the owner rejected D-PHILO-DATA1 on 2026-10-04 (no ballot, no philosophy line). Nothing to do; carried by mistake from the #4185 consolidation.",
-          "at": "2026-10-04T18:08:04.720Z"
+          "evidence": "Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). Void: the owner rejected D-PHILO-DATA1 on 2026-10-04.",
+          "at": "2026-11-05T00:01:00.070Z",
+          "closure": "obsolete"
         },
         {
           "n": 14,
@@ -44416,8 +44417,8 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-02T01:15:18.089Z",
-      "updated": "2026-11-01T06:57:38.099Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-05T00:01:00.070Z",
+      "updatedBy": "owner",
       "goals": []
     },
     {
@@ -73562,6 +73563,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c62 has no port target yet: in the Rust era the struct signature was visible only to the in-process API (CmdSupply.rs:429-433 printed kind and name; ApiFreeze.rs:20-40 snapshotted only pub fns), and Jet has no public-API producer today (Jetpack/Publication/Source/Diff.jet has the types and nothing produces them). The producer requirement is now on #6418; c62 is met with that #Test. Analysis: Prep-2, briefs/6096-c62-blocker.md."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "G15 audit on dev 0d1ea12f79 (Docs/audits/g15-2026-11/VERDICTS-g15-6096-4599.md, commit 125e2e8f89): 1 criteria settled, 34 stay open; each open row names what is left."
@@ -74113,11 +74119,11 @@
         {
           "n": 59,
           "text": "pkg-fetch-lock: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::foreign_package_provider_fetch_lock_and_locked_round_trip)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case (ported-failing #6418)",
+          "at": "2026-11-05T00:01:35.152Z"
         },
         {
           "n": 60,
@@ -74131,11 +74137,11 @@
         {
           "n": 61,
           "text": "pkg-git-transport: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::git_transport_uses_canonical_public_ip_classifier)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/pkg/git_transport_uses_canonical_public_ip_classifier.case (PASS)",
+          "at": "2026-11-05T00:01:36.069Z"
         },
         {
           "n": 62,
@@ -74149,20 +74155,20 @@
         {
           "n": 63,
           "text": "pkg-vendor-security: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::vendor_rejects_symlink_sources_and_traversal_names)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/pkg/vendor_rejects_symlink_sources_and_traversal_names.case (ported-failing #6418)",
+          "at": "2026-11-05T00:01:36.797Z"
         },
         {
           "n": 64,
           "text": "polyglot-cpp-binder: 1 deleted Rust tests have a Jet test covering the same behavior (tests/polyglot_systems.rs::cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "e2e19e2e2b: tests/cases/polyglot_systems/cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface.case (ported-failing #6418)",
+          "at": "2026-11-05T00:01:37.639Z"
         },
         {
           "n": 65,
@@ -74270,7 +74276,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-04T23:44:37.724Z",
+      "updated": "2026-11-05T00:01:48.849Z",
       "updatedBy": "Main"
     },
     {
@@ -74921,8 +74927,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-04T20:29:06.782Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-04T23:59:39.320Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0q31aks",
@@ -84780,6 +84786,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:33:38.449Z"
+        },
+        {
+          "n": 135,
+          "text": "jet fetch and jet fetch --locked are built; tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case passes (stale or missing provider artifact fails E1256 and writes no lock; a good one fetches, projects .jet/bindings/js/plotly.jet, compiles, and verifies byte-identical in locked mode), and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:01:38.392Z"
+        },
+        {
+          "n": 136,
+          "text": "jet registry vendor is built; tests/cases/pkg/vendor_rejects_symlink_sources_and_traversal_names.case and tests/cases/pkg/cli_vendor_dir_flag_relocates.case pass (symlinked sources and traversal-shaped dependency names are refused without touching anything outside the vendor tree), and their known-failing rows are removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:01:39.086Z"
+        },
+        {
+          "n": 137,
+          "text": "jet publish has a Jet public-API producer (PublicAPIItem from the checked package, structs included); a Jetpack/Publication #Test proves #CLI struct Config { port: Int{3000}; required: Int } freezes as struct Config { port: Int; required: Int [positional 0] } (tests/pkg.rs:5948), which meets #6096 c62",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T00:01:47.906Z"
         }
       ],
       "refs": [],
@@ -84791,7 +84824,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-04T23:33:39.397Z",
+      "updated": "2026-11-05T00:01:47.906Z",
       "updatedBy": "Main"
     },
     {
@@ -90513,11 +90546,11 @@
         {
           "n": 1,
           "text": "The closure audit covers every done card and met criterion (live and archived). Each row is DURABLE, re-verified against dev content with the commit recorded, or reopened with its reason. The audit TSV is committed under Docs/audits.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T16:33:48.413Z"
+          "evidence": "Every done card and met criterion has a recorded verdict. a32d379133 commits Docs/audits/closure-audit-2026-11 (15,249 rows on dev 0e281eefd0; the 59 live and post-cutover dispositions applied; the 8 on frozen cards applied with the owner's approval, 2026-11-04: 3 reopened, 4 verified, 1 obsolete). ff5dd7fd7b commits Docs/audits/precut-2026-11 under D-AUDIT-PRECUT1 = D: all 3,670 pre-cutover rows re-judged on the base compiler built from 9c7ddf1359 (VERIFIED 827, REOPEN 2,403, OBSOLETE 440); the reopened rows were added as 1,495 criteria on 119 live cards (board rev 92162, 1,615 writes, 0 failed). The 384 orphaned merges have verdicts (briefs/6563-orphans-rehome.tsv).",
+          "at": "2026-11-05T00:01:06.455Z"
         },
         {
           "n": 2,
@@ -90573,7 +90606,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:47.956Z",
-      "updated": "2026-11-04T23:51:40.917Z",
+      "updated": "2026-11-05T00:01:06.455Z",
       "updatedBy": "Main"
     },
     {
@@ -168181,8 +168214,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-04T18:24:18.575Z"
+      "status": "ratified",
+      "created": "2026-11-04T18:24:18.575Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04"
     },
     {
       "id": "D-REFLECT-EDIT1",
@@ -171076,6 +171111,28 @@
       "status": "open",
       "answer": "",
       "created": "2026-11-04T23:46:12.709Z"
+    },
+    {
+      "id": "q8dletl9",
+      "cardId": "c09kjhit",
+      "decisionId": "D-EFFTYPE-MODVALUE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Structs should already have nested constant support, need to engineer away the downside. Also maybe module and package since they use a special keyword can have special reserved properties that normal structs don't? Idk",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-04T23:57:14.183Z"
+    },
+    {
+      "id": "q91vyiey",
+      "cardId": "c09kjhit",
+      "decisionId": "D-EFFTYPE-MODVALUE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Also like in zig file as a strict sounds like a good idea",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-04T23:59:39.320Z"
     }
   ],
   "ideas": [
@@ -171932,6 +171989,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T00:01:48.849Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T00:01:47.906Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#137 jet publish has a Jet public-API producer (PublicAPIItem fro"
+    },
+    {
+      "at": "2026-11-05T00:01:39.086Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#136 jet registry vendor is built; tests/cases/pkg/vendor_rejects"
+    },
+    {
+      "at": "2026-11-05T00:01:38.392Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#135 jet fetch and jet fetch --locked are built; tests/cases/pkg/"
+    },
+    {
+      "at": "2026-11-05T00:01:37.639Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-05T00:01:36.797Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-05T00:01:36.069Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#61"
+    },
+    {
+      "at": "2026-11-05T00:01:35.152Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#59"
+    },
+    {
+      "at": "2026-11-05T00:01:06.455Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n8pmxe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-05T00:01:00.070Z",
+      "by": "owner",
+      "action": "card.criteria-meet",
+      "ref": "c003mq4e",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-05T00:00:59.472Z",
+      "by": "owner",
+      "action": "card.criteria-meet",
+      "ref": "c003mq4e",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-05T00:00:58.868Z",
+      "by": "owner",
+      "action": "card.criteria-meet",
+      "ref": "c003mq4e",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-05T00:00:58.233Z",
+      "by": "owner",
+      "action": "card.criteria-meet",
+      "ref": "c0wcsfeo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-05T00:00:57.556Z",
+      "by": "owner",
+      "action": "card.criteria-meet",
+      "ref": "c0wcsfeo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-05T00:00:56.832Z",
+      "by": "owner",
+      "action": "card.criteria-reopen",
+      "ref": "c08lw188",
+      "note": "#1: Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). Its evidence read jetpack_jetos.rs, Rust code deleted at the cutover."
+    },
+    {
+      "at": "2026-11-05T00:00:56.164Z",
+      "by": "owner",
+      "action": "card.criteria-reopen",
+      "ref": "c0kwxkks",
+      "note": "#2: Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). Its evidence cites native-jetos.md:95-118 with no path on dev."
+    },
+    {
+      "at": "2026-11-05T00:00:55.506Z",
+      "by": "owner",
+      "action": "card.criteria-reopen",
+      "ref": "c0wxdq1k",
+      "note": "#1: Owner approved writing these audit results in chat with Main, 2026-11-04 (#6563 c1; Docs/audits/closure-audit-2026-11/6563-c1-dispositions.tsv). Its evidence read cc.rs, Rust code deleted at the cutover; nothing on dev proves it."
+    },
+    {
+      "at": "2026-11-04T23:59:39.320Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q91vyiey",
+      "note": ""
+    },
+    {
+      "at": "2026-11-04T23:57:15.980Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-REFLECT-TYPEINFO1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-04T23:57:14.183Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q8dletl9",
+      "note": ""
+    },
     {
       "at": "2026-11-04T23:51:40.917Z",
       "by": "Main",
