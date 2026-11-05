@@ -6,17 +6,20 @@ cache script copies remain temporarily for running agents, not as new tooling ho
 `JET_REPO` overrides the checkout derived from these tools.
 
 ```sh
-Tools/agent/cache/laneS.sh node your-small-job.mjs
-Tools/agent/cache/laneB.sh 8 command args
-Tools/agent/cache/safe-jet.sh check path/to/program.jet
+jet Tools/agent/cache/Lanes.jet small node your-small-job.mjs
+jet Tools/agent/cache/Lanes.jet heavy 8 command args
+jet Tools/agent/cache/Lanes.jet jet check path/to/program.jet
 node Tools/agent/cache/purge-bulk.mjs
 ```
 
-- `laneS.sh` gives four capped small-job slots; `laneB.sh` gives two capped heavy
-  slots. `safe-jet.sh` defaults to the frozen `scratch/jet-current` binary and
-  three serialized slots; `JET`, `SAFE_JET_MEM` and `SAFE_JET_TIMEOUT` override it.
-  These wrappers require Linux systemd user scopes and flock.
-- `mem-guard.sh` is an opt-in long-running emergency guard: below 7 GiB available
+- `Lanes.jet small` gives four capped small-job slots (`LANES_MEM`, 1G..8G,
+  default 3G); `Lanes.jet heavy GB` gives two heavy slots capped at GB (at most
+  12). `Lanes.jet jet` runs `$JET` (default the frozen `scratch/jet-current`
+  binary) in three serialized slots; `SAFE_JET_MEM` (default 6G) and
+  `SAFE_JET_TIMEOUT` (default 300 s, exit 124) override it. The cap is the
+  child's address-space limit (`core.process` `memory_limit`); slots are
+  exclusive file locks under `$JET_STATE_ROOT`.
+- `Lanes.jet guard` is an opt-in long-running emergency guard: below 7 GiB available
   RAM it kills the largest eligible compiler/build process and logs the action.
   Only Main should start it; it is not a substitute for job memory caps.
 - `purge-bulk.mjs` dry-runs deletion candidates; `--apply` deletes eligible output.

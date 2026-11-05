@@ -171,11 +171,11 @@ Tools/agent-eval/test-economics/test-economics.mjs	port	unassigned	PORT-EASY	JSO
 Tools/agent/AgentDocFlags.jet	keep	unassigned	JET-EXISTS	Jet port of check-agent-doc-flags.mjs (#5072 C9); documented Tools/agent flags exist and guidance docs keep plans in Tower; native-suite agent-doc-flags gate; ASCII ICU-root collation stands in for C4	Tools/agent/native-suite.mjs	core.files,core.process,core.regex,core.term	C4(ASCII stand-in)
 Tools/agent/ballots/validate.mjs	blocked-route	unassigned	JET-EXISTS	validates ballot files with Tower's ballot rules (imports Tools/tower/app/store.mjs); ports with Tower (#6311)	Tools/agent/ballots/README.md	core.encoding.json,core.files,core.process	Tower(#6311)
 Tools/agent/cache/cache-cutover.mjs	deleted	unassigned	PORT-EASY	finished one-off jet-luna -> jet-dev cache rename			
-Tools/agent/cache/laneB.sh	port	unassigned	PORT-EASY	heavy-job lane: two machine-wide flock slots, systemd-run memory-capped scope	Tools/agent/cache/README.md	core.files.lock,core.process	C1
-Tools/agent/cache/laneS.sh	port	unassigned	PORT-EASY	small-job lane: four flock slots, systemd-run memory-capped scope; Tools/perf/function-boundary/run.sh	Tools/agent/cache/README.md,Tools/perf/function-boundary/run.sh	core.files.lock,core.process	C1
-Tools/agent/cache/mem-guard.sh	port	unassigned	PORT-EASY	opt-in emergency OOM guard: polls MemAvailable, kills the largest compiler/build process, logs it	Tools/agent/cache/README.md	core.process	
+Tools/agent/cache/laneB.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/cache/Lanes.jet heavy (#6035 c3); deleted
+Tools/agent/cache/laneS.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/cache/Lanes.jet small (#6035 c3); deleted
+Tools/agent/cache/mem-guard.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/cache/Lanes.jet guard (#6035 c3); deleted
 Tools/agent/cache/purge-bulk.mjs	port	unassigned	PORT-EASY	dry-run/--apply purge of regenerable cache output older than six hours	Tools/agent/cache/README.md	core.encoding.json,core.files,core.process,core.regex	
-Tools/agent/cache/safe-jet.sh	port	unassigned	PORT-EASY	memory-capped serialized jet invocation (systemd-run + flock)	Tools/agent/cache/README.md	core.files.lock,core.process	C1
+Tools/agent/cache/safe-jet.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/cache/Lanes.jet jet (#6035 c3); deleted
 Tools/agent/chain/build-slot.sh	port	unassigned	PORT-EASY	machine build slots: physical-core CPU sets, memory and I/O admission, ticket queue, slot ledger; moved from lane scratch (#6564 c2)	Tools/agent/chain/chain.sh,Tools/agent/land/publish-base.sh,Tools/agent/release-compiler.mjs,Tools/agent/suite/suite.sh	core.files.lock,core.process	
 Tools/agent/chain/chain-lib.mjs	port	unassigned	PORT-EASY	chain.sh library: stage plan from the diff, stage input hashing, store eviction; moved from lane scratch (#6564 c2)	Tools/agent/chain/chain.sh	core.crypto,core.encoding.json,core.files,core.process	
 Tools/agent/chain/chain.sh	port	unassigned	PORT-EASY	the shared self-host chain (export, check, s1, full, seed-published) with content-addressed stage reuse; moved from lane scratch (#6564 c2)	AGENTS.md,Tools/agent/land/publish-base.sh,Tools/agent/release-compiler.mjs	core.crypto,core.files,core.files.lock,core.process	
@@ -341,19 +341,19 @@ Tools/canvas-test/gecko-lifecycle.mjs	blocked-route	unassigned	PORT-EASY	imports
 Tools/canvas-test/native-lifecycle.mjs	blocked-route	unassigned	PORT-EASY	http client			
 Tools/canvas-test/run.mjs	blocked-route	unassigned	JET-EXISTS	imports canvas-test/scenario.mjs (http client)			
 Tools/canvas-test/scenario.mjs	blocked-route	unassigned	PORT-GAP	http client			
-Tools/ci/agent-workload-gate.sh	port	unassigned	PORT-EASY	Jet candidate Tools/ci/AgentWorkloads.jet; cutover gated			
-Tools/ci/agent-workload-matrix.sh	port	unassigned	PORT-EASY	Jet candidate Tools/ci/AgentWorkloads.jet; cutover gated			
+Tools/ci/agent-workload-gate.sh	deleted	unassigned	PORT-EASY	cut over to Tools/ci/AgentWorkloads.jet (#6035 c3); deleted
+Tools/ci/agent-workload-matrix.sh	deleted	unassigned	PORT-EASY	cut over to Tools/ci/AgentWorkloads.jet matrix (#6035 c3); deleted
 Tools/ci/ci-evidence.sh	port	unassigned	PORT-EASY				
 Tools/ci/compiled-workload-gate.sh	port	unassigned	PORT-EASY	JSON reads are native (Dyn, 63f7afdc6)			
 Tools/ci/compiled-workload-review.mjs	port	unassigned	PORT-EASY	JSON reads are native (Dyn, 63f7afdc6)			
 Tools/ci/compiled-workload-runner.mjs	blocked-route	unassigned	PORT-EASY	http client			
 Tools/ci/compiled-workload-runner.sh	blocked-route	unassigned	PORT-EASY	node entry for compiled-workload-runner.mjs (http client); ports with it			
-Tools/ci/test-agent-workload-gate.sh	port	unassigned	PORT-EASY	Jet candidate Tools/ci/AgentWorkloads.jet; cutover gated			
+Tools/ci/test-agent-workload-gate.sh	deleted	unassigned	PORT-EASY	cut over to Tools/ci/AgentWorkloads.jet (#6035 c3); deleted
 Tools/ci/test-compiled-workload-gate.sh	port	unassigned	PORT-EASY				
 Tools/ci/test-compiled-workload-peer-launcher.mjs	port	unassigned	PORT-EASY				
-Tools/ci/test-shards.sh	port	unassigned	JET-EXISTS	Jet candidate Tools/ci/TestShards.jet; cutover gated			
+Tools/ci/test-shards.sh	deleted	unassigned	JET-EXISTS	cut over to Tools/ci/TestShards.jet (#6035 c3); deleted
 Tools/ci/tower-hygiene-gate.sh	port	unassigned	PORT-EASY	JSON reads are native (Dyn, 63f7afdc6)			
-Tools/ci/weighted-shards.sh	port	unassigned	JET-EXISTS	Jet candidate Tools/ci/WeightedShards.jet; cutover unblocked (#5072 C4): the shell now pins LC_ALL=C, so ties order by bytes in both; identical output on 40 fixtures under en_US.UTF-8, C, C.UTF-8 and POSIX			
+Tools/ci/weighted-shards.sh	deleted	unassigned	JET-EXISTS	cut over to Tools/ci/WeightedShards.jet (#6035 c3); deleted
 Tools/cli-census/census.mjs	port	unassigned	JET-EXISTS	Jet candidate Tools/cli-census/Census.jet; cutover gated			
 Tools/compiler-modules/dissolve-collections.mjs	delete-candidate	unassigned	PORT-EASY	one-off module-cycle cutover, no caller; needs a zero-sites check before removal			
 Tools/compiler-modules/drop-file-imports.mjs	delete-candidate	unassigned	PORT-EASY	one-off module-cycle cutover, only migrate-examples calls it; needs a zero-sites check before removal			

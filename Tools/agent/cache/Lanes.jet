@@ -1,0 +1,368 @@
+#!/usr/bin/env jet
+// Memory-capped, slot-limited lanes for agent jobs, and the emergency memory
+// guard. Usage (from anywhere):
+//   jet Tools/agent/cache/Lanes.jet jet <jet args...>       one capped jet run
+//   jet Tools/agent/cache/Lanes.jet small <command...>      a small job
+//   jet Tools/agent/cache/Lanes.jet heavy <GB> <command...> a heavy job
+//   jet Tools/agent/cache/Lanes.jet guard                   the memory guard
+//
+// `jet` runs $JET (default $JET_STATE_ROOT/scratch/jet-current) in one of three
+// machine-wide slots, capped at SAFE_JET_MEM (default 6G) and stopped after
+// SAFE_JET_TIMEOUT seconds (default 300, exit 124), with TMPDIR on
+// $JET_SCRATCH_ROOT. `small` gives four slots capped at LANES_MEM (1G..8G,
+// default 3G); `heavy` gives two slots capped at GB (at most 12). A busy lane
+// waits for the first free slot. Slots are exclusive file locks, so the lock
+// dies with its holder. Every job runs without core dumps and is stopped if
+// this lane dies.
+//
+// The cap is core.process's memory limit, the child's address-space limit.
+//
+// `guard` protects the orchestrator from a global OOM: every 2 s, below 7 GiB
+// of available memory it kills the largest-RSS compiler, build or test job
+// (jetc0, jet test binaries, rustc, cargo, jet, python runners, linkers) and
+// logs it in $JET_STATE_ROOT/mem-guard.log. It never touches anything else.
+// Only Main starts it; it is not a substitute for job caps.
+use {
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
+    term :: core.term
+    time :: core.time
+}
+
+GIB :: 1073741824
+
+fn run() {
+    args :: process.args()
+    if args.len() == 0 -> usage()
+    rest :: args[1..<args.len()]
+    code :: if args[0] == {
+        "jet" -> jet_lane(rest)
+        "small" -> small_lane(rest)
+        "heavy" -> heavy_lane(rest)
+        "guard" -> guard()
+        else -> usage()
+    }
+    process.exit(code)
+}
+
+fn usage() -[Exec, IO]> Never {
+    term.eprint("usage: jet Tools/agent/cache/Lanes.jet jet <jet args...> | small <command...> | heavy <GB> <command...> | guard")
+    process.exit(64)
+}
+
+// --- roots ------------------------------------------------------------------
+
+// An environment value, or `fallback` when it is unset or empty.
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The value `${XDG_CONFIG_HOME:-~/.config}/jet/env` assigns to `name`
+// (`NAME=value` or `export NAME=value`, optionally quoted), the file the
+// shell tools source first.
+fn env_file_value(name: String) -[Env, FS]> String? Never! {
+    home :: env_or("HOME", "")
+    path :: "{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env"
+    text :: files.read(path) ?? return None
+    found := ""
+    seen := false
+    loop raw in text.lines() {
+        line :: raw.trim().removeprefix("export ").trim()
+        parts :: line.partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail
+        quoted :: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
+        if value.len() >= 2 && quoted -> value = value.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+fn root(name: String, fallback: String) -[Env, FS]> String Never! {
+    env_or(name, env_file_value(name) ?? fallback)
+}
+
+fn state_root() -[Env, FS]> String Never! {
+    home :: env_or("HOME", "")
+    root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{home}/.cache")}/jet-dev")
+}
+
+fn scratch_root() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
+
+// --- lanes ------------------------------------------------------------------
+
+struct Lane {
+    name: String
+    slots: [String]
+    wait_ms: Int
+    memory_bytes: Int
+    timeout_s: Int?
+    env: [(name: String, value: String)]
+}
+
+// Hold the first free slot (waiting while every slot is busy), then run the
+// job under the lane's limits with the caller's terminal. The exit code is
+// the job's, 128+N for a signal, 124 for a timeout.
+fn run_in_lane(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    loop path in lane.slots {
+        files.create_dir_all(files.dirname(path)) ?? return lane_error(lane, "cannot create {files.dirname(path)}: {err}")
+        files.append_all(path, "") ?? return lane_error(lane, "cannot open slot {path}: {err}")
+    }
+    sys.set_core_file_limit(Val(0), None) ?? ()
+    loop {
+        loop path in lane.slots {
+            held :: files.try_lock(path) ?? next
+            return run_job(lane, argv, held)
+        }
+        time.sleep(time.duration_ms(lane.wait_ms))
+    }
+}
+
+// The lane's slot lock `_slot` stays held until the job ends.
+fn run_job(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, Time.Wait, IO]> Int Never! {
+    spec := process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).memory_limit(lane.memory_bytes)
+    if lane.timeout_s == .Val(seconds) -> spec = spec.timeout(time.duration_seconds(seconds))
+    loop pair in lane.env -> spec = spec.env(pair.name, pair.value)
+    results :: process.run_all([ProcessSpec]{spec}, 1) ?? return refuse("{lane.name}: {argv[0]} could not start: {err}", 127)
+    if results[0] == {
+        .Ok(receipt) -> job_code(receipt)
+        .Err(error) -> refuse("{lane.name}: {argv[0]} could not start: {error}", 127)
+    }
+}
+
+fn job_code(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.timed_out -> return 124
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+fn lane_error(lane: Lane, message: String) -[IO]> Int Never! {
+    term.eprint("{lane.name}: {message}")
+    2
+}
+
+// "6G" / "512M" / plain bytes as bytes; None if malformed.
+fn size_bytes(text: String) -> Int? Never! {
+    if text == "" -> return None
+    scale := 1
+    digits := text
+    if text.ends_with("G") || text.ends_with("M") {
+        scale = if text.ends_with("G") -> GIB else -> 1048576
+        digits = text[0..<text.len() - 1]
+    }
+    value :: digits_value(digits) ?? return None
+    Val(value * scale)
+}
+
+fn digits_value(text: String) -> Int? Never! {
+    if text == "" -> return None
+    value := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+        value = value * 10 + code - 48
+    }
+    Val(value)
+}
+
+fn refuse(message: String, code: Int) -[IO]> Int Never! {
+    term.eprint(message)
+    code
+}
+
+fn jet_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    state :: state_root()
+    jet :: env_or("JET", "{state}/scratch/jet-current")
+    if files.basename(jet).ends_with(".jet") || files.basename(jet) == "safe-jet.sh" {
+        term.eprint("Lanes.jet jet refuses to wrap itself or a script (JET={jet}); point JET at a jet binary")
+        return 64
+    }
+    memory :: size_bytes(env_or("SAFE_JET_MEM", "6G")) ?? return refuse("jet lane: SAFE_JET_MEM must be a size like 6G", 64)
+    timeout :: digits_value(env_or("SAFE_JET_TIMEOUT", "300")) ?? return refuse("jet lane: SAFE_JET_TIMEOUT must be whole seconds", 64)
+    slots :: [String]{"{state}/jet-slots/1", "{state}/jet-slots/2", "{state}/jet-slots/3"}
+    argv := [String]{jet}
+    loop arg in args -> &argv.push(arg)
+    run_in_lane(Lane{name: "jet lane", slots: slots, wait_ms: 500, memory_bytes: memory, timeout_s: Val(timeout), env: [(name: String, value: String)]{(name: "TMPDIR", value: scratch_root())}}, argv)
+}
+
+fn small_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() == 0 -> usage()
+    mem :: env_or("LANES_MEM", "3G")
+    gb :: if mem.ends_with("G") -> digits_value(mem[0..<mem.len() - 1]) ?? 0 else -> 0
+    if gb < 1 || gb > 8 {
+        term.eprint("laneS: LANES_MEM must be 1G..8G (got {mem})")
+        return 2
+    }
+    d :: "{state_root()}/laneS"
+    slots :: [String]{"{d}/1", "{d}/2", "{d}/3", "{d}/4"}
+    run_in_lane(Lane{name: "laneS", slots: slots, wait_ms: 1000, memory_bytes: gb * GIB, timeout_s: None, env: [(name: String, value: String)]{}}, args)
+}
+
+fn heavy_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    if args.len() < 2 -> usage()
+    gb :: digits_value(args[0]) ?? return refuse("laneB: GB must be a whole number (got {args[0]})", 2)
+    if gb > 12 {
+        term.eprint("laneB: cap is 12 GB")
+        return 2
+    }
+    state :: state_root()
+    slots :: [String]{"{state}/laneB2.lock", "{state}/unitcheck/lock"}
+    run_in_lane(Lane{name: "laneB", slots: slots, wait_ms: 2000, memory_bytes: gb * GIB, timeout_s: None, env: [(name: String, value: String)]{}}, args[1..<args.len()])
+}
+
+// --- memory guard ------------------------------------------------------------
+
+GUARD_LIMIT_KB :: 7340032
+
+struct Victim {
+    pid: Int
+    rss_kb: Int
+    comm: String
+}
+
+// A compiler, build or test job the guard may stop: the process name, or a
+// cargo test binary (`deps/jet-<hash>`) anywhere in its command line.
+fn eligible(comm: String, cmdline: String) -> Bool Never! {
+    if comm == "jetc0" || comm == "jetc1" || comm == "rustc" || comm == "cargo" || comm == "jet" -> return true
+    if comm == "ld" || comm == "cc" || comm == "lld" || comm == "perf" -> return true
+    if comm.starts_with("jet-") && comm.len() > 4 && lower_alnum_dash(comm[4..<comm.len()]) -> return true
+    if comm.starts_with("python") && digits_dots(comm[6..<comm.len()]) -> return true
+    deps_jet_hash(cmdline)
+}
+
+fn lower_alnum_dash(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 45) -> return false
+    }
+    true
+}
+
+fn digits_dots(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || code == 46) -> return false
+    }
+    true
+}
+
+fn deps_jet_hash(cmdline: String) -> Bool Never! {
+    marker :: "deps/jet-"
+    parts := cmdline.partition(marker)
+    loop parts.sep != "" {
+        if parts.tail.len() > 0 {
+            code :: Int.from_u8(parts.tail.bytes()[0])
+            if (code >= 48 && code <= 57) || (code >= 97 && code <= 102) -> return true
+        }
+        parts = parts.tail.partition(marker)
+    }
+    false
+}
+
+// The leading number of the `key` line of a /proc file ("MemAvailable:",
+// "VmRSS:"), in kB.
+fn proc_field_kb(text: String, key: String) -> Int? Never! {
+    loop line in text.lines() {
+        if line.starts_with(key) -> return digits_value(line.removeprefix(key).trim().partition(" ").head)
+    }
+    None
+}
+
+fn meminfo_available_kb() -[FS]> Int? Never! {
+    proc_field_kb(files.read("/proc/meminfo") ?? return None, "MemAvailable:")
+}
+
+// A /proc command line with its NUL separators as spaces.
+fn cmdline_text(raw: [U8]) -> String Never! {
+    bytes := raw
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{0}) -> bytes[index] = U8{32}
+    }
+    String.from_bytes_lossy(bytes)
+}
+
+// The largest-RSS eligible process, from /proc.
+fn largest_victim() -[FS]> Victim? Never! {
+    best := [Victim]{}
+    entries :: files.list_dir("/proc") ?? return None
+    loop entry in entries {
+        pid :: digits_value(entry.name) ?? next
+        comm :: (files.read("/proc/{pid}/comm") ?? next).trim()
+        cmdline :: cmdline_text(files.read_bytes("/proc/{pid}/cmdline") ?? [U8]{})
+        if !eligible(comm, cmdline) -> next
+        rss :: proc_field_kb(files.read("/proc/{pid}/status") ?? next, "VmRSS:") ?? 0
+        if best.len() > 0 && best[0].rss_kb >= rss -> next
+        best = [Victim]{Victim{pid: pid, rss_kb: rss, comm: comm}}
+    }
+    if best.len() == 0 -> None else -> Val(best[0].copy())
+}
+
+fn stamp() -[Time]> String Never! {
+    dt :: time.gmtime(time.unix_ns() /% 1000000000)
+    "{time.isoformat_date(dt.date())} {time.isoformat_time(dt.time())}"
+}
+
+fn guard() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    log :: "{state_root()}/mem-guard.log"
+    loop {
+        available :: meminfo_available_kb() ?? GUARD_LIMIT_KB
+        if available < GUARD_LIMIT_KB {
+            if largest_victim() == {
+                .Val(victim) -> {
+                    #Unsafe("the guard signals only compiler, build and test jobs of this user, chosen by name from /proc") {
+                        sys.kill(victim.pid, 9).drop("the victim may exit before its signal")
+                    }
+                    files.append_all(log, "{stamp()} avail={available}kB killed pid={victim.pid} rss={victim.rss_kb}kB comm={victim.comm}\n") ?? ()
+                }
+                .None -> files.append_all(log, "{stamp()} avail={available}kB no eligible victim\n") ?? ()
+            }
+            time.sleep(5s)
+        }
+        time.sleep(2s)
+    }
+}
+
+#Test("sizes and whole numbers parse; anything else is refused") {
+    assert_eq(size_bytes("6G"), Val(6 * GIB))
+    assert_eq(size_bytes("512M"), Val(536870912))
+    assert_eq(size_bytes("100"), Val(100))
+    assert_eq(size_bytes("6g"), None)
+    assert_eq(size_bytes(""), None)
+    assert_eq(digits_value("300"), Val(300))
+    assert_eq(digits_value("-1"), None)
+}
+
+#Test("the guard picks only compiler, build and test jobs") {
+    assert(eligible("jetc0", ""))
+    assert(eligible("jet", ""))
+    assert(eligible("jet-lsp", ""))
+    assert(eligible("python3.12", ""))
+    assert(eligible("node", "/repo/target/debug/deps/jet-4fa9c0 --test"))
+    assert(!eligible("node", "node Tools/tower/tower.mjs"))
+    assert(!eligible("omp", ""))
+    assert(!eligible("firefox", ""))
+    assert(!eligible("jet-", ""))
+    assert(!eligible("jet-X", ""))
+    assert(!eligible("pythonx", ""))
+}
+
+#Test("the guard reads /proc fields and the test-binary marker") {
+    assert_eq(proc_field_kb("MemTotal:  100 kB\nMemAvailable:   7340031 kB\n", "MemAvailable:"), Val(7340031))
+    assert_eq(proc_field_kb("Name:\tjet\nVmRSS:\t  2048 kB\n", "VmRSS:"), Val(2048))
+    assert_eq(proc_field_kb("Name:\tjet\n", "VmRSS:"), None)
+    assert(deps_jet_hash("x deps/jet-z deps/jet-0ab"))
+    assert(!deps_jet_hash("x deps/jet-z deps/jet-"))
+}
+
+#Test("a job's exit code is its own, 128+N for a signal and 124 for a timeout") {
+    ok :: process.cmd([String]{"sh", "-c", "exit 3"}).run() ?? panic("sh: {err}")
+    assert_eq(job_code(ok), 3)
+    killed :: process.cmd([String]{"sh", "-c", "kill -TERM $$"}).run() ?? panic("sh: {err}")
+    assert_eq(job_code(killed), 143)
+    slow :: process.cmd([String]{"sleep", "5"}).timeout(100ms).run() ?? panic("sleep: {err}")
+    assert_eq(job_code(slow), 124)
+}
