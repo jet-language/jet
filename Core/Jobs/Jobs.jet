@@ -123,10 +123,10 @@ struct JobQueueStatus {
 // enqueue/delay/receipt/inspect/events/claim/heartbeat/acknowledge/fail/cancel/
 // dead_letter/recover_expired/status/pause/resume/wait/prune methods retain
 // ServiceError failures; mutation is committed by the provider before return.
+// The queue binds to the package endpoint, whose private authority file sits
+// beside the database (`<database>.authority`), so every run of the package
+// reaches the same rows (D-DX-QUEUE1=A).
 fn queue() -[DB, Env, FS, Time]> JobQueue ServiceError! {
-    endpoint :: core.service.__active_endpoint() ?? return Err(err)
-    service.__authority_validate(endpoint) ?? return Err(err)
-    authority :: core.service.__endpoint_authority(endpoint)
     name :: "default"
     queue_validate_text(name, "job queue", 256, false) ?? return Err(err)
     path :: queue_default_path()
@@ -138,6 +138,9 @@ fn queue() -[DB, Env, FS, Time]> JobQueue ServiceError! {
     #Unsafe("create the lexical parent with the existing raw recursive mkdir kernel before SQLite open") {
         core.files.__create_dir_all_raw(files.dirname(path)) ?? return Err(queue_mkdir_error(err))
     }
+    endpoint :: core.service.__active_endpoint("{path}.authority") ?? return Err(err)
+    service.__authority_validate(endpoint) ?? return Err(err)
+    authority :: core.service.__endpoint_authority(endpoint)
     driver := db.__driver_open(path) ?? return Err(queue_unavailable("queue SQLite open failed"))
     queue_begin(driver) ?? return Err(err)
     initialized :: queue_initialize_on_driver(&driver, authority, name, 1024) ?? {

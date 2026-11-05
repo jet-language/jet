@@ -14,6 +14,7 @@ use {
     service_sys :: core.sys
     service_encoding :: core.encoding
     service_crypto :: core.crypto
+    service_files :: core.files
 }
 
 // Ordinary source values: construction, matching, equality and ownership use
@@ -1185,11 +1186,67 @@ fn endpoint_receive(endpoint: ServiceEndpoint) -> String ServiceError! {
     }
 }
 
-// No job or service invocation runs in-process, so no execution scope binds
-// an endpoint: opening a job queue reports the typed not-started error an
-// unscoped job always received.
-fn __active_endpoint() -> ServiceEndpoint ServiceError! {
-    Err(ServiceError.NotStarted("job queue requires an active issued service endpoint"))
+// The package endpoint core.jobs binds a queue to (D-DX-QUEUE1=A: durable jobs
+// with no service setup). Its authority is a private secret kept at
+// `secret_path`, beside the queue database, so every run of the package
+// reaches the same queue rows and verifies the same receipts. The first run
+// writes a fresh authority to a private (0600) exclusive temporary and
+// publishes it with a no-replace rename, so the secret is never visible at a
+// wider mode or half-written; a run that loses that race reads the winner's
+// file. An existing file that is not a regular file owned by this user with
+// no group or other permission bits is refused, never overwritten.
+fn __active_endpoint(secret_path: String) -[Env, FS]> ServiceEndpoint ServiceError! {
+    authority :: package_authority(secret_path) ?? return Err(err)
+    endpoint :: endpoint_new("jobs", "package", 1, authority) ?? return Err(err)
+    authority_register(endpoint, true, None) ?? return Err(err)
+    Ok(endpoint)
+}
+
+fn package_authority(path: String) -[Env, FS]> String ServiceError! {
+    if service_files.exists(path) == false {
+        issued :: service_issue_authority() ?? return Err(err)
+        nonce :: service_issue_authority() ?? return Err(err)
+        temporary :: "{path}.{nonce}.tmp"
+        if package_authority_write(temporary, issued) == {
+            .Err(error) -> {
+                service_files.remove(temporary).drop("the private temporary is removed best-effort")
+                return Err(package_authority_io(temporary, error))
+            }
+            .Ok(_) -> {}
+        }
+        if service_files.rename(temporary, path, if_exists: .Refuse) == {
+            .Ok(_) -> return Ok(issued)
+            .Err(.AlreadyExists(_)) -> {}
+            .Err(error) -> {
+                service_files.remove(temporary).drop("the private temporary is removed best-effort")
+                return Err(package_authority_io(path, error))
+            }
+        }
+        // Another run published first: its authority is the package's.
+        service_files.remove(temporary).drop("the losing temporary is removed best-effort")
+    }
+    package_authority_read(path)
+}
+
+fn package_authority_write(path: String, authority: String) IOError! -[FS]> {
+    writer :: service_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(err)
+    writer.write_all(authority.bytes()) ?? return Err(err)
+    writer.fsync()
+}
+
+fn package_authority_read(path: String) -[Env, FS]> String ServiceError! {
+    info :: service_files.stat(path, links: .Refuse) ?? return Err(package_authority_io(path, err))
+    if !info.is_file -> return Err(ServiceError.Policy("job queue authority `{path}` is not a regular file; remove it so the next run can create a private one"))
+    if info.owner != Val(service_sys.geteuid()) -> return Err(ServiceError.Policy("job queue authority `{path}` is not owned by this user; remove it so the next run can create a private one"))
+    if info.mode.bit_and(0o077) != 0 -> return Err(ServiceError.Policy("job queue authority `{path}` is readable or writable by group or others; restrict it with `chmod 600` or remove it"))
+    raw :: service_files.read_bytes(path) ?? return Err(package_authority_io(path, err))
+    authority :: String.from_bytes(raw) ?? return Err(ServiceError.Policy("job queue authority `{path}` is malformed; remove it so the next run can create a fresh one"))
+    if !valid_authority_token(authority) -> return Err(ServiceError.Policy("job queue authority `{path}` is malformed; remove it so the next run can create a fresh one"))
+    Ok(authority)
+}
+
+fn package_authority_io(path: String, error: IOError) -> ServiceError Never! {
+    ServiceError.Unavailable("job queue authority `{path}` cannot be read or created: {error}")
 }
 
 // The issuing authority token of an endpoint, for Core providers (core.jobs)

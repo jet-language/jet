@@ -4585,8 +4585,8 @@ Combined rollback failures preserve the original diagnostic and recovery text.
 Generation rollout, start and stop are Jet policy; each registry change takes
 the registry guard, the one linearization point for drain, partition, handoff
 and endpoint send.
-No job or service invocation runs in-process, so no execution scope binds an
-endpoint and `core.jobs.queue()` reports `ServiceError.NotStarted`.
+No service worker runs its handler in-process. `core.jobs.queue()` binds to
+the package endpoint instead, whose authority `core.jobs` describes below.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4744,6 +4744,15 @@ The source-owned lifecycle exposes the effects it actually consumes:
 startup value selects the database; otherwise `.jet/state/jobs.db` is used.
 Logical environment overlays do not redirect this provider. Set an isolated
 database path before launching examples or conformance programs.
+
+The queue binds to the package endpoint, so durable jobs need no service setup
+(D-DX-QUEUE1=A). Its authority is a private secret in `<database>.authority`.
+The first run creates it with a no-replace publish of an exclusive 0600 file.
+A concurrent first run that loses the race reads the winner's secret, so every
+run of the package reaches the same rows and verifies the same receipts. An
+existing secret that is not a regular file owned by the current user, or that
+grants any group or other permission, is refused with `ServiceError.Policy`
+and is never overwritten.
 
 Queue status publication also retains `DB` alongside `Time`, matching the
 provider calls reached while obtaining its wall-clock sample.
