@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6584,
-    "rev": 92700,
+    "rev": 92708,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55178,7 +55178,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-05T22:55:46.129Z",
+      "updated": "2026-11-05T23:17:51.887Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -56452,8 +56452,8 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-07T15:05:28.935Z",
-      "updated": "2026-11-05T23:09:57.039Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-05T23:17:49.600Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -61546,7 +61546,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T15:42:32.097Z",
-      "updated": "2026-11-05T21:39:30.903Z",
+      "updated": "2026-11-05T23:17:47.916Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -71741,7 +71741,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T23:17:36.223Z",
+      "updated": "2026-11-05T23:17:50.291Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -85816,7 +85816,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-05T22:32:31.246Z",
+      "updated": "2026-11-05T23:17:53.709Z",
       "updatedBy": "Main"
     },
     {
@@ -86352,8 +86352,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-05T23:05:47.901Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-05T23:17:52.776Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0l09me0",
@@ -92025,8 +92025,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-05T23:07:19.134Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-05T23:17:51.016Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c09umw0r",
@@ -141746,13 +141746,13 @@
       "explainer": "",
       "story": "Dev wonders why a sum loop stayed scalar. jet inspect decisions prints the loop note from the IR optimizer, with the reason the vectorizing step declined.",
       "inWild": "LLVM: optimization remarks report which passes fired or missed, per function. Source: https://llvm.org/docs/Remarks.html\n\nGo: the -m flag prints inlining and escape decisions. Source: https://go.dev/wiki/CompilerOptimizations",
-      "detail": "OWNER RULING\n\nOwner ruling, 2026-10-22, architecture cutover card log, quoted: “The optimizer ledger (jet inspect optimization, live report) is retargeted to the IR optimizer report, no shim.” This ballot records it for one-click confirmation. The alternative is kept for the record.\n\nThe same ruling ports the web emitter onto the slot IR and drops the old Rust-source emitter. Those parts are covered by the ratified one-IR architecture and the Rust removal scope ballot.\n\nTODAY\n\nThe command is jet inspect decisions (Compiler/JetCli/Source/Cli/Inspect.jet:198). It prints the IR optimizer’s report for the checked program at the level jet build uses (InspectDecisions.jet:1-7).\n\nThe report is IROptReport (Compiler/JetIR/Source/Opt.jet:123-163). It holds module totals per pass: inlined calls, folds, fused compares, removed dead code and more. It also has one note per loop reduction or stepped index, vectorized or declined with the reason (OptReduce.jet:222-229, OptVersion.jet:194-197). Nothing translates old middle-layer records.\n\nOWED UNDER A\n\nPer-function outcomes for every pass, not only loop notes, so a user can ask about one function.",
+      "detail": "OWNER RULING\n\nOwner ruling, 2026-10-22, architecture cutover card log, quoted: “The optimizer ledger (jet inspect optimization, live report) is retargeted to the IR optimizer report, no shim.” This ballot records it for one-click confirmation. The alternative is kept for the record.\n\nThe same ruling ports the web emitter onto the slot IR and drops the old Rust-source emitter. Those parts are covered by the ratified one-IR architecture and the Rust removal scope ballot.\n\nTODAY\n\nThe command is jet inspect decisions (Compiler/JetCli/Source/Cli/Inspect.jet:198). It prints the IR optimizer’s report for the checked program at the level jet build uses (InspectDecisions.jet:1-7).\n\nThe report is IROptReport (Compiler/JetIR/Source/Opt.jet:123-163). It holds module totals per pass: inlined calls, folds, fused compares, removed dead code and more. It also has one note per loop reduction or stepped index, vectorized or declined with the reason (OptReduce.jet:222-229, OptVersion.jet:194-197). Nothing translates old middle-layer records.\n\nOWED UNDER A\n\nPer-function outcomes for every pass, not only loop notes, so a user can ask about one function.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Recording cost. Per-function notes are recorded only when jet inspect decisions asks for them. A normal jet build passes no recorder, so it does no extra work and its output bytes are unchanged.\n\n2. Per-function outcomes are owed work, not a cost to users. Each pass already decides per function; the note records that decision with its reason, as loop notes do today.\n\nNo loss remains.",
       "options": [
         {
           "key": "A",
           "name": "Retarget the report to the slot IR optimizer",
           "detail": "The report lists what the IR optimizer did and why it declined steps, read straight from the optimizer that runs. Nothing translates the old format.",
-          "technical": "jet inspect decisions reads IROptReport: module totals per pass plus per-loop notes. Per-function outcomes for every pass are added there. The old ledger code went with the old layers.",
+          "technical": "jet inspect decisions reads IROptReport: module totals per pass plus per-loop notes. Per-function outcomes for every pass are added there. The old ledger code went with the old layers. Per-function notes are recorded only when jet inspect decisions asks; a normal build passes no recorder and pays nothing.",
           "code": "$ jet inspect decisions app.jet\nO1: instructions <before> -> <after>, inlined <n>, folded <n>, ...\nsum reduction total: declined (<reason>)"
         },
         {
@@ -141782,19 +141782,14 @@
           "The report describes the optimizer that actually runs.",
           "No translation layer from the deleted middle layers."
         ],
-        "losses": [
-          {
-            "loss": "Per-function outcomes for every pass are still owed.",
-            "mitigation": "Passes already note loop outcomes with reasons; the same note goes on each pass."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
             "reason": "B removes the only tool that explains optimization decisions."
           }
         ],
-        "tradeoff": "A small recording cost in the optimizer, for a report that tells the truth about the new compiler."
+        "tradeoff": "A reads the optimizer that runs and records notes only when asked, so builds pay nothing."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -141824,9 +141819,7 @@
             "gains": [
               "The report matches the optimizer that runs."
             ],
-            "losses": [
-              "The optimizer must record pass outcomes."
-            ],
+            "losses": [],
             "proposed": {
               "code": "$ jet inspect decisions app.jet\nsum reduction total: declined (<reason>)"
             }
@@ -141852,19 +141845,14 @@
           "gains": [
             "One truthful optimization report."
           ],
-          "losses": [
-            {
-              "loss": "Per-function outcomes are still owed.",
-              "mitigation": "Passes already note loop outcomes; each pass gets the same note."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
               "reason": "B removes the only tool that explains optimization decisions."
             }
           ],
-          "tradeoff": "A small recording cost, for a report that tells the truth."
+          "tradeoff": "A records notes only when asked; B removes the only explanation."
         }
       },
       "draft": false,
@@ -143931,13 +143919,13 @@
       "explainer": "Words used here. Runnable memory: memory the processor may execute. Hardened systems can forbid making memory runnable after it was written, to stop attacks that inject code. Program files stay allowed.\n\nWhere this happens: systemd services with `MemoryDenyWriteExecute=yes`, SELinux with the `deny_execmem` setting, and PaX kernels. Phones and consoles forbid any new code, but `jet run` does not run there.\n\nBeginner path: nothing changes; the script runs and prints the same thing.\n\nExpert path: `jet run --verbose` prints one line naming the refusal and the fallback. Shipped programs built with `jet build` are never affected.",
       "story": "Omar runs a nightly Jet script from a locked-down systemd service. The first in-memory run is refused by the system. He should not need to know why; the script should just run.",
       "inWild": "$ node --jitless app.js     # V8 without runnable memory: interpreter only\n$ go run .                  # always builds a file, then runs it\n# LuaJIT on iOS: the JIT is disabled, interpreter only",
-      "detail": "OWNER RULINGS\n\nOwner decision, chat on 2026-10-23 at 05:29, relayed by Main: fall back to writing the same O0 code to a file.\n\nOwner answers, chat on 2026-10-23 at about 05:50, recorded on card c0vsqf8a as binding. They read:\n\n(a) “Relaunch: launching the running program’s own script path (os.executable() under jet run) runs it through the same jet at the same level.”\n\n(b) “Tier-up includes on-stack replacement at loop heads today.”\n\n(c) “A crash under in-memory jet run exits with the real signal, same as the built binary (no conversion to exit 1).”\n\nAnswer (c) fixes the fallback’s crash behaviour: every step exits with the real signal, as the built binary does. This ballot records both for one-click confirmation. The alternatives are kept for the record.\n\nWhat it amends. D-EXEC1=A allows a tiny evaluator only for a platform that forbids creating machine code at run time, and only if Jet must run there. This decision answers hosts that forbid runnable memory but still run files: they get the file fallback, not an evaluator. The evaluator clause stays only for platforms that forbid all new code, where `jet run` is not hosted.\n\nIt also narrows D-EXEC2=A: the build-to-file path survives only as this fallback, producing the same image. D-PORTABLE1/2 already keep checked native code in a file cache, so sandboxed apps meet the same rule. D-ADAPTIVE-TIER1 keeps its refusal list for phones, consoles, web and bare metal. I9 holds by construction, because the bytes are the ones the in-memory path maps.\n\nHow the fallback works. Main’s plan (o0-plan.md) links the program at a fixed base inside jet, maps it RW, copies, then flips text to RX. If mmap or mprotect with PROT_EXEC fails with EPERM or EACCES, jet writes the same image to a `memfd_create` file. It maps that file read-and-execute at the same base, in the same process.\n\nBoth systemd filters allow mapping a file that is never writable and runnable at once. If that is refused too, jet runs the memfd with `execveat`, then a private 0700 file under `$XDG_RUNTIME_DIR` or the cache directory with execve. Either way the process is the program. If every step is refused, jet prints a diagnostic naming the policy and suggests `jet build`.\n\n`os.executable()` still returns the script path: jet passes it to the image, which does not trust `/proc/self/exe` (see D-EXEC-RELAUNCH1). With tier-up on by default (D-EXEC-TIERUP1), the in-process step maps each tiered function from a new memfd. After an exec step the compiler is gone, so the program keeps its O0 code with the same output.\n\nEvidence. systemd’s MemoryDenyWriteExecute rejects mmap with PROT_WRITE and PROT_EXEC together, and mprotect adding PROT_EXEC. Its manual says files on non-noexec mounts and `memfd_create` still run code (systemd.exec(5)). V8’s `--jitless` mode (v7.4, 2019) runs without runnable memory; V8 measured 40 percent and 80 percent slower benchmarks. LuaJIT disables its JIT on iOS (luajit.org install notes).\n\nTest. `systemd-run --user --wait --pipe -p MemoryDenyWriteExecute=yes jet run hello.jet` prints the same bytes. Adding `-p SystemCallFilter=~memfd_create` forces the private-file step.",
+      "detail": "OWNER RULINGS\n\nOwner decision, chat on 2026-10-23 at 05:29, relayed by Main: fall back to writing the same O0 code to a file.\n\nOwner answers, chat on 2026-10-23 at about 05:50, recorded on card c0vsqf8a as binding. They read:\n\n(a) “Relaunch: launching the running program’s own script path (os.executable() under jet run) runs it through the same jet at the same level.”\n\n(b) “Tier-up includes on-stack replacement at loop heads today.”\n\n(c) “A crash under in-memory jet run exits with the real signal, same as the built binary (no conversion to exit 1).”\n\nAnswer (c) fixes the fallback’s crash behaviour: every step exits with the real signal, as the built binary does. This ballot records both for one-click confirmation. The alternatives are kept for the record.\n\nWhat it amends. D-EXEC1=A allows a tiny evaluator only for a platform that forbids creating machine code at run time, and only if Jet must run there. This decision answers hosts that forbid runnable memory but still run files: they get the file fallback, not an evaluator. The evaluator clause stays only for platforms that forbid all new code, where `jet run` is not hosted.\n\nIt also narrows D-EXEC2=A: the build-to-file path survives only as this fallback, producing the same image. D-PORTABLE1/2 already keep checked native code in a file cache, so sandboxed apps meet the same rule. D-ADAPTIVE-TIER1 keeps its refusal list for phones, consoles, web and bare metal. I9 holds by construction, because the bytes are the ones the in-memory path maps.\n\nHow the fallback works. Main’s plan (o0-plan.md) links the program at a fixed base inside jet, maps it RW, copies, then flips text to RX. If mmap or mprotect with PROT_EXEC fails with EPERM or EACCES, jet writes the same image to a `memfd_create` file. It maps that file read-and-execute at the same base, in the same process.\n\nBoth systemd filters allow mapping a file that is never writable and runnable at once. If memfd_create is refused, jet writes the image once to a private 0700 file in the cache directory, named by its hash, checks the hash and maps it the same way. Repeat runs reuse that file. Only if every runnable mapping is refused does jet start the file with execve, so the process is the program. If that is refused too, jet prints a diagnostic naming the policy and suggests `jet build`.\n\n`os.executable()` still returns the script path: jet passes it to the image, which does not trust `/proc/self/exe` (see D-EXEC-RELAUNCH1). With tier-up on by default (D-EXEC-TIERUP1), both in-process steps map each tiered function the same way. The exec step exists only where no runnable mapping is allowed at all. No design can add faster code there, so the program keeps its O0 code with the same output.\n\nEvidence. systemd’s MemoryDenyWriteExecute rejects mmap with PROT_WRITE and PROT_EXEC together, and mprotect adding PROT_EXEC. Its manual says files on non-noexec mounts and `memfd_create` still run code (systemd.exec(5)). V8’s `--jitless` mode (v7.4, 2019) runs without runnable memory; V8 measured 40 percent and 80 percent slower benchmarks. LuaJIT disables its JIT on iOS (luajit.org install notes).\n\nTest. `systemd-run --user --wait --pipe -p MemoryDenyWriteExecute=yes jet run hello.jet` prints the same bytes. Adding `-p SystemCallFilter=~memfd_create` forces the private-file step.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Start cost. The program stays in jet's process: the image is copied to an in-memory file and mapped, which costs one memory copy and no exec. Where memfd_create is refused, the cached file is written once and reused by every later run.\n\n2. Tier-up. Both in-process steps map tiered functions the same way, so tier-up works on every system that allows any runnable mapping. A system that refuses all runnable mappings cannot run new code under any option.\n\nNo loss remains.",
       "options": [
         {
           "key": "A",
           "name": "Run the same code from a file",
-          "detail": "When the system refuses runnable memory, Jet writes the same machine code to a file and runs it. Output, exit status and signals are the same. Only `--verbose` mentions the fallback. The start costs a file write and an exec, a few milliseconds.",
-          "technical": "Same linked image. On EPERM or EACCES from mmap/mprotect with PROT_EXEC, jet writes a memfd and maps it PROT_READ|PROT_EXEC at the base, in-process. Else it runs the memfd with execveat. Else it uses a private 0700 file in $XDG_RUNTIME_DIR or the cache directory, unlinked after exec. Else a registered diagnostic. The script path is passed to the image for `os.executable()`. Tier-up maps tiered code from new memfds in-process; after an exec step it is off.",
+          "detail": "When the system refuses runnable memory, Jet writes the same machine code to a file and runs it. Output, exit status and signals are the same. Only `--verbose` mentions the fallback. The program stays in the same process, so start-up and tier-up are unchanged.",
+          "technical": "Same linked image. On EPERM or EACCES from mmap/mprotect with PROT_EXEC, jet writes a memfd and maps it PROT_READ|PROT_EXEC at the base, in-process. Else it maps a hash-named private 0700 file in the cache directory the same way, reused across runs. Else it starts that file with execve. Else a registered diagnostic. The script path is passed to the image for `os.executable()`. Tier-up maps tiered code the same way in both in-process steps.",
           "code": "$ systemd-run -p MemoryDenyWriteExecute=yes jet run hello.jet\nhello\n$ jet run --verbose hello.jet\nnote: runnable memory refused (EPERM); running the same code from a file\nhello"
         },
         {
@@ -143992,18 +143980,10 @@
         "why": "You ruled this in chat on 2026-10-23. It is the same code, so meaning, output and crash signals cannot drift, and users on hardened systems need no flags.",
         "gains": [
           "Scripts run unchanged on hardened Linux services.",
-          "One code generator and one runtime; no interpreter to keep in step."
+          "One code generator and one runtime; no interpreter to keep in step.",
+          "Start-up and tier-up stay in-process on hardened systems."
         ],
-        "losses": [
-          {
-            "loss": "A refused system pays a file write and an exec on each run.",
-            "mitigation": "An in-memory file comes first, so the cost is milliseconds; `--verbose` shows when it happens."
-          },
-          {
-            "loss": "After an exec step, tier-up cannot swap in faster code.",
-            "mitigation": "The in-process memfd step keeps tier-up; only stricter systems fall to exec, with identical output."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
@@ -144014,7 +143994,7 @@
             "reason": "A second way of running code is many times slower and must match the first forever."
           }
         ],
-        "tradeoff": "A slightly slower start on hardened systems, in exchange for one meaning everywhere."
+        "tradeoff": "A runs the same code from an in-memory or cached file, so hardened systems lose nothing."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -144043,11 +144023,10 @@
             "gist": "Write the same machine code to a file and run it.",
             "gains": [
               "Same output and exit status.",
-              "No user action needed."
+              "No user action needed.",
+              "Stays in-process; tier-up still works."
             ],
-            "losses": [
-              "A few milliseconds slower to start."
-            ],
+            "losses": [],
             "proposed": {
               "code": "$ jet run --verbose hello.jet\nnote: runnable memory refused; running from a file\nhello"
             }
@@ -144088,12 +144067,7 @@
           "gains": [
             "Scripts run unchanged on hardened services."
           ],
-          "losses": [
-            {
-              "loss": "Each run on such a system pays a file write and exec.",
-              "mitigation": "An in-memory file comes first, so it costs milliseconds."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -144104,7 +144078,7 @@
               "reason": "Much slower, and a second engine must match forever."
             }
           ],
-          "tradeoff": "A slower start on hardened systems for one meaning everywhere."
+          "tradeoff": "A runs the same code from a file, with no cost and one meaning everywhere."
         }
       },
       "designAway": [
@@ -144360,7 +144334,7 @@
       "explainer": "Words used here. `os.executable()` returns the path of the file that started the running program. Relaunch means starting a new process of the same program, usually with different arguments.\n\nBeginner path: `process.cmd([os.executable(), \"worker\"])` starts the same program again, after `jet build` and under `jet run`.\n\nExpert path: after `jet build`, the call names the binary. Under `jet run` it names the absolute script path. A script with `#!/usr/bin/env jet` and the exec bit runs directly when started.",
       "story": "Sam's test program starts itself six times to check that cleanup runs on every kind of exit. Built, it works. Under the old in-memory runner it started `jet` with the wrong arguments and every case failed.",
       "inWild": "$ python3 -c 'import sys; print(sys.executable)'   # the python program\n$ node -p process.execPath                         # the node program\n$ go run .   # os.Executable() is the built copy in Go's cache",
-      "detail": "OWNER RULINGS\n\nOwner decision, chat on 2026-10-23 at 05:29, relayed by Main: os.executable() returns the script path under jet run.\n\nOwner answers, chat on 2026-10-23 at about 05:50, recorded on card c0vsqf8a as binding. They read:\n\n(a) “Relaunch: launching the running program’s own script path (os.executable() under jet run) runs it through the same jet at the same level.”\n\n(b) “Tier-up includes on-stack replacement at loop heads today.”\n\n(c) “A crash under in-memory jet run exits with the real signal, same as the built binary (no conversion to exit 1).”\n\nThis ballot records both for one-click confirmation. The alternatives are kept for the record. Source card #4346, found on 2026-10-02 under the old in-memory runner, where the call returned jet.\n\nToday. `jet run` builds `.jet/build/<stem>` and starts it as a child, so the call returns that file. A shebang script on its repeat path returns the kept copy in `~/.cache/jet/scripts`. The ExecBallots probe confirmed both on 2026-10-23. So #4346 does not show today; it returns with in-memory O0, where `/proc/self/exe` is `jet`.\n\nWhat it touches. I9 holds with one stated meaning: the file that starts this program. After `jet build` that is the binary; under `jet run` it is the script. D-SCRIPT-ENTRY1=A makes a script with `#!/usr/bin/env jet` start through `jet run`, so its path starts the same program. No ratified decision is reversed. The contract row in Docs/spec/reference/core-library.md (line 1754, \"Return process facts\") gains this sentence.\n\n`Examples/features/io/sys_executable.jet` still says the call names `jet` under `jet run`; that comment comes from the old runner and must be rewritten.\n\nImplementation, from Main's plan (o0-plan.md). The runtime reads the path from `/proc/self/exe` today (JetRuntime CompilerHost.jet). Under the in-memory runner that is `jet`, so jet passes the absolute script path to the image on its start stack. The runtime uses it when present. Built binaries keep `/proc/self/exe`, which is absolute, unlike AT_EXECFN.\n\nThe file fallback (D-EXEC-NOEXEC1) passes the same path. `process.argv()[0]` becomes the script path as given, which is what the kernel passes for a shebang script.\n\nEdge case, settled by answer (a). cleanup_matrix.jet relaunches process.cmd([os.executable(), path]), and so do the distributed, storage and watcher examples. Their sources have no shebang and no exec bit, so the kernel alone would refuse to start them.\n\nRule under A, written beside executable() in core-library.md: starting the running program’s own script path runs it through the same jet at the same level. Every existing relaunch keeps working, and #4346’s six identical traces hold under jet run and after jet build.",
+      "detail": "OWNER RULINGS\n\nOwner decision, chat on 2026-10-23 at 05:29, relayed by Main: os.executable() returns the script path under jet run.\n\nOwner answers, chat on 2026-10-23 at about 05:50, recorded on card c0vsqf8a as binding. They read:\n\n(a) “Relaunch: launching the running program’s own script path (os.executable() under jet run) runs it through the same jet at the same level.”\n\n(b) “Tier-up includes on-stack replacement at loop heads today.”\n\n(c) “A crash under in-memory jet run exits with the real signal, same as the built binary (no conversion to exit 1).”\n\nThis ballot records both for one-click confirmation. The alternatives are kept for the record. Source card #4346, found on 2026-10-02 under the old in-memory runner, where the call returned jet.\n\nToday. `jet run` builds `.jet/build/<stem>` and starts it as a child, so the call returns that file. A shebang script on its repeat path returns the kept copy in `~/.cache/jet/scripts`. The ExecBallots probe confirmed both on 2026-10-23. So #4346 does not show today; it returns with in-memory O0, where `/proc/self/exe` is `jet`.\n\nWhat it touches. I9 holds with one stated meaning: the file that starts this program. After `jet build` that is the binary; under `jet run` it is the script. D-SCRIPT-ENTRY1=A makes a script with `#!/usr/bin/env jet` start through `jet run`, so its path starts the same program. No ratified decision is reversed. The contract row in Docs/spec/reference/core-library.md (line 1754, \"Return process facts\") gains this sentence.\n\n`Examples/features/io/sys_executable.jet` still says the call names `jet` under `jet run`; that comment comes from the old runner and must be rewritten.\n\nImplementation, from Main's plan (o0-plan.md). The runtime reads the path from `/proc/self/exe` today (JetRuntime CompilerHost.jet). Under the in-memory runner that is `jet`, so jet passes the absolute script path to the image on its start stack. The runtime uses it when present. Built binaries keep `/proc/self/exe`, which is absolute, unlike AT_EXECFN.\n\nThe file fallback (D-EXEC-NOEXEC1) passes the same path. `process.argv()[0]` becomes the script path as given, which is what the kernel passes for a shebang script.\n\nEdge case, settled by answer (a). cleanup_matrix.jet relaunches process.cmd([os.executable(), path]), and so do the distributed, storage and watcher examples. Their sources have no shebang and no exec bit, so the kernel alone would refuse to start them.\n\nRule under A, written beside executable() in core-library.md: starting the running program’s own script path runs it through the same jet at the same level. Every existing relaunch keeps working, and #4346’s six identical traces hold under jet run and after jet build.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Starting a script without a shebang. Jet code never needs the kernel to do it: under ruling (a), process.cmd with the program's own script path runs it through the same jet at the same level. Outside programs start a .jet file with jet run, as they do today.\n\n2. Files beside the executable. Under jet run they resolve beside the script, where its files live. A built binary keeps its own folder.\n\nNo loss remains.",
       "options": [
         {
           "key": "A",
@@ -144423,16 +144397,7 @@
           "Existing relaunching programs work under `jet run` and after `jet build`.",
           "No new API and no build on first call."
         ],
-        "losses": [
-          {
-            "loss": "A script without a shebang cannot be started directly by the system.",
-            "mitigation": "Per your ruling, starting the program’s own script runs it through the same jet and level."
-          },
-          {
-            "loss": "Code that locates files beside the executable finds the script's folder, not a build folder.",
-            "mitigation": "That is the folder users expect; built binaries keep their own folder."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
@@ -144443,7 +144408,7 @@
             "reason": "The first call pays a full build, and it keeps a script cache alive."
           }
         ],
-        "tradeoff": "One rule for starting a script's own path, for relaunch code that works everywhere."
+        "tradeoff": "One meaning, the file that starts this program, and relaunch code works on every level."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -144474,9 +144439,7 @@
               "Relaunch code works on every level.",
               "No new API."
             ],
-            "losses": [
-              "Scripts without a shebang need a rule."
-            ],
+            "losses": [],
             "proposed": {
               "code": "process.cmd([os.executable(), \"worker\"])\n// jet run: \"/home/sam/app.jet\""
             }
@@ -144516,12 +144479,7 @@
           "gains": [
             "Relaunching programs work under `jet run` and after `jet build`."
           ],
-          "losses": [
-            {
-              "loss": "The system cannot start a script without a shebang.",
-              "mitigation": "Starting the program's own script runs it through the same `jet`."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -144532,7 +144490,7 @@
               "reason": "First call pays a full build and keeps a cache."
             }
           ],
-          "tradeoff": "One relaunch rule for scripts, for code that works everywhere."
+          "tradeoff": "One meaning for the call, and relaunch code works everywhere."
         }
       },
       "designAway": [
@@ -171863,7 +171821,7 @@
       "explainer": "",
       "story": "Ana's release script checks a new compiler on the golden profile. It runs eight processes, each told to take one eighth of the rows, then merges the eight verdict files. Her census script lists the rows first, then runs only the jet run level. Both want plain jet test commands.",
       "inWild": "cargo nextest: --partition count:2/8 runs one of eight slices, and list prints the tests without running them. Source: https://nexte.st/docs/ci-features/partitioning/\n\npytest: --collect-only lists tests without running them, and --junitxml=FILE writes the verdicts. Source: https://docs.pytest.org/en/stable/how-to/usage.html",
-      "detail": "TODAY\n\nD-TEST-PROFILE1=A put test profiles in package.jet. Compiler/package.jet declares quick (the default for a bare jet test Compiler), golden, ui, cases and full profiles over five suites, each with a baseline ledger. A profile already carries suites, baseline, jobs, memory, filter, shard, opt_in, optimize and time_limit. A positional FILTER after the package replaces filter: (Compiler/JetCli/Source/Cli/TestProfile.jet:134-135).\n\nThe corpus suites run in process through the testkit pool (TestProfile.jet:187-226). Verdicts reach disk only through JET_CI_EVIDENCE_DIR/<suite>.json (TestProfile.jet:223-224).\n\njet test already takes --optimize=. When the profile also sets optimize:, the run is refused with E2104 (TestProfile.jet:96-100). Build profiles do the opposite under D-SETTING-ORDER1=A: profile fields apply first, then flags win (Front.jet:869-874).\n\nCALLERS THAT NEED PER-RUN CHOICES\n\nThey call the Tools/testkit binary (run.jet:21-99), which has its own flags.\n\n- release-compiler.mjs:502-503: --shard I/N per process and --results per shard.\n- goldens-census.mjs:216, :228: --list, --tier o0,o1,o2, --shard and --results.\n- compiler-registries.mjs:290: cases with --opt-in and --results.\n- Tools/agent/suite/suite.sh: A/B runs with --jet naming another compiler, including old bases without profile code.\n\nverify-full and native-suite need only per-suite evidence, which JET_CI_EVIDENCE_DIR already gives. Tools/ci/AgentWorkloads.jet:393 needs only a filter, which the positional FILTER gives. --opt-in, --jobs and --timeout are profile fields (opt_in, jobs, time_limit), so a census declares its own profile.\n\nSHAPE UNDER A (proposed)\n\n- --shard=I/N runs the I-th of N slices of the selected rows. Slicing is deterministic, the same rows for the same I/N and tree. It overrides shard:.\n- --list prints the selected row IDs, one per line, after filter and shard, and runs nothing. It exits 0.\n\n- --optimize=none,basic,full takes a list of levels and overrides optimize:. For the corpus, none is o0 (jet run), basic o1 (jet build) and full o2 (release), as the profile maps them today (TestProfile.jet:211-213).\n- --compiler=PATH builds and runs every selected row with that jet. Slicing, baseline and verdicts stay with the running jet, so an A/B run differs only in the compiler. It defaults to the running jet.\n\n- --results=FILE writes every selected row's verdict as JSON. It uses the same row schema and writer as the evidence files.\n\nRule: a flag overrides the profile field of the same name for that run only, as build profiles already do.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. A second word for build level. A adds no --tier: the existing --optimize takes a list. Today's E2104 refusal becomes an override, matching build profiles.\n\n2. Shards could clobber the baseline. A sharded run compares against the baseline but never writes it. -u with --shard stays refused with E2104, as -u with shard: is today (TestProfile.jet:93-95).\n\n3. Two result formats. --results and JET_CI_EVIDENCE_DIR share one writer and one row schema. The flag writes one file for all selected suites. The variable writes one file per suite for CI.\n\nEDGE CASES\n\n- --list with -u is refused with E2104: listing runs nothing to bless.\n- --shard=0/8, --shard=9/8 or a malformed value is refused with E2104 and the valid range.\n- --results to an unwritable path fails before any row runs.\n- Concurrent shards must share no scratch. Each run gets its own temp directory for corpus rows, as the tests children already do (TestProfile.jet:252).\n\nAFTER A LANDS\n\nThe four scripts switch to jet test <tree>/Compiler --profile <p> with these flags, and the Tools/testkit binary CLI is deleted. The testkit engine stays as the library jet test calls.\n\nWHY NOT B OR C\n\nB keeps the testkit binary CLI as a second front door to the same engine, with its own words (--tier, a bare suite name). Every new choice then lands twice. C writes static per-shard profiles such as golden_3_of_8 into Compiler/package.jet. That fixes the shard count in data and still cannot list rows or save verdicts to a chosen file.",
+      "detail": "TODAY\n\nD-TEST-PROFILE1=A put test profiles in package.jet. Compiler/package.jet declares quick (the default for a bare jet test Compiler), golden, ui, cases and full profiles over five suites, each with a baseline ledger. A profile already carries suites, baseline, jobs, memory, filter, shard, opt_in, optimize and time_limit. A positional FILTER after the package replaces filter: (Compiler/JetCli/Source/Cli/TestProfile.jet:134-135).\n\nThe corpus suites run in process through the testkit pool (TestProfile.jet:187-226). Verdicts reach disk only through JET_CI_EVIDENCE_DIR/<suite>.json (TestProfile.jet:223-224).\n\njet test already takes --optimize=. When the profile also sets optimize:, the run is refused with E2104 (TestProfile.jet:96-100). Build profiles do the opposite under D-SETTING-ORDER1=A: profile fields apply first, then flags win (Front.jet:869-874).\n\nCALLERS THAT NEED PER-RUN CHOICES\n\nThey call the Tools/testkit binary (run.jet:21-99), which has its own flags.\n\n- release-compiler.mjs:502-503: --shard I/N per process and --results per shard.\n- goldens-census.mjs:216, :228: --list, --tier o0,o1,o2, --shard and --results.\n- compiler-registries.mjs:290: cases with --opt-in and --results.\n- Tools/agent/suite/suite.sh: A/B runs with --jet naming another compiler, including old bases without profile code.\n\nverify-full and native-suite need only per-suite evidence, which JET_CI_EVIDENCE_DIR already gives. Tools/ci/AgentWorkloads.jet:393 needs only a filter, which the positional FILTER gives. --opt-in, --jobs and --timeout are profile fields (opt_in, jobs, time_limit), so a census declares its own profile.\n\nSHAPE UNDER A (proposed)\n\n- --shard=I/N runs the I-th of N slices of the selected rows. Slicing is deterministic, the same rows for the same I/N and tree. It overrides shard:.\n- --list prints the selected row IDs, one per line, after filter and shard, and runs nothing. It exits 0.\n\n- --optimize=none,basic,full takes a list of levels and overrides optimize:. For the corpus, none is o0 (jet run), basic o1 (jet build) and full o2 (release), as the profile maps them today (TestProfile.jet:211-213).\n- --compiler=PATH builds and runs every selected row with that jet. Slicing, baseline and verdicts stay with the running jet, so an A/B run differs only in the compiler. It defaults to the running jet.\n\n- --results=FILE writes every selected row's verdict as JSON. It uses the same row schema and writer as the evidence files.\n\nRule: a flag overrides the profile field of the same name for that run only, as build profiles already do.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. A second word for build level. A adds no --tier: the existing --optimize takes a list. Today's E2104 refusal becomes an override, matching build profiles, and the run prints the levels it used.\n\n2. Shards could clobber the baseline. A sharded run compares against the baseline but never writes it. -u with --shard stays refused with E2104, as -u with shard: is today (TestProfile.jet:93-95).\n\n3. Two result formats. --results and JET_CI_EVIDENCE_DIR share one writer and one row schema. The flag writes one file for all selected suites. The variable writes one file per suite for CI.\n\n4. More flags. Only four are new, since --optimize exists. They are accepted only with --profile and listed under it in jet help test, so a plain jet test reads and runs as before.\n\nEDGE CASES\n\n- --list with -u is refused with E2104: listing runs nothing to bless.\n- --shard=0/8, --shard=9/8 or a malformed value is refused with E2104 and the valid range.\n- --results to an unwritable path fails before any row runs.\n- Concurrent shards must share no scratch. Each run gets its own temp directory for corpus rows, as the tests children already do (TestProfile.jet:252).\n\nAFTER A LANDS\n\nThe four scripts switch to jet test <tree>/Compiler --profile <p> with these flags, and the Tools/testkit binary CLI is deleted. The testkit engine stays as the library jet test calls.\n\nWHY NOT B OR C\n\nB keeps the testkit binary CLI as a second front door to the same engine, with its own words (--tier, a bare suite name). Every new choice then lands twice. C writes static per-shard profiles such as golden_3_of_8 into Compiler/package.jet. That fixes the shard count in data and still cannot list rows or save verdicts to a chosen file.",
       "options": [
         {
           "key": "A",
@@ -171910,12 +171868,8 @@
         ],
         "losses": [
           {
-            "loss": "Shards running at once could overwrite the saved baseline.",
-            "mitigation": "A sharded run only compares against the baseline and never writes it."
-          },
-          {
-            "loss": "--optimize given with a profile's optimize: stops being an error.",
-            "mitigation": "The flag wins for that run, matching build profiles, and the run prints the levels it used."
+            "loss": "jet test gains four flags.",
+            "mitigation": "They work only with --profile, so a plain jet test is unchanged."
           }
         ],
         "whyNot": [
@@ -171928,7 +171882,7 @@
             "reason": "C fixes the shard count in the package file, and still cannot list rows or save verdicts."
           }
         ],
-        "tradeoff": "A adds five flags to jet test. B keeps two commands. C multiplies profiles."
+        "tradeoff": "A adds four flags that work only with --profile. B keeps two commands. C multiplies profiles."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -171960,7 +171914,7 @@
               "Flags match profile field names."
             ],
             "losses": [
-              "Five more flags on jet test."
+              "Four new flags, used only with --profile."
             ],
             "proposed": {
               "code": "$ jet test Compiler --profile golden --shard=3/8 --results=r.json\n$ jet test Compiler --profile golden --list --optimize=none\n$ jet test Compiler --profile golden --compiler=base/jet"
@@ -172004,12 +171958,8 @@
           ],
           "losses": [
             {
-              "loss": "Shards at once could overwrite the baseline.",
-              "mitigation": "A sharded run compares against the baseline and never writes it."
-            },
-            {
-              "loss": "--optimize with a profile's optimize: is no longer an error.",
-              "mitigation": "The flag wins for that run, as with build profiles."
+              "loss": "Four new flags on jet test.",
+              "mitigation": "They work only with --profile; plain jet test is unchanged."
             }
           ],
           "whyNot": [
@@ -172022,7 +171972,7 @@
               "reason": "Fixed shard counts, and no listing or results file."
             }
           ],
-          "tradeoff": "A adds five flags. B keeps two commands. C multiplies profiles."
+          "tradeoff": "A adds four --profile flags. B keeps two commands. C multiplies profiles."
         }
       },
       "draft": false,
@@ -172040,13 +171990,13 @@
       "explainer": "",
       "story": "Ana clones Jet on a new laptop with no Nix and runs the golden tests. A C test calls jet cc. It has no toolchain yet, asks for the signed index, finds no key, and fails. She wants the tests to run, without trusting a key nobody controls.",
       "inWild": "Nix: a flake lock pins one nixpkgs revision, and every download is checked against the cache's signing key. Source: https://nixos.org/manual/nix/stable/command-ref/conf-file.html#conf-trusted-public-keys\n\nGo: GOFLAGS=-mod=vendor builds from a reviewed copy in the repo with no download index. Source: https://go.dev/ref/mod#vendoring",
-      "detail": "TODAY\n\njet cc first looks for a verified C toolchain already in the Hangar. If none is there, it provisions one through the provider (Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:256-282). That step builds the client with NixIndexClient.from_roots_with_mode at :265, with allow_local_nix_catalog false at :273.\n\nThe client needs trust/nix-index-v1.ed25519.pub and config/nix-index-v1.endpoint, both installed together (Jetpack/Nix/Source/Index/IndexClient.jet:57-89). With neither installed it fails with \"signed nixpkgs index endpoint and public key must be configured explicitly\", reported as E1348 (Jetpack/Provider/Source/Core/Realized.jet:188, :196-201). It refuses only the test key id jet-test-index-v1 (:79-81).\n\nDocs/spec/packaging/trust-root.md:37-41 leaves the checked-in trust manifest awaiting the key ceremony. index.jet-lang.dev (:57) and keys.jet-lang.dev (:31) do not resolve. DNS, TLS, hosting and signer custody are outside the repo (:107-116).\n\nJetpack already has a local path. jetpack env and update take --local-nix-catalog DIR, or a per-project choice remembered after a prompt (Jetpack/CLI/Source/Env/EnvCommand.jet:343-373). That choice is skipped when an official key or endpoint is installed (:350). The flag is never a stored grant (Flags.jet:11-13). A local catalog resolves records with trust tier LocalUnofficial and an empty signature (IndexClient.jet resolve_local_catalog). It is made by the index producer's generate-local (Tools/jetpack-nix-index/README.md:60-63).\n\nSHAPE UNDER A (proposed)\n\n1. jet cc takes --local-nix-catalog DIR and the remembered project choice, exactly as jetpack env does. The same flag field and the same NixIndexClient.from_local_catalog are used, with no new mechanism.\n\n2. The repo commits a small catalog of only the toolchain packages jet cc needs. It is generated with generate-local from one pinned nixpkgs revision, the one jet cc's toolchain ref names. Repo tools pass the flag.\n\n3. Every downloaded store path is still admitted through the Nix binary-cache closure check, which checks the signed cache response (E1350, Realized.jet:189). The catalog only names which paths to fetch.\n\nTRUST UNDER A\n\nThe catalog is reviewed like code, in git. Receipts record the trust tier local-unofficial, so a release check can tell these builds apart. Changing the catalog can only point to other paths the Nix cache itself signed.\n\nFAILURE AND EDGES UNDER A\n\n- No flag, no remembered choice, no official key: E1348 as today. The fix names --local-nix-catalog.\n- A package missing from the small catalog: the index's not-indexed error names it, and the fix is to regenerate the catalog with it.\n\n- Offline with the toolchain already in the Hangar: no index lookup at all. Offline without it: E1276.\n- Official key and endpoint installed: an explicit flag still wins for that run, since it is the user's grant. Otherwise the official index is used. The committed catalog is then deleted.\n\n- Bumping the pin: regenerating the catalog needs Nix once, on the maintainer's machine. A fresh clone needs no Nix.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. No Jet signature on the catalog. Git review replaces it for this repo, and the Nix cache signature still guards every byte.\n\n2. A second index source. It is the existing local tier, not a new one, and it ends when the official index lands.\n\nB: A DOGFOOD SIGNER\n\nA repo key, repo-dogfood-index-v1, signs a published index. The client accepts it today, since only jet-test-index-v1 is refused. The publishing exporter refuses it as official (Jetpack/TrustRoot/Source/Metadata.jet:249).\n\nIts results are labeled OfficialSigned, the only signed tier (Jetpack/Nix/Source/Index/IndexWire.jet:131-133). That mislabels them. A private key must live on an agent machine, and the index needs a host. If the manifest's expires_unix passes without a re-sign, every fresh build fails with E1348. Revoking the key means replacing the trust file on every machine.\n\nC: THE OWNER'S KEY CEREMONY FIRST\n\nThe owner runs the offline key ceremony and publishes a signed index with publish.sh --sign-index and --sign-manifest. This is the end state under every option. Alone, it blocks C tests on fresh machines until DNS, TLS and hosting exist. Until then jet cc fails with E1348.\n\nNOT OFFERED\n\nGoldens calling the flake's Nix toolchain directly. The hand-off rule is that, with jet present, repo tools run with no Nix. That path would also stop the goldens from testing jet cc.",
+      "detail": "TODAY\n\njet cc first looks for a verified C toolchain already in the Hangar. If none is there, it provisions one through the provider (Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:256-282). That step builds the client with NixIndexClient.from_roots_with_mode at :265, with allow_local_nix_catalog false at :273.\n\nThe client needs trust/nix-index-v1.ed25519.pub and config/nix-index-v1.endpoint, both installed together (Jetpack/Nix/Source/Index/IndexClient.jet:57-89). With neither installed it fails with \"signed nixpkgs index endpoint and public key must be configured explicitly\", reported as E1348 (Jetpack/Provider/Source/Core/Realized.jet:188, :196-201). It refuses only the test key id jet-test-index-v1 (:79-81).\n\nDocs/spec/packaging/trust-root.md:37-41 leaves the checked-in trust manifest awaiting the key ceremony. index.jet-lang.dev (:57) and keys.jet-lang.dev (:31) do not resolve. DNS, TLS, hosting and signer custody are outside the repo (:107-116).\n\nJetpack already has a local path. jetpack env and update take --local-nix-catalog DIR, or a per-project choice remembered after a prompt (Jetpack/CLI/Source/Env/EnvCommand.jet:343-373). That choice is skipped when an official key or endpoint is installed (:350). The flag is never a stored grant (Flags.jet:11-13). A local catalog resolves records with trust tier LocalUnofficial and an empty signature (IndexClient.jet resolve_local_catalog). It is made by the index producer's generate-local (Tools/jetpack-nix-index/README.md:60-63).\n\nSHAPE UNDER A (proposed)\n\n1. jet cc takes --local-nix-catalog DIR and the remembered project choice, exactly as jetpack env does. The same flag field and the same NixIndexClient.from_local_catalog are used, with no new mechanism.\n\n2. The repo commits a small catalog of only the toolchain packages jet cc needs. It is generated with generate-local from one pinned nixpkgs revision, the one jet cc's toolchain ref names. Repo tools pass the flag.\n\n3. Every downloaded store path is still admitted through the Nix binary-cache closure check, which checks the signed cache response (E1350, Realized.jet:189). The catalog only names which paths to fetch.\n\nTRUST UNDER A\n\nThe catalog is reviewed like code, in git. Receipts record the trust tier local-unofficial, so a release check can tell these builds apart. Changing the catalog can only point to other paths the Nix cache itself signed.\n\nFAILURE AND EDGES UNDER A\n\n- No flag, no remembered choice, no official key: E1348 as today. The fix names --local-nix-catalog.\n- A package missing from the small catalog: the index's not-indexed error names it, and the fix is to regenerate the catalog with it.\n\n- Offline with the toolchain already in the Hangar: no index lookup at all. Offline without it: E1276.\n- Official key and endpoint installed: an explicit flag still wins for that run, since it is the user's grant. Otherwise the official index is used. The committed catalog is then deleted.\n\n- Bumping the pin: the new pin must be a nixpkgs channel revision. generate-local rebuilds the catalog from that revision's public build records, with no Nix on any machine.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. No Jet signature on the catalog. A signature would vouch that each name maps to the right store path; a check gives the same assurance with no key. The pin must be a nixpkgs channel revision, which the Nix build farm evaluates publicly. generate-local reads that evaluation's job outputs. Lane checks regenerate the catalog whenever it or the pin changes and fail on any difference. Every downloaded byte still needs the Nix cache signature.\n\n2. A pin bump needs no Nix. generate-local reads the same public build records over HTTPS, so any machine with jet can regenerate the catalog.\n\n3. A second index source. It is the existing local tier, not a new one, and it ends when the official index lands.\n\nNo loss remains.\n\nB: A DOGFOOD SIGNER\n\nA repo key, repo-dogfood-index-v1, signs a published index. The client accepts it today, since only jet-test-index-v1 is refused. The publishing exporter refuses it as official (Jetpack/TrustRoot/Source/Metadata.jet:249).\n\nIts results are labeled OfficialSigned, the only signed tier (Jetpack/Nix/Source/Index/IndexWire.jet:131-133). That mislabels them. A private key must live on an agent machine, and the index needs a host. If the manifest's expires_unix passes without a re-sign, every fresh build fails with E1348. Revoking the key means replacing the trust file on every machine.\n\nC: THE OWNER'S KEY CEREMONY FIRST\n\nThe owner runs the offline key ceremony and publishes a signed index with publish.sh --sign-index and --sign-manifest. This is the end state under every option. Alone, it blocks C tests on fresh machines until DNS, TLS and hosting exist. Until then jet cc fails with E1348.\n\nNOT OFFERED\n\nGoldens calling the flake's Nix toolchain directly. The hand-off rule is that, with jet present, repo tools run with no Nix. That path would also stop the goldens from testing jet cc.",
       "options": [
         {
           "key": "A",
           "name": "A reviewed local list in the repo",
           "detail": "jet cc accepts the same named local package list that jetpack env already accepts. This repo keeps a small list of just the toolchain packages. Downloads are still checked against the Nix cache's signatures. The official signed index replaces the list once it is published.",
-          "technical": "jet cc honors --local-nix-catalog and the remembered project choice through NixIndexClient.from_local_catalog. The repo commits a generate-local catalog of toolchain attrs at one pinned revision. Receipts carry the local-unofficial tier.",
+          "technical": "jet cc honors --local-nix-catalog and the remembered project choice through NixIndexClient.from_local_catalog. The repo commits a generate-local catalog of toolchain attrs at one pinned revision. Receipts carry the local-unofficial tier. generate-local builds it from the build farm's public evaluation of that channel revision, and lane checks regenerate and compare it.",
           "code": "$ jet cc -c hello.c --local-nix-catalog Tools/nix-catalog\n// toolchain: clang from the local list (local-unofficial)\n// each download checked against the Nix cache signature\n\n$ jet cc -c hello.c\nerror[E1348]: signed nixpkgs index endpoint and public key\n  must be configured explicitly\n  fix: pass --local-nix-catalog DIR, or install the official key"
         },
         {
@@ -172083,18 +172033,10 @@
         "gains": [
           "Fresh clones compile C with no Nix installed.",
           "No private key on any agent machine.",
-          "Results are honestly labeled unofficial."
+          "Results are honestly labeled unofficial.",
+          "Anyone can recheck or regenerate the list without Nix."
         ],
-        "losses": [
-          {
-            "loss": "The list carries no Jet signature.",
-            "mitigation": "It is reviewed in git, and every download still needs the Nix cache's own signature."
-          },
-          {
-            "loss": "Bumping the pinned revision needs Nix once to regenerate the list.",
-            "mitigation": "Only the maintainer who bumps it needs Nix; the official index removes the step."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
@@ -172105,7 +172047,7 @@
             "reason": "C is the end state under every option, but alone it blocks C tests on fresh machines until hosting exists."
           }
         ],
-        "tradeoff": "A trusts a reviewed list now. B trusts a repo key. C waits."
+        "tradeoff": "A uses a list anyone can regenerate and check now. B trusts a repo key. C waits."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -172134,11 +172076,10 @@
             "gist": "jet cc takes the named local list jetpack env already takes; the repo keeps one.",
             "gains": [
               "Fresh clones compile C without Nix.",
-              "No private key on agent machines."
+              "No private key on agent machines.",
+              "A check rebuilds the list from public build records."
             ],
-            "losses": [
-              "No Jet signature on the list."
-            ],
+            "losses": [],
             "proposed": {
               "code": "$ jet cc -c hello.c --local-nix-catalog Tools/nix-catalog\n// clang from the local list (local-unofficial)"
             }
@@ -172179,16 +172120,7 @@
             "Fresh clones compile C with no Nix.",
             "Results are labeled unofficial."
           ],
-          "losses": [
-            {
-              "loss": "No Jet signature on the list.",
-              "mitigation": "Git review, plus the Nix cache signature on every download."
-            },
-            {
-              "loss": "A pin bump needs Nix once.",
-              "mitigation": "Only for the maintainer; the official index removes it."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -172199,7 +172131,7 @@
               "reason": "The end state, but alone it blocks fresh machines."
             }
           ],
-          "tradeoff": "A trusts a reviewed list now. B trusts a repo key. C waits."
+          "tradeoff": "A uses a checkable list now. B trusts a repo key. C waits."
         }
       },
       "draft": false,
@@ -172217,14 +172149,14 @@
       "explainer": "",
       "story": "Ana adds a function to the Core text module. Hosted CI fails: the Core coverage check says 4640 functions are uncovered, against a ceiling of 37. Her change added one. The other 4602 were always there; the old count simply missed them.",
       "inWild": "Detekt (Kotlin): `detekt --create-baseline` records existing findings, so only new findings fail the build. Source: https://detekt.dev/docs/introduction/baseline/",
-      "detail": "TODAY\n\nTools/agent/core-coverage-census.mjs counts each public Core declaration, methods included, as covered when a test, example or doctest calls it. It counts source call sites, not executed lines (:2-6). --check fails when the total uncovered count exceeds Tools/agent/core-coverage-ratchet.json. --write initializes or lowers the ceiling and never raises it (:9-10, ratchetDecision at :355-359). Hosted CI runs --check (.github/workflows/ci.yml:27-30).\n\nThe ceiling file holds {\"version\": 1, \"uncovered\": 37}. It was written in a checkpoint commit on 2026-10-02 (7bc7cc9d19), not by a decision.\n\nCommit 73e720ed17 fixed the census. It threw on duplicate ids: a bare impl Display inside a type took the trait's name, and operator overloads shared one id. Its module names also kept CamelCase paths (core.Time.Expiring), so no call site matched. Now every part is snake_cased, matching all 113 source modules in Prelude/Core.jet.\n\nThe honest run on 2026-11-05 reports 7395 public functions, 4639 uncovered, over 128 modules. 13 modules are fully covered and 115 have gaps. For example, core.files has 92 of 226 uncovered, core.text 68 of 108 and core.time 129 of 343.\n\nSHAPE UNDER A (proposed)\n\nThe ceiling file becomes version 2 and holds one count per module plus the total. The owner's reset writes today's counts once, in a commit that cites this decision.\n\n--check fails when any module's uncovered count exceeds its ceiling. A module missing from the file has ceiling 0, so a new module must be fully covered. --write lowers each module that improved and never raises one. The message names the module, its count, its ceiling and the uncovered functions it gained.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. A total of 4639 would let new untested functions in whenever old ones gain tests. Per-module ceilings stop that: a new public function in a module needs a use, or that module's count rises.\n\n2. A reset by hand could become a habit. --write still cannot raise any ceiling. A raise needs a hand edit citing an owner decision, which the gate's message says.\n\nEDGE CASES\n\n- Moving an uncovered function into another module raises that module. The move needs a use for it first. The message names the function, so the fix is one call in a test.\n\n- Deleting a module removes its row on the next --write. A stale row with no module is ignored by --check.\n\n- A future census fix that finds more uncovered functions needs the same owner reset. It cannot slip in through --write.\n\nWHY NOT B OR C\n\nB keeps hosted CI red until 4602 functions gain uses, which takes weeks at best. A check that is always red hides real regressions, because nobody reads it. C deletes the check and tracks coverage on a card. That loses the guard that stops new untested Core functions.",
+      "detail": "TODAY\n\nTools/agent/core-coverage-census.mjs counts each public Core declaration, methods included, as covered when a test, example or doctest calls it. It counts source call sites, not executed lines (:2-6). --check fails when the total uncovered count exceeds Tools/agent/core-coverage-ratchet.json. --write initializes or lowers the ceiling and never raises it (:9-10, ratchetDecision at :355-359). Hosted CI runs --check (.github/workflows/ci.yml:27-30).\n\nThe ceiling file holds {\"version\": 1, \"uncovered\": 37}. It was written in a checkpoint commit on 2026-10-02 (7bc7cc9d19), not by a decision.\n\nCommit 73e720ed17 fixed the census. It threw on duplicate ids: a bare impl Display inside a type took the trait's name, and operator overloads shared one id. Its module names also kept CamelCase paths (core.Time.Expiring), so no call site matched. Now every part is snake_cased, matching all 113 source modules in Prelude/Core.jet.\n\nThe honest run on 2026-11-05 reports 7395 public functions, 4639 uncovered, over 128 modules. 13 modules are fully covered and 115 have gaps. For example, core.files has 92 of 226 uncovered, core.text 68 of 108 and core.time 129 of 343.\n\nSHAPE UNDER A (proposed)\n\nThe ceiling file becomes version 2 and lists each module's uncovered public functions by name and signature. The owner's reset writes today's list once, in a commit that cites this decision.\n\n--check fails when an uncovered function is not listed. A new module has no list, so it must be fully covered. --write removes names that gained a use and never adds one. The message names the module and the function, and says how to cover it.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. The stored number jumps from 37 to 4639. Under A no number is stored. The file names today's uncovered functions, so it guards each one: a covered function that loses its last use fails the check, which no count can catch.\n\n2. A count would let new untested functions in whenever old ones gain tests. A name list stops that: any uncovered function not on the list fails.\n\n3. A reset by hand could become a habit. --write can only remove names. Adding one needs a hand edit citing an owner decision, which the gate's message says.\n\n4. Moving a function. A moved uncovered function keeps its entry, matched by name and signature, so a move needs no new test.\n\nNo loss remains.\n\nEDGE CASES\n\n- Moving an uncovered function keeps its entry: --check matches it by name and signature once its old entry is gone, and --write moves the entry.\n\n- Deleting a module removes its list on the next --write. A stale entry with no function is ignored by --check.\n\n- A future census fix that finds more uncovered functions needs the same owner reset. It cannot slip in through --write.\n\nWHY NOT B OR C\n\nB keeps hosted CI red until 4602 functions gain uses, which takes weeks at best. A check that is always red hides real regressions, because nobody reads it. C deletes the check and tracks coverage on a card. That loses the guard that stops new untested Core functions.",
       "options": [
         {
           "key": "A",
-          "name": "Reset to the honest count, per module",
-          "detail": "You reset the ceiling once to today's true counts, one per module. After that each module's gap can only shrink, and new code needs a test, example or doc example that uses it.",
-          "technical": "core-coverage-ratchet.json version 2 holds per-module ceilings. --check fails on any module above its ceiling; a module not listed has ceiling 0. --write lowers and never raises.",
-          "code": "// Tools/agent/core-coverage-ratchet.json after the reset\n{\n  \"version\": 2,\n  \"uncovered\": 4639,\n  \"modules\": { \"core.files\": 92, \"core.text\": 68, \"core.time\": 129 }\n}\n\n$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: 69 uncovered > ceiling 68 (new: <function>)"
+          "name": "Reset to today's uncovered list",
+          "detail": "You reset the check once to today's true list of uncovered functions, by module and name. After that the list can only shrink: new code needs a test, example or doc example, and covered code stays covered.",
+          "technical": "core-coverage-ratchet.json version 2 lists uncovered functions per module by name and signature. --check fails on any uncovered function not listed; a moved function keeps its entry. --write removes names and never adds one.",
+          "code": "// Tools/agent/core-coverage-ratchet.json after the reset\n{\n  \"version\": 2,\n  \"uncovered\": {\n    \"core.text\": [\"<function>(<signature>)\", ...],\n    \"core.time\": [\"<function>(<signature>)\", ...]\n  }\n}\n\n$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> is uncovered and not listed\n  fix: call it from a test, example or doc example"
         },
         {
           "key": "B",
@@ -172255,18 +172187,9 @@
         "gains": [
           "Hosted CI goes green and stays meaningful.",
           "New Core functions must come with a use.",
-          "Each module's gap can only shrink."
+          "A covered function can never quietly lose its last use."
         ],
-        "losses": [
-          {
-            "loss": "The stored number jumps from 37 to 4639.",
-            "mitigation": "Only this one reset, citing this decision; the check itself still cannot raise any ceiling."
-          },
-          {
-            "loss": "Moving an uncovered function into another module needs a use first.",
-            "mitigation": "The message names the function, so the fix is one call in a test."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
@@ -172277,7 +172200,7 @@
             "reason": "C loses the guard that stops new untested Core functions."
           }
         ],
-        "tradeoff": "A resets once and tightens per module. B waits red. C stops checking."
+        "tradeoff": "A records today's gaps by name and lets the list only shrink. B waits red. C stops checking."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -172302,17 +172225,15 @@
         "options": [
           {
             "key": "A",
-            "name": "Reset, per module",
-            "gist": "Reset once to today's true counts per module; each can only shrink.",
+            "name": "Reset to today's list",
+            "gist": "Reset once to today's uncovered functions by name; the list only shrinks.",
             "gains": [
               "CI goes green and stays meaningful.",
-              "New functions need a use."
+              "New functions need a use; covered ones stay covered."
             ],
-            "losses": [
-              "The number jumps to 4639."
-            ],
+            "losses": [],
             "proposed": {
-              "code": "$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: 69 uncovered > ceiling 68 (new: <function>)"
+              "code": "$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> is uncovered and not listed"
             }
           },
           {
@@ -172349,18 +172270,9 @@
           "why": "No work can meet a ceiling from a broken count. One reset per module keeps the check honest and stops new untested code.",
           "gains": [
             "CI green and meaningful.",
-            "New Core functions need a use."
+            "New functions need a use; covered ones stay covered."
           ],
-          "losses": [
-            {
-              "loss": "The number jumps to 4639.",
-              "mitigation": "One reset citing this decision; the check still can't raise it."
-            },
-            {
-              "loss": "Moving an uncovered function needs a use first.",
-              "mitigation": "The message names the function to call."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -172371,7 +172283,7 @@
               "reason": "Nothing stops new untested Core functions."
             }
           ],
-          "tradeoff": "A resets and tightens. B waits red. C stops checking."
+          "tradeoff": "A lists today's gaps and only shrinks. B waits red. C stops checking."
         }
       },
       "draft": false,
@@ -172389,7 +172301,7 @@
       "explainer": "",
       "story": "Mia gets a sales.arrow file from a Polars notebook. She wants it as typed Sale rows in Jet, the same way she already loads sales.parquet. Every option runs the same program. It prints the row count, then the total cents, or a typed error that says why the file was not read.",
       "inWild": "Polars, Arrow JS (TypeScript), Arrow Go and Arrow Java each read IPC files in their own language. pyarrow and R arrow use Arrow C++. DuckDB reads them through its arrow extension, which is built on the nanoarrow C library. Format: https://arrow.apache.org/docs/format/Columnar.html#serialization-and-interprocess-communication-ipc",
-      "detail": "RATIFIED RULES\n\nD-DATA-READER2=A: Jet reads Parquet with its own reader in Core. Core/Data/Parquet.jet (1,129 lines) is that reader. It reads flat columns, v1 pages, PLAIN, dictionary and RLE encodings, and SNAPPY. Examples/features/tooling/data_loader prints its Parquet line on o0, o1 and o2.\n\nD-COLUMNAR-BOUNDARY1=A: a table that another program already holds in memory arrives through the Arrow C data interface as one checked owner (Core/Data/Arrow.jet, DataArrowBatch<T>). That ruling says, in its own words: do not treat Arrow C as Arrow IPC or Parquet support, and new external format or runtime libraries need their own ballots.\n\nD-DATA-READER1 (the earlier Rust-reader ruling, since replaced for Parquet by D-DATA-READER2) also says it selects the Parquet decoder only, not the separate Arrow IPC file format.\n\nTODAY\n\nCore/Data/Data.jet maps the format names ARROW, ARROW-IPC and FEATHER to DataFormat.Arrow. Loading one returns DataErrorKind.Bridge: \"Arrow IPC has a separate provider boundary; Parquet is the registered reader\" (Data.jet:3039-3041). No code in Core, Compiler or Jetpack decodes an IPC file. Card #6419 c7 asks for an Arrow IPC file loaded into a typed frame on o0, o1 and o2, faster than pyarrow and Polars. That criterion cannot start until this is settled.\n\nTHE FORMAT\n\nAn IPC stream is a sequence of messages. Each message has a FlatBuffers header (Schema, DictionaryBatch or RecordBatch) and a body of column buffers padded to 8 bytes. The file format, which Feather v2 is, wraps a stream between ARROW1 magic bytes and adds a footer that indexes every batch. Buffers may be compressed per batch with LZ4 frame or Zstandard. Core already has a Jet Zstandard decoder (Core/Archive/Zstd.jet, 1,012 lines). D-DATA-READER2=A already commits Core to a Jet LZ4 decoder.\n\nWHAT EACH OPTION OWES\n\nEvery option keeps the same Jet code: data.file<[T]>(path, \"arrow\", limits) and the same typed DataError kinds. Every option checks schema-to-type matching the way the Parquet path does: a nullable column never becomes a required field without an explicit conversion. Limits on bytes, rows, nesting and allocation follow the existing DataLimits. The arrow-testing integration files are pinned as fixtures. pyarrow is a development-only oracle and never a runtime dependency. A timed read against pyarrow and Polars is published, and any loss becomes a card.\n\nReview. Author: BallotLead. Adversarial pass by Main. The code samples now use the real loader API from Examples/features/tooling/data_loader.jet. They print the typed error instead of returning silently. The speed risk for c7 is now a stated loss.",
+      "detail": "RATIFIED RULES\n\nD-DATA-READER2=A: Jet reads Parquet with its own reader in Core. Core/Data/Parquet.jet (1,129 lines) is that reader. It reads flat columns, v1 pages, PLAIN, dictionary and RLE encodings, and SNAPPY. Examples/features/tooling/data_loader prints its Parquet line on o0, o1 and o2.\n\nD-COLUMNAR-BOUNDARY1=A: a table that another program already holds in memory arrives through the Arrow C data interface as one checked owner (Core/Data/Arrow.jet, DataArrowBatch<T>). That ruling says, in its own words: do not treat Arrow C as Arrow IPC or Parquet support, and new external format or runtime libraries need their own ballots.\n\nD-DATA-READER1 (the earlier Rust-reader ruling, since replaced for Parquet by D-DATA-READER2) also says it selects the Parquet decoder only, not the separate Arrow IPC file format.\n\nTODAY\n\nCore/Data/Data.jet maps the format names ARROW, ARROW-IPC and FEATHER to DataFormat.Arrow. Loading one returns DataErrorKind.Bridge: \"Arrow IPC has a separate provider boundary; Parquet is the registered reader\" (Data.jet:3039-3041). No code in Core, Compiler or Jetpack decodes an IPC file. Card #6419 c7 asks for an Arrow IPC file loaded into a typed frame on o0, o1 and o2, faster than pyarrow and Polars. That criterion cannot start until this is settled.\n\nTHE FORMAT\n\nAn IPC stream is a sequence of messages. Each message has a FlatBuffers header (Schema, DictionaryBatch or RecordBatch) and a body of column buffers padded to 8 bytes. The file format, which Feather v2 is, wraps a stream between ARROW1 magic bytes and adds a footer that indexes every batch. Buffers may be compressed per batch with LZ4 frame or Zstandard. Core already has a Jet Zstandard decoder (Core/Archive/Zstd.jet, 1,012 lines). D-DATA-READER2=A already commits Core to a Jet LZ4 decoder.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Another reader in Core. The new code is a bounded FlatBuffers header reader and message framing. Column batches, validity bitmaps, limits, error kinds and the Zstandard decoder are the Parquet path's, reused. Arrow's format is frozen at metadata version 5 under its 1.0 stability promise, so the reader does not chase a moving target.\n\n2. Fewer column types. The first version reads every column type the Arrow C owner in Core/Data/Arrow.jet accepts, the types a typed frame can hold. Any other type returns Unsupported naming it, under every option.\n\n3. Speed against pyarrow and Polars. An uncompressed file is mapped once and its column buffers are shared, not copied, so the read is the metadata checks pyarrow also does. Compressed buffers decode in parallel, one per buffer. The c7 cell gets an asm-parity ceiling like every gate cell.\n\nNo loss remains.\n\nWHAT EACH OPTION OWES\n\nEvery option keeps the same Jet code: data.file<[T]>(path, \"arrow\", limits) and the same typed DataError kinds. Every option checks schema-to-type matching the way the Parquet path does: a nullable column never becomes a required field without an explicit conversion. Limits on bytes, rows, nesting and allocation follow the existing DataLimits. The arrow-testing integration files are pinned as fixtures. pyarrow is a development-only oracle and never a runtime dependency. A timed read against pyarrow and Polars is published, and any loss becomes a card.\n\nReview. Author: BallotLead. Adversarial pass and loss redesign by Main. The code samples now use the real loader API from Examples/features/tooling/data_loader.jet. They print the typed error instead of returning silently. The speed risk for c7 is now a stated loss.",
       "options": [
         {
           "key": "A",
@@ -172432,22 +172344,10 @@
         "gains": [
           "Arrow files load with the same call and errors as Parquet.",
           "No native library to build for each target, including WebAssembly.",
-          "Every buffer offset is checked by Jet code before use."
+          "Every buffer offset is checked by Jet code before use.",
+          "Uncompressed columns are shared with the file, not copied."
         ],
-        "losses": [
-          {
-            "loss": "Core owns another reader and its FlatBuffers parsing.",
-            "mitigation": "The format is small and stable, and the pinned arrow-testing files plus pyarrow as a development oracle catch drift."
-          },
-          {
-            "loss": "A first version may read fewer column types than Arrow C++.",
-            "mitigation": "Unsupported types return a typed Unsupported error that names the type, never a wrong value."
-          },
-          {
-            "loss": "Card #6419 c7 needs the read to beat pyarrow and Polars, which use tuned C++ and Rust readers.",
-            "mitigation": "A aliases the file's column buffers instead of copying them where alignment allows, and the c7 cell gets an asm-parity ceiling like every gate cell."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
@@ -172458,7 +172358,7 @@
             "reason": "C leaves out the format that pandas, Polars and DuckDB use to hand tables to each other, and makes users rewrite files as Parquet."
           }
         ],
-        "tradeoff": "A costs Core a new reader and keeps the toolchain native-free. B saves writing the reader but adds a native library for every target. C costs nothing but drops a common data format."
+        "tradeoff": "A writes a small reader on a frozen format and keeps Core native-free. B builds a native library per target. C drops the format."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -172489,11 +172389,10 @@
             "gist": "Core reads the file in Jet code, next to the Parquet reader.",
             "gains": [
               "Same call and errors as Parquet.",
-              "No native library on any target."
+              "No native library on any target.",
+              "Uncompressed columns are shared with the file, not copied."
             ],
-            "losses": [
-              "Core owns another reader."
-            ],
+            "losses": [],
             "proposed": {
               "code": "sales := data.file<[Sale]>(\"sales.arrow\", \"arrow\", limits) ?? { print(\"not read: {err}\"); return }\nrows :: snapshot<[Sale]>(&sales) ?? { print(\"not read: {err}\"); return }"
             }
@@ -172535,16 +172434,7 @@
             "Arrow files load like Parquet files.",
             "Core stays free of native libraries."
           ],
-          "losses": [
-            {
-              "loss": "Core owns another reader.",
-              "mitigation": "Pinned test files and pyarrow as a development oracle catch drift."
-            },
-            {
-              "loss": "Fewer column types at first than Arrow C++.",
-              "mitigation": "An unsupported type returns a typed error that names it."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -172555,7 +172445,7 @@
               "reason": "C drops a format that pandas, Polars and DuckDB share."
             }
           ],
-          "tradeoff": "A costs a new reader and keeps Core native-free. B saves the reader but adds a native library. C costs nothing but drops a common format."
+          "tradeoff": "A adds a small reader and stays native-free. B adds a native build. C drops the format."
         }
       },
       "draft": false,
@@ -172573,7 +172463,7 @@
       "explainer": "",
       "story": "Ana splits her app into `app` and a local `helper` package and runs `jet test` from a plain shell. With A it runs. With B it stops with E1355 until she enters env.dev, which provides nothing her tests use.",
       "inWild": "[dependencies]\nhelper = { path = \"helper\" }   # read from disk\nserde = \"1\"                    # needs the registry or its cache\n// Cargo builds path dependencies from the tree. Source: doc.rust-lang.org/cargo/reference/specifying-dependencies.html#specifying-path-dependencies.",
-      "detail": "",
+      "detail": "HOW A'S DOWNSIDES ARE DESIGNED AWAY\n\nReading path manifests. The check runs on the package graph the loader already builds for the run, so it opens no extra file. It stops at the first non-path import. No loss remains.",
       "options": [
         {
           "key": "A",
@@ -172611,7 +172501,8 @@
             "reason": "B makes every local multi-package project enter the environment even when it uses nothing from it."
           }
         ],
-        "tradeoff": "Path packages run anywhere; only packages that come from the hangar need the environment."
+        "tradeoff": "Path packages run anywhere; only packages that come from the hangar need the environment.",
+        "losses": []
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -172642,9 +172533,7 @@
               "Local packages run with `jet test` outside the environment.",
               "A registry import inside a path package still stops at E1355."
             ],
-            "losses": [
-              "The boundary check reads each path package's manifest, not only the root's."
-            ],
+            "losses": [],
             "proposed": {
               "code": "use helper      // path dependency with no registry imports: runs\nuse acme.json   // registry dependency: E1355 outside env.dev\n// helper importing acme.json: E1355 outside env.dev"
             }
@@ -172671,12 +172560,7 @@
           "gains": [
             "Local packages keep working outside the environment, as they always have."
           ],
-          "losses": [
-            {
-              "loss": "The check reads every path package's manifest.",
-              "mitigation": "Path packages are local files the build reads anyway, and the walk stops at the first registry import."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -175521,6 +175405,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T23:17:53.709Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ENV-PATHDEP1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:52.777Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DATA-ARROW-IPC1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:51.887Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CORE-COVERAGE-RATCHET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:51.016Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-NIX-INDEX-ROOT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:50.291Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TEST-INVOKE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:49.600Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EXEC-RELAUNCH1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:48.816Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EXEC-NOEXEC1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T23:17:47.917Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-OPT-LEDGER-IR1",
+      "note": ""
+    },
     {
       "at": "2026-11-05T23:17:46.332Z",
       "by": "Main",
