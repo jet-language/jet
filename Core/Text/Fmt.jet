@@ -6,9 +6,9 @@ use {
 // run this source; interpolation selectors and compile-time calls run the
 // shared Prelude kernel, which takes the same steps, so both give one meaning
 // (owner rows, card #4588). Radix helpers use lowercase digits; text padding
-// counts UTF-8 scalars. Fixed-precision formats preserve the exact binary
-// Float's ties-to-even rounding and signed zero; non-finite Floats keep their
-// ordinary display.
+// counts UTF-8 scalars. Fixed-precision formats round half away from zero
+// (owner ruling #4588) and print a value that rounds to zero without a sign;
+// non-finite Floats keep their ordinary display.
 fn number(n: Int) -> String Never! { grouped_int(n) }
 fn bin(n: Int) -> String Never! { radix_signed_width(n, 2, 0) }
 fn oct(n: Int) -> String Never! { radix_signed_width(n, 8, 0) }
