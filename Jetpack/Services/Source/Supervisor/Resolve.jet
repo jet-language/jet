@@ -209,11 +209,13 @@ fn services_validate_socket_names(sockets: [String]) ServicesError! {
 struct ServicePortReservation {
     ports: [Int]
     listeners: [TCPListener]
-
-    // Rust `drop(allocated_ports)`: release the listeners immediately
-    // before spawn so the service binds its ports without a race.
-    fn release(^self) Never! {}
 }
+
+// Rust `drop(allocated_ports)`: release the listeners immediately before
+// spawn so the service binds its ports without a race. A consuming free
+// function drops the reservation, and so closes every listener, on return;
+// a `^self` method with this body leaves them open (compiler defect #6572).
+fn services_release_ports(^reservation: ServicePortReservation) Never! {}
 
 fn services_allocate_ports(ports: [Int]) -[Net, Time.Wait]> ServicePortReservation ServicesError! {
     services_validate_ports(ports)
@@ -226,7 +228,7 @@ fn services_allocate_ports(ports: [Int]) -[Net, Time.Wait]> ServicePortReservati
         }
         address :: net.listener_local_socket_addr(listener) ?? return Err(ServicesError.new("couldn't read allocated service port: {err}"))
         &allocated.push(net.socket_port(address))
-        &listeners.push(listener)
+        &listeners.push(^listener)
     }
     Ok(ServicePortReservation{ports: allocated, listeners})
 }

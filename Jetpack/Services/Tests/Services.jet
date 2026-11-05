@@ -79,6 +79,17 @@ fn services_test_wait_child_pid(path: String) -> Int {
     Int.parse(text.trim()) ?? panic("child pid")
 }
 
+// Core contains a spawned child's process group: once the leader exits, its
+// collector sweeps the group, so no descendant outlives the leader. Wait up
+// to two seconds for that sweep.
+fn services_test_wait_swept(pid: Int) {
+    deadline :: services_now_ms() + 2000
+    loop services_test_is_alive(pid) {
+        assert(services_now_ms() < deadline, "the leader's process group must be swept once it exits")
+        time.sleep(time.duration_ms(20))
+    }
+}
+
 fn services_test_has_pair(command: [String], first: String, second: String) -> Bool {
     loop index in 1..<command.len() {
         if command[index - 1] == first && command[index] == second -> return true
@@ -254,7 +265,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     port :: reservation.ports[0]
     assert(port != 0)
     assert(net.tcp_listen("127.0.0.1:{port}") == .Err(_), "the parent reservation must prevent a competing bind")
-    reservation.release()
+    services_release_ports(^reservation)
     _ :: net.tcp_listen("127.0.0.1:{port}") ?? panic("the reservation must release before the child is spawned")
 }
 
@@ -357,7 +368,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     child_pid :: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
     started.child.wait() ?? panic("leader exit")
     assert(!services_test_is_alive(started.state.pid), "the recorded leader must exit")
-    assert(services_test_is_alive(child_pid), "the descendant must outlive its leader")
+    services_test_wait_swept(child_pid)
 
     services_down_one(services_test_host(), dir, plan) ?? panic("down must stop the persisted authority")
     assert(!services_test_is_alive(child_pid), "the persisted process group must be gone")
@@ -377,7 +388,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     service_dir :: services_service_dir(dir, "fixture")
     child_pid :: services_test_wait_child_pid(files.join(service_dir, "data/child.pid"))
     started.child.wait() ?? panic("leader exit")
-    assert(services_test_is_alive(child_pid), "the descendant must outlive its leader")
+    services_test_wait_swept(child_pid)
 
     running :: services_read_lifecycle(service_dir) ? present -> present ! failure -> panic("read lifecycle")
     facts := running ?? panic("running lifecycle facts must exist")
@@ -401,7 +412,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     found :: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
     started := found ?? panic("fixture must start")
     child_pid :: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
-    assert(services_test_is_alive(child_pid), "the descendant must outlive its leader")
+    services_test_wait_swept(child_pid)
 
     // The leader can lose the identity race between the supervisor's check
     // and its stop request; cleanup must fall back to the persisted authority.
