@@ -12,10 +12,9 @@
 // $JET_SCRATCH_ROOT. `small` gives four slots capped at LANES_MEM (1G..8G,
 // default 3G); `heavy` gives two slots capped at GB (at most 12). A busy lane
 // waits for the first free slot. Slots are exclusive file locks, so the lock
-// dies with its holder. Every job runs without core dumps and is stopped if
-// this lane dies.
-//
-// The cap is core.process's memory limit, the child's address-space limit.
+// dies with its holder. Every job runs without core dumps, in its own
+// systemd user scope in jetwork.slice with MemoryMax set to the cap and no
+// swap (Linux systemd user sessions only).
 //
 // `guard` protects the orchestrator from a global OOM: every 2 s, below 7 GiB
 // of available memory it kills the largest-RSS compiler, build or test job
@@ -29,8 +28,6 @@ use {
     term :: core.term
     time :: core.time
 }
-
-GIB :: 1073741824
 
 fn run() {
     args :: process.args()
@@ -99,13 +96,13 @@ struct Lane {
     name: String
     slots: [String]
     wait_ms: Int
-    memory_bytes: Int
+    memory: String
     timeout_s: Int?
     env: [(name: String, value: String)]
 }
 
 // Hold the first free slot (waiting while every slot is busy), then run the
-// job under the lane's limits with the caller's terminal. The exit code is
+// job in a memory-capped scope with the caller's terminal. The exit code is
 // the job's, 128+N for a signal, 124 for a timeout.
 fn run_in_lane(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     loop path in lane.slots {
@@ -113,6 +110,8 @@ fn run_in_lane(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]
         files.append_all(path, "") ?? return lane_error(lane, "cannot open slot {path}: {err}")
     }
     sys.set_core_file_limit(Val(0), None) ?? ()
+    // Failed transient scopes linger and collide with reused PIDs ("already loaded").
+    process.cmd([String]{"systemctl", "--user", "reset-failed"}).run().drop("clearing failed scopes is best effort")
     loop {
         loop path in lane.slots {
             held :: files.try_lock(path) ?? next
@@ -123,8 +122,11 @@ fn run_in_lane(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]
 }
 
 // The lane's slot lock `_slot` stays held until the job ends.
-fn run_job(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, Time.Wait, IO]> Int Never! {
-    spec := process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).memory_limit(lane.memory_bytes)
+fn run_job(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, Time, Time.Wait, IO]> Int Never! {
+    unit :: "jw-{lane.name}-{sys.pid()}-{time.unix_ns()}"
+    scoped := [String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"}
+    loop arg in argv -> &scoped.push(arg)
+    spec := process.cmd(scoped).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if lane.timeout_s == .Val(seconds) -> spec = spec.timeout(time.duration_seconds(seconds))
     loop pair in lane.env -> spec = spec.env(pair.name, pair.value)
     results :: process.run_all([ProcessSpec]{spec}, 1) ?? return refuse("{lane.name}: {argv[0]} could not start: {err}", 127)
@@ -143,19 +145,6 @@ fn job_code(receipt: ProcessReceipt) -> Int Never! {
 fn lane_error(lane: Lane, message: String) -[IO]> Int Never! {
     term.eprint("{lane.name}: {message}")
     2
-}
-
-// "6G" / "512M" / plain bytes as bytes; None if malformed.
-fn size_bytes(text: String) -> Int? Never! {
-    if text == "" -> return None
-    scale := 1
-    digits := text
-    if text.ends_with("G") || text.ends_with("M") {
-        scale = if text.ends_with("G") -> GIB else -> 1048576
-        digits = text[0..<text.len() - 1]
-    }
-    value :: digits_value(digits) ?? return None
-    Val(value * scale)
 }
 
 fn digits_value(text: String) -> Int? Never! {
@@ -181,12 +170,12 @@ fn jet_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
         term.eprint("Lanes.jet jet refuses to wrap itself or a script (JET={jet}); point JET at a jet binary")
         return 64
     }
-    memory :: size_bytes(env_or("SAFE_JET_MEM", "6G")) ?? return refuse("jet lane: SAFE_JET_MEM must be a size like 6G", 64)
+    memory :: env_or("SAFE_JET_MEM", "6G")
     timeout :: digits_value(env_or("SAFE_JET_TIMEOUT", "300")) ?? return refuse("jet lane: SAFE_JET_TIMEOUT must be whole seconds", 64)
     slots :: [String]{"{state}/jet-slots/1", "{state}/jet-slots/2", "{state}/jet-slots/3"}
     argv := [String]{jet}
     loop arg in args -> &argv.push(arg)
-    run_in_lane(Lane{name: "jet lane", slots: slots, wait_ms: 500, memory_bytes: memory, timeout_s: Val(timeout), env: [(name: String, value: String)]{(name: "TMPDIR", value: scratch_root())}}, argv)
+    run_in_lane(Lane{name: "safe-jet", slots: slots, wait_ms: 500, memory: memory, timeout_s: Val(timeout), env: [(name: String, value: String)]{(name: "TMPDIR", value: scratch_root())}}, argv)
 }
 
 fn small_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
@@ -199,7 +188,7 @@ fn small_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! 
     }
     d :: "{state_root()}/laneS"
     slots :: [String]{"{d}/1", "{d}/2", "{d}/3", "{d}/4"}
-    run_in_lane(Lane{name: "laneS", slots: slots, wait_ms: 1000, memory_bytes: gb * GIB, timeout_s: None, env: [(name: String, value: String)]{}}, args)
+    run_in_lane(Lane{name: "laneS", slots: slots, wait_ms: 1000, memory: mem, timeout_s: None, env: [(name: String, value: String)]{}}, args)
 }
 
 fn heavy_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
@@ -211,7 +200,7 @@ fn heavy_lane(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! 
     }
     state :: state_root()
     slots :: [String]{"{state}/laneB2.lock", "{state}/unitcheck/lock"}
-    run_in_lane(Lane{name: "laneB", slots: slots, wait_ms: 2000, memory_bytes: gb * GIB, timeout_s: None, env: [(name: String, value: String)]{}}, args[1..<args.len()])
+    run_in_lane(Lane{name: "laneB", slots: slots, wait_ms: 2000, memory: "{gb}G", timeout_s: None, env: [(name: String, value: String)]{}}, args[1..<args.len()])
 }
 
 // --- memory guard ------------------------------------------------------------
@@ -326,12 +315,9 @@ fn guard() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     }
 }
 
-#Test("sizes and whole numbers parse; anything else is refused") {
-    assert_eq(size_bytes("6G"), Val(6 * GIB))
-    assert_eq(size_bytes("512M"), Val(536870912))
-    assert_eq(size_bytes("100"), Val(100))
-    assert_eq(size_bytes("6g"), None)
-    assert_eq(size_bytes(""), None)
+#Test("whole numbers parse; anything else is refused") {
+    assert_eq(digits_value(""), None)
+    assert_eq(digits_value("6G"), None)
     assert_eq(digits_value("300"), Val(300))
     assert_eq(digits_value("-1"), None)
 }

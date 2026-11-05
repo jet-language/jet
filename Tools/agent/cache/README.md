@@ -16,9 +16,9 @@ node Tools/agent/cache/purge-bulk.mjs
   default 3G); `Lanes.jet heavy GB` gives two heavy slots capped at GB (at most
   12). `Lanes.jet jet` runs `$JET` (default the frozen `scratch/jet-current`
   binary) in three serialized slots; `SAFE_JET_MEM` (default 6G) and
-  `SAFE_JET_TIMEOUT` (default 300 s, exit 124) override it. The cap is the
-  child's address-space limit (`core.process` `memory_limit`); slots are
-  exclusive file locks under `$JET_STATE_ROOT`.
+  `SAFE_JET_TIMEOUT` (default 300 s, exit 124) override it. Each job runs in a
+  systemd user scope (`jetwork.slice`, `MemoryMax` = the cap, no swap); slots
+  are exclusive file locks under `$JET_STATE_ROOT`.
 - `Lanes.jet guard` is an opt-in long-running emergency guard: below 7 GiB available
   RAM it kills the largest eligible compiler/build process and logs the action.
   Only Main should start it; it is not a substitute for job memory caps.
