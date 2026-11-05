@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6568,
-    "rev": 92411,
+    "nextNum": 6569,
+    "rev": 92418,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91173,6 +91173,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "ui --coverage: registered codes with no reachable CLI path (unfinished features or defects); these stay missing in the gate, with no allowlist (I4), until fixed: E0122 (only a defect path emits it: decide internal error or user path); E1410 (parser E0999 StackedRuleLines fires first on a doubled panel marker); E2389-E2392 (only text cells in Inspect proof rows, Inspect.jet:1751, never rendered as diagnostics); E3105 (the driver never fills request.gate_policies outside tests, so org and package unsafe declarations never reach sema_unsafe_inspect; #4268); E1257 and E1260 (plugin interface facts not loaded under jet check); E3512 (jet build --locked unbuilt; also locked_generated_drift_fails_before_materialization.case fails on base with no known-failing row); E3503 (ungranted build-action refusal unbuilt, #4268). Still being checked: E0998, E1300, E4201-E4203."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "ui --coverage triage of the 26 snapshot-without-emitter rows, checked against the Rust tree at c9129d174d^: 23 codes Rust emitted are unported, and porting them is part of the verify-full blocker: E3540, E-WEB-RUN (main.rs); L0520 (CheckerInfer/expr.rs); E0619, L0619 (Loader.rs); E3411, E3412 (comptime); E-OSTARGET-MIXED-AXIS, E-OSTARGET-UNMATCHED-CALL (OSTarget.rs); E3004 (TaskGroup.rs); E2967 (ResourceSchedule.rs); E3011, E3014 (Prelude Core.rs); L0601 (Bundle.rs); E3620, E3623, E3625, E3627, E3628, E3629 (CmdProve.rs, ProveReplay.rs); E1801 (comptime Interpreter.rs); E1355 (CmdCompile.rs); E1299 (Store/Ingest.rs, reserved row). E1402 and E1225 stay retired (the extension host doesn't exist yet; jetpack.toml is a retired format) and their snapshots move to held. E2103 is emitted as a hand-rendered string at ProgramCompletions.jet:154 and moves onto its registry row."
         },
         {
@@ -91458,7 +91463,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-05T13:49:18.755Z",
+      "updated": "2026-11-05T14:02:37.378Z",
       "updatedBy": "Main"
     },
     {
@@ -91718,6 +91723,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "Golden leak-gate census, 2026-11-05 on dev 02602250cc (s1 with the checked allocator; runtime process roots tagged; under --checked-alloc the runtime runs the entry's drops instead of the exit shortcut): about 1170 of the golden programs leak (o0 1164, o1 1162, o2 1161 rows; about 100 more rows leak on only some tiers). On o0, 610 rows leak only runtime init roots (jet_rt_*_init, TLS keys), so the runtime frees or tags those at shutdown; 507 have real library or user leaks. Leak-gate rows: 3492 of 4715. Starting point for c2 and c3 when G19 is worked."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "c3 progress (invariant fixes), f2ba7d34bf: the fresh-temporary-never-dropped family. loop x in make(), make()[i], make_map()[k], every non-mutating Map/Set builtin on a fresh receiver, and Set.from(make()) (buffer) now end the temporary. Before: 100-520 MB VmRSS per 40,000 rounds per shape on O0 and O2. Three new cases FAIL->PASS, one guard case PASS on both; every shape clean under --checked-alloc on O0 and O2; chain FIXED_POINT; golden A/B 267 = 267; cases A/B over 284 ids. Probe audit of the flat shapes (match, if pattern, struct method, String chains, ?. and ??, slices, tuple fields) is in the guard case."
         }
       ],
@@ -91785,7 +91795,74 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-05T13:50:39.503Z",
+      "updated": "2026-11-05T14:06:03.132Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0xuffg1",
+      "num": 6568,
+      "title": "Close rate: one source of truth per fact, structural checks, criteria sized to close",
+      "body": "Owner 2026-11-05: cards take too long to close; a well-designed codebase should take a change in one place. Measured on 2026-11-05: a compiler rebuild to fixed point takes about 5 minutes (147 s s1 + 132 s), and a lander batch averages 129 s over 111 batches, so build and landing are not the bottleneck. The causes are copies of one fact that drift (a diagnostic lives in the Prelude row, the generated DiagnosticRows, the coverage baseline, the snapshot, the explain page and spec prose: retiring two codes touched 10 files, and ui --coverage found 137 drift errors), checks that are found serially instead of structurally (three leak families found one at a time; 1170 leaking golden programs), unported Rust behavior that is porting work rather than edits (82 KF-UNPORTED ui rows over about 60 codes, 23 more Rust-only codes, 294 open G15 criteria), and criteria merged from old cards that each hold a whole feature.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each diagnostic fact has one hand-written home (its Prelude row). The generated registry table, the coverage baseline and the explain pages are generated from it, and adding, rewording or retiring a code is a one-file edit plus regeneration; a check fails if a generated copy differs from its source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:08:03.789Z"
+        },
+        {
+          "n": 2,
+          "text": "Every diagnostic renders through its registry row: a check fails on any hand-built diagnostic text ('More: jet-lang.dev/e/...' or a bare code string outside the registry renderer), and the existing sites (for example ProgramCompletions.jet:154, E2103) are moved.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:08:04.448Z"
+        },
+        {
+          "n": 3,
+          "text": "Every open G14 and G15 criterion is one observable, testable outcome that one patch can meet. Criteria merged from older cards that each name a whole feature are split, without dropping any requirement, and each split criterion names its proving test.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:08:05.114Z"
+        },
+        {
+          "n": 4,
+          "text": "A new seed release is cut from a dev commit that passes verify-full, so stage-1 builds no longer carry fixed compiler bugs such as the named-comparator double free (fixed in 0de406f2c4).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:08:05.788Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G20"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T14:08:03.130Z",
+      "updated": "2026-11-05T14:08:05.788Z",
       "updatedBy": "Main"
     }
   ],
@@ -172908,6 +172985,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T14:08:05.788Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#4 A new seed release is cut from a dev commit that passes veri"
+    },
+    {
+      "at": "2026-11-05T14:08:05.114Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#3 Every open G14 and G15 criterion is one observable, testable"
+    },
+    {
+      "at": "2026-11-05T14:08:04.448Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#2 Every diagnostic renders through its registry row: a check f"
+    },
+    {
+      "at": "2026-11-05T14:08:03.789Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#1 Each diagnostic fact has one hand-written home (its Prelude "
+    },
+    {
+      "at": "2026-11-05T14:08:03.130Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0xuffg1",
+      "note": "Close rate: one source of truth per fact, structural checks, criteria sized to close"
+    },
+    {
+      "at": "2026-11-05T14:06:03.132Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q4s6en",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:02:37.378Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T13:57:35.551Z",
       "by": "Main",
