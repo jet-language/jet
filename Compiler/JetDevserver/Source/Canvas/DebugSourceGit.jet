@@ -34,24 +34,24 @@ MAX_DEBUG_VALUE_BYTES :: 4 * 1024
 MAX_DEBUG_CALL_STACK_BYTES :: 16 * 1024
 MAX_DEBUG_WIRE_PATH :: 64
 
-enum DebugTier { Interpreter; NativeLldb }
+enum DebugTier { Replay; NativeLldb }
 impl DebugTier {
     fn parse(value: String?) -> Self Err! {
-        if value.unwrap_or("jet-dev-interpreter") == {
-            "jet-dev-interpreter" -> { return .Ok(.Interpreter) }
+        if value.unwrap_or("jet-dev-replay") == {
+            "jet-dev-replay" -> { return .Ok(.Replay) }
             "native-lldb" -> { return .Ok(.NativeLldb) }
-            else -> { return .Err(debug_error("bad_request", "Canvas debug tier must be `jet-dev-interpreter` or `native-lldb`")) }
+            else -> { return .Err(debug_error("bad_request", "Canvas debug tier must be `jet-dev-replay` or `native-lldb`")) }
         }
     }
     fn wire_name(self) -> String {
         if self == {
-            .Interpreter -> "jet-dev-interpreter"
+            .Replay -> "jet-dev-replay"
             .NativeLldb -> "native-lldb"
         }
     }
 }
 
-// Source/revision-bound ownership of the canonical debugger, not a second interpreter.
+// Source/revision-bound ownership of the canonical debugger, not a second debugger.
 struct DebugSessions {
     next_id: AtomicU64
     sessions: Mutex<[String: DebugSession]>
@@ -144,7 +144,7 @@ impl DebugSessions {
             if history.is_empty() -> history.push("s")
             replay_commands = history.copy()
             native :: if tier == {
-                .Interpreter -> .None
+                .Replay -> .None
                 .NativeLldb -> .Val(NativeDebugArtifact.build(path, id)?)
             }
             _ :: sessions.insert(id.copy(), DebugSession {
@@ -154,7 +154,7 @@ impl DebugSessions {
             })
         }
         session_tier :: sessions.get(id).map((session) -> session.tier) ?? return .Err(debug_error("session", "debug session disappeared"))
-        if session_tier == .Interpreter && sessions.get(id).and_then((session) -> session.history.as_ref()).is_none() {
+        if session_tier == .Replay && sessions.get(id).and_then((session) -> session.history.as_ref()).is_none() {
             recorded := run_session_recorded(path.display().to_string())
             if recorded.status == .Failed {
                 return .Err(debug_error("execution", "debug recording failed:\n{recorded.transcript}"))
@@ -172,8 +172,8 @@ impl DebugSessions {
         inputs.push("bt")
         refs :: inputs.iter().map((text) -> text.as_str()).collect()
         result := if session_tier == {
-            .Interpreter -> {
-                history :: session_history.as_ref() ?? return .Err(debug_error("execution", "interpreter debug history was not captured"))
+            .Replay -> {
+                history :: session_history.as_ref() ?? return .Err(debug_error("execution", "replay debug history was not captured"))
                 run_session_replay(path.display().to_string(), history, refs)
             }
             .NativeLldb -> {

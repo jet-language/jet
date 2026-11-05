@@ -162,7 +162,7 @@ fn seams_checked_projection() {
         seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job check")
         seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
     }
-    loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Eval, JetDriverCompileMode.Interpreter}) {
+    loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Eval, JetDriverCompileMode.RootRun}) {
         request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
         front := jet_driver_lowering_inputs(^request, None)

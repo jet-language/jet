@@ -1180,7 +1180,7 @@ function rustStringSliceValue(expression, context) {
 
 // Jet CoreCalls.jet CORE_CALL_COVERAGE_* bits.
 const CORE_CALL_COVERAGE = {
-  SEMA: 1, TIR_SUBSET: 2, TIR_EVAL: 4, AOT: 8, INTERPRETER: 16, COMPTIME: 32, KNOWN: 63,
+  SEMA: 1, TIR_SUBSET: 2, TIR_EVAL: 4, AOT: 8, COMPTIME: 32, KNOWN: 47,
 };
 
 function corePureRouteValue(expression, context) {
@@ -1200,23 +1200,6 @@ function corePureRouteValue(expression, context) {
     SketchCms: "SketchCMS", Ui: "UI", Io: "IO",
   };
   return jetSpelling[match[1]] ?? match[1];
-}
-
-function coreInterpreterRouteValue(expression, context) {
-  const value = expression.trim();
-  if (value.startsWith("CoreCallInterpreterRoute::Pure(")) {
-    const pure = readRustCall(value, 0, context);
-    if (pure.name !== "CoreCallInterpreterRoute::Pure" ||
-        pure.end !== value.length || pure.args.length !== 1) {
-      throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
-    }
-    return { kind: "Pure", route: corePureRouteValue(pure.args[0], context) };
-  }
-  const match = value.match(/^CoreCallInterpreterRoute::(None|Ambient|TypedIntrinsic)$/);
-  if (!match) {
-    throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
-  }
-  return { kind: match[1] === "None" ? "NoRoute" : match[1] };
 }
 
 function coreCoverageValue(expression, context) {
@@ -1554,15 +1537,8 @@ function coreCallSinkFor(moduleName, member) {
   return null;
 }
 
-function coreInterpreterRouteIsExecutable(route) {
-  if (route.kind === "NoRoute") return false;
-  if (route.kind === "Pure") return route.route !== "NoPureRoute";
-  return true;
-}
-
 function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
   const effectKind = coreCallEffectFor(moduleName, member);
-  const route = { kind: effectKind === null ? "TypedIntrinsic" : "NoRoute" };
   return {
     module_name: moduleName,
     member: member,
@@ -1577,11 +1553,9 @@ function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
     effect_leaf: coreCallEffectLeafFor(moduleName, member),
     sink_class: coreCallSinkFor(moduleName, member),
     pure_route: "NoPureRoute",
-    interpreter_route: route,
     symbol: { kind: prelude ? "Prelude" : "Rust", name: symbol },
     source_target: null,
-    coverage: coreInterpreterRouteIsExecutable(route) ?
-      CORE_CALL_COVERAGE.KNOWN : CORE_CALL_COVERAGE.KNOWN - CORE_CALL_COVERAGE.INTERPRETER,
+    coverage: CORE_CALL_COVERAGE.KNOWN,
     aot_direct: true,
     native_int_result: false,
     ui_capabilities: [],
@@ -1602,7 +1576,6 @@ function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
     effect_leaf: null,
     sink_class: null,
     pure_route: "NoPureRoute",
-    interpreter_route: { kind: "TypedIntrinsic" },
     symbol: { kind: "Rust", name: "" },
     source_target: null,
     coverage: CORE_CALL_COVERAGE.KNOWN,
@@ -1616,13 +1589,7 @@ function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
 function coreCallMarkSourceOwned(record) {
   record.symbol = { kind: "SourceOwned" };
   record.coverage = CORE_CALL_COVERAGE.SEMA;
-  record.interpreter_route = { kind: "NoRoute" };
   record.aot_direct = false;
-}
-
-function coreCallSetInterpreterRoute(record, route) {
-  record.interpreter_route = route;
-  if (coreInterpreterRouteIsExecutable(route)) record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
 }
 
 function coreCallConstructorRecord(name, args, context) {
@@ -1636,10 +1603,8 @@ function coreCallConstructorRecord(name, args, context) {
   }
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
-    const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
+    return coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
       rustStringValue(args[2], context), true, rustBoolSliceValue(args[3], context));
-    coreCallSetInterpreterRoute(record, { kind: "TypedIntrinsic" });
-    return record;
   }
   if (name === "CoreCallRecord::new" || name === "CoreCallRecord::new_with_coverage") {
     const withCoverage = name.endsWith("new_with_coverage");
@@ -1668,7 +1633,6 @@ function coreCallConstructorRecord(name, args, context) {
     if (withCoverage) {
       const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
       record.coverage = coreCoverageValue(args[3], context);
-      record.interpreter_route = { kind: "NoRoute" };
       return record;
     }
     return coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
@@ -1689,12 +1653,7 @@ function applyCoreCallMethod(record, name, args, context) {
   if (name === "with_max_arity") {
     record.signature.max_arity = rustIntegerValue(argument, context);
   } else if (name === "with_pure_route") {
-    const route = corePureRouteValue(argument, context);
-    record.pure_route = route;
-    record.interpreter_route = { kind: "Pure", route: route };
-    if (route !== "NoPureRoute") record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
-  } else if (name === "with_interpreter_route") {
-    coreCallSetInterpreterRoute(record, coreInterpreterRouteValue(argument, context));
+    record.pure_route = corePureRouteValue(argument, context);
   } else if (name === "with_frame_accesses") {
     record.frame_accesses = rustSliceItems(argument, context).map(function (value) {
       return coreResourceAccessValue(value, context);
@@ -1744,7 +1703,6 @@ function jetStringList(values) {
 
 // The CoreCallRecord literal, fields in CoreCalls.jet declaration order.
 function coreCallRecordLiteral(record) {
-  const route = record.interpreter_route;
   const symbol = record.symbol;
   const capability = record.capability;
   const completion = record.frame_completion;
@@ -1772,8 +1730,6 @@ function coreCallRecordLiteral(record) {
     "effect_leaf: " + jetOptional(record.effect_leaf, jetStringExpression),
     "sink_class: " + jetOptional(record.sink_class, function (sink) { return "SinkClass." + sink; }),
     "pure_route: CoreCallPureRoute." + record.pure_route,
-    "interpreter_route: CoreCallInterpreterRoute." + route.kind +
-      (route.kind === "Pure" ? "{route: CoreCallPureRoute." + route.route + "}" : ""),
     "symbol: CoreCallSymbol." + symbol.kind +
       (symbol.kind === "SourceOwned" ? "" : "{name: " + jetStringExpression(symbol.name) + "}"),
     "source_target: " + jetOptional(record.source_target, jetStringExpression),
@@ -1794,18 +1750,8 @@ function translateCoreCallExpression(expression, context) {
   return coreCallRecordLiteral(coreCallRecordFromRust(expression, context));
 }
 
-function coreDispatcherExpression(row, ambientKeys) {
-  let expression = row.expression.replace(/,\s*$/, "");
-  const key = row.module + "." + row.member;
-  if (
-    ambientKeys.has(key) &&
-    !expression.includes("with_interpreter_route(") &&
-    !expression.includes("with_pure_route(") &&
-    !expression.includes("sema_web_call(")
-  ) {
-    expression += ".with_interpreter_route(CoreCallInterpreterRoute::Ambient)";
-  }
-  return expression;
+function coreDispatcherExpression(row) {
+  return row.expression.replace(/,\s*$/, "");
 }
 
 function coreCallIdentityValue(argument, field, sourceLine) {
@@ -1955,7 +1901,6 @@ function parseCoreSource(source, root = ROOT) {
   const sourceModules = [];
   const bootstraps = [];
   const dispatcherRows = [];
-  const ambientRoutes = [];
   const formatRows = [];
   let rootTypes = [];
   let namespaceOnly = [];
@@ -1967,7 +1912,6 @@ function parseCoreSource(source, root = ROOT) {
   const seenFormatLabels = new Set();
   const seenFormatModules = new Set();
   const seenDispatcherKeys = new Set();
-  const seenAmbientRoutes = new Set();
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = coreSourceLine(raw);
     if (!line) continue;
@@ -2097,22 +2041,6 @@ function parseCoreSource(source, root = ROOT) {
         ownedMembers: ownedMembers,
         ownedTypes: ownedTypes,
         implTypes: implTypes,
-        sourceLine: sourceLine,
-      });
-      continue;
-    }
-    const ambient = line.match(
-      /^ambient_route\s+([A-Za-z_][A-Za-z0-9_.]*)\s+([A-Za-z_][A-Za-z0-9_!?]*)$/,
-    );
-    if (ambient) {
-      const key = ambient[1] + "." + ambient[2];
-      if (seenAmbientRoutes.has(key)) {
-        throw new Error("duplicate Core ambient route `" + key + "` at line " + sourceLine);
-      }
-      seenAmbientRoutes.add(key);
-      ambientRoutes.push({
-        module: ambient[1],
-        member: ambient[2],
         sourceLine: sourceLine,
       });
       continue;
@@ -2336,23 +2264,6 @@ function parseCoreSource(source, root = ROOT) {
         "` instead of the provider; delete the row and the Rust symbol it names");
     }
   }
-  const nonReceiverDispatcherCounts = new Map();
-  for (const row of dispatcherRows) {
-    if (row.kind === "receiver") continue;
-    const key = row.module + "." + row.member;
-    nonReceiverDispatcherCounts.set(key, (nonReceiverDispatcherCounts.get(key) || 0) + 1);
-  }
-  for (const route of ambientRoutes) {
-    if (!moduleSet.has(route.module)) {
-      throw new Error("ambient route names missing Core module `" + route.module + "`");
-    }
-    const key = route.module + "." + route.member;
-    const matches = nonReceiverDispatcherCounts.get(key) || 0;
-    if (matches !== 1) {
-      throw new Error("ambient route must match exactly one non-receiver dispatcher row: " +
-        key + " (matches=" + matches + ")");
-    }
-  }
   const namespaceSet = new Set(namespaceOnly);
   if (namespaceSet.size !== namespaceOnly.length) {
     throw new Error("Core namespace_only declarations contain a duplicate");
@@ -2369,7 +2280,6 @@ function parseCoreSource(source, root = ROOT) {
     rootTypes,
     namespaceOnly,
     dispatcherRows,
-    ambientRoutes,
     formatRows,
   };
 }
@@ -2397,12 +2307,9 @@ function coreModuleInventory() {
 // ledger; otherwise a stale adapter spelling can become user-visible without
 // a source declaration.
 function publicDispatcherRows(declarations = coreSourceFacts()) {
-  const ambientKeys = new Set(declarations.ambientRoutes.map(function (route) {
-    return route.module + "." + route.member;
-  }));
   // One body line per dispatcher row, in Core.jet order.
   const body = declarations.dispatcherRows.map(function (row) {
-    return "    " + coreDispatcherExpression(row, ambientKeys) + ",";
+    return "    " + coreDispatcherExpression(row) + ",";
   }).join("\n");
   const sourceLineAt = function (offset) {
     return declarations.dispatcherRows[lineAt(body, offset) - 1].sourceLine;
@@ -2573,11 +2480,6 @@ function coreCallRowText(expression) {
 }
 
 function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
-  const ambientKeys = new Set(
-    declarations.ambientRoutes.map(function (route) {
-      return route.module + "." + route.member;
-    }),
-  );
   const lines = [
     CORE_CALL_ROWS_BEGIN,
     "// Source: " + CORE_SOURCE_PATH,
@@ -2591,7 +2493,7 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
     "CORE_CALLS :: comptime { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
-    const expression = coreDispatcherExpression(row, ambientKeys);
+    const expression = coreDispatcherExpression(row);
     lines.push(
       "    " + translateCoreCallExpression(expression, "Core.jet line " + row.sourceLine) + ",",
     );
@@ -5142,7 +5044,7 @@ function hostileFixtures() {
       'frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, ' +
       'effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, ' +
       'effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, ' +
-      'interpreter_route: CoreCallInterpreterRoute.NoRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, ' +
+      'symbol: CoreCallSymbol.SourceOwned, source_target: None, ' +
       'coverage: CoreCallCoverage{bits: 1}, aot_direct: false, native_int_result: false, ' +
       'ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}';
     if (actual !== expected) {
@@ -5157,7 +5059,7 @@ function hostileFixtures() {
         record.signature.arity !== 1 || record.signature.max_arity !== 2 ||
         record.effect_kind !== "Net" || record.effect_leaf !== "Time.Wait" ||
         record.capability.kind !== "NativeRequired" || record.capability.provider !== "core.net" ||
-        record.coverage !== CORE_CALL_COVERAGE.SEMA || record.interpreter_route.kind !== "NoRoute" ||
+        record.coverage !== CORE_CALL_COVERAGE.SEMA ||
         record.aot_direct) {
       throw new Error("source-owned builder lost its declaration facts or target: " + coreCallRecordLiteral(record));
     }
@@ -5227,19 +5129,6 @@ function hostileFixtures() {
     if (declarations.dispatcherRows.length !== 7) {
       throw new Error("dispatcher identity parser lost a valid constructor or receiver form");
     }
-  }));
-
-  results.push(rejects("ambient route has no dispatcher row",
-    "ambient route must match exactly one non-receiver dispatcher row", function () {
-    parseCoreSource([
-      "bootstrap Syntax depends_on []",
-      "bootstrap Effects depends_on [Syntax]",
-      "bootstrap Core depends_on [Effects]",
-      "bootstrap Derives depends_on [Core]",
-      "module core.jobs exports {queue}",
-      "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])",
-      "ambient_route core.jobs missing",
-    ].join("\n"));
   }));
 
   results.push(rejects("Core API workflow manifest drops a ledger row",

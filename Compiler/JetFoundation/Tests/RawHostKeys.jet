@@ -1,7 +1,7 @@
 // The compiler-private source keys are the existing runtime spellings.
 // No reserved-name parser exemption or compatibility alias is involved.
 use jet_foundation.[
-    CoreCallInterpreterRoute, Effect, Type, TypeTupleField, core_call, core_host_fixed_signature,
+    Effect, Type, TypeTupleField, core_call, core_host_fixed_signature,
     core_module_export, type_identity_equal, type_tuple_fields_canonical,
 ]
 
@@ -10,7 +10,7 @@ fn raw_host_key_fixture(module_name: String, key: String, retired: String, param
     assert(row.module_name == module_name && row.member == key)
     assert(row.signature.arity == parameters.len() && row.signature.max_arity == parameters.len())
     assert(row.signature.borrow_mask == borrowed)
-    assert(row.interpreter_route == CoreCallInterpreterRoute.Ambient && row.aot_direct)
+    assert(row.aot_direct)
     if row.symbol == {
         .Prelude(symbol) -> assert(symbol == key)
         else -> panic("raw host route retains its Prelude symbol")

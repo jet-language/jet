@@ -359,7 +359,7 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
 fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     source :: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
+    mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.RootRun
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, mode)
     compiled := jet_cli_compile_executable(^prepared, None, build_options_stock("run"), None, None, color)
     if ^compiled == {

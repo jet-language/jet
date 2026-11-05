@@ -105,9 +105,9 @@ struct JetDriverHostFacts {
 // canonical comptime stage (checked, built to JetIR, evaluated by JetEval),
 // then stops: nothing is built or emitted for run time. Config surfaces
 // (Jetpack EnvModel) evaluate their typed values this way.
-// `Eval` and `Interpreter` check the selected root of the entry module for
-// JetEval's IR evaluation, without AOT emission. Eval checks the selected
-// root's transitive pure row; Interpreter leaves effects to its runtime
+// `Eval` and `RootRun` check the selected root of the entry module and build
+// it as slot IR that runs natively, without AOT emission. Eval checks the
+// selected root's transitive pure row; RootRun leaves effects to its runtime
 // authorizer.
 // `Check` is `jet check`: the Program checks, then it stops before lowering.
 // No Core reachability pruning and no C export rows; the entry and the
@@ -119,7 +119,7 @@ enum JetDriverCompileMode {
     Doc
     Comptime
     Eval
-    Interpreter
+    RootRun
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index

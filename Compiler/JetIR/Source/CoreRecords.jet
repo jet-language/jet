@@ -1,6 +1,6 @@
 // Complete checked top-level functions into backend-neutral IR.
 use {
-    jet_foundation.[AccessConvention, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallCompletion, CoreCallRecord, CoreCallResourceAccess, CoreCapabilityContract, CoreMarkerApplication, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TTargetApplicability, TVisibility, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
+    jet_foundation.[AccessConvention, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallCompletion, CoreCallRecord, CoreCallResourceAccess, CoreCapabilityContract, CoreMarkerApplication, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TVisibility, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
     jet_sema.[
         SemaComptimeItemRequest,
     ]
@@ -113,7 +113,7 @@ fn ir_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool Ne
     if left.module_name != right.module_name || left.member != right.member || !ir_string_rows_equal(left.receiver_types, right.receiver_types) -> return false
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
-    if left.pure_route != right.pure_route || left.interpreter_route != right.interpreter_route || left.symbol != right.symbol -> return false
+    if left.pure_route != right.pure_route || left.symbol != right.symbol -> return false
     if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result -> return false
     if !ir_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !ir_core_completion_equal(left.frame_completion, right.frame_completion) || !ir_core_capability_equal(left.capability, right.capability) || !ir_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
     ir_authority_decisions_equal(left.authority, right.authority) && ir_core_markers_equal(left.marker, right.marker)
@@ -165,7 +165,6 @@ fn ir_comptime_item_shell(module_identity: String, module_name: String, key: Str
         source_span: span,
         failure_carrier: TFailureCarrier.Infallible,
         effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
-        target_applicability: TTargetApplicability{rust_aot: false, interpreter: true, web: false},
         web_bucket: None,
         web_marker: None,
         visibility: TVisibility.Private,

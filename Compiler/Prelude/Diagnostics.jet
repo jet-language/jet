@@ -7096,7 +7096,7 @@ struct DebugTraceInRelease {
         no_fix :: None
         fix_safety :: .BehaviorPreserving
         fn what(self) -> String { "A `debug` trace is left at `{self.site}`." }
-        fn why(self) -> String { "`debug(value)` is a development trace: it prints while you run, test, or interpret a program and adds no effect, so a shipped artifact (`jet build`) or a release-profile build must not contain it." }
+        fn why(self) -> String { "`debug(value)` is a development trace: it prints while you run, test, or evaluate a program and adds no effect, so a shipped artifact (`jet build`) or a release-profile build must not contain it." }
         fn fix(self) -> String { "Remove the `debug(…)` wrapper and keep the expression; `jet fix` applies this edit." }
     }
 }
@@ -7106,8 +7106,8 @@ struct ReplFuelExhausted {
         code :: "E1801"
         status :: .Retired
         no_fix :: None
-        fn what(self) -> String { "*Retired* (was: a REPL snippet ran more than its interpreter step cap)" }
-        fn why(self) -> String { "The REPL does not interpret: each turn is built and run by a child `jet`, as `jet run` runs a program, so there is no step cap to exhaust; a turn that never ends is stopped with Ctrl-C" }
+        fn what(self) -> String { "*Retired* (was: a REPL snippet ran past its step cap)" }
+        fn why(self) -> String { "Each REPL turn is built and run by a child `jet`, as `jet run` runs a program, so there is no step cap to exhaust; a turn that never ends is stopped with Ctrl-C" }
         fn fix(self) -> String { "Do not use E1801" }
     }
 }
@@ -7120,8 +7120,8 @@ struct ReplFeatureNotSupported {
         stage :: [.Repl]
         meaning :: "Hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs)"
         detail :: true
-        fn what(self) -> String { "The REPL interpreter can't run `{self.feature}`." }
-        fn why(self) -> String { "The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. A `jet repl` run reports this interpreter limitation." }
+        fn what(self) -> String { "The REPL can't run `{self.feature}`." }
+        fn why(self) -> String { "The REPL is for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — need a full program. A `jet repl` run reports this limitation." }
         fn fix(self) -> String { "Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler." }
     }
 }
@@ -10803,21 +10803,21 @@ struct RetiredDevPrescan {
         status :: .Retired
         meaning :: "*Retired* (was: `jet dev` pre-scanned AST features and refused programs before the canonical evaluator ran)"
         no_fix :: None
-        fn what(self) -> String { "*Retired* (was: `jet dev` can't interpret this program yet — it uses a feature outside the old source boundary)" }
+        fn what(self) -> String { "*Retired* (was: `jet dev` refused a program that used a feature outside the old source boundary)" }
         fn why(self) -> String { "The canonical evaluator owns the run and dev execution boundary; a source pre-scan could reject syntax the shared evaluator can execute." }
         fn fix(self) -> String { "Follow the guidance for E2201" }
     }
 }
 
-struct DevStepBudgetExhausted {
+struct RetiredDevStepBudget {
     impl Diagnostic {
         code :: "E2202"
-        meaning :: "`jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4)"
-        detail :: true
-        no_fix :: .Behavior
-        fn what(self) -> String { "A program ran too long for `jet dev` to keep interpreting (the step budget was exhausted)." }
-        fn why(self) -> String { "`jet dev` interprets your program; a run that never finishes is almost always a loop whose condition never becomes false." }
-        fn fix(self) -> String { "Check the loop near the pointed-at line for a condition that never ends; `jet run` executes the real build with no step limit." }
+        status :: .Retired
+        meaning :: "*Retired* (was: `jet dev` stopped a run that exceeded its step budget)"
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `jet dev` stopped a run that exceeded its step budget)" }
+        fn why(self) -> String { "`jet dev` runs the program as native code with no step budget; a run that never ends is stopped with Ctrl-C." }
+        fn fix(self) -> String { "Do not use E2202" }
     }
 }
 
@@ -10852,7 +10852,7 @@ struct DebugSessionQuit {
 struct DevTypeSurfaceChanged {
     impl Diagnostic {
         code :: "E2210"
-        stage :: [.Interp]
+        stage :: [.Tooling]
         meaning :: "A `jet dev` edit changed a type surface, so the dev loop restarts instead of swapping (c77)"
         detail :: true
         no_fix :: .Behavior
@@ -12223,7 +12223,7 @@ struct AppFeatureNotOnTarget {
         detail :: true
         fix_next :: "Choose a target that supports the feature, or remove the feature."
         fn what(self) -> String { "App feature `.{self.feature}` needs target `{self.required}`, but the resolved target is `{self.target}`." }
-        fn why(self) -> String { "App is one type across targets, but each feature must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps AOT, JIT, interpreter, and web codegen on one meaning (I9). During `jet check`, Jet reports this diagnostic." }
+        fn why(self) -> String { "App is one type across targets, but each feature must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps native and web codegen on one meaning (I9). During `jet check`, Jet reports this diagnostic." }
         fn fix(self) -> String { "Choose a build target that supports `.{self.feature}` (for example `#Target(JS)` for browser features or a native target for server features), or remove that feature." }
     }
 }

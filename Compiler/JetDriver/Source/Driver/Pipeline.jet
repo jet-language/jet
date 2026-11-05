@@ -948,7 +948,7 @@ fn jet_driver_comptime_function_closure(
             }
             else -> {
                 function :: checked.function ?? {
-                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no published body", "the interpreter fragment is lowered only from a complete typed function", "publish the checked body from the canonical on-demand Sema result"))
+                    &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no published body", "a comptime function is lowered only from a complete typed function", "publish the checked body from the canonical on-demand Sema result"))
                     complete = false
                     next
                 }
@@ -1643,23 +1643,23 @@ fn jet_driver_comptime_flush(
                 &diagnostics.push(jet_driver_attach_registration_source_location(eval_error.diagnostic, graph, comptime_request.module_identity))
             }
             if graph.keep_going {
-                if eval_result.internal_problem == .Val(problem) -> &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "keep-going: the comptime interpreter failed internally: {problem.message}", "JET_KEEP_GOING drops the item and runs the rest", "fix the interpreter defect"))
+                if eval_result.internal_problem == .Val(problem) -> &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "keep-going: the native comptime run failed internally: {problem.message}", "JET_KEEP_GOING drops the item and runs the rest", "fix the comptime run defect"))
                 next
             }
-            // An interpreter internal problem is a compiler defect with its
+            // A comptime run's internal problem is a compiler defect with its
             // own exact message; it leaves as the run's internal problem.
             failed := jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-            if eval_result.internal_problem == .Val(problem) -> failed.internal_problem = Val("the comptime interpreter failed internally: {problem.message}")
+            if eval_result.internal_problem == .Val(problem) -> failed.internal_problem = Val("the native comptime run failed internally: {problem.message}")
             flushed.stop = Val(failed)
             return flushed
         }
         if !eval_result.complete {
-            &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the comptime interpreter returned neither a value nor an explicit control result", "only complete values and canonical soft-stop control may leave evaluation", "return the evaluator's exact error or completed result"))
+            &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "the native comptime run returned neither a value nor an explicit control result", "only complete values and canonical soft-stop control may leave evaluation", "return the evaluator's exact error or completed result"))
             flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
             return flushed
         }
         value :: eval_result.value ?? {
-            &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "a complete comptime evaluation returned no value", "a staged value is recorded only after successful evaluation", "preserve the completed interpreter value"))
+            &diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, comptime_request.module_identity, "E0003", comptime_request.span, "a complete comptime evaluation returned no value", "a staged value is recorded only after successful evaluation", "preserve the completed comptime value"))
             flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
             return flushed
         }
@@ -3579,7 +3579,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
     // A compile that lowers checks Core bodies on demand (CoreDemand.jet);
     // JET_KEEP_GOING checks every body.
-    lowers :: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter
+    lowers :: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun
     if lowers && !kg.enabled -> registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph))
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
@@ -4022,7 +4022,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     output_checks := [TOutputCheckFact]{}
     if request.mode == JetDriverCompileMode.Test {
         jet_driver_test_plan(jet_driver_test_modules(load), checked_graph, sema_functions, &tests, &output_checks, &entry_diagnostics)
-    } else if request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter {
+    } else if request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun {
         // An evaluation runs the entry module's selected function, never
         // the package's executable entry.
         selected_name :: request.selected_entry ?? "run"

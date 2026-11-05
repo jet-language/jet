@@ -12,7 +12,6 @@ use jet_foundation.[
     jet_ring_prelude_closure_layer,
     body_tree_new,
     AST_NODE_GENERATED,
-    WebPartitionMarker,
     AccessConvention,
     ResolvedOutput,
     CompilerThreads,
@@ -65,7 +64,6 @@ use jet_foundation.[
     TFailureCarrier,
     TFuncKind,
     TGenericParam,
-    TTargetApplicability,
     TTestFact,
     TAppliedRule,
     TTypeDef,
@@ -1600,11 +1598,6 @@ fn sema_function_returns_value(effective_return: Type) -> Bool Never! {
     true
 }
 
-fn sema_function_target_applicability(func: Func) -> TTargetApplicability Never! {
-    if func.web_marker == (Val(WebPartitionMarker.JS)) -> return TTargetApplicability{rust_aot: false, interpreter: false, web: true}
-    TTargetApplicability{rust_aot: true, interpreter: true, web: true}
-}
-
 fn sema_function_generic_params(func: Func, graph_option: SemaRegistrationGraph?, module_identity: String, diagnostics: &[Diagnostic], complete: &Bool) -> [TGenericParam] {
     params := [TGenericParam]{}
     index := 0
@@ -2223,7 +2216,6 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         unsafe_gate = Val(TUnsafeGate{file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, unsafe_span), line: line, reason: reason, enabled: true, fenced: false})
     }
     sema_place_borrow_function(&body, params, place_borrow_receiver, context.arena.tree)
-    target :: sema_function_target_applicability(func)
     memo :: sema_function_header_memo_config(func)
     // `#Scalar` keeps every loop of the body on the scalar path: its loops
     // record no loop proof (LoopFacts.jet).
@@ -2240,7 +2232,6 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         source_span: func.span,
         failure_carrier: sema_failure_carrier(Val(effective_return)),
         effects: effects,
-        target_applicability: target,
         web_bucket: None,
         web_marker: func.web_marker,
         visibility: visibility,
@@ -2519,8 +2510,8 @@ fn sema_check_comptime_function(graph: SemaRegistrationGraph, environment: &Sema
     }
     source :: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
     // Any function a compile-time body reaches runs while building; the
-    // evaluator's effect gate (E3401) rejects an effectful call, as in the
-    // Rust interpreter. No `comptime fn` or `pure` marker is required.
+    // native run's effect gate (E3401) rejects an effectful call. No
+    // `comptime fn` or `pure` marker is required.
     // Retarget module-local scope facts while reading the retained graph
     // from its single owner in `program`.
     // copy: a handle copy (Shared facts plus length and frontier ints): this check reads a frozen

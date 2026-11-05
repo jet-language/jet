@@ -195,7 +195,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     }
     // Input services resolve paths against the build file's own directory.
     base_dir :: jet_driver_parent_path(path)
-    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("build"), true)
+    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(^path), Val("build"), true)
     compiled := ^selection.compile
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
     program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
