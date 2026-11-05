@@ -375,13 +375,15 @@ parity, goldens, snapshots, or generated artifacts.
 
 Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
 chain and the machine build slots), `Tools/agent/land/` (the lander, batch
-landing, the census preflight, publishing, and `q.mjs`, which queues a land
-job), `Tools/agent/suite/` (suite runs and the testkit build) and
-`Tools/agent/ballots/validate.mjs` (the ballot validator). Tools find state,
-scratch, queues, published compilers and seeds only through the root variables
-of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs` (node). Their
-defaults derive from `$HOME` and the XDG directories; a machine sets its own
-values in the environment or in `${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
+landing, the census preflight and publishing), `Tools/agent/Land.jet` (`queue`
+adds a land job for the lander; `land` lands a patch stack directly, with
+`--scratch-copy` on a fresh clone), `Tools/agent/suite/` (suite runs and the
+testkit build) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
+Tools find state, scratch, queues, published compilers and seeds only through
+the root variables of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs`
+(node). Their defaults derive from `$HOME` and the XDG directories; a machine
+sets its own values in the environment or in
+`${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
 committed file spells one machine's home, user, mounts or tool roots:
 `Tools/agent/LaneCheck.jet`'s personal-information guard, which every lane
 check runs first, refuses them, and

@@ -26,9 +26,12 @@ Its stage-2 compiler becomes the seed of the next release.
 A clone and a seed are enough: no Nix, no `Tools/agent/jet-env`, nothing in
 `HOME` and no environment variables. This builds the compiler of a release
 tag with that release's seed, gives it the seed's runtime pack, runs one row
-of the UI suite with it and runs an example. `TAG` is a published release (see
+of the UI suite with it, runs an example, lands a patch on a scratch copy of
+the checkout and validates a ballot. `TAG` is a published release (see
 [Where the first seed comes from](#where-the-first-seed-comes-from)); its
-runtime pack was built from the tag's commit.
+runtime pack was built from the tag's commit. `PATCH` is a `git diff` of
+your change, `MSG` a file with its commit message, and `BALLOT` a ballot
+payload.
 
 ```sh
 TAG=a0_NNN
@@ -41,6 +44,9 @@ mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed && S
 export PATH=$PWD/Compiler/JetCli/.jet/build:$PATH
 jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet
 jet run Examples/features/basics/hello.jet
+git config user.name "Your Name" && git config user.email you@example.com
+jet Tools/agent/Land.jet land --scratch-copy ../dev-copy "$PATCH" "$MSG"
+jet Tools/agent/ballots/Validate.jet "$BALLOT"
 ```
 
 `jet` reads the Core library from the checkout that holds its input, and its
@@ -58,6 +64,16 @@ the commit you checked out, or a runtime pack rebuilt for this checkout with
 
 A seed released before these defaults finds neither; run its two steps
 with `JET_TOOLCHAIN_ROOT=$PWD JET_COMPILER_IDENTITY=$(cat "$SEED/IDENTITY")`.
+
+`Land.jet land --scratch-copy DIR` clones the checkout into `DIR`, which must
+not exist yet, with the checkout's git identity. It applies the patch, runs
+the lane check (`Tools/agent/LaneCheck.jet`: the whole compiler and Jetpack's
+assembly when the patch touches `Compiler/`, `Core/` or `Jetpack/`, else each
+Jet file it touches) and commits it on `DIR`'s branch. A patch
+that does not apply or does not check leaves `DIR` as it was cloned. Several
+`PATCH MSG` pairs land in order, one commit each. `Validate.jet` reads only the
+payload, with the rules Tower applies when a ballot is posted
+([Tools/agent/ballots/README.md](../../../Tools/agent/ballots/README.md)).
 
 ## The chain
 

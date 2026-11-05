@@ -1,0 +1,564 @@
+#!/usr/bin/env jet
+// Land patches on a checkout, or queue them for the landing service.
+//
+//   jet Tools/agent/Land.jet land [--scratch-copy DIR] PATCH MSG [PATCH MSG]...
+//   jet Tools/agent/Land.jet queue LANE BASE...
+//
+// `land` commits a stack of patches on the checkout it runs in, one commit
+// per patch, with the message in the MSG file after it. The checkout must
+// have no tracked changes. Every patch is applied in order, the patched tree
+// passes the lane check (Tools/agent/LaneCheck.jet with $JET, else `jet` on
+// PATH), and only then are the commits built in a private index and
+// published with one compare-and-swap of HEAD. A patch that does not apply,
+// or a failed check, puts the worktree back as it was and leaves HEAD where
+// it was. The lane check covers the whole compiler and Jetpack's assembly
+// when a patch touches Compiler, Core, Jetpack or a sources.list, and
+// otherwise every .jet file the patches leave behind. The landing service
+// (Tools/agent/land/lander.sh) runs the full census before it commits; `land`
+// is the direct path for a checkout with no service, such as a fresh clone.
+//
+// `--scratch-copy DIR` clones the checkout into DIR first (DIR must not
+// exist), copies the checkout's git user.name and user.email into the clone,
+// and lands there. The checkout itself is not touched.
+//
+// `queue` adds land jobs for the landing service: each BASE names BASE.patch
+// and BASE.msg, queued in order as one lane's stack. The stack must apply in
+// order on HEAD of $JET_DEV_WORKTREE (else this checkout); that is checked in
+// a temporary index, so the worktree is not touched. Speed lanes must carry a
+// Pareto line in each message (owner order: Pareto work first):
+//   `PARETO: <wall seconds> s`     a measured same-run wall saving >= 0.5 s;
+//   `PARETO-STAGE: <design>`       a stage of an approved >= 1.5 s design;
+//   `SMALL-WIN: <wall seconds> s`  a smaller win, accepted only while the lane
+//                                  has an approved design in the Pareto list
+//                                  ($PARETO_APPROVED, else
+//                                  $JET_SCRATCH_ROOT/lanes/Main/pareto-approved.txt).
+// Jobs go to $JET_RUN_ROOT/land-queue/<epoch>-<lane>[n].job.
+use {
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
+    term :: core.term
+    time :: core.time
+}
+
+SPEED_LANES :: [String]{"O0Speed", "RustOut"}
+COMPILER_PREFIXES :: [String]{"Compiler/", "Core/", "Jetpack/"}
+IDENTITY_KEYS :: [String]{"user.name", "user.email"}
+JOB_FILES :: [String]{".patch", ".msg"}
+
+fn run() {
+    args :: process.args()
+    if args.len() == 0 -> usage()
+    // Every git call names its index itself; an index inherited from the
+    // caller would point the checkout's own commands at someone else's.
+    sys.unset("GIT_INDEX_FILE") ?? false
+    rest :: args[1..<args.len()]
+    code :: if args[0] == {
+        "land" -> land_main(rest)
+        "queue" -> queue_main(rest)
+        else -> usage()
+    }
+    process.exit(code)
+}
+
+fn usage() -[Exec, IO]> Never {
+    term.eprint("usage: jet Tools/agent/Land.jet land [--scratch-copy DIR] PATCH MSG [PATCH MSG]...")
+    term.eprint("       jet Tools/agent/Land.jet queue LANE BASE...")
+    process.exit(64)
+}
+
+// --- processes --------------------------------------------------------------
+
+struct Ran {
+    code: Int
+    output: String
+    errors: String
+}
+
+// `argv` run in `dir`, with GIT_INDEX_FILE set to `index` unless it is "".
+fn run_in(dir: String, argv: [String], index: String) -[Exec, Time.Wait]> Ran Never! {
+    spec := process.cmd(argv).cwd(dir).output_limit(268435456)
+    if index != "" -> spec = spec.env("GIT_INDEX_FILE", index)
+    receipt :: spec.run() ?? return Ran{code: 127, output: "", errors: "{argv[0]}: {err}"}
+    code :: if receipt.signal == .Val(_) -> 128 else -> receipt.code
+    Ran{code: code, output: receipt.output.copy(), errors: receipt.errors.copy()}
+}
+
+fn git(dir: String, args: [String]) -[Exec, Time.Wait]> Ran Never! {
+    argv := [String]{"git"}
+    &argv.extend(args)
+    run_in(dir, argv, "")
+}
+
+fn git_index(dir: String, index: String, args: [String]) -[Exec, Time.Wait]> Ran Never! {
+    argv := [String]{"git"}
+    &argv.extend(args)
+    run_in(dir, argv, index)
+}
+
+// The first line of a command's error output, else of its output.
+fn first_line(ran: Ran) -> String Never! {
+    text :: if ran.errors.trim() != "" -> ran.errors.trim() else -> ran.output.trim()
+    text.partition("\n").head.copy()
+}
+
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// --- roots (Tools/agent/roots.sh) -------------------------------------------
+
+// The value `${XDG_CONFIG_HOME:-~/.config}/jet/env` assigns to `name`, the
+// file the shell tools source first.
+fn env_file_value(name: String) -[Env, FS]> String? Never! {
+    home :: env_or("HOME", "")
+    path :: "{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env"
+    text :: files.read(path) ?? return None
+    found := ""
+    seen := false
+    loop raw in text.lines() {
+        line :: raw.trim().removeprefix("export ").trim()
+        parts :: line.partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail
+        quoted :: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
+        if value.len() >= 2 && quoted -> value = value.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+fn root(name: String, fallback: String) -[Env, FS]> String Never! { env_or(name, env_file_value(name) ?? fallback) }
+
+fn state_root() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+
+fn scratch_root() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }
+
+fn run_root() -[Env, FS]> String Never! { root("JET_RUN_ROOT", "{scratch_root()}/run") }
+
+// The top of the checkout the command runs in, "" outside one.
+fn checkout_top() -[Exec, FS, Env, Time.Wait]> String Never! {
+    here :: files.cwd() ?? return ""
+    top :: git(here, [String]{"rev-parse", "--show-toplevel"})
+    if top.code != 0 -> return ""
+    top.output.trim()
+}
+
+fn absolute(path: String) -[FS, Env]> String Never! { files.absolute(path) ?? path.copy() }
+
+// --- patches ----------------------------------------------------------------
+
+// The paths a patch touches (`git apply --numstat -z`): each changed path,
+// and both sides of a rename.
+fn touched_paths(dir: String, patch: String) -[Exec, Time.Wait]> [String] Never! {
+    stat :: git(dir, [String]{"apply", "--numstat", "-z", patch})
+    paths := [String]{}
+    if stat.code != 0 -> return paths
+    fields :: nul_fields(stat.output)
+    index := 0
+    loop {
+        if index >= fields.len() -> break
+        field :: fields[index]
+        index += 1
+        if field == "" -> next
+        // `added<TAB>deleted<TAB>path`, or `added<TAB>deleted<TAB>` followed by
+        // the old and the new path of a rename.
+        counts :: field.partition("\t")
+        name :: counts.tail.partition("\t").tail
+        if name != "" {
+            if !paths.contains(name) -> &paths.push(name.copy())
+            next
+        }
+        loop _ in 0..<2 {
+            if index < fields.len() && !paths.contains(fields[index]) -> &paths.push(fields[index].copy())
+            index += 1
+        }
+    }
+    paths
+}
+
+fn nul_fields(text: String) -> [String] Never! {
+    fields := [String]{}
+    current := [U8]{}
+    loop byte in text.bytes() {
+        if Int.from_u8(byte) == 0 {
+            &fields.push(String.from_bytes_lossy(current))
+            current = [U8]{}
+            next
+        }
+        &current.push(byte)
+    }
+    if current.len() > 0 -> &fields.push(String.from_bytes_lossy(current))
+    fields
+}
+
+fn compiler_input(path: String) -> Bool Never! {
+    if path.ends_with("sources.list") -> return true
+    loop prefix in COMPILER_PREFIXES {
+        if path.starts_with(prefix) -> return true
+    }
+    false
+}
+
+// --- land -------------------------------------------------------------------
+
+struct Pair {
+    patch: String
+    message: String
+}
+
+#Error
+struct LandError {
+    message: String
+}
+
+fn land_main(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    copy_dir := ""
+    positional := [String]{}
+    index := 0
+    loop {
+        if index >= args.len() -> break
+        arg :: args[index]
+        index += 1
+        if arg == "--scratch-copy" {
+            if index >= args.len() -> usage()
+            copy_dir = absolute(args[index])
+            index += 1
+            next
+        }
+        &positional.push(arg.copy())
+    }
+    if positional.len() == 0 || positional.len() % 2 != 0 -> usage()
+    pairs := [Pair]{}
+    loop at in 0..<(positional.len() /% 2) {
+        patch :: absolute(positional[at * 2])
+        message :: absolute(positional[at * 2 + 1])
+        needed :: [String]{patch, message}
+        loop path in needed {
+            if !files.exists(path) {
+                term.eprint("land: no file {path}")
+                return 2
+            }
+        }
+        &pairs.push(Pair{patch: patch, message: message})
+    }
+    source :: checkout_top()
+    if source == "" {
+        term.eprint("land: run this inside a git checkout")
+        return 2
+    }
+    if copy_dir == "" -> return land(source, pairs)
+    target :: scratch_copy(source, copy_dir) ?? {
+        term.eprint("land: {err.message}")
+        return 2
+    }
+    land(target, pairs)
+}
+
+// Clone `source` into `dir` with the checkout's commit identity.
+fn scratch_copy(source: String, dir: String) -[Exec, FS, IO, Time.Wait]> String LandError! {
+    if files.exists(dir) -> return Err(LandError{message: "{dir} already exists; a scratch copy needs a new directory"})
+    cloned :: git(source, [String]{"clone", "--quiet", "--no-hardlinks", source, dir})
+    if cloned.code != 0 -> return Err(LandError{message: "git clone into {dir} failed: {first_line(cloned)}"})
+    loop key in IDENTITY_KEYS {
+        value :: git(source, [String]{"config", "--get", key})
+        if value.code == 0 -> git(dir, [String]{"config", key, value.output.trim()})
+    }
+    head :: git(dir, [String]{"rev-parse", "--abbrev-ref", "HEAD"})
+    print("scratch copy {dir} of {source} at {head.output.trim()}")
+    Ok(dir.copy())
+}
+
+fn land(dir: String, pairs: [Pair]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    dirty :: git(dir, [String]{"status", "--porcelain", "--untracked-files=no"})
+    if dirty.code != 0 || dirty.output.trim() != "" {
+        term.eprint("land: {dir} has tracked changes; commit or move them first")
+        if dirty.output.trim() != "" -> term.eprint(dirty.output.trim())
+        return 3
+    }
+    pre :: git(dir, [String]{"rev-parse", "--verify", "HEAD"}).output.trim()
+    applied := [String]{}
+    touched := [String]{}
+    loop pair in pairs {
+        name :: files.basename(pair.patch)
+        &touched.extend(touched_paths(dir, pair.patch))
+        apply :: git(dir, [String]{"apply", pair.patch})
+        if apply.code != 0 {
+            term.eprint("land: {name} does not apply on {pre.slice(0..<10)}: {first_line(apply)}")
+            revert(dir, applied)
+            return 4
+        }
+        &applied.push(pair.patch.copy())
+        print("applied {name}")
+    }
+    if !check(dir, touched) {
+        revert(dir, applied)
+        term.eprint("land: the check failed; the worktree is back at {pre.slice(0..<10)} and nothing was committed")
+        return 5
+    }
+    landed :: commit_stack(dir, pre, pairs) ?? {
+        revert(dir, applied)
+        term.eprint("land: {err.message}; the worktree is back at {pre.slice(0..<10)} and HEAD did not move")
+        return 6
+    }
+    // The worktree already is the new HEAD; bring the checkout's index along.
+    git(dir, [String]{"read-tree", "--reset", "HEAD"})
+    git(dir, [String]{"update-index", "-q", "--refresh"})
+    loop line in landed -> print("landed {line}")
+    print("HEAD {git(dir, [String]{"rev-parse", "--short", "HEAD"}).output.trim()} in {dir}")
+    0
+}
+
+// Undo the applied patches, newest first.
+fn revert(dir: String, applied: [String]) Never! -[Exec, IO, Time.Wait]> {
+    loop step in 0..<applied.len() {
+        patch :: applied[applied.len() - 1 - step]
+        undone :: git(dir, [String]{"apply", "-R", patch})
+        if undone.code != 0 -> term.eprint("land: could not revert {files.basename(patch)}: {first_line(undone)}; check `git status` in {dir}")
+    }
+}
+
+// The lane check (Tools/agent/LaneCheck.jet, with $JET, else `jet` on PATH)
+// of the patched tree: the whole compiler, with Jetpack's assembly check,
+// when a patch touches a compiler input, else each touched .jet file. Both
+// run the personal-information guard first. Error rows are shown as the
+// check prints them.
+fn check(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
+    jet :: env_or("JET", "jet")
+    compiler := false
+    targets := [String]{}
+    loop path in touched {
+        if compiler_input(path) -> compiler = true
+        if path.ends_with(".jet") && files.exists(files.join(dir, path)) -> &targets.push(path.copy())
+    }
+    if compiler -> targets = [String]{""}
+    if targets.len() == 0 {
+        print("check: no Jet sources touched; the apply check is the check")
+        return true
+    }
+    clean := true
+    loop target in targets {
+        argv := [String]{jet, "Tools/agent/LaneCheck.jet"}
+        if target != "" -> &argv.push(target.copy())
+        label :: if target == "" -> "the compiler" else -> target.copy()
+        receipt :: process.cmd(argv).cwd(dir).env("JET", jet).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456).run() ?? {
+            term.eprint("check: cannot run {jet}: {err}")
+            return false
+        }
+        if receipt.code == 0 && receipt.signal == None {
+            print("check: {label} ok")
+            next
+        }
+        clean = false
+        term.eprint("check: {label} failed (exit {receipt.code})")
+        if receipt.output.trim() != "" -> term.eprint(receipt.output.trim())
+        if receipt.errors.trim() != "" -> term.eprint(receipt.errors.trim())
+    }
+    clean
+}
+
+// One commit per patch, chained on `pre` in a private index; HEAD moves once,
+// and only if it is still `pre`. Returns `<short sha> <subject>` per commit.
+fn commit_stack(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
+    index_path :: git(dir, [String]{"rev-parse", "--git-path", "land-index"}).output.trim()
+    index :: if index_path.starts_with("/") -> index_path.copy() else -> files.join(dir, index_path)
+    files.remove(index) ?? ()
+    tip := pre.copy()
+    landed := [String]{}
+    failure := ""
+    read :: git_index(dir, index, [String]{"read-tree", pre})
+    if read.code != 0 -> failure = "read-tree of {pre.slice(0..<10)} failed: {first_line(read)}"
+    loop pair in pairs {
+        if failure != "" -> break
+        staged :: git_index(dir, index, [String]{"apply", "--cached", pair.patch})
+        if staged.code != 0 {
+            failure = "{files.basename(pair.patch)} does not stage: {first_line(staged)}"
+            break
+        }
+        tree :: git_index(dir, index, [String]{"write-tree"})
+        if tree.code != 0 {
+            failure = "write-tree failed: {first_line(tree)}"
+            break
+        }
+        made :: git(dir, [String]{"commit-tree", tree.output.trim(), "-p", tip, "-F", pair.message})
+        if made.code != 0 {
+            failure = "commit-tree for {files.basename(pair.patch)} failed: {first_line(made)}"
+            break
+        }
+        tip = made.output.trim()
+        subject :: git(dir, [String]{"log", "-1", "--format=%h %s", tip}).output.trim()
+        &landed.push(subject)
+    }
+    files.remove(index) ?? ()
+    if failure != "" -> return Err(LandError{message: failure})
+    // The commits must carry exactly the checked worktree.
+    worktree :: git(dir, [String]{"diff", "--quiet", tip, "--"})
+    if worktree.code != 0 -> return Err(LandError{message: "the commits do not match the checked worktree"})
+    moved :: git(dir, [String]{"update-ref", "-m", "land: {pairs.len()} commit(s) on {pre.slice(0..<10)}", "HEAD", tip, pre})
+    if moved.code != 0 -> return Err(LandError{message: "update-ref of HEAD {pre.slice(0..<10)} failed (HEAD moved?): {first_line(moved)}"})
+    Ok(landed)
+}
+
+// --- queue ------------------------------------------------------------------
+
+fn queue_main(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
+    if args.len() < 2 -> usage()
+    lane :: args[0]
+    bases := [String]{}
+    loop base in args[1..<args.len()] -> &bases.push(absolute(base))
+    loop base in bases {
+        loop ext in JOB_FILES {
+            if !files.exists("{base}{ext}") {
+                term.eprint("NOT QUEUED: missing {base}{ext}")
+                return 1
+            }
+        }
+    }
+    if SPEED_LANES.contains(lane) {
+        refusal :: pareto_refusal(lane, bases)
+        if refusal != "" {
+            print(refusal)
+            return 1
+        }
+    }
+    worktree :: root("JET_DEV_WORKTREE", checkout_top())
+    if worktree == "" {
+        term.eprint("NOT QUEUED: no dev worktree (set JET_DEV_WORKTREE or run inside the checkout)")
+        return 2
+    }
+    if !stack_applies(worktree, bases) {
+        print("NOT QUEUED: rebase the failing patches onto HEAD")
+        return 1
+    }
+    queue :: "{run_root()}/land-queue"
+    files.create_dir_all("{queue}/taken") ?? {
+        term.eprint("NOT QUEUED: cannot create {queue}: {err}")
+        return 2
+    }
+    start := time.now().to_timestamp()
+    loop at in 0..<bases.len() {
+        base :: bases[at]
+        suffix :: if bases.len() > 1 -> "{at + 1}" else -> ""
+        name := "{start + at}-{lane}{suffix}"
+        // Never overwrite a queued or taken job with the same second-based name.
+        loop {
+            if !files.exists("{queue}/{name}.job") && !files.exists("{queue}/taken/{name}.job") -> break
+            start += 1
+            name = "{start + at}-{lane}{suffix}"
+        }
+        writer :: files.create("{queue}/{name}.job", if_exists: .Refuse) ?? {
+            term.eprint("NOT QUEUED: cannot create {queue}/{name}.job: {err}")
+            return 2
+        }
+        writer.write_all("{lane}\t{base}.msg\t{base}.patch\n".bytes()) ?? {
+            term.eprint("NOT QUEUED: cannot write {queue}/{name}.job: {err}")
+            return 2
+        }
+        writer.fsync() ?? ()
+        print("queued {name}")
+    }
+    0
+}
+
+// Why a speed lane's stack may not be queued, "" when it may.
+fn pareto_refusal(lane: String, bases: [String]) -[Env, FS]> String Never! {
+    approved_file :: env_or("PARETO_APPROVED", "{scratch_root()}/lanes/Main/pareto-approved.txt")
+    approved := false
+    if files.read(approved_file) == .Ok(text) {
+        loop line in text.lines() {
+            if line.partition("\t").head == lane -> approved = true
+        }
+    }
+    loop base in bases {
+        message :: files.read("{base}.msg") ?? ""
+        wall :: tagged_seconds(message, "PARETO:")
+        stage := false
+        loop line in message.lines() {
+            if line.starts_with("PARETO-STAGE:") && line.remove_prefix("PARETO-STAGE:").trim() != "" -> stage = true
+        }
+        small :: tagged_seconds(message, "SMALL-WIN:") != None
+        if stage || (wall ?? -1.0) >= 0.5 -> next
+        if small && approved -> next
+        if small -> return "NOT QUEUED: {base} is a small win, but {lane} has no approved Pareto design yet; send the big-win design first (owner order: Pareto work first)"
+        return "NOT QUEUED: {base}.msg needs a PARETO: >=0.5 s, PARETO-STAGE: or SMALL-WIN: line"
+    }
+    ""
+}
+
+// The seconds of the first line `<marker> [-]<number> s` (a `s` word follows
+// the number), as `/^<marker>\s*-?([0-9.]+)\s*s\b/m` reads it.
+fn tagged_seconds(message: String, marker: String) -> Float? Never! {
+    loop line in message.lines() {
+        if !line.starts_with(marker) -> next
+        rest :: line.remove_prefix(marker).trim_start().remove_prefix("-")
+        digits := [U8]{}
+        loop byte in rest.bytes() {
+            code :: Int.from_u8(byte)
+            if !((code >= 48 && code <= 57) || code == 46) -> break
+            &digits.push(byte)
+        }
+        if digits.len() == 0 -> next
+        number :: String.from_bytes_lossy(digits)
+        after :: rest.remove_prefix(number).trim_start()
+        if !after.starts_with("s") -> next
+        unit_end :: after.remove_prefix("s").bytes()
+        if unit_end.len() > 0 {
+            code :: Int.from_u8(unit_end[0])
+            if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 -> next
+        }
+        return Val(Float.parse(number) ?? 0.0)
+    }
+    None
+}
+
+// Do the patches apply in order on HEAD of `worktree`? Checked in a temporary
+// index, so the worktree is not touched. Prints `OK <patch>` or
+// `FAIL <patch>: <reason>` for each.
+fn stack_applies(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
+    scratch :: run_root()
+    files.create_dir_all(scratch) ?? ()
+    index :: "{scratch}/stackidx.{sys.pid()}"
+    files.remove(index) ?? ()
+    clean := true
+    read :: git_index(worktree, index, [String]{"read-tree", "HEAD"})
+    if read.code != 0 {
+        print("FAIL read-tree of HEAD in {worktree}: {first_line(read)}")
+        return false
+    }
+    loop base in bases {
+        name :: "{files.basename(base)}.patch"
+        applied :: git_index(worktree, index, [String]{"apply", "--cached", "{base}.patch"})
+        if applied.code == 0 {
+            print("OK   {name}")
+            next
+        }
+        clean = false
+        print("FAIL {name}: {first_line(applied)}")
+    }
+    files.remove(index) ?? ()
+    clean
+}
+
+#Test("numstat -z rows give each path, and both sides of a rename") {
+    nul :: String.from_bytes([U8]{U8{0}}) ?? ""
+    fields :: nul_fields("1\t2\ta.jet{nul}0\t0\t{nul}old.md{nul}new.md{nul}")
+    assert_eq(fields, [String]{"1\t2\ta.jet", "0\t0\t", "old.md", "new.md"})
+}
+
+#Test("compiler inputs are Compiler, Core, Jetpack and sources lists") {
+    assert(compiler_input("Core/Text/String.jet"))
+    assert(compiler_input("Jetpack/Bootstrap/sources.list"))
+    assert(!compiler_input("Tools/agent/Land.jet"))
+    assert(!compiler_input("Docs/spec/contributing/bootstrap.md"))
+}
+
+#Test("Pareto seconds follow the tag and end in an s word") {
+    assert_eq(tagged_seconds("x\nPARETO: 0.7 s\n", "PARETO:"), Val(0.7))
+    assert_eq(tagged_seconds("PARETO: -1.5s", "PARETO:"), Val(1.5))
+    assert_eq(tagged_seconds("PARETO: 2 seconds", "PARETO:"), None)
+    assert_eq(tagged_seconds(" PARETO: 2 s", "PARETO:"), None)
+    assert_eq(tagged_seconds("SMALL-WIN: 0.1 s", "PARETO:"), None)
+}

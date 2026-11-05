@@ -169,7 +169,7 @@ Tools/agent-eval/run-cold-context.mjs	blocked-route	unassigned	PORT-EASY	http cl
 Tools/agent-eval/test-cold-context.mjs	port	unassigned	PORT-EASY	JSON reads are native (Dyn, 63f7afdc6)			
 Tools/agent-eval/test-economics/test-economics.mjs	port	unassigned	PORT-EASY	JSON reads are native (Dyn, 63f7afdc6)			
 Tools/agent/AgentDocFlags.jet	keep	unassigned	JET-EXISTS	Jet port of check-agent-doc-flags.mjs (#5072 C9); documented Tools/agent flags exist and guidance docs keep plans in Tower; VerifyFull agent-doc-flags gate; ASCII ICU-root collation stands in for C4	Tools/agent/VerifyFull.jet	core.files,core.process,core.regex,core.term	C4(ASCII stand-in)
-Tools/agent/ballots/validate.mjs	blocked-route	unassigned	JET-EXISTS	validates ballot files with Tower's ballot rules (imports Tools/tower/app/store.mjs); ports with Tower (#6311)	Tools/agent/ballots/README.md	core.encoding.json,core.files,core.process	Tower(#6311)
+Tools/agent/ballots/validate.mjs	deleted	unassigned	JET-EXISTS	ported to Tools/agent/ballots/Validate.jet: payload-only, no Tower store (#6564 c3); deleted			
 Tools/agent/cache/cache-cutover.mjs	deleted	unassigned	PORT-EASY	finished one-off jet-luna -> jet-dev cache rename			
 Tools/agent/cache/laneB.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/cache/Lanes.jet heavy (#6035 c3); deleted
 Tools/agent/cache/laneS.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/cache/Lanes.jet small (#6035 c3); deleted
@@ -250,15 +250,15 @@ Tools/agent/land/batch-land.sh	port	unassigned	PORT-EASY	lands a batch of lane p
 Tools/agent/land/capped.sh	port	unassigned	PORT-EASY	runs a heavy job in its own memory-capped systemd scope; moved from lane scratch (#6564 c2)	Tools/agent/land/precommit.sh	core.process	
 Tools/agent/land/census-errors.mjs	port	unassigned	PORT-EASY	maps a keep-going census report to repository file:line rows; moved from lane scratch (#6564 c2)	Tools/agent/land/census-snap.sh	core.files	
 Tools/agent/land/census-snap.sh	port	unassigned	PORT-EASY	the collect-all census of HEAD plus named files (check, build, runtime pack, self-check): the AGENTS.md preflight; moved from lane scratch (#6564 c2)	AGENTS.md,Tools/agent/land/precommit.sh	core.files,core.files.lock,core.process	
-Tools/agent/land/lander.sh	port	unassigned	PORT-EASY	the landing service: prescreen, batch, bisect, results; moved from lane scratch (#6564 c2)	AGENTS.md,Tools/agent/land/q.mjs	core.files,core.process	
+Tools/agent/land/lander.sh	port	unassigned	PORT-EASY	the landing service: prescreen, batch, bisect, results; moved from lane scratch (#6564 c2)	AGENTS.md,Tools/agent/Land.jet	core.files,core.process	
 Tools/agent/land/precommit.sh	port	unassigned	PORT-EASY	runs census-snap.sh when a batch touches compiler inputs; moved from lane scratch (#6564 c2)	Tools/agent/land/batch-land.sh	core.process	
 Tools/agent/land/prescreen.sh	port	unassigned	PORT-EASY	admission check of one land job on an export of HEAD; moved from lane scratch (#6564 c2)	Tools/agent/land/lander.sh	core.files,core.process	
 Tools/agent/land/publish-base.sh	port	unassigned	PORT-EASY	publishes base/<sha>, its golden census and hosted jetpack, and seeds the chain store; moved from lane scratch (#6564 c2)	Tools/agent/land/batch-land.sh,Tools/agent/suite/suite.sh	core.files,core.files.lock,core.process	
 Tools/agent/land/publish-latest.sh	port	unassigned	PORT-EASY	publishes the batch-verified census compiler as install-latest; moved from lane scratch (#6564 c2)	Tools/agent/land/batch-land.sh	core.files,core.process	
-Tools/agent/land/q.mjs	port	unassigned	PORT-EASY	queues land jobs (Pareto gate for speed lanes, stack apply check); moved from lane scratch (#6564 c2)	AGENTS.md	core.files,core.process	
+Tools/agent/land/q.mjs	deleted	unassigned	PORT-EASY	ported to Tools/agent/Land.jet queue (#6564 c3); deleted			
 Tools/agent/land/release-train.sh	port	unassigned	PORT-EASY	lander hook that runs release-compiler.mjs on the newest landed HEAD; moved from lane scratch (#6564 c2)	Tools/agent/land/batch-land.sh	core.files.lock,core.process	
 Tools/agent/land/runtime-pack-check.sh	port	unassigned	PORT-EASY	lowers a tree's runtime pack with a candidate compiler, as chain s1 does; moved from lane scratch (#6564 c2)	Tools/agent/land/census-snap.sh	core.files,core.process	
-Tools/agent/land/stackcheck.sh	port	unassigned	PORT-EASY	checks that a patch stack applies in order on dev HEAD in a temporary index; moved from lane scratch (#6564 c2)	Tools/agent/land/q.mjs	core.files,core.process	
+Tools/agent/land/stackcheck.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/Land.jet queue (#6564 c3); deleted			
 Tools/agent/land/unstick.sh	port	unassigned	PORT-EASY	reverts a failed batch's leftovers in the dev worktree; moved from lane scratch (#6564 c2)	Tools/agent/land/batch-land.sh	core.process	
 Tools/agent/lane-check-regression.mjs	deleted	unassigned	PORT-EASY	ported to #Tests in Tools/agent/LaneCheck.jet (#6035 c3); deleted			
 Tools/agent/lane-check.sh	deleted	unassigned	PORT-EASY	ported to Tools/agent/LaneCheck.jet (#6035 c3); callers cut over; deleted			
@@ -292,7 +292,7 @@ Tools/agent/registry-shard.test.mjs	port	unassigned	PORT-EASY	registry-shard reg
 Tools/agent/release-compiler.mjs	port	unassigned	PORT-EASY	release gate of the a0_NNN compiler train; release-train.sh; its seed helpers serve publish-release's build, and Tools/release (Jet) publishes what it admits	.agents/skills/orchestration/references/closeout.md,Docs/spec/contributing/bootstrap.md,Tools/agent/publish-release.mjs,Tools/agent/release-compiler.test.mjs,Tools/release/Release.jet,~Main/release-train.sh	core.crypto,core.encoding.json,core.files,core.process,core.regex	C1,C2,process-file-redirect
 Tools/agent/release-compiler.test.mjs	port	unassigned	PORT-EASY	release-compiler regression; ports with it	Tools/agent/release-compiler.mjs	#Test,core.regex	
 Tools/agent/require-clean-tree.sh	deleted	unassigned	PORT-EASY	Claude PreToolUse hook with no registration left (.claude/settings.json, tests/event_hooks.rs gone)			
-Tools/agent/roots.mjs	port	unassigned	PORT-EASY	dev tool roots (state, scratch, run, base, target, seeds) for node tools (#6564 c2)	Tools/agent/land/q.mjs,Tools/agent/release-compiler.mjs,Tools/agent/safety-schedule.mjs	core.sys	
+Tools/agent/roots.mjs	port	unassigned	PORT-EASY	dev tool roots (state, scratch, run, base, target, seeds) for node tools (#6564 c2)	Tools/agent/release-compiler.mjs,Tools/agent/safety-schedule.mjs	core.sys	
 Tools/agent/roots.sh	port	unassigned	PORT-EASY	dev tool roots for shell tools; reads the machine's jet env file (#6564 c2)	Tools/agent/chain/chain.sh,Tools/agent/land/lander.sh,Tools/agent/suite/suite.sh	core.sys	
 Tools/agent/run-feature-examples.mjs	port	unassigned	PORT-EASY	focused native feature-example runner; publish-base.sh, build-census.sh, fixture-gate.sh, compiler-diff	Compiler/JetRuntime/Tests/run-world-sentry-fixtures.mjs,Examples/README.md,Tools/agent/compiler-diff.mjs,Tools/agent/run-feature-examples.test.mjs,Tools/agent/test-corpora.mjs,~Main/CHAIN.md,~Main/build-census.sh,~Main/fixture-gate.sh,~Main/publish-base.sh	core.encoding.json,core.files,core.process,core.regex	C2,C4
 Tools/agent/run-feature-examples.test.mjs	port	unassigned	PORT-EASY	run-feature-examples regression; no in-repo caller		#Test	

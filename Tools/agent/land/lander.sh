@@ -3,7 +3,7 @@
 # with ONE precommit (batch-land.sh) and commits each as its own commit. On a failed batch it bisects
 # (halves) automatically, lands every clean half, and returns failing patches to their lane with the rows.
 #
-# Enqueue (lanes): Tools/agent/land/q.mjs, or write a file $JET_RUN_ROOT/land-queue/<epoch>-<Lane>.job with ONE line:
+# Enqueue (lanes): `jet Tools/agent/Land.jet queue`, or write a file $JET_RUN_ROOT/land-queue/<epoch>-<Lane>.job with ONE line:
 #   <Lane><TAB><absolute msg file><TAB><absolute patch file>
 # Results (lanes): $JET_RUN_ROOT/land-results/<same name>.result  (LANDED <sha> | REJECTED <reason/rows> | STALE does not apply)
 # Log: $JET_RUN_ROOT/lander.log. Stop: touch $JET_RUN_ROOT/lander.stop. Roots: Tools/agent/roots.sh; the lander
