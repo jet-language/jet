@@ -7,9 +7,11 @@
 // the statements to activate it, or, when leaving its directory tree, to
 // deactivate and restore the prior `PATH`.
 //
-// This file owns the pure shell-text generation and the ancestor `env.jet`
-// walk. Realization and trust gating stay with the CLI env verbs, which
-// reuse the same composition as `jet env` (I8: one env engine).
+// This file owns the pure shell-text generation. The ancestor `env.jet` walk
+// and the path helpers live with the environment model (EnvModel/Source/
+// Environment/DefinitionFingerprint.jet). Realization and trust gating stay
+// with the CLI env verbs, which reuse the same composition as `jet env` (I8:
+// one env engine).
 
 ENV_HOOK_GIT_CONFIG_COUNT :: "GIT_CONFIG_COUNT"
 ENV_HOOK_GIT_CONFIG_KEY_0 :: "GIT_CONFIG_KEY_0"
@@ -36,34 +38,6 @@ fn env_hook_git_hooks_environment(root: String, relative: String) -[FS, Env]> [S
         ENV_HOOK_GIT_CONFIG_KEY_0: "core.hooksPath",
         ENV_HOOK_GIT_CONFIG_VALUE_0: hooks
     })
-}
-
-// Rust `Path::components` contains `Component::ParentDir`.
-fn env_hook_has_parent_component(path: String) -> Bool Never! {
-    loop part in path.split("/") {
-        if part == ".." -> return true
-    }
-    false
-}
-
-// Rust `Path::starts_with`: whole components only.
-fn env_hook_path_within(path: String, root: String) -> Bool Never! {
-    if path == root -> return true
-    base :: if root.ends_with("/") -> root else -> "{root}/"
-    path.starts_with(base)
-}
-
-// The nearest directory at or above `start` that contains an `env.jet`.
-// This keeps an env active across `cd` into a project subdirectory (direnv
-// semantics): the whole subtree under an `env.jet` root is inside that env.
-fn env_hook_find_env_root(start: String) -[FS]> String? Never! {
-    dir := start
-    loop {
-        if files.is_file(files.join(dir, ENV_FILE)) -> return Val(dir)
-        parent :: files.dirname(dir)
-        if parent == "" || parent == dir -> return None
-        dir = parent
-    }
 }
 
 // The opt-in shell hook the user installs once. Re-sourcing never

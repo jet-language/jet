@@ -1111,11 +1111,11 @@ fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare"}
 
 // `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
 // makes it `jet dev`.
-fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
     jet_cli_with_build_options(jet_cli_run_entry(jet_argv, args, passthrough, shorthand, watch, color, quiet, verbose, threads), jet_argv, quiet)
 }
 
@@ -1126,7 +1126,7 @@ fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, short
 // target. A `jet dev` (`watch`) resolves its own command home and starts at the
 // `fn dev` its target declares, unless `--show-default` asks for the stock
 // entry; `--watch=off` runs it once instead of rerunning it on every change.
-fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, watch: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
     keep_watching := watch
     loop argument in jet_argv {
@@ -1149,6 +1149,12 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
     if jet_cli_authority_flags(jet_argv, color) == {
         .Refused(refusal) -> return refusal
         .Rows(rows) -> invocation = rows
+    }
+    // `jet dev`, and a `jet run` that refuses preparation, stop at the
+    // project environment boundary before the program loads (EnvBoundary.jet).
+    if watch || jet_cli_flag_before_separator(jet_argv, "--no-prepare") {
+        target :: if args.len() > 1 -> args[1] else -> "."
+        if jet_cli_env_boundary_refusal(target, jet_argv, color) == .Val(refusal) -> return refusal
     }
     command :: if watch -> "dev" else -> "run"
     entry :: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
@@ -1186,7 +1192,7 @@ fn jet_cli_test_option_error(what: String, color: Bool) -> JetCLIPlan Never! {
 // one, as `jet build` runs its `fn build`. The tested file's doctests run as
 // claims of the same harness (Doctests.jet). The result cache and
 // JET_CLI_TEST_UNPORTED_FLAGS are not ported yet.
-fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
     options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, measure: false, json: false, profile: "", project_root: None, status: ""}
     fresh := false
@@ -1271,6 +1277,8 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
             options.filter = Val(filter)
         }
     }
+    boundary_target :: if positionals.len() > 0 -> positionals[0] else -> "."
+    if jet_cli_env_boundary_refusal(boundary_target, jet_argv, color) == .Val(refusal) -> return refusal
     // `--profile <test profile>`, or a bare package run under `defaults: { test: … }`.
     if jet_cli_test_profile_plan(jet_argv, positionals, show_default, options.update_snapshots, color, quiet) == .Val(plan) -> return plan
     options.time_limit_ms = jet_cli_test_profile_time_limit()
