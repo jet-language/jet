@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92433,
+    "rev": 92439,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42880,6 +42880,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T14:54:43.274Z"
+        },
+        {
+          "n": 10,
+          "text": "A pattern test in a `loop` condition binds its names in the loop body for each pass, exactly as in an `if` condition: `loop cur == .Val(c) { ...; cur = next(c) }` runs once per `Val` and stops at `None`. Golden at O0/O2, plus a UI snapshot that a bound name is not visible after the loop. Found by the 2026-11-05 Doom port investigation (defect against a ratified rule; compiler 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:36:18.662Z"
         }
       ],
       "refs": [
@@ -42893,7 +42902,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-04T14:54:43.275Z",
+      "updated": "2026-11-05T14:36:18.662Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -59918,6 +59927,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-18T18:40:10.242Z"
+        },
+        {
+          "n": 5,
+          "text": "A module global written `name := <value>` starts from any storable value computed while compiling, including `[U8]`, `[T]`, maps and structs holding them, with no startup copy (D-JAI-COMPTIME1=A). E0622 is retired for these. `spec.md:255-259` is updated, and a golden mutates a module-global `[U8]` at O0/O2. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:36:17.332Z"
         }
       ],
       "refs": [
@@ -59935,7 +59953,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:47.130Z",
-      "updated": "2026-10-28T11:32:36.793Z",
+      "updated": "2026-11-05T14:36:17.332Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -76183,6 +76201,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-29T13:58:56.482Z"
+        },
+        {
+          "n": 6,
+          "text": "Integer lane types (`I8`..`I64`, `U8`..`U64` lanes) support element-wise `<<`, `>>` (arithmetic for signed, logical for unsigned), `.bit_and`, `.bit_or`, `.bit_xor` and `.bit_not`, with a lane or a scalar right side. Output matches the scalar fold at O0/O2, and a UI snapshot covers a float-lane shift error. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:36:18.002Z"
         }
       ],
       "refs": [],
@@ -76191,7 +76218,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-01T07:20:28.645Z",
+      "updated": "2026-11-05T14:36:18.002Z",
       "updatedBy": "Main"
     },
     {
@@ -80740,6 +80767,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T04:44:09.693Z"
+        },
+        {
+          "n": 9,
+          "text": "D-UB-BOUNDARY1=A is built: expert code skips a check only inside a written #Unchecked(<check>) block (bounds first), and the global --bounds flag is removed in the same cutover with every caller migrated. Today #Unchecked(bounds) reports E0927 ('#Unchecked isn't a known applied rule') and jet build --bounds=off still works. A golden shows the block removing the check only in its scope at O0, O1 and O2. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:36:19.384Z"
         }
       ],
       "refs": [],
@@ -80748,7 +80784,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-10-31T04:44:10.530Z",
+      "updated": "2026-11-05T14:36:19.384Z",
       "updatedBy": "Main"
     },
     {
@@ -81839,6 +81875,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T06:56:27.438Z"
+        },
+        {
+          "n": 29,
+          "text": "An `#Import module c.<lib>` row may declare a C counted-pointer parameter as a list of a fixed-width `T`: `[T]`/`View<T>` when C only reads, `&[T]` when C writes. Jet passes the element pointer and the element count with no copy. `Examples/ffi/adaptations/pointer-count/after.jet` builds and prints its golden at O0/O2, and a 64000-byte `[U8]` round-trips through a C checksum with matching output. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:36:16.677Z"
         }
       ],
       "refs": [
@@ -81849,7 +81894,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-05T06:56:27.438Z",
+      "updated": "2026-11-05T14:36:16.677Z",
       "updatedBy": "Main"
     },
     {
@@ -88525,7 +88570,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two `ID<T>` values compare with `==`/`!=` by slot and generation, as D-POOLID-API1=A says. A live id equals itself, and an id taken before `remove` differs from the id `add` returns for the reused slot. Golden at O0/O2, plus a UI snapshot proving E0312 is no longer raised for `ID<T>`. Found by the 2026-11-05 Doom port investigation (defect against a ratified rule; compiler 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:36:16.013Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "core",
@@ -88535,7 +88590,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:38.449Z",
-      "updated": "2026-11-01T01:14:38.449Z",
+      "updated": "2026-11-05T14:36:16.013Z",
       "updatedBy": "Main"
     },
     {
@@ -173080,6 +173135,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T14:36:19.385Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0sg79an",
+      "note": "#9 D-UB-BOUNDARY1=A is built: expert code skips a check only in"
+    },
+    {
+      "at": "2026-11-05T14:36:18.662Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0flvd7x",
+      "note": "#10 A pattern test in a `loop` condition binds its names in the "
+    },
+    {
+      "at": "2026-11-05T14:36:18.002Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05gn07n",
+      "note": "#6 Integer lane types (`I8`..`I64`, `U8`..`U64` lanes) support "
+    },
+    {
+      "at": "2026-11-05T14:36:17.332Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06y0cef",
+      "note": "#5 A module global written `name := <value>` starts from any st"
+    },
+    {
+      "at": "2026-11-05T14:36:16.677Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#29 An `#Import module c.<lib>` row may declare a C counted-poin"
+    },
+    {
+      "at": "2026-11-05T14:36:16.013Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03jg20v",
+      "note": "#1 Two `ID<T>` values compare with `==`/`!=` by slot and genera"
+    },
     {
       "at": "2026-11-05T14:29:35.452Z",
       "by": "agent",
