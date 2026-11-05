@@ -1743,7 +1743,16 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if ir_cell_value_type(ir_ty(p, b, receiver)) != None -> return ir_cell_method(&m, p, &b, expression_ty, receiver, method, args, span)
                 host_receiver_ty :: ir_ty(p, b, receiver)
                 receiver_row :: ir_value_type(&m, p, host_receiver_ty) ?? return ir_type_fail(&b, span, host_receiver_ty)
-                if ir_host_value_row(m, p, receiver_row) == .Val(owner) {
+                host_owner := ir_host_value_row(m, p, receiver_row)
+                // A reflection record laid out as a compiler-owned struct
+                // (FunctionInfo, EffectInfo, TypeInfo, ...) still has its
+                // methods answered by the compiler.
+                if host_owner == None {
+                    if ir_untag(host_receiver_ty) == .Named(record) {
+                        if ir_host_value_name(record) -> host_owner = Val(record.copy())
+                    }
+                }
+                if host_owner == .Val(owner) {
                     values := [Int]{receiver}
                     loop argument in args -> &values.push(argument)
                     return ir_host_method(&m, p, &b, expression_ty, "{owner}.{method}", values, span)
