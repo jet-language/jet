@@ -1,8 +1,10 @@
-// Contract tests for the hardening manifest and repro bundles. Run from the
-// repository root: `jet test Tools/hardening`. Each test pairs the accepted
-// case with the forged or broken case that must fail.
+// Contract tests for the hardening manifest, repro bundles and regression
+// seeds. Run from the repository root: `jet test Tools/hardening`, with $JET
+// naming the compiler the seeds run on (else `jet` on PATH). Each test pairs
+// the accepted case with the forged or broken case that must fail.
 
 use {
+    files :: core.files
     json :: core.encoding.json
 }
 
@@ -261,6 +263,7 @@ fn repro_input() -> ReproInput Never! {
         mutation_arm: "swap-args",
         mutator_version: "1",
         source: "fn run() {{\n    print(\"ÀB\")\n}}\n",
+        stdin: [U8]{97, 10},
         stdout: [U8]{0, 255, 10, 65},
         stderr: [U8]{},
         exit: Val(3),
@@ -288,7 +291,7 @@ fn errors_of(tree: Dyn) -> String Never! {
     validate_repro(tree, "").errors.join("\n")
 }
 
-#Test("a sealed repro reconstructs source, oracle, commands, raw channels, exit, seed, mutation, commit and binary") {
+#Test("a sealed repro reconstructs source, stdin, oracle, commands, raw channels, exit, seed, mutation, commit and binary") {
     input :: repro_input()
     bundle :: make_repro(input) ?? panic("the repro did not seal: {err}")
     // Store and read back exactly as a bundle file would be.
@@ -298,6 +301,7 @@ fn errors_of(tree: Dyn) -> String Never! {
     rebuilt :: reconstruct_repro(stored, "") ?? panic("the repro did not reconstruct: {err}")
     assert_eq(rebuilt.source, input.source)
     assert_eq(rebuilt.source_sha256, digest(input.source))
+    assert_eq(rebuilt.stdin, [U8]{97, 10})
     assert_eq(rebuilt.stdout, [U8]{0, 255, 10, 65})
     assert_eq(rebuilt.stderr, [U8]{})
     assert_eq(rebuilt.exit, Val(3))
@@ -323,6 +327,7 @@ fn errors_of(tree: Dyn) -> String Never! {
     tampered :: [Dyn]{
         with_field(bundle, "source", Dyn.Text("fn run() {{}}\n")),
         with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQg==")),
+        with_field(bundle, "stdin_bytes", Dyn.Text("Ygo=")),
         with_field(bundle, "exit", Dyn.Int(0)),
         with_field(bundle, "seed", Dyn.Text("43")),
         with_field(bundle, "mutation_arm", Dyn.Text("none")),
@@ -388,4 +393,94 @@ fn errors_of(tree: Dyn) -> String Never! {
     hand :: check_manifest_text(edited_text, clean, stored).join("\n")
     assert(hand.contains("module:core.text.byte_count: stored status `missing`, the tree derives `covered`"))
     assert(hand.contains("stored manifest bytes differ from a fresh generation of the same snapshot"))
+}
+
+// c34: the #2337 regression seeds pass on the fixed compiler, and putting
+// each seam's broken behavior back produces a sealed finding bundle.
+
+fn regression_identity() -> RunIdentity Never! {
+    RunIdentity{
+        run_id: "regressions-test",
+        started: "2026-11-05T00:00:00Z",
+        finished: "2026-11-05T00:00:01Z",
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        binary_sha256: digest("binary"),
+        host: "linux-x64",
+        target: "linux-x64",
+        registry_snapshot_hash: digest("snapshot"),
+    }
+}
+
+fn regression_scratch() -[FS]> String Never! {
+    files.mkdtemp("jet-hardening-regressions-") ?? panic("scratch: {err}")
+}
+
+fn regression_compiler() -[Env, Exec, Time.Wait]> String Never! {
+    compiler_path() ?? panic("the regression seeds need a compiler: {err}")
+}
+
+fn stored_finding(findings: [Dyn], surface: String) -> Dyn Never! {
+    if findings.len() != 1 -> panic("{surface} gave {findings.len()} findings, not 1")
+    stored :: json.parse(json.canonical(findings[0]) ?? panic("no canonical form")) ?? panic("the stored bundle did not parse")
+    assert_eq(validate_repro(stored, digest("snapshot")).errors.join("\n"), "")
+    stored
+}
+
+#Test("every regression seed prints its expected bytes on every tier of the fixed compiler") {
+    jet :: regression_compiler()
+    scratch :: regression_scratch()
+    loop seed in regression_seeds() {
+        runs :: run_seed(seed, jet, scratch) ?? panic("{seed.surface}: {err}")
+        assert_eq(runs.len(), regression_tiers().len())
+        loop run in runs {
+            if !clean_run(seed, run) -> panic("{seed.surface} on {run.tier} printed `{run.stdout}` (stderr `{run.stderr}`)")
+        }
+        findings :: seed_finding(seed, runs, regression_identity(), "none") ?? panic("{seed.surface}: {err}")
+        assert_eq(findings.len(), 0)
+    }
+}
+
+#Test("inverting each regression seed's seam produces one sealed P0 finding bundle on that seam's tier") {
+    jet :: regression_compiler()
+    scratch :: regression_scratch()
+    found := [String]{}
+    loop seed in regression_seeds() {
+        runs :: run_seed(seed, jet, scratch, invert: true) ?? panic("{seed.surface}: {err}")
+        assert_eq(inversion_problem(seed, runs), "")
+        stored :: stored_finding(seed_finding(seed, runs, regression_identity(), inversion_arm(seed)) ?? panic("{seed.surface}: {err}"), seed.surface)
+        assert_eq(field_text(stored, "stable_surface_id") ?? "", seed.surface)
+        assert_eq(field_text(stored, "classification") ?? "", "P0")
+        assert_eq(field_text(stored, "mutation_arm") ?? "", inversion_arm(seed))
+        rebuilt :: reconstruct_repro(stored, seed.broken_tier) ?? panic("{seed.surface} did not reconstruct: {err}")
+        assert_eq(rebuilt.source, seed.source)
+        assert_eq(rebuilt.stdin, seed.stdin.bytes())
+        assert_eq(rebuilt.stdout, seed.broken.bytes())
+        &found.push(seed.surface.copy())
+    }
+    assert_eq(found, [String]{"regression:semantic-equality", "regression:indexed-place", "regression:packed-int", "regression:release-emission", "regression:stdin-transport"})
+    // stdin-transport is inverted for real: its empty line came from the run.
+    assert_eq(inversion_arm(regression_seeds()[4]), "inverted:jet_run:stdin-withheld")
+}
+
+#Test("a loud failure off the default tier is P1, silent wrong data, a timeout and a signal are findings, and an inversion must show only on its tier") {
+    seed :: regression_seeds()[3]
+    clean :: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: seed.expected.copy(), stderr: "", exit: Val(0), signal: None, timeout: false}
+    loud :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: "", stderr: "error: emission\n", exit: Val(1), signal: None, timeout: false}
+    silent :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: "0\n", stderr: "", exit: Val(0), signal: None, timeout: false}
+    hung :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: None, signal: None, timeout: true}
+    killed :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: None, signal: Val("11"), timeout: false}
+    expected :: [String]{"P1", "P0", "P1", "P1"}
+    cases :: [TierRun]{loud, silent, hung, killed}
+    loop (index, run) in cases {
+        stored :: stored_finding(seed_finding(seed, [TierRun]{run.copy(), clean.copy()}, regression_identity(), "none") ?? panic("{err}"), seed.surface)
+        assert_eq(field_text(stored, "classification") ?? "", expected[index])
+        assert_eq(field_text(stored, "mutation_arm") ?? "", "none")
+    }
+    assert_eq((seed_finding(seed, [TierRun]{clean.copy()}, regression_identity(), "none") ?? panic("{err}")).len(), 0)
+    // release-emission inverts aot_release: that tier must diverge, jet_run must not.
+    assert_eq(inversion_problem(seed, [TierRun]{silent.copy(), clean.copy()}), "")
+    aot_clean :: TierRun{tier: AOT_RELEASE, command: tier_command(AOT_RELEASE), stdout: seed.expected.copy(), stderr: "", exit: Val(0), signal: None, timeout: false}
+    assert_eq(inversion_problem(seed, [TierRun]{aot_clean, clean.copy()}), "inverting regression:release-emission left aot_release clean")
+    run_failed :: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: "", stderr: "error\n", exit: Val(1), signal: None, timeout: false}
+    assert_eq(inversion_problem(seed, [TierRun]{silent.copy(), run_failed}), "regression:release-emission failed on jet_run, which its inversion does not touch")
 }

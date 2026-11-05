@@ -5,15 +5,25 @@
 //                       a moved source snapshot is reported as stale
 //   --repro-check FILE  validate a jet.hardening.repro.v1 bundle against the tree
 //   --repro-replay FILE --tier TIER --source-out PATH
-//                       write the bundle's exact source to PATH and print the
-//                       tier's command with that path in its {source} slot
+//                       write the bundle's exact source to PATH (and its stdin
+//                       to PATH.stdin) and print the tier's command with that
+//                       path in its {source} slot
+//   --regressions DIR [--invert] [--commit SHA]
+//                       run the #2337 regression seeds on every tier with $JET
+//                       and write each finding to DIR/<seed>.repro.json; fails
+//                       on any finding. --invert puts each seam's broken
+//                       behavior back and fails unless every seed is found.
+//                       The commit is `git rev-parse HEAD` unless named, as an
+//                       export without .git must.
 //   --root DIR          the checkout to read (default .)
 
 use {
     files :: core.files
     json :: core.encoding.json
     process :: core.process
+    sys :: core.sys
     term :: core.term
+    time :: core.time
 }
 
 struct Options {
@@ -22,30 +32,38 @@ struct Options {
     path: String
     tier: String
     source_out: String
+    commit: String
+    invert: Bool
 }
 
 fn usage() -> String Never! {
-    "usage: jet run Tools/hardening/Main.jet -- [--root DIR] (--write [PATH] | --check [PATH] | --repro-check FILE | --repro-replay FILE --tier TIER --source-out PATH)"
+    "usage: jet run Tools/hardening/Main.jet -- [--root DIR] (--write [PATH] | --check [PATH] | --repro-check FILE | --repro-replay FILE --tier TIER --source-out PATH | --regressions DIR [--invert] [--commit SHA])"
 }
 
 fn parse_args(args: [String]) -> Options Err! {
-    options := Options{root: ".", command: "", path: "", tier: "", source_out: ""}
+    options := Options{root: ".", command: "", path: "", tier: "", source_out: "", commit: "", invert: false}
     index := 0
     loop index < args.len() {
         arg :: args[index]
         has_value :: index + 1 < args.len() && !args[index + 1].starts_with("--")
         value :: if has_value -> args[index + 1].copy() else -> ""
         if {
-            arg == "--write" || arg == "--check" || arg == "--repro-check" || arg == "--repro-replay" -> {
+            arg == "--invert" -> {
+                options.invert = true
+                index += 1
+                next
+            }
+            arg == "--write" || arg == "--check" || arg == "--repro-check" || arg == "--repro-replay" || arg == "--regressions" -> {
                 if options.command != "" -> return Err("choose one command\n{usage()}")
                 options.command = arg.copy()
                 options.path = value.copy()
             }
-            arg == "--root" || arg == "--tier" || arg == "--source-out" -> {
+            arg == "--root" || arg == "--tier" || arg == "--source-out" || arg == "--commit" -> {
                 if !has_value -> return Err("{arg} needs a value")
                 if {
                     arg == "--root" -> options.root = value.copy()
                     arg == "--tier" -> options.tier = value.copy()
+                    arg == "--commit" -> options.commit = value.copy()
                     else -> options.source_out = value.copy()
                 }
             }
@@ -55,9 +73,11 @@ fn parse_args(args: [String]) -> Options Err! {
     }
     if options.command == "" -> return Err(usage())
     if options.path == "" {
+        if options.command == "--regressions" -> return Err("--regressions needs a directory for the findings")
         if options.command != "--write" && options.command != "--check" -> return Err("{options.command} needs a bundle path")
         options.path = files.join(options.root, MANIFEST_PATH)
     }
+    if (options.invert || options.commit != "") && options.command != "--regressions" -> return Err("--invert and --commit go with --regressions")
     if options.command == "--repro-replay" && (options.tier == "" || options.source_out == "") -> return Err("--repro-replay needs --tier and --source-out")
     Ok(options)
 }
@@ -85,8 +105,65 @@ fn read_bundle(path: String) -[FS]> Dyn Err! {
     Ok(parsed)
 }
 
-fn hardening_main(args: [String]) -[FS, IO]> Bool Err! {
+// The commit a regression run records: --commit, else the checkout's HEAD.
+fn run_commit(options: Options) -[Exec, Time.Wait]> String Err! {
+    if options.commit != "" {
+        if !is_commit(options.commit) -> return Err("--commit needs a full 40-hex commit id, not `{options.commit}`")
+        return Ok(options.commit.copy())
+    }
+    head :: process.cmd([String]{"git", "-C", options.root, "rev-parse", "HEAD"}).run() ?? return Err("git did not start: {err}")
+    if head.code != 0 -> return Err("--regressions records the commit; outside a git checkout pass --commit SHA ({head.errors.trim()})")
+    Ok(head.output.trim().copy())
+}
+
+// --regressions: every seed on every tier, each finding written as a bundle.
+// Without --invert a finding fails the run; with it, a seed the check
+// misses fails it.
+fn regressions(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
+    jet :: compiler_path() ?? return Err(err)
+    inputs :: load_inputs(options.root) ?? return Err(err)
+    snapshot :: build_snapshot(inputs)
+    commit :: run_commit(options) ?? return Err(err)
+    files.create_dir_all(options.path) ?? return Err("cannot create {options.path}: {err}")
+    started :: time.isoformat(time.now())
+    identity := RunIdentity{
+        run_id: "regressions-{started}",
+        started: started.copy(),
+        finished: started.copy(),
+        commit: commit,
+        binary_sha256: binary_digest(jet) ?? return Err(err),
+        host: sys.platform(),
+        target: sys.platform(),
+        registry_snapshot_hash: snapshot.hash.copy(),
+    }
+    passed := true
+    loop seed in regression_seeds() {
+        runs :: run_seed(seed, jet, files.join(options.path, "seeds"), invert: options.invert) ?? return Err(err)
+        identity.finished = time.isoformat(time.now())
+        arm :: if options.invert -> inversion_arm(seed) else -> "none"
+        findings :: seed_finding(seed, runs, identity, arm) ?? return Err(err)
+        loop bundle in findings {
+            path :: files.join(options.path, "{seed.seed}.repro.json")
+            text :: json.canonical(bundle) ?? return Err("the {seed.surface} finding has no canonical form: {err}")
+            files.write(path, "{text}\n") ?? return Err("cannot write {path}: {err}")
+            print("finding {seed.surface}: {path}")
+            if !options.invert -> passed = false
+        }
+        if findings.len() == 0 -> print("clean {seed.surface}")
+        if options.invert {
+            problem :: inversion_problem(seed, runs)
+            if problem != "" {
+                term.eprint("hardening regressions: {problem}")
+                passed = false
+            }
+        }
+    }
+    Ok(passed)
+}
+
+fn hardening_main(args: [String]) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
     options :: parse_args(args) ?? return Err(err)
+    if options.command == "--regressions" -> return regressions(options)
     if options.command == "--write" {
         fresh :: generate(options.root) ?? return Err(err)
         parent :: options.path.rpartition("/").head
@@ -121,7 +198,13 @@ fn hardening_main(args: [String]) -[FS, IO]> Bool Err! {
     rebuilt :: reconstruct_repro(bundle, options.tier) ?? return Err(err)
     files.write(options.source_out, rebuilt.source) ?? return Err("cannot write {options.source_out}: {err}")
     command :: replay_command(bundle, options.tier, options.source_out) ?? return Err(err)
-    print(command)
+    if rebuilt.stdin.len() == 0 {
+        print(command)
+        return Ok(true)
+    }
+    stdin_path :: "{options.source_out}.stdin"
+    files.write_bytes(stdin_path, rebuilt.stdin) ?? return Err("cannot write {stdin_path}: {err}")
+    print("{command} < {stdin_path}")
     Ok(true)
 }
 

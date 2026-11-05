@@ -171,7 +171,15 @@ projection; it consumes the bounded `manifest.capability_relation.rows`
 source and remains fail-closed for missing, stale, unavailable, failed, or
 unqualified rows. Telemetry reports observations only.
 
-`jet run Tools/hardening/Main.jet -- --write` generates that source as
+`jet run Tools/hardening/Main.jet -- --regressions DIR` runs the #2337
+regression seeds: semantic equality, indexed places, packed Int, release
+emission and stdin transport. Each seed runs under `jet run` and as a release
+build, and must print its expected bytes and exit 0. Any other result is
+written to DIR as a `jet.hardening.repro.v1` bundle, and the run fails.
+`--invert` puts each seam's broken behavior back. That run fails unless every
+seed gives a bundle, so the check is proven to see each bug.
+
+`jet run Tools/hardening/Main.jet -- --write` generates the rows source above as
 `.jet/hardening-manifest.json`. Its rows come from the Core registries and the
 route and dispatcher facts, and each covered row names the observable sink its
 conformance witness uses. `--check` fails unless the stored file is

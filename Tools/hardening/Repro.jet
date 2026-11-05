@@ -1,8 +1,9 @@
 // jet.hardening.repro.v1: one hardening run, sealed. A bundle keeps the
-// exact source, the tier commands, the raw stdout and stderr bytes, the exit,
-// the seed and mutation, the oracle, the commit and the binary identity, and
-// a content digest over all of it. Changing any byte changes the digest, and a
-// bundle recorded under another source snapshot is stale.
+// exact source, the stdin it was fed, the tier commands, the raw stdout and
+// stderr bytes, the exit, the seed and mutation, the oracle, the commit and
+// the binary identity, and a content digest over all of it. Changing any
+// byte changes the digest, and a bundle recorded under another source
+// snapshot is stale.
 
 use {
     json :: core.encoding.json
@@ -40,6 +41,7 @@ struct ReproInput {
     mutation_arm: String
     mutator_version: String
     source: String
+    stdin: [U8]
     stdout: [U8]
     stderr: [U8]
     exit: Int?
@@ -62,6 +64,7 @@ struct Reconstructed {
     source: String
     source_sha256: String
     tier_commands: [TierCommand]
+    stdin: [U8]
     stdout: [U8]
     stderr: [U8]
     exit: Int?
@@ -197,6 +200,8 @@ fn make_repro(input: ReproInput) -> Dyn Err! {
         "started": Dyn.Text(input.started.copy()),
         "stderr_bytes": Dyn.Text(base64.encode(input.stderr)),
         "stderr_encoding": Dyn.Text("base64"),
+        "stdin_bytes": Dyn.Text(base64.encode(input.stdin)),
+        "stdin_encoding": Dyn.Text("base64"),
         "stdout_bytes": Dyn.Text(base64.encode(input.stdout)),
         "stdout_encoding": Dyn.Text("base64"),
         "target": Dyn.Text(input.target.copy()),
@@ -292,6 +297,7 @@ fn validate_repro(tree: Dyn, current_snapshot: String) -> ReproCheck Never! {
     }
     source :: field_text(tree, "source") ?? ""
     if field_text(tree, "source_sha256") != Val(digest(source)) -> &errors.push("repro source hash does not match source")
+    _ :: channel_bytes(tree, "stdin", &errors)
     _ :: channel_bytes(tree, "stdout", &errors)
     _ :: channel_bytes(tree, "stderr", &errors)
     _ :: read_commands(tree, &errors)
@@ -334,6 +340,7 @@ fn reconstruct_repro(tree: Dyn, tier: String) -> Reconstructed Err! {
         source: field_text(tree, "source") ?? "",
         source_sha256: field_text(tree, "source_sha256") ?? "",
         tier_commands: selected,
+        stdin: channel_bytes(tree, "stdin", &errors),
         stdout: channel_bytes(tree, "stdout", &errors),
         stderr: channel_bytes(tree, "stderr", &errors),
         exit: exit,
