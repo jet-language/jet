@@ -2600,22 +2600,14 @@ struct SharedBusyWait {
 }
 
 struct CompilerExtension {
-    rule: String
-    severity: String
-    message: String
-
     impl Diagnostic {
         code :: "L1401"
         severity :: .Lint
-        lint_name :: "compiler_extension"
-        stage :: [.Jet]
-        meaning :: "Compiler-extension finding from a configured component"
-        detail :: true
-        no_fix :: .Behavior
-        fix_next :: "Address the finding, or unset `JET_COMPILER_EXTENSION` to skip the extension."
-        fn what(self) -> String { "Compiler-extension `{self.rule}` ({self.severity}): {self.message}" }
-        fn why(self) -> String { "A configured compiler-extension component (`JET_COMPILER_EXTENSION`) reported this finding after type checking. V1 surfaces findings as lints; wall with `policy.lints.deny`." }
-        fn fix(self) -> String { "Fix compiler-extension rule `{self.rule}` in the configured component, or unset `JET_COMPILER_EXTENSION`." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: a configured compiler-extension component reported a finding)" }
+        fn why(self) -> String { "No compiler-extension host runs a configured component after type checking yet, so no finding can reach this report; the code is registered again with its emitter when that host lands" }
+        fn fix(self) -> String { "Do not use L1401" }
     }
 }
 
@@ -8207,13 +8199,11 @@ struct UseExecutablePackage {
 struct UnrealizedLibrary {
     impl Diagnostic {
         code :: "E0983"
-        stage :: [.Jetpack]
-        meaning :: "`use <pkg>` names a declared `library` dependency that hasn't been realized yet (U17)"
-        detail :: true
-        no_fix :: .Behavior
-        fn what(self) -> String { "`use <pkg>` named a `library` dependency the project declares but that hasn't been realized (its source isn't staged in the shared hangar store, and isn't on disk as a path dep)." }
-        fn why(self) -> String { "U17: `jet build`/`check`/`test` never realize on demand; `jet run` delegates a declared project environment to Jetpack, but `--no-prepare` and standalone undeclared dependencies remain non-resolving." }
-        fn fix(self) -> String { "Run `jetpack env --prep` to realize the library into the hangar, or rerun `jet run` without `--no-prepare` from the declaring project." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `use <pkg>` named a declared library that hasn't been realized)" }
+        fn why(self) -> String { "The driver has no realized-library search root in the hangar yet, so it cannot tell an unrealized library from a missing one (E0603 reports both); the code is registered again with its emitter when that root lands" }
+        fn fix(self) -> String { "Do not use E0983" }
     }
 }
 
