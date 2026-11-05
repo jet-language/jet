@@ -372,6 +372,32 @@ fn sema_effect_in_assume_det(node: SemaEffectNode, span: Span) -> Bool Never! {
     false
 }
 
+// Rust `crate::Sema::e3403` at a Clock intrinsic site (method_calls.rs
+// record_static_time_effect and the `Clock.{method}` check, binary.rs
+// `Clock comparison`, expr.rs `Clock formatting` and `Clock copy`): the
+// producer recorded a `Time` row under the operation's own name
+// (`Clock.system`), so a pure body reports E3403 with the pure denial and
+// records none of the site's effects. False when the site is not one.
+fn sema_effect_report_nondeterministic_intrinsic(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if !nodes[node_index].is_pure || fact.callee != None -> return false
+    api :: fact.intrinsic_api ?? return false
+    if !api.starts_with("Clock.") && !api.starts_with("Clock ") -> return false
+    row :: fact.facts.effect_bound ?? return false
+    if sema_effect_in_assume_det(nodes[node_index], span) -> return false
+    loop entry in row {
+        if entry.name.starts_with("!") || sema_effect_root(entry.name) != "Time" -> next
+        nodes[node_index].nondeterministic_call = true
+        // A wrapper node at the site's own span reports once.
+        loop previous in diagnostics {
+            if previous.code == "E3403" && previous.span == span -> return true
+        }
+        diagnostic :: sema_error("E3403", span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound.")
+        &diagnostics.push(diagnostic_with_rights(^diagnostic, "pure", [String]{api.copy()}, [String]{}, None))
+        return true
+    }
+    false
+}
+
 // A compile-time value's call site `fact` whose callee reads ambient time or
 // randomness is refused by the API it calls (E3403), before evaluation
 // reaches the host clock or random source.
@@ -1161,6 +1187,7 @@ fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, program:
             callee: None,
             facts: facts,
             discarded: false,
+            intrinsic_api: Val(api),
         })
     }
     true
@@ -1610,7 +1637,7 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
                         // the pure function reports E3403 instead of E3401.
                         nodes[node_index].nondeterministic_call = true
                         &diagnostics.push(sema_error("E3403", node.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
-                    } else {
+                    } else if !sema_effect_report_nondeterministic_intrinsic(&nodes, node_index, value, node.span, &diagnostics) {
                         if !sema_effect_record_static_dispatch(&nodes, facts, node_index, tree, node, value) {
                             sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
                             sema_effect_record_dispatch(&nodes, node_index, tree, node, value)
@@ -1631,7 +1658,10 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         }
         else -> {
             found :: sema_effect_find_exact_fact(facts, caller, node.span)
-            if found == .Val(position) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, facts.modules[caller.module_index].facts[position], &diagnostics)
+            if found == .Val(position) {
+                value :: facts.modules[caller.module_index].facts[position]
+                if !sema_effect_report_nondeterministic_intrinsic(&nodes, node_index, value, node.span, &diagnostics) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
+            }
         }
     }
     if node.kind == {
