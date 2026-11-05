@@ -21,12 +21,12 @@ this directory only after its landing commit. That commit deletes the item's
 files (and the directory with its last item) and adds a row to "Landed"
 below. The card then cites the landing commit, not this path.
 
-Owner and status are as of 2026-11-04 (dev f32195ac8c). The owner is the
-agent lane integrating the item. Update the row when either changes.
+Owner and status are as of 2026-11-05 (dev 207ffbc92f). The owner is the
+agent lane integrating the item. Update the row when either changes. No item
+is held now.
 
 | Card | Directory | Items | Owner | Status |
 |---|---|---|---|---|
-| #6497 | `6497/` | FFIDesign-1: the generated #CLI parser (pulled: Exec effect on help/version) | Builder3, after #5971 c34 | Queued; no rework is on dev. Help/version must not need `Exec`; then rebase the three hand-written files onto dev and regenerate the four tables. A 3-way apply conflicts on 348c3649f1 |
 
 ## Landed
 
@@ -40,6 +40,7 @@ finds the commit that landed a directory's items.
 | #6414 | OptAccumulate (#6414 c37): the recovered recognizer reworked into the general associative-operation tail-accumulation pass (`Compiler/JetIR/Source/OptAccumulate.jet`, pass `accumulate`, on at O1 and O2): exact Int `+`, `*`, `bit_and`, `bit_or` and `bit_xor`, wrapping word `+` and `*`, word `bit_or` and `bit_xor`, signed-word `bit_and`; either operand order, the other operand computed before or after the call; only a recursion whose head test its step provably reaches; a #Test per shape and refusal, the `math/accumulating_recursion` golden on every tier, and a same-run measurement against `JET_OPT_DISABLE=accumulate` | the commit that deleted `6414/` |
 | #5971 | Main-13 (#5971 c12): a narrowing fixed-width conversion stops like one from Int, and the overflow words choose its outcome; the runtime's 33 narrowing sites use `wrapping(T{x})`, which removed the parked patch's recursion. The 10 Core sites are #5971 c34, which no held patch carries | cc0615c8da |
 | #6442 | BugSweep 15n (the Jetpack CLI `jetpack why` claims), 19 (the inline-Package stock carrier is `run.jet`), 20 (a command home's own command function is package-private), 21 (project configuration files are never package source) and 23 (catalog service refs are `@jetpack`) | the commit that deleted `6442/` |
+| #6497 | FFIDesign-1 (#6497 size root 1): the generated #CLI parser. It landed inside FFIDesign-2, with the fix that pulled it from wave 22: the parser the entry calls gets the entry's exemption from the application's required effects, so help and version need no `Exec`. The held patch is byte for byte FFIDesign-2's diff of its 8 files. The held copy stayed here after it landed, and a later commit deleted `6497/` | e82d9a1c09 |
 
 ## Held work that was lost
 
