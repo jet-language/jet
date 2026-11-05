@@ -12390,6 +12390,28 @@ struct FrameScheduleConflict {
     }
 }
 
+struct CorruptProofArtifact {
+    impl Diagnostic {
+        code :: "E3611"
+        stage :: [.Compile]
+        detail :: true
+        fn what(self) -> String { "proof artifact is corrupt" }
+        fn why(self) -> String { "report hash or canonical bytes do not match" }
+        fn fix(self) -> String { "move the corrupt artifact aside and run `jet prove TARGET` again" }
+    }
+}
+
+struct UnsafeProofArtifactPath {
+    impl Diagnostic {
+        code :: "E3614"
+        stage :: [.Compile]
+        detail :: true
+        fn what(self) -> String { "proof artifact path is unsafe" }
+        fn why(self) -> String { "a parent or final path is a symlink or otherwise unsafe" }
+        fn fix(self) -> String { "replace it with a regular project directory or file" }
+    }
+}
+
 struct ReplaySchemaMismatch {
     impl Diagnostic {
         code :: "E3620"

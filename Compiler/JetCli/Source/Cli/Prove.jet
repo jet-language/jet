@@ -5,8 +5,8 @@
 use {
     cli_files :: core.files
     cli_sys :: core.sys
-    jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[diagnostic_from_registry]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
 }
 
 // The `--lens` values, in report order (D-PROVE-LENS1=A).
@@ -23,6 +23,8 @@ struct JetCLIProveRefusal {
     why: String
     fix: String
     exit_code: Int
+    // Plain lines printed after Fix, such as the file a refusal is about.
+    detail: String?{None}
 }
 
 fn jet_cli_prove_refusal(code: String, what: String, fix: String, exit_code: Int) -> JetCLIProveRefusal Never! {
@@ -76,15 +78,23 @@ fn jet_cli_prove(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
     if request.replay != None -> form = "prove --replay"
     if request.save != None -> form = "prove --save"
     if request.unsave != None -> form = "prove --unsave"
+    if form == "prove" && request.lenses.len() == 0 -> return JetCLIPlan.Prove{target: target, color: color, json: json}
+    if request.lenses.len() > 0 && form == "prove" -> form = "prove --lens"
     jet_cli_not_ported(form, color)
 }
 
 // A refusal as the human report on stderr, or with `--json` as the one failed
 // `prove` status line on stdout (main.rs `emit_cli_report_for_action`).
 fn jet_cli_prove_fail(refusal: JetCLIProveRefusal, color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if !json -> return jet_cli_fail(refusal.code, refusal.what, refusal.why, refusal.fix, color, refusal.exit_code)
-    report :: jet_cli_report_json(diagnostic_from_registry(refusal.code, None, refusal.what, refusal.why, refusal.fix), None, "", "", 0)
-    jet_cli_done("{jet_cli_status_render_with_reports("prove", false, [String]{report}, [JetCLIStatusField]{})}\n", "", refusal.exit_code)
+    JetCLIPlan.Done{output: jet_cli_prove_refused(refusal, color, json)}
+}
+
+fn jet_cli_prove_refused(refusal: JetCLIProveRefusal, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    report := diagnostic_from_registry(refusal.code, None, refusal.what, refusal.why, refusal.fix)
+    report.detail = refusal.detail
+    if !json -> return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: refusal.exit_code}
+    report_json :: jet_cli_report_json(report, None, "", "", 0)
+    JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("prove", false, [String]{report_json}, [JetCLIStatusField]{})}\n", stderr: "", exit_code: refusal.exit_code}
 }
 
 // The closed grammar. The output flags the front already read are skipped;

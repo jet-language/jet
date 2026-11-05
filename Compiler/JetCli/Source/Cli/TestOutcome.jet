@@ -11,11 +11,11 @@ use {
     jet_foundation.[
         BuildOptions, EvidenceBuild, EvidenceExpectation, EvidenceProducerKind, EvidenceReport,
         EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
-        EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
+        EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
         EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, build_options_key,
         evidence_expectation_error_text, evidence_merge_error_text, evidence_record_checked_derivation,
         evidence_record_from_test_codes, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
-        evidence_report_encode, evidence_report_json, evidence_report_new,
+        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write,
     ]
     jet_pkg_model.[ClaimsGrade, ClaimsProjection, WorkspaceDeclarationCache]
 }
@@ -198,9 +198,18 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
 }
 
 // Optional history: the run's report as `.jet/evidence/<report id>.json`,
-// indexed against its source revision and unprotected. A failure is one
-// `history:` line for stderr; the run's own result stands.
+// indexed against its source revision and unprotected. Under `jet prove` the
+// parent names a report file in EVIDENCE_REPORT_ENV (Rust CmdCompile.rs
+// `inherited_report_path`); the report goes there instead, and the parent
+// persists it. A failure is one `history:` line for stderr; the run's own
+// result stands.
 fn jet_cli_test_persist(report: EvidenceReport) -> String {
+    if cli_sys.get(EVIDENCE_REPORT_ENV) == .Val(handoff) {
+        if handoff != "" {
+            evidence_report_write(report, handoff) ?? return jet_cli_history_notice("handing test evidence to `jet prove`", err.message)
+            return ""
+        }
+    }
     if report.records.len() == 0 -> return ""
     bytes :: evidence_report_encode(report) ?? return jet_cli_history_notice("writing test evidence", err.message)
     cache := WorkspaceDeclarationCache.new()

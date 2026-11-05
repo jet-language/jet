@@ -68,14 +68,19 @@ fn jet_cli_comparison_index_entry(index: JetCLIRecordIndex, identity: JetCLIReco
 }
 
 // Rust `persist_evidence_report_for_inputs_with_retention` (CmdCompile.rs):
-// the encoded `bytes` of `report` as `.jet/evidence/<name>.json` under the
-// project root selected from cwd, published once and never replaced, and
-// indexed as evidence for `target_inputs_sha256`. `protected` exempts the row
-// from history retention.
+// the encoded `bytes` of `report` under the project root selected from cwd
+// (jet_cli_evidence_persist_at).
 fn jet_cli_evidence_persist(cache: &WorkspaceDeclarationCache, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
-    if name == "" || name.contains("/") || name.contains("\\") || name == "." || name == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{name}`"))
     cwd :: cli_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
     root :: jet_cli_selected_project_root(&cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
+    jet_cli_evidence_persist_at(root, report, bytes, name, target_inputs_sha256, protected)
+}
+
+// The encoded `bytes` of `report` as `.jet/evidence/<name>.json` under `root`,
+// published once and never replaced, and indexed as evidence for
+// `target_inputs_sha256`. `protected` exempts the row from history retention.
+fn jet_cli_evidence_persist_at(root: String, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
+    if name == "" || name.contains("/") || name.contains("\\") || name == "." || name == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{name}`"))
     held :: JetCLIRootedDirectory.open(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
     _ :: held.publish_immutable("{name}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
     index := jet_cli_record_index_load(root)
