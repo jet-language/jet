@@ -36,66 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use `ok` or `err` only inside a fallible function or expression.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0404</code>: <code>tests/ui/enum_pattern_needs_dot_payload.stderr</code>.</p>
-<pre class="diag">Error [jet.BareCasePattern]: Pattern `Fade` needs a leading `.`
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:8:9
+<p>First UI snapshot mentioning <code>E0404</code>: <code>tests/ui/fallible_unchecked.stderr</code>.</p>
+<pre class="diag">Error [jet.OkErrOutsideFallible]: `Ok(...)` only fits where a fallible result is expected
+  --&gt; tests/ui/fallible_unchecked.jet:6:10
     |
-  8 |         Fade(n) -&gt; { print(n) }
-    |         ^^^^
- Why: Match patterns take a leading dot so the name isn&#39;t read as a variable or call (D-ENUMDOT1)
- Fix: Write `.Fade(…)`
-More: jet-lang.dev/e/E0367
-
-Error [jet.BareCasePattern]: Pattern `Ok` needs a leading `.`
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:11:9
-    |
- 11 |         Ok(n) -&gt; { print(n) }
-    |         ^^
- Why: Match patterns take a leading dot so the name isn&#39;t read as a variable or call (D-ENUMDOT1)
- Fix: Write `.Ok(…)`
-More: jet-lang.dev/e/E0367
-
-Error [jet.BareCasePattern]: Pattern `Err` needs a leading `.`
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:12:9
-    |
- 12 |         Err(e) -&gt; { print(e) }
-    |         ^^^
- Why: Match patterns take a leading dot so the name isn&#39;t read as a variable or call (D-ENUMDOT1)
- Fix: Write `.Err(…)`
-More: jet-lang.dev/e/E0367
-
-Error [jet.BareCasePattern]: Pattern `Int` needs a leading `.`
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:15:9
-    |
- 15 |         Int(n) -&gt; { print(n) }
-    |         ^^^
- Why: Match patterns take a leading dot so the name isn&#39;t read as a variable or call (D-ENUMDOT1)
- Fix: Write `.Int(…)`
-More: jet-lang.dev/e/E0367
-
-Error [jet.BareCasePattern]: Pattern `String` needs a leading `.`
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:16:9
-    |
- 16 |         String(s) -&gt; { print(s) }
-    |         ^^^^^^
- Why: Match patterns take a leading dot so the name isn&#39;t read as a variable or call (D-ENUMDOT1)
- Fix: Write `.String(…)`
-More: jet-lang.dev/e/E0367
-
-Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:6:31
-    |
-  6 | fn show(light: Light, result: Int !String, value: Int | String) {
-    |                               ^^^^^^^^^^^
- Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
-More: jet-lang.dev/e/E2417
-
-Error [jet.OkErrOutsideFallible]: `Ok(...)` only fits where a fallible result is expected
-  --&gt; tests/ui/enum_pattern_needs_dot_payload.jet:21:25
-    |
- 21 |     show(Light.Fade(1), Ok(1), 2)
-    |                         ^^^^
+  6 |     x :: Ok(1)
+    |          ^^^^
  Why: `Ok` builds the success side of a `T E!` result
  Fix: Use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one
 More: jet-lang.dev/e/E0404

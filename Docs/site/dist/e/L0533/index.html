@@ -38,7 +38,7 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0533</code>: <code>tests/ui_lint/tail_call_blocked.warn</code>.</p>
 <pre class="diag">Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because `r` closes after it returns
-  --&gt; tail_call_blocked.jet:18:5
+  --&gt; tests/ui_lint/tail_call_blocked.jet:18:5
     |
  18 |     count(n - 1, acc + r.name.len())
     |     ^^^^^
@@ -46,8 +46,17 @@
  Fix: Close `r` before the call with `close(^r)` (bind any argument that reads it first), or open it in a smaller block that ends before the call
 More: jet-lang.dev/e/L0533
 
+Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
+  --&gt; tests/ui_lint/tail_call_blocked.jet:25:5
+    |
+ 25 |     return deferred(n - 1)
+    |     ^^^^^^
+ Why: An unadorned expression on the final value line is Jet&#39;s implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
 Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because `d` closes after it returns
-  --&gt; tail_call_blocked.jet:25:12
+  --&gt; tests/ui_lint/tail_call_blocked.jet:25:12
     |
  25 |     return deferred(n - 1)
     |            ^^^^^^^^
@@ -56,7 +65,7 @@ Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because 
 More: jet-lang.dev/e/L0533
 
 Warning [jet.TailCallBlocked]: This tail call can&#39;t reuse the frame because `r` closes after it returns
-  --&gt; tail_call_blocked.jet:49:5
+  --&gt; tests/ui_lint/tail_call_blocked.jet:49:5
     |
  49 |     kept(n - 1, Res{name: &quot;k{n}&quot;})
     |     ^^^^

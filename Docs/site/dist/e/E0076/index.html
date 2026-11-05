@@ -37,31 +37,31 @@
 <p class="diag-copy fix" data-registry-field="fix">Add the missing payload and make every payload the same type, or target an inner effect-only loop.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0076</code>: <code>tests/ui/result_loop_break_payloads.stderr</code>.</p>
-<pre class="diag">Error [jet.LoopResultMismatch]: This result loop exits without a value
+<pre class="diag">Error [jet.LoopResultMismatch]: This loop break needs a value
   --&gt; tests/ui/result_loop_break_payloads.jet:3:19
     |
   3 |         if true { break }
     |                   ^^^^^
- Why: Every exit from a loop used as a value must provide the same result type
- Fix: Add a break payload, or target an inner effect-only loop
+ Why: An ordinary loop used as a value needs a payload on every matching break
+ Fix: Write `break value`
 More: jet-lang.dev/e/E0076
 
-Error [jet.LoopResultMismatch]: This loop breaks with String (text), but another exit uses Int (a whole number)
+Error [jet.LoopResultMismatch]: This loop breaks with `String`, but another exit uses `Int`
   --&gt; tests/ui/result_loop_break_payloads.jet:14:15
     |
  14 |         break &quot;other&quot;
     |               ^^^^^^^
- Why: An ordinary loop has one final result type
+ Why: An ordinary loop used as a value has one result type
  Fix: Make every break payload use the same type
 More: jet-lang.dev/e/E0076
 
-Error [jet.LoopResultMismatch]: This result loop exits without a value
+Error [jet.LoopResultMismatch]: This loop break needs a value
   --&gt; tests/ui/result_loop_break_payloads.jet:25:14
     |
  25 |         } ?? break(result)
     |              ^^^^^^^^^^^^^
- Why: Every exit from a loop used as a value must provide the same result type
- Fix: Add a break payload, or target an inner effect-only loop
+ Why: An ordinary loop used as a value needs a payload on every matching break
+ Fix: Write `break value`
 More: jet-lang.dev/e/E0076
 
 Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
@@ -72,15 +72,6 @@ Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` i
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
-
-Error [jet.LoopResultMismatch]: This result loop exits without a value
-  --&gt; tests/ui/result_loop_break_payloads.jet:35:23
-    |
- 35 |         fallible() ?? break(result)
-    |                       ^^^^^^^^^^^^^
- Why: Every exit from a loop used as a value must provide the same result type
- Fix: Add a break payload, or target an inner effect-only loop
-More: jet-lang.dev/e/E0076
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

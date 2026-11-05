@@ -37,8 +37,17 @@
 <p class="diag-copy fix" data-registry-field="fix">Add an entry or transition path to `{state}`, or remove it from the declaration.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0153</code>: <code>tests/ui_lint/typestate_unreachable.warn</code>.</p>
-<pre class="diag">Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
-  --&gt; typestate_unreachable.jet:6:50
+<pre class="diag">Warning [jet.UnreachableState]: `Flow.State.Orphan` is unreachable from every entry transition.
+  --&gt; tests/ui_lint/typestate_unreachable.jet:2:26
+    |
+  2 |     state { Start, Done, Orphan }
+    |                          ^^^^^^
+ Why: When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol.
+ Fix: Add an entry or transition path to `Orphan`, or remove it from the declaration.
+More: jet-lang.dev/e/L0153
+
+Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
+  --&gt; tests/ui_lint/typestate_unreachable.jet:6:50
     |
   6 |     #Transition(_, Start) fn start() -[]&gt; Flow { return Flow{} }
     |                                                  ^^^^^^
@@ -47,22 +56,13 @@
 More: jet-lang.dev/e/L0530
 
 Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
-  --&gt; typestate_unreachable.jet:7:63
+  --&gt; tests/ui_lint/typestate_unreachable.jet:7:63
     |
   7 |     #Transition(Start, Done) fn done(self: ^Flow) -[]&gt; Flow { return self }
     |                                                               ^^^^^^
  Why: An unadorned expression on the final value line is Jet&#39;s implicit return; `return` is for early exits
  Fix: Remove the final `return` and leave the expression as the block tail
 More: jet-lang.dev/e/L0530
-
-Warning [jet.UnreachableState]: `Flow.State.Orphan` is unreachable from every entry transition.
-  --&gt; tests/ui_lint/typestate_unreachable.jet:2:26
-    |
-  2 |     state { Start, Done, Orphan }
-    |                          ^^^^^^
- Why: When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol.
- Fix: Add an entry or transition path to `Orphan`, or remove it from the declaration.
-More: jet-lang.dev/e/L0153
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

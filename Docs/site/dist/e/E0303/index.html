@@ -36,32 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Correct the named construction fields to match the struct or variant.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0303</code>: <code>tests/ui/enum_named_payload_needs_dot_brace.stderr</code>.</p>
-<pre class="diag">Error [jet.InvalidConstructionField]: Variant `Box` requires labeled fields
-  --&gt; tests/ui/enum_named_payload_needs_dot_brace.jet:6:15
+<p>First UI snapshot mentioning <code>E0303</code>: <code>tests/ui/named_pattern_unnamed_case.stderr</code>.</p>
+<pre class="diag">Error [jet.InvalidConstructionField]: Case `BadURL` has no field names to match
+  --&gt; named_pattern_unnamed_case.jet:9:9
     |
-  6 |     v :: View.Box(10, 20)
-    |               ^^^
- Why: Named-payload variants construct with the dot-brace form (D-UITREE1/D-DOTCTOR1), matching struct construction
- Fix: Write `View.Box.{ w: 1.0, h: 2.0 }`
-More: jet-lang.dev/e/E0303
-
-Error [jet.InvalidConstructionField]: Variant `Box` requires labeled fields
-  --&gt; tests/ui/enum_named_payload_needs_dot_brace.jet:6:15
-    |
-  6 |     v :: View.Box(10, 20)
-    |               ^^^
- Why: Named-payload variants construct with the dot-brace form (D-UITREE1/D-DOTCTOR1), matching struct construction
- Fix: Write `View.Box.{ w: 1.0, h: 2.0 }`
-More: jet-lang.dev/e/E0303
-
-Error [jet.InvalidConstructionField]: Variant `Box` is missing fields: width, height
-  --&gt; tests/ui/enum_named_payload_needs_dot_brace.jet:6:15
-    |
-  6 |     v :: View.Box(10, 20)
-    |               ^^^
- Why: Every payload field must appear exactly once
- Fix: Add: width, height
+  9 |         .BadURL{reason} -&gt; reason
+    |         ^^^^^^^^^^^^^^^
+ Why: Only a case declared with named fields can be matched with `{field: pattern}`; this case&#39;s payload is positional
+ Fix: Match it by position: `.BadURL(reason)`
 More: jet-lang.dev/e/E0303
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
