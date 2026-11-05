@@ -1513,8 +1513,13 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
             _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
             return text
         }
-        // A unit value shows its magnitude and unit label.
+        // A unit value shows its magnitude and unit label, unless its unit
+        // type has its own Display (D-QUANTITY-PRINT1). The value lays out as
+        // its Float magnitude, so the implementation is found by the checked
+        // unit type, not the slot's row.
         if ir_kind_of(m, b, slot) == .Float {
+            trait_short :: if mode == .Show -> "Printable" else -> "Display"
+            if p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, ty)}") == .Val(row) -> return ir_render_impl_call(&m, p, &b, slot, row, trait_short)
             text :: ir_unit_text(&m, p, &b, ty, slot)
             if text >= 0 -> return text
         }
@@ -1581,10 +1586,12 @@ fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IR
     ir_render_impl_call(&m, p, &b, slot, row, trait_short)
 }
 
-// Whether a Display implementation is selected for `slot`'s type.
-fn ir_render_has_display(m: IRModule, p: IRProgram, b: IRBuilder, slot: Int) -> Bool Never! {
+// Whether a Display implementation is selected for `slot`'s type, or for its
+// checked type `ty` (a unit type lays out as its Float magnitude).
+fn ir_render_has_display(m: IRModule, p: IRProgram, b: IRBuilder, ty: Type, slot: Int) -> Bool Never! {
     if slot < 0 || p.render_impls.len() == 0 -> return false
-    p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") != None
+    if p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") != None -> return true
+    p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, ty)}") != None
 }
 
 // The owned String the user Debug implementation makes of `slot`, -1 when its

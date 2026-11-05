@@ -209,9 +209,11 @@ fn sema_registration_unit_leaf_name(ty: Type) -> String? {
     Val(parts[parts.len() - 1])
 }
 
+// One fact per unit type of each package: packages may mint the same leaf
+// (`tick` in two families), and each keeps its own family and dimension.
 fn sema_registration_unit_fact_push(facts: &[SemaRegistrationUnitFact], fact: SemaRegistrationUnitFact) Never! {
     loop existing in facts {
-        if existing.name == fact.name -> return
+        if existing.name == fact.name && existing.package == fact.package -> return
     }
     &facts.push(fact)
 }
@@ -289,10 +291,37 @@ fn sema_registration_unit_facts(graph: SemaRegistrationGraph) -> [SemaRegistrati
 fn sema_registration_unit_fact_for_type(graph: SemaRegistrationGraph, ty: Type) -> SemaRegistrationUnitFact? {
     name :: sema_registration_unit_leaf_name(ty) ?? return None
     qualified :: sema_registration_unit_type_is_qualified(ty)
+    owner := String?{None}
+    owner_read := false
     loop fact_index in 0..<graph.unit_facts.len() {
         if graph.unit_facts[fact_index].name != name -> next
         if qualified && sema_registration_unit_fact_is_builtin_time(graph.unit_facts[fact_index]) -> next
+        // A module-qualified unit type names its declaring package's fact.
+        if qualified {
+            if !owner_read {
+                owner = sema_registration_unit_type_package(graph, ty)
+                owner_read = true
+            }
+            if owner == .Val(package) && graph.unit_facts[fact_index].package != package -> next
+        }
         return Val(graph.unit_facts[fact_index])
+    }
+    None
+}
+
+// The package identity of the module declaring the qualified nominal `ty`
+// (`{module_name}::{name}`), or None when no registered nominal is spelled so.
+fn sema_registration_unit_type_package(graph: SemaRegistrationGraph, ty: Type) -> String? Never! {
+    if ty == .Tagged(_, inner) -> return sema_registration_unit_type_package(graph, inner)
+    spelled := ""
+    if ty == {
+        .Named(value) | .Apply(value, _) -> spelled = value.copy()
+        else -> return None
+    }
+    loop module_index in 0..<graph.modules.len() {
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            if sema_registration_nominal_spelling(graph, SemaRegistrationRowRef{module_index: module_index, row: row}) == spelled -> return Val(graph.modules[module_index].package_identity)
+        }
     }
     None
 }

@@ -1,11 +1,19 @@
 # tests/unit_family.rs::imported_public_units_keep_display_metadata_across_tiers at tests/unit_family.rs:1525; hand-port
-# Claim: imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
-# Fixture migrated: use units :: "measurements" becomes a separate package dependency
-# Not ported: Interpreter vs JIT tier split (tests/unit_family.rs:1525): no CLI tier selector
+# Claim: an imported unit type keeps its defining package's Display, and `:Unit(name)` / `:Unit(bare)` keep the unit metadata, on every tier (tests/unit_family.rs:1525, D-QUANTITY-PRINT1)
+# Fixture migrated: use "measurements" as units becomes a separate package dependency imported as `use units :: measurements`
+# Not ported: the #Target(Web) leg (Rust wasm emitter); the Interpreter/JIT split maps to the three --optimize tiers
 fixture: imported_public_units_keep_display_metadata_across_tiers.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check app/main.jet
+exit: 0 # the imported unit type checks
+step: jet run --optimize=none app/main.jet
 exit: 0 # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
-stdout: = "" # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
+stdout: = "defined in units\ndefined in units\n12 Meter\n12\n" # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
+step: jet run --optimize=basic app/main.jet
+exit: 0 # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
+stdout: = "defined in units\ndefined in units\n12 Meter\n12\n" # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
+step: jet run --optimize=full app/main.jet
+exit: 0 # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
+stdout: = "defined in units\ndefined in units\n12 Meter\n12\n" # imported units print defined-in-units display metadata (tests/unit_family.rs:1525)
