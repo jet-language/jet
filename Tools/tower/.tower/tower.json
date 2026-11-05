@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92450,
+    "rev": 92475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43252,6 +43252,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:49:27.545Z"
+        },
+        {
+          "n": 14,
+          "text": "Single-source census F25 (Docs/audits/2026-11-05-single-source-census.md): Jetpack's copy of the syntax registry. One hand-written home: `JetFoundation/Data/Syntax` (I7). Fix: derive: Jetpack imports jet_foundation, or the shared part is generated. Drift check: Generator `--check`. Drifted on 2026-11-05: Not drifted: 374 of 381 have the same name and value; none differ Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:28.820Z"
         }
       ],
       "refs": [],
@@ -43264,7 +43273,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:23.832Z",
-      "updated": "2026-11-04T23:49:28.198Z",
+      "updated": "2026-11-05T15:30:28.820Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -44944,6 +44953,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:44:09.326Z"
+        },
+        {
+          "n": 26,
+          "text": "Single-source census F8 (Docs/audits/2026-11-05-single-source-census.md): Diagnostic codes emitted by the debugger. One hand-written home: Prelude rows. Fix: add rows; emit through `diagnostic_from_registry`. Drift check: Guard: every `\"E####\"` literal in Compiler sources names a registry row (this scan found only these 9; E0061/E0277 in RustForeign.jet are rustc codes). Drifted on 2026-11-05: Yes. 9 codes are emitted with no registry row Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:14.307Z"
         }
       ],
       "refs": [],
@@ -44956,7 +44974,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-02T16:50:50.627Z",
-      "updated": "2026-11-04T23:44:09.975Z",
+      "updated": "2026-11-05T15:30:14.307Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -55057,6 +55075,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:46:41.937Z"
+        },
+        {
+          "n": 106,
+          "text": "Single-source census F13 (Docs/audits/2026-11-05-single-source-census.md): Dead test-harness data from the Rust era. One hand-written home: none; the facts they describe no longer exist. Fix: delete (keep `diagnostics_coverage_allowlist.tsv` and `retired-with-rust.tsv`, which have readers). Drift check: Guard: every committed `.tsv`/`.txt` under tests/ and Tools/ci has a reader. Drifted on 2026-11-05: Yes. No `tests/*.rs` and no `crates/` exist. suites.txt says `test-shards.sh` and `tests/suite_membership.rs` read it; neither does (`test-shards.sh:47` has its own list). test-weights.tsv is not read by test-shards.sh. golden-rust-known-failures.tsv's reader, tests/golden.rs, is gone. suites.txt and suite_budgets.txt are read only by `Tools/agent-eval/test-economics`. The others have no reader Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:18.012Z"
         }
       ],
       "refs": [],
@@ -55066,7 +55093,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-05T09:34:12.444Z",
+      "updated": "2026-11-05T15:30:18.012Z",
       "updatedBy": "Main",
       "goals": [
         "G3",
@@ -60933,6 +60960,21 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F21 (Docs/audits/2026-11-05-single-source-census.md): Generators whose output no gate checks. Already owned by #5073 c2, #6168, #4896 c4; this is the drift evidence those criteria must clear. One hand-written home: The generator registry (F7). Fix: add `--check`; run every generator in s5. Drift check: s5. Drifted on 2026-11-05: Not checked (that needs the generators run) Effort S."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F20 (Docs/audits/2026-11-05-single-source-census.md): Each runtime generator written twice. Already owned by #5073 c2; this is the drift evidence those criteria must clear. One hand-written home: One generator; the literals move into the Prelude rows (F3, F16). Fix: delete one twin (the Jet one, if the cutover goes that way). Drift check: Gate the survivor's `--check` in s5. Drifted on 2026-11-05: Not compared table by table; the generated headers agree Effort M."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F7 (Docs/audits/2026-11-05-single-source-census.md): Which generators exist and which files are generated. Already owned by #5073 c2; this is the drift evidence those criteria must clear. One hand-written home: One generator registry (each tool, its outputs, its `--check`). Fix: gen: s5, batch-land and prescreen read the registry. Drift check: The registry's own check: every file with a \"Generated by\" header has a registry row, and every row has a gate. Drifted on 2026-11-05: Yes. `batch-land.sh:75` tests `git ls-files --error-unmatch Tools/agent/RuntimeGenerators` (the `.jet` is missing), so the fallback list always runs. That list (trap, lifecycle, stop-exports, host-errors, scheduler, services, test, observe, compiler-needed-text) lacks host-carriers, fault-report, unicode-tables and core-tables. s5 checks host-carriers but not observe-messages or compiler-needed-text. GEN and GENX (CoreSources, CoreCallRows, … Effort S."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 3 criteria from archived #4131, #4535, #4540: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -61373,7 +61415,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T15:42:32.097Z",
-      "updated": "2026-11-04T23:49:40.493Z",
+      "updated": "2026-11-05T15:30:25.123Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -75581,6 +75623,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F18 (Docs/audits/2026-11-05-single-source-census.md): Builtin method lowering routes. Already owned by #6151 c11, #3325; this is the drift evidence those criteria must clear. One hand-written home: BuiltinMethods.jet rows (plus the runtime export). Fix: gen: put the runtime symbol in the row and derive arity and borrow flags from parameters and access. Drift check: Generator `--check`; `runtime-abi-symbols.mjs` confirms each symbol exists. Drifted on 2026-11-05: Not checked row by row Effort L."
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Merged #6255 \"Core `Mat3.to_array()` (and siblings) break D-SHAPE-CONVERT1: conversions are owned by the destination type\" into this card (one Core declaration per API: no twins (Law 8)); its 2 open item(s) are carried as \"(was #6255)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
@@ -76089,6 +76136,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:25:03.150Z"
+        },
+        {
+          "n": 48,
+          "text": "Single-source census F1 (Docs/audits/2026-11-05-single-source-census.md): Effects each Core call performs. One hand-written home: Effect rows on the Core declarations. Fix: gen: build CoreCallRows from the parsed Core signatures; delete the JS effect lists; make the row hold a set of effects, not one. Drift check: CoreSourceRows/ledger `--check` fails when a row's effect set differs from the declared effect row. Drifted on 2026-11-05: Yes. `Core/Jobs/Jobs.jet:126` declares `fn queue() -[DB, Env, FS, Time]>`, but `CoreCallRows.jet:1278` has `effect_kind: Val(Effect.DB)`. The row type can hold only one effect, so the other three are lost Effort L. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:08.091Z"
+        },
+        {
+          "n": 49,
+          "text": "Single-source census F4 (Docs/audits/2026-11-05-single-source-census.md): Core's module exports, types and enum variants. One hand-written home: Core declarations. Fix: delete Core.jet; derive the compiler's view from the parsed Core (CoreSourceRows already does this for calls, enums and records). Drift check: CoreSourceRows `--check` covers every export; a guard forbids a second export table. Drifted on 2026-11-05: Yes. `Core.jet:89` JetDataPlotAggregate = None\\|Count\\|Sum\\|Mean\\|Min\\|Max, but `Core/Data/Data.jet:465` = Sum\\|Mean\\|Count\\|Min\\|Max (an extra None, different order). Three owned members have no Core declaration: `Core.jet:81` core.data `schema`, `:150` core.http.server `bind`, `:207` core.term `take`. 2951 entries checked (`corejet-owns.mjs`, `corejet-enums.mjs` in this lane) Effort L. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:10.796Z"
+        },
+        {
+          "n": 50,
+          "text": "Single-source census F19 (Docs/audits/2026-11-05-single-source-census.md): Core signatures kept as hand tables projected from Rust. One hand-written home: Core declarations. Fix: gen from Core via CoreSourceRows; delete the tables. Drift check: CoreSourceRows `--check`. Drifted on 2026-11-05: Types match in the 9 rows sampled. `core_sig_fn` sets `effect_bound: None`, so every declared effect is dropped from these signatures Effort L. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:23.246Z"
         }
       ],
       "refs": [],
@@ -76099,7 +76173,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-04T18:09:30.381Z",
+      "updated": "2026-11-05T15:30:23.246Z",
       "updatedBy": "Main"
     },
     {
@@ -76537,6 +76611,21 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F22 (Docs/audits/2026-11-05-single-source-census.md): Reflection surface. Already owned by #6202 c10, #6039, #3520 c29; this is the drift evidence those criteria must clear. One hand-written home: Core declarations (`impl Printable` on each type; TypeInfo methods in Core/Compiler). Fix: derive from Core; delete the name lists. Drift check: CoreSourceRows `--check`; guard on Core type names in sema. Drifted on 2026-11-05: Not compared Effort M."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F17 (Docs/audits/2026-11-05-single-source-census.md): Marker names used in parser and sema logic. Already owned by #6202 c18, #6206 c33-c34 (#6188); this is the drift evidence those criteria must clear. One hand-written home: Prelude marker structs. Fix: derive: generate marker constants or ids from the Prelude; switch on them. Drift check: `marker_name_literals_stay_in_the_registry` guard (planned in #6188). Drifted on 2026-11-05: Not compared one by one. The trait-named subset has drifted (F5) Effort L."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F5 (Docs/audits/2026-11-05-single-source-census.md): Built-in, operator and derive trait names. Already owned by #6202 c21 (#6235), #6039 c5; this is the drift evidence those criteria must clear. One hand-written home: Trait declarations in the Prelude. Fix: derive: declare the protocol traits in the Prelude (with their operator and method) and generate one trait table; delete every hand list. Drift check: Guard: no compiler file spells a protocol trait name outside the generated table. Drifted on 2026-11-05: Yes. TypeRelations.jet:1241 has 14 names (Printable Equatable Comparable Serialize Encode Decode Renderable Close Add Sub Mul Div Numeric CheckedText). Checked.jet:3126 adds Display, Debug and Driver. Declarations.jet:40 has 11, including Iterable, which neither of the other two has, and lacks Printable, Serialize, Renderable, Close, Numeric and CheckedText. DeclarationMarkers.jet:33 adds Codable. Literal counts outside tests: \"Equatable\" 31 in … Effort M."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -76986,7 +77075,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T18:57:04.836Z",
-      "updated": "2026-11-04T23:51:03.718Z",
+      "updated": "2026-11-05T15:30:26.058Z",
       "updatedBy": "Main"
     },
     {
@@ -77109,6 +77198,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F6 (Docs/audits/2026-11-05-single-source-census.md): Target OS vocabulary. Already owned by #6206 c4-c5 (#6210); this is the drift evidence those criteria must clear. One hand-written home: One OS enum in Core/Prelude, projected into BuildOptions values. Fix: gen BuildOptions `os` values and TTargetOS; derive the parser, sema and driver mappings. Drift check: Generator `--check`, plus a guard on literal `\"macos\"`/`\"OS.MacOS\"` outside the registry. Drifted on 2026-11-05: Yes. BuildOptions = linux macos windows web freestanding. TTargetOS = Linux MacOS Windows. Lang.Target = Native Web Wasm JS Freestanding OS. Checked.jet:2902 also accepts the alias `\"mac_os\"`; Pipeline.jet:602 accepts 9 spellings (`macos`, `MacOS`, `OS.MacOS` ×3 OSes); Request.jet:744 accepts `wasi` Effort M."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F2 (Docs/audits/2026-11-05-single-source-census.md): The effect vocabulary (roots and leaves). Already owned by #6206 c1-c3; this is the drift evidence those criteria must clear. One hand-written home: `Prelude/Effects.jet`. Fix: gen `Lang.jet` Effect and `BUILTIN_EFFECT_LEAVES` (the generated `Registry/EffectVocabulary.jet` already exists); derive every leaf literal from EffectVocabulary. Drift check: CoreSourceRows `--check` also compares `Lang.jet` Effect and EffectsSurface with the Prelude; add a guard that fails on effect-leaf string literals outside the registry. Drifted on 2026-11-05: Yes. Lang.jet = FS Net Crypto Time Random Env Proc IO DB Exec Browser Secret. It has Crypto, Random and Proc, which the Prelude lacks, and lacks Rand, Log, GPU, FFI, Panic and Mem. `BUILTIN_EFFECT_LEAVES` lacks Mem.Alloc and Mem.Rc. CoreCalls.jet:9 matches the Prelude today Effort M."
+        },
         {
           "at": "2026-10-31",
           "by": "Main",
@@ -77486,7 +77585,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-04T18:09:26.606Z",
+      "updated": "2026-11-05T15:30:12.648Z",
       "updatedBy": "Main"
     },
     {
@@ -92013,6 +92112,21 @@
       "log": [
         {
           "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F16 (Docs/audits/2026-11-05-single-source-census.md): Runtime stop messages and codes in each tier (I9). Already owned by #6568 c2 (partial); this is the drift evidence those criteria must clear. One hand-written home: Prelude rows (E3001, E3010, …) with a message template. Fix: gen the native, eval and web text from the row. Drift check: Generator `--check` for each tier's output. Drifted on 2026-11-05: Not drifted: list-bounds wording matches in all 5 homes Effort M."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F15 (Docs/audits/2026-11-05-single-source-census.md): Diagnostic text and explain URLs built by hand. Already owned by #6568 c2; this is the drift evidence those criteria must clear. One hand-written home: Prelude rows rendered by Render.jet. Fix: gen or derive: every caller renders through the registry. Drift check: Guard: no `jet-lang.dev/e/` or `Error [E` literal outside Render.jet and generated files. Drifted on 2026-11-05: Only E3003 has been compared (F3); the other sites were not Effort L."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F3 (Docs/audits/2026-11-05-single-source-census.md): E3003 deadline text at runtime. Already owned by #6568 c2; this is the drift evidence those criteria must clear. One hand-written home: Prelude row. Fix: gen: build the scheduler messages from the registry row, the way ObserveMessages (E3013) already does. Drift check: The generator's `--check` reads the Prelude row, so a text edit in the row turns the runtime file stale. Drifted on 2026-11-05: Yes. Runtime: \"Deadline exceeded while waiting in …\" / Why \"This wait point observed the task context deadline from `#Context(deadline: …)`\" / Fix \"Raise the deadline budget or shorten the work before this wait point\". Registry: \"`deadline exceeded while waiting in {self.wait_kind}`.\" / Why \"A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero…\" / Fix \"…shorten the work before the wait point, or … Effort S."
+        },
+        {
+          "at": "2026-11-05",
           "by": "agent",
           "text": "612a9b61a2: c1 census on dev ec28412cb0: 1019 generated copies differed (1017 page headers naming the old guard generator, the rows file with L1401 and E0983 hand-edited on retire, the baseline compile line 1 72 74 vs 1 74 76) and 72 coverage allowances were stale. All regenerated, none hand-edited."
         },
@@ -92058,6 +92172,69 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T14:08:05.788Z"
+        },
+        {
+          "n": 5,
+          "text": "Single-source census F9 (Docs/audits/2026-11-05-single-source-census.md): The environment-variable registry. One hand-written home: A Jet table of env vars (name, reader, meaning) in JetFoundation. Fix: gen the doc page from the table; derive the readers' names from it. Drift check: Generator `--check`, plus a guard that every `\"JET_…\"` literal in code has a table row. Drifted on 2026-11-05: Yes. 27 documented vars have no reference anywhere in Compiler, Tools or Core (JET_CACHE_DIR, JET_FUZZ_*, JET_KEYS_DIR, JET_REGISTRY_CACHE_DIR, JET_REGISTRY_NAME, JET_PACKAGE_STORE_DIR, JET_TIMING, JET_CFFI_* ×7, JET_GOLDEN_FILTER, JET_REQUIRE_RUSTC, JET_TEST_JOBS, JET_UI_FILTER, JET_UPDATE_GOLDEN, JET_DEV_FILE, JET_TEST_PROOF_REPORT, JET_COV_OUT, JET_API_CACHE_DIR, JET_INLINE_DEPS_FIXTURES). 77 of the 91 JET_ names read in code are … Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:14.976Z"
+        },
+        {
+          "n": 6,
+          "text": "Single-source census F10 (Docs/audits/2026-11-05-single-source-census.md): Token dictionary behind `jet explain`/inspect syntax. One hand-written home: Prelude markers, the lexer keyword table and Syntax constants. Fix: gen the dictionary's token, kind and registry_name columns; keep only the meaning prose hand-written, keyed by token. Drift check: Generator `--check`. Drifted on 2026-11-05: Yes. The dictionary's marker spellings Cli, Abi, Html and Sql differ from the Prelude's CLI, ABI, HTML and SQL. 11 Prelude markers are missing as markers (Unsafe, Scrub, State, Transition, Shared, Todo, Impure, Transact, Context, Reactive, Test; most are filed as Keyword). 19 dictionary markers are not declared (Pure, Invariant, Default, InlineAlways, Wasm, JS, Ref, Tag, wire, static, inline, Add, Mul, Min, Max, …). It lacks the live keywords … Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:15.727Z"
+        },
+        {
+          "n": 7,
+          "text": "Single-source census F11 (Docs/audits/2026-11-05-single-source-census.md): Hot-text order list (compiler functions laid out first). One hand-written home: A measurement, so the source is the measured run. Fix: gen, plus a staleness check. Drift check: A check, run in s5, that every row names an existing function (no rebuild needed). Drifted on 2026-11-05: Yes. At least 9 rows name functions that no longer exist anywhere in the repo: sema_effect_builtin_leaves, sema_effect_grantable_roots, sema_name_first_seen, sema_prelude_conversion_demands_visit, sema_taint_check_graph, sema_finalize_core_usage, jet_driver_checked_function_owners, jet_cli_parse_root, jet_cli_right_root. 24 non-generated rows did not resolve; the other 15 (pkg_* and similar) were not checked Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:16.505Z"
+        },
+        {
+          "n": 8,
+          "text": "Single-source census F12 (Docs/audits/2026-11-05-single-source-census.md): Diagnostic codes cited in spec pages. One hand-written home: Prelude rows. Fix: delete or correct each citation. Drift check: Guard: every `E####` in Docs/spec resolves to a registry row (or to a list of retired codes). Drifted on 2026-11-05: Yes. 8 codes appear nowhere in Compiler: syntax-decisions.md E0125, E0314, E2713, E0130, E3020, E0962; proof-replay-decisions.md E3612, E3613 Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:17.268Z"
+        },
+        {
+          "n": 9,
+          "text": "Single-source census F14 (Docs/audits/2026-11-05-single-source-census.md): The native test suite set. One hand-written home: `Tools/ci/TestShards.jet` (or the testkit). Fix: delete test-shards.sh's copy; everyone else imports native-suite.mjs or reads the testkit's list. Drift check: Guard comparing the lists, or one export. Drifted on 2026-11-05: Partly. test-shards, TestShards, native-suite and verify-full = golden ui cases registries. release-compiler and testkit = golden ui cases. compiler-diff = golden ui differential. Whether release comparison should cover `registries` is not stated anywhere [INFERENCE: a gap] Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:18.791Z"
+        },
+        {
+          "n": 10,
+          "text": "Single-source census F23 (Docs/audits/2026-11-05-single-source-census.md): Process grants the native boundary can enforce (I9: only hosts encode this). One hand-written home: One row set in `Policy/Authority.jet` (or a Core declaration), checked by sema. Fix: derive the runtime list from the rows; sema reports the refusal at compile time. Drift check: Generator `--check`. Drifted on 2026-11-05: The native and web lists differ (the web list has only the two FS grants) [INFERENCE: web may be narrower on purpose] Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:26.975Z"
+        },
+        {
+          "n": 11,
+          "text": "Single-source census F24 (Docs/audits/2026-11-05-single-source-census.md): Process exit codes (stop 70, defect/ICE 101, user 1, usage 2). One hand-written home: One exit-code table in JetFoundation (law D-FAIL-EXIT1). Fix: derive: runtime, CLI, web and testkit use named constants generated from it. Drift check: Guard on bare 70/101 in exit positions. Drifted on 2026-11-05: Not drifted: the values agree today Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:30:27.860Z"
         }
       ],
       "refs": [],
@@ -92068,7 +92245,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T14:08:03.130Z",
-      "updated": "2026-11-05T14:58:31.596Z",
+      "updated": "2026-11-05T15:30:27.860Z",
       "updatedBy": "Main"
     }
   ],
@@ -173573,6 +173750,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T15:30:28.820Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bs5inj",
+      "note": "#14 Single-source census F25 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:27.860Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#11 Single-source census F24 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:26.975Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#10 Single-source census F23 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:26.058Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y4zfcp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:25.123Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:24.302Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:23.246Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w1wcfc",
+      "note": "#50 Single-source census F19 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:22.351Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w1wcfc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:21.307Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y4zfcp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:20.383Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xuffg1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:19.571Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xuffg1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:18.792Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#9 Single-source census F14 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:18.012Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rqi33c",
+      "note": "#106 Single-source census F13 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:17.268Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#8 Single-source census F12 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:16.505Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#7 Single-source census F11 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:15.727Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#6 Single-source census F10 (Docs/audits/2026-11-05-single-sour"
+    },
+    {
+      "at": "2026-11-05T15:30:14.976Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xuffg1",
+      "note": "#5 Single-source census F9 (Docs/audits/2026-11-05-single-sourc"
+    },
+    {
+      "at": "2026-11-05T15:30:14.307Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xnvmrf",
+      "note": "#26 Single-source census F8 (Docs/audits/2026-11-05-single-sourc"
+    },
+    {
+      "at": "2026-11-05T15:30:13.446Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:12.648Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:11.727Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y4zfcp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:10.796Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w1wcfc",
+      "note": "#49 Single-source census F4 (Docs/audits/2026-11-05-single-sourc"
+    },
+    {
+      "at": "2026-11-05T15:30:09.800Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xuffg1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:08.905Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:30:08.091Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w1wcfc",
+      "note": "#48 Single-source census F1 (Docs/audits/2026-11-05-single-sourc"
+    },
     {
       "at": "2026-11-05T15:14:45.866Z",
       "by": "Main",
