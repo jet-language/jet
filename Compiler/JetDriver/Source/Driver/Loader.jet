@@ -671,7 +671,7 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
         inner :: String.from_bytes(bytes[prefix_len..<bytes.len() - 1]) ?? ""
         args :: jet_driver_top_level_commas(inner)
         if args.len() == 0 || args[0] != "mem.Heap" || args.len() > 2 {
-            &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`"))
+            &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`"))
             return None
         }
         cap := ByteSize?{None}
@@ -685,7 +685,7 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
         }
         return Val(AllocatorPolicy.Counting{cap: cap})
     }
-    &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`", "use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`"))
+    &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`", "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`"))
     None
 }
 
@@ -2261,6 +2261,15 @@ fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_
         return None
     }
     jet_driver_find_source_path(source_units, importing_unit.root_index, [String]{resolved.path}, &diagnostics, span)
+}
+
+// E0603 for a file import that names no checked file (Rust Loader.rs
+// `resolve_file_import`). The fix names the file the import expects, as the
+// importing file's own path shows it.
+fn jet_driver_missing_file_import(unit: JetDriverSourceUnit, import_path: String, span: Span) -> Diagnostic {
+    resolved :: jet_driver_file_import_path(unit.relative_path, import_path)
+    prefix :: if unit.path.ends_with(unit.relative_path) -> unit.path.slice(0, unit.path.len() - unit.relative_path.len()) else -> ""
+    jet_driver_diagnostic("E0603", span, "can't find the file `{import_path}`", "a file import path must point at an existing `.jet` file next to this file's tree", "create `{import_path}.jet`, or fix the path in `use \"{import_path}\"` (authority path `{prefix}{resolved.path}` is missing)")
 }
 
 // (Rust `resolve_code_module_file`): the source unit a body-less
@@ -4531,9 +4540,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                     }
                     diagnostics_before :: diagnostics.len()
                     target_index = jet_driver_lookup_file_target(source_units, unit, path, span, &diagnostics)
-                    if target_index == None && diagnostics.len() == diagnostics_before {
-                        &diagnostics.push(jet_driver_diagnostic("E0603", span, "the imported file is not in the authorized package source snapshot", "file imports resolve only against exact checked files beneath the same source root", "include the imported source file in the authorized source snapshot"))
-                    }
+                    if target_index == None && diagnostics.len() == diagnostics_before -> &diagnostics.push(jet_driver_missing_file_import(unit, path, span))
                 }
                 .Module(name, span) -> {
                     core_module :: jet_driver_core_import_module(scoped.declaration)

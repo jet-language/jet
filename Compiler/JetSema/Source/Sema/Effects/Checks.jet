@@ -2048,8 +2048,10 @@ fn sema_effect_tfacts(node: SemaEffectNode, solved: [String]) -> TEffectFacts Ne
     TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span}
 }
 
+// Rust `e1264`: the span is the first entry of the declared effect row, or
+// the function's name when it declares none.
 fn sema_effect_secret_diagnostic(node: SemaEffectNode) -> Diagnostic {
-    sema_error("E1264", node.span, "`{node.name}` reads a secret but doesn't declare the `Secret` effect", "reading a secret always requires an explicit grant; unlike other effects, there is no silently inferred default", "add `Secret` to `{node.name}`'s effect row, or widen an existing row to cover it")
+    sema_error("E1264", node.row_span ?? node.name_span, "`{node.name}` reads a secret but doesn't declare the `Secret` effect", "reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other effects, there is no silently-inferred default here, so a function must opt in even with no other explicit effect row at all.", "add `-[Secret]>` to `{node.name}`'s signature (or widen an existing effect row to cover it)")
 }
 
 fn sema_effect_unbounded_dispatch_diagnostic(dispatch: TEffectSpan) -> Diagnostic {

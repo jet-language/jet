@@ -4762,7 +4762,13 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         return sema_expr_expected(compared, expected, environment, program, &diagnostics)
     }
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty)) {
-        &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
+        // Rust binary.rs: only a named left operand owns a missing hook
+        // (E0360); a built-in left operand (`2 - debt`) has no rule for the
+        // pair (E0109).
+        if lhs.ty == {
+            .Named(_) -> &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
+            else -> &diagnostics.push(sema_expr_op_mismatch(op, lhs.ty, rhs.ty, span))
+        }
         return None
     }
 

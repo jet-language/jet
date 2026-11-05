@@ -2065,6 +2065,11 @@ fn sema_expression_field_is_shorthand(field: ExprField) -> Bool Never! {
 fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if value.ty == head -> return false
     facts :: sema_expr_distinct_facts(head, environment, program, &scopes) ?? return false
+    // A value that already has the head's distinct type (`Meters{a + b}` for
+    // `Meters` operands) is no re-typing, whatever spelling its type carries.
+    if sema_expr_distinct_facts(sema_expr_unwrap_tag(value.ty), environment, program, &scopes) == .Val(own) {
+        if own.key == facts.key -> return false
+    }
     offered :: type_name(value.ty)
     method :: if value.ty == {
         .Int -> "from_int"

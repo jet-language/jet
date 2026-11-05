@@ -8589,7 +8589,7 @@ fn sema_check_script_entries(graph: SemaRegistrationGraph, diagnostics: &[Diagno
         span :: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
         start :: diagnostics.len()
         if {
-            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> &diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].module_path}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `fn run`", "move the statements into the entry file's `fn run`, or import a declaration-only file"))
+            graph.modules[source_module_index].module_identity != graph.entry_module_identity -> &diagnostics.push(sema_error("E0620", span, "imported script `{graph.modules[source_module_index].source_file}` has executable top-level statements", "imported files provide declarations; executable code belongs in an explicit `fn run`, so an import never gains a hidden side effect.", "move the statements into the entry file's `fn run`, or import a declaration-only file"))
             else -> &diagnostics.push(sema_error("E0621", span, "top-level executable statements require an explicit `fn run`", "Jet does not invent a runtime function for ordinary files; only `fn run` executes code", "move the statements into `fn run`"))
         }
         sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
