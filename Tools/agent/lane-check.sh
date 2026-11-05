@@ -12,7 +12,8 @@
 # unit the native self-host builds) with JET_KEEP_GOING=1, so every error in
 # every item is reported at once. A path argument checks that file or project
 # instead. Every mode first runs personal-info-guard.sh, which refuses any file
-# naming this machine's home, user, host, email or mounts (#6564 c5).
+# naming this machine's home, user, host, email or mounts (#6564 c5), and
+# Jetpack/Bootstrap/compiler-slice.mjs, which refuses a drifted compiler slice.
 #
 # What this is NOT: it does not run tests, does not run formatters, does not
 # regenerate artifacts, does not build a compiler. Those stay with the
@@ -34,6 +35,12 @@ repo="$PWD"
 
 if ! bash Tools/agent/personal-info-guard.sh "$repo"; then
   echo "CHECK FAILED — personal or machine information in the checkout (see above)"
+  exit 1
+fi
+
+if ! slice="$(node Jetpack/Bootstrap/compiler-slice.mjs 2>&1)"; then
+  printf '%s\n' "$slice"
+  echo "CHECK FAILED — the Jetpack compiler slice drifted from the compiler's packages (see above)"
   exit 1
 fi
 
