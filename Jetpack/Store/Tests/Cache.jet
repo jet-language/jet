@@ -35,8 +35,8 @@ fn store_cache_test_root(label: String) -> String Never! {
     endpoints :: [String]{"daemon://", "nix://local"}
     loop endpoint in endpoints {
         if store_cache_parse_endpoint(endpoint) == {
-            .Ok(_) -> panic("a Nix store endpoint must be retired")
-            .Err(error) -> assert(error.message().contains("retired"))
+            .Ok(_) -> panic("a Nix store endpoint must be refused")
+            .Err(error) -> assert(error.message().contains("Nix store endpoints are not supported"), error.message())
         }
     }
 }

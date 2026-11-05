@@ -382,7 +382,11 @@ if (( with_tests == 1 && overall == 0 )); then
   exec 9>"$state/slots/aot"
   flock 9
   aot_status=0
-  bounded aot "$aot_mem" 1800 "$scratch/aot/project" "$jet" test src/jetpack.jet || aot_status=$?
+  # Serial: claims set process-wide state (environment variables, the working
+  # directory), so one process can't run them concurrently; an unserial batch
+  # dies without a claim to attribute it to ("no individually selected child
+  # reproduced the failure").
+  bounded aot "$aot_mem" 1800 "$scratch/aot/project" "$jet" test src/jetpack.jet --serial || aot_status=$?
   flock -u 9
   rm -rf "$scratch/aot/project/.jet/build"
   # `jet test` exits 1 when a claim fails; any other stop, or no summary line,
