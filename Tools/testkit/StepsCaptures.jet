@@ -53,8 +53,9 @@ fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx
     if subject.starts_with("cap:") -> text = kit_steps_state_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state) ?? return Err("captured subject unavailable")
     if subject == "file" || subject == "file?" {
         location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("capture file escapes work")
+        // Rust `from_utf8_lossy`: a binary file's text pieces stay capturable.
         if subject == "file?" && !files.exists(location) -> text = ""
-        else -> text = files.read(location) ?? return Err("capture file: {err}")
+        else -> text = kit_steps_utf8_lossy(files.read_bytes(location) ?? return Err("capture file: {err}"))
     }
     Ok(kit_steps_transform(text, kit_steps_subject_transform(selector)) ?? return Err("capture subject transform failed"))
 }

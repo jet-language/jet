@@ -208,16 +208,18 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCL
         if item.diagnostic == None -> proved += 1 else -> failed += 1
     }
     // Capture and replay refuse what they cannot model before any program
-    // runs. A target that passed reaches the replay producer, which is not
-    // built; one whose front end failed reports that failure instead.
+    // runs. A target whose front end failed reports that failure instead,
+    // with no artifact; one that passed runs with the recorded clock.
+    session := JetCLIReplayRun?{None}
     if capture != None || replay != None {
-        refused :: jet_cli_prove_replay_checks(identity.authority_root, members, capture, replay, color, json)
-        if refused == .Val(output) -> return output
-        if failed == 0 -> return jet_cli_not_ported_output(jet_cli_prove_replay_form(capture), color)
+        checked :: jet_cli_prove_replay_checks(identity, members, capture, replay, color, json) ?? return err.output
+        if failed == 0 -> session = Val(checked)
     }
+    time_ms := Int?{None}
+    if session == .Val(run) -> time_ms = Val(run.time_ms)
     tests := JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts.copy(), consumed: [JetCLIRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
     if failed == 0 {
-        ran :: jet_cli_prove_tests(identity, members, groups, cwd, front.contracts) ?? return jet_cli_prove_refused(err, color, json)
+        ran :: jet_cli_prove_tests(identity, members, groups, cwd, front.contracts, time_ms) ?? return jet_cli_prove_refused(err, color, json)
         tests = ran
     }
     test_failed := 0
@@ -246,7 +248,24 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCL
     // A run that already failed gets no E2942: its failures name their fixes.
     below :: if exit_code == JET_DRIVER_EXIT_OK -> jet_cli_claims_below_floor(grade, floor, target.root) else -> None
     if below != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
-    report :: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, solver, proved, failed, grade, floor, exit_code) ?? return jet_cli_ice(err.message)
+    // A replay reproduces the captured run's exit or it diverged; a capture
+    // records how this run ended. An internal error does neither.
+    replayed := JetCLIReplayArtifact?{None}
+    replay_note := ""
+    if session == .Val(run) {
+        if exit_code != JET_CLI_EXIT_ICE && run.replayed == .Val(artifact) {
+            if exit_code != artifact.status {
+                return jet_cli_prove_refused(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the replayed run exited {exit_code}, but the captured run exited {artifact.status}", "recapture and replay the matching target"), color, json)
+            }
+            replayed = Val(artifact.copy())
+            replay_note = "REPLAY   reproduced {artifact.artifact_id} · parity: not available\n"
+        }
+        if exit_code != JET_CLI_EXIT_ICE && capture == .Val(request) {
+            written :: jet_cli_replay_capture_write(identity, request, run, exit_code) ?? return jet_cli_prove_refused(err, color, json)
+            replay_note = "REPLAY   captured {written}\n"
+        }
+    }
+    report :: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, solver, proved, failed, grade, floor, replayed, exit_code) ?? return jet_cli_ice(err.message)
     // Rust `run_prove`: an internal compiler error produces no evidence artifact.
     if exit_code != JET_CLI_EXIT_ICE {
         jet_cli_prove_write(identity, report, tests.consumed) ?? return jet_cli_prove_refused(err, color, json)
@@ -259,7 +278,7 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCL
         status :: jet_cli_status_render_with_reports("prove", exit_code == JET_DRIVER_EXIT_OK, reports, [JetCLIStatusField]{jet_cli_status_field("proof", JetCLIStatusValue.Float{text: report})})
         return JetDriverVerbOutput{stdout: "{status}\n", stderr: "", exit_code: exit_code}
     }
-    human :: jet_cli_prove_human(members, front, tests, budgets, solver, lenses, proved, failed, jet_cli_prove_claims_text(grade, floor), jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets, solver), color, exit_code)
+    human :: jet_cli_prove_human(members, front, tests, budgets, solver, lenses, proved, failed, jet_cli_prove_claims_text(grade, floor), replay_note, jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets, solver), color, exit_code)
     if below == .Val(diagnostic) -> return JetDriverVerbOutput{stdout: human.stdout, stderr: "{human.stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}", exit_code: human.exit_code}
     human
 }
@@ -647,7 +666,8 @@ fn jet_cli_prove_fact(identity: JetCLIProveIdentity, member: JetCLIProveMember, 
 // JET_PROP_SEED reaches the child, whose properties fail naming the range.
 // A test that ended at an uncaught runtime stop makes the run exit 70, and
 // each `declared` contract is settled by what the children observed of it.
-fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, declared: [JetCLIProveContract]) -> JetCLIProveTests JetCLIProveRefusal! {
+// A capture or replay hands every child its one wall-clock value, `time_ms`.
+fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, declared: [JetCLIProveContract], time_ms: Int?) -> JetCLIProveTests JetCLIProveRefusal! {
     items := [JetCLIProveTestItem]{}
     observed := [JetCLIProveObserved]{}
     consumed := [JetCLIRecordLink]{}
@@ -684,6 +704,7 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
             .timeout(120s)
             .output_limit(67108864)
         if requested == None -> spec = spec.env("JET_PROP_SEED", "{seed}")
+        if time_ms == .Val(ms) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{ms}")
         receipt :: spec.run() ?? {
             &items.push(unavailable.copy())
             next
@@ -1054,7 +1075,7 @@ fn jet_cli_prove_budget_json(count: JetCLIProveBudgetCount) -> String Never! {
 // `render_report`, canonicalized (A-canonical JSON: sorted keys, no
 // whitespace). The exact bytes are the `--json` proof and the artifact's
 // `proofReport`.
-fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], proved: Int, failed: Int, grade: ClaimsGrade, floor: ClaimsGrade?, exit_code: Int) -[FS, Env]> String JetCLIReadError! {
+fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], proved: Int, failed: Int, grade: ClaimsGrade, floor: ClaimsGrade?, replayed: JetCLIReplayArtifact?, exit_code: Int) -[FS, Env]> String JetCLIReadError! {
     diagnostics := [String]{}
     rows := [JetCLIProveRow]{}
     loop item in front.items {
@@ -1176,6 +1197,15 @@ fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         }
         outcome :: jet_cli_solver_status(row)
         &rows.push(JetCLIProveRow{id: row.id.copy(), kind: "solver", producer: JET_CLI_SOLVER_BACKEND, outcome: outcome, state: "checked", body: jet_cli_solver_row_body(row, indexes)})
+    }
+    // A replay row says the run reproduced the captured exit from the
+    // recorded clock. Only the mir-v1 adapter ran, so no parity with a
+    // second adapter is claimed.
+    if replayed == .Val(artifact) {
+        id :: jet_cli_prove_evidence_id(identity, "replay", identity.root, "0:0-0:0", "replay {artifact.artifact_id}")
+        attachment :: "{{\"replayArtifactId\":{foundation_json_quote(artifact.artifact_id)}}}"
+        body :: "{{\"attachment\":{attachment},\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"replay\",\"id\":{foundation_json_quote(id)},\"kind\":\"replay\",\"outcome\":\"passed\",\"producer\":\"jet-replay\",\"property\":null,\"reason\":\"parity_not_available\",\"solver\":null,\"source\":{root_source},\"state\":\"executed\""
+        &rows.push(JetCLIProveRow{id: id, kind: "replay", producer: "jet-replay", outcome: "passed", state: "executed", body: body})
     }
     deterministic := JetCLIProveBudgetCount{}
     statistical := JetCLIProveBudgetCount{}
@@ -1387,7 +1417,7 @@ fn jet_cli_prove_line_span(source: String, line: Int) -> Span? Never! {
 // front-end errors (facet `all`) and every stop always show, anything else
 // failed or incomplete is listed outside the selection, and the exit and
 // the report never change.
-fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], lenses: [String], proved: Int, failed: Int, claims: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
+fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], lenses: [String], proved: Int, failed: Int, claims: String, replay: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
     stdout := if lenses.len() > 0 -> "LENSES   {jet_cli_prove_lens_names(lenses).join(", ")}\n" else -> ""
     stdout = "{stdout}CLAIMS   grade: {claims}\n"
     if failed > 0 || jet_cli_prove_lens_checked(lenses) -> stdout = "{stdout}CHECKED  front end: {proved} proved, {failed} failed\n"
@@ -1443,7 +1473,7 @@ fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, te
             if jet_cli_solver_diagnostic(row) == .Val(diagnostic) -> stderr = "{stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}"
         }
     }
-    stdout = "{stdout}RESULT   {result}\n"
+    stdout = "{stdout}{replay}RESULT   {result}\n"
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
 }
 

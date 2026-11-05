@@ -1,15 +1,17 @@
-// `jet prove --capture`, `--capture-sensitive` and `--replay` up to their
-// producer (Docs/spec/proof-replay-decisions.md, "Replay wire format" and
-// "Replay privacy, identity, and delivery"): the static authority preflight of
-// the one target, the explicit capture destination, and the complete reader of
-// a `.jetproof-replay` artifact. Every refusal here comes before a program
-// runs and leaves no artifact. A run that passes every check reaches the
-// producer, which is not built (E2104).
+// `jet prove --capture`, `--capture-sensitive` and `--replay`
+// (Docs/spec/proof-replay-decisions.md, "Replay wire format" and "Replay
+// privacy, identity, and delivery"): the static authority preflight of the one
+// target, the explicit capture destination, the writer and the complete
+// reader of a `.jetproof-replay` artifact. Every refusal here comes before a
+// program runs and leaves no artifact. Safe capture records one wall-clock
+// value, which the run's programs read through JET_CLI_REPLAY_TIME_ENV; replay
+// hands them the recorded value the same way.
 use {
     cli_files :: core.files
     cli_term :: core.term
     cli_time :: core.time
     prove_crypto :: core.crypto
+    replay_random :: core.crypto.random
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
         CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
@@ -27,6 +29,8 @@ JET_CLI_REPLAY_MAX_PAYLOAD :: 1048576
 JET_CLI_REPLAY_MAX_HEADER :: 4194304
 // The largest integer canonical JSON writes as decimal (2^53 - 1).
 JET_CLI_REPLAY_MAX_EXACT :: 9007199254740991
+// The largest signed 64-bit clock value.
+JET_CLI_REPLAY_MAX_I64 :: 9223372036854775807
 JET_CLI_REPLAY_ADAPTER :: "mir-v1"
 // Frame kinds: TimeWall, and the RunAct extension.
 JET_CLI_REPLAY_KIND_TIME :: 1
@@ -39,6 +43,27 @@ JET_CLI_REPLAY_KINDS_V1 :: [Int]{2, 3, 16, 32, 33, 34, 48, 49, 50, 51, 52, 240, 
 JET_CLI_REPLAY_IO_BUILTINS :: [String]{"print", "eprint", "input", "read_all_input"}
 JET_CLI_REPLAY_IDENTITY_KEYS :: [String]{"abi", "build_digest", "core_abi", "entry", "execution_adapter", "lock_digest", "mir_identity", "mir_schema", "optimized_mir_hash", "profile", "semantic_mir_hash", "source_digest", "target_triple", "time_site_id"}
 JET_CLI_REPLAY_MIR_KEYS :: [String]{"core_ids", "function_ids", "identity_digest", "optimized_hash", "schema", "semantic_hash", "source_map", "target_facts"}
+// The runtime's wall-clock override (JetRuntime HostTime.jet
+// `jet_time_raw_wall_override_ms`), in Unix milliseconds.
+JET_CLI_REPLAY_TIME_ENV :: "JET_PROVE_REPLAY_TIME_MS"
+
+// A verified artifact: its id, the target identity it is bound to, the one
+// recorded wall-clock value, and the exit status of the captured run.
+struct JetCLIReplayArtifact {
+    artifact_id: String
+    identity: [CanonicalJSONField]
+    unix_ns: Int
+    status: Int
+}
+
+// A capture or replay whose checks passed: the wall-clock value the run's
+// programs read, the target identity, and the replayed artifact.
+struct JetCLIReplayRun {
+    time_ms: Int
+    identity: [CanonicalJSONField]
+    site_id: String
+    replayed: JetCLIReplayArtifact?
+}
 
 // One reachable call the replay authority must model: `authority` is None for
 // an opaque boundary (an unknown callee, an unsafe or concurrent region).
@@ -71,23 +96,219 @@ fn jet_cli_replay_refusal(code: String, what: String, why: String, fix: String) 
     JetCLIProveRefusal{code: code, what: what, why: why, fix: fix, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// The capture or replay form of `jet prove` before its producer: the refusal
-// output, or None when every check passed.
-fn jet_cli_prove_replay_checks(root: String, members: [JetCLIProveMember], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool) -> JetDriverVerbOutput? {
+// The capture or replay form of `jet prove` once its checks pass, or the
+// refusal output.
+fn jet_cli_prove_replay_checks(identity: JetCLIProveIdentity, members: [JetCLIProveMember], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool) -> JetCLIReplayRun JetCLIProveStop! {
+    root :: identity.authority_root
     sites :: jet_cli_replay_sites(members)
+    site_id :: jet_cli_replay_site_id(identity, members, sites)
+    expected :: jet_cli_replay_target_identity(identity, members, site_id)
     if capture == .Val(request) {
-        refusal :: jet_cli_replay_capture_refusal(root, request, sites) ?? return None
-        return Val(jet_cli_prove_refused(refusal, color, json))
+        if jet_cli_replay_capture_refusal(root, request, sites) == .Val(refusal) -> return Err(JetCLIProveStop{output: jet_cli_prove_refused(refusal, color, json)})
+        // Consent from a terminal reaches here, but no writer records raw
+        // Rand, IO or Net values yet.
+        if request.sensitive -> return Err(JetCLIProveStop{output: jet_cli_not_ported_output("prove --capture-sensitive", color)})
+        return Ok(JetCLIReplayRun{time_ms: jet_cli_replay_clock_ms(), identity: expected, site_id: site_id, replayed: None})
     }
-    raw :: replay ?? return None
-    refusal :: jet_cli_replay_input_refusal(root, raw, sites) ?? return None
-    Val(jet_cli_prove_refused(refusal, color, json))
+    raw :: replay ?? return Err(JetCLIProveStop{output: jet_cli_ice("prove replay checks ran without --capture or --replay")})
+    artifact :: jet_cli_replay_input(root, raw, sites, expected) ?? return Err(JetCLIProveStop{output: jet_cli_prove_refused(err, color, json)})
+    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, replayed: Val(artifact)})
 }
 
-// The command form the producer would run.
-fn jet_cli_prove_replay_form(capture: JetCLIProveCapture?) -> String Never! {
-    if capture == .Val(request) -> return if request.sensitive -> "prove --capture-sensitive" else -> "prove --capture"
-    "prove --replay"
+// One wall-clock read, at the millisecond the runtime hands programs. A
+// reading whose nanoseconds would encode as all-digit hex, which the reader
+// takes for decimal, is read again a millisecond later.
+fn jet_cli_replay_clock_ms() -> Int {
+    loop {
+        ms :: cli_time.unix_ns() /% 1000000
+        if jet_cli_replay_u64_value(jet_cli_replay_u64_text(ms * 1000000)) == .Val(back) {
+            if back == ms * 1000000 -> return ms
+        }
+        cli_time.sleep(1ms)
+    }
+}
+
+// The target identity a capture records and a replay must match: the proof
+// digests, the entry, the adapter and the one Time site.
+fn jet_cli_replay_target_identity(identity: JetCLIProveIdentity, members: [JetCLIProveMember], site_id: String) -> [CanonicalJSONField] {
+    triple :: jet_cli_prove_triple()
+    parts :: triple.split("-").to_list()
+    // Keys in byte order, as canonical JSON writes them.
+    [CanonicalJSONField]{
+        jet_cli_replay_string("abi", parts[parts.len() - 1]),
+        jet_cli_replay_string("build_digest", identity.build_digest),
+        jet_cli_replay_string("core_abi", identity.core_abi),
+        jet_cli_replay_string("entry", jet_cli_replay_entry(identity.authority_root, members)),
+        jet_cli_replay_string("execution_adapter", JET_CLI_REPLAY_ADAPTER),
+        jet_cli_replay_string("lock_digest", identity.lock_digest),
+        jet_cli_replay_string("mir_identity", identity.mir_json),
+        jet_cli_replay_string("mir_schema", JET_CLI_REPLAY_ADAPTER),
+        jet_cli_replay_string("optimized_mir_hash", identity.mir_hash),
+        jet_cli_replay_string("profile", "dev"),
+        jet_cli_replay_string("semantic_mir_hash", identity.mir_hash),
+        jet_cli_replay_string("source_digest", identity.source_digest),
+        jet_cli_replay_string("target_triple", triple),
+        jet_cli_replay_string("time_site_id", site_id),
+    }
+}
+
+fn jet_cli_replay_string(key: String, value: String) -> CanonicalJSONField Never! {
+    CanonicalJSONField{key: key, value: CanonicalJSON.String(value)}
+}
+
+fn jet_cli_replay_integer_field(key: String, value: Int) -> CanonicalJSONField Never! {
+    CanonicalJSONField{key: key, value: CanonicalJSON.Integer("{value}")}
+}
+
+// The first member's path below the authority root.
+fn jet_cli_replay_entry(root: String, members: [JetCLIProveMember]) -> String Never! {
+    if members.len() == 0 -> return ""
+    absolute :: members[0].absolute
+    if absolute.starts_with("{root}/") -> return absolute.removeprefix("{root}/")
+    jet_cli_file_name(absolute)
+}
+
+// The one `core.time.now` site the Time record answers, named by the entry,
+// the source digest and the call; a target with no such site still gets a
+// distinct id, which replay refuses as E3623.
+fn jet_cli_replay_site_id(identity: JetCLIProveIdentity, members: [JetCLIProveMember], sites: [JetCLIReplaySite]) -> String Never! {
+    operation := "none"
+    loop site in sites {
+        if operation == "none" && jet_cli_replay_is_time_now(site) -> operation = site.operation.copy()
+    }
+    out := [U8]{}
+    loop field in ([String]{"jet.replay.v1/time-site", jet_cli_replay_entry(identity.authority_root, members), identity.source_digest, operation}) -> jet_cli_receipt_frame(&out, field.bytes())
+    prove_crypto.sha256(out).hex()
+}
+
+// The v1 bytes of one safe Time capture: the canonical header, one TimeWall
+// frame and the footer, with the content id in place.
+fn jet_cli_replay_encode(run: JetCLIReplayRun, salt: String, status: Int) -> [U8] Never! {
+    header :: jet_cli_replay_header_bytes("0".repeat(24), run.identity, salt, status)
+    out := "JREPLAY".bytes()
+    &out.push(U8{0})
+    jet_cli_replay_put_le(&out, 1, 2)
+    jet_cli_replay_put_le(&out, 0, 2)
+    jet_cli_replay_put_le(&out, header.len(), 4)
+    &out.extend(header)
+    ns :: CanonicalJSON.Object([CanonicalJSONField]{
+        jet_cli_replay_integer_field("bits", 64),
+        jet_cli_replay_string("t", "int"),
+        jet_cli_replay_string("v", jet_cli_replay_u64_text(run.time_ms * 1000000)),
+    })
+    record :: canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        jet_cli_replay_integer_field("call_id", 0),
+        jet_cli_replay_string("site_id", run.site_id),
+        CanonicalJSONField{key: "unix_ns", value: ns},
+    }))
+    payload :: record.slice(0, record.len() - 1)
+    frame := [U8]{U8{1}}
+    jet_cli_replay_put_le(&frame, JET_CLI_REPLAY_KIND_TIME, 2)
+    jet_cli_replay_put_le(&frame, 0, 8)
+    jet_cli_replay_put_le(&frame, payload.len(), 4)
+    &frame.extend(payload)
+    &out.extend(frame)
+    &out.extend(prove_crypto.sha256(frame).as_bytes())
+    // With the id zeroed, these bytes are what the content id hashes.
+    id :: prove_crypto.sha256(out).hex().slice(0, 24)
+    bytes := out.slice(0, 32)
+    &bytes.extend(id.bytes())
+    &bytes.extend(out.slice(56, out.len()))
+    footer_hash :: prove_crypto.sha256(bytes).as_bytes()
+    &bytes.extend("JEND".bytes())
+    jet_cli_replay_put_le(&bytes, 1, 8)
+    jet_cli_replay_put_le(&bytes, payload.len(), 8)
+    &bytes.extend(footer_hash)
+    bytes
+}
+
+// The canonical header, without its trailing LF.
+fn jet_cli_replay_header_bytes(artifact_id: String, identity: [CanonicalJSONField], salt: String, status: Int) -> [U8] Never! {
+    header :: canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        jet_cli_replay_string("artifact_id", artifact_id),
+        CanonicalJSONField{key: "capture", value: CanonicalJSON.Object([CanonicalJSONField]{
+            jet_cli_replay_string("mode", "safe"),
+            CanonicalJSONField{key: "roots", value: CanonicalJSON.Array([CanonicalJSON]{CanonicalJSON.String("Time")})},
+        })},
+        CanonicalJSONField{key: "identity", value: CanonicalJSON.Object(identity)},
+        CanonicalJSONField{key: "limits", value: CanonicalJSON.Object([CanonicalJSONField]{
+            jet_cli_replay_integer_field("frames", JET_CLI_REPLAY_MAX_FRAMES),
+            jet_cli_replay_integer_field("payload_bytes", JET_CLI_REPLAY_MAX_ARTIFACT),
+        })},
+        jet_cli_replay_string("privacy_salt", salt),
+        jet_cli_replay_string("producer", "jet-prove"),
+        CanonicalJSONField{key: "run", value: CanonicalJSON.Object([CanonicalJSONField]{
+            jet_cli_replay_string("outcome", if status == JET_CLI_EXIT_RUNTIME_STOP -> "panic" else -> "exit"),
+            jet_cli_replay_integer_field("status", status),
+        })},
+        jet_cli_replay_string("schema", "jet.replay"),
+        CanonicalJSONField{key: "version", value: CanonicalJSON.Object([CanonicalJSONField]{
+            jet_cli_replay_integer_field("major", 1),
+            jet_cli_replay_integer_field("minor", 0),
+        })},
+    }))
+    header.slice(0, header.len() - 1)
+}
+
+// `value` (at least zero) as `width` little-endian bytes.
+fn jet_cli_replay_put_le(out: &[U8], value: Int, width: Int) Never! {
+    rest := value
+    loop _ in 0..<width {
+        &out.push(U8.from_int(rest %% 256) ?? panic("replay wire byte"))
+        rest /%= 256
+    }
+}
+
+// Writes this run's capture and returns where the record index keeps it.
+// The bytes pass the reader before any is published. The default name is
+// `.jet/replays/<entry>-<id[0..12]>`; an explicit path is an export, with
+// the indexed copy at `.jet/replays/<id>`.
+fn jet_cli_replay_capture_write(identity: JetCLIProveIdentity, request: JetCLIProveCapture, run: JetCLIReplayRun, status: Int) -> String JetCLIProveRefusal! {
+    root :: identity.authority_root
+    salt :: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
+    bytes :: jet_cli_replay_encode(run, salt, status)
+    verified :: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_unfinalized("the encoded artifact failed its own check: {err.why}"))
+    id :: verified.artifact_id
+    entry :: jet_cli_replay_field_value(run.identity, "entry")
+    name :: if request.path == None -> "{jet_cli_replay_entry_stem(entry)}-{id.slice(0, 12)}.jetproof-replay" else -> "{id}.jetproof-replay"
+    jet_cli_replay_publish(root, [String]{".jet", "replays"}, name, bytes)
+    if request.path == .Val(path) {
+        parts :: path.split("/").to_list()
+        folders := [String]{}
+        loop index in 0..<(parts.len() - 1) -> &folders.push(parts[index].copy())
+        jet_cli_replay_publish(root, folders, parts[parts.len() - 1], bytes)
+    }
+    indexed :: ".jet/replays/{name}"
+    index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_unfinalized(err.message))
+    record :: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-prove-v1"}
+    row :: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
+    jet_cli_record_index_publish_and_store(&index, root, ^row) ?? return Err(jet_cli_replay_unfinalized(err.message))
+    Ok(indexed)
+}
+
+// Publishes `bytes` as `name` in the real folders `parts` below `root`,
+// through a mode-0600 temporary, never replacing different bytes.
+fn jet_cli_replay_publish(root: String, parts: [String], name: String, bytes: [U8]) JetCLIProveRefusal! {
+    held :: JetCLIRootedDirectory.open(root, parts, true) ?? return Err(jet_cli_replay_unfinalized(err.message))
+    _ :: held.publish_immutable(name, bytes, Val(0o600), JET_CLI_REPLAY_MAX_ARTIFACT) ?? return Err(jet_cli_replay_unfinalized(err.message))
+}
+
+fn jet_cli_replay_unfinalized(why: String) -> JetCLIProveRefusal Never! {
+    jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", why, "fix the path and retry capture")
+}
+
+// The entry's file stem with every byte but ASCII letters, digits, `-` and
+// `_` as `_`.
+fn jet_cli_replay_entry_stem(entry: String) -> String Never! {
+    stem :: jet_cli_file_name(entry).removesuffix(".jet")
+    out := [U8]{}
+    loop byte in stem.bytes() {
+        code :: Int.from_u8(byte)
+        keep :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
+        &out.push(if keep -> byte else -> U8{95})
+    }
+    if out.len() == 0 -> return "replay"
+    String.from_bytes(out) ?? "replay"
 }
 
 // --- capture -----------------------------------------------------------------
@@ -158,27 +379,47 @@ fn jet_cli_replay_unmodeled(operation: String, why: String, fix: String) -> JetC
 // --- replay ------------------------------------------------------------------
 
 // A replay names an indexed replay id or a project-relative artifact. The
-// artifact is verified whole before any value could be injected; the target
-// preflight runs first when there is no artifact to read.
-fn jet_cli_replay_input_refusal(root: String, raw: String, sites: [JetCLIReplaySite]) -> JetCLIProveRefusal? {
-    index :: jet_cli_record_index_load(root) ?? return Val(jet_cli_replay_refusal("E2105", "could not load the replay record index", err.message, "repair or remove the project's `.jet/records` index, then run the command again"))
+// artifact is verified whole, then bound to the current target's exact
+// identity (E3621), before any value could be injected; the target preflight
+// runs first when there is no artifact to read.
+fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], expected: [CanonicalJSONField]) -> JetCLIReplayArtifact JetCLIProveRefusal! {
+    index :: jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_refusal("E2105", "could not load the replay record index", err.message, "repair or remove the project's `.jet/records` index, then run the command again"))
     found :: jet_cli_record_index_find(index, "replay", raw, true)
     if found == None {
-        if jet_cli_replay_input_problem(raw) == .Val(problem) -> return Val(jet_cli_replay_refusal("E3622", "replay artifact path is invalid", problem, "use an indexed replay id or a canonical `.jetproof-replay` path"))
+        if jet_cli_replay_input_problem(raw) == .Val(problem) -> return Err(jet_cli_replay_refusal("E3622", "replay artifact path is invalid", problem, "use an indexed replay id or a canonical `.jetproof-replay` path"))
     }
     relative :: if found == .Val(entry) -> entry.path.copy() else -> raw.copy()
     present :: cli_files.lexists(jet_cli_entry_join(root, relative))
     if !present {
-        if jet_cli_replay_target_refusal(sites) == .Val(refusal) -> return Val(refusal)
+        if jet_cli_replay_target_refusal(sites) == .Val(refusal) -> return Err(refusal)
     }
-    if jet_cli_replay_verify_file(root, relative, raw) == .Err(fault) -> return Val(jet_cli_replay_fault_refusal(fault))
+    artifact :: jet_cli_replay_verify_file(root, relative, raw) ?? return Err(jet_cli_replay_fault_refusal(err))
+    if jet_cli_replay_identity_change(artifact.identity, expected) == .Val(key) {
+        return Err(jet_cli_replay_refusal("E3621", "replay semantic identity does not match", "the recorded `{key}` differs from the current target's", "replay the exact recorded revision, or recapture this one"))
+    }
     if present {
-        if jet_cli_replay_target_refusal(sites) == .Val(refusal) -> return Val(refusal)
+        if jet_cli_replay_target_refusal(sites) == .Val(refusal) -> return Err(refusal)
     }
     if jet_cli_replay_time_count(sites) == 0 {
-        return Val(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target has no statically identified `core.time.now` call site for the captured Time record", "replay the matching target, or recapture a target with one supported Time call"))
+        return Err(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target has no statically identified `core.time.now` call site for the captured Time record", "replay the matching target, or recapture a target with one supported Time call"))
+    }
+    Ok(artifact)
+}
+
+// The first identity key whose recorded value differs from `expected`, or
+// None when the identities are the same.
+fn jet_cli_replay_identity_change(recorded: [CanonicalJSONField], expected: [CanonicalJSONField]) -> String? Never! {
+    loop key in JET_CLI_REPLAY_IDENTITY_KEYS {
+        if jet_cli_replay_field_value(recorded, key) != jet_cli_replay_field_value(expected, key) -> return Val(key.copy())
     }
     None
+}
+
+fn jet_cli_replay_field_value(fields: [CanonicalJSONField], key: String) -> String Never! {
+    loop field in fields {
+        if field.key == key && field.value == .String(text) -> return text.copy()
+    }
+    ""
 }
 
 // A replay input that is not an index id: a project-relative path to a
@@ -229,7 +470,7 @@ fn jet_cli_replay_fault_refusal(fault: JetCLIReplayFault) -> JetCLIProveRefusal 
 
 // Opens `relative` under `root` through real directories only, then verifies
 // the bytes. `shown` is the input as the user wrote it.
-fn jet_cli_replay_verify_file(root: String, relative: String, shown: String) JetCLIReplayFault! {
+fn jet_cli_replay_verify_file(root: String, relative: String, shown: String) -> JetCLIReplayArtifact JetCLIReplayFault! {
     parts :: relative.split("/").to_list()
     current := root.copy()
     parent := ""
@@ -251,8 +492,10 @@ fn jet_cli_replay_verify_file(root: String, relative: String, shown: String) Jet
 
 // The v1 wire format: `JREPLAY\0`, u16 major and minor, u32 header length,
 // the canonical JSON header, frames, then `JEND`, u64 frame count, u64
-// payload-byte count and the SHA-256 of every byte before `JEND`.
-fn jet_cli_replay_verify(bytes: [U8]) JetCLIReplayFault! {
+// payload-byte count and the SHA-256 of every byte before `JEND`. After the
+// prefix and its bounds, the footer hash comes first: a changed byte is
+// corruption (E3622) whatever the changed text would parse as.
+fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault! {
     if bytes.len() < 68 || !jet_cli_replay_has_magic(bytes) -> return Err(jet_cli_replay_corrupt("missing JREPLAY magic"))
     major :: jet_cli_replay_le(bytes, 8, 2)
     minor :: jet_cli_replay_le(bytes, 10, 2)
@@ -261,6 +504,9 @@ fn jet_cli_replay_verify(bytes: [U8]) JetCLIReplayFault! {
     header_end :: 16 + header_length
     if header_end + 52 > bytes.len() -> return Err(jet_cli_replay_corrupt("truncated header"))
     if header_length > JET_CLI_REPLAY_MAX_HEADER -> return Err(jet_cli_replay_limit("replay header exceeds the {JET_CLI_REPLAY_MAX_HEADER}-byte limit"))
+    jend :: bytes.len() - 52
+    if !jet_cli_replay_has_jend(bytes, jend) -> return Err(jet_cli_replay_corrupt("missing JEND footer"))
+    if prove_crypto.sha256(bytes.slice(0, jend)).as_bytes() != bytes.slice(jend + 20, bytes.len()) -> return Err(jet_cli_replay_corrupt("footer hash mismatch"))
     header :: bytes.slice(16, header_end)
     _ :: String.from_bytes(header) ?? return Err(jet_cli_replay_corrupt("header is not UTF-8"))
     root :: jet_cli_replay_json(header, "header")
@@ -270,10 +516,7 @@ fn jet_cli_replay_verify(bytes: [U8]) JetCLIReplayFault! {
             return Err(jet_cli_replay_corrupt("header must be a JSON object"))
         }
     }
-    artifact_id :: jet_cli_replay_header(fields)
-    jend :: bytes.len() - 52
-    if !jet_cli_replay_has_jend(bytes, jend) -> return Err(jet_cli_replay_corrupt("missing JEND footer"))
-    if prove_crypto.sha256(bytes.slice(0, jend)).as_bytes() != bytes.slice(jend + 20, bytes.len()) -> return Err(jet_cli_replay_corrupt("footer hash mismatch"))
+    artifact := jet_cli_replay_header(fields)
     at := header_end
     frames := 0
     payload_bytes := 0
@@ -296,8 +539,12 @@ fn jet_cli_replay_verify(bytes: [U8]) JetCLIReplayFault! {
         if flags != 1 || !jet_cli_replay_le_is(bytes, at + 3, frames) || (frames == 0 && kind != JET_CLI_REPLAY_KIND_TIME) -> return Err(jet_cli_replay_corrupt("replay frame ordering or kind is invalid"))
         payload :: bytes.slice(at + 15, payload_end)
         _ :: String.from_bytes(payload) ?? return Err(jet_cli_replay_corrupt("replay frame payload is not UTF-8"))
-        if kind == JET_CLI_REPLAY_KIND_TIME -> time_frames += 1
-        if kind == JET_CLI_REPLAY_KIND_TIME -> jet_cli_replay_time_payload(payload) else -> jet_cli_replay_act_payload(payload)
+        if kind == JET_CLI_REPLAY_KIND_TIME {
+            time_frames += 1
+            artifact.unix_ns = jet_cli_replay_time_payload(payload)
+        } else {
+            jet_cli_replay_act_payload(payload)
+        }
         frames += 1
         payload_bytes += length
         at = frame_end
@@ -313,11 +560,13 @@ fn jet_cli_replay_verify(bytes: [U8]) JetCLIReplayFault! {
     loop _ in 0..<24 -> &body.push(U8{48})
     &body.extend(bytes.slice(56, jend))
     content :: prove_crypto.sha256(body).hex()
-    if content.slice(0, 24) != artifact_id -> return Err(jet_cli_replay_corrupt("replay artifact_id does not match content"))
+    if content.slice(0, 24) != artifact.artifact_id -> return Err(jet_cli_replay_corrupt("replay artifact_id does not match content"))
+    Ok(artifact)
 }
 
-// The header fields every v1 artifact carries; returns its artifact id.
-fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> String JetCLIReplayFault! {
+// The header fields every v1 artifact carries, as the artifact they describe
+// (its Time value comes from its frame).
+fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> JetCLIReplayArtifact JetCLIReplayFault! {
     jet_cli_replay_keys(fields, "header", [String]{"artifact_id", "capture", "identity", "limits", "privacy_salt", "producer", "run", "schema", "version"}, [String]{"extensions"}, "E3620")
     version :: jet_cli_replay_object(fields, "version", "header")
     jet_cli_replay_keys(version, "header version", [String]{"major", "minor"}, [String]{}, "E3620")
@@ -349,7 +598,7 @@ fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> String JetCLIReplayFau
     if outcome != "exit" && outcome != "panic" -> return Err(jet_cli_replay_corrupt("header run outcome `{outcome}` is invalid"))
     if status < 0 || status > 255 -> return Err(jet_cli_replay_corrupt("header run status is not an exit status"))
     if (outcome == "panic") != (status == JET_CLI_EXIT_RUNTIME_STOP) -> return Err(jet_cli_replay_corrupt("header run outcome and status disagree"))
-    Ok(artifact_id)
+    Ok(JetCLIReplayArtifact{artifact_id: artifact_id, identity: identity, unix_ns: 0, status: status})
 }
 
 // The target identity a replay is bound to.
@@ -399,8 +648,8 @@ fn jet_cli_replay_entry_problem(entry: String) -> Bool Never! {
 }
 
 // A TimeWall record: `{call_id, site_id, unix_ns}` with `unix_ns` a tagged
-// 64-bit integer.
-fn jet_cli_replay_time_payload(payload: [U8]) JetCLIReplayFault! {
+// 64-bit integer. Returns the recorded nanoseconds.
+fn jet_cli_replay_time_payload(payload: [U8]) -> Int JetCLIReplayFault! {
     value :: jet_cli_replay_json(payload, "Time payload")
     fields :: if value == {
         .Object(found) -> found
@@ -418,6 +667,43 @@ fn jet_cli_replay_time_payload(payload: [U8]) JetCLIReplayFault! {
     if !jet_cli_replay_integer_is(unix_ns, "bits", "64") || shape != "int" -> return Err(jet_cli_replay_corrupt("Time payload unix_ns type is invalid"))
     number :: jet_cli_replay_text(unix_ns, "v", "Time payload unix_ns")
     if !jet_cli_replay_canonical_u64(number) -> return Err(jet_cli_replay_corrupt("Time payload unix_ns value is invalid"))
+    // The runtime clock is a signed 64-bit count, so a larger value was never
+    // a reading a program could have made.
+    Ok(jet_cli_replay_u64_value(number) ?? return Err(jet_cli_replay_corrupt("Time payload unix_ns is beyond the signed 64-bit clock")))
+}
+
+// The value of a canonical u64 text as `jet_cli_replay_canonical_u64` reads
+// it: sixteen digits that start with `0` or hold a letter are hex, every
+// other text is decimal. None above the signed 64-bit range.
+fn jet_cli_replay_u64_value(text: String) -> Int? Never! {
+    if text.len() != 16 || (jet_cli_replay_digits(text) && !text.starts_with("0")) {
+        decimal :: Int.parse(text) ?? return None
+        return Val(decimal)
+    }
+    value := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        digit :: if code <= 57 -> code - 48 else -> code - 87
+        if value > (JET_CLI_REPLAY_MAX_I64 - digit) /% 16 -> return None
+        value = value * 16 + digit
+    }
+    Val(value)
+}
+
+// The canonical u64 text of `value` (at least zero): minimal decimal up to
+// 2^53 - 1, else 16 lowercase hex digits. A hex text with no letter reads
+// back as decimal, so a writer checks `jet_cli_replay_u64_value` returns
+// `value` before it records one.
+fn jet_cli_replay_u64_text(value: Int) -> String Never! {
+    if value <= JET_CLI_REPLAY_MAX_EXACT -> return "{value}"
+    digits :: "0123456789abcdef"
+    text := ""
+    rest := value
+    loop _ in 0..<16 {
+        text = "{digits.slice(rest %% 16, rest %% 16 + 1)}{text}"
+        rest /%= 16
+    }
+    text
 }
 
 // A RunAct extension record: `{function, line, locals}`.
