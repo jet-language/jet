@@ -1,12 +1,12 @@
-// KNOWN-FAILING #4840: production EnvModel discards fleet host overrides.
-// Port tests/fleet.rs:54-154; every original predicate, no invented implementation.
-// Keep separate from passing PkgIntegrationFleet.jet until #4840 restores the original model.
+// Fleet host overrides survive EnvModel evaluation: captured per host,
+// computed in dependency order with provenance, symbolic option atoms kept,
+// and a dependency cycle rejected before capture.
 use {
     jet_env_model.[envmodel_evaluate_env]
     jet_foundation.[CtValue]
 }
 
-#Test("fleet_valid_captures_hosts_and_overrides KNOWN-FAILING #4840") {
+#Test("fleet_valid_captures_hosts_and_overrides") {
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
     fleets :: envmodel_test_host_groups(source, false)
     assert_eq(fleets.len(), 1)
@@ -18,7 +18,7 @@ use {
     assert(fleet.hosts[1].overrides == None)
 }
 
-#Test("fleet_override_computes_fields_in_dependency_order_with_provenance KNOWN-FAILING #4840") {
+#Test("fleet_override_computes_fields_in_dependency_order_with_provenance") {
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: base + 2, base: 40 }}\n    }}\n}}\n"
     override_plan :: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
     first :: override_plan.fields[0].value
@@ -36,7 +36,7 @@ use {
     assert(found, "region provenance exists")
 }
 
-#Test("fleet_override_options_keep_symbolic_atoms_and_evaluate_values KNOWN-FAILING #4840") {
+#Test("fleet_override_options_keep_symbolic_atoms_and_evaluate_values") {
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ options: [network.hostName: laptop, filesystem.timeZone: \"UTC\", tuning.retries: base + 1], base: 4 }}\n    }}\n}}\n"
     override_plan :: envmodel_test_host_groups(source, false)[0].hosts[0].overrides ?? panic("host has an override")
     first :: override_plan.fields[0].value
@@ -60,7 +60,7 @@ use {
     assert(found, "options provenance exists")
 }
 
-#Test("fleet_override_dependency_cycle_is_rejected_before_capture KNOWN-FAILING #4840") {
+#Test("fleet_override_dependency_cycle_is_rejected_before_capture") {
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web{{ region: base + 1, base: region + 1 }}\n    }}\n}}\n"
     error :: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E0338")
