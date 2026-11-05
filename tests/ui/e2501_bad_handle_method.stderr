@@ -1,17 +1,8 @@
-Error [jet.BareQuestionMark]: A bare `?` has no meaning.
-  --> tests/ui/e2501_bad_handle_method.jet:5:34
+Error [jet.FileHandleDirectionMismatch]: `write_line` is not available on a read-only file handle
+  --> tests/ui/e2501_bad_handle_method.jet:6:7
     |
-  5 |     h :: files.open("/tmp/x.txt")?
-    |                                  ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
-
-Error [jet.BareQuestionMark]: A bare `?` has no meaning.
-  --> tests/ui/e2501_bad_handle_method.jet:6:26
-    |
-  6 |     h.write_line("hello")?
-    |                          ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+  6 |     h.write_line("hello")
+    |       ^^^^^^^^^^
+ Why: `files.open` returns a read-only handle; it can only read lines or bytes
+ Fix: Use `files.create` or `files.append` to get a writable handle
+More: jet-lang.dev/e/E2501

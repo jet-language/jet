@@ -36,33 +36,24 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Read or edit through the live window name instead of the owner.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0220</code>: <code>tests/ui/ownership/named_write_window_calls_keep_alias_and_read_view_checks.stderr</code>.</p>
-<pre class="diag">Error [jet.ImmutableAssignment]: `window` was made with `::`, so it can&#39;t be changed
-  --&gt; named_write_window_calls_keep_alias_and_read_view_checks.jet:9:11
+<p>First UI snapshot mentioning <code>E0220</code>: <code>tests/ui/ownership/match_place_optional_payload_window_rejects_aliasing.stderr</code>.</p>
+<pre class="diag">Error [jet.ReadDuringWriteWindow]: `counter.value` cannot be read while `n` has a live exclusive write window into it
+  --&gt; match_place_optional_payload_window_rejects_aliasing.jet:9:27
     |
-  9 |     both(&amp;window, value)
-    |           ^^^^^^
- Why: `both` will change this value, so it must be mutable (`:=`)
- Fix: Declare it with `window := ...`
-More: jet-lang.dev/e/E0111
-
-Error [jet.UseWhileWriteActive]: `value` is being changed in this call, so it can&#39;t be used again here
-  --&gt; named_write_window_calls_keep_alias_and_read_view_checks.jet:9:19
-    |
-  9 |     both(&amp;window, value)
-    |                   ^^^^^
- Why: While something is being changed through the write-access marker `&amp;`, nobody else may be looking at it
- Fix: Pass the write-access marker `&amp;` (`&amp;value`) only once, or copy first with `value.copy()`
-More: jet-lang.dev/e/E0204
-
-Error [jet.ReadDuringWriteWindow]: `value` cannot be read while `window` has a live exclusive write window into it
-  --&gt; named_write_window_calls_keep_alias_and_read_view_checks.jet:9:19
-    |
-  9 |     both(&amp;window, value)
-    |                   ^^^^^
- Why: `window` is an exclusive window into `value`; reading the owner beside that window would be rejected after lowering
- Fix: Read or edit through `window` instead of `value`
+  9 |             print(counter.value ?? 0)
+    |                           ^^^^^
+ Why: `n` is an exclusive window into `counter.value`; reading the owner beside that window would be rejected after lowering
+ Fix: Read or edit through `n` instead of `counter.value`
 More: jet-lang.dev/e/E0220
+
+Error [jet.OwnerMovedWhileViewed]: `maybe` cannot be assigned while `n` is still looking into it
+  --&gt; match_place_optional_payload_window_rejects_aliasing.jet:20:13
+    |
+ 20 |             maybe = None
+    |             ^^^^^
+ Why: `n` is a live exclusive mutable view into `maybe`; changing or moving the owner could invalidate that view
+ Fix: Finish using `n` before changing `maybe`, narrow the view&#39;s scope, or make an owned copy
+More: jet-lang.dev/e/E0212
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

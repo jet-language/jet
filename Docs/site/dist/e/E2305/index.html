@@ -45,6 +45,15 @@
  Why: Every return path&#39;s owners must stay inside the sources named after `from`
  Fix: Widen the `from` clause, or stop returning a view from that owner
 More: jet-lang.dev/e/E2305
+
+Error [jet.ViewOutlivesOwner]: A returned view cannot borrow from a temporary argument
+  --&gt; tests/ui/nested_payload_view_escape.jet:13:34
+    |
+ 13 |     print(head(.Data([1, 2, 3]), [9]).len())
+    |                                  ^^^
+ Why: The temporary owner is dropped at the end of this statement, while the returned view remains live
+ Fix: Store the owner in a named binding first, then pass that binding to the view-returning call
+More: jet-lang.dev/e/E2305
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
