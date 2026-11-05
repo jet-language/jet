@@ -58,11 +58,7 @@ fn jet_cli_pinned_exec(binary: String, channel: String, version: String, raw: [S
     if !quiet -> jet_cli_write_notice("{trust_pin_handoff_line(channel, version, JET_CLI_VERSION)}\n")
     command := [String]{binary}
     loop argument in raw -> &command.push(argument)
-    receipt :: cli_process.cmd(command).env(TOOLCHAIN_EXEC_MARKER_ENV, version).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2105", "couldn't exec the pinned toolchain `{binary}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false),
-        exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }
+    receipt :: cli_process.cmd(command).env(TOOLCHAIN_EXEC_MARKER_ENV, version).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't exec the pinned toolchain `{binary}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code := receipt.code
     if receipt.signal != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}

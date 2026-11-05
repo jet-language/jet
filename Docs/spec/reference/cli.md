@@ -22,6 +22,14 @@ and `jet version --json` succeed with no output. Diagnostic essays instead
 use the `jet.status/v1` `explain` action under `--json`. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
+A command that fails under `--json` prints one `jet.status/v1` line on stdout
+and nothing on stderr. Its `reports` hold the typed refusal: a missing file or
+project, a usage error, an unbuilt command, or a missing or mismatched engine.
+The compile and authority problems of `jet run --json` keep their status line
+on stderr, so the program's own stdout stays clean. `jet new --json` prints
+one line with action `new`: `new.path` is the folder and `new.files` the
+files it wrote.
+
 `jet emit --ast|--ir <file>` prints one compiler tier of a file:
 `--ast` the parsed syntax tree (parsing only), and `--ir` the slot IR `jet build`
 builds from the checked functions of the entry package (every checked function

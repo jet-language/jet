@@ -618,7 +618,7 @@ fn jet_cli_repl_child(session: String, invocation: JetCLIInvocationAuthority?) -
 }
 
 fn jet_cli_repl_child_failed(what: String) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), "run `jet repl`; it starts this command itself", false), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), "run `jet repl`; it starts this command itself", false, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 fn jet_cli_repl_child_run(dir: String, file: String, source: String, invocation: JetCLIInvocationAuthority?, options: BuildOptions, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
@@ -1155,7 +1155,7 @@ fn jet_cli_repl_session(project: String?, invocation: JetCLIInvocationAuthority?
 }
 
 fn jet_cli_repl_no_session(color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't create the REPL session directory", jet_cli_why("E2105"), "check that the temporary directory is writable", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E2105", "couldn't create the REPL session directory", jet_cli_why("E2105"), "check that the temporary directory is writable", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // `jet repl [file.jet] [--project <dir>]`: the line-based session (lib.rs
@@ -1164,7 +1164,7 @@ fn jet_cli_repl(project: String?, preload: String?, invocation: JetCLIInvocation
     preload_file := String?{None}
     if preload == .Val(file) {
         preload_file = jet_cli_repl_preload(file)
-        if preload_file == None -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        if preload_file == None -> return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     }
     session := jet_cli_repl_session(project, invocation, color) ?? return jet_cli_repl_no_session(color)
     jet_cli_repl_banner(color)

@@ -318,11 +318,7 @@ enum JetCLICompiled {
 }
 
 fn jet_cli_refused(what: String, fix: String, color: Bool) -> JetCLICompiled Never! {
-    JetCLICompiled.Refused{output: JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, color),
-        exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }}
+    JetCLICompiled.Refused{output: jet_cli_prepare_refusal(what, fix, color)}
 }
 
 // `root` joined with a root-relative path (Loader.jet `jet_driver_authority_path`).
@@ -634,7 +630,7 @@ fn jet_cli_path_dependency_reachable(canonical: String, reach: JetCLIRootPathRea
 }
 
 fn jet_cli_path_dependency_escape(name: String, relative: String, parent: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E1206", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E1206", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Authorize each path root once, in dependency-name order, and each version
@@ -717,10 +713,10 @@ fn jet_cli_authorize_dependency_root(roots: &[JetDriverAuthorizedSourceRoot], ca
     caches := [JetDriverAuthorizedSourceFile]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
     if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
-        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        return Val(jet_cli_report_output("", "E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color, JET_DRIVER_EXIT_USER_ERROR))
     }
     if jet_cli_foreign_cache_files(canonical, &caches, &budget) == .Val(problem) {
-        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        return Val(jet_cli_report_output("", "E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color, JET_DRIVER_EXIT_USER_ERROR))
     }
     &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
     None
@@ -1299,11 +1295,7 @@ fn jet_cli_snapshot_refused(what: String, fix: String, color: Bool) -> JetCLISna
 }
 
 fn jet_cli_prepare_refusal(what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, color),
-        exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }
+    jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // The checked sources under `anchor`'s source root with `overlays` laid over

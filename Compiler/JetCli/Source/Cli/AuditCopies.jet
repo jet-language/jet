@@ -60,7 +60,7 @@ fn jet_cli_audit_entry_plan(subject: JetCLIAuditSubject, words: [String], color:
             .Refused(plan) -> return plan
         }
     }
-    source :: cli_files.read(file) ?? return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)}", JET_DRIVER_EXIT_USER_ERROR)
+    source :: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     if subject == .Foreign -> return JetCLIPlan.AuditForeign{file: file, source: source, color: color, json: json, notice: notice}
     JetCLIPlan.AuditCopies{file: file, source: source, color: color, json: json, notice: notice}
 }

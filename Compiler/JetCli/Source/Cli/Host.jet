@@ -277,11 +277,7 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
 // result). What the program printed is program output: before the value,
 // or on stderr under `--json` so stdout stays one `eval` document.
 fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    source :: cli_files.read(file) ?? return JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color),
-        exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }
+    source :: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, mode)
@@ -371,7 +367,7 @@ fn jet_cli_stem(file: String) -> String Never! {
 }
 
 fn jet_cli_build_failed(what: String, why: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, why, fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E2105", what, why, fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 // The native runtime is checked and linked once when the toolchain is packaged,
 // then shipped beside `jet` as jet-runtime/<runtime key>/jet_runtime.pack.o.
@@ -1404,7 +1400,7 @@ fn jet_cli_threads_reason(joined: I64, threads: Int) -> String {
 }
 
 fn jet_cli_launch_failed(why: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't run the built program: {why}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E2105", "couldn't run the built program: {why}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Under `--verbose`, the advisory lints (not a11y) of a compile with no
@@ -1798,15 +1794,16 @@ fn jet_cli_new_lock(root: String) -> String {
 }
 
 fn jet_cli_new_failed(code: String, what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // `jet new <name>` (CmdCompile.rs `run_new`): the folder and `.jet/`, then
 // package.jet, the lock, run.jet, the `overrides` command homes, and
-// .gitignore, each a failure of its own; the status lines go to stderr.
+// .gitignore, each a failure of its own; the status lines go to stderr, or
+// with `json` one `new` status line names the folder and its files on stdout.
 // Every Jet file goes through the formatter first, so a fresh project already
 // passes `jet fmt --check`; a template the formatter rejects is a compiler fault.
-fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool) -> JetDriverVerbOutput {
+fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
     write_failed :: "correct the named problem, then run the command again"
     manifest :: jet_cli_fmt_format_source(jet_cli_new_manifest(name, template, annotated), "{name}/package.jet", false, false, color)
     if manifest.report != None || manifest.diagnostics.len() > 0 -> return jet_cli_ice("the `jet new` package.jet template does not format")
@@ -1826,11 +1823,22 @@ fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: B
         }
     }
     cli_files.write("{name}/.gitignore", ".jet/build/\n.jet/lock\n.jet/cache/\n") ?? return jet_cli_new_failed("E2105", "couldn't write .gitignore: {err}", write_failed, color)
+    files := [String]{"package.jet", "run.jet"}
+    loop home in homes -> &files.push(home)
+    &files.push(".gitignore")
+    if json {
+        listed :: loop file in files -> jet_cli_status_text(file)
+        created :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("path", jet_cli_status_text("{name}/")),
+            jet_cli_status_field("files", jet_cli_status_array(listed)),
+        })
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("new", true, [JetCLIStatusField]{jet_cli_status_field("new", created)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     if quiet -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    status := "created {name}/\n  package.jet\n  run.jet\n"
-    loop home in homes -> status = "{status}  {home}\n"
+    status := "created {name}/\n"
+    loop file in files -> status = "{status}  {file}\n"
     next_command :: if template == "web" -> "dev" else -> "run"
-    JetDriverVerbOutput{stdout: "", stderr: "{status}  .gitignore\nnext: cd {name} && jet {next_command}\n", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: "{status}next: cd {name} && jet {next_command}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // CmdDoc.rs `undocumented_diagnostics` + `render_doc_diagnostics`: one L2201
@@ -2210,7 +2218,7 @@ fn jet_cli_trim_start_matches(text: String, prefix: String) -> String Never! {
 }
 
 fn jet_cli_external_fmt_fail(code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, color), exit_code: exit_code}
+    jet_cli_report_output("", code, what, why, fix, color, exit_code)
 }
 
 // EnvHook.rs `find_env_root`: the nearest directory at or above `start`
@@ -2636,12 +2644,15 @@ fn jet_cli_alias_args(argv: [String]) -> [String] Never! {
 // target of `--trace[=FILE]` (which the front door admits only on those
 // verbs), else of JET_TRACE_FILE (Request.jet `jet_cli_trace_sink`).
 // A verb that holds a compile result ends the process itself (jet_cli_finish);
-// every other verb's output is written here and its exit code returned to
+// every other verb's output is written here, as its `--json` outcome
+// (jet_cli_json_outcome), and its exit code returned to
 // run.jet, which exits with it. This is round 3's entry shape: every seed
 // (a0_001 included) checks and lowers it.
 fn jet_cli_main(args: [String]) -> Int {
     plan :: jet_cli_front(args)
-    output :: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(^plan, jet_cli_trace_flag(jet_cli_owned_flags(args))) else -> jet_cli_execute(^plan)
+    owned :: jet_cli_owned_flags(args)
+    done :: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(^plan, jet_cli_trace_flag(owned)) else -> jet_cli_execute(^plan)
+    output :: jet_cli_json_outcome(jet_cli_wants_json(owned), ^done)
     jet_cli_write_output(output)
     output.exit_code
 }
@@ -2728,7 +2739,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
-        .New(name, template, annotated, quiet, color) -> output = jet_cli_new_project(name, template, annotated, quiet, color)
+        .New(name, template, annotated, quiet, json, color) -> output = jet_cli_new_project(name, template, annotated, quiet, json, color)
 
         .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)
         .Emit(file, source, color, json, tier, function) -> output = jet_cli_compile_emit(file, source, color, json, tier, function, trace_sink)

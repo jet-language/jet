@@ -13,7 +13,7 @@ fn jet_cli_format_diagnostics(path: String, source: String, diagnostics: [Diagno
 }
 
 fn jet_cli_format_stdin(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOutput {
-    source :: cli_term.read_all_input() ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", request.color), exit_code: JET_DRIVER_EXIT_USAGE}
+    source :: cli_term.read_all_input() ?? return jet_cli_report_output("", "E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", request.color, JET_DRIVER_EXIT_USAGE)
     label :: request.stdin_path ?? "<stdin>"
     file :: jet_cli_fmt_one(label, source, request)
     if file.report == .Val(report) {
@@ -37,7 +37,7 @@ fn jet_cli_format_run(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOut
     cwd :: cli_files.cwd() ?? "."
     files := [String]{}
     if request.changed {
-        files = jet_cli_fmt_changed_files() ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
+        files = jet_cli_fmt_changed_files() ?? return jet_cli_report_output("", "E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color, JET_DRIVER_EXIT_USAGE)
     } else if request.paths.len() == 0 {
         jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, &files)
     } else {

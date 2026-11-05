@@ -13,6 +13,7 @@
 use {
     cli_files :: core.files
     jet_driver.[
+        JetDriverFailure,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USER_ERROR,
         JET_DRIVER_EXIT_USAGE,
@@ -94,8 +95,9 @@ enum JetCLIPlan {
     // `options` (native O0 unless its build options say otherwise).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
-    // `run_new`); `template` is "" for the print-only starter.
-    New(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool)
+    // `run_new`); `template` is "" for the print-only starter. `json` prints
+    // the created files as one `new` status line instead of the human recap.
+    New(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool)
     // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
     // `inspect.doc` status, `check` reports undocumented public items.
     Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
@@ -306,8 +308,29 @@ fn jet_cli_report(code: String, what: String, why: String, fix: String, color: B
     diagnostic_render_all("", "", [Diagnostic]{diagnostic_from_registry(code, None, what, why, fix)}, color)
 }
 
+// A failed verb with one spanless CLI diagnostic: `notice` and the rendered
+// report on stderr, and the typed report a `--json` run prints in its place
+// (jet_cli_json_outcome).
+fn jet_cli_report_output(notice: String, code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetDriverVerbOutput Never! {
+    reports :: [Diagnostic]{diagnostic_from_registry(code, None, what, why, fix)}
+    stderr :: "{notice}{diagnostic_render_all("", "", reports, color)}"
+    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: exit_code, failure: Val(JetDriverFailure{reports: reports, notice: notice})}
+}
+
 fn jet_cli_done(stdout: String, stderr: String, exit_code: Int) -> JetCLIPlan Never! {
     JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}}
+}
+
+// The plan of that failure (jet_cli_report_output).
+fn jet_cli_report_done(notice: String, code: String, what: String, why: String, fix: String, color: Bool, exit_code: Int) -> JetCLIPlan Never! {
+    JetCLIPlan.Done{output: jet_cli_report_output(notice, code, what, why, fix, color, exit_code)}
+}
+
+// A failure the Rust host printed as one plain stderr line (main.rs
+// `write_mode_diagnostic`): `text` stays those bytes, and a `--json` run
+// prints `code`'s typed report with `what` and `fix` instead.
+fn jet_cli_plain_failure(text: String, code: String, what: String, fix: String, exit_code: Int) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: text, exit_code: exit_code, failure: Val(JetDriverFailure{reports: [Diagnostic]{diagnostic_from_registry(code, None, what, jet_cli_why(code), fix)}, notice: ""})}
 }
 
 fn jet_cli_diagnostics_output(file: String, source: String, report: Diagnostic, color: Bool, json: Bool, notice: String) -[FS, Env]> JetDriverVerbOutput Never! {
@@ -326,11 +349,7 @@ fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
 
 // The bytes and status of that refusal, for a host-side projection.
 fn jet_cli_not_ported_output(command: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2104", "`jet {command}` is not built yet", "This `jet` has no implementation of this command form yet, and no other `jet` can run it.", "Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.", color),
-        exit_code: JET_DRIVER_EXIT_USAGE,
-    }
+    jet_cli_report_output("", "E2104", "`jet {command}` is not built yet", "This `jet` has no implementation of this command form yet, and no other `jet` can run it.", "Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.", color, JET_DRIVER_EXIT_USAGE)
 }
 
 fn jet_cli_prefix(items: [String], end: Int) -> [String] Never! {
@@ -757,7 +776,7 @@ fn jet_cli_read_entry(file: String, command: String, color: Bool, quiet: Bool, t
         parent :: jet_cli_parent(file) ?? "."
         default_entry :: file == "run.jet" || file.ends_with("/run.jet")
         fix :: if default_entry && jet_cli_has_manifest_above(parent) -> "create `run.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
-        return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color)}", JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_report_done(notice, "E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
     JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose}
 }
@@ -1275,11 +1294,11 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
 fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Bool, threads: Int?, given: JetCLITestOptions, fresh: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
     options := given
     if !cli_files.exists(file) {
-        return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "can't find `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_report_done(options.status, "E2105", "can't find `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
     if fresh && !quiet -> options.status = "{options.status}jet test: fresh result run (test-result cache bypassed; build cache reusable)\n"
     source :: cli_files.read(file) ?? {
-        return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_report_done(options.status, "E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
     // `--measure` builds under the release profile unless a profile is named.
     argv := [String]{}
@@ -1340,7 +1359,7 @@ fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) 
 // does (a directory is its project's stock entry; a file keeps its typed
 // spelling, or gains `.jet`). Every category consumes checked Driver facts.
 fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("lint"), JET_DRIVER_EXIT_USAGE)
+    if args.len() < 2 -> return jet_cli_missing_target("lint", quiet)
     a11y :: jet_argv.contains("--a11y")
     complexity :: jet_argv.contains("--complexity")
     cost :: jet_argv.contains("--cost")
@@ -1365,8 +1384,14 @@ fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
     } else {
         if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
     }
-    source :: cli_files.read(file) ?? return jet_cli_done("", "{notice}{jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)}", JET_DRIVER_EXIT_USER_ERROR)
+    source :: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice, category: if complexity -> "complexity" else if cost -> "cost" else -> "a11y", raw: jet_argv, json: json}
+}
+
+// A command run with no target: its help on stderr (unless `quiet`) as a
+// usage error, and an E2104 report for `--json`.
+fn jet_cli_missing_target(command: String, quiet: Bool) -> JetCLIPlan Never! {
+    JetCLIPlan.Done{output: jet_cli_plain_failure(if quiet -> "" else -> jet_cli_command_help(command), "E2104", "`jet {command}` needs a target", "run `jet help {command}` for its usage", JET_DRIVER_EXIT_USAGE)}
 }
 
 // The tiers `jet emit` prints, one mode flag each (`--ast`, `--ir`).
@@ -1376,7 +1401,7 @@ JET_CLI_EMIT_TIERS :: [String]{"ast", "ir"}
 // error; a target needs exactly one mode flag (E2102); the file is read as
 // typed. `--fn NAME` selects one function's tree.
 fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
-    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("emit"), JET_DRIVER_EXIT_USAGE)
+    if args.len() < 2 -> return jet_cli_missing_target("emit", quiet)
     modes := [String]{}
     loop tier in JET_CLI_EMIT_TIERS {
         if jet_argv.contains("--{tier}") -> &modes.push(tier)
@@ -1442,8 +1467,8 @@ JET_CLI_NEW_TEMPLATES :: [String]{"cli", "ui", "web", "overrides"}
 // `jet new <name> [--template <t>] [--annotated]` (Source/main.rs `"new"`):
 // a bare `jet new` is a usage error that prints the command's help; the
 // backend scaffolds (`new service|route|job|migration`) are not ported yet.
-fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS]> JetCLIPlan Never! {
-    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("new"), JET_DRIVER_EXIT_USAGE)
+fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
+    if args.len() < 2 -> return jet_cli_missing_target("new", quiet)
     name :: args[1]
     if name == "service" || name == "route" || name == "job" || name == "migration" -> return jet_cli_not_ported("new {name}", color)
     template := ""
@@ -1463,7 +1488,7 @@ fn jet_cli_new(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[F
     if cli_files.exists(name) {
         return jet_cli_fail("E2104", "`{name}` already exists", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, color: color}
+    JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, json: json, color: color}
 }
 
 // `jet fmt` (Source/main.rs `"fmt"`): `--lang` selects the environment
@@ -1545,6 +1570,23 @@ fn jet_cli_front(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     plan
 }
 
+// Under `--json` a failed verb that carries typed reports answers with them
+// in the `cli` status envelope on stdout and keeps only its notice on stderr,
+// as a refused plan does (jet_cli_front); a verb that already wrote its own
+// status envelope keeps it.
+fn jet_cli_json_outcome(json: Bool, output: ^JetDriverVerbOutput) -> JetDriverVerbOutput Never! {
+    outcome := ^output
+    if !json -> return outcome
+    schema :: "\"schema\":\"{JET_CLI_STATUS_SCHEMA}\""
+    if outcome.stdout.contains(schema) || outcome.stderr.contains(schema) -> return outcome
+    if outcome.failure == .Val(failure) {
+        reports := [String]{}
+        loop report in failure.reports -> &reports.push(jet_cli_report_json(report, None, "", "", 0))
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("cli", false, reports, [JetCLIStatusField]{})}\n", stderr: failure.notice, exit_code: outcome.exit_code}
+    }
+    outcome
+}
+
 fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     // The compiler verbs own every raw argument, before Jet's output/flag
     // parsing; the `jet-cc`/`jet-cxx`/`jet-c++` aliases arrive here as these
@@ -1553,7 +1595,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
     // The internal compiler service owns its raw arguments, as the engine
     // aliases do: `jet __jetpack <op>`, nothing else.
     if raw.len() > 0 && raw[0] == JET_COMPILER_SERVICE_VERB {
-        if raw.len() != 2 -> return jet_cli_done("", jet_cli_report("E2104", "`jet {JET_COMPILER_SERVICE_VERB}` takes exactly one operation", jet_cli_why("E2104"), "`jet {JET_COMPILER_SERVICE_VERB}` is spoken by `jetpack`; run the jetpack command instead", false), JET_DRIVER_EXIT_USAGE)
+        if raw.len() != 2 -> return jet_cli_report_done("", "E2104", "`jet {JET_COMPILER_SERVICE_VERB}` takes exactly one operation", jet_cli_why("E2104"), "`jet {JET_COMPILER_SERVICE_VERB}` is spoken by `jetpack`; run the jetpack command instead", false, JET_DRIVER_EXIT_USAGE)
         return JetCLIPlan.CompilerService{op: raw[1]}
     }
     // A REPL turn's child (Repl.jet), started only by `jet repl`.
@@ -1774,13 +1816,13 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "prove" -> return jet_cli_prove(jet_cli_tail(jet_cli_command_first(argv, command), 1), color, json)
-        "new" -> return jet_cli_new(jet_argv, args, color, quiet)
+        "new" -> return jet_cli_new(jet_argv, args, color, quiet, json)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
         "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)
         "eval" -> return jet_cli_eval(argv, args, color, json)
         "repl" -> return jet_cli_repl_plan(jet_argv, args, color)
         "fill" -> {
-            if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fill"), JET_DRIVER_EXIT_USAGE)
+            if args.len() < 2 -> return jet_cli_missing_target("fill", quiet)
             return JetCLIPlan.Fill{target: args[1], json: json, color: color}
         }
         "diff" | "merge" -> {

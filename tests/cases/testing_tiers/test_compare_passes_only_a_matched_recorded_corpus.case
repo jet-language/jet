@@ -12,7 +12,11 @@ stdout: = "status=matched relation=typed_equality samples=1 reason=1 observed ca
 step: jet test-compare corpus.json --json
 cwd: matched
 exit: 0
-stdout: ~ "\"universal_proof\":false" # equal samples are reported, never as a universal proof
+json: stdout doc $.schema = "jet.status/v1"
+json: stdout doc $.action = "test-compare"
+json: stdout doc $.ok = true
+json: stdout doc $.comparison.status = "matched"
+json: stdout doc $.comparison.universal_proof = false # equal samples are reported, never as a universal proof
 step: jet test-compare corpus.json
 cwd: timeout
 exit: 1

@@ -251,8 +251,18 @@ fn jet_cli_comparison_render(record: ComparisonRecord, json: Bool) -> String Nev
     relation :: observation_relation_as_str(record.relation)
     reason :: record.reason ?? "comparison has no reason"
     if json {
-        first :: if record.first_difference == .Val(index) -> "{index}" else -> "null"
-        return "{{\"schema_version\":{record.schema_version},\"status\":{foundation_json_quote(status)},\"relation\":{foundation_json_quote(relation)},\"samples\":{record.samples.len()},\"discarded_cases\":{record.discarded_cases},\"first_difference\":{first},\"universal_proof\":false,\"reason\":{foundation_json_quote(reason)}}}\n"
+        first :: if record.first_difference == .Val(index) -> jet_cli_status_int(index) else -> JetCLIStatusValue.Null
+        comparison :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(Int{record.schema_version})),
+            jet_cli_status_field("status", jet_cli_status_text(status)),
+            jet_cli_status_field("relation", jet_cli_status_text(relation)),
+            jet_cli_status_field("samples", jet_cli_status_int(record.samples.len())),
+            jet_cli_status_field("discarded_cases", jet_cli_status_int(record.discarded_cases)),
+            jet_cli_status_field("first_difference", first),
+            jet_cli_status_field("universal_proof", jet_cli_status_bool(false)),
+            jet_cli_status_field("reason", jet_cli_status_text(reason)),
+        })
+        return "{jet_cli_status_render("test-compare", record.status == ComparisonStatus.Matched, [JetCLIStatusField]{jet_cli_status_field("comparison", comparison)})}\n"
     }
     out := "status={status} relation={relation} samples={record.samples.len()} reason={reason}"
     mismatch := record.reduced_counterexample
@@ -269,7 +279,12 @@ fn jet_cli_comparison_render(record: ComparisonRecord, json: Bool) -> String Nev
 
 fn jet_cli_comparison_error_output(message: String, json: Bool) -> JetDriverVerbOutput Never! {
     if json {
-        return JetDriverVerbOutput{stdout: "{{\"status\":\"invalid_oracle\",\"universal_proof\":false,\"error\":{foundation_json_quote(message)}}}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        comparison :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("status", jet_cli_status_text("invalid_oracle")),
+            jet_cli_status_field("universal_proof", jet_cli_status_bool(false)),
+            jet_cli_status_field("error", jet_cli_status_text(message)),
+        })
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("test-compare", false, [JetCLIStatusField]{jet_cli_status_field("comparison", comparison)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     JetDriverVerbOutput{stdout: "", stderr: "{message}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }

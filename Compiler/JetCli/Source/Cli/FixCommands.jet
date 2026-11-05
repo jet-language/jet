@@ -147,7 +147,7 @@ fn jet_cli_fix_markers(before: String, inside: Bool) -> JetCLIFixApply {
 }
 
 fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
-    before :: cli_files.read(file) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    before :: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     all_fixes := [JetCLIFix]{}
     baseline := [String]{}
     if jet_cli_fix_collect(file, before, true) == {
@@ -173,7 +173,7 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, colo
         applied = jet_cli_fix_markers(before, markers == "inside")
         count = applied.applied
         if applied.source != before && jet_cli_fix_errors(file, applied.source).len() > baseline.len() {
-            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return jet_cli_report_output("", "E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     } else {
         applied = jet_cli_fix_checked(file, before, fixes, baseline, &rejected)
@@ -207,7 +207,7 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, colo
         status = "{rolled}{file}: would apply {count} fix{if count == 1 -> "" else -> "es"} (dry run; nothing written)\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review (dry run)\n"
     } else {
-        log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None, skips) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None, skips) ?? return jet_cli_report_output("", "E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
         status = "{rolled}{file}: applied {count} fix{if count == 1 -> "" else -> "es"}\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review\n"
         status = "{status}  log: {log}\n"

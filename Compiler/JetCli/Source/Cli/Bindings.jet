@@ -15,7 +15,9 @@ fn jet_cli_data_bind_usage(format: String) -> String Never! {
 
 fn jet_cli_data_bind_argument_error(format: String, what: String, color: Bool) -> JetCLIPlan Never! {
     shared :: jet_cli_diagnostic_copy("E2102")
-    jet_cli_done("", "{jet_cli_report("E2102", what, shared.why, shared.fix, color)}{jet_cli_data_bind_usage(format)}", JET_DRIVER_EXIT_USAGE)
+    output := jet_cli_report_output("", "E2102", what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
+    output.stderr = "{output.stderr}{jet_cli_data_bind_usage(format)}"
+    JetCLIPlan.Done{output: output}
 }
 
 fn jet_cli_data_bind_io_error(format: String, path: String, operation: String, why: String, color: Bool) -> JetCLIPlan Never! {

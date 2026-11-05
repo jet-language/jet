@@ -104,7 +104,7 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
     merged := build_options_with_code(options, jet_cli_build_code_options(file, selected.options))
     resolved_options := BuildOptions?{None}
     if ^merged == {
-        .Refused(code, what, fix) -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
+        .Refused(code, what, fix) -> return jet_cli_report_output("", code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)
         .Resolved(resolved, notes) -> {
             loop note in notes -> jet_cli_write_notice("{note}\n")
             // The command line and profile removals were noted before the compile (jet_cli_build_options).

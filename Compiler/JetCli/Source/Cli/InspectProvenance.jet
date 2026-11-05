@@ -544,7 +544,7 @@ fn jet_cli_provenance_json(requirement: String, reports: [JetCLIProvenanceReport
 // root (or its one-line error), the lock (E1202 when absent or unreadable),
 // then the project entry whose package facts the host checks.
 fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    root :: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", JET_DRIVER_EXIT_USER_ERROR)
+    root :: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", "no package.jet found", "run `jet inspect provenance` inside a project", JET_DRIVER_EXIT_USER_ERROR)
     if jet_cli_lock_load(root) == {
         .Missing -> return jet_cli_inspect_b_report("E1202", "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again", color, json, JET_DRIVER_EXIT_USER_ERROR)
         .Unported(shape) -> return jet_cli_not_ported("inspect provenance <{shape}>", color)
@@ -613,7 +613,7 @@ fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob, requirement: String)
             what :: "dependency `{target}` is not present in the lockfile"
             fix :: "use `jet inspect provenance` to list locked dependencies"
             if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, job.color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), fix, job.color, JET_DRIVER_EXIT_USER_ERROR)
         }
     }
     if job.json -> return JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}

@@ -65,13 +65,13 @@ fn jet_cli_structural_help(command: String) -> String? Never! {
 }
 
 fn jet_cli_struct_fail(what: String, fix: String) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, false), exit_code: JET_DRIVER_EXIT_USAGE}
+    jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), fix, false, JET_DRIVER_EXIT_USAGE)
 }
 
 fn jet_cli_struct_index_error(context: String, diagnostics: [Diagnostic]) -> JetDriverVerbOutput Never! {
-    text := jet_cli_report("E2105", context, jet_cli_why("E2105"), "correct source errors; structural tools never merge unchecked code", false)
-    loop diagnostic in diagnostics -> text = "{text}  {diagnostic.code}: {diagnostic.what}\n"
-    JetDriverVerbOutput{stdout: "", stderr: text, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    output := jet_cli_report_output("", "E2105", context, jet_cli_why("E2105"), "correct source errors; structural tools never merge unchecked code", false, JET_DRIVER_EXIT_USER_ERROR)
+    loop diagnostic in diagnostics -> output.stderr = "{output.stderr}  {diagnostic.code}: {diagnostic.what}\n"
+    output
 }
 
 fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {

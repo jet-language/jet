@@ -395,9 +395,10 @@ enum JetCLIInspectEntry {
     Refused(plan: JetCLIPlan)
 }
 
-// Source/main.rs `write_mode_diagnostic` then exit: one plain stderr line.
-fn jet_cli_inspect_plain_error(text: String, exit_code: Int) -> JetCLIPlan Never! {
-    JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "", stderr: text, exit_code: exit_code}}
+// Source/main.rs `write_mode_diagnostic` then exit: one plain stderr line,
+// with its E2104 report for `--json` (jet_cli_plain_failure).
+fn jet_cli_inspect_plain_error(text: String, what: String, fix: String, exit_code: Int) -> JetCLIPlan Never! {
+    JetCLIPlan.Done{output: jet_cli_plain_failure(text, "E2104", what, fix, exit_code)}
 }
 
 // Source/main.rs `absolutize`: `path` joined onto the working directory.
@@ -700,7 +701,7 @@ fn jet_cli_inspect_build_query(command: String, args: [String], color: Bool, jso
     }
     path :: file ?? {
         hint :: if command == "explain-build" -> "<target|action|file> " else -> ""
-        return jet_cli_inspect_plain_error("usage: jet {command} {hint}<file.jet>\n", JET_DRIVER_EXIT_USAGE)
+        return jet_cli_inspect_plain_error("usage: jet {command} {hint}<file.jet>\n", "`jet {command}` needs a Jet file", "run `jet {command} {hint}<file.jet>`", JET_DRIVER_EXIT_USAGE)
     }
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: command, file: path, subject: subject, json: json, color: color, threads: threads, notice: "", project: false}}
 }
@@ -1368,7 +1369,7 @@ fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [
 // stdout under `--json`.
 fn jet_cli_replay_fail(job: JetCLIInspectJob, code: String, what: String, why: String, fix: String, exit_code: Int) -> JetDriverVerbOutput Never! {
     if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json(code, what, why, fix), stderr: "", exit_code: exit_code}
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, job.color), exit_code: exit_code}
+    jet_cli_report_output("", code, what, why, fix, job.color, exit_code)
 }
 
 // ProveReplay.rs `validate_replay_path`: a forward-slash path of non-empty,
