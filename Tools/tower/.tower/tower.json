@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92487,
+    "rev": 92490,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63809,6 +63809,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Owner 2026-11-05: the goal is the fastest test suites of any language; tests should run almost instantly. c54's 60 s for the full ui, golden and cases suites is an upper bound, not the target; c58 sets the target against peers."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "The recovered SP05 work is now in the repo at Tools/tower/held/5910/ (landed e07c1b85ae): sp05c.patch (applies to 512356f682, not to dev), sp05b.patch, the sp05b delta and the SP05b/SP05c proof scripts and logs, byte-identical to the rescued copies except $HOME in 2 script lines. c17 integrates it; the SelfMem lane is rebasing it onto dev now."
@@ -64398,6 +64403,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T13:50:26.292Z"
+        },
+        {
+          "n": 57,
+          "text": "Running one test costs about that test's own time. The testkit's fixed startup cost is measured phase by phase (building or loading the kit, compiling the harness, scanning the corpora, loading Core, starting workers), each phase is listed with its time, and everything that is not the test itself is cut, cached or done once, so a run filtered to one golden entry at --jobs 1 finishes within 0.5 s of that entry's own compile-and-run time. Today a single golden entry pays about 35 s of fixed kit overhead (2026-11-04 gate run: cli_args.jet 3.1 s and fidelity.jet 5.5 s alone, plus about 35 s each run). This also speeds every agent's A/B proof run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T16:14:50.485Z"
+        },
+        {
+          "n": 58,
+          "text": "Jet's test runner is the fastest of any language, shown by a peer-matched cell in the canonical performance manifest. The same test corpus (a few thousand small unit tests with assertions, plus a set of whole-program golden tests) is written in Jet and in each peer (Rust with cargo test and nextest, Go with go test, Zig with zig build test, TypeScript with Bun test and Vitest, Python with pytest), and the cell measures, per peer: a cold full run, a warm full run, and the edit-one-test-and-rerun loop, in wall time and peak memory on the same machine. Jet/peer is below 1.00 for every peer in every metric, per the AGENTS performance gate; any loss stays logged here.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T16:14:51.176Z"
         }
       ],
       "refs": [],
@@ -64407,7 +64430,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-05T13:50:26.292Z",
+      "updated": "2026-11-05T16:14:51.176Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -173867,6 +173890,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T16:14:51.176Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#58 Jet's test runner is the fastest of any language, shown by a"
+    },
+    {
+      "at": "2026-11-05T16:14:50.485Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#57 Running one test costs about that test's own time. The testk"
+    },
+    {
+      "at": "2026-11-05T16:14:49.747Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T16:03:32.493Z",
       "by": "Main",
