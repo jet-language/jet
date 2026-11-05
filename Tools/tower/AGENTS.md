@@ -128,6 +128,7 @@ tower papercut resolve <id> --by owner        # owner clears a handled papercut
 tower goal add --title "Self-compile in about 50 ms" [--body "…"] --by me
 tower goal update G1 --status achieved|dropped|active [--title …] [--body …] --by me
 tower goal log G1 --text "measured 410 ms" --by me
+tower goal remap --merge G7=G1 --renumber G3=G2 --by me  # merge goals; renumber the rest
 tower card update '#12' --goals G1,G2 --by me  # link goals; --goals '' clears them
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower decision list --open --drafts          # agent review: include drafts, hidden from owner views

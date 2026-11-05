@@ -96,6 +96,7 @@ tower goal show G1 [--json]          # linked cards with their phases, then the 
 tower goal add --title "…" [--body "…"] --by <agent>
 tower goal update G1 [--title "…"] [--body "…"] [--status active|achieved|dropped] --by <agent>
 tower goal log G1 --text "…" --by <agent>
+tower goal remap --merge G7=G1 --renumber G3=G2 --by <agent>   # merge goals, then renumber the rest
 tower card update '#N' --goals G1,G2 --by <agent>   # --goals '' clears the links
 ```
 

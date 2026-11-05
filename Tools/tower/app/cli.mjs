@@ -117,6 +117,7 @@ const COMMAND_FLAGS = {
     add: by('title', 'body'),
     update: by('title', 'body', 'status'),
     log: by('text'),
+    remap: by('merge', 'renumber'),
   }},
   idea: { verbs: {
     list: ['all'],
@@ -206,6 +207,7 @@ const FLAG_VALUE = {
   manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
   hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE',
+  merge: 'G1=G14,G7=G14', renumber: 'G14=G1,G15=G2',
 };
 
 const flagToken = (key) => {
@@ -868,7 +870,21 @@ function cmdGoal(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.updateGoal(s, ref, { logEntry: flags.text ?? pos.slice(2).join(' '), by: flags.by }));
       return out(flags, `logged on goal ${result.id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown goal verb "${verb}" — list/show/add/update/log`);
+    case 'remap': {
+      const pairs = (raw, flag) => Object.fromEntries(String(raw ?? '').split(',').map(x => x.trim()).filter(Boolean).map((pair) => {
+        const [from, to, extra] = pair.split('=').map(x => x.trim());
+        if (!from || !to || extra !== undefined) throw new TowerError('E_USAGE', `--${flag} takes FROM=TO pairs, got "${pair}"`);
+        return [from, to];
+      }));
+      const merge = pairs(flags.merge, 'merge');
+      const renumber = pairs(flags.renumber, 'renumber');
+      if (!Object.keys(merge).length && !Object.keys(renumber).length) throw new TowerError('E_USAGE', 'goal remap needs --merge or --renumber');
+      const { result } = store.mutate((s, _config, history) => db.remapGoals(s, history, { merge, renumber, by: flags.by }));
+      if (flags.json) return out(flags, null, result);
+      for (const g of result.goals) console.log(`${g.id.padEnd(5)} ${g.status.padEnd(9)} ${g.title}`);
+      return;
+    }
+    default: throw new TowerError('E_USAGE', `unknown goal verb "${verb}" — list/show/add/update/log/remap`);
   }
 }
 

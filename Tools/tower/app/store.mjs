@@ -3227,6 +3227,56 @@ export function updateGoal(s, ref, patch) {
   return goal;
 }
 
+// Merge goals and renumber the rest in one write. `merge` maps a goal to the
+// goal that absorbs it: its linked cards (live and archived) move over, its
+// body and log join the target's, and the merged goal is removed. `renumber`
+// then maps every remaining goal to its new id; the ids must stay distinct.
+export function remapGoals(s, history, { merge = {}, renumber = {}, by }) {
+  if (!by) fail('E_INVALID', 'goal remap needs --by <actor>');
+  const idOf = (ref) => mustGoal(s, ref).id;
+  const mergeIds = Object.fromEntries(Object.entries(merge).map(([from, into]) => [idOf(from), idOf(into)]));
+  for (const [from, into] of Object.entries(mergeIds)) {
+    if (from === into) fail('E_INVALID', `goal ${from} cannot merge into itself`);
+    if (into in mergeIds) fail('E_INVALID', `goal ${from} merges into ${into}, which is itself merged`);
+  }
+  const remaining = s.goals.filter(g => !(g.id in mergeIds));
+  const renumberIds = {};
+  for (const [from, to] of Object.entries(renumber)) {
+    const id = idOf(from);
+    if (id in mergeIds) fail('E_INVALID', `goal ${id} is merged, so it cannot be renumbered`);
+    const target = String(to).trim().toUpperCase();
+    if (!GOAL_ID_RE.test(target)) fail('E_INVALID', `goal id ${to} must look like G1`);
+    renumberIds[id] = target;
+  }
+  const finalId = (id) => renumberIds[mergeIds[id] ?? id] ?? (mergeIds[id] ?? id);
+  const finalIds = remaining.map(g => finalId(g.id));
+  const dup = finalIds.find((id, i) => finalIds.indexOf(id) !== i);
+  if (dup) fail('E_INVALID', `goal remap gives two goals the id ${dup}`);
+  for (const [from, into] of Object.entries(mergeIds)) {
+    const src = s.goals.find(g => g.id === from);
+    const dst = s.goals.find(g => g.id === into);
+    const note = `Merged from ${from} (${src.title})${src.body ? `: ${src.body}` : '.'}`;
+    dst.body = dst.body ? `${dst.body}\n\n${note}` : note;
+    dst.log = [...dst.log, ...src.log.map(e => ({ ...e, text: `[${from}] ${e.text}` }))];
+  }
+  const remapCard = (c) => {
+    if (!c.goals?.length) return;
+    const next = [...new Set(c.goals.map(finalId))];
+    if (JSON.stringify(next) !== JSON.stringify(c.goals)) c.goals = next;
+  };
+  s.cards.forEach(remapCard);
+  if ((history.cards || []).some(c => c.goals?.some(id => finalId(id) !== id))) history.cards.forEach(remapCard);
+  s.goals = remaining;
+  for (const g of s.goals) {
+    const id = finalId(g.id);
+    if (id !== g.id) { g.id = id; g.updated = now(); g.updatedBy = by; }
+  }
+  s.goals.sort((a, b) => Number(GOAL_ID_RE.exec(a.id)[1]) - Number(GOAL_ID_RE.exec(b.id)[1]));
+  const parts = [...Object.entries(mergeIds).map(([f, t]) => `${f}>${t}`), ...Object.entries(renumberIds).map(([f, t]) => `${f}=${t}`)];
+  logEvent(s, { by, action: 'goal.remap', ref: 'goals', note: parts.join(' ').slice(0, 200) });
+  return { merged: mergeIds, renumbered: renumberIds, goals: s.goals.map(g => ({ id: g.id, title: g.title, status: g.status })) };
+}
+
 // ---- mutations: ideas ------------------------------------------------------
 
 export function addIdea(s, p) {

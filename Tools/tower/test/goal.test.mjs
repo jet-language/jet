@@ -139,6 +139,23 @@ test('lint reports a card linking an unknown goal', () => {
   assert.match(findings[0].msg, /unknown goal G4/);
 });
 
+test('goal remap merges goals into others and renumbers the rest', () => {
+  const st = fresh();
+  for (const title of ['Examples pass', 'Hand-off', 'Core library']) st.mutate((s) => db.addGoal(s, { title, body: `${title} body`, by: 'owner' }));
+  st.mutate((s, c) => db.addCard(s, { title: 'Golden suite', goals: ['G1'], by: 'planner' }, c));
+  st.mutate((s, c) => db.addCard(s, { title: 'Both', goals: ['G1', 'G2'], by: 'planner' }, c));
+  st.mutate((s, c) => db.addCard(s, { title: 'Core', goals: ['G3'], by: 'planner' }, c));
+  st.mutate((s) => db.updateGoal(s, 'G1', { logEntry: 'baseline 40 rows', by: 'agent' }));
+  assert.throws(() => st.mutate((s, _c, h) => db.remapGoals(s, h, { merge: { G1: 'G2' }, renumber: { G2: 'G3' }, by: 'owner' })), code('E_INVALID'), 'two goals cannot share an id');
+  assert.throws(() => st.mutate((s, _c, h) => db.remapGoals(s, h, { merge: { G1: 'G2', G2: 'G3' }, by: 'owner' })), code('E_INVALID'), 'a merge target cannot itself merge');
+  st.mutate((s, _c, h) => db.remapGoals(s, h, { merge: { G1: 'G2' }, renumber: { G2: 'G1', G3: 'G2' }, by: 'owner' }));
+  const s = st.load();
+  assert.deepEqual(s.goals.map(g => [g.id, g.title]), [['G1', 'Hand-off'], ['G2', 'Core library']]);
+  assert.match(s.goals[0].body, /Merged from G1 \(Examples pass\): Examples pass body/);
+  assert.deepEqual(s.goals[0].log.map(e => e.text), ['[G1] baseline 40 rows']);
+  assert.deepEqual(s.cards.map(c => c.goals), [['G1'], ['G1'], ['G2']]);
+});
+
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
 const run = (cwd, args) => execFileSync(process.execPath, [TOWER, ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
 const fails = (cwd, args) => {
