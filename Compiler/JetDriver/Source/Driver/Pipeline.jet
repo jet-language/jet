@@ -86,6 +86,8 @@ use {
         sema_marker_is_guest_export,
         sema_source_location_at,
         sema_effect_chain_name,
+        sema_module_is_core_source,
+        sema_source_file_at,
         SemaCompilerModuleSource,
     ]
     jet_foundation.[
@@ -168,7 +170,7 @@ use {
         pkg_effect_enforce,
         pkg_effect_module_owner,
     ]
-    jet_ir.[IRProgram, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
+    jet_ir.[IRProgram, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -2795,6 +2797,41 @@ fn jet_driver_prunable_core_modules(load: JetDriverLoadResult, core_sources: [Je
     identities
 }
 
+// The Core functions and methods a compile that lowers checks up front under
+// Core demand (SemaRegistrationGraph.core_lowering_roots), by key: the
+// top-level functions lowering keeps with no keyed call in a checked body
+// (ir_core_lowered_by_name), every top-level function of a Core module with
+// foreign rows, which jet_driver_prunable_core_modules leaves rooted, and
+// the methods lowering selects by owner type (ir_core_method_lowered_by_owner).
+fn jet_driver_core_lowering_roots(graph: SemaRegistrationGraph) -> [String:Bool] Never! {
+    roots := [String:Bool]{}
+    loop module_row in graph.modules {
+        identity :: module_row.module_identity
+        if !sema_module_is_core_source(identity) -> next
+        rooted := module_row.foreign_functions.len() > 0
+        loop provider in graph.foreign_providers {
+            if provider.module_identity == identity -> rooted = true
+        }
+        loop item in module_row.program.items {
+            if item == .Func(func) {
+                source_file :: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, func.span)
+                if rooted || ir_core_lowered_by_name(identity, source_file, func.name) -> roots[symbol_id(SymbolKind.Function, identity, "", func.name).key] = true
+            }
+        }
+        loop nominal in module_row.nominals {
+            loop method in nominal.methods {
+                if ir_core_method_lowered_by_owner(method.declaration.name) -> roots[method.symbol.id.key] = true
+            }
+        }
+        loop implementation in module_row.impls {
+            loop method in implementation.methods {
+                if ir_core_method_lowered_by_owner(method.declaration.name) -> roots[method.symbol.id.key] = true
+            }
+        }
+    }
+    roots
+}
+
 // ---- JET_KEEP_GOING: the compiler-internal all-phases diagnostic mode ----
 // Every failed unit is recorded and replaced by a typed trap so every later
 // phase still runs: sema keeps a failed function as a trap of its declared
@@ -3526,6 +3563,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     registration_graph.plugin_facts = jet_driver_plugin_facts(request)
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
+    // A compile that lowers checks Core bodies on demand (CoreDemand.jet);
+    // JET_KEEP_GOING checks every body.
+    lowers :: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.Interpreter
+    if lowers && !kg.enabled -> registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph))
     if registration_graph.internal_problem != None {
         loop diagnostic in registration_graph.diagnostics -> &load.diagnostics.push(diagnostic)
         return jet_driver_compile_internal_result(

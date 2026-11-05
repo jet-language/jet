@@ -1,10 +1,11 @@
-// Demand-checked Core bodies under `jet check`. A check lowers nothing, so a
-// Core body matters to it only through the checked bodies that reach it: its
-// effects, memory facts and failure contract flow to a caller along the call
-// and function-value edges the whole-program passes walk. Such a check
+// Demand-checked Core bodies. A Core body matters to a compile only through
+// the checked bodies that reach it: its effects, memory facts and failure
+// contract flow to a caller along the call and function-value edges the
+// whole-program passes walk, and lowering keeps a top-level Core body only
+// when a kept body names it (ir_reachable_core_rows). Such a compile
 // registers every Core declaration as usual, but checks a Core module's
-// top-level function or inherent method body only once a checked body names
-// it (sema_core_demand_body_keys, or a call-site fact). sema_core_demand_waves
+// top-level function body only once a checked body names it
+// (sema_core_demand_body_keys, or a call-site fact). sema_core_demand_waves
 // checks the named bodies after the body pass, in waves until no checked
 // body names a new one.
 //
@@ -12,12 +13,13 @@
 // type, not by a key: trait-impl methods (generic dispatch reaches every
 // implementation of the trait), compiler-generated ones (their codec and
 // derive demand is separate), and methods named `close` (`close(^value)`
-// reaches its owner's `close` by name). Build, run and test check every
-// body, since lowering roots some Core helpers by name
-// (ir_reachable_core_rows), and so do a `jet doc` run, test mode, an
-// incremental session, the entry module, and a program that opts in to
-// the web partition's checks (sema_web_partition_active): a bucket closes
-// over every call edge, an unnamed Core caller's too.
+// reaches its owner's `close` by name). A compile that lowers
+// (SemaRegistrationGraph.core_lowering_roots) also checks up front the
+// functions and methods lowering keeps by name or by owner type with no
+// keyed call in a checked body (the roots the driver lists). A `jet doc`
+// run, an incremental session, the entry module, and a program that opts in
+// to the web partition's checks (sema_web_partition_active) check every
+// body: a bucket closes over every call edge, an unnamed Core caller's too.
 use jet_foundation.[
     BodyCallArg,
     BodyTree,
@@ -44,6 +46,7 @@ fn sema_core_demand_index(graph: &SemaRegistrationGraph, enabled: Bool) {
     graph.core_checked = [String:Bool]{}
     rows := [String:Int]{}
     if enabled {
+        roots :: graph.core_lowering_roots ?? [String:Bool]{}
         // Every method an impl that stays checked supplies; a nominal lists
         // its impls' methods among its own.
         eager := [String:Bool]{}
@@ -57,18 +60,21 @@ fn sema_core_demand_index(graph: &SemaRegistrationGraph, enabled: Bool) {
             identity :: graph.modules[module_index].module_identity
             if !sema_module_is_core_source(identity) || identity == graph.entry_module_identity -> next
             loop item in graph.modules[module_index].program.items {
-                if item == .Func(func) -> rows[symbol_id(SymbolKind.Function, identity, "", func.name).key] = module_index
+                if item == .Func(func) {
+                    key :: symbol_id(SymbolKind.Function, identity, "", func.name).key
+                    if roots.get(key) == None -> rows[key] = module_index
+                }
             }
             loop nominal in graph.modules[module_index].nominals {
                 loop method in nominal.methods {
-                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None -> next
+                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None -> next
                     rows[method.symbol.id.key] = module_index
                 }
             }
             loop implementation in graph.modules[module_index].impls {
                 if !sema_core_demand_impl_deferrable(implementation) -> next
                 loop method in implementation.methods {
-                    if method.declaration.name != "close" -> rows[method.symbol.id.key] = module_index
+                    if method.declaration.name != "close" && roots.get(method.symbol.id.key) == None -> rows[method.symbol.id.key] = module_index
                 }
             }
         }
@@ -113,10 +119,26 @@ fn sema_check_registered_item_in_core_wave(environment: SemaScopeEnvironment, pr
 // Core body a checked body names is checked into its module's result. A
 // wave's bodies may name more, and may reach generated codecs and derived
 // methods, whose waves follow it; waves repeat until no body names a new
-// deferred one. A program that names no Core body runs none.
+// deferred one. A program that names no Core body runs none. A compile that
+// lowers also lowers what the driver joins to the checked modules after
+// finalization, the comptime closures (jet_driver_merge_checked_text_functions)
+// and the startup functions (jet_driver_add_startup_functions), so the first
+// wave demands what those name too.
 fn sema_core_demand_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := ^owned
     if graph.core_demand_rows.len() == 0 -> return ^graph
+    seeds := [String]{}
+    if graph.core_lowering_roots != None {
+        loop result in comptime_functions {
+            if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, &seeds)
+            loop fact in result.call_facts {
+                if fact.callee == .Val(callee) -> &seeds.push(callee.key)
+            }
+        }
+        loop value in values {
+            if value.init == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, &seeds)
+        }
+    }
     // Per module: how many of its functions and call-site facts were read.
     read_functions := [Int]{}
     read_facts := [Int]{}
@@ -125,6 +147,8 @@ fn sema_core_demand_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     loop {
         wave := [String:Bool]{}
         affected := [Int]{}
+        loop key in seeds -> sema_core_demand_key(&graph, key, &wave, &affected)
+        seeds = [String]{}
         sema_core_demand_named(&graph, modules, &read_functions, &read_facts, &wave, &affected)
         if wave.len() == 0 -> break
         &affected.sort()
@@ -210,12 +234,15 @@ fn sema_core_demand_named(graph: &SemaRegistrationGraph, modules: [SemaGraphModu
         }
         read_facts[module_index] = modules[module_index].call_facts.len()
     }
-    loop key in keys {
-        sema_core_demand_add(&graph, key, &wave, &affected)
-        // A call at type arguments names its generic declaration.
-        template :: sema_core_demand_template_key(key)
-        if template != key -> sema_core_demand_add(&graph, template, &wave, &affected)
-    }
+    loop key in keys -> sema_core_demand_key(&graph, key, &wave, &affected)
+}
+
+// Demands the deferred body `key` names; a call at type arguments names its
+// generic declaration.
+fn sema_core_demand_key(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
+    sema_core_demand_add(&graph, key, &wave, &affected)
+    template :: sema_core_demand_template_key(key)
+    if template != key -> sema_core_demand_add(&graph, template, &wave, &affected)
 }
 
 fn sema_core_demand_add(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {

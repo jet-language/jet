@@ -156,7 +156,44 @@ fn ir_precise_source_name(name: String) -> Bool Never! {
 }
 
 fn ir_precise_source_target(function: FnBody) -> Bool Never! {
-    function.module_identity.starts_with("<corelib>/") && ir_core_source_path(function.source_file, "Core/Math/Math.jet") && ir_core_reach_is_top_level(function.kind) && ir_precise_source_name(function.name)
+    ir_core_reach_is_top_level(function.kind) && ir_precise_source_function(function.module_identity, function.source_file, function.name)
+}
+
+// Whether a top-level Core function with these header fields is one of the
+// precise-operation source helpers (ir_precise_source_name).
+fn ir_precise_source_function(module_identity: String, source_file: String, name: String) -> Bool Never! {
+    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Math/Math.jet") && ir_precise_source_name(name)
+}
+
+// Whether a top-level Core function with these header fields is one lowering
+// keeps by name, with no keyed call in a kept caller's checked body: a
+// Fmt.jet selector helper, an Encoding.jet decode helper, an Args.jet
+// helper, a precise-operation source helper, a core.process line reader
+// (ir_process_line_reader) or a startup function. A compile that lowers
+// checks each up front under Core demand (driver
+// jet_driver_core_lowering_roots), since no checked body names it.
+fn ir_core_lowered_by_name(module_identity: String, source_file: String, name: String) -> Bool Never! {
+    top :: TFuncKind.TopLevel
+    if ir_string_format_source(module_identity, source_file, top) || ir_codec_decode_source(module_identity, source_file, top, name) || ir_args_source(module_identity, source_file, top, name) || ir_precise_source_function(module_identity, source_file, name) -> return true
+    if name.starts_with(IR_STARTUP_FUNCTION_PREFIX) -> return true
+    core_identity_in_module(module_identity, "core.process") && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
+}
+
+// The core.process function that reads one line of a child's stream of
+// owner type `owner` (ProcessStdoutStream / ProcessStderrStream), or "".
+fn ir_process_line_reader(owner: String) -> String Never! {
+    if owner == "ProcessStdoutStream" -> "__stdout_next_line" else if owner == "ProcessStderrStream" -> "__stderr_next_line" else -> ""
+}
+
+// Whether an authored inherent Core method named `name` is one lowering
+// selects by its owner type, with no keyed call in a kept caller's checked
+// body: the renderers and the comparison Build.jet's owner tables take
+// (`display`, `show`, `compare`, `close`), a line reader
+// (ir_line_reader_key) and an encoding reader's `next`
+// (ir_encoding_reader_next_key). A compile that lowers checks each up front
+// under Core demand (driver jet_driver_core_lowering_roots).
+fn ir_core_method_lowered_by_owner(name: String) -> Bool Never! {
+    name == "display" || name == "show" || name == "compare" || name == "close" || name == "read_line" || name == "next"
 }
 
 fn ir_core_reach_add(keys: &[String], key: String) Never! {
@@ -179,7 +216,7 @@ fn ir_core_reach_lambda_keys(tree: BodyTree, value: BodyLambda, functions: [FnBo
 fn ir_line_reader_key(functions: [FnBody], handle: Type) -> String Never! {
     owner :: ir_line_reader_owner(handle)
     if owner == "" -> return ""
-    stream :: if owner == "ProcessStdoutStream" -> "__stdout_next_line" else if owner == "ProcessStderrStream" -> "__stderr_next_line" else -> ""
+    stream :: ir_process_line_reader(owner)
     loop function in functions {
         if stream != "" {
             if function.name == stream && core_identity_in_module(function.module_identity, "core.process") -> return function.key.copy()
