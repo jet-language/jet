@@ -41,6 +41,9 @@ use jet_foundation.[
     diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
+    OWNED_TRAITS,
+    owned_trait_declares,
+    owned_trait_operator_hook,
     sema_collection_is_list,
     sema_collection_method_contract,
     sema_collection_receiver_element,
@@ -294,7 +297,7 @@ fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, a
         segments :: bound.key.split(":").to_list()
         trait_name :: segments[segments.len() - 1]
         if sema_type_builtin_trait_symbol(trait_name) == .Val(builtin) && builtin.id.key == bound.key {
-            if sema_checked_operator_hook(trait_name) == (Val(method)) {
+            if owned_trait_operator_hook(trait_name) == (Val(method)) {
                 hook_trait = Val(trait_name)
                 break
             }
@@ -308,7 +311,7 @@ fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, a
     if hook_trait == None {
         missing :: sema_call_type_param_method_trait(program, method) ?? return unhandled
         &diagnostics.push(sema_error("E0901", span, "calling `{method}` needs `{missing}`", "methods on a type parameter require that bound", "add `<T: {missing}>` to the generic parameter list"))
-        if sema_checked_operator_hook(missing) != (Val(method)) || (method != "compare" && method != "equal") -> return rejected
+        if owned_trait_operator_hook(missing) != (Val(method)) || (method != "compare" && method != "equal") -> return rejected
         hook_trait = Val(missing)
     }
     if method != "compare" && method != "equal" -> return unhandled
@@ -331,16 +334,14 @@ fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, a
 }
 
 // Rust's fallback over every registered trait (method_calls.rs:6887-6894):
-// the least-named trait that declares `method`, the synthetic hook traits
-// (Traits.rs:2883, :2852 Close, :3566 CheckedText) included.
+// the least-named trait that declares `method`, the compiler-owned traits
+// (OWNED_TRAITS) included.
 fn sema_call_type_param_method_trait(program: SemaProgramTables, method: String) -> String? {
     best := String?{None}
-    synthetic :: [String]{"Add", "CheckedText", "Close", "Comparable", "Div", "Equatable", "Mul", "Sub"}
-    loop trait_name in synthetic {
-        declares :: sema_checked_operator_hook(trait_name) == (Val(method)) || (trait_name == "Close" && method == "close") || (trait_name == "CheckedText" && (method == "check" || method == "encode_hole"))
-        if !declares -> next
-        if best == .Val(current) && current <= trait_name -> next
-        best = Val(trait_name)
+    loop owned in OWNED_TRAITS {
+        if !owned_trait_declares(owned, method) -> next
+        if best == .Val(current) && current <= owned.name -> next
+        best = Val(owned.name)
     }
     if program.registration_graph == .Val(graph) {
         loop graph_module in graph.modules {

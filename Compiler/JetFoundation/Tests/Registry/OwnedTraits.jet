@@ -1,0 +1,99 @@
+// OWNED_TRAITS is the one home of the compiler-owned traits: every trait name
+// the compiler surface spells has a row, the rows are consistent, and no
+// compiler source keeps its own list of them.
+use {
+    owned_traits_files :: core.files
+    jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait]
+}
+
+// The surface files whose `TRAIT_*` constants name compiler-owned traits.
+OWNED_TRAITS_SURFACES :: [String]{"Compiler/JetFoundation/Data/Syntax/CoreSurface.jet", "Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet"}
+
+// Reviewed lines that quote several owned trait names for another reason
+// than which traits the compiler owns, and the names each one quotes.
+struct OwnedTraitsReviewed {
+    path: String
+    names: String
+}
+
+OWNED_TRAITS_REVIEWED :: [OwnedTraitsReviewed]{
+    // The derive marker words a declaration accepts (`Codable` among them).
+    OwnedTraitsReviewed{path: "Compiler/JetParser/Source/Parser/DeclarationMarkers.jet", names: "Printable Equatable Debug Comparable Encode Decode"},
+    OwnedTraitsReviewed{path: "Compiler/JetParser/Source/Parser/Declarations/Types.jet", names: "Numeric Comparable Printable"},
+    // The bounds Core's `Decimal` and `Fraction` satisfy built in.
+    OwnedTraitsReviewed{path: "Compiler/JetSema/Source/Sema/TypeRelations.jet", names: "Numeric Add Sub Mul Comparable"},
+    // The codec bounds a container satisfies through its elements.
+    OwnedTraitsReviewed{path: "Compiler/JetSema/Source/Sema/TypeRelations.jet", names: "Encode Decode Serialize"},
+}
+
+// The owned trait names one source line quotes, in order, each once.
+fn owned_traits_quoted(line: String) -> [String] Never! {
+    found := [String]{}
+    parts :: line.split("\"").to_list()
+    loop index in 0..<parts.len() {
+        if index % 2 == 0 -> next
+        if owned_trait(parts[index]) != None && !found.contains(parts[index]) -> &found.push(parts[index])
+    }
+    found
+}
+
+#Test("every compiler-surface trait constant has an owned trait row") {
+    violations := [String]{}
+    loop path in OWNED_TRAITS_SURFACES {
+        source :: owned_traits_files.read(path) ?? panic("read {path}: {err}")
+        loop line in source.split("\n") {
+            if !line.starts_with("TRAIT_") || !line.contains(" :: \"") -> next
+            name :: line.split("\"").to_list()[1]
+            if owned_trait(name) == None -> &violations.push("{path}: `{name}` has no OWNED_TRAITS row")
+        }
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+#Test("owned trait rows name each trait, hook and method once") {
+    violations := [String]{}
+    names := [String]{}
+    hooks := [String]{}
+    loop owned in OWNED_TRAITS {
+        if names.contains(owned.name) -> &violations.push("`{owned.name}` has two rows")
+        &names.push(owned.name)
+        if owned.contract == {
+            .Operator(hook, _) -> {
+                if hooks.contains(hook) -> &violations.push("`{owned.name}` repeats the operator hook `{hook}`")
+                &hooks.push(hook)
+            }
+            .Methods(methods, _, shares) -> {
+                seen := [String]{}
+                loop method in methods {
+                    if seen.contains(method.name) -> &violations.push("`{owned.name}` declares `{method.name}` twice")
+                    &seen.push(method.name)
+                }
+                if shares == .Val(other) && owned_trait(other) == None -> &violations.push("`{owned.name}` shares the associated types of `{other}`, which has no row")
+            }
+            else -> {}
+        }
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+#Test("no compiler source lists the owned trait names outside OWNED_TRAITS") {
+    violations := [String]{}
+    entries :: owned_traits_files.walk("Compiler", None) ?? panic("walk Compiler: {err}")
+    loop entry in entries {
+        if entry.is_dir || !entry.path.ends_with(".jet") -> next
+        if !entry.path.contains("/Source/") && !entry.path.contains("/Data/") -> next
+        if entry.path.ends_with("Registry/OwnedTraits.jet") -> next
+        source :: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
+        loop (index, line) in source.split("\n").to_list() {
+            if line.trim_start().starts_with("//") -> next
+            quoted :: owned_traits_quoted(line)
+            if quoted.len() < 3 -> next
+            names :: quoted.join(" ")
+            reviewed :: loop row in OWNED_TRAITS_REVIEWED {
+                if entry.path.ends_with(row.path) && row.names == names -> break true
+            } ?? false
+            if !reviewed -> &violations.push("{entry.path}:{index + 1} lists {names}; read OWNED_TRAITS instead")
+        }
+    }
+    assert_eq(violations.join("\n"), "")
+}

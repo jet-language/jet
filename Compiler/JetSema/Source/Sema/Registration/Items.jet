@@ -99,6 +99,7 @@ use {
         name_rows_remove,
         name_rows_set,
         name_text,
+        owned_trait_is_operator,
         sema_reserved_type_name,
         symbol_id,
         type_identity,
@@ -1711,7 +1712,7 @@ fn sema_registration_operator_owner(owner: SymbolID, module_identity: String, le
     trait_value :: trait_name ?? return owner.copy()
     // copy: the operator owner is a new owned SymbolID. For an unchecked trait it equals `owner`,
     // the caller's declaring symbol (a read parameter), which the caller keeps.
-    if !sema_checked_operator_trait(trait_value) -> return owner.copy()
+    if !owned_trait_is_operator(trait_value) -> return owner.copy()
     right :: rhs ?? left
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
@@ -2415,15 +2416,11 @@ fn sema_registration_unknown_impl_target(definition: ImplDef) -> Diagnostic {
         trait_name :: definition.trait_name ?? ""
         fix = if {
             trait_name == "" -> "call a named method, or wrap `{type_name}` in a struct or distinct type of your own and implement the methods there"
-            sema_registration_is_operator_trait(trait_name) -> "call a named method, or implement `{trait_name}` on a struct or distinct type of your own (an operator hook on `{type_name}` belongs to the package that declares the other operand type)"
+            owned_trait_is_operator(trait_name) -> "call a named method, or implement `{trait_name}` on a struct or distinct type of your own (an operator hook on `{type_name}` belongs to the package that declares the other operand type)"
             else -> "implement `{trait_name}` on a struct or distinct type of your own, or wrap `{type_name}` in one"
         }
     }
     sema_error("E0301", definition.type_span, "`impl {header}` needs a user-defined type", why, fix)
-}
-
-fn sema_registration_is_operator_trait(name: String) -> Bool Never! {
-    name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Equatable" || name == "Comparable"
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.
@@ -2469,7 +2466,7 @@ fn sema_registration_opmix_builtin_impl(items: [Item], definition: ImplDef) -> B
     if definition.type_name.contains(".") -> return false
     if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) -> return false
     trait_name :: definition.trait_name ?? return false
-    if !sema_checked_operator_trait(trait_name) -> return false
+    if !owned_trait_is_operator(trait_name) -> return false
     rhs :: definition.operator_rhs ?? return false
     if rhs == .Named(rhs_name) {
         if rhs_name == definition.type_name -> return false

@@ -37,6 +37,9 @@ use jet_foundation.[
     core_root_type,
     core_type_modules,
     foundation_named_type,
+    owned_trait,
+    owned_trait_arithmetic,
+    owned_trait_structural,
     sema_reserved_type_name,
     typed_head_kind_of,
     boundary_head_carrier_module,
@@ -1234,13 +1237,11 @@ fn sema_type_graph_trait_symbol_at(graph: SemaRegistrationGraph, caller: Int, bo
 }
 
 // Rust Generics::BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
-// a compiler-owned trait that no source module declares. Its identity is the
-// bare trait name with no owning module.
+// a compiler-owned trait that no source module declares (`bare_bound` in
+// OWNED_TRAITS). Its identity is the bare trait name with no owning module.
 fn sema_type_builtin_trait_symbol(name: String) -> Symbol? {
-    if name == {
-        "Printable" | "Equatable" | "Comparable" | "Serialize" | "Encode" | "Decode" | "Renderable" | "Close" | "Add" | "Sub" | "Mul" | "Div" | "Numeric" | "CheckedText" -> {}
-        else -> return None
-    }
+    owned :: owned_trait(name) ?? return None
+    if !owned.bare_bound -> return None
     Val(Symbol{id: symbol_id(SymbolKind.Trait, "", "", name), kind: SymbolKind.Trait, name: name, module_name: "", owner: None, span: Span{start: 0, end: 0}, ty: None, visibility: 2})
 }
 
@@ -1402,8 +1403,8 @@ fn sema_type_provider_close_owner(nominal: SemaRegistrationNominal) -> Bool Neve
 // trait block or derive of that trait name.
 fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     scalar_family :: bound_name != "Close" && bound_name != "CheckedText"
-    arithmetic :: bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Div"
-    structural :: bound_name == "Equatable" || bound_name == "Comparable"
+    arithmetic :: owned_trait_arithmetic(bound_name)
+    structural :: owned_trait_structural(bound_name)
     if actual_resolved == {
         .Int | .Float -> return Val(scalar_family)
         .Bool | .String | .Char -> return Val(scalar_family && !arithmetic && bound_name != "Numeric")

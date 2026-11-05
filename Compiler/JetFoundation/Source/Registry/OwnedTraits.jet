@@ -1,0 +1,178 @@
+// The traits the compiler owns; this file is their only home. No source file
+// declares them, so each row of OWNED_TRAITS is that trait's declaration, and
+// every reader asks the table: the orphan rule (`local`), a bare generic
+// bound (`bare_bound`), the raw protocol return (`raw_return`), operator
+// identity and hooks, the type-parameter method fallback, and the impl
+// contract check (E0906, E0907, E0913). A trait the compiler knows has a row,
+// and the row names its contract, so no compiler-owned trait goes unchecked.
+
+// How an owned trait's method takes its receiver.
+enum OwnedReceiver {
+    // No receiver: `fn zero() -> Self`.
+    Static
+    // `self` with whatever access the impl writes; the trait fixes none.
+    Any
+    Fixed(access: AccessConvention)
+}
+
+struct OwnedParam {
+    name: String
+    ty: Type
+}
+
+// `Self` and the trait's associated type names resolve per impl.
+struct OwnedMethod {
+    name: String
+    receiver: OwnedReceiver
+    params: [OwnedParam]
+    // None: the method returns no value.
+    returns: Type?
+}
+
+enum OwnedContract {
+    // Fixed methods and associated types. `shares` names the trait whose
+    // impl on the same type binds the associated names these methods use
+    // (`IndexMut` reads `Index`'s `Key` and `Value`).
+    Methods(methods: [OwnedMethod], associated: [String], shares: String?)
+    // `fn {hook}(self, rhs: Rhs) -> {result}`; no result admits any declared
+    // one (the arithmetic hooks, whose right-hand type may be written).
+    Operator(hook: String, result: Type?)
+    // `fn encode(self) -> Dyn` or the static `fn decode(tree: Dyn) -> T [FieldError]!`.
+    Codec(verb: String)
+    // `comptime fn from_literal(value: Source) -> T` on the literal's source.
+    Literal(source: Type)
+    // A `distinct String` type's pure checker and hole encoder; the prelude
+    // spells the same declaration for readers.
+    CheckedText
+    // Derived by the compiler from the type itself; an impl adds no methods
+    // the compiler reads.
+    Derived
+}
+
+struct OwnedTrait {
+    name: String
+    // The orphan rule counts the trait as declared by every program (E0902).
+    local: Bool
+    // A generic bound may name it bare, with no declaring module.
+    bare_bound: Bool
+    // Its impl methods return their declared type as written, never through
+    // the implicit failure carrier.
+    raw_return: Bool
+    contract: OwnedContract
+}
+
+OWNED_TRAITS :: [OwnedTrait]{
+    OwnedTrait{name: "Add", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "add", result: None}},
+    OwnedTrait{name: "Sub", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "sub", result: None}},
+    OwnedTrait{name: "Mul", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "mul", result: None}},
+    OwnedTrait{name: "Div", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "div", result: None}},
+    OwnedTrait{name: "Equatable", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "equal", result: Val(Type.Bool)}},
+    OwnedTrait{name: "Comparable", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "compare", result: Val(Type.Named{name: "Ordering"})}},
+    OwnedTrait{name: "Encode", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Codec{verb: "encode"}},
+    OwnedTrait{name: "Decode", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Codec{verb: "decode"}},
+    OwnedTrait{name: "Literal.Int", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{source: Type.Int}},
+    OwnedTrait{name: "Literal.Float", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{source: Type.String}},
+    OwnedTrait{name: "CheckedText", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.CheckedText},
+    OwnedTrait{name: "Printable", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Derived},
+    OwnedTrait{name: "Serialize", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Derived},
+    OwnedTrait{name: "Renderable", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Derived},
+    OwnedTrait{name: "Display", local: true, bare_bound: false, raw_return: true, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "display", receiver: OwnedReceiver.Fixed{access: AccessConvention.Read}, params: [OwnedParam]{}, returns: Val(Type.String)},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Debug", local: true, bare_bound: false, raw_return: true, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "debug", receiver: OwnedReceiver.Any, params: [OwnedParam]{}, returns: Val(Type.String)},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Close", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "close", receiver: OwnedReceiver.Fixed{access: AccessConvention.Move}, params: [OwnedParam]{}, returns: None},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Numeric", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "zero", receiver: OwnedReceiver.Static, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Self"})},
+        OwnedMethod{name: "one", receiver: OwnedReceiver.Static, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Self"})},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Driver", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "query", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "sql", ty: Type.Named{name: "SQL"}}}, returns: Val(Type.Result{ok: Type.List{element: Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, err: Type.Named{name: "DBError"}})},
+        OwnedMethod{name: "query_one", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "sql", ty: Type.Named{name: "SQL"}}}, returns: Val(Type.Result{ok: Type.Option{inner: Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, err: Type.Named{name: "DBError"}})},
+        OwnedMethod{name: "execute", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "sql", ty: Type.Named{name: "SQL"}}}, returns: Val(Type.Result{ok: Type.Int, err: Type.Named{name: "DBError"}})},
+        OwnedMethod{name: "begin", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Bool)},
+        OwnedMethod{name: "commit", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Bool)},
+        OwnedMethod{name: "rollback", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Bool)},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Reader", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "read", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "limit", ty: Type.Int}}, returns: Val(Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "IOError"}})},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Writer", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "write", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "bytes", ty: Type.List{element: Type.IntN{signed: false, bits: 8}}}}, returns: Val(Type.Result{ok: Type.Int, err: Type.Named{name: "IOError"}})},
+        OwnedMethod{name: "write_all", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "bytes", ty: Type.List{element: Type.IntN{signed: false, bits: 8}}}}, returns: Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "IOError"}})},
+    }, associated: [String]{}, shares: None}},
+    OwnedTrait{name: "Rollback", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "snapshot", receiver: OwnedReceiver.Fixed{access: AccessConvention.Read}, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Snapshot"})},
+        OwnedMethod{name: "restore", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "snap", ty: Type.Named{name: "Snapshot"}}}, returns: None},
+    }, associated: [String]{"Snapshot"}, shares: None}},
+    OwnedTrait{name: "Iterator", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "next", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Option{inner: Type.Named{name: "Item"}})},
+    }, associated: [String]{"Item"}, shares: None}},
+    OwnedTrait{name: "Iterable", local: false, bare_bound: false, raw_return: true, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "iter", receiver: OwnedReceiver.Fixed{access: AccessConvention.Move}, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Iter"})},
+    }, associated: [String]{"Iter"}, shares: None}},
+    OwnedTrait{name: "Index", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "get", receiver: OwnedReceiver.Fixed{access: AccessConvention.Read}, params: [OwnedParam]{OwnedParam{name: "k", ty: Type.Named{name: "Key"}}}, returns: Val(Type.Option{inner: Type.Named{name: "Value"}})},
+    }, associated: [String]{"Key", "Value"}, shares: None}},
+    OwnedTrait{name: "IndexMut", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
+        OwnedMethod{name: "set", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "k", ty: Type.Named{name: "Key"}}, OwnedParam{name: "v", ty: Type.Named{name: "Value"}}}, returns: None},
+    }, associated: [String]{}, shares: Val("Index")}},
+}
+
+fn owned_trait(name: String) -> OwnedTrait? Never! {
+    loop owned in OWNED_TRAITS {
+        if owned.name == name -> return Val(owned)
+    }
+    None
+}
+
+// Whether the owned trait declares a method of this name.
+fn owned_trait_declares(owned: OwnedTrait, method: String) -> Bool Never! {
+    if owned.contract == {
+        .Methods(methods, _, _) -> loop declared in methods {
+            if declared.name == method -> break true
+        } ?? false
+        .Operator(hook, _) -> hook == method
+        .Codec(verb) -> verb == method
+        .Literal(_) -> method == "from_literal"
+        .CheckedText -> method == "check" || method == "encode_hole"
+        .Derived -> false
+    }
+}
+
+// The operator hook method an operator trait declares: `add` for `Add`.
+fn owned_trait_operator_hook(trait_name: String) -> String? Never! {
+    owned :: owned_trait(trait_name) ?? return None
+    if owned.contract == .Operator(hook, _) -> return Val(hook)
+    None
+}
+
+fn owned_trait_is_operator(trait_name: String) -> Bool Never! {
+    owned_trait_operator_hook(trait_name) != None
+}
+
+// The operator trait whose hook is `method`: `Add` for `add`.
+fn owned_trait_for_operator_hook(method: String) -> String? Never! {
+    loop owned in OWNED_TRAITS {
+        if owned.contract == .Operator(hook, _) && hook == method -> return Val(owned.name)
+    }
+    None
+}
+
+// An operator hook that admits any declared result and a written right-hand
+// type: `+`, `-`, `*`, `/`.
+fn owned_trait_arithmetic(trait_name: String) -> Bool Never! {
+    owned :: owned_trait(trait_name) ?? return false
+    if owned.contract == .Operator(_, result) -> return result == None
+    false
+}
+
+// An operator hook with a fixed result: `==` and ordering.
+fn owned_trait_structural(trait_name: String) -> Bool Never! {
+    owned :: owned_trait(trait_name) ?? return false
+    if owned.contract == .Operator(_, result) -> return result != None
+    false
+}

@@ -7,6 +7,7 @@
 // Prelude effect module is validated, and every module contributes leaves.
 use jet_foundation.[
     EFFECT_VOCABULARY_LEAVES,
+    OWNED_TRAITS,
     Diagnostic,
     EffectRowEntry,
     Func,
@@ -301,10 +302,8 @@ fn sema_effect_trait_bound_set(bounds: &[SemaEffectTraitBound], trait_name: Stri
 // closed row of known effects. An un-annotated method leaves each impl free.
 fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
     bounds := [SemaEffectTraitBound]{}
-    operator_traits :: [String]{"Add", "Sub", "Mul", "Div", "Equatable", "Comparable"}
-    operator_methods :: [String]{"add", "sub", "mul", "div", "equal", "compare"}
-    loop (index, trait_name) in operator_traits {
-        &bounds.push(SemaEffectTraitBound{trait_name: trait_name, method: operator_methods[index], bound: [String]{}})
+    loop owned in OWNED_TRAITS {
+        if owned.contract == .Operator(hook, _) -> &bounds.push(SemaEffectTraitBound{trait_name: owned.name, method: hook, bound: [String]{}})
     }
     loop item in items {
         if item == {
