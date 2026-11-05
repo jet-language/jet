@@ -76,6 +76,12 @@ Discovery covers `Examples/features` and `tests/run`. A package or workspace
 root stops descent; its `run.jet` is the entry, not its support modules.
 `.out` expects successful stdout, `.err.out` expects stderr and exit 1 or 70,
 and `.stderr.out` pins successful stderr. `.stdin` contains exact piped input.
+`<stem>.test.out` is the entry's `jet test` stdout, checked on each tier once
+the run passes: `o0` tests with `--optimize=none`, `o1` with
+`--optimize=basic` and `o2` with `--release`, a package or workspace entry
+tests as its directory, and `<stem>.<tier>.test.out` replaces it for that tier
+alone. Its last line is the harness summary, and the exit must be 1 when the
+summary counts a failed or unexpected-pass test, else 0.
 Golden sidecars live beside expected streams as `<stem>.case`; runtime-test
 streams and sidecars live beside their source or project directory.
 

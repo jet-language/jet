@@ -2,9 +2,9 @@ use files :: core.files
 
 
 fn kit_golden_tiers() -> [KitTier] {
-    [KitTier{name: "o0", flags: [], direct: true},
-     KitTier{name: "o1", flags: [], direct: false},
-     KitTier{name: "o2", flags: ["--release"], direct: false}]
+    [KitTier{name: "o0", flags: [], direct: true, test_flags: ["--optimize=none"]},
+     KitTier{name: "o1", flags: [], direct: false, test_flags: ["--optimize=basic"]},
+     KitTier{name: "o2", flags: ["--release"], direct: false, test_flags: ["--release"]}]
 }
 
 fn kit_golden_exists(path: String) -> Bool { files.exists(path) }
@@ -151,6 +151,46 @@ fn kit_golden_default_step(word: String) -> KitStep {
     KitStep{argv: [word], stdin: "", exit: "0", assertions: []}
 }
 
+// The harness exits 1 when its summary, the last line, counts a failed or an
+// unexpected-pass test, and 0 otherwise; output with no summary has no exit.
+fn kit_golden_test_exit(stdout: String) -> Int? {
+    lines :: stdout.trim().split("\n").to_list()
+    summary :: lines[lines.len() - 1].copy()
+    if !summary.contains(" passed, ") -> return None
+    code := 0
+    loop part in summary.split(", ") {
+        words :: part.split(" ").to_list()
+        if words.len() != 2 -> return None
+        count :: Int.parse(words[0].copy()) ?? return None
+        if count > 0 && (words[1] == "failed" || words[1] == "unexpected-pass") -> code = 1
+    }
+    Val(code)
+}
+
+// An entry's `<stem>.test.out` is its `jet test` stdout, checked on each tier
+// once the run passes; `<stem>.<tier>.test.out` replaces it for that tier
+// alone. The tier's `test_flags` choose the level, a package or workspace
+// entry tests as its directory, and the command runs from the staged project
+// under the sidecar's environment. None when the entry has no `.test.out`.
+fn kit_golden_test_outcome(context: KitStepCtx, entry: KitEntry, tier: KitTier, source: String, expected: String) -> KitOutcome? {
+    tiered :: "{expected}.{tier.name}.test.out"
+    path :: if kit_golden_exists(tiered) -> tiered else -> "{expected}.test.out"
+    golden :: kit_exec_optional(path) ?? return None
+    code :: kit_golden_test_exit(golden) ?? return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "{files.basename(path)} ends in no test summary, so its exit is unknown"), run: kit_exec_failed("no test summary")})
+    project :: files.basename(entry.path) == "run.jet" && (kit_golden_exists(files.join(context.work, "package.jet")) || kit_golden_exists(files.join(context.work, "workspace.jet")))
+    args := [String]{context.env.jet, "test"}
+    loop flag in tier.test_flags -> &args.push(flag)
+    &args.push(if project -> context.work else -> files.join(source, entry.path))
+    result :: kit_exec_invoke_with_env(context.env, args, context.work, context.scratch, "", kit_steps_environment(context.plan, context.env, context.work, context.scratch, ""))
+    failure :: kit_exec_process_failure(result)
+    if failure == {
+        .Val(value) -> return Val(KitOutcome{verdict: value, run: result})
+        .None -> {}
+    }
+    if result.code != code -> return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "jet test exit {result.code}; expected {code}: {result.stderr}"), run: result})
+    Val(KitOutcome{verdict: kit_expect_exact(context.id, path, Val(golden), result.stdout, context.bless, false), run: result})
+}
+
 fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: String, bless: KitBless) -> KitOutcome {
     expected :: files.join(env.root, entry.expected)
     plan := kit_steps_parse(kit_exec_optional("{expected}.case") ?? "")
@@ -171,7 +211,9 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
     }
     context := kit_steps_context(plan, entry.path, env, work, scratch, files.dirname(expected), bless)
     context.golden = Val(KitGoldenStepCtx{entry: entry, tier: tier, source: source, expected: expected, last_explicit: last_explicit, implicit: implicit})
-    kit_steps_execute(context, kit_golden_step_hooks())
+    outcome :: kit_steps_execute(context, kit_golden_step_hooks())
+    if outcome.verdict.status != "PASS" -> return outcome
+    kit_golden_test_outcome(context, entry, tier, source, expected) ?? outcome
 }
 
 fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {

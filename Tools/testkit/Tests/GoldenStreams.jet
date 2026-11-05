@@ -128,6 +128,40 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     files.remove_all(root) ?? panic("remove tier-expected scratch")
 }
 
+#Test("golden test examples compare jet test stdout and exit at each tier's level") {
+    root :: kit_test_golden_scratch("test-out")
+    project :: "Examples/features/topic"
+    entry :: KitEntry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    kit_exec_write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o2.out"), "wrong tier\n")
+    options := kit_exec_defaults()
+    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless(), known: kit_known_load(root)}
+    // The shared file holds o1's level; o0 and o2 test at their own.
+    kit_exec_write(files.join(root, "{entry.expected}.test.out"), "at --optimize=basic: pass\n1 passed, 0 failed, 0 skipped\n")
+    shared :: kit_golden_run_suite(entry, context)
+    assert_eq(shared.map(outcome -> outcome.verdict.status), ["FAIL", "PASS", "FAIL"])
+    kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at --optimize=none: pass\n1 passed, 0 failed, 0 skipped\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o2.test.out"), "at --release: pass\n1 passed, 0 failed, 0 skipped\n")
+    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "PASS")
+    // A summary that counts a failure expects exit 1, so a passing run fails.
+    kit_exec_write(files.join(root, "{entry.expected}.o0.test.out"), "at --optimize=none: pass\n0 passed, 1 failed, 0 skipped\n")
+    exit :: kit_golden_run_suite(entry, context)[0].verdict
+    assert_eq(exit.status, "FAIL")
+    assert(exit.detail.contains("jet test exit 0; expected 1"))
+    // The sidecar's environment reaches `jet test`: the failing run exits 1 as its summary says.
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_TEST_FAIL=1\n")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.test.out"), "at --optimize=basic: FAIL\n0 passed, 1 failed, 0 skipped\n")
+    assert_eq(kit_golden_run_suite(entry, context)[1].verdict.status, "PASS")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.test.out"), "at --optimize=basic: FAIL\n")
+    unknown :: kit_golden_run_suite(entry, context)[1].verdict
+    assert_eq(unknown.status, "FAIL")
+    assert(unknown.detail.contains("ends in no test summary"))
+    assert_eq(kit_golden_test_exit("a: pass\n1 passed, 0 failed, 0 skipped, 1 expected-fail, 1 unexpected-pass\n"), Val(1))
+    assert_eq(kit_golden_test_exit("a: expected-fail\n0 passed, 0 failed, 0 skipped, 1 expected-fail\n"), Val(0))
+    files.remove_all(root) ?? panic("remove test-out scratch")
+}
+
 #Test("golden repo-cwd runs the program from the staged source root, header only") {
     root :: kit_test_golden_scratch("repo-cwd")
     project :: "Examples/features/topic"

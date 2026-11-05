@@ -29,5 +29,9 @@ case "$1" in
         chmod +x "$artifact"
         ;;
     run) printf 'hello\n' ;;
+    test)
+        if [ "${JET_TESTKIT_TEST_FAIL:-}" = 1 ]; then printf 'at %s: FAIL\n0 passed, 1 failed, 0 skipped\n' "$2"; exit 1; fi
+        printf 'at %s: pass\n1 passed, 0 failed, 0 skipped\n' "$2"
+        ;;
     *) printf 'unknown fixture command\n' >&2; exit 2 ;;
 esac

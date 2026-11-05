@@ -91,9 +91,9 @@ used as the stem, so `topic/example/run.jet` maps to
 an example with no native golden is skipped rather than given an invented
 result.
 
-The native checker uses `.out`, `.err.out`, and `.stderr.out`. Dedicated web,
-harness, test, fuzz, and input-specific checks consume the other suffixes
-listed below:
+The native checker uses `.out`, `.err.out`, and `.stderr.out`; the testkit
+golden suite also checks `.test.out`. Dedicated web, harness, fuzz, and
+input-specific checks consume the other suffixes listed below:
 
 | Fixture | Meaning |
 | --- | --- |
@@ -103,7 +103,7 @@ listed below:
 | `<stem>.web.out` | Web-target output used by the corresponding web fixture. |
 | `<stem>.harness.out` | Harness-managed output. |
 | `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
-| `<stem>.test.out` | Test-command output. |
+| `<stem>.test.out` | `jet test` stdout, checked by the testkit golden suite on every tier after the run passes. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
 | `<stem>.ast.out` / `<stem>.mir.out` / `<stem>.lir.out` | `jet emit --ast`/`--mir`/`--lir` stdout, checked by the native feature runner after the run passes. |
 
