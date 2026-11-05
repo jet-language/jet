@@ -801,6 +801,11 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         sema_data_check_labels("Dyn.from", args, [String]{}, span, &diagnostics)
         if args[0].convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", args[0].span, "a value was passed with the move marker `^` to a parameter that does not consume", "Dyn.from reads the value's Encode contract", "remove the move marker `^` here"))
         value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        // Rust core_literals.rs `Dyn.from`: the unencodable value is the error, at that value.
+        if !sema_serde_type_is_admissible(environment, program, value.ty, SemaSerdeDirection.Encode) {
+            &diagnostics.push(sema_error("E0905", args[0].span, "`{type_name(value.ty)}` does not implement `Encode`", "`Dyn.from` calls the value's Encode contract", "derive or implement `Encode` on this type"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         return sema_data_check_encode(args[0].expr, value, [CallArg]{}, [Type]{}, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     private_number :: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0 && environment.module_name == "__core_encoding_stream"

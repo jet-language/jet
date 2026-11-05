@@ -340,8 +340,9 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         }
         if shift_argument == index {
             if checked.ty == .IntN(_, _) {
+                // D-BINREAD-LEN1=A: U64 and the signed widths stay explicit (E0112 at the call).
                 if !sema_stream_handle_integer_width(checked.ty) {
-                    &diagnostics.push(sema_type_mismatch(required, checked.ty, checked_args[index].span))
+                    &diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
                     return None
                 }
                 converted :: sema_expr_numeric_conversion(checked, Type.Int, checked.span, sema_source_line_at(environment.source_segments, checked.span) ?? 0) ?? return None

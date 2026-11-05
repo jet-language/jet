@@ -16,6 +16,7 @@ use jet_foundation.[
     SymbolKind,
     Type,
     core_identity_is,
+    expr_span,
     type_name,
 ]
 
@@ -512,13 +513,18 @@ fn sema_ui_browser_method(receiver: Expr, receiver_value: TExpr, owner: String, 
     result_type :: sema_ui_browser_result(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     effect_name := sema_ui_browser_effect(owner, method)
     effects_ok := sema_ui_handle_call_fact(environment, program, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics)
-    if args.len() != expected_args.len() -> &diagnostics.push(sema_call_arity_diagnostic(method, expected_args.len(), args.len(), false, span))
+    if args.len() != expected_args.len() -> &diagnostics.push(sema_call_core_arity_diagnostic(method, expected_args.len(), args.len(), span))
     typed_args := [TExpr]{}
     valid := args.len() == expected_args.len()
     loop index in 0..<args.len() {
         required := if index < expected_args.len() -> Val(expected_args[index]) else -> None
+        if args[index].convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", expr_span(args[index].expr), "a value was passed with the move marker `^` to a parameter that does not consume", "standard library functions in M10 read their ordinary arguments unless documented otherwise", "remove the move marker `^` here"))
+        diagnostic_start :: diagnostics.len()
         value :: sema_check_expression(args[index].expr, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if value == .Val(checked) -> &typed_args.push(checked) else -> valid = false
+        // (Rust `check_call_args`) a value that does not fit its parameter is
+        // the call's E0112, not the value's own E0108.
+        if value == None && required == .Val(parameter) -> sema_call_argument_replace_mismatch(method, index, parameter, args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !valid || !effects_ok -> return SemaMethodSpecialCheck{handled: true, value: None}
     if sema_call_core_handle_unbuilt(owner, method, span, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}

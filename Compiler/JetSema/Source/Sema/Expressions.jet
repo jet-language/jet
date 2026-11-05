@@ -3757,7 +3757,15 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     // the validated type, then checks as the Core builder method.
     if method == SEMA_VALIDATE_CHECK && sema_validate_over_receiver(receiver_value.ty, environment, program) == .Val(subject) {
         rule :: sema_validate_over_rule(subject, args, method_span, environment, program, &scopes, &diagnostics) ?? {
-            sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            // The `at:` field name is not a value; its E0354 is the report.
+            discarded := [CallArg]{}
+            loop argument in args {
+                if argument.label == .Val(label) {
+                    if label.name == "at" && argument.expr == .Ident(_, _, _) -> next
+                }
+                &discarded.push(argument.copy()) // copy: `args` is the caller's read parameter
+            }
+            sema_data_check_discarded_arguments(discarded, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             return None
         }
         return sema_expr_check_declared_method(receiver, receiver_value, method, routed_method, method_span, owner_type_args, type_args, rule, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

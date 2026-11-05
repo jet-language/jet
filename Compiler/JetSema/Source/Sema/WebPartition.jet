@@ -86,7 +86,8 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
                 if !sema_web_abi_safe(ret, types) -> &found.push(sema_web_abi_type(ret, "as a `#WasmExport` return type", meta.name_span))
             }
         }
-        if buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser") {
+        uses_browser :: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
+        if uses_browser {
             &found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
         }
         if meta.row >= 0 {
@@ -95,6 +96,9 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
                 if buckets[at] == buckets[callee] -> next
                 // The one sanctioned crossing: JS calling a `#WasmExport`.
                 if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
+                // A Core browser API reached from a Wasm pin is the E-WEB-TARGET-BROWSER
+                // above (Rust partitioned user functions only).
+                if uses_browser && sema_module_is_core_source(graph.modules[metas[callee].registration].module_identity) -> next
                 &found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
             }
         }
