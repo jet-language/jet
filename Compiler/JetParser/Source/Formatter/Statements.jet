@@ -1083,7 +1083,7 @@ fn jfmt_fmt_effect_loop_body(f: &JetFmt, body: [Stmt], header_end: Int, arrow_bo
     }
     // An expression in an author-braced loop may return a non-Unit value.
     // The formatter has no sema type information, so collapsing that body
-    // to `->` could create L0508 on the next check. Keep the existing brace
+    // to `->` could make the next check reject a dropped value. Keep the existing brace
     // as the conservative spelling; bare bodies still take the canonical
     // arrow path below.
     single_expr :: body.len() == 1 && (if body[0] == {

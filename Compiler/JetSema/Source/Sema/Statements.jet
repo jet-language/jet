@@ -4331,7 +4331,8 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
         source :: sema_scope_resolve(scopes, name) ?? return None
         if source.kind != SymbolKind.Parameter && !sema_stmt_move_direct(binding.init, &state, scopes, "the destructuring binding", &diagnostics) -> return None
     }
-    if diagnostics.len() != before || locals.len() != names.len() -> return None
+    // A warning from the value (a lint) leaves the binding complete.
+    if sema_has_error_since(diagnostics, before) || locals.len() != names.len() -> return None
     temp := checked_generated_local("__jet_destructure_{span.start}", span, init.ty)
     temp.mutable = true
     if pattern == {

@@ -4514,13 +4514,11 @@ struct ArrowLoopValueDrop {
     impl Diagnostic {
         code :: "L0508"
         severity :: .Lint
-        lint_name :: "arrow_loop_value_drop"
-        meaning :: "Arrow loop body computes and drops a non-unit value"
-        detail :: true
-        no_fix :: .Behavior
-        fn what(self) -> String { "This arrow loop body computes a value and drops it." }
-        fn why(self) -> String { "A statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source." }
-        fn fix(self) -> String { "Bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: an arrow loop body computes and drops a non-unit value)" }
+        fn why(self) -> String { "The parser rejects a loop body value that nothing uses (E0003), so no dropped value reaches the lint" }
+        fn fix(self) -> String { "Do not use L0508" }
     }
 }
 
@@ -4944,9 +4942,9 @@ struct InlineAutodiff {
         severity :: .Lint
         lint_name :: "inline_autodiff"
         no_fix :: .Behavior
-        fn what(self) -> String { "Autodiff transform result called inline; bind the derivative before calling it" }
-        fn why(self) -> String { "The registered sema rule applies here" }
-        fn fix(self) -> String { "Bind the autodiff derivative to a name before calling it." }
+        fn what(self) -> String { "An autodiff transform result is called inline" }
+        fn why(self) -> String { "The transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested" }
+        fn fix(self) -> String { "Bind the derivative first, then call the binding: `d_loss :: compute.gradient(loss)`" }
     }
 }
 

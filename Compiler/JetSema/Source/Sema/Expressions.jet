@@ -3679,6 +3679,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
             &diagnostics.push(sema_lint("L0506", method_span, "Hidden allocation inside `#Context` without an allocator", "This call may allocate on the global heap while a scoped context is active", "Add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block"))
         }
     }
+    sema_expr_lint_unit_scalar_rewrap(receiver, method, args, method_span, environment, program, scopes, context, &diagnostics)
+    if method == "call" -> sema_expr_lint_inline_autodiff(receiver, environment, program, scopes, context, &diagnostics)
     // This rule a=A: `.new(...)` leaves only the static receiver implicit; the
     // ordinary expected type names it (E0356 when there is none).
     if receiver == .Ident(receiver_name, receiver_span, _) && receiver_name == "" {
@@ -4008,6 +4010,7 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
 }
 
 fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    sema_expr_lint_raw_multiline_html(parts, span, expected, environment, context, &diagnostics)
     tree_parts := [TStrPart]{}
     index := 0
     loop index < parts.len() {
@@ -4040,6 +4043,57 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
         index += 1
     }
     sema_expr_expected_owned(sema_tree_node(Type.String, TExprKind.StrLit{parts: tree_parts}, span), expected, environment, program, &diagnostics)
+}
+
+// L0524: a multiline literal that holds an HTML tag and stays a plain String.
+// The AST keeps no quote form, so the literal whose span crosses a line is the
+// triple-quoted one; the report points at its opening `"""`.
+fn sema_expr_lint_raw_multiline_html(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if context.compiler_generated -> return
+    if expected == .Val(wanted) {
+        if wanted != Type.String -> return
+    }
+    tagged := false
+    loop part in parts {
+        if part == .Lit(text) {
+            if sema_expr_text_has_html_tag(text) -> tagged = true
+        }
+    }
+    if !tagged -> return
+    loop segment in environment.source_segments {
+        if span.start >= segment.generated.start && span.end <= segment.generated.end && span.end > span.start {
+            first :: sema_source_segment_line(segment, span.start - segment.generated.start) ?? return
+            last :: sema_source_segment_line(segment, span.end - 1 - segment.generated.start) ?? return
+            if first != last -> &diagnostics.push(sema_lint("L0524", Span{start: span.start, end: span.start + 3}, "This multiline HTML fragment is still a plain `String`", "Plain String interpolation cannot distinguish trusted HTML fragments from text that must be escaped", "Wrap the literal in `HTML{{…}}` and type any trusted fragment holes as `HTML`"))
+            return
+        }
+    }
+}
+
+// `<` then a letter or `/` and a letter, closed by a later `>`.
+fn sema_expr_text_has_html_tag(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    index := 0
+    loop index + 2 < bytes.len() {
+        if bytes[index] == (U8{60}) {
+            at := index + 1
+            if bytes[at] == (U8{47}) -> at += 1
+            if at < bytes.len() && sema_expr_ascii_letter(bytes[at]) {
+                close := at + 1
+                loop close < bytes.len() {
+                    if bytes[close] == (U8{62}) -> return true
+                    if bytes[close] == (U8{60}) -> break
+                    close += 1
+                }
+            }
+        }
+        index += 1
+    }
+    false
+}
+
+fn sema_expr_ascii_letter(byte: U8) -> Bool Never! {
+    (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
 }
 
 fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4388,6 +4442,82 @@ fn sema_expr_lint_fixed_cleanup(receiver: Expr, receiver_type: Type, args: [Call
                 lint :: sema_lint("L0518", method_span, "Plain `Fixed(n)` output immediately removes grouping separators", "`Fixed(n)` is machine-plain; deleting this cleanup preserves the same text", "Delete `.replace(\",\", \"\")` from the `Fixed(n)` projection")
                 &diagnostics.push(diagnostic_with_edit(lint, TextEdit{span: Span{start: expr_span(receiver).end, end: expr_span(args[1].expr).end + 1}, new_text: ""}))
             }
+        }
+    }
+}
+
+// L1141: `compute.gradient(f).call(…)` calls the derivative a transform
+// returns without naming it; the report covers the transform call. A direct
+// form (`compute.gradient(f, w)`) returns values, not a callable.
+fn sema_expr_lint_inline_autodiff(callee: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if context.compiler_generated -> return
+    if sema_failure_union_unparen(callee) == .MethodCall(owner, member, _, _, _, args, _) {
+        if member != "gradient" && member != "value_and_gradient" && member != "vjp" && member != "jvp" -> return
+        if args.len() == 0 -> return
+        loop (index, argument) in args {
+            if index == 0 -> next
+            if argument.label == .Val(label) && label.name == "wrt" -> next
+            return
+        }
+        alias :: sema_shared_access_without_parens_name(owner) ?? return
+        if !sema_expr_core_module_alias_visible(alias, scopes) -> return
+        if sema_call_core_import_module(environment, program, alias) != (Val("core.compute")) -> return
+        target :: sema_shared_access_without_parens_name(args[0].expr) ?? "f"
+        span :: Span{start: expr_source_start(owner), end: args[args.len() - 1].span.end + 1}
+        &diagnostics.push(sema_lint("L1141", span, "An autodiff transform result is called inline", "The transform arity returns a callable; inline calls make it unclear whether a direct gradient or a derivative function was requested", "Bind the derivative first, then call the binding: `d_{target} :: {alias}.{member}({target})`"))
+    }
+}
+
+// L0519: `Meter.from_float(value.raw() * 2)` unwraps a linear unit, scales the
+// scalar and rewraps the same unit, which `value * 2` says directly. A point of
+// an affine family, or a rewrap inside `#Arithmetic`, keeps its explicit form.
+fn sema_expr_lint_unit_scalar_rewrap(receiver: Expr, method: String, args: [CallArg], method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if !method.starts_with("from_") || args.len() != 1 || args[0].label != None || args[0].spread || context.arithmetic_policy != None -> return
+    unit_name :: sema_shared_access_without_parens_name(receiver) ?? return
+    unit :: sema_expr_unit_fact(Type.Named{name: unit_name}, environment, program) ?? return
+    if unit.kind == QuantityKind.Point -> return
+    if sema_failure_union_unparen(args[0].expr) == .Binary(operator, left, right, _, _) {
+        if operator != BinOp.Mul && operator != BinOp.Div -> return
+        scaled :: sema_expr_lint_unit_projection(left, unit.name, environment, program, scopes) && sema_expr_lint_direct_scalar(right)
+        if scaled || (operator == BinOp.Mul && sema_expr_lint_direct_scalar(left) && sema_expr_lint_unit_projection(right, unit.name, environment, program, scopes)) {
+            &diagnostics.push(sema_lint("L0519", method_span, "A policy-free unit unwrap/scale/rewrap can use direct scalar unit arithmetic", "The expression unwraps a linear unit, applies one scalar operation, and immediately rewraps the same unit", "Use `unit * scalar`, `scalar * unit`, or `unit / scalar` directly"))
+        }
+    }
+}
+
+// `name.raw()` where `name` is a binding of the unit `unit_name`.
+fn sema_expr_lint_unit_projection(expr: Expr, unit_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    if sema_failure_union_unparen(expr) == .MethodCall(inner, method, _, _, _, args, _) {
+        if method != "raw" || args.len() != 0 -> return false
+        if inner == .Ident(name, _, _) {
+            index :: sema_scope_resolve_index(scopes, name) ?? return false
+            ty :: sema_scope_binding_type(environment, scopes, index) ?? return false
+            fact :: sema_expr_unit_fact(ty, environment, program) ?? return false
+            return fact.name == unit_name
+        }
+    }
+    false
+}
+
+// A scalar operand that is a literal, a name, a negated literal or
+// `Float.from_int` of one, so no call result is folded into the rewrite.
+fn sema_expr_lint_direct_scalar(expr: Expr) -> Bool Never! {
+    current := sema_failure_union_unparen(expr)
+    loop {
+        if current == {
+            .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Ident(_, _, _) -> return true
+            .Unary(op, inner, _, _) -> {
+                if op != UnOp.Neg -> return false
+                if sema_failure_union_unparen(inner) == {
+                    .Int(_, _, _, _, _) | .Float(_, _, _, _, _) -> return true
+                    else -> return false
+                }
+            }
+            .MethodCall(owner, method, _, _, _, args, _) -> {
+                if method != "from_int" || args.len() != 1 || sema_shared_access_without_parens_name(owner) != Val("Float") -> return false
+                current = sema_failure_union_unparen(args[0].expr)
+            }
+            else -> return false
         }
     }
 }
