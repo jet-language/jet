@@ -2172,6 +2172,14 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
             borrowed := binding.symbol.kind == SymbolKind.Parameter && binding.access != AccessConvention.Move
             if {
+                // Rust lambdas.rs escaping captures: a task group may flow
+                // only through a direct `Group` parameter (E1110). Rust's
+                // lambda span ends where its expression body's span ends (a
+                // call's span is its name).
+                escapes && !task_body && capture_ty == (Type.Named{name: "Group"}) -> {
+                    escape_span :: if lambda.body == .Expr(body_value) -> Span{start: lambda.span.start, end: expr_span(body_value).end} else -> lambda.span
+                    &diagnostics.push(sema_error("E1110", escape_span, "`{binding.symbol.name}` is a `Group` and cannot escape in a lambda", "a task group is a scoped spawn authority that may flow only through a direct function or method parameter", "move this work to a function or method that takes `{binding.symbol.name}: Group` and call it directly"))
+                }
                 // The task's crossing prover refuses a captured Cell guard.
                 task_body && sema_cell_guard_contained(capture_ty) -> {}
                 !escapes -> {

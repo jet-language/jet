@@ -433,3 +433,13 @@ fn marker_registered(name: String) -> Bool Never! {
     }
     false
 }
+
+// Policy.rs `RuleSignature::accepts_arguments` (D-MARK-FORM1=A): whether the
+// registered rule `name` may be written with parentheses at all. A row with
+// no parameter and no variadic list never takes arguments.
+fn marker_registered_accepts_arguments(name: String) -> Bool Never! {
+    loop rule in marker_source_read(MARKER_SOURCE) {
+        if rule.name == name -> return rule.signature.params.len() > 0 || rule.signature.variadic != None
+    }
+    false
+}

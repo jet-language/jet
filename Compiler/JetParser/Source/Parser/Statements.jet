@@ -1922,8 +1922,10 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     args := [CallArg]{ }
     end := name.span
     if parser_current_kind(&state) == TOKEN_LPAREN {
+        open :: parser_current(&state).span
         args = parser_parse_call_args(&state, 1, true)
         if state.position > 0 -> end = parser_lookahead(&state, -1).span
+        if args.len() == 0 -> parser_check_empty_marker_parens(&state, word, Span{start: open.start, end: end.end})
     }
     marker_args := [MarkerCallArg]{ }
     labels := [CallLabel?]{ }

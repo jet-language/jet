@@ -3674,6 +3674,19 @@ fn sema_expr_function_field(receiver: Type, name: String, method_name: String, e
     true
 }
 
+// Whether `receiver.method(…)` is an allocator's `alloc`, `try_alloc` or
+// `reset` on a name: those keep the arena's views (Rust
+// `allocator_view_preserving_receiver`).
+fn sema_expr_allocator_view_receiver(receiver: Expr, method: String, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+    if method != "alloc" && method != "try_alloc" && method != "reset" -> return false
+    if receiver == .Ident(name, span, _) {
+        index :: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+        ty :: sema_scope_binding_type(environment, scopes, index) ?? return false
+        return sema_call_memory_allocator_name(ty) != None
+    }
+    false
+}
+
 fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // L0505 / L0506: a growing call in a loop of a `core.mem` file, or inside
     // a `#Context` block that names no allocator, may reach the global heap.
@@ -3740,7 +3753,13 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if !exempt_view_receiver && method != "starts_with" && method != "ends_with" && method != "contains" && sema_string_view_owning_read(receiver, Type.String, scopes) && receiver == .Ident(view_name, view_span, _) {
         receiver_checked = sema_string_view_materialize(view_name, view_span, None, environment, program, &scopes, &state, &context, &diagnostics)
     } else {
+        // Rust `allocator_view_preserving_receiver` (method_calls.rs): `alloc`
+        // and `reset` on an allocator name run no owner read on it, or a live
+        // arena view would be E0220 before `reset` can invalidate it.
+        previous_root_read :: context.suppress_partial_move_root_read
+        if sema_expr_allocator_view_receiver(receiver, method, environment, scopes) -> context.suppress_partial_move_root_read = true
         receiver_checked = sema_check_expression(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        context.suppress_partial_move_root_read = previous_root_read
     }
     context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1

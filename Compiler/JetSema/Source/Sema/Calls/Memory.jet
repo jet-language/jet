@@ -321,8 +321,11 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
     payload :: sema_check_expression(updated_args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     parameter := SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload.ty), variadic: false}
     // Rust `alloc_method_return` records no receiver write: `arena.alloc(v)`
-    // reads the allocator handle (only `reset` writes it).
-    ownership := sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
+    // reads the allocator handle (only `reset` writes it). On an allocator
+    // name that read is no place read (Rust `allocator_view_preserving_receiver`),
+    // so the arena's own views (D-ALLOC2) never meet it; the name's moves were
+    // checked when it was read (sema_ownership_check_root_base_use).
+    ownership := if receiver == .Ident(_, _, _) -> sema_ownership_check_allocator_handle_call(&state, "{name}.{method}", receiver, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics) else -> sema_ownership_check_method_call(&state, "{name}.{method}", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     view := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: payload.ty}
     result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view

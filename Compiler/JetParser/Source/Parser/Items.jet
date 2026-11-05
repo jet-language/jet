@@ -75,7 +75,9 @@ use {
         diagnostic_from_registry,
         expr_span,
         diagnostic_with_edit,
+        diagnostic_with_structured_edit,
         marker_registered,
+        marker_registered_accepts_arguments,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -473,10 +475,26 @@ fn parser_parse_marker(state: &JetParserState) -> Marker {
     args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
     end := name.span
     if parser_current_kind(&state) == TOKEN_LPAREN {
+        open :: parser_current(&state).span
         args = parser_parse_marker_args(&state)
         if state.position > 0 -> end = parser_lookahead(&state, -1).span
+        if args.args.len() == 0 {
+            marker_name :: parser_value(state, name)
+            parser_check_empty_marker_parens(&state, marker_name, Span{start: open.start, end: end.end})
+        }
     }
     Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None}
+}
+
+// D-MARK-FORM1=A (Rust Parser/Items/marker_groups.rs, Policy.rs
+// `marker_empty_arguments_error`): a marker writes parentheses exactly when it
+// passes arguments, so `#Name()` of a rule that takes arguments is a leftover
+// pair. It is E0999 at `(`…`)` with the delete edit, and parsing goes on so
+// `jet fmt` can apply it.
+fn parser_check_empty_marker_parens(state: &JetParserState, name: String, parens: Span) {
+    if !marker_registered_accepts_arguments(name) || parser_aborting(&state) -> return
+    diagnostic :: diagnostic_from_registry("E0999", Val(parens), "`#{name}()` has empty parentheses", "a marker writes parentheses exactly when it passes arguments", "write `#{name}`")
+    &state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: parens, new_text: ""}))
 }
 fn parser_marker_first_expr(marker: Marker) -> Expr? {
     if marker.args.len() == 0 -> return None

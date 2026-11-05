@@ -3468,6 +3468,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     if !jet_driver_retain_error_prelude_module(&load) {
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
     }
+    jet_driver_unsafe_check(request, &load)
 
     target_machine_option := jet_driver_selected_target_machine(request, &load.diagnostics)
     if target_machine_option == None {

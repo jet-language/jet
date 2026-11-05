@@ -350,6 +350,11 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
             if parser_current_kind(&state) == TOKEN_LT {
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
             }
+            // Rust Types.rs E0119: a `$fact` path segment reads a compile-time
+            // fact value, which never names a type outside a derive template.
+            if state.derive_template_depth == 0 && (name.starts_with("$") || name.contains(".$")) {
+                parser_add_error_code(&state, "E0119", start.span, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
+            }
             ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
         }
     }

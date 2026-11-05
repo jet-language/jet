@@ -2,8 +2,8 @@
 // The host supplies owning package policies and external lock/trust/build facts;
 // no CLI reader re-scans source text to discover an unsafe operation.
 use {
-    jet_foundation.[GateLedger, Diagnostic, Program, diagnostic_with_source_path, gate_ledger_sort]
-    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics]
+    jet_foundation.[GateLedger, Diagnostic, Item, Program, ast_program, compiler_transfer_rows, diagnostic_with_source_path, gate_ledger_sort]
+    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_unsafe_inspect]
 }
 
 fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
@@ -55,20 +55,7 @@ fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQuery
     programs := [Program]{}
     loop module_row in source.modules {
         row := SemaGateModule{source: module_row.path, program: module_row.program}
-        loop package in load.packages {
-            if package.identity != module_row.package_identity -> next
-            row.policy_path = Val(jet_driver_display_path(package.root_path, module_row.physical_path))
-            row.unsafe_paths = package.policy_unsafe_paths
-            row.expert = package.policy_expert
-            break
-        }
-        loop policy in request.gate_policies {
-            if policy.package_identity != module_row.package_identity -> next
-            row.declarations = policy.declarations
-            row.unsafe_paths = policy.unsafe_paths
-            row.expert = policy.expert
-            break
-        }
+        jet_driver_gate_module_policy(&row, request, load.packages, module_row.package_identity, module_row.physical_path)
         &modules.push(row)
         &programs.push(module_row.program)
     }
@@ -88,4 +75,57 @@ fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQuery
     }
     gate_ledger_sort(&ledger)
     JetDriverGateQueryResult{source: source, ledger: ledger, diagnostics: diagnostics, complete: !jet_driver_has_errors(diagnostics)}
+}
+
+// A module gate row's package display path and `policy.unsafe` /
+// `policy.expert` surface, then any host-supplied gate policy for the package.
+fn jet_driver_gate_module_policy(row: &SemaGateModule, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo], package_identity: String, physical_path: String) Never! {
+    loop package in packages {
+        if package.identity != package_identity -> next
+        row.policy_path = Val(jet_driver_display_path(package.root_path, physical_path))
+        row.unsafe_paths = package.policy_unsafe_paths
+        row.expert = package.policy_expert
+        break
+    }
+    loop policy in request.gate_policies {
+        if policy.package_identity != package_identity -> next
+        row.declarations = policy.declarations
+        row.unsafe_paths = policy.unsafe_paths
+        row.expert = policy.expert
+        break
+    }
+}
+
+// Rust CheckInner.rs (D-UNSAFE-OBLIG1=A): every check runs the unsafe
+// obligation pass and the package `policy.unsafe` / `policy.expert` surface
+// over the loaded programs before registration. Compiler-owned Core sources
+// carry no package policy and are not inspected. Each program's items move
+// into its row for the read and back after it.
+fn jet_driver_unsafe_check(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
+    modules := [SemaGateModule]{}
+    owners := [Int]{}
+    loop index in 0..<load.modules.len() {
+        unit_index :: load.modules[index].source_unit_index
+        if jet_driver_unit_is_core(load.source_units[unit_index]) -> next
+        source :: load.source_units[unit_index].path
+        physical := source
+        root_index :: load.source_units[unit_index].root_index
+        file_index :: load.source_units[unit_index].file_index
+        if load.source_units[unit_index].source_origin == SemaSourceOrigin.Snapshot && root_index >= 0 && file_index >= 0 {
+            physical = request.authorized_sources.roots[root_index].files[file_index].path
+        }
+        program := ast_program()
+        compiler_transfer_rows<Item>(&program.items, &load.modules[index].program.items)
+        program.policy_declarations = load.modules[index].program.policy_declarations.copy()
+        program.rule_facts = load.modules[index].program.rule_facts.copy()
+        program.no_prelude = load.modules[index].program.no_prelude
+        row := SemaGateModule{source: source, program: ^program}
+        jet_driver_gate_module_policy(&row, request, load.packages, load.modules[index].package_identity, physical)
+        &modules.push(^row)
+        &owners.push(index)
+    }
+    if modules.len() == 0 -> return
+    inspection :: sema_unsafe_inspect(modules, request.gate_set)
+    loop position in 0..<owners.len() -> compiler_transfer_rows<Item>(&load.modules[owners[position]].program.items, &modules[position].program.items)
+    loop entry in inspection.diagnostics -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, entry.source, 0))
 }

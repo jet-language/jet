@@ -3057,6 +3057,12 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
     // `_ :: view_call(..)` discards the value at once: no local holds the
     // view, so there is no loan to record (and no binding to carry it).
     if binding.name == "_" -> return true
+    // D-ALLOC2 (Rust `check_binding` arena_alloc_source): `x :: arena.alloc(v)`
+    // makes `x` a scope-bound view into `arena`; a reset invalidates it
+    // (E0632) and it may not leave the region (E0631).
+    if sema_ownership_is_allocator_view(Val(init_ty)) && binding.init == .MethodCall(arena, method, _, _, _, _, _) && method == "alloc" {
+        if arena == .Ident(_, _, _) -> return sema_ownership_record_fresh_view_fact(&state, binding.name, binding.name_span, arena, [String]{}, AccessConvention.Write, scopes, binding.name_span)
+    }
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
     if sema_stmt_has_struct_view_source(binding.init) {
         // A struct that stores a view is a new carrier of its places: it
@@ -3191,6 +3197,30 @@ fn sema_stmt_destructure_count(actual: Int, expected: Int, tuple: Bool, literal:
     why := if tuple -> if literal -> "a tuple pattern must name exactly as many members as the literal holds" else -> "a tuple pattern must name exactly as many members as the tuple holds" else -> "a list pattern must name exactly as many items as the list holds"
     target := if tuple -> "tuple" else -> "list"
     &diagnostics.push(sema_error("E0315", span, "this pattern binds {actual} {unit}{actual_suffix}, but the {container} has {expected}", why, "name {expected} {unit}{expected_suffix} to match the {target}"))
+}
+
+// Rust bindings.rs `contains_taskgroup`: whether `ty` holds a `Group`. A
+// function type has its own direct `Group` parameter and return checks.
+fn sema_stmt_contains_taskgroup(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "Group"
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_stmt_contains_taskgroup(inner)
+        .Map(key, _, value) -> sema_stmt_contains_taskgroup(key) || sema_stmt_contains_taskgroup(value)
+        .Result(ok, err) -> sema_stmt_contains_taskgroup(ok) || sema_stmt_contains_taskgroup(err)
+        .Apply(_, args) | .Union(args) -> {
+            loop arg in args {
+                if sema_stmt_contains_taskgroup(arg) -> return true
+            }
+            false
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_stmt_contains_taskgroup(field.ty) -> return true
+            }
+            false
+        }
+        else -> false
+    }
 }
 
 fn sema_stmt_contains_shared_guard(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, seen: &[String]) -> Bool Never! {
@@ -4427,6 +4457,9 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     }
     if binding.name == "err" -> &diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, &diagnostics) -> return None
+    // D-ALLOC2 (Rust `check_binding`): `y :: x` would move an arena view to a
+    // new, possibly longer-lived binding.
+    _ := sema_ownership_report_arena_view_escape(&state, binding.init, "be stored in another binding", scopes, &diagnostics)
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &context, &diagnostics)
     if binding.arena_view -> return None
     if binding.is_comptime -> return sema_stmt_check_prepared_binding(binding, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4493,6 +4526,11 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     if init.ty == .Named(stream) && (stream == "FileLines" || stream == "StdinLines" || stream == "ProcessLines") {
         loop_name :: if binding.name == "" -> "line" else -> binding.name
         &diagnostics.push(sema_error("E2502", expr_span(binding.init), "a line stream can only be used directly in a loop", "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use", "iterate it directly: `loop {loop_name} in handle.lines() {{ … }}`"))
+    }
+    // E1110 (Rust `check_binding`, bindings.rs contains_taskgroup): a value
+    // that holds a `Group` inside it could outlive the group's owner.
+    if init.ty != (Type.Named{name: "Group"}) && sema_stmt_contains_taskgroup(init.ty) {
+        &diagnostics.push(sema_error("E1110", binding.name_span, "`Group` cannot be stored inside another value", "a task group is call-stack-only spawn authority; aliases and aggregates could outlive its owner", "pass `group: Group` directly to a helper function or method and use it there"))
     }
     // This rule stage S5 (Rust `string_view_call_source`): `x :: s.trim()`,
     // `s.after(sep)` or `s.before(sep)` on a local or parameter `String`
@@ -6710,6 +6748,9 @@ fn sema_stmt_returns_module_call(value: Expr, environment: SemaScopeEnvironment,
 // obligations: the value moves out and its views must outlive the call.
 fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_ownership_report_lending_view_escape(value, "be returned", scopes, context, &diagnostics) -> return None
+    // D-ALLOC2 (Rust `check_return`): a returned arena view would outlive the
+    // arena, which drops at scope end.
+    if sema_ownership_report_arena_view_escape(&state, value, "be returned", scopes, &diagnostics) -> return None
     // (Rust `check_return`): a bare range place is a read
     // window at a named `View<T>` return boundary, acquired explicitly so
     // the returned type stays a view instead of a materialized list.

@@ -2493,9 +2493,36 @@ fn sema_ownership_exact_view_carrier_for_place(state: &SemaOwnershipState, expr:
 }
 
 fn sema_ownership_diag_invalidated_view(fact: SemaOwnershipViewFact, span: Span) -> Diagnostic {
-    owner :: sema_ownership_place_name(fact.source)
+    // Rust `check_view_use` names the arena itself, not the fresh slot.
+    owner :: sema_ownership_view_owner_name(fact.source)
     verb :: if fact.invalidated_verb == "" -> "operation" else -> fact.invalidated_verb
     sema_error("E0632", span, "`{owner}` was {verb} here, so the value `{fact.carrier}` points into is gone", "`{fact.carrier}` is a view into `{owner}`; `{owner}.{verb}()` invalidated everything stored in `{owner}`, so reading `{fact.carrier}` now would read freed memory", "use `{fact.carrier}` before `{owner}.{verb}()`, or re-`alloc` after the {verb} to get a fresh value")
+}
+
+// D-ALLOC2 (Rust `report_view_escape`, CheckerOwnership.rs): E0631 when a name
+// holding an `arena.alloc` view would leave the arena's region.
+fn sema_ownership_report_arena_view_escape(state: &SemaOwnershipState, expr: Expr, what: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if expr == {
+        .Ident(name, span, _) -> {
+            index :: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+            if !sema_ownership_is_allocator_view(scopes.bindings[index].symbol.ty) -> return false
+            key :: scopes.bindings[index].symbol.id.key
+            loop fact in state.views {
+                if !fact.active || fact.carrier_key != key || !fact.source.projections.contains("[fresh]") -> next
+                arena :: sema_ownership_view_owner_name(fact.source)
+                &diagnostics.push(sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to {what}", "`{name}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory", "keep `{name}` inside the `{arena}` region, or copy what you need out with `{name}.copy()` before it leaves"))
+                return true
+            }
+            false
+        }
+        else -> false
+    }
+}
+
+// The type `arena.alloc(v)` gives its result (Memory.jet allocator methods).
+fn sema_ownership_is_allocator_view(ty: Type?) -> Bool Never! {
+    if ty == .Val(.Tagged(marker, _)) -> return marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView})
+    false
 }
 
 fn sema_ownership_report_invalidated_view(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -4131,6 +4158,16 @@ fn sema_ownership_check_snapshot_receiver_call(state: &SemaOwnershipState, calle
     accepted :: sema_ownership_check_call_receiver_as(&state, receiver, AccessConvention.Read, true, sema_window_plain_name(callee), sema_ownership_receiver_consumer(callee), scopes, span, expr_span(receiver), &diagnostics)
     state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: AccessConvention.Read, reserved: false}
     sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, [SemaOwnershipCallAccess]{}, accepted, true, true, false)
+}
+
+// An allocator handle named as the receiver of `alloc`/`try_alloc` keeps its
+// Read call access but runs no place read on the name: the arena's `[fresh]`
+// views look into storage the handle does not read (Rust
+// `allocator_view_preserving_receiver`).
+fn sema_ownership_check_allocator_handle_call(state: &SemaOwnershipState, callee: String, receiver: Expr, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+    sema_ownership_note_call_receiver(&state, receiver, AccessConvention.Read)
+    accesses :: loop receiver_place in sema_ownership_places_from_expr_in_state(receiver, scopes, &state) -> SemaOwnershipCallAccess{place: receiver_place, access: AccessConvention.Read, span: span, reserved: false, retained: true}
+    sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, ^accesses, true, true, true, false)
 }
 
 fn sema_ownership_check_lambda_captures(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
