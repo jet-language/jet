@@ -61,7 +61,7 @@ fn provider_collect_canonical_packages(repo: String, members: [MemberRef], reque
             .Find(_) -> true
             else -> false
         }
-        member_root :: files.join(repo, relative)
+        member_root :: files.join(repo, pkg_normalize_member_path(relative))
         info :: files.stat(member_root) ?? return Err(ProviderReason{message: "could not inspect Package member `{relative}`: {err}"})
         if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "Package member `{relative}` is not a regular directory"})
         if discover {

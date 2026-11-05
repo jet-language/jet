@@ -613,7 +613,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     store :: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
     written :: [(path: String, text: String)]{
-        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"),
         (path: "packages/hello/package.jet", text: "name: \"hello\"\nversion: \"0.1.0\"\n"),
         (path: "packages/hello/hello.jet", text: "module hello {{ }}\n"),
         (path: "packages/hello/bin/hello", text: "#!/bin/sh\necho hi\n"),
@@ -626,12 +626,13 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     }
     upstream :: "file://{repo}"
     table :: provider_core_test_table("mine", upstream, ProviderKind.Core)
-    realized :: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization")
+    realized :: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization: {err.message()}")
     assert_eq(realized.name, "hello")
     cache :: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
     assert(files.is_file(files.join(cache, "packages/hello/package.jet")))
     assert(!files.exists(files.join(cache, "packages/world")))
-    assert(files.is_file(files.join(cache, "workspace.jet")))
+    assert(files.is_file(files.join(cache, "package.jet")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -644,7 +645,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     // `app` depends on the in-repo `logging` member through an alias (`log`)
     // that differs from the member name: resolution is by path target.
     written :: [(path: String, text: String)]{
-        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"),
         (path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ log: ../logging }}\n"),
         (path: "packages/app/app.jet", text: "module app {{ }}\n"),
         (path: "packages/logging/package.jet", text: "name: \"logging\"\nversion: \"0.1.0\"\n"),
@@ -658,11 +659,12 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     }
     upstream :: "file://{repo}"
     table :: provider_core_test_table("mine", upstream, ProviderKind.Core)
-    provider_realize(&verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization")
+    provider_realize(&verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization: {err.message()}")
     cache :: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
     assert(files.is_file(files.join(cache, "packages/app/package.jet")))
     assert(files.is_file(files.join(cache, "packages/logging/package.jet")))
     assert(!files.exists(files.join(cache, "packages/unrelated")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -720,6 +722,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     after :: provider_cache_expectation(&verification, spec, table, ctx) ?? panic("changed cache identity")
     assert(before.identity.source_fingerprint != after.identity.source_fingerprint)
     assert(before.owned_output != after.owned_output)
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 

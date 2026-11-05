@@ -413,6 +413,17 @@ fn store_realize_verified(verification: &StoreVerification, roots: HangarRoots, 
     }
 
     prepared :: store_build_for_cache(&verification, roots, ctx, request, IndependentRootOptions.default(), false)
+    // The private build roots go on every exit once registration is decided
+    // (Rust drops the workspace guards).
+    registered :: store_register_prepared(&verification, roots, ctx, prepared) ? value -> value ! error -> {
+        prepared.release()
+        return Err(error)
+    }
+    prepared.release()
+    Ok(registered)
+}
+
+fn store_register_prepared(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, prepared: PreparedRealization) -> VerifiedRealization RealizeError! {
     realized := prepared.realized
     if prepared.attestation == {
         .Val(attestation) -> realized.producer.facts["cache.reproducibility"] = attestation
@@ -494,6 +505,17 @@ fn store_certify_independent_root_build(verification: &StoreVerification, roots:
     }
     store_closure_graph_structure(&verification, roots) ?? return Err(RealizeError.Store(err))
     prepared :: store_build_for_cache(&verification, roots, ctx, request, options, true)
+    // The private roots live until registration is decided, then go on every
+    // exit (Rust drops the workspace guards).
+    certified :: store_certify_prepared(&verification, roots, ctx, options, prepared) ? value -> value ! error -> {
+        prepared.release()
+        return Err(error)
+    }
+    prepared.release()
+    Ok(certified)
+}
+
+fn store_certify_prepared(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, options: IndependentRootOptions, prepared: PreparedRealization) -> IndependentRootCertification RealizeError! {
     action_key :: prepared.action_key ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification produced no action identity")))
     if options.cancelled == {
         .Val(cancelled) -> {

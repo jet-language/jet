@@ -51,11 +51,12 @@ fn store_artifact_test_size_refused(text: String) -> Bool {
     }
 }
 
-// Whether publishing `text` from a concurrent task succeeded.
-fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, Exec, Time, Rand]> Bool {
+// A concurrent task's publish failure, or "" when `text` was published; the
+// joining claim reports it (a panic inside the task loses its message).
+fn store_artifact_test_published(store: ArtifactStore, text: String) -[FS, Env, Exec, Time, Rand]> String {
     if store.publish_blob(text.bytes()) == {
-        .Ok(_) -> true
-        .Err(error) -> panic("{text} publish failed: {error.message()}")
+        .Ok(_) -> ""
+        .Err(error) -> "{text} publish failed: {error.message()}"
     }
 }
 
@@ -113,18 +114,22 @@ fn store_artifact_test_host_limit(store: ArtifactStore) -[FS]> Int? Never! {
     store_artifact_test_cleanup(root)
 }
 
+// The lock is held far inside the publishers' wait bound: each publish makes
+// several fsyncs, which take seconds each on a loaded shared disk, so the
+// second publisher's wait spans the first one's whole commit (#3590 c53: the
+// old 3 s bound with a 2.2 s hold failed under load).
 #Test("artifact store concurrent publishers wait for shared lock") {
     root :: store_artifact_test_root("concurrent")
-    store :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024 * 1024).with_reserve_bytes(0).with_lock_wait(time.duration_seconds(3)))
+    store :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024 * 1024).with_reserve_bytes(0).with_lock_wait(time.duration_seconds(600)))
     lock :: store.acquire_lock() ?? panic("test lock")
     left_store :: store.copy()
     right_store :: store.copy()
     left :: task ^left_store { store_artifact_test_published(left_store, "left") }
     right :: task ^right_store { store_artifact_test_published(right_store, "right") }
-    time.sleep(time.duration_ms(2200))
+    time.sleep(time.duration_ms(500))
     close(^lock)
-    assert(^left.join() ?? panic("left publisher task"), "left publish failed")
-    assert(^right.join() ?? panic("right publisher task"), "right publish failed")
+    assert_eq(^left.join() ?? panic("left publisher task"), "")
+    assert_eq(^right.join() ?? panic("right publisher task"), "")
     store_artifact_test_cleanup(root)
 }
 
@@ -427,11 +432,12 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: comptime { `{"schema":"jet.build-record/v
     assert_eq(config.reserve_bytes(), STORE_ARTIFACT_DEFAULT_RESERVE_BYTES)
 }
 
-// #4407: the canonical Fixed formatter owns Rust's ties-to-even behavior.
-// Do not restore a store-local integer half-up formatter for lock diagnostics.
-#Test("artifact store lock duration uses canonical fixed ties to even") {
+// The canonical `:Fixed(n)` formatter owns the rounding (owner ruling #4588:
+// half away from zero, so 0.0625 s prints 0.063). Do not restore a
+// store-local formatter for lock diagnostics.
+#Test("artifact store lock duration uses the canonical fixed rounding") {
     error :: ArtifactStoreError.Locked{path: "/store/locks/store.lock", owner_pid: None, elapsed_ns: 62500000}
-    assert_eq(error.message(), "store lock is owned by a live process (owner pid unknown) after waiting 0.062s: /store/locks/store.lock")
+    assert_eq(error.message(), "store lock is owned by a live process (owner pid unknown) after waiting 0.063s: /store/locks/store.lock")
 }
 
 #Test("artifact store process identity accessors preserve owner wire") {
@@ -514,4 +520,67 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: comptime { `{"schema":"jet.build-record/v
     store_artifact_test_cleanup(cache)
     store_artifact_test_cleanup(workspace)
     store_artifact_test_cleanup(other)
+}
+
+// #3590 c55: the machine-wide artifact cache root cannot be escaped. Names
+// that would be path components are refused before anything is created, and
+// an artifact key must be a digest, so a traversal key never names a path.
+#Test("artifact store refuses traversal, separator and absolute LTO namespaces and artifact keys") {
+    parent :: store_artifact_test_root("escape")
+    root :: files.join(parent, "store")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    refused :: [String]{"", ".", "..", "../outside", "a/b", "a\\b", "/etc", "~"}
+    loop namespace in refused {
+        if store.publish_lto(namespace, "lto".bytes()) == {
+            .Ok(_) -> panic("LTO namespace `{namespace}` must be refused")
+            .Err(error) -> assert_eq(store_artifact_test_kind(error), "invalid-key")
+        }
+    }
+    assert_eq(store_artifact_test_entries(files.join(root, "lto")), 0)
+    assert(!files.exists(files.join(parent, "outside")), "a refused namespace created a directory outside the store")
+    loop key in refused {
+        if store.publish_bytes(key, "payload".bytes(), false) == {
+            .Ok(_) -> panic("artifact key `{key}` must be refused")
+            .Err(error) -> assert_eq(store_artifact_test_kind(error), "invalid-digest")
+        }
+    }
+    assert_eq(store_artifact_test_entries(parent), 1)
+    assert_eq(store_artifact_test_entries(files.join(root, "ac")), 0)
+    assert_eq(store_artifact_test_entries(files.join(root, "cas")), 0)
+    store_artifact_test_cleanup(parent)
+}
+
+#Test("artifact store refuses a symlinked layout directory without touching its target") {
+    if sys.is_windows() -> return
+    parent :: store_artifact_test_root("escape-layout")
+    root :: files.join(parent, "store")
+    outside :: files.join(parent, "outside")
+    files.create_dir_all(root) ?? panic("store root")
+    files.create_dir_all(outside) ?? panic("outside")
+    files.symlink(outside, files.join(root, "cas")) ?? panic("cas link")
+    if ArtifactStore.open(ArtifactStoreConfig.new(root).with_cap_bytes(1024).with_reserve_bytes(0)) == {
+        .Ok(_) -> panic("a symlinked cas directory must be refused")
+        .Err(error) -> assert(error.message().contains("store directory is a symlink"), "unexpected refusal: {error.message()}")
+    }
+    assert_eq(store_artifact_test_entries(outside), 0)
+    store_artifact_test_cleanup(parent)
+}
+
+#Test("artifact store never follows a symlinked object out of the cache") {
+    if sys.is_windows() -> return
+    parent :: store_artifact_test_root("escape-object")
+    root :: files.join(parent, "store")
+    outside :: files.join(parent, "outside-object")
+    store :: store_artifact_test_store(root, 1024)
+    object :: store.publish_blob("cached".bytes()) ?? panic("publish")
+    path :: store.object_path(object)
+    // The link names bytes that would verify, so only refusing the link keeps
+    // the read inside the cache.
+    files.write(outside, "cached") ?? panic("outside bytes")
+    files.remove(path) ?? panic("drop object")
+    files.symlink(outside, path) ?? panic("object link")
+    assert(store_artifact_test_blob(store, object) == None, "a symlinked object must read as a miss")
+    assert(!files.lexists(path), "the link is quarantined out of cas")
+    assert_eq(files.read(outside) ?? panic("outside survives"), "cached")
+    store_artifact_test_cleanup(parent)
 }
