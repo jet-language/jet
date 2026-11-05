@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const corpus = path.join(root, "tests", "compiled_workloads");
-const contractScript = path.join(root, "Tools", "ci", "compiled-workload-gate.sh");
+const contractTool = path.join(root, "Tools", "ci", "CompiledWorkloads.jet");
 const MEASUREMENT_REGISTRY = Object.freeze({
   network: "network=disabled",
   rss: Object.freeze({
@@ -97,7 +97,7 @@ function fail(message) {
   console.error("compiled workload runner: " + message);
   process.exit(1);
 }
-const contract = spawnSync("bash", [contractScript, "--contract"], {
+const contract = spawnSync(jetBin, [contractTool, "--contract"], {
   cwd: root,
   encoding: "utf8",
 });
