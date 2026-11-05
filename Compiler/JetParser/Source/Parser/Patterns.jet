@@ -368,8 +368,12 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
         parts := parser_take_pattern_text_parts(&state, token_parts)
         return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span, id: parser_node_id(&state)}, span: token.span}
     }
-    parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
-    ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(&state)}, span: token.span}
+    // A computed pattern is read whole and dropped, so the call's own `)`
+    // still closes it and the one report names what was written.
+    described :: parser_describe_token(state, token)
+    computed :: if token.kind == TOKEN_RPAREN -> ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(&state)}, span: token.span} else -> parser_parse_expression(&state, 0, depth + 1)
+    parser_add_error_code(&state, "E0003", computed.span, "`take_pattern` takes a literal pattern string, not {described}", "the pattern is matched at compile time, so it must be written directly as a string literal", "write `take_pattern(\"literal-{{hole}}-pattern\")` or `take_pattern([U8]{{\"…\"}})` for bytes")
+    ParsedExpr{expr: Expr.Unit{span: computed.span, id: parser_node_id(&state)}, span: computed.span}
 }
 // S31 only equality against `Val(name)` introduces a binding.
 // Other payload expressions construct a value, and so does an ALL_CAPS

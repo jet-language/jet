@@ -400,15 +400,15 @@ fn sema_effect_report_nondeterministic_intrinsic(nodes: &[SemaEffectNode], node_
 
 // A compile-time value's call site `fact` whose callee reads ambient time or
 // randomness is refused by the API it calls (E3403), before evaluation
-// reaches the host clock or random source.
+// reaches the host clock or random source. An intrinsic (`time.now`) has no
+// declared callee and is named by its API.
 fn sema_effect_comptime_nondeterministic(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
-    callee :: fact.callee ?? return
+    api :: if fact.callee == .Val(callee) -> sema_effect_decl_label(callee.key) else -> fact.intrinsic_api ?? return
     row :: fact.facts.effect_bound ?? return
     loop entry in row {
         if entry.name.starts_with("!") -> next
         root :: sema_effect_root(entry.name)
         if root == "Time" || root == "Rand" {
-            api :: sema_effect_decl_label(callee.key)
             diagnostic :: sema_error("E3403", fact.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or keep it at runtime outside the `comptime` value.")
             &diagnostics.push(diagnostic_with_rights(^diagnostic, "pure", [String]{api}, [String]{}, None))
             return
@@ -1193,7 +1193,9 @@ fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, program:
     allowed :: wall ?? return false
     if !allowed -> return false
     caller_key := sema_scope_function_owner_key(scopes)
-    if caller_key != "" {
+    // A compile-time value has no owner frame; its sites still feed the
+    // ambient time/randomness check (sema_effect_comptime_nondeterministic).
+    if caller_key != "" || scopes.comptime_execution_depth > 0 {
         &context.call_facts.push(SemaCallSiteFact{
             span: span,
             caller_key: caller_key,

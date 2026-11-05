@@ -4734,6 +4734,16 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         sema_expr_same_type_operator(op) && sema_expr_wants_expected_form(right) -> rhs_expected = Val(sema_expr_rhs_hint(op, checked_lhs.ty, right))
         else -> {}
     }
+    if op == BinOp.Eq || op == BinOp.Ne {
+        if right == .Ident(bare, bare_span, _) {
+            if sema_scope_resolve_index(scopes, bare) == None {
+                if sema_pattern_bare_case(checked_lhs.ty, bare, bare_span, environment, program) == .Val(bare_case) {
+                    &diagnostics.push(bare_case)
+                    return None
+                }
+            }
+        }
+    }
     checked_rhs :: sema_check_expression(right, rhs_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     // A fractional literal before a Dyn operand is a Float, not a Decimal.
     if sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment, program)) && sema_dyn_float_literal_value(left) == .Val(number) {

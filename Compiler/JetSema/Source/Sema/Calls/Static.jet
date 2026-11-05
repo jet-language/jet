@@ -976,12 +976,14 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     diagnostics_before := diagnostics.len()
     targets := [SemaStaticMethodTarget]{}
     generic_owner_method := false
+    owner_param_names := [String]{}
     if program.registration_graph == .Val(graph) {
         owner_row :: sema_type_graph_nominal_row(graph, owner_symbol.id.key)
         if owner_row == .Val(row) {
             owner :: graph.modules[row.module_index].nominals[row.row]
             targets = sema_call_static_registered_targets(graph, owner, method, static_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
             generic_owner_method = owner.generic_params.len() > 0 && static_args.len() == 0 && sema_call_static_registered_method_exists(graph, owner, method, environment, program)
+            loop param in owner.generic_params -> &owner_param_names.push(param.name)
         }
     }
     if targets.len() == 0 && program.registration_graph == None {
@@ -999,7 +1001,8 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         }
         if {
             generic_owner_method -> {
-                &diagnostics.push(sema_error("E0904", method_span, "cannot infer the owner type arguments for `{type_name}.{method}`", "static method lookup needs one concrete owner type before building `StaticCall`", "provide the owner's type arguments or add argument/expected-type evidence"))
+                written :: if owner_param_names.len() > 0 -> "{type_name}<{owner_param_names.join(", ")}>" else -> "{type_name}<…>"
+                &diagnostics.push(sema_error("E0904", method_span, "`{type_name}.{method}` needs its generic receiver type here", "constructor inputs and the surrounding expected type must determine one concrete receiver type", "write the full receiver, such as `{written}.{method}(...)`"))
             }
             else -> {
                 // Rust `check_static_method_call`: a declared method with a
@@ -1158,6 +1161,16 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
                 if literal < bounds.lo || literal > bounds.hi {
                     &diagnostics.push(sema_error("E0135", argument.span, "`{literal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{literal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
                 }
+            }
+        }
+        // A float literal past the bounds can never convert either; its
+        // conversion stays fallible, as any float source's does.
+        if args[0].expr == .Float(number, _, _, raw, _) {
+            if sema_expr_is_integer(facts.base) && (number < Float.from_int(bounds.lo) || number > Float.from_int(bounds.hi)) {
+                // A whole-number literal reads as the integer it converts to.
+                text :: raw ?? "{number}"
+                written :: if text.ends_with(".0") -> text.slice(0, text.len() - 2) else -> text
+                &diagnostics.push(sema_error("E0135", argument.span, "`{written}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{written}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
             }
         }
     }

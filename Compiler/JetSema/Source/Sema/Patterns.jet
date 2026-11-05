@@ -313,6 +313,18 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
     result
 }
 
+// A bare name `light == Red` compares against: when no binding has that name
+// but the subject's enum declares a case of it, the leading `.` of `.Red` is
+// missing (E0367), not the name. None when the name is no such case.
+fn sema_pattern_bare_case(subject_ty: Type, name: String, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
+    if name.len() == 0 || Int.from_u8(name.bytes()[0]) < 65 || Int.from_u8(name.bytes()[0]) > 90 -> return None
+    probe := [Diagnostic]{}
+    payload :: sema_pattern_payload(subject_ty, name, env, program, span, &probe)
+    if !payload.known || payload.group || payload.owner == None -> return None
+    written :: if payload.types.len() > 0 -> ".{name}(…)" else -> ".{name}"
+    Val(sema_error("E0367", span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call", "write `{written}`"))
+}
+
 fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool) -> TPatternBindingFact Never! {
     TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, symbol_id: None}
 }

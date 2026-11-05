@@ -224,12 +224,14 @@ fn sema_function_header_memo_stats(receiver: Expr, method: String, args: [CallAr
 
 // E0126: a default expression may name only parameters written
 // before its own; defaults fill left to right. `self` is not a parameter here.
-fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
+// Answers the indices of the parameters whose defaults read a later one, so
+// their defaults aren't checked again (the later name is not in scope there).
+fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> [Int] {
     names := [String]{}
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name != "self" -> &names.push(function.params[parameter_index].name)
     }
-    valid := true
+    invalid := [Int]{}
     index := 0
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name == "self" -> next
@@ -247,14 +249,14 @@ fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: 
                     }
                     if later {
                         &diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
-                        valid = false
+                        if invalid.len() == 0 || invalid[invalid.len() - 1] != parameter_index -> &invalid.push(parameter_index)
                     }
                 }
             }
         }
         index += 1
     }
-    valid
+    invalid
 }
 
 // The identifier nodes a default expression reads, in source order.

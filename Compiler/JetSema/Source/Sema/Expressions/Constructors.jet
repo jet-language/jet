@@ -960,7 +960,8 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                         payload_expr = value
                     }
                     .Positional(_) -> {
-                        &diagnostics.push(sema_error("E0764", span, "variant `{variant}` needs named payload fields", "this enum variant declares labeled fields", "write each variant field as `name: value`"))
+                        labels :: loop declared in fields -> declared.name
+                        &diagnostics.push(sema_expression_enum_named_positional(owner.name, variant, labels, span))
                         return None
                     }
                 }
@@ -1107,6 +1108,13 @@ fn sema_expression_core_enum_positional_literal(enum_name: String, display_name:
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
+// E0764: positional values for a named-payload variant. The fix spells the
+// labeled construction (`View.Box{ width: …, height: … }`).
+fn sema_expression_enum_named_positional(owner: String, variant: String, labels: [String], span: Span) -> Diagnostic {
+    fields :: loop label in labels -> "{label}: …"
+    sema_error("E0764", span, "variant `{variant}` needs named payload fields", "`{owner}.{variant}` declares labeled fields, so each value names the field it fills", "write `{owner}.{variant}{{ {fields.join(", ")} }}`")
+}
+
 // A named-payload case of a Core enum without a source declaration
 // (`PluginError.Budget{...}`), checked like a declared enum's named
 // payload (Rust `check_enum_lit`): fields keep their written order and every
@@ -1125,7 +1133,7 @@ fn sema_expression_core_enum_named_literal(enum_name: String, display_name: Stri
                 payload_expr = value
             }
             .Positional(_) -> {
-                &diagnostics.push(sema_error("E0764", span, "variant `{variant}` needs named payload fields", "this enum variant declares labeled fields", "write each variant field as `name: value`"))
+                &diagnostics.push(sema_expression_enum_named_positional(display_name, variant, labels, span))
                 return None
             }
         }
@@ -2112,6 +2120,19 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
                 }
                 .Empty -> return sema_expression_enum_literal(variant_head.enum_name, owner_args, variant_head.variant, [EnumLitArg]{}, false, None, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 else -> {}
+            }
+        }
+    }
+    // A head that names no type is that unknown type (E0119), not a body
+    // that fails to match it. A head naming a declared type or a Core record
+    // (`IOContext`) is known whatever the written-name table says.
+    if head == .Val(written) && program.registration_graph == .Val(graph) {
+        if sema_expr_unwrap_tag(written) == .Named(written_name) {
+            if sema_expression_type_symbol(&scopes, environment, program, written_name) == None && sema_expression_core_record_name(written_name, [Type]{}, expected, environment, program, &scopes) == None {
+                before :: diagnostics.len()
+                generic_names :: loop parameter in environment.generic_params -> parameter.name
+                sema_type_unknown_written_names(graph, sema_scope_caller_row(environment, graph), written, span, generic_names, &diagnostics)
+                if diagnostics.len() > before -> return None
             }
         }
     }

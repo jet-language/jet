@@ -4849,10 +4849,15 @@ fn sema_stmt_is_path_op(operation: THandleOp, normalize: Bool) -> Bool Never! {
 // the body comptime evaluator and binds when the owner body is checked again.
 // The name then reads as that value and the binding emits no runtime code.
 fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    fact_start :: context.call_facts.len()
     scopes.comptime_execution_depth += 1
     checked :: sema_check_expression(binding.init, binding.ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
     init :: checked ?? {
+        sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
+        return None
+    }
+    if sema_stmt_comptime_site_nondeterministic(context, fact_start, &diagnostics) {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
@@ -4888,6 +4893,15 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
     sema_stmt_track_origin(binding, environment, program, &scopes)
     sema_origin_prepared_projection(binding.init, ty, known, &context)
     Val(TStmt.Inline{body: [TStmt]{}, span: Span{start: binding.name_span.start, end: init_span.end}})
+}
+
+// A compile-time site whose calls (from `fact_start` on) read ambient time or
+// randomness is refused where the body writes it (E3403), so it is never
+// staged and a later site in the body is still checked. True when reported.
+fn sema_stmt_comptime_site_nondeterministic(context: SemaCheckContext, fact_start: Int, diagnostics: &[Diagnostic]) -> Bool {
+    before :: diagnostics.len()
+    loop index in fact_start..<context.call_facts.len() -> sema_effect_comptime_nondeterministic(context.call_facts[index], &diagnostics)
+    diagnostics.len() > before
 }
 
 // Rust `Stmt::Assign` with a compound op checks the update value against the
@@ -7483,10 +7497,22 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         }
                         item_type_option := sema_stmt_for_in_item_type(collection.ty, method_kind, iterable_item_type)
                         item_type := item_type_option ?? Type.Named{name: "Unit"}
+                        // A bindingless `loop xs -> .member` binds the implicit `it`,
+                        // which bare member chains in the body read. Its source must
+                        // be a collection of items: a scalar source (a range, or a
+                        // value that is no loop source) and a nested bindingless loop
+                        // are E0380, and the rejected loop declares no second `it`.
+                        bindingless :: var == "it" && var2 == None
+                        nested_bindingless :: bindingless && context.implicit_loop_subject_depth > 0
+                        scalar_bindingless :: bindingless && !nested_bindingless && collection_value != None && (range_source || item_type_option == None)
+                        if nested_bindingless || scalar_bindingless {
+                            &diagnostics.push(sema_error("E0380", expr_source_span(collection_expr), "this loop needs a named source binding", "an implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding", "write `loop item in source -> ...`; give nested loops named bindings"))
+                            valid = false
+                        }
                         // A source that failed its own check already reported why;
                         // its placeholder type is not a second loop-source error.
-                        if item_type_option == None && collection_value != None {
-                            &diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "values of type {type_name(collection.ty)} can't be used as a loop source", "a `for` source must provide one checked item type per step", "use a list, map, stream, iterator, reader, or registered Iterable value"))
+                        if item_type_option == None && collection_value != None && !scalar_bindingless {
+                            &diagnostics.push(sema_error("E0109", expr_source_span(collection_expr), "values of type {type_name(collection.ty)} can't be used as a loop source", "a `loop` source must provide one checked item type per step", "use a list, map, stream, iterator, reader, or registered Iterable value"))
                             valid = false
                         }
                         pair_types := sema_stmt_for_in_pair_types(collection.ty, item_type)
@@ -7547,21 +7573,26 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         source_checked := collection_value != None
                         first_local_type := Type?{None}
                         second_local_type := Type?{None}
-                        if source_checked && !pair_rejected {
+                        if source_checked && !pair_rejected && !scalar_bindingless {
                             first_local_type = Val(first_type)
                             second_local_type = Val(second_type ?? item_type)
                         }
                         // Each `#SingleUse` element a consuming loop hands over owes its
                         // own duty in the body; task handles keep their join rule.
                         element_owes_duty :: ((consumes_collection && sema_stmt_for_in_is_list(collection.ty)) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)) && !sema_stmt_for_in_type_requires_owned_iteration(item_type)
-                        first_local :: sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, environment, program, &scopes, &state, &diagnostics)
-                        if first_local == None -> valid = false
+                        first_local := TLocal?{None}
+                        if nested_bindingless {
+                            valid = false
+                        } else {
+                            first_local = sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, environment, program, &scopes, &state, &diagnostics)
+                            if first_local == None -> valid = false
+                        }
                         variable_two := TLocal?{None}
                         if var2 != None && (second_type != None || !source_checked || pair_rejected) {
                             variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, element_owes_duty, environment, program, &scopes, &state, &diagnostics)
                             if variable_two == None -> valid = false
                         }
-                        if borrowed_elements {
+                        if borrowed_elements && !nested_bindingless {
                             sema_scope_mark_place_alias(&scopes, var)
                             if var2 != None -> sema_scope_mark_place_alias(&scopes, var2.name)
                         }
@@ -7575,15 +7606,6 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         iter_borrowed_depth := context.iter_borrowed.len()
                         if sema_stmt_for_in_driven_root(collection_expr) == .Val(driven) -> &context.iter_borrowed.push(driven)
                         references_before := state.references.len()
-                        // A bindingless `loop xs -> .member`
-                        // binds the implicit `it`, which bare member chains in
-                        // the body read; a nested bindingless loop is E0380.
-                        bindingless :: var == "it" && var2 == None
-                        nested_bindingless :: bindingless && context.implicit_loop_subject_depth > 0
-                        if nested_bindingless {
-                            &diagnostics.push(sema_error("E0380", expr_source_span(collection_expr), "this loop needs a named source binding", "an implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding", "write `loop item in source -> ...`; give nested loops named bindings"))
-                            valid = false
-                        }
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth += 1
                         nested := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
                         if bindingless && !nested_bindingless -> context.implicit_loop_subject_depth -= 1
@@ -8046,6 +8068,9 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
                                 if {
                                     lost_tail -> {
                                         if diagnostics.len() == discard_diagnostic_start -> &diagnostics.push(sema_stmt_lost_tail_diagnostic(context.function_name, type_name(checked.ty), expr_span(expr)))
+                                        // The checked statement stays in the body so the
+                                        // flow passes after it (typestate) still read it.
+                                        &output.push(TStmt.ExprStmt{value: checked, span: expr_span(expr)})
                                         complete = false
                                     }
                                     else -> {
@@ -8144,10 +8169,12 @@ fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_
         arm :: SwitchArm{cond: cond, body: then_body, span: cond_span}
         return sema_stmt_check_prep_type_table(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, [SwitchArm]{arm}, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
     }
+    fact_start :: context.call_facts.len()
     scopes.comptime_execution_depth += 1
     checked :: sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
     condition :: checked ?? return false
+    if sema_stmt_comptime_site_nondeterministic(context, fact_start, &diagnostics) -> return false
     // A prepared local reads as its value, so a local left in the checked
     // condition is known only at run time.
     runtime_local := false
@@ -8211,10 +8238,12 @@ fn sema_stmt_check_comptime_block(body: [Stmt], span: Span, environment: SemaSco
         span: span,
         id: AST_NODE_GENERATED,
     }
+    fact_start :: context.call_facts.len()
     scopes.comptime_execution_depth += 1
     checked :: sema_check_expression(block, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
     checked_block :: checked ?? return false
+    if sema_stmt_comptime_site_nondeterministic(context, fact_start, &diagnostics) -> return false
     _ := sema_comptime_body_capture(&context, environment, program, scopes, "comptime block", block, checked_block.ty, span, span)
     false
 }

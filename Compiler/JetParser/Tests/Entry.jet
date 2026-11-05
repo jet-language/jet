@@ -238,6 +238,13 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     }
 }
 
+#Test("a site-bound rule named as a policy points at its own site") {
+    result :: parser_test_result("#Policy(Unsafe)\nfn run() {{}}\n")
+    found := false
+    loop diagnostic in result.diagnostics { if diagnostic.code == "E0355" && diagnostic.why.contains("policy scope cannot widen them") && diagnostic.fix.contains("`#Unsafe` at its sound site") -> found = true }
+    assert(found)
+}
+
 // Rust: crates/jet-parser/src/lib.rs:449
 #Test("duplicate_callable_policy_markers_are_rejected") {
     result :: parser_test_result("#Policy(trace(\"one\"))\n#Policy(trace(\"two\"))\nfn run() {{}}\n")

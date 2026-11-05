@@ -1353,7 +1353,7 @@ fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegis
 
 fn sema_checked_foreign_crate_version(library: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if library == "std" || library.split("@").len() > 1 -> return true
-    &diagnostics.push(sema_error("E0701", span, "the crate `{library}` needs a version pin", "every non-`std` `extern rust` crate must pin an exact version so builds stay reproducible", "write: extern rust `{library}@0.1` {{ ... }}"))
+    &diagnostics.push(sema_error("E0701", span, "the crate `{library}` needs a version pin", "every non-`std` `extern rust` crate must pin an exact version so builds stay reproducible", "write `extern rust \"{library}@0.1\" {{ ... }}`"))
     false
 }
 

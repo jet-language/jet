@@ -2014,7 +2014,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // E1410/E1411: a `#DevPanel` function's panel contract (Rust
     // `check_devtools_panels`), also read from the declared signature.
     sema_check_devtools_panel(func, updated, program, &diagnostics)
-    if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
+    forward_defaults :: sema_function_header_check_default_forward_refs(func, &diagnostics)
+    if forward_defaults.len() > 0 -> complete = false
     sema_function_header_lint_err_params(func, &diagnostics)
     if function_kind == .TopLevel && !sema_module_is_core_source(module_identity) && !sema_module_no_prelude(updated, program) -> sema_function_header_lint_prelude_shadow(func, &diagnostics)
     if !sema_function_header_check_variadic_bound_shape(func, updated, program, &diagnostics) -> complete = false
@@ -2064,7 +2065,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         // E0502: a map in a declared parameter type needs a key-eligible key.
         if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, &diagnostics) -> complete = false
         default_expr := TExpr?{None}
-        if func.params[param_index].default != None {
+        if func.params[param_index].default != None && !forward_defaults.contains(param_index) {
             default_context := sema_check_context_init()
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params

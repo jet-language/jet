@@ -3,7 +3,7 @@ Error [jet.BareCasePattern]: Pattern `Fade` needs a leading `.`
     |
   8 |         Fade(n) -> { print(n) }
     |         ^^^^
- Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call
  Fix: Write `.Fade(…)`
 More: jet-lang.dev/e/E0367
 
@@ -12,7 +12,7 @@ Error [jet.BareCasePattern]: Pattern `Ok` needs a leading `.`
     |
  11 |         Ok(n) -> { print(n) }
     |         ^^
- Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call
  Fix: Write `.Ok(…)`
 More: jet-lang.dev/e/E0367
 
@@ -21,7 +21,7 @@ Error [jet.BareCasePattern]: Pattern `Err` needs a leading `.`
     |
  12 |         Err(e) -> { print(e) }
     |         ^^^
- Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call
  Fix: Write `.Err(…)`
 More: jet-lang.dev/e/E0367
 
@@ -30,7 +30,7 @@ Error [jet.BareCasePattern]: Pattern `Int` needs a leading `.`
     |
  15 |         Int(n) -> { print(n) }
     |         ^^^
- Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call
  Fix: Write `.Int(…)`
 More: jet-lang.dev/e/E0367
 
@@ -39,24 +39,6 @@ Error [jet.BareCasePattern]: Pattern `String` needs a leading `.`
     |
  16 |         String(s) -> { print(s) }
     |         ^^^^^^
- Why: Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)
+ Why: Match patterns take a leading dot so the name isn't read as a variable or call
  Fix: Write `.String(…)`
 More: jet-lang.dev/e/E0367
-
-Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
-  --> tests/ui/enum_pattern_needs_dot_payload.jet:6:31
-    |
-  6 | fn show(light: Light, result: Int !String, value: Int | String) {
-    |                               ^^^^^^^^^^^
- Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
-More: jet-lang.dev/e/E2417
-
-Error [jet.OkErrOutsideFallible]: `Ok(...)` only fits where a fallible result is expected
-  --> tests/ui/enum_pattern_needs_dot_payload.jet:21:25
-    |
- 21 |     show(Light.Fade(1), Ok(1), 2)
-    |                         ^^^^
- Why: `Ok` builds the success side of a `T E!` result
- Fix: Use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one
-More: jet-lang.dev/e/E0404

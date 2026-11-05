@@ -1,21 +1,3 @@
-Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
-  --> typestate_unreachable.jet:6:50
-    |
-  6 |     #Transition(_, Start) fn start() -[]> Flow { return Flow{} }
-    |                                                  ^^^^^^
- Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
- Fix: Remove the final `return` and leave the expression as the block tail
-More: jet-lang.dev/e/L0530
-
-Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
-  --> typestate_unreachable.jet:7:63
-    |
-  7 |     #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
-    |                                                               ^^^^^^
- Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
- Fix: Remove the final `return` and leave the expression as the block tail
-More: jet-lang.dev/e/L0530
-
 Warning [jet.UnreachableState]: `Flow.State.Orphan` is unreachable from every entry transition.
   --> tests/ui_lint/typestate_unreachable.jet:2:26
     |
@@ -24,3 +6,21 @@ Warning [jet.UnreachableState]: `Flow.State.Orphan` is unreachable from every en
  Why: When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol.
  Fix: Add an entry or transition path to `Orphan`, or remove it from the declaration.
 More: jet-lang.dev/e/L0153
+
+Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
+  --> tests/ui_lint/typestate_unreachable.jet:6:50
+    |
+  6 |     #Transition(_, Start) fn start() -[]> Flow { return Flow{} }
+    |                                                  ^^^^^^
+ Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
+
+Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
+  --> tests/ui_lint/typestate_unreachable.jet:7:63
+    |
+  7 |     #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
+    |                                                               ^^^^^^
+ Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
+ Fix: Remove the final `return` and leave the expression as the block tail
+More: jet-lang.dev/e/L0530
