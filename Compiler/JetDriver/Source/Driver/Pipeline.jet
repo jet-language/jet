@@ -3942,8 +3942,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     registered_function_keys = JetDriverRegisteredKeys{modules: name_rows(), keys: [NameRows]{}}
     loaded_identity_counts = [String:Int]{}
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.owners", checked_row)
-    // E0601 only when neither named tests nor selected Check Outputs exist.
-    if request.mode == JetDriverCompileMode.Test && jet_driver_runnable_test_count(registration_graph) == 0 {
+    // E0601 only when neither named tests nor selected Check Outputs exist,
+    // and the run is not a code suite's.
+    if request.mode == JetDriverCompileMode.Test && !request.code_suite && jet_driver_runnable_test_count(registration_graph) == 0 {
         &load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
     }
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)

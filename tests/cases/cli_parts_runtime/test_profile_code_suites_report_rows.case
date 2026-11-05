@@ -25,6 +25,12 @@ step: jet test --profile sizes --capture=all
 cwd: {work}/app
 exit: 0
 stderr: ~ "`sizes`: 3 rows against `.jet/test/sizes/sizes.rows`: 0 lost, 0 changed, 0 new" # a later run compares
+copy: alt/untested.jet app/run.jet
+step: jet test --profile rows --capture=all
+cwd: {work}/app
+exit: 0
+stderr: !~ "E0601" # a package with no #Test still runs its code suite
+stderr: ~ "`sizes`: 3 rows recorded as the baseline `.jet/test/rows/sizes.rows`" # the suite ran alone
 copy: alt/failing.jet app/sizes.jet
 step: jet test --profile sizes --capture=all
 cwd: {work}/app
