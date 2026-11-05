@@ -1,5 +1,5 @@
 // Test receipts and the support matrix. A receipt is one runner's report: a
-// verify-full.json written by Tools/agent/verify-full.sh, or the RELEASE.json
+// verify-full.json written by Tools/agent/VerifyFull.jet, or the RELEASE.json
 // Tools/agent/release-compiler.mjs admits a release with. Each names the
 // target it ran on and its shard of the suite inventory, so a runner that
 // never reported shows up as a gap in the matrix.
@@ -65,9 +65,9 @@ fn parse_verify_full(file: String, bytes: [U8]) -> Receipt Never! {
     shard :: field(tree, "shard")
     receipt.shard = int_field(shard, "index") ?? -1
     receipt.shards = int_field(shard, "count") ?? 0
-    if receipt.target == "" -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so rerun Tools/agent/verify-full.sh"))
-    if receipt.shards < 1 || receipt.shard < 0 || receipt.shard >= receipt.shards -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no valid shard: rerun Tools/agent/verify-full.sh"))
-    if !is_hex(receipt.jet_sha256, 64) -> &receipt.problems.push(problem(STALE, "{file} does not record the sha256 of the jet it ran, so it cannot be tied to this release: rerun Tools/agent/verify-full.sh"))
+    if receipt.target == "" -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so rerun Tools/agent/VerifyFull.jet"))
+    if receipt.shards < 1 || receipt.shard < 0 || receipt.shard >= receipt.shards -> &receipt.problems.push(problem(MISSING_RUNNER, "{file} names no valid shard: rerun Tools/agent/VerifyFull.jet"))
+    if !is_hex(receipt.jet_sha256, 64) -> &receipt.problems.push(problem(STALE, "{file} does not record the sha256 of the jet it ran, so it cannot be tied to this release: rerun Tools/agent/VerifyFull.jet"))
     receipt
 }
 

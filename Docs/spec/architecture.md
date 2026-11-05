@@ -2175,15 +2175,15 @@ of its suite. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
 and exact streams; diagnostic text remains a product surface, not a blessable
 implementation accident.
 
-`JET=/absolute/path/to/jet Tools/agent/verify-full.sh` runs the complete native
-suite inventory and source-pinned compiler registries, collecting independent
-failures. Missing, refused, skipped and non-PASS verdicts do not close the gate.
-It uses an already-built compiler, never Cargo to build Jet's compiler/tests,
-and never a Rust producer. `Tools/agent/native-suite.mjs` exposes the shared,
-pure post-closeout command descriptors and strict receipt validator; it has no
-CLI or closeout-bypass flag. Under owner directive #59, native cutover executes
-those runners directly and reports formal qualification/closeout separately as
-**NOT MET (deferred)**, never as a suite pass.
+`JET=/absolute/path/to/jet jet Tools/agent/VerifyFull.jet` runs the complete
+native suite inventory and source-pinned compiler registries, collecting
+independent failures. Missing, refused, skipped and non-PASS verdicts do not
+close the gate. It uses an already-built compiler, never Cargo to build Jet's
+compiler/tests, and never a Rust producer. The gate's command list and strict
+receipt validator live in that one file; it has no closeout-bypass flag. Under
+owner directive #59, native cutover executes those runners directly and reports
+formal qualification/closeout separately as **NOT MET (deferred)**, never as a
+suite pass.
 
 Native cutover uses one outer process trace. Testkit's exec-only
 `native-command.mjs` labels each case without changing its command PID or streams;

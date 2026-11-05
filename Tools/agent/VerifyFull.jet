@@ -1,0 +1,625 @@
+#!/usr/bin/env jet
+// Full native gate: the Tools/agent ratchets plus the complete native suites
+// (golden, ui, cases, registries) of this shard, run with an already-built
+// admitted compiler. It never builds Jet itself. Independent failures
+// accumulate; no skip, blessing or reference oracle can close a suite.
+// Usage (from the repository root):
+//   JET=<admitted jet> jet Tools/agent/VerifyFull.jet
+// Environment:
+//   JET                   the compiler under test (required)
+//   JET_VERIFY_TMPDIR     scratch parent (default $TMPDIR, then the scratch
+//                         root); it must lie outside the checkout and /tmp
+//   JET_CI_EVIDENCE_DIR   where the logs, verify-full-summary.tsv and
+//                         verify-full.json go (default <scratch>/evidence)
+//   JET_VERIFY_TIMEOUT_MS per-child timeout (default one hour)
+//   JET_TEST_SHARD, JET_TEST_SHARD_COUNT   the shard (default 0 of 1)
+//   JET_NATIVE_TRACE_LOG  run the suites under the native trace
+//
+// The closeout gate runs first and is a prerequisite, not an escape hatch. The
+// source is pinned to the commit of an inherited `../source.manifest.json`, or
+// else to HEAD exported through Tools/agent/proof-source.mjs, and its tracked
+// bytes are checked before and after the suites. A child that dies by a signal,
+// times out or exits 124 or >= 128 is unsafe: every later row is BLOCKED.
+// verify-full.json is the receipt Tools/release reads: its pin, the sha256 of
+// the jet it ran, its target and shard, and one row per scope.
+use {
+    crypto :: core.crypto
+    files :: core.files
+    json :: core.encoding.json
+    process :: core.process
+    sys :: core.sys
+    term :: core.term
+    time :: core.time
+}
+
+SUITES :: [String]{"golden", "ui", "cases", "registries"}
+SOURCE_SCHEMA :: "jet-proof-source/v1"
+DEFAULT_TIMEOUT_MS :: 3600000
+
+struct Setting {
+    name: String
+    value: String
+}
+
+struct Row {
+    scope: String
+    status: String
+    // A row whose child ran records its exit code (None when it died by a
+    // signal or timed out) and signal.
+    ran: Bool
+    code: Int?
+    signal: Int?
+    reason: String?
+    log: String
+    total: Int?
+    passed: Int?
+}
+
+struct Verify {
+    repo: String
+    binary: String
+    jet_sha256: String
+    target: String
+    shard_index: String
+    shard_count: String
+    scratch: String
+    evidence: String
+    env: [Setting]
+    timeout_ms: Int
+    pin: String?
+    rows: [Row]
+    unsafe: String
+}
+
+struct Ran {
+    row: Row
+    output: String
+}
+
+fn run() {
+    jet :: env_or("JET", "")
+    if jet == "" -> return abort("verify-full: JET must name the admitted compiler binary")
+    binary :: files.realpath(jet) ?? return abort("verify-full: JET `{jet}` cannot be resolved: {err}")
+    repo :: repo_root()
+    parent :: env_or("JET_VERIFY_TMPDIR", env_or("TMPDIR", scratch_root()))
+    files.create_dir_all(parent) ?? return abort("verify-full: scratch parent `{parent}` cannot be created: {err}")
+    base :: files.realpath(parent) ?? return abort("verify-full: scratch parent `{parent}` cannot be resolved: {err}")
+    checkout :: files.realpath(repo) ?? return abort("verify-full: checkout `{repo}` cannot be resolved: {err}")
+    if inside(checkout, base) || inside(files.realpath("/tmp") ?? "/tmp", base) -> return abort("verify-full: scratch must be external and disk-backed")
+    scratch :: "{base}/jet-verify-{sys.pid()}-{time.unix_ns()}"
+    files.create_dir(scratch) ?? return abort("verify-full: scratch `{scratch}` cannot be created: {err}")
+    evidence_dir :: env_or("JET_CI_EVIDENCE_DIR", "{scratch}/evidence")
+    evidence :: files.absolute(evidence_dir) ?? return abort("verify-full: evidence directory `{evidence_dir}` cannot be resolved: {err}")
+    if inside(checkout, evidence) -> return abort("verify-full: evidence must be outside the checkout")
+    files.create_dir_all(evidence) ?? return abort("verify-full: evidence directory `{evidence}` cannot be created: {err}")
+    compiler :: files.read_bytes(binary) ?? return abort("verify-full: `{binary}` cannot be read: {err}")
+    timeout_text :: env_or("JET_VERIFY_TIMEOUT_MS", "{DEFAULT_TIMEOUT_MS}")
+    timeout_ms :: Int.parse(timeout_text) ?? return abort("verify-full: JET_VERIFY_TIMEOUT_MS `{timeout_text}` is not a number of milliseconds")
+    state := Verify{
+        repo: repo.copy(),
+        binary: binary.copy(),
+        jet_sha256: crypto.sha256(compiler).hex(),
+        target: runner_target(),
+        shard_index: env_or("JET_TEST_SHARD", "0"),
+        shard_count: env_or("JET_TEST_SHARD_COUNT", "1"),
+        scratch: scratch.copy(),
+        evidence: evidence.copy(),
+        env: [Setting]{},
+        timeout_ms: timeout_ms,
+        pin: None,
+        rows: [Row]{},
+        unsafe: "",
+    }
+    loop setting in ([Setting]{
+        Setting{name: "JET", value: binary.copy()},
+        Setting{name: "TMPDIR", value: scratch.copy()},
+        Setting{name: "TMP", value: scratch.copy()},
+        Setting{name: "TEMP", value: scratch.copy()},
+        Setting{name: "JET_TEST_SCRATCH_DIR", value: scratch.copy()},
+        Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()},
+        Setting{name: "NO_COLOR", value: "1"},
+        Setting{name: "TERM", value: "dumb"},
+    }) -> &state.env.push(setting)
+
+    closeout :: run_child(&state, "closeout-gate", [String]{"node", "{repo}/Tools/agent/closeout-gate.mjs", "check"})
+    record(&state, closeout.row)
+    if closeout.row.status != "PASS" -> process.exit(1)
+    if !pin_source(&state) -> process.exit(1)
+    if !check_pin(&state, "source-integrity-before") -> process.exit(1)
+    root :: state.repo.copy()
+    &state.env.push(Setting{name: "JET_TOOLCHAIN_ROOT", value: root.copy()})
+    &state.env.push(Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()})
+    if process.env_get("JET_NATIVE_TRACE_LOG") != None {
+        cache :: "{evidence}/native-ffi-cache"
+        files.create_dir_all(cache) ?? return abort("verify-full: `{cache}` cannot be created: {err}")
+        &state.env.push(Setting{name: "JET_NATIVE_TRACE_NODE", value: process.which("node") ?? "node"})
+        &state.env.push(Setting{name: "JET_NATIVE_TRACE_CACHE_ROOT", value: cache})
+    }
+
+    suites :: shard_suites(state)
+    files.write("{evidence}/test-targets.txt", "{suites.join("\n")}\n") ?? return abort("verify-full: test-targets.txt cannot be written: {err}")
+    loop gate in ([[String]]{
+        [String]{"unsafe-ratchet", binary, "UnsafeRatchet.jet"},
+        [String]{"agent-doc-flags", binary, "AgentDocFlags.jet"},
+        [String]{"rust-era-ratchet", binary, "RustEraRatchet.jet"},
+        [String]{"decision-index", binary, "DecisionIndex.jet", "--check"},
+        [String]{"core-coverage", "node", "core-coverage-census.mjs", "--check"},
+        [String]{"core-module-check", "node", "core-module-check.mjs", "--check"},
+    }) {
+        argv := [String]{gate[1], "{root}/Tools/agent/{gate[2]}"}
+        loop index in 3..<gate.len() -> &argv.push(gate[index])
+        ran :: run_child(&state, gate[0], argv)
+        record(&state, ran.row)
+    }
+    head :: state.pin ?? ""
+    loop suite in suites {
+        if suite != "registries" {
+            // `jet test Compiler --profile <suite>` runs that corpus in process with
+            // JET and JET_TEST_SCRATCH_DIR from this environment and writes its
+            // case verdicts to $JET_CI_EVIDENCE_DIR/<suite>.json.
+            ran := run_child(&state, suite, [String]{binary, "test", "{root}/Compiler", "--profile", suite, "--color=never"})
+            if ran.row.status == "PASS" -> testkit_verdict(&ran.row, "{evidence}/{suite}.json", binary, suite)
+            record(&state, ran.row)
+            next
+        }
+        output :: "{scratch}/registries"
+        manifest :: "{output}/manifest.json"
+        listed := run_child(&state, "registry-manifest", [String]{"node", "{root}/Tools/agent/compiler-registries.mjs", "manifest", head, "--out", output})
+        if listed.row.status == "PASS" -> registry_verdict(&listed.row, manifest, None, head, root, binary)
+        passed :: listed.row.status == "PASS"
+        record(&state, listed.row)
+        if !passed {
+            record(&state, blocked_row("registries", "prerequisite registry-manifest did not pass", "{evidence}/registries.log"))
+            next
+        }
+        receipt :: "{evidence}/registries.json"
+        ran := run_child(&state, "registries", [String]{"node", "{root}/Tools/agent/compiler-registries.mjs", "run", "--jet", binary, "--manifest", manifest, "--receipt", receipt})
+        if ran.row.status == "PASS" -> registry_verdict(&ran.row, manifest, Val(receipt), head, root, binary)
+        record(&state, ran.row)
+    }
+    check_pin(&state, "source-integrity-after")
+    verdict :: if all_pass(state.rows) -> "PASS" else -> "FAIL"
+    term.eprint("verify-full: {verdict}; complete evidence: {evidence}/verify-full-summary.tsv")
+    process.exit(if verdict == "PASS" -> 0 else -> 1)
+}
+
+fn abort(text: String) -[Exec, IO]> Never {
+    term.eprint(text)
+    process.exit(1)
+}
+
+// An environment value, or `fallback` when it is unset or empty.
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The shared scratch root of Tools/agent/roots.sh.
+fn scratch_root() -[Env]> String Never! {
+    cache :: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
+    env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", "{cache}/jet-dev"))
+}
+
+// The checkout holding this script.
+fn repo_root() -[Env, Exec, FS, IO]> String Never! {
+    tool :: "/Tools/agent/VerifyFull.jet"
+    script :: sys.executable()
+    if script.ends_with(tool) -> return script.removesuffix(tool)
+    dir := files.cwd() ?? "/"
+    loop {
+        if files.exists("{dir}{tool}") -> return dir
+        if dir == "/" || dir == "" -> return abort("verify-full: run from inside the Jet checkout (no Tools/agent/VerifyFull.jet above the working directory)")
+        dir = files.dirname(dir)
+    }
+}
+
+// The runner target Tools/release/support-matrix.tsv names: node's
+// `${process.platform}-${process.arch}` spelling, which release-compiler.mjs
+// records too.
+fn runner_target() -[Env]> String Never! {
+    name :: sys.name()
+    arch :: sys.arch()
+    platform :: if name == "macos" -> "darwin" else -> if name == "windows" -> "win32" else -> name
+    machine :: if arch == "x86_64" -> "x64" else -> if arch == "aarch64" -> "arm64" else -> arch
+    "{platform}-{machine}"
+}
+
+fn inside(root: String, path: String) -> Bool Never! {
+    path == root || path.starts_with("{root}/") || root == "/"
+}
+
+fn blocked_row(scope: String, reason: String, log: String) -> Row Never! {
+    Row{scope: scope.copy(), status: "BLOCKED", ran: false, code: None, signal: None, reason: Val(reason.copy()), log: log.copy(), total: None, passed: None}
+}
+
+fn all_pass(rows: [Row]) -> Bool Never! {
+    rows.len() > 0 && rows.all(row -> row.status == "PASS")
+}
+
+fn record(state: &Verify, row: Row) -[FS, Exec, IO]> () {
+    &state.rows.push(row)
+    publish(state)
+}
+
+fn spawn(spec: ProcessSpec) -[Env, Exec, FS, IO, Time, Time.Wait]> ProcessReceipt IOError! {
+    results :: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(err)
+    receipt :: results[0] ?? return Err(err)
+    Ok(receipt)
+}
+
+// Run one child in the pinned source with the verification environment. Once a
+// child has been unsafe, nothing else runs: the row is BLOCKED.
+fn run_child(state: &Verify, scope: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+    log :: "{state.evidence}/{scope}.log"
+    if state.unsafe != "" -> return Ran{row: blocked_row(scope, state.unsafe, log), output: ""}
+    spec := process.cmd(argv).cwd(state.repo).timeout(time.duration_ms(state.timeout_ms)).output_limit(134217728)
+    loop setting in state.env -> spec = spec.env(setting.name, setting.value)
+    row := Row{scope: scope.copy(), status: "FAIL", ran: true, code: None, signal: None, reason: None, log: log.copy(), total: None, passed: None}
+    receipt :: spawn(spec) ?? {
+        state.unsafe = "unsafe child {err} in {scope}"
+        files.write(log, "{err}\n") ?? return abort("verify-full: `{log}` cannot be written: {err}")
+        row.reason = Val(state.unsafe.copy())
+        return Ran{row: row, output: ""}
+    }
+    files.write(log, "{receipt.output}{receipt.errors}") ?? return abort("verify-full: `{log}` cannot be written: {err}")
+    signal :: receipt.signal ?? -1
+    if receipt.timed_out -> state.unsafe = "unsafe child timeout in {scope}"
+    if !receipt.timed_out && signal >= 0 {
+        row.signal = Val(signal)
+        state.unsafe = "unsafe child signal {signal} in {scope}"
+    }
+    if !receipt.timed_out && signal < 0 {
+        row.code = Val(receipt.code)
+        if receipt.code == 0 -> row.status = "PASS"
+        if receipt.code >= 128 || receipt.code == 124 -> state.unsafe = "unsafe child {receipt.code} in {scope}"
+    }
+    if state.unsafe != "" -> row.reason = Val(state.unsafe.copy())
+    Ran{row: row, output: receipt.output}
+}
+
+// Pin the source: to the commit of an inherited ../source.manifest.json, or to
+// HEAD exported through proof-source.mjs, whose output becomes the source.
+fn pin_source(state: &Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
+    inherited :: "{files.dirname(state.repo)}/source.manifest.json"
+    if files.exists(inherited) {
+        text :: files.read(inherited) ?? return abort("verify-full: `{inherited}` cannot be read: {err}")
+        tree :: json.parse(text) ?? return abort("verify-full: `{inherited}` is not JSON: {err}")
+        state.pin = Val(text_field(tree, "commit"))
+        return true
+    }
+    head :: process.cmd([String]{"git", "rev-parse", "HEAD"}).cwd(state.repo).run() ?? return abort("verify-full: cannot pin full verification source: {err}")
+    if head.code != 0 || head.signal != None -> return abort("verify-full: cannot pin full verification source: {head.errors.trim_end()}")
+    commit :: head.output.trim()
+    state.pin = Val(commit.copy())
+    export :: run_child(&state, "source-export", [String]{"node", "{state.repo}/Tools/agent/proof-source.mjs", commit, state.repo})
+    passed :: export.row.status == "PASS"
+    record(&state, export.row)
+    if passed -> state.repo = export.output.trim().copy()
+    passed
+}
+
+// The suites of this shard, from Tools/ci/TestShards.jet.
+fn shard_suites(state: Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] Never! {
+    spec := process.cmd([String]{state.binary, "{state.repo}/Tools/ci/TestShards.jet", state.shard_index, state.shard_count}).cwd(state.repo)
+    loop setting in state.env -> spec = spec.env(setting.name, setting.value)
+    receipt :: spawn(spec) ?? return abort("verify-full: native suite inventory failed: {err}")
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return abort("verify-full: native suite inventory failed: {receipt.errors.trim_end()}")
+    suites := [String]{}
+    loop line in receipt.output.split("\n") {
+        if line == "" -> next
+        if !SUITES.contains(line) || suites.contains(line) -> return abort("verify-full: invalid native suite inventory row `{line}`")
+        &suites.push(line.copy())
+    }
+    if suites.len() == 0 -> return abort("verify-full: empty native suite inventory")
+    suites
+}
+
+fn check_pin(state: &Verify, scope: String) -[FS, Exec, IO]> Bool Never! {
+    log :: "{state.evidence}/{scope}.log"
+    pin :: state.pin ?? ""
+    problem :: pinned_source_problem(state.repo, pin)
+    row := Row{scope: scope.copy(), status: "PASS", ran: true, code: Val(0), signal: None, reason: None, log: log.copy(), total: None, passed: None}
+    text := "{pin}\t{state.repo}\n"
+    if problem == .Val(reason) {
+        row.status = "FAIL"
+        row.code = Val(2)
+        row.reason = Val(reason.copy())
+        text = "{reason}\n"
+    }
+    files.write(log, text) ?? return abort("verify-full: `{log}` cannot be written: {err}")
+    passed :: row.status == "PASS"
+    record(&state, row)
+    passed
+}
+
+// Why `source` is not the exact tree its sibling source.manifest.json pins to
+// `expected`: a tracked file's bytes, symlink target or executable bit
+// differs, or the manifest names another commit. None when it is.
+fn pinned_source_problem(source: String, expected: String) -[FS]> String? Never! {
+    manifest :: "{files.dirname(source)}/source.manifest.json"
+    text :: files.read(manifest) ?? return Val("proof source manifest `{manifest}` cannot be read: {err}")
+    tree :: json.parse(text) ?? return Val("proof source manifest `{manifest}` is not JSON: {err}")
+    entries :: array_field(tree, "files")
+    if expected == "" || text_field(tree, "commit") != expected || text_field(tree, "schema") != SOURCE_SCHEMA || entries.len() == 0 {
+        return Val("proof source manifest is not pinned to {expected}")
+    }
+    loop entry in entries {
+        path :: text_field(entry, "path")
+        mode :: text_field(entry, "mode")
+        if path == "" || path.starts_with("/") || path.split("/").to_list().contains("..") -> return Val("invalid proof source path {path}")
+        file :: "{source}/{path}"
+        changed :: "pinned proof source changed: {path}"
+        meta :: files.stat(file) ?? return Val(changed)
+        link :: mode == "120000"
+        if link && !meta.is_symlink -> return Val(changed)
+        if !link && (!meta.is_file || executable(meta.mode) != (mode == "100755")) -> return Val(changed)
+        bytes :: if link -> (files.read_link(file) ?? return Val(changed)).bytes() else -> files.read_bytes(file) ?? return Val(changed)
+        if blob_hash(bytes) != text_field(entry, "blob") -> return Val(changed)
+    }
+    None
+}
+
+fn executable(mode: Int) -> Bool Never! {
+    mode % 2 == 1 || (mode /% 8) % 2 == 1 || (mode /% 64) % 2 == 1
+}
+
+// Git's blob id: sha1 of `blob <length>\0<bytes>`.
+fn blob_hash(bytes: [U8]) -> String Never! {
+    framed := "blob {bytes.len()}".bytes()
+    &framed.push(U8{0})
+    &framed.extend(bytes)
+    crypto.sha1(framed)
+}
+
+// A JSON evidence document, or None when it is missing or not JSON.
+fn read_document(path: String) -[FS]> Dyn? Never! {
+    text :: files.read(path) ?? return None
+    tree :: json.parse(text) ?? return None
+    Val(tree)
+}
+
+fn fail_row(row: &Row, reason: String) Never! {
+    row.status = "FAIL"
+    row.reason = Val(reason.copy())
+}
+
+// A testkit suite passes only when its report names this compiler and every
+// case of that suite is PASS.
+fn testkit_verdict(row: &Row, report: String, binary: String, suite: String) -[FS]> () {
+    tree :: read_document(report) ?? return fail_row(&row, "testkit report `{report}` is missing or not JSON")
+    results :: array_field(tree, "results")
+    if text_field(tree, "jet") != binary || results.len() == 0 || results.any(result -> text_field(result, "status") != "PASS" || text_field(result, "suite") != suite) {
+        return fail_row(&row, "missing, skipped, refused, wrong-suite or non-PASS testkit case verdict")
+    }
+    row.total = Val(results.len())
+    row.passed = Val(results.len())
+}
+
+// The registry manifest must be pinned to this source and complete; the run
+// receipt, when given, must pass every manifest entry with this compiler.
+fn registry_verdict(row: &Row, manifest_path: String, receipt_path: String?, head: String, root: String, binary: String) -[FS]> () {
+    manifest :: read_document(manifest_path) ?? return fail_row(&row, "registry manifest `{manifest_path}` is missing or not JSON")
+    entries :: array_field(manifest, "entries")
+    complete :: if field(manifest, "completeCompilerRegistries") == .Bool(flag) -> flag else -> false
+    if text_field(manifest, "head") != head || text_field(manifest, "repo") != root || !complete || entries.len() == 0 || entries.any(entry -> text_field(entry, "status") == "BLOCKED") {
+        return fail_row(&row, "registry manifest is missing, unpinned, incomplete or BLOCKED")
+    }
+    ids := [String]{}
+    loop entry in entries {
+        id :: text_field(entry, "id")
+        if ids.contains(id) -> return fail_row(&row, "duplicate registry manifest entries")
+        &ids.push(id.copy())
+    }
+    count :: ids.len()
+    path :: receipt_path ?? {
+        row.total = Val(count)
+        return
+    }
+    receipt :: read_document(path) ?? return fail_row(&row, "registry receipt `{path}` is missing or not JSON")
+    ran :: array_field(receipt, "entries")
+    // Same length, each receipt id a distinct manifest id: the same id set.
+    ran_ids := [String]{}
+    same_ids := true
+    loop entry in ran {
+        id :: text_field(entry, "id")
+        if !ids.contains(id) || ran_ids.contains(id) -> same_ids = false
+        &ran_ids.push(id.copy())
+    }
+    if text_field(receipt, "status") != "PASS" || text_field(receipt, "head") != head || text_field(receipt, "jet") != binary
+        || int_field(receipt, "total") != Val(count) || int_field(receipt, "passed") != Val(count) || int_field(receipt, "blocked") != Val(0) || int_field(receipt, "failed") != Val(0)
+        || ran.len() != count || ran.any(entry -> text_field(entry, "status") != "PASS") || !same_ids {
+        return fail_row(&row, "registry receipt has missing, unpinned, blocked, failed or non-PASS entries")
+    }
+    row.total = Val(count)
+    row.passed = Val(count)
+}
+
+fn field(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+fn text_field(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+fn int_field(tree: Dyn, name: String) -> Int? Never! {
+    if field(tree, name) == {
+        .Int(value) -> Val(value)
+        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
+        else -> None
+    }
+}
+
+fn array_field(tree: Dyn, name: String) -> [Dyn] Never! {
+    if field(tree, name) == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+fn optional_int(value: Int?) -> Dyn Never! {
+    if value == .Val(number) -> return Dyn.Int(number)
+    Dyn.Null
+}
+
+fn row_tree(row: Row) -> Dyn Never! {
+    entries := [String: Dyn]{"scope": Dyn.Text(row.scope.copy()), "status": Dyn.Text(row.status.copy())}
+    if row.ran {
+        entries["code"] = optional_int(row.code)
+        entries["signal"] = optional_int(row.signal)
+    }
+    if row.reason == .Val(reason) -> entries["reason"] = Dyn.Text(reason.copy())
+    entries["log"] = Dyn.Text(row.log.copy())
+    if row.total == .Val(total) -> entries["total"] = Dyn.Int(total)
+    if row.passed == .Val(passed) -> entries["passed"] = Dyn.Int(passed)
+    Dyn.Object(entries.copy())
+}
+
+// Rewrite verify-full-summary.tsv and verify-full.json from every row so far.
+fn publish(state: Verify) -[FS, Exec, IO]> () {
+    summary := "status\tscope\trc\tprerequisite\tlog\ttarget\n"
+    rows := [Dyn]{}
+    loop row in state.rows {
+        code :: if row.code == .Val(number) -> "{number}" else -> "-"
+        summary = "{summary}{row.status}\t{row.scope}\t{code}\t{row.reason ?? "-"}\t{row.log}\t{row.scope}\n"
+        &rows.push(row_tree(row))
+    }
+    head :: if state.pin == .Val(commit) -> Dyn.Text(commit.copy()) else -> Dyn.Null
+    receipt :: Dyn.Object([String: Dyn]{
+        "head": head,
+        "source": Dyn.Text(state.repo.copy()),
+        "jet": Dyn.Text(state.binary.copy()),
+        "jet_sha256": Dyn.Text(state.jet_sha256.copy()),
+        "target": Dyn.Text(state.target.copy()),
+        "shard": Dyn.Object([String: Dyn]{"index": Dyn.Int(Int.parse(state.shard_index) ?? 0), "count": Dyn.Int(Int.parse(state.shard_count) ?? 0)}),
+        "scratch": Dyn.Text(state.scratch.copy()),
+        "status": Dyn.Text(if all_pass(state.rows) -> "PASS" else -> "FAIL"),
+        "rows": Dyn.Array(rows.copy()),
+    })
+    text :: json.to_string_pretty(receipt) ?? return abort("verify-full: the receipt cannot be encoded: {err}")
+    files.write("{state.evidence}/verify-full-summary.tsv", summary) ?? return abort("verify-full: the summary cannot be written: {err}")
+    files.write("{state.evidence}/verify-full.json", "{text}\n") ?? return abort("verify-full: verify-full.json cannot be written: {err}")
+}
+
+// The runner's control flow, run for real with tiny fixture children: a fake
+// compiler that answers the Jet gates, the shard inventory and
+// `jet test <dir>/Compiler --profile <suite>`, and fake node gates. This proves
+// runner behavior only, never compiler or full-suite proof.
+FIXTURE_COMMIT :: "0123456789012345678901234567890123456789"
+
+FIXTURE_JET :: "#!/usr/bin/env bash\ncase \"$1\" in\n  */Tools/ci/TestShards.jet) printf 'golden\\nui\\ncases\\nregistries\\n'; exit 0 ;;\n  */Tools/agent/*.jet) exit 0 ;;\nesac\n[[ \"$1\" == test && \"$2\" == */Compiler && \"$3\" == --profile ]] || exit 64\nsuite=$4\n[[ $suite == golden && $FIXTURE_MODE == signal ]] && kill -TERM $$\n[[ $suite == golden && $FIXTURE_MODE == ordinary ]] && exit 17\nstatus=PASS\n[[ $suite == ui && $FIXTURE_MODE == refused ]] && status=REFUSED\n[[ $suite == ui && $FIXTURE_MODE == corrupt ]] && printf changed >>Tools/agent/core-module-check.mjs\nprintf '{{\"jet\":\"%s\",\"results\":[{{\"case\":\"%s\",\"suite\":\"%s\",\"tier\":\"o0\",\"status\":\"%s\"}}]}}' \"$JET\" \"$suite\" \"$suite\" \"$status\" >\"$JET_CI_EVIDENCE_DIR/$suite.json\"\n"
+
+FIXTURE_GIT :: "#!/usr/bin/env bash\n[[ $FIXTURE_MODE == pinned ]] && exit 19\nprintf '0123456789012345678901234567890123456789\\n'\n"
+
+FIXTURE_REGISTRIES :: "import {{mkdirSync,readFileSync,writeFileSync}} from 'node:fs';\nconst args=process.argv.slice(2);\nif(args[0]==='manifest'){{const dir=args[args.indexOf('--out')+1];mkdirSync(dir,{{recursive:true}});writeFileSync(dir+'/manifest.json',JSON.stringify({{head:args[1],repo:process.cwd(),completeCompilerRegistries:true,entries:[{{id:'fixture'}}]}}));}}\nelse {{if(process.env.FIXTURE_MODE==='registry')process.exit(1);const manifest=JSON.parse(readFileSync(args[args.indexOf('--manifest')+1]));writeFileSync(args[args.indexOf('--receipt')+1],JSON.stringify({{status:'PASS',head:manifest.head,jet:process.env.JET,total:1,passed:1,blocked:0,failed:0,entries:[{{id:'fixture',status:'PASS'}}]}}));}}\n"
+
+fn fixture_put(tree: String, path: String, text: String) -[FS]> () {
+    file :: "{tree}/{path}"
+    files.create_dir_all(files.dirname(file)) ?? panic("fixture directory for {file}: {err}")
+    files.write(file, text) ?? panic("fixture {file}: {err}")
+    files.set_mode(file, 0o755) ?? panic("fixture mode {file}: {err}")
+}
+
+// One fixture tree: this runner, the fake compiler and git, and the fake node
+// gates. `export` is what the fake proof-source.mjs prints.
+fn fixture_tree(tree: String, runner: String, export: String) -[FS]> [String] {
+    written := [(path: String, text: String)]{
+        (path: "Tools/agent/VerifyFull.jet", text: runner.copy()),
+        (path: "Tools/agent/closeout-gate.mjs", text: "if (process.env.FIXTURE_MODE === 'closeout') process.exit(3);\n"),
+        (path: "Tools/agent/core-coverage-census.mjs", text: "// fixture gate: passes\n"),
+        (path: "Tools/agent/core-module-check.mjs", text: "// fixture gate: passes\n"),
+        (path: "Tools/agent/proof-source.mjs", text: "console.log({json.dumps(Dyn.Text(export.copy())) ?? panic("export path")});\n"),
+        (path: "Tools/agent/compiler-registries.mjs", text: FIXTURE_REGISTRIES),
+        (path: "bin/jet", text: FIXTURE_JET),
+        (path: "bin/git", text: FIXTURE_GIT),
+    }
+    paths := [String]{}
+    loop item in written {
+        fixture_put(tree, item.path, item.text)
+        &paths.push(item.path.copy())
+    }
+    paths
+}
+
+fn fixture_row(rows: [Dyn], scope: String) -> Dyn Never! {
+    loop row in rows {
+        if text_field(row, "scope") == scope -> return row.copy()
+    }
+    Dyn.Null
+}
+
+fn fixture_checkout() -[FS, Env]> String {
+    dir := files.cwd() ?? panic("working directory")
+    loop {
+        if files.exists("{dir}/Tools/agent/VerifyFull.jet") -> return dir
+        if dir == "/" || dir == "" -> panic("run the test from inside the Jet checkout")
+        dir = files.dirname(dir)
+    }
+}
+
+#Test("verify-full collects every row, blocks after an unsafe child, and refuses a changed source or a failed closeout gate") {
+    checkout :: fixture_checkout()
+    jet :: env_or("JET", process.which("jet") ?? panic("a jet on PATH or in JET runs the fixture runner"))
+    runner :: files.read("{checkout}/Tools/agent/VerifyFull.jet") ?? panic("runner source: {err}")
+    base :: env_or("JET_TEST_SCRATCH_DIR", scratch_root())
+    container :: "{base}/verify-full-fixture-{sys.pid()}-{time.unix_ns()}"
+    external :: "{container}-evidence"
+    files.create_dir_all(external) ?? panic("fixture evidence: {err}")
+    // `work` runs with no manifest above it and exports to `pinned`, whose
+    // sibling source.manifest.json pins every file it holds.
+    work :: "{container}/work/source"
+    pinned :: "{container}/pinned/source"
+    modes :: [String]{"pass", "ordinary", "refused", "signal", "registry", "corrupt", "closeout", "pinned"}
+    loop mode in modes {
+        fixture_tree(work, runner, pinned)
+        tracked :: fixture_tree(pinned, runner, pinned)
+        listed := [Dyn]{}
+        loop path in tracked {
+            bytes :: files.read_bytes("{pinned}/{path}") ?? panic("fixture bytes: {err}")
+            &listed.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "mode": Dyn.Text("100755"), "blob": Dyn.Text(blob_hash(bytes))}))
+        }
+        manifest :: Dyn.Object([String: Dyn]{"schema": Dyn.Text(SOURCE_SCHEMA), "commit": Dyn.Text(FIXTURE_COMMIT), "files": Dyn.Array(listed.copy())})
+        files.write("{container}/pinned/source.manifest.json", json.dumps(manifest) ?? panic("manifest")) ?? panic("fixture manifest: {err}")
+        tree :: if mode == "pinned" -> pinned else -> work
+        evidence :: "{external}/{mode}"
+        // The timeout only catches a hang; a loaded machine needs headroom.
+        ran :: process.cmd([String]{jet, "run", "-A", "{tree}/Tools/agent/VerifyFull.jet"}).cwd(tree)
+            .env("PATH", "{tree}/bin:{env_or("PATH", "/usr/bin:/bin")}").env("JET", "{tree}/bin/jet").env("FIXTURE_MODE", mode)
+            .env("JET_VERIFY_TMPDIR", external).env("JET_CI_EVIDENCE_DIR", evidence).env("JET_TEST_SHARD", "0").env("JET_TEST_SHARD_COUNT", "1")
+            .env("JET_TOOLCHAIN_ROOT", checkout).timeout(300s).run() ?? panic("{mode}: the runner could not start: {err}")
+        assert_eq(ran.signal, None)
+        expected :: if mode == "pass" || mode == "pinned" -> 0 else -> 1
+        if ran.code != expected -> panic("{mode}: exit {ran.code}, expected {expected}\n{ran.output}{ran.errors}")
+        report :: read_document("{evidence}/verify-full.json") ?? panic("{mode}: verify-full.json is missing or not JSON")
+        rows :: array_field(report, "rows")
+        status :: (scope: String) -> text_field(fixture_row(rows, scope), "status")
+        if mode == "pass" -> assert(rows.all(row -> text_field(row, "status") == "PASS"))
+        if mode == "ordinary" {
+            assert_eq(int_field(fixture_row(rows, "golden"), "code"), Val(17))
+            loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "PASS")
+        }
+        if mode == "refused" {
+            assert_eq(status("ui"), "FAIL")
+            assert(text_field(fixture_row(rows, "ui"), "reason").contains("non-PASS"))
+            assert_eq(status("cases"), "PASS")
+        }
+        if mode == "signal" {
+            assert_eq(status("golden"), "FAIL")
+            loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "BLOCKED")
+        }
+        if mode == "registry" -> assert_eq(status("registries"), "FAIL")
+        if mode == "corrupt" -> assert_eq(status("source-integrity-after"), "FAIL")
+        if mode == "pinned" {
+            assert_eq(status("source-integrity-before"), "PASS")
+            assert_eq(status("source-export"), "")
+        }
+        if mode == "closeout" -> assert_eq(rows.len(), 1)
+    }
+    files.remove_all(container) ?? panic("fixture cleanup: {err}")
+    files.remove_all(external) ?? panic("fixture cleanup: {err}")
+}

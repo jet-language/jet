@@ -16,7 +16,7 @@
 // build directory fails the build. Logs stay in OUT/logs.
 //
 // Then, in a checkout of COMMIT, once per runner (shard and target):
-//   JET=OUT/jet JET_CI_EVIDENCE_DIR=EVDIR Tools/agent/verify-full.sh
+//   JET=OUT/jet JET_CI_EVIDENCE_DIR=EVDIR jet Tools/agent/VerifyFull.jet
 //   jet run Tools/release/Main.jet -- candidate OUT --evidence EVDIR...
 //   jet run Tools/release/Main.jet -- publish OUT
 // `candidate` writes and signs OUT/CANDIDATE.json, the record that binds the release; `publish`
@@ -188,7 +188,7 @@ function build(options) {
     process.stdout.write([
         `BUILT ${out}: ${s2.identity} (s2 == s3) from ${sha}.`,
         'Gate it in a checkout of that commit, once per runner, then record and publish it:',
-        `  JET=${join(out, 'jet')} JET_CI_EVIDENCE_DIR=<EVDIR> Tools/agent/verify-full.sh`,
+        `  JET=${join(out, 'jet')} JET_CI_EVIDENCE_DIR=<EVDIR> jet Tools/agent/VerifyFull.jet`,
         `  jet run Tools/release/Main.jet -- candidate ${out} --evidence <EVDIR>`,
         `  jet run Tools/release/Main.jet -- publish ${out} --dry-run`,
         '',

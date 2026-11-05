@@ -105,7 +105,7 @@ it with the previous tag's `s2` as its seed.
 
    Then check out the `a0_NNN` tag and run the chain with `SEED=seed`.
    Releases are built by `Tools/agent/publish-release.mjs`
-   (`build COMMIT --seed SEED --out OUT`), gated by `Tools/agent/verify-full.sh`
+   (`build COMMIT --seed SEED --out OUT`), gated by `jet Tools/agent/VerifyFull.jet`
    with `JET=OUT/jet` on each runner, recorded and signed by
    `jet run Tools/release/Main.jet -- candidate OUT --evidence EV`, and published
    by `jet run Tools/release/Main.jet -- publish OUT`. Each release also carries

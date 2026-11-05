@@ -153,7 +153,7 @@ in that same allowlisted case/dependency cache namespace; report it separately
 as `allowedFfiQueries`, not a crate build. Never admit a Rust fallback for
 compiling the Jet program. Preserve PASS cases without an observed command
 marker as an explicit category without inferring why the marker is absent.
-The cutover suite composes the same native runner commands as `verify-full`
+The cutover suite composes the same native runner commands as `Tools/agent/VerifyFull.jet`
 after its formal closeout prefix, without adding a skip-closeout option.
 Report qualified formal proof composition and milestone closeout separately
 as `NOT MET — deferred per owner #59`; stage equivalence and passing suites

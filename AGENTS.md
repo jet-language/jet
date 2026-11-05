@@ -369,7 +369,7 @@ repository. Follow the orchestration resource reference for bounded,
 checkout-owned targets and shared artifacts; respect `JET_TARGET_CAP_GB=120`.
 Rebuild before compiler smoke tests. After integration, run the exact narrow
 proof the criteria name. Broad suites, unfiltered censuses, and
-`Tools/agent/verify-full.sh` are milestone or release operations and need the
+`Tools/agent/VerifyFull.jet` are milestone or release operations and need the
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
@@ -390,7 +390,7 @@ check runs first, refuses them, and
 Hosted CI runs only the Core source-coverage ratchet
 (`.github/workflows/ci.yml`); until a pinned native seed release exists
 (D-SEED-DIST1), `Tools/agent/LaneCheck.jet` and the full gate
-(`Tools/agent/verify-full.sh`) run locally with the admitted `JET`.
+(`JET=<jet> jet Tools/agent/VerifyFull.jet`) run locally with the admitted `JET`.
 
 ## References
 

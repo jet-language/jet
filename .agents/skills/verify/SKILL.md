@@ -33,7 +33,7 @@ contract. Do not run a suite merely because this skill was loaded.
   commit-bound token, one composed targeted sweep, and one fresh-context review,
   is defined only in `../orchestration/references/closeout.md`. Do not invent a
   second cadence here.
-- An unfiltered conformance census, `verify-full.sh`, and
+- An unfiltered conformance census, `Tools/agent/VerifyFull.jet`, and
   `tower milestone verify` are tokened milestone operations, not card proof.
   No blanket suite substitutes for the named criterion command.
 - Technical acceptance belongs to the agents and the orchestrator. Owner
