@@ -1,8 +1,8 @@
 # Test profiles in package.jet: a bare `jet test` runs the `defaults.test` profile, each
 # run is a child `jet test` whose rows become its baseline under `.jet/test/<profile>/`,
 # and a later run fails only on a lost row (a baseline pass that now fails). `time_limit`
-# stops a test that runs past it, `optimize:` runs the tests once per level, and a corpus
-# suite is refused. Each part has its negative control.
+# stops a test that runs past it, `optimize:` runs the tests once per level, and a golden
+# corpus suite runs in process at the matching tiers. Each part has its negative control.
 fixture: fixtures/test_profiles
 env: NO_COLOR=1
 env: TERM=dumb
@@ -47,11 +47,13 @@ step: jet test --profile levels --optimize=basic
 cwd: {work}/app
 exit: 2
 stderr: ~ "`--optimize` and test profile `levels` both choose the optimize level" # the flag can't override the fan-out
-step: jet test --profile full
+step: jet test --profile full --capture=all
 cwd: {work}/app
-exit: 2
-stderr: ~ "E2104" # the golden corpus suite has no runner yet
-stderr: ~ "(suite `golden`)" # the refusal names the suite
+exit: 0
+stdout: ~ "PASS\ttests/golden/greet.jet\to0" # optimize none runs the corpus on o0
+stdout: ~ "PASS\ttests/golden/greet.jet\to2" # optimize full runs it on o2
+stdout: !~ "greet.jet\to1" # basic is not one of the profile's levels
+stderr: ~ "run `tests at optimize full`" # the #Tests run beside the corpus
 remove: app/tests/golden
 step: jet test --profile full
 cwd: {work}/app

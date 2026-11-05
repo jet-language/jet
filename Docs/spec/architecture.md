@@ -2161,7 +2161,7 @@ The [Jet testkit](../../Compiler/JetTestKit/Source/Kit.jet) owns diagnostic
 snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
 scenarios (`cases`). `Compiler/package.jet` names the corpora as `suites:` and
 runs them through `test:` profiles: `jet test Compiler --profile
-golden|ui|cases|corpus [FILTER]` runs them in process with the running `jet` as
+golden|ui|cases|full [FILTER]` runs them in process with the running `jet` as
 the compiler under test, and `-u` blesses the selected rows. The selected
 suites share one pool sized by cores and free memory. Rows print as cases
 finish; each suite's report and failure list keep suite-then-path order,

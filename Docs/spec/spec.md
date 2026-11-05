@@ -3835,12 +3835,18 @@ defaults: { test: quick }
 ```
 
 `time_limit:` (`ms`, `s` or `m`) stops and fails each test that runs longer.
-`optimize:` runs the `tests` suite once per listed level. Each run's rows are
-its baseline in `.jet/test/<profile>/`. A later run fails when a test that
-passed in the baseline fails or is gone; a failure the baseline already holds
-does not fail it, and `-u` records the run as the new baseline. The golden
-corpus runner is not ported yet, so a profile naming a corpus suite is refused
-with E2104 (`reference/cli.md`).
+`optimize:` runs the `tests` suite once per listed level, and runs a golden
+corpus at the matching tiers (none is `jet run`, basic `jet build`, full
+`jet build --release`). Each run's rows are its baseline in
+`.jet/test/<profile>/`. A later run fails when a test that passed in the
+baseline fails or is gone; a failure the baseline already holds does not fail
+it, and `-u` records the run as the new baseline. A suite with
+`golden_corpus:`, `ui_corpus:` or `cases_corpus:` runs in the `jet` process
+itself, every entry of the corpus a row; `jobs:`, `memory:`, `filter:`,
+`shard: I/N`, `opt_in:` and `baseline:` (a ledger of the rows accepted as
+failing) shape that run, a filter argument after the package replaces
+`filter:`, and `-u` rewrites the selected rows' expected output
+(`reference/cli.md`).
 
 ### Test scope members
 

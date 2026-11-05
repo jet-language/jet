@@ -50,10 +50,11 @@ selected corpora in process through the `Compiler/JetTestKit` pool, with the
 running `jet` as the compiler under test:
 
 ```sh
+jet test Compiler                                           # quick: every member's #Tests (defaults: { test: quick })
 jet test Compiler --profile golden                          # Examples/features and tests/run
 jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
 jet test Compiler --profile cases                           # tests/cases
-jet test Compiler --profile corpus                          # all three
+jet test Compiler --profile full                            # the #Tests and all three corpora
 jet test Compiler --profile golden basics/fizzbuzz          # rows whose ID contains the filter
 JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json
 ```
