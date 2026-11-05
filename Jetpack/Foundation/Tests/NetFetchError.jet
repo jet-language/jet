@@ -1,5 +1,6 @@
 use {
     net_fetch_error_test_files :: core.files
+    net_fetch_error_test_sys :: core.sys
     jetpack_foundation.[
         FoundationFetchError, FoundationFetchErrorKind, foundation_fetch_classify_http_error,
         foundation_fetch_host_from_url, foundation_fetch_http_error, foundation_fetch_resolve_redirect,
@@ -180,8 +181,11 @@ fn foundation_fetch_test_redirect_error(current: String, location: String, detai
 
 #Test("tls_fixture_pems_are_checked_in_for_future_handshake_tests") {
     // Read the repository fixtures in place; do not embed/copy the private key.
-    cert :: net_fetch_error_test_files.read("tests/fixtures/tls/localhost.cert.pem") ?? panic("certificate fixture missing")
-    key :: net_fetch_error_test_files.read("tests/fixtures/tls/localhost.key.pem") ?? panic("key fixture missing")
+    // Claims run inside an assembled scratch project, so the repository is
+    // named by JET_TOOLCHAIN_ROOT, never the working directory.
+    root :: net_fetch_error_test_sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
+    cert :: net_fetch_error_test_files.read(net_fetch_error_test_files.join(root, "tests/fixtures/tls/localhost.cert.pem")) ?? panic("certificate fixture missing")
+    key :: net_fetch_error_test_files.read(net_fetch_error_test_files.join(root, "tests/fixtures/tls/localhost.key.pem")) ?? panic("key fixture missing")
     assert(cert.contains("BEGIN CERTIFICATE"))
     assert(cert.contains("DNS:localhost") || cert.contains("MIID"))
     assert(key.contains("BEGIN PRIVATE KEY"))

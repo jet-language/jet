@@ -5,6 +5,17 @@
 // read, so a stale or partial workspace lock never masquerades as a valid
 // index.
 
+use {
+    jetpack_foundation.[env_runtime_project_lock]
+    jet_pkg_model.[
+        AuthorityResolver, CheckedFile, LockFile, LockedWorkspaceMember, PKG_LOCK_VERSION, PKG_NO_WORKSPACE_SOURCE,
+        PKG_WORKSPACE_LOCK, WorkspaceDeclarationCache, WorkspacePlan, WorkspacePlanMember, WorkspaceSourceRole,
+        pkg_check_workspace_overlay_gates, pkg_lock_ensure_build_stamp, pkg_lock_parse, pkg_lock_write,
+        pkg_lock_write_atomically, pkg_sha256_hex,
+    ]
+    files :: core.files
+}
+
 // Write the members of a freshly evaluated `plan` into `.jet/lock`, creating
 // `.jet/` when absent and keeping every unrelated lock record. A failed write
 // is returned to the caller.

@@ -231,14 +231,6 @@ fn env_shell_same_projection_source(left: String, right: String) -[FS, Env]> Boo
     left_real == right_real
 }
 
-// Rust `Path::strip_prefix`: the remainder after a whole-component prefix.
-fn env_shell_strip_path_prefix(path: String, prefix: String) -> String? Never! {
-    if path == prefix -> return Val("")
-    base :: if prefix.ends_with("/") -> prefix else -> "{prefix}/"
-    if !path.starts_with(base) -> return None
-    Val(path.removeprefix(base))
-}
-
 // The logical `/nix/store` name of `binary` when it lies inside a projected
 // closure object, by logical path or by the object's canonical source.
 fn env_shell_logical_executable_path(projections: [String: String], binary: String) -[FS, Env]> String? Never! {
