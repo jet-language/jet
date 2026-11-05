@@ -34,9 +34,36 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Inferred divergence is useful to callers but is not part of the written API contract.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Add `Never` to the return type, for example `fn {function}() Never`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `-&gt; Never` as the return type, for example `fn {function}() -&gt; Never`.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>L2421</code>: <code>tests/ui_lint/inferred_never_return.warn</code>.</p>
+<pre class="diag">Warning [jet.InferredNeverReturn]: Public function `fail` always diverges but does not declare `Never`
+  --&gt; inferred_never_return.jet:4:4
+    |
+  4 | fn fail(message: String) {
+    |    ^^^^
+ Why: Inferred divergence is useful to callers but is not part of the written API contract
+ Fix: Write `-&gt; Never` as the return type, for example `fn fail() -&gt; Never`
+More: jet-lang.dev/e/L2421
+
+Warning [jet.InferredNeverReturn]: Public function `stop` always diverges but does not declare `Never`
+  --&gt; inferred_never_return.jet:8:4
+    |
+  8 | fn stop(code: Int) -&gt; Int {
+    |    ^^^^
+ Why: Inferred divergence is useful to callers but is not part of the written API contract
+ Fix: Write `-&gt; Never` as the return type, for example `fn stop() -&gt; Never`
+More: jet-lang.dev/e/L2421
+
+Warning [jet.PositionalBoolParameter]: Public function `maybe` has a positional `Bool` parameter `flag`
+  --&gt; inferred_never_return.jet:17:10
+    |
+ 17 | fn maybe(flag: Bool) {
+    |          ^^^^
+ Why: Positional booleans are easy to transpose at the call site
+ Fix: Callers can write `flag: true` to make the intent clear (S61 labels)
+More: jet-lang.dev/e/L2401
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>
