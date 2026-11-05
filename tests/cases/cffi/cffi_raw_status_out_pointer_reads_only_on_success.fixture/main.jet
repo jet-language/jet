@@ -1,0 +1,31 @@
+use core.mem
+use store :: c.store
+#Layout(c)
+struct Record {
+    id: U64
+    flags: U32
+}
+#Error
+enum StoreError { Status }
+#Import module c.store {
+    fn store_load(id: U64, out: *Record) -> I32 = "store_load"
+}
+fn load(id: U64) -> Record StoreError! {
+    slot := Record{id: 0, flags: 0}
+    status := I32{ 1 }
+    #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
+        p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
+        status = store.store_load(id, p)
+        if Int.from_i32(status) == 0 { slot = p.copy().* }
+    }
+    if Int.from_i32(status) != 0 { return Err(StoreError.Status) }
+    return Ok(slot)
+}
+
+fn run() {
+    print((load(7) ?? panic("success expected")).id)
+    if load(8) == {
+        .Ok(v) -> { print("unexpected {v.id}") }
+        .Err(e) -> { print("status 9") }
+    }
+}

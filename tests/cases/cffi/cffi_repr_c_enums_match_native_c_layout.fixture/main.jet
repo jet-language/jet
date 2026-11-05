@@ -1,0 +1,25 @@
+use c :: c.reprc2
+#Layout(c)
+enum Status {
+    Ok = 0
+    Lost = 7
+}
+#Layout(c, tag: U8)
+enum Packet {
+    Ping(Int) = 3
+    Data(x: Int, y: Int) = 7
+}
+#Import module c.reprc2 {
+    fn repr_status(s: Status) -> I32 = "repr_status"
+    fn repr_packet(p: Packet) -> I32 = "repr_packet"
+    fn repr_packet_size() -> I32 = "repr_packet_size"
+    fn repr_packet_align() -> I32 = "repr_packet_align"
+    fn repr_packet_payload_offset() -> I32 = "repr_packet_payload_offset"
+}
+fn run() {
+    print(c.repr_status(Status.Lost))
+    print(c.repr_packet(Packet.Ping(41)))
+    print(c.repr_packet_size())
+    print(c.repr_packet_align())
+    print(c.repr_packet_payload_offset())
+}

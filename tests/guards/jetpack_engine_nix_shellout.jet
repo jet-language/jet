@@ -1,0 +1,83 @@
+// Port of tests/jetpack_engine.rs:5169-5220
+// (package_and_environment_paths_have_no_installed_nix_shellout). The Rust test
+// scanned ten crates/jetpack/src files for Command::new("nix"), "nix-store",
+// "curl" and "wget". This scans the Jet successors of those files for the same
+// four tools as a spawned argv head (`cmd([String]{"tool"`) or a PATH lookup
+// (`which("tool")`), the Jet spellings of Command::new with a literal name.
+use jens_files :: core.files
+
+// The Jet successors of the Rust list: Bridge.rs and Provider.rs are
+// Provider/Source, NixIndex.rs is Nix/Source/Index, CLI/realize.rs is
+// CLI/Source/Realize, CLI/run_enter_dev.rs is CLI/Source/Env and
+// CLI/Source/Jobs, CLI/profile.rs is CLI/Source/Profile, CLI/tool.rs is
+// CLI/Source/Tools, CLI/trust_env_build.rs is CLI/Source/Env/ComposeEnv.jet
+// and CLI/Source/Commands/TrustCommand.jet, and Store.rs and Store/NixCache.rs
+// are Store/Source.
+JENS_ROOTS :: [String]{
+    "Jetpack/Provider/Source",
+    "Jetpack/Nix/Source/Index",
+    "Jetpack/CLI/Source/Realize",
+    "Jetpack/CLI/Source/Env",
+    "Jetpack/CLI/Source/Jobs",
+    "Jetpack/CLI/Source/Profile",
+    "Jetpack/CLI/Source/Tools",
+    "Jetpack/CLI/Source/Commands/TrustCommand.jet",
+    "Jetpack/Store/Source",
+}
+
+// Store/Source/Cache is the successor of Store/Cache.rs, the HTTP binary-cache
+// transport. The Rust list did not include it (Store/Cache.rs ran curl too).
+JENS_EXCLUDED :: [String]{"Jetpack/Store/Source/Cache"}
+
+JENS_TOOLS :: [String]{"nix", "nix-store", "curl", "wget"}
+
+fn jens_excluded(path: String) -> Bool {
+    loop excluded in JENS_EXCLUDED {
+        if path == excluded -> return true
+    }
+    false
+}
+
+fn jens_walk(path: String, out: &[String]) {
+    if jens_excluded(path) {
+        return
+    }
+    if !jens_files.is_dir(path) {
+        if path.ends_with(".jet") -> &out.push(path)
+        return
+    }
+    loop child in (jens_files.list_dir(path) ?? panic("list {path}: {err}")) {
+        jens_walk(child.path, &out)
+    }
+}
+
+fn jens_offenders(path: String, source: String, offenders: &[String]) {
+    loop tool in JENS_TOOLS {
+        needles :: [String]{"cmd([String]{{\"{tool}\"", "which(\"{tool}\")"}
+        loop needle in needles {
+            if source.contains(needle) {
+                &offenders.push("{path} must not shell out to installed {tool} via {needle}")
+            }
+        }
+    }
+}
+
+#Test("package_and_environment_paths_have_no_installed_nix_shellout") {
+    sources := [String]{}
+    loop root in JENS_ROOTS {
+        assert(jens_files.exists(root), "the scanned successor {root} must exist")
+        before :: sources.len()
+        jens_walk(root, &sources)
+        assert(sources.len() > before, "{root} holds no Jet source to scan")
+    }
+    offenders := [String]{}
+    loop path in sources {
+        jens_offenders(path, jens_files.read(path) ?? panic("read {path}: {err}"), &offenders)
+    }
+    assert_eq(offenders.join("\n"), "")
+    // The needles see the Jet spellings: a seeded spawn and a seeded PATH lookup
+    // each report once.
+    seeded := [String]{}
+    jens_offenders("synthetic.jet", "receipt :: process.cmd([String]{{\"nix\", \"build\"}}).run()\nfound :: files.which(\"wget\")\n", &seeded)
+    assert_eq(seeded.len(), 2)
+}
