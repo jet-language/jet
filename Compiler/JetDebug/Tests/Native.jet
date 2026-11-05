@@ -77,8 +77,12 @@ fn native_test_toolchain_root() -> String Never! {
     built :: native_test_process.cmd([String]{jet, "build", "--optimize=none", "--output-dir={out}", source}).env("JET_TOOLCHAIN_ROOT", native_test_toolchain_root()).stdout(.Capture).stderr(.Capture).run() ?? panic("jet build: {err}")
     if !built.success -> panic("jet build failed: {built.output}{built.errors}")
     session := NativeSession.start(native_test_files.join(out, "prog"), native_test_files.join(root, "output.txt")) ?? panic("start: {err.detail}")
-    resolved :: &session.break_at("prog.jet", 2) ?? panic("break: {err.detail}")
-    assert(resolved)
+    resolved := -1
+    if &session.break_at("prog.jet", 2) == {
+        .Ok(number) -> resolved = number ?? -1
+        .Err(failure) -> panic("break: {failure.detail}")
+    }
+    assert_eq(resolved, 1)
     paused :: &session.launch([String]{}) ?? panic("launch: {err.detail}")
     assert(paused.kind == NativeStopKind.Paused)
     frame :: paused.frame ?? panic("pause frame")

@@ -41,6 +41,12 @@ fn native_debug_unavailable(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E2203", None, row.what.replace("{{detail}}", detail), row.why, row.fix)
 }
 
+// The LLDB on PATH: a session's one external tool.
+fn native_debug_lldb() -> String NativeDebugError! {
+    lldb :: native_process.which("lldb") ?? return Err(NativeDebugError{detail: "LLDB is not on PATH"})
+    Ok(lldb)
+}
+
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0.
 struct NativeFrame {
@@ -83,7 +89,7 @@ impl NativeSession {
     // Load `binary` (a native image with debug info) under LLDB. The program's
     // output is written to `output_path`; nothing runs until `launch`.
     fn start(binary: String, output_path: String) -> NativeSession NativeDebugError! {
-        lldb :: native_process.which("lldb") ?? return Err(NativeDebugError{detail: "LLDB is not on PATH"})
+        lldb :: native_debug_lldb() ?? return Err(err)
         if native_debug_control_free(binary) == false || native_debug_control_free(output_path) == false {
             return Err(NativeDebugError{detail: "the program path contains a control character"})
         }
@@ -120,11 +126,30 @@ impl NativeSession {
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
-    // line table names it). False when no code is on that line.
-    fn break_at(&self, file: String, line: Int) -> Bool NativeDebugError! {
+    // line table names it): its number, or None when no code is on that line.
+    fn break_at(&self, file: String, line: Int) -> Int? NativeDebugError! {
         if !native_debug_control_free(file) -> return Err(NativeDebugError{detail: "the breakpoint path contains a control character"})
-        output :: &self.run_commands([String]{"breakpoint set -f {native_debug_quote(file)} -l {line}"}) ?? return Err(err)
-        Ok(native_debug_breakpoint_resolved(output))
+        &self.set_breakpoint("breakpoint set -f {native_debug_quote(file)} -l {line}")
+    }
+
+    // A breakpoint at the start of the Jet function `function`.
+    fn break_in(&self, function: String) -> Int? NativeDebugError! {
+        if !native_debug_control_free(function) -> return Err(NativeDebugError{detail: "the function name contains a control character"})
+        &self.set_breakpoint("breakpoint set -n {native_debug_quote(function)}")
+    }
+
+    // A breakpoint that resolves to no code is removed, not left pending.
+    fn set_breakpoint(&self, command: String) -> Int? NativeDebugError! {
+        output :: &self.run_commands([String]{command}) ?? return Err(err)
+        number :: native_debug_breakpoint_number(output) ?? return Err(NativeDebugError{detail: "LLDB set no breakpoint: {native_debug_first_error(output)}"})
+        if native_debug_breakpoint_resolved(output) -> return Ok(Val(number))
+        &self.delete_breakpoint(number) ?? return Err(err)
+        Ok(None)
+    }
+
+    fn delete_breakpoint(&self, number: Int) NativeDebugError! {
+        _ :: &self.run_commands([String]{"breakpoint delete {number}"}) ?? return Err(err)
+        Ok()
     }
 
     // Remove every breakpoint.
@@ -216,6 +241,193 @@ impl NativeSession {
     }
 }
 
+// The command that builds `entry` as the debuggable native image: this `jet`
+// (`jet`), unoptimized, with its DWARF, into `out_dir`.
+fn native_debug_build_argv(jet: String, entry: String, out_dir: String) -> [String] Never! {
+    [String]{jet, "build", "--optimize=none", "--output-dir={out_dir}", entry}
+}
+
+// The image `native_debug_build_argv` writes: the entry's stem in `out_dir`.
+fn native_debug_image(entry: String, out_dir: String) -> String Never! {
+    native_files.join(out_dir, native_files.basename(entry).before(".jet"))
+}
+
+// The `(jet)` console over a session: `jet debug` and the Canvas native tier
+// both speak it. Every stop prints the Jet source line with its `<- here`
+// caret and the frame's locals; frames without Jet line information (the
+// runtime) are never shown.
+NATIVE_DEBUG_HELP :: "commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+
+// The deepest run of runtime frames a step finishes out of before it lets the
+// program continue.
+NATIVE_DEBUG_RUNTIME_DEPTH :: 16
+
+// What one console command printed, and where it left the program.
+struct NativeDebugStep {
+    text: String
+    stop: NativeStop
+}
+
+impl NativeSession {
+    // Run the program to the start of its `run`, in the Jet source `file`
+    // whose text is `lines`. None when the program has no `run`.
+    fn open(&self, file: String, lines: [String]) -> NativeDebugStep? NativeDebugError! {
+        start := -1
+        if &self.break_in("run") == {
+            .Ok(placed) -> start = placed ?? -1
+            .Err(failure) -> return Err(failure)
+        }
+        if start < 0 -> return Ok(None)
+        first :: &self.launch([String]{}) ?? return Err(err)
+        &self.delete_breakpoint(start) ?? return Err(err)
+        text :: &self.report(first, file, lines) ?? return Err(err)
+        Ok(Val(NativeDebugStep{text: text, stop: first}))
+    }
+
+    // One console command at `stop`. `quit` is the caller's: only it knows
+    // how its session ends.
+    fn command(&self, command: String, stop: NativeStop, file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
+        trimmed :: command.trim()
+        word :: trimmed.before(" ")
+        operand :: if trimmed.contains(" ") -> trimmed.after(" ").trim().copy() else -> ""
+        text := ""
+        if word == {
+            "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" -> {
+                moved :: &self.move(word) ?? return Err(err)
+                text = &self.report(moved, file, lines) ?? return Err(err)
+                return Ok(NativeDebugStep{text: text, stop: moved})
+            }
+            "b" | "break" -> {
+                at :: Int.parse(operand) ?? -1
+                placed := -1
+                if at >= 1 {
+                    if &self.break_at(file, at) == {
+                        .Ok(found) -> placed = found ?? -1
+                        .Err(failure) -> return Err(failure)
+                    }
+                }
+                text = if {
+                    at < 1 -> "break needs a line number of {file}, as `break 12`\n"
+                    placed < 0 -> "no code on {file}:{at}\n"
+                    else -> "breakpoint set  {file}:{at}\n"
+                }
+            }
+            "locals" -> {
+                locals :: &self.locals() ?? return Err(err)
+                text = "{native_debug_locals_line(locals)}\n"
+            }
+            "p" | "print" -> {
+                locals :: &self.locals() ?? return Err(err)
+                text = "{native_debug_print(locals, operand)}\n"
+            }
+            "bt" | "backtrace" -> {
+                frames :: &self.backtrace() ?? return Err(err)
+                text = native_debug_backtrace(frames)
+            }
+            "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
+            "" -> {}
+            else -> text = "unknown command `{word}`; {NATIVE_DEBUG_HELP}\n"
+        }
+        Ok(NativeDebugStep{text: text, stop: stop})
+    }
+
+    // Run one run-control command. A step that lands in code without Jet line
+    // information finishes out of it back to the Jet caller, or continues when
+    // no Jet frame is left to return to.
+    fn move(&self, word: String) -> NativeStop NativeDebugError! {
+        stop := if word == {
+            "s" | "step" -> &self.step_in() ?? return Err(err)
+            "n" | "next" -> &self.step_over() ?? return Err(err)
+            "f" | "finish" -> &self.step_out() ?? return Err(err)
+            else -> &self.continue_run() ?? return Err(err)
+        }
+        depth := 0
+        loop stop.kind == NativeStopKind.Paused && !native_debug_stop_in_jet(stop.frame) {
+            frames :: &self.backtrace() ?? return Err(err)
+            caller := false
+            loop (k, frame) in frames {
+                if k > 0 && native_debug_jet_frame(frame) -> caller = true
+            }
+            depth += 1
+            stop = if caller && depth <= NATIVE_DEBUG_RUNTIME_DEPTH -> &self.step_out() ?? return Err(err) else -> &self.continue_run() ?? return Err(err)
+        }
+        Ok(stop)
+    }
+
+    // The program's new output, then where `stop` left it.
+    fn report(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
+        text := &self.take_output()
+        if stop.kind == {
+            .Exited -> text = "{text}{if stop.code == 0 -> "program finished" else -> "program finished with exit status {stop.code}"}\n"
+            .Signaled -> text = "{text}program stopped by {stop.reason}\n"
+            .Paused -> {
+                frame :: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
+                if stop.reason.starts_with("breakpoint") -> text = "{text}breakpoint hit  {frame.file}:{frame.line}  in {frame.function}()\n"
+                source :: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+                locals :: &self.locals() ?? return Err(err)
+                text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
+            }
+        }
+        Ok(text)
+    }
+
+    // The paused facts at the current stop: the innermost Jet frame, its
+    // locals, and the Jet call stack outermost first. None when no Jet frame
+    // is on the stack.
+    fn snapshot(&self) -> DebugSnapshot? NativeDebugError! {
+        frames :: &self.backtrace() ?? return Err(err)
+        stack := [FrameSnapshot]{}
+        loop frame in frames {
+            if native_debug_jet_frame(frame) -> &stack.insert(0, FrameSnapshot{function: frame.function, line: frame.line})
+        }
+        if stack.len() == 0 -> return Ok(None)
+        top :: stack[stack.len() - 1]
+        values := [ValueSnapshot]{}
+        locals :: &self.locals() ?? return Err(err)
+        loop local in locals -> &values.push(ValueSnapshot{name: local.name, type_name: local.type_name, value: local.value})
+        Ok(Val(DebugSnapshot{function: top.function, line: top.line, locals: values, call_stack: stack}))
+    }
+}
+
+fn native_debug_stop_in_jet(frame: NativeFrame?) -> Bool Never! {
+    if frame == .Val(found) -> return native_debug_jet_frame(found)
+    false
+}
+
+fn native_debug_jet_frame(frame: NativeFrame) -> Bool Never! {
+    frame.file.ends_with(".jet") && frame.line > 0
+}
+
+// `locals:` and the frame's locals by name.
+fn native_debug_locals_line(locals: [NativeLocal]) -> String Never! {
+    if locals.len() == 0 -> return "locals:  (none)"
+    sorted := locals.copy()
+    &sorted.sort_by((left: NativeLocal, right: NativeLocal) -> left.name <=> right.name)
+    shown := [String]{}
+    loop local in sorted -> &shown.push("{local.name} = {local.value}")
+    "locals:  {shown.join("   ")}"
+}
+
+fn native_debug_print(locals: [NativeLocal], name: String) -> String Never! {
+    if name == "" -> return "print needs a local's name, as `print total`"
+    loop local in locals {
+        if local.name == name -> return "{local.name} = {local.value}"
+    }
+    "`{name}` is not a local here"
+}
+
+// The Jet frames, innermost first.
+fn native_debug_backtrace(frames: [NativeFrame]) -> String Never! {
+    text := ""
+    index := 0
+    loop frame in frames {
+        if !native_debug_jet_frame(frame) -> next
+        text = "{text}#{index}  {frame.function}()  at {frame.file}:{frame.line}\n"
+        index += 1
+    }
+    text
+}
+
 // A path or argument LLDB reads inside one command line.
 fn native_debug_control_free(value: String) -> Bool Never! {
     loop byte in value.bytes() {
@@ -245,6 +457,18 @@ fn native_debug_breakpoint_resolved(output: String) -> Bool Never! {
         if trimmed.starts_with("Breakpoint ") -> return !trimmed.contains("no locations")
     }
     false
+}
+
+// The number of the `Breakpoint N: …` LLDB just set.
+fn native_debug_breakpoint_number(output: String) -> Int? Never! {
+    loop line in output.lines() {
+        trimmed :: line.trim()
+        if trimmed.starts_with("Breakpoint ") && trimmed.contains(":") {
+            number :: Int.parse(trimmed.after("Breakpoint ").before(":")) ?? return None
+            return Val(number)
+        }
+    }
+    None
 }
 
 // The stop a run-control command reports: `Process N exited with status = C`,
