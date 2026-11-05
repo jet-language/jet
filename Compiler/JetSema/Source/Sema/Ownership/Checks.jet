@@ -2819,7 +2819,7 @@ fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTa
 // it only the change checks run: Rust `check_write_arg_change` for a `&`
 // argument to a parameter that does not edit, and `record_call_receiver_access`
 // for a handle receiver that writes through the handle.
-fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, action: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if sema_ownership_reject_frozen_write(state, expr, if action == "" -> "be edited" else -> action, expr_span(expr), scopes, &diagnostics) -> return false
     if sema_ownership_report_invalidated_view(&state, expr, scopes, expr_span(expr), &diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
@@ -2881,6 +2881,12 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
                 if info.symbol.kind == SymbolKind.Parameter {
                     param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
                     &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "an unmarked parameter gives read access only; nobody changes it during the call", "change the parameter to `{places[0].root}: &{param_type}` with the write-access marker `&`, and write `&` at its call sites"))
+                } else if callee != "" && !info.place_alias && places[0].projections.len() == 0 && info.binding_sigil == .Val(sigil) {
+                    // A whole `::` local passed with `&` to a write parameter:
+                    // the fix is the binding's sigil, as for an assignment.
+                    leaf :: callee.slice(callee.rfind(".") + 1, callee.len())
+                    diagnostic :: sema_error("E0111", expr_span(expr), "`{places[0].root}` was made with `::`, so it can't be changed", "`{leaf}` will change this value, so it must be mutable (`:=`)", "declare it with `{places[0].root} := ...`")
+                    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: ":="}))
                 } else {
                     &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
                 }
@@ -2940,17 +2946,22 @@ fn sema_ownership_report_group_loan_change(state: SemaOwnershipState, changed: S
 // `action` is Rust's change wording for a pinned place (E0219), such as
 // "be assigned"; an empty action keeps the general E0212 report.
 fn sema_ownership_check_write(state: &SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(&state, expr, action, true, scopes, &diagnostics)
+    sema_ownership_check_write_as(&state, expr, action, "", true, scopes, &diagnostics)
+}
+
+// A whole argument passed with `&` to `callee`'s write parameter.
+fn sema_ownership_check_write_argument(state: &SemaOwnershipState, expr: Expr, callee: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    sema_ownership_check_write_as(&state, expr, "be passed with write access", callee, true, scopes, &diagnostics)
 }
 
 // A write access whose root needs no write capability (see
 // `sema_ownership_write_capability`).
 fn sema_ownership_check_write_change(state: &SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(&state, expr, action, false, scopes, &diagnostics)
+    sema_ownership_check_write_as(&state, expr, action, "", false, scopes, &diagnostics)
 }
 
-fn sema_ownership_check_write_as(state: &SemaOwnershipState, expr: Expr, action: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    ok :: sema_ownership_write_capability(&state, expr, action, capability, scopes, &diagnostics)
+fn sema_ownership_check_write_as(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    ok :: sema_ownership_write_capability(&state, expr, action, callee, capability, scopes, &diagnostics)
     if ok {
         places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
         loop place in places {
@@ -3450,7 +3461,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 // argument's root on write capability; `&` toward a parameter
                 // that does not edit runs the change checks alone.
                 checked :: if {
-                    arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write(&state, arg.expr, "be passed with write access", scopes, &diagnostics)
+                    arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write_argument(&state, arg.expr, callee, scopes, &diagnostics)
                     arg.convention == AccessConvention.Write -> sema_ownership_check_write_change(&state, arg.expr, "be passed with write access", scopes, &diagnostics)
                     // Exact-place inference has already checked and consumed
                     // this projected argument; reading it again is a reuse.
@@ -6150,12 +6161,12 @@ fn sema_ownership_check_lvalue_write(state: &SemaOwnershipState, target: LValue,
 // root binding needs no write capability of its own.
 fn sema_ownership_check_lvalue_write_as(state: &SemaOwnershipState, target: LValue, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if target == {
-        .Local(name, span) -> sema_ownership_check_write_as(&state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
+        .Local(name, span) -> sema_ownership_check_write_as(&state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, &diagnostics)
         // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
-        .Field(base, field, span) -> sema_ownership_check_write_as(&state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
+        .Field(base, field, span) -> sema_ownership_check_write_as(&state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, &diagnostics)
         .Index(base, index, span, kind) -> {
             if !sema_ownership_check_expression(&state, index, scopes, &diagnostics) -> return false
-            sema_ownership_check_write_as(&state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
+            sema_ownership_check_write_as(&state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, &diagnostics)
         }
     }
 }
