@@ -106,10 +106,12 @@ owner-ratified decision naming its exact scope and removal condition.
 
 A violation stops the affected work until it is fixed at the root.
 
-- **I1 — Safety.** Jet is memory-safe and type-safe by default. The expert
-  escape hatch is a user-written, audited `#Unsafe("reason") { … }` block or
-  `#Unsafe("reason") fn`. Generated `unsafe` operations appear only there or in
-  vetted standard-library and memory internals.
+- **I1 — Safety.** Jet is memory-safe and type-safe by default. Memory safety
+  includes leak freedom: safe Jet cannot leak memory, and only code inside an
+  `#Unsafe` block or function may. The expert escape hatch is a user-written,
+  audited `#Unsafe("reason") { … }` block or `#Unsafe("reason") fn`. Generated
+  `unsafe` operations appear only there or in vetted standard-library and
+  memory internals.
 - **I2 — Hidden backend.** If the native backend rejects or cannot lower checked
   code, that is an internal compiler error with exit code 101, never a user
   diagnostic.

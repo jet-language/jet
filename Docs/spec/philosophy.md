@@ -29,8 +29,10 @@ what works. [AGENTS.md](../../AGENTS.md) defines authority and decision rights.
 
 When priorities conflict, the earlier one wins:
 
-1. **Memory and type safety.** Safe by default. Expert escape requires explicit,
-   audited opt-in; unsafe power must not leak into ordinary code.
+1. **Memory and type safety.** Safe by default. Safe Jet cannot leak memory:
+   every value it allocates is freed, and only `#Unsafe` code may leak. Expert
+   escape requires explicit, audited opt-in; unsafe power must not spread into
+   ordinary code.
 2. **Beginner experience.** Prefer useful defaults, little ceremony, and errors
    that explain what happened, why, and how to fix it. Reveal complexity when
    the program needs it, not before the first useful result.
