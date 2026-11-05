@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6568,
-    "rev": 92394,
+    "rev": 92395,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70448,6 +70448,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "c15 progress: ui rows A-LIBTYPES (core.mem volatile): 3 FAIL -> PASS (lowlevel_volatile_write_without_unsafe, _wrong_ptr, _wrong_value). Root: Rust core_call.rs:4848-4893 checks mem.volatile_read/volatile_write itself (E3101 outside #Unsafe, E0112 pointer and value texts); Jet checked them as ordinary calls. lowlevel_volatile_write_wrong_value.stderr regenerated to Rust final's E0112 (a432c41f79 left it stale). On dev a706770a61: ui 2376 rows PASS 2017, FAIL 214 -> PASS 2020, FAIL 211; 11 cases and 12 golden rows lost 0; FIXED_POINT jet 249f1d0a6187bd19"
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "c8 progress, 2d712dd94a: a field read off a fresh call result (make().count, make().rows.len(), rows :: make().rows) now drops the result, at the statement end or right after the read inside a condition. Before the fix every such read leaked the whole value: the new case grew VmRSS 264600 kB per 40,000 calls on O0 and O2. field_of_a_call_result_drops_the_result.case FAIL->PASS; the six reads pass --checked-alloc; chain FIXED_POINT; golden A/B 267 rows the same; cases A/B over 280 rows (memory, ownership, allocator, repl). The repl 9-turn peak falls from 5.6 GB to 5.3 GB. Loops over fresh lists and the registration-graph replica follow as their own patches."
         },
         {
@@ -71282,7 +71287,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T13:10:22.654Z",
+      "updated": "2026-11-05T13:22:15.500Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -172827,6 +172832,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T13:22:15.500Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T13:14:17.878Z",
       "by": "Main",
