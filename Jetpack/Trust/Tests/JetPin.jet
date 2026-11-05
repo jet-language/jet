@@ -7,10 +7,11 @@ use {
     ]
     jetpack_trust.[
         TrustError, trust_pin_channel_of, trust_pin_classify_channel, trust_pin_decide,
-        trust_pin_identity_preparse, trust_pin_locked_toolchain, trust_pin_move,
-        trust_pin_realize_jet_binary, trust_pin_report, trust_pin_resolve_channel,
+        trust_pin_identity_preparse, trust_pin_lock_write_diagnostic, trust_pin_locked_toolchain,
+        trust_pin_move, trust_pin_realize_jet_binary, trust_pin_report, trust_pin_resolve_channel,
         trust_pin_toolchain_record, trust_pin_write_init,
     ]
+    jet_foundation.[diagnostic_display_name]
     jet_pkg_model.[pkg_lock_record_toolchain]
     files :: core.files
     process :: core.process
@@ -41,6 +42,10 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
         }
     }
 }
+
+// The text of tests/fixtures/jetpack-diagnostics/E1224.stderr. It is written here
+// because an embed may not leave this package (E0957).
+TRUST_PIN_E1224_SNAPSHOT :: "Error [jet.PackageFileOperationFailed]: Couldn't write .jet/lock\n Why: The lock file records exact toolchain identity\n Fix: Check write permissions: permission denied\nMore: jet-lang.dev/e/E1224\n"
 
 // ── T1 ──
 
@@ -216,4 +221,13 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
 #Test("channel of takes major and minor") {
     assert_eq(trust_pin_channel_of("0.4.2"), "0.4")
     assert_eq(trust_pin_channel_of("1.10.0"), "1.10")
+}
+
+#Test("a lock that can't be written reports E1224") {
+    root :: trust_pin_test_root("unwritable")
+    trust_pin_test_manifest(root, "payload: {{ name: \"x\", version: \"1\", jet: 0.4 }}\n")
+    files.create_dir_all(files.join(root, ".jet/lock")) ?? panic("lock path held by a directory")
+    assert_eq(trust_pin_test_code(trust_pin_move(root, Val("0.7"), "9.9.9")), "E1224")
+    diagnostic :: trust_pin_lock_write_diagnostic("permission denied")
+    assert_eq(TRUST_PIN_E1224_SNAPSHOT, "Error [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\nMore: jet-lang.dev/e/{diagnostic.code}\n")
 }

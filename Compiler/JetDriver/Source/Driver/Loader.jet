@@ -583,7 +583,7 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
             "gb" | "gib" -> multiplier = 1073741824
             "bytes" -> {}
             else -> {
-                &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity", "use a positive whole-byte quantity such as `2.gb`"))
+                &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` uses exact bytes or a `.kb`, `.mb`, or `.gb` byte quantity", "use a positive whole-byte quantity such as `2.gb`"))
                 return None
             }
         }
@@ -591,26 +591,26 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
     digits := digits_text.replace("_", "")
     if digits.starts_with("+") -> digits = digits.slice(1, digits.len())
     if digits.len() == 0 {
-        &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` must be a positive whole-byte quantity such as `2.gb`", "use a positive whole-byte quantity that fits in 64 bits"))
+        &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` must be a positive whole-byte quantity such as `2.gb`", "use a positive whole-byte quantity that fits in 64 bits"))
         return None
     }
     count := 0
     loop byte in digits.bytes() {
         digit := Int.from_u8(byte)
         if digit < 48 || digit > 57 {
-            &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` must be a positive whole-byte quantity such as `2.gb`", "use a positive whole-byte quantity that fits in 64 bits"))
+            &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` must be a positive whole-byte quantity such as `2.gb`", "use a positive whole-byte quantity that fits in 64 bits"))
             return None
         }
         digit -= 48
         if count > 922337203685477580 || (count == 922337203685477580 && digit > 7) {
-            &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` must be a positive byte quantity that fits in 64 bits", "use a positive whole-byte quantity that fits in 64 bits"))
+            &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` must be a positive byte quantity that fits in 64 bits", "use a positive whole-byte quantity that fits in 64 bits"))
             return None
         }
         count = count * 10 + digit
     }
     max_int :: 922337203685477580 * 10 + 7
     if count == 0 || count > max_int /% multiplier {
-        &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`cap:` must be a positive byte quantity that fits in 64 bits", "use a positive whole-byte quantity that fits in 64 bits"))
+        &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` must be a positive byte quantity that fits in 64 bits", "use a positive whole-byte quantity that fits in 64 bits"))
         return None
     }
     Val(count * multiplier)
@@ -671,13 +671,13 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
         inner :: String.from_bytes(bytes[prefix_len..<bytes.len() - 1]) ?? ""
         args :: jet_driver_top_level_commas(inner)
         if args.len() == 0 || args[0] != "mem.Heap" || args.len() > 2 {
-            &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`"))
+            &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument", "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`"))
             return None
         }
         cap := ByteSize?{None}
         if args.len() == 2 {
             if !args[1].starts_with("cap:") {
-                &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "the counting allocator's optional argument is spelled `cap:`", "use `cap:` for the counting allocator's optional limit"))
+                &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "the counting allocator's optional argument is spelled `cap:`", "use `cap:` for the counting allocator's optional limit"))
                 return None
             }
             bytes_value :: jet_driver_parse_allocator_bytes(args[1].slice(4, args[1].len()), span, &diagnostics) ?? return None
@@ -685,7 +685,7 @@ fn jet_driver_parse_program_allocator(value: String, span: Span, diagnostics: &[
         }
         return Val(AllocatorPolicy.Counting{cap: cap})
     }
-    &diagnostics.push(jet_driver_diagnostic("E1206", span, "invalid hosted program allocator", "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`", "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`"))
+    &diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`", "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`"))
     None
 }
 
@@ -825,7 +825,7 @@ fn jet_driver_parent_path(path: String) -> String Never! {
 
 fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], snapshot: JetDriverAuthorizedSourceSnapshot, diagnostics: &[Diagnostic]) {
     // A path dependency that a dependency declares stays below
-    // that dependency's directory (E1206) unless the root package reaches it:
+    // that dependency's directory (E1223) unless the root package reaches it:
     // the root declares that directory itself, or the directory lies beside
     // one the root declares outside its own tree (`Compiler/JetSema ->
     // ../JetParser -> ../JetLexer`). The root already opened that sibling
@@ -858,7 +858,7 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
                     root :: snapshot.roots[package.root_index]
                     resolved :: jet_driver_dependency_path(root.canonical_path, dependency.source)
                     if resolved.valid && entry_root_index >= 0 && package.root_index != entry_root_index && !jet_driver_path_within(resolved.path, root.canonical_path) && !jet_driver_root_reaches(reach_declared, reach_sibling_dirs, resolved.path) {
-                        &diagnostics.push(jet_driver_diagnostic_at_source("E1206", dependency.span, dependency.source_path, 0, "path dependency `{dependency.name}` escapes its parent package", "the path `{dependency.source}` resolves outside the declaring package directory `{root.canonical_path}`", "use a relative path below the declaring package directory"))
+                        &diagnostics.push(jet_driver_diagnostic_at_source("E1223", dependency.span, dependency.source_path, 0, "path dependency `{dependency.name}` escapes its parent package", "the path `{dependency.source}` resolves outside the declaring package directory `{root.canonical_path}`", "use a relative path below the declaring package directory"))
                         next
                     }
                     target_root := Int?{None}

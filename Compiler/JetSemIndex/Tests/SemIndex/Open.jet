@@ -38,10 +38,10 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     assert_eq(failure.message(), "2 load/check diagnostic(s)")
     if failure == .Load(diagnostics) -> assert_eq(diagnostics, ([Diagnostic]{first, second}))
     assert_eq(semindex_package_facts_error_text([Diagnostic]{}), "")
-    expected :: "E1206: package facts for `./é/main.jet` have a shape error — one typed Package fact graph must own this projection; broken; E1206: package facts for `other.jet` have a shape error — one typed Package fact graph must own this projection; ambiguous"
+    expected :: "E1215: package facts for `./é/main.jet` have a shape error — one typed Package fact graph must own this projection; broken; E1215: package facts for `other.jet` have a shape error — one typed Package fact graph must own this projection; ambiguous"
     assert_eq(semindex_package_facts_error_text([Diagnostic]{first, second}), expected)
     assert_eq(first.severity, DIAGNOSTIC_ERROR)
-    assert_eq(first.code, "E1206")
+    assert_eq(first.code, "E1215")
     assert_eq(first.span, None)
     assert_eq(first.fix, "fix package.jet, the inline Package carrier, or its declared Config files before tooling uses package facts")
 }
@@ -58,8 +58,8 @@ fn semindex_open_test_clean(root: String) -[FS]> {
         .Err(error) -> {
             // Main's oracle ruling: the migration-era substring was stale;
             // the registered Authority diagnostic text remains canonical.
-            assert_eq(error.message, "E1206: the package has two manifest roots — `package.jet` and `pkg.jet` both exist; choosing one would make package identity ambiguous")
-            assert_eq(semindex_package_facts_diagnostic(entry, error.message).code, "E1206")
+            assert_eq(error.message, "E1215: the package has two manifest roots — `package.jet` and `pkg.jet` both exist; choosing one would make package identity ambiguous")
+            assert_eq(semindex_package_facts_diagnostic(entry, error.message).code, "E1215")
         }
     }
     semindex_open_test_clean(root)

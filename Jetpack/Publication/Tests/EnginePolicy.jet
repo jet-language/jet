@@ -35,7 +35,7 @@ fn engine_policy_manifest_error(raw: String) -> Diagnostic {
     assert(exception.matches("Acme.Widget", "1.2.3"))
     assert(exception.summary().contains("reason=urgent security fix"))
     invalid :: engine_policy_manifest_error("name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ exceptions: [PolicyException{{ id: \"JSA-1\", scope: \"Acme.Widget#^1.2\", reason: \"why\", expires: 10 }}] }}\n")
-    assert_eq(invalid.code, "E1206")
+    assert_eq(invalid.code, "E1215")
     assert(invalid.why.contains("PolicyException.scope"))
 }
 
@@ -63,7 +63,7 @@ fn engine_policy_manifest_error(raw: String) -> Diagnostic {
     assert(diagnostic.why.contains("security-sensitive"))
     assert(diagnostic.fix.contains("valid SPDX expression"))
     malformed :: engine_policy_manifest_error("name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n")
-    assert_eq(malformed.code, "E1206")
+    assert_eq(malformed.code, "E1215")
     assert(malformed.what.contains("package.jet"))
     assert(malformed.why.contains("Package metadata policy is malformed"))
     assert(malformed.fix.contains("syntax-decisions.md"))

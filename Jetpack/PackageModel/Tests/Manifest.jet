@@ -50,7 +50,7 @@ use jet_pkg_model.[
     duplicate :: "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{ licenses: .Allow([\"MIT\", \"MIT\"]) }}\n"
     if Manifest.parse("package.jet", duplicate) == {
         .Err(error) -> {
-            assert_eq(error.diagnostic.code, "E1206")
+            assert_eq(error.diagnostic.code, "E1215")
             assert(error.diagnostic.what.contains("package.jet"))
             assert(pkg_ascii_lower(error.diagnostic.why).contains("package metadata policy is malformed"))
             assert(error.diagnostic.fix.contains("syntax-decisions.md"))

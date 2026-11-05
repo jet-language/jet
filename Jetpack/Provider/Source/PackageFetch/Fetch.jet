@@ -1,7 +1,7 @@
 // Resolve all dependencies and publish the machine graph + semantic rationale
 // only after provider verification. Locked mode never writes or refreshes an index.
 fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: Manifest, existing: LockFile?, options: PackageFetchOptions) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchResult PackageFetchError! {
-    root :: files.canonicalize(project_root) ?? return Err(pkg_fetch_error("E1206", "couldn't open project root", "{err}", "restore the package directory"))
+    root :: files.canonicalize(project_root) ?? return Err(pkg_fetch_error("E1224", "couldn't open project root", "{err}", "restore the package directory"))
     pkg_check_toolchain(manifest, files.join(root, PACKAGE_FILE)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     roots :: pkg_resolve_roots()
     context :: ProviderCtx{fixtures: provider_fixtures_from_env(None), store_dir: roots.hangar_dir(), offline: options.locked, project_dir: Val(root), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
@@ -88,7 +88,7 @@ fn pkg_fetch_semantic_records(root: String, lock: LockFile, manifest: Manifest, 
             _ :: &semantic.selective_update(record)
         }
     }
-    trust_revalidate_semantic_lock(semantic) ?? return Err(pkg_fetch_error("E1206", "couldn't record the registry resolution rationale", "semantic lock validation rejected the update explanation", err.message()))
+    trust_revalidate_semantic_lock(semantic) ?? return Err(pkg_fetch_error("E1205", "couldn't record the registry resolution rationale", "semantic lock validation rejected the update explanation", err.message()))
     Ok(semantic)
 }
 fn pkg_fetch_locked_error(name: String, detail: String) -> PackageFetchError Never! {

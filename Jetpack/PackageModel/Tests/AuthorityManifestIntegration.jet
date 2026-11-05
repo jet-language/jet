@@ -29,7 +29,7 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
     blocks :: [String]{"grants: {{ \"dep\": [Net] }}", "policy: {{ trust: {{ default: prompt }} }}", "policy: {{ providers: {{ nix: {{ registry: \"nixpkgs\" }} }} }}"}
     loop block in blocks {
         diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n")
-        assert_eq(diagnostic.code, "E1206")
+        assert_eq(diagnostic.code, "E1215")
         assert(diagnostic.why.contains("authority:"))
         assert(diagnostic.fix.contains("authority:"))
     }
@@ -46,7 +46,7 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
     retired :: [String]{"policy: {{ no_alloc: true }}", "policy: {{ zero_rc: true }}", "policy: {{ arena_bounded: 65536 }}"}
     loop block in retired {
         diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n")
-        assert_eq(diagnostic.code, "E1206")
+        assert_eq(diagnostic.code, "E1215")
         assert(diagnostic.why.contains("authority"))
         assert(diagnostic.fix.contains("authority"))
     }
@@ -54,7 +54,7 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
 
 #Test("retired_effect_budget_names_authority_holds") {
     diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\neffects: {{ deny: [Net] }}\n")
-    assert_eq(diagnostic.code, "E1206")
+    assert_eq(diagnostic.code, "E1215")
     assert(diagnostic.why.contains("authority"))
     assert(diagnostic.fix.contains("authority"))
 }

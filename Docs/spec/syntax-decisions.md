@@ -2651,7 +2651,7 @@ fn sensor() -[!Mem.Alloc(above: 2048)]> { }
 
 # Package policy may only tighten safety, never authorize it:
 policy: { unsafe: .Allow }
-// error E1206: `policy.unsafe` must be `.Deny` or `.Paths([...])`
+// error E1215: `policy.unsafe` must be `.Deny` or `.Paths([...])`
 // and cannot authorize unsafe code; each operation still needs
 // `#Unsafe("reason")` at the exact block or function.
 ```
@@ -5620,7 +5620,7 @@ D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
 (D-JPK-DISPATCH1). Frozen-forward identity block: the bare top-level identity
 fields stay parseable by every future jet, so an old jet can always read enough
 of any manifest to fetch the right toolchain. The retired `payload:` wrapper is
-an ordinary E1206 unknown-field error. `jet self toolchain`
+an ordinary E1215 unknown-field error. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is `name: target@provider`, or a bare
@@ -7676,7 +7676,7 @@ resolved dependency graph, and an empty list denies every dependency. Repeated
 list entries normalize to one sorted value. `.Allow` is not a valid
 `policy.unsafe` value.
 
-The parser reports malformed package policy as `E1206`. A valid policy
+The parser reports malformed package policy as `E1215`. A valid policy
 violation is a compile/check error `E2960` naming the policy key, rejected
 construct, and project path. `jet inspect guarantees` projects the
 same normalized values, preserving absent keys and explicit empty deny lists;

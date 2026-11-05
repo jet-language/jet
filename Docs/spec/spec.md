@@ -2233,7 +2233,7 @@ A dependency package is checked as its own package. When the dependency has
 errors, the importer reports them inline, followed by one **E0626** naming the
 dependency and the `jet check` that checks it on its own; the dependency's
 warnings stay with its own check. A path dependency declared by a dependency
-must stay below that dependency's directory (**E1206**) unless the root
+must stay below that dependency's directory (**E1223**) unless the root
 package declares the same directory itself, or reaches its sibling directory
 through an explicit out-of-tree path dependency. This lets sibling packages such as
 `Compiler/JetLexer` and `Compiler/JetFoundation` share a dependency

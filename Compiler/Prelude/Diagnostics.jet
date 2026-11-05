@@ -1526,6 +1526,17 @@ struct ZipLengthMismatch {
     }
 }
 
+struct DistinctTypeMismatch {
+    impl Diagnostic {
+        code :: "E0753"
+        meaning :: "A distinct type compared with, or used in place of, another type"
+        detail :: true
+        fn what(self) -> String { "A distinct type is used where another type is expected" }
+        fn why(self) -> String { "A distinct type is never accepted in place of its base type or another distinct type, even when both are built on the same base." }
+        fn fix(self) -> String { "Convert explicitly with the distinct type's constructor, or compare the underlying values with `.raw()`." }
+    }
+}
+
 struct DistinctOverDistinct {
     impl Diagnostic {
         code :: "E0129"
@@ -9083,6 +9094,19 @@ struct LintSelectorIsCode {
     }
 }
 
+struct InvalidPackageManifest {
+    impl Diagnostic {
+        code :: "E1215"
+        stage :: [.Jet]
+        meaning :: "A `package.jet` or Package fact graph that is missing, malformed, or uses a field the Package vocabulary doesn't have"
+        detail :: true
+        no_fix :: .Behavior
+        fn what(self) -> String { "`package.jet` has a shape error" }
+        fn why(self) -> String { "Every package has one `package.jet` in the Package vocabulary: bare `name:` and `version:`, then `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, `authority:` or `members:`." }
+        fn fix(self) -> String { "Check `package.jet` against Docs/spec/syntax-decisions.md." }
+    }
+}
+
 struct UnresolvedRegistryDependency {
     impl Diagnostic {
         code :: "E1207"
@@ -9270,6 +9294,45 @@ struct InvalidAuthorityBlock {
         fn what(self) -> String { "`package.jet` has a malformed `authority:` block." }
         fn why(self) -> String { "`authority: {{ allow: […], deny: […], grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, the `FFI` parent and its language leaves including `FFI.Go`, `FFI.Py`, and `FFI.Octave`, and deny-only `Panic`/`Mem`." }
         fn fix(self) -> String { "Fix the authority field or right name." }
+    }
+}
+
+struct InvalidProgramAllocator {
+    impl Diagnostic {
+        code :: "E1222"
+        stage :: [.Jet]
+        meaning :: "A hosted program `allocator:` fact that isn't `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`"
+        detail :: true
+        no_fix :: .Behavior
+        fn what(self) -> String { "Invalid hosted program allocator" }
+        fn why(self) -> String { "`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`, with `cap:` a positive whole-byte quantity that fits in 64 bits." }
+        fn fix(self) -> String { "Use `allocator: mem.Heap` or `mem.Counting.over(mem.Heap, cap: 2.gb)`." }
+    }
+}
+
+struct PathDependencyEscape {
+    impl Diagnostic {
+        code :: "E1223"
+        stage :: [.Jet]
+        meaning :: "A path dependency resolves outside the package directory that declares it"
+        detail :: true
+        no_fix :: .Behavior
+        fn what(self) -> String { "A path dependency escapes its parent package" }
+        fn why(self) -> String { "A package's path dependencies stay below its own directory, unless the root package declares the same directory." }
+        fn fix(self) -> String { "Use a relative path below the declaring package directory." }
+    }
+}
+
+struct PackageFileOperationFailed {
+    impl Diagnostic {
+        code :: "E1224"
+        stage :: [.Jet]
+        meaning :: "A file operation on the project lock, the package store or a package source failed"
+        detail :: true
+        no_fix :: .Behavior
+        fn what(self) -> String { "A package file operation failed" }
+        fn why(self) -> String { "Jet could not read or write a file that package resolution needs." }
+        fn fix(self) -> String { "Check the permissions and free space of the named path, then run the command again." }
     }
 }
 

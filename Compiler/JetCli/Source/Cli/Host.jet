@@ -1892,7 +1892,7 @@ fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: B
     if run_source.report != None || run_source.diagnostics.len() > 0 -> return jet_cli_ice("the `jet new` run.jet template `{template}` does not format")
     cli_files.create_dir_all("{name}/.jet") ?? return jet_cli_new_failed("E2105", "couldn't create `{name}`/.jet: {err}", write_failed, color)
     cli_files.write("{name}/package.jet", manifest.text) ?? return jet_cli_new_failed("E2105", "couldn't write package.jet: {err}", write_failed, color)
-    cli_files.write("{name}/.jet/lock", jet_cli_new_lock(name)) ?? return jet_cli_new_failed("E1206", "couldn't write .jet/lock", "check the project lock permissions: could not write `.jet/lock`: {err}", color)
+    cli_files.write("{name}/.jet/lock", jet_cli_new_lock(name)) ?? return jet_cli_new_failed("E1224", "couldn't write .jet/lock", "check the project lock permissions: could not write `.jet/lock`: {err}", color)
     cli_files.write("{name}/run.jet", run_source.text) ?? return jet_cli_new_failed("E2105", "couldn't write run.jet: {err}", write_failed, color)
     homes := [String]{}
     if template == "overrides" {
@@ -2139,7 +2139,7 @@ fn jet_cli_fmt_is_package_manifest_file(origin: String) -> Bool Never! {
 
 // CmdCompile.rs `format_package_manifest_for_fmt`: `package.jet` is formatted
 // only by the typed Package model. A manifest the model cannot read stops the
-// run with its registered manifest diagnostic (E1206 and family); a layout
+// run with its registered manifest diagnostic (E1215 and family); a layout
 // the model declines (authored comments) is left exactly as written.
 fn jet_cli_fmt_package_manifest(source: String, origin: String) -> JetCLIFmtSource {
     if PackageFacts.parse(source, origin) == .Err(error) -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_parse_diagnostic(origin, error)})

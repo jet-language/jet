@@ -288,23 +288,23 @@ fn pkg_manifest_diagnostic_from_row(code: String, holes: [ManifestEntry], span: 
 // The registered diagnostic for one Package parse failure.
 fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diagnostic Never! {
     if error == {
-        .UnknownField(field) -> pkg_e1206_unknown_field(field)
-        .MissingName -> pkg_e1206("`{PACKAGE_FILE}` needs a `name` field")
-        .MissingRecord(field) -> pkg_e1206("`{field}:` needs a record value")
-        .MalformedField(value) -> pkg_e1206("malformed field `{value}`")
-        .UnknownOutputKind(kind) -> pkg_e1206("unknown Output kind `{kind}`")
-        .RetiredRecordHead -> pkg_e1206("record literals use `{{ … }}`; remove the dot before `{{`")
+        .UnknownField(field) -> pkg_e1215_unknown_field(field)
+        .MissingName -> pkg_e1215("`{PACKAGE_FILE}` needs a `name` field")
+        .MissingRecord(field) -> pkg_e1215("`{field}:` needs a record value")
+        .MalformedField(value) -> pkg_e1215("malformed field `{value}`")
+        .UnknownOutputKind(kind) -> pkg_e1215("unknown Output kind `{kind}`")
+        .RetiredRecordHead -> pkg_e1215("record literals use `{{ … }}`; remove the dot before `{{`")
         .InvalidValue(field, value) -> {
-            if field == "runtime" -> return pkg_e1206("`runtime` must be `core`, `alloc`, or `hosted`, not `{value}`")
-            pkg_e1206("invalid value for `{field}`: `{value}`")
+            if field == "runtime" -> return pkg_e1215("`runtime` must be `core`, `alloc`, or `hosted`, not `{value}`")
+            pkg_e1215("invalid value for `{field}`: `{value}`")
         }
-        .ConfigMembers -> pkg_e1206("a Config file cannot declare `members`")
+        .ConfigMembers -> pkg_e1215("a Config file cannot declare `members`")
         .NestedMembers(root, member) -> diagnostic_from_registry("E1323", None,
             "member Package `{member}` declares `members`",
             "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
             "remove `members:` from `{member}` and lift its references into `{root}`")
         .LintPolicyCode(code, name) -> pkg_manifest_diagnostic_from_row("E1206", [ManifestEntry]{ManifestEntry{key: "code", value: code}, ManifestEntry{key: "name", value: name}}, None)
-        .Composition(detail) -> pkg_e1206(detail)
+        .Composition(detail) -> pkg_e1215(detail)
         .BadTarget(name, value, reserved) -> {
             if reserved -> return pkg_e1210("package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)")
             pkg_e1210("package `{name}` lists target `{value}`, which is not a known target")
@@ -312,26 +312,26 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
         .BadTargetField(name, detail) -> pkg_e1216("package `{name}`: {detail}")
         .ReservedSection(section) -> pkg_e1209(path, section)
         .BadEffectsBlock(detail) -> pkg_e1221(detail)
-        .RetiredAuthorityField(field, replacement) -> diagnostic_from_registry("E1206", None,
+        .RetiredAuthorityField(field, replacement) -> diagnostic_from_registry("E1215", None,
             "`{field}` is not a field",
             "`{field}` moved into `{replacement}` in the one `authority:` block.",
             "write `{replacement}` inside `authority: {{ … }}`")
         .BadMemoryPolicy(detail) -> {
             if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.deny`") {
-                return diagnostic_from_registry("E1206", None,
+                return diagnostic_from_registry("E1215", None,
                     "`{PACKAGE_FILE}` names an unknown memory floor",
                     "{detail}; memory floors belong in `authority.deny`.",
                     "write the denial in `authority.deny` inside `authority: {{ deny: […] }}`")
             }
-            pkg_e1206("memory policy is malformed: {detail}")
+            pkg_e1215("memory policy is malformed: {detail}")
         }
-        .RetiredPolicyField(field, replacement) -> diagnostic_from_registry("E1206", None,
+        .RetiredPolicyField(field, replacement) -> diagnostic_from_registry("E1215", None,
             "`{field}` is not a field",
             "Package refusals use the named `policy.lints.deny` surface; `{field}` was a separate boolean and no longer has meaning.",
             "remove `{field}` for the default, or put `auto_derive` in `policy.lints.deny` as `{replacement}` to refuse auto-derive")
-        .BadGuaranteePolicy(detail) -> pkg_e1206("package guarantee policy is malformed: {detail}")
-        .BadPackagePolicy(detail) -> pkg_e1206("package metadata policy is malformed: {detail}")
-        .BadAllocatorPolicy(detail) -> diagnostic_from_registry("E1206", None,
+        .BadGuaranteePolicy(detail) -> pkg_e1215("package guarantee policy is malformed: {detail}")
+        .BadPackagePolicy(detail) -> pkg_e1215("package metadata policy is malformed: {detail}")
+        .BadAllocatorPolicy(detail) -> diagnostic_from_registry("E1222", None,
             "invalid hosted program allocator",
             detail,
             "use `allocator: mem.Heap` or wrap it with `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)`")
@@ -339,8 +339,8 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
 }
 
 // An unknown top-level manifest field.
-fn pkg_e1206_unknown_field(field: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1206", None,
+fn pkg_e1215_unknown_field(field: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1215", None,
         "unknown field `{field}:` in `{PACKAGE_FILE}`",
         "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level — there is no `identity:` or `payload:` wrapper.",
         "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`")
@@ -354,8 +354,8 @@ fn pkg_e1221(detail: String) -> Diagnostic Never! {
         "`{MANIFEST_BLOCK_AUTHORITY}: {{ allow: […], deny: […], grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
 }
 
-fn pkg_e1206(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1206", None,
+fn pkg_e1215(detail: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E1215", None,
         "`{PACKAGE_FILE}` has a shape error",
         detail,
         "check `{PACKAGE_FILE}` against Docs/spec/syntax-decisions.md (U1)")

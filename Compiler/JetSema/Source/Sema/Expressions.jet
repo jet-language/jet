@@ -1693,7 +1693,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     if op == BinOp.Eq || op == BinOp.Ne {
         if !sema_expr_distinct_same(lhs.ty, rhs.ty, left_facts, right_facts) {
             distinct :: if left_facts != None -> left_facts else -> right_facts ?? return None
-            &diagnostics.push(sema_error("E0128", span, "a `{type_name(lhs.ty)}` can't be compared with a `{type_name(rhs.ty)}`", "`{distinct.name}` is a distinct type; it only compares equal to another `{distinct.name}`", "use `.raw()` to compare the underlying values, or construct a `{distinct.name}`"))
+            &diagnostics.push(sema_error("E0753", span, "a `{type_name(lhs.ty)}` can't be compared with a `{type_name(rhs.ty)}`", "`{distinct.name}` is a distinct type; it only compares equal to another `{distinct.name}`", "use `.raw()` to compare the underlying values, or construct a `{distinct.name}`"))
             return None
         }
         return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))

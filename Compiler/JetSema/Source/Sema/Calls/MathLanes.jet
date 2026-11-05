@@ -113,7 +113,7 @@ fn sema_call_try_math_method(receiver: Expr, receiver_value: TExpr, method: Stri
             next
         }
         if wanted == .Val(required) && !type_identity_equal(checked.ty, required) {
-            &diagnostics.push(sema_error("E0128", expr_span(argument.expr), "`.{method}()` on `{name}` expects a `{type_name(required)}`, got `{type_name(checked.ty)}`", "`{name}.{method}(…)` operates on a `{type_name(required)}`", "pass a `{type_name(required)}` value"))
+            &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`.{method}()` on `{name}` expects a `{type_name(required)}`, got `{type_name(checked.ty)}`", "`{name}.{method}(…)` operates on a `{type_name(required)}`", "pass a `{type_name(required)}` value"))
             complete = false
             next
         }
@@ -138,7 +138,7 @@ fn sema_call_try_math_static(owner: String, method: String, args: [CallArg], spa
     wanted :: if method == "splat" -> sema_call_math_scalar_type(name) else -> sema_call_math_array_bridge(name)
     checked :: sema_check_expression(args[0].expr, Val(wanted), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
     if !type_identity_equal(checked.ty, wanted) {
-        &diagnostics.push(sema_error("E0128", expr_span(args[0].expr), "`{name}.{method}()` expects a `{type_name(wanted)}`, got `{type_name(checked.ty)}`", "`{name}.{method}` builds a `{name}` from a `{type_name(wanted)}`", "pass a `{type_name(wanted)}` value"))
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{name}.{method}()` expects a `{type_name(wanted)}`, got `{type_name(checked.ty)}`", "`{name}.{method}` builds a `{name}` from a `{type_name(wanted)}`", "pass a `{type_name(wanted)}` value"))
         return failed
     }
     value :: sema_tree_node(self_type, TExprKind.MathBuiltin{type_name: name, function: method, args: [TExpr]{checked}}, span)

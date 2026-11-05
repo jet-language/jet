@@ -785,7 +785,7 @@ the ratified rewrites. The retired-spelling status lines go to stderr unless
 `--quiet`. `package.jet` and `Config` record sources go through the typed
 Package formatter (the Jetpack Package model, referenced into the Compiler
 unit from `Jetpack/PackageModel`): an unreadable manifest stops the run with
-its E1206-family diagnostic, and a layout the model declines (authored
+its E1215 manifest diagnostic, and a layout the model declines (authored
 comments) is left as written. `--changed` formats the `.jet` files git reports
 changed against `HEAD` or staged (exit 2 outside a git worktree).
 Ordinary-source formatting preserves declaration meaning: a raw

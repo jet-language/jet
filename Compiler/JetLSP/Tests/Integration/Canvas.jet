@@ -347,7 +347,7 @@ fn source_order(src: String, names: [String]) -> [Int] {
     entry :: dir.join("main.jet")
     fs.write(entry, "fn run() {{}}\n").unwrap()
     diagnostics :: graph_json_for_file(entry).expect_err("Canvas must reject ambiguous package facts")
-    assert(diagnostics.find((diagnostic) -> diagnostic.code == "E1206") != None, "{diagnostics}")
+    assert(diagnostics.find((diagnostic) -> diagnostic.code == "E1215") != None, "{diagnostics}")
 }
 // Rust: tests/canvas.rs:882
 #Test("canvas_project_uses_shared_package_diagnostic") {
@@ -357,9 +357,9 @@ fn source_order(src: String, names: [String]) -> [Int] {
     entry :: dir.join("main.jet")
     fs.write(entry, "fn run() {{}}\n").unwrap()
     diagnostics :: graph_json_for_file(entry).expect_err("Canvas must reject ambiguous package facts")
-    diagnostic :: diagnostics.find((diagnostic) -> diagnostic.code == "E1206").expect("ambiguous package facts must use the shared E1206 diagnostic")
+    diagnostic :: diagnostics.find((diagnostic) -> diagnostic.code == "E1215").expect("ambiguous package facts must use the shared E1215 diagnostic")
     project :: project_json_for_entry(entry)
-    assert(project.contains("\"code\":\"E1206\""), project)
+    assert(project.contains("\"code\":\"E1215\""), project)
     assert(!project.contains("\"code\":\"package\""), project)
     assert(project.contains("one typed Package fact graph must own this projection"), project)
     loop field in [diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix] -> assert(project.contains(field), "project omitted diagnostic field: {field}\n{project}")
