@@ -1,0 +1,181 @@
+// Ports of the deleted tests/receipt_store.rs store tests (#6096 c17). The Rust
+// ReceiptStore claim, write, lookup, record and list calls map to
+// jet_cli_receipt_claim, jet_cli_receipt_prepare plus jet_cli_receipt_publish,
+// jet_cli_receipt_lookup and jet_cli_receipt_list. A Rust store directory is a
+// Jet project root: its objects live under .jet/receipts/objects.
+use {
+    jet_cli.[
+        JetCLIReceipt, JetCLIReceiptClaim, JetCLIReceiptSection, JetCLIRecordLink, jet_cli_comparison_input_paths,
+        jet_cli_receipt_claim, jet_cli_receipt_list, jet_cli_receipt_lookup, jet_cli_receipt_prepare,
+        jet_cli_receipt_publish,
+    ]
+    jet_pkg_model.[WorkspaceDeclarationCache]
+    rsp_files :: core.files
+    rsp_process :: core.process
+    rsp_sys :: core.sys
+}
+
+// Host terminal bits for a piped run: stdin, stdout and stderr are not terminals.
+RSP_TERMINAL :: [U8]{U8{48}, U8{48}, U8{48}}
+
+struct RspFixtureRoot { path: String }
+impl RspFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        rsp_files.remove_all(self.path).drop("test root cleanup")
+    }
+}
+
+fn rsp_root(label: String) -[FS, Env]> String {
+    root :: rsp_files.join(rsp_sys.temp_dir(), "jet-receipts-{label}-{rsp_process.current_pid()}")
+    rsp_files.remove_all(root).drop("a stale test root may be absent")
+    rsp_files.create_dir_all(root) ?? panic("create receipt test root")
+    rsp_files.realpath(root) ?? panic("canonical receipt test root")
+}
+
+fn rsp_write(path: String, text: String) -[FS]> {
+    rsp_files.write(path, text) ?? panic("write {path}")
+}
+
+fn rsp_claim(verb: String, args: [String], paths: [String]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim {
+    jet_cli_receipt_claim(verb, paths, args, RSP_TERMINAL) ?? panic("claim {verb}: {err.message}")
+}
+
+// The Rust store.write(&claim, &args, status, stdout, stderr). Like the Rust
+// ReceiptStore::new, the store root is created first; the Jet store opens it.
+fn rsp_publish(store: String, claim: JetCLIReceiptClaim, stdout: String) -[FS, Env, Time.Wait]> {
+    rsp_files.create_dir_all(store) ?? panic("create store root {store}")
+    receipt :: jet_cli_receipt_prepare(claim, 0, stdout.bytes(), [U8]{}, [JetCLIReceiptSection]{}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, [String]{}) ?? panic("prepare: {err.message}")
+    published :: jet_cli_receipt_publish(store, receipt) ?? panic("publish: {err.message}")
+    assert(published, "a new receipt is published as a new immutable object")
+}
+
+// The Rust store.lookup(&claim).unwrap().is_some().
+fn rsp_current(store: String, claim: JetCLIReceiptClaim) -[FS, Time.Wait]> Bool {
+    if jet_cli_receipt_lookup(store, claim) == {
+        .Val(_) -> return true
+        .None -> return false
+        .Err(error) -> { panic("lookup: {error.message}") }
+    }
+}
+
+// The Rust store.list().
+fn rsp_list(store: String) -[FS, Time.Wait]> [JetCLIReceipt] {
+    jet_cli_receipt_list(store) ?? panic("list: {err.message}")
+}
+
+// The Rust store.list_current().len(): listed receipts whose inputs still match.
+fn rsp_list_current(store: String) -[FS, Time.Wait]> Int {
+    current := 0
+    loop receipt in rsp_list(store) {
+        if rsp_current(store, receipt.claim) -> current += 1
+    }
+    current
+}
+
+// tests/receipt_store.rs:58-96.
+#Test("content_keys_reuse_without_timestamps_and_invalidate_only_dependents") {
+    root :: rsp_root("identity")
+    owner :: RspFixtureRoot{path: root}
+    defer close(^owner)
+    source :: "{root}/source.jet"
+    unrelated :: "{root}/unrelated.jet"
+    rsp_write(source, "fn run() {{}}\n")
+    rsp_write(unrelated, "fn run() {{}}\n")
+    store :: "{root}/store"
+    args :: [String]{"check", source}
+    source_claim :: rsp_claim("check", args, [String]{source})
+    unrelated_claim :: rsp_claim("check", args, [String]{unrelated})
+    rsp_publish(store, source_claim, "source")
+    rsp_publish(store, unrelated_claim, "unrelated")
+
+    // Rewriting identical bytes changes ordinary filesystem metadata, but not
+    // the receipt identity.
+    rsp_write(source, "fn run() {{}}\n")
+    assert(rsp_current(store, source_claim))
+    assert(rsp_current(store, unrelated_claim))
+
+    rsp_write(source, "fn run() {{ print(1) }}\n")
+    changed_source :: rsp_claim("check", args, [String]{source})
+    assert(changed_source.key != source_claim.key)
+    assert(!rsp_current(store, source_claim))
+    assert(rsp_current(store, unrelated_claim))
+}
+
+// tests/receipt_store.rs:180-256. The Rust ReceiptStore::input_paths_for read
+// the explicit target's authority inputs; jet_cli_comparison_input_paths is the
+// Jet producer of that closure.
+#Test("explicit_check_receipt_tracks_package_workspace_and_generated_authorities") {
+    root :: rsp_root("project-authorities")
+    owner :: RspFixtureRoot{path: root}
+    defer close(^owner)
+    package :: "{root}/packages/app"
+    source :: "{package}/src/main.jet"
+    package_manifest :: "{package}/package.jet"
+    workspace :: "{root}/workspace.jet"
+    workspace_lock :: "{root}/.jet/lock"
+    package_lock :: "{package}/.jet/lock"
+    generated :: "{package}/.jet/generated/inputs.jet"
+    loop directory in ([String]{"{package}/src", "{root}/.jet", "{package}/.jet", "{package}/.jet/generated"}) {
+        rsp_files.create_dir_all(directory) ?? panic("create {directory}")
+    }
+    rsp_write(workspace, "module workspace {{ members: [\"packages/app\"] }}\n")
+    rsp_write(package_manifest, "name: \"app\"\nversion: \"0.1.0\"\n")
+    rsp_write(source, "fn run() {{}}\n")
+    rsp_write(workspace_lock, "workspace-lock-v1\n")
+    rsp_write(package_lock, "package-lock-v1\n")
+    rsp_write(generated, "generated-v1\n")
+
+    argv :: [String]{"check", "packages/app/src/main.jet"}
+    cache := WorkspaceDeclarationCache.new()
+    inputs :: jet_cli_comparison_input_paths(&cache, source) ?? panic("input paths: {err.message}")
+    loop expected in ([String]{workspace, package_manifest, workspace_lock, package_lock, generated}) {
+        assert(inputs.contains(expected), "explicit check omitted authority input {expected}: {inputs.join(", ")}")
+    }
+
+    store :: "{root}/receipts"
+    claim :: rsp_claim("check", argv, inputs)
+    rsp_publish(store, claim, "ok")
+    assert(rsp_current(store, claim))
+
+    cases :: [(path: String, replacement: String, original: String)]{
+        (path: workspace, replacement: "module workspace {{ members: [] }}\n", original: "module workspace {{ members: [\"packages/app\"] }}\n"),
+        (path: package_manifest, replacement: "name: \"changed\"\n", original: "name: \"app\"\nversion: \"0.1.0\"\n"),
+        (path: workspace_lock, replacement: "workspace-lock-v2\n", original: "workspace-lock-v1\n"),
+        (path: package_lock, replacement: "package-lock-v2\n", original: "package-lock-v1\n"),
+        (path: generated, replacement: "generated-v2\n", original: "generated-v1\n"),
+    }
+    loop case in cases {
+        rsp_write(case.path, case.replacement)
+        assert(!rsp_current(store, claim), "changed authority input {case.path} replayed an old receipt")
+        rsp_write(case.path, case.original)
+    }
+}
+
+// tests/receipt_store.rs:258-287.
+#Test("result_payloads_share_one_receipt_codec_and_store") {
+    root :: rsp_root("kinds")
+    owner :: RspFixtureRoot{path: root}
+    defer close(^owner)
+    source :: "{root}/main.jet"
+    rsp_write(source, "fn run() {{}}\n")
+    store :: "{root}/store"
+    args :: [String]{"act"}
+    kinds :: [String]{"test", "golden", "budget", "api"}
+    claims := [JetCLIReceiptClaim]{}
+    magic := "jet-receipt-v2".bytes()
+    &magic.push(U8{0})
+
+    loop kind in kinds {
+        claim :: rsp_claim(kind, args, [String]{source})
+        rsp_publish(store, claim, kind)
+        bytes :: rsp_files.read_bytes("{store}/.jet/receipts/objects/{claim.key}") ?? panic("read receipt object {kind}")
+        assert(bytes.len() >= magic.len() && bytes.slice(0, magic.len()) == magic, "{kind} receipt uses the shared receipt codec")
+        &claims.push(claim)
+    }
+
+    assert_eq(rsp_list(store).len(), kinds.len())
+    assert_eq(rsp_list_current(store), kinds.len())
+    rsp_write(source, "fn run() {{ print(1) }}\n")
+    assert_eq(rsp_list_current(store), 0)
+    assert_eq(rsp_list(store).len(), kinds.len())
+}

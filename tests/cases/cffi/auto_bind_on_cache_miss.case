@@ -1,0 +1,21 @@
+# tests/cffi.rs::auto_bind_on_cache_miss at tests/cffi.rs:2534; hand-port
+# Claim: with no binding cache, a header-path `use` makes the compiler run the C binder, write .jet/bindings/c/mylib.jet and check the program with no error (tests/cffi.rs:2566-2579)
+# Fixture: the header, C provider and package manifest verbatim from the original (helpers tests/cffi.rs:1286-1320); the C provider is built with cc and ar as the original did
+# Syntax migrated: `use "include/mylib.h" as m` is written `use m :: "include/mylib.h"`
+# Not ported: jet::compile_with_path (internal Rust API); `jet check` runs the same loader, binder and checker
+requires: tool:cc|gcc|clang
+requires: tool:ar
+fixture: auto_bind_on_cache_miss.fixture
+write: package.jet auto_bind_on_cache_miss.package.template
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+mkdir: .jet/bindings/c
+capture: cc = first-spawnable cc --version | gcc --version | clang --version
+step: {cap:cc} -c mylib.c -o mylib.o
+exit: 0
+step: ar rcs libmylib.a mylib.o
+exit: 0
+step: jet check main.jet
+exit: 0 # tests/cffi.rs:2575 auto-bind on cache miss must not produce a compile error
+file: .jet/bindings/c/mylib.jet is-file

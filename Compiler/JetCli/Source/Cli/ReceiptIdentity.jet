@@ -191,7 +191,8 @@ fn jet_cli_receipt_generated_paths(path: String, strict: Bool, paths: &[String])
 fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] JetCLIReadError! {
     absolute :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize input {target}: {jet_cli_io_error_text(err)}"))
     if !jet_cli_receipt_regular(target) -> return Err(jet_cli_read_error("receipt input is not a regular file: {target}"))
-    directory :: AuthorityResolver.authority_walk_root(absolute) ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
+    // The authority walk starts at the corpus file's directory, not the file.
+    directory :: AuthorityResolver.authority_walk_root(jet_cli_parent(absolute) ?? "/") ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
     paths := [String]{absolute}
     loop root in jet_cli_receipt_authority_roots(&cache, directory) {
         loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
