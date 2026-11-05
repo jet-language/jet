@@ -81,7 +81,7 @@ After **every linked card** for a milestone is `done`, freeze the integrated
 source in a commit and open the commit-bound token:
 
 ```sh
-Tools/agent/closeout-gate.mjs open MILESTONE --by AGENT
+jet Tools/agent/CloseoutGate.jet open MILESTONE --by AGENT
 ```
 
 The gate must select the frozen source commit, a qualified candidate at that

@@ -14,24 +14,28 @@ import { fileURLToPath } from 'node:url';
 import { scratchRoot } from './roots.mjs';
 import { CORE_IMPORT_LINE, unblockUses } from './compiler-packages.mjs';
 import { prepareTransport, runTransport } from './compiler-registry-transports.mjs';
-import { assertPinnedSource } from './proof-source.mjs';
 import { partitionRegistries } from './registry-shard.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n');
 const proofPath = join(dirname(repo), 'source.manifest.json');
-const currentHead = () => {
-    const proof = JSON.parse(readFileSync(proofPath, 'utf8'));
-    return assertPinnedSource(repo, proof.commit).commit;
-};
+// SOURCE's pinned commit, once Tools/agent/ProofSource.jet confirms it still
+// holds the bytes its sibling source.manifest.json records.
+function assertPinnedSource(source, head) {
+    const jet = process.env.JET || 'jet';
+    const checked = spawnSync(jet, [join(source, 'Tools/agent/ProofSource.jet'), 'check', source, head], { encoding: 'utf8' });
+    if (checked.status !== 0) throw Error(checked.stderr.trim() || `proof source check failed for ${source}`);
+    return checked.stdout.trim();
+}
+const currentHead = () => assertPinnedSource(repo, JSON.parse(readFileSync(proofPath, 'utf8')).commit);
 function usePinnedSource(head) {
     if (!/^[a-f0-9]{40}$/.test(head ?? '')) throw Error('registry source requires a full committed SHA');
     if (existsSync(proofPath)) {
         assertPinnedSource(repo, head);
         return;
     }
-    const source = execFileSync(process.execPath, [join(repo, 'Tools/agent/proof-source.mjs'), head, repo],
+    const source = execFileSync(process.env.JET || 'jet', [join(repo, 'Tools/agent/ProofSource.jet'), head, repo],
         { encoding: 'utf8', maxBuffer: 8 << 20 }).trim();
     assertPinnedSource(source, head);
     const child = spawnSync(process.execPath, [join(source, 'Tools/agent/compiler-registries.mjs'), ...process.argv.slice(2)],

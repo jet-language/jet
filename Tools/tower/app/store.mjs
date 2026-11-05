@@ -3471,7 +3471,7 @@ export function verifyMilestone(s, id, { evidence, by } = {}, historyCards = [])
   if (unfinished.length)
     fail('E_MILESTONE', `milestone ${m.id} has unverified criteria (${unfinished.map(i => i.n).join(',')})`);
   if (!m.closeout)
-    fail('E_MILESTONE', `milestone ${m.id} has no closeout token — run \`Tools/agent/closeout-gate.mjs open ${m.id} --by <agent>\` from the frozen source commit before broad proof or review`);
+    fail('E_MILESTONE', `milestone ${m.id} has no closeout token — run \`jet Tools/agent/CloseoutGate.jet open ${m.id} --by <agent>\` from the frozen source commit before broad proof or review`);
   const builders = new Set((m.criteria || []).map(i => i.metBy).filter(Boolean));
   if (builders.has(by)) fail('E_CRITERIA_SELF', `milestone reviewer must differ from an agent that marked its criteria met (${by})`);
   m.status = 'met';

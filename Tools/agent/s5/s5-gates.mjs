@@ -23,11 +23,10 @@ cheap.push(start('check-lexer-keyword-rows', [jet, 'Tools/agent/LexerKeywordRows
 cheap.push(start('check-owned-trait-rows', [jet, 'Tools/agent/OwnedTraitRows.jet', '--check']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
 cheap.push(start('trap-messages-test', [node, '--test', 'Tools/agent/gen-runtime-trap-messages.test.mjs']));
-for (const tool of ['LexerKeywordRows', 'UnicodeNameAsset', 'AgentDocFlags', 'DecisionIndex', 'UnsafeRatchet', 'DiagnosticRows', 'OwnedTraitRows']) {
+for (const tool of ['LexerKeywordRows', 'UnicodeNameAsset', 'AgentDocFlags', 'DecisionIndex', 'UnsafeRatchet', 'DiagnosticRows', 'OwnedTraitRows', 'ProofSource']) {
   cheap.push(start(`${tool}-test`, [jet, 'test', `Tools/agent/${tool}.jet`]));
 }
 cheap.push(start('compiler-packages', [node, '--test', 'Tools/agent/compiler-packages.test.mjs']));
-cheap.push(start('proof-source-guard', [node, '--test', 'Tools/agent/proof-source.test.mjs']));
 cheap.push(start('core-type-references', [node, '--test', 'Tools/agent/core-type-references.test.mjs']));
 cheap.push(start('core-runtime-wrapper', [node, '--test', 'Tools/agent/core-runtime-wrapper.test.mjs']));
 cheap.push(start('native-cli-transport', [node, '--test', 'Tools/agent/compiler-native-transport.test.mjs']));

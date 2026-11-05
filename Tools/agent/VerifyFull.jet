@@ -17,7 +17,7 @@
 //
 // The closeout gate runs first and is a prerequisite, not an escape hatch. The
 // source is pinned to the commit of an inherited `../source.manifest.json`, or
-// else to HEAD exported through Tools/agent/proof-source.mjs, and its tracked
+// else to HEAD exported through Tools/agent/ProofSource.jet, and its tracked
 // bytes are checked before and after the suites. A child that dies by a signal,
 // times out or exits 124 or >= 128 is unsafe: every later row is BLOCKED.
 // verify-full.json is the receipt Tools/release reads: its pin, the sha256 of
@@ -121,7 +121,7 @@ fn run() {
         Setting{name: "TERM", value: "dumb"},
     }) -> &state.env.push(setting)
 
-    closeout :: run_child(&state, "closeout-gate", [String]{"node", "{repo}/Tools/agent/closeout-gate.mjs", "check"})
+    closeout :: run_child(&state, "closeout-gate", [String]{binary, "{repo}/Tools/agent/CloseoutGate.jet", "check"})
     record(&state, closeout.row)
     if closeout.row.status != "PASS" -> process.exit(1)
     if !pin_source(&state) -> process.exit(1)
@@ -279,7 +279,7 @@ fn run_child(state: &Verify, scope: String, argv: [String]) -[Env, Exec, FS, IO,
 }
 
 // Pin the source: to the commit of an inherited ../source.manifest.json, or to
-// HEAD exported through proof-source.mjs, whose output becomes the source.
+// HEAD exported through ProofSource.jet, whose output becomes the source.
 fn pin_source(state: &Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never! {
     inherited :: "{files.dirname(state.repo)}/source.manifest.json"
     if files.exists(inherited) {
@@ -292,7 +292,7 @@ fn pin_source(state: &Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never!
     if head.code != 0 || head.signal != None -> return abort("verify-full: cannot pin full verification source: {head.errors.trim_end()}")
     commit :: head.output.trim()
     state.pin = Val(commit.copy())
-    export :: run_child(&state, "source-export", [String]{"node", "{state.repo}/Tools/agent/proof-source.mjs", commit, state.repo})
+    export :: run_child(&state, "source-export", [String]{state.binary, "{state.repo}/Tools/agent/ProofSource.jet", commit, state.repo})
     passed :: export.row.status == "PASS"
     record(&state, export.row)
     if passed -> state.repo = export.output.trim().copy()
@@ -512,7 +512,7 @@ fn publish(state: Verify) -[FS, Exec, IO]> () {
 // runner behavior only, never compiler or full-suite proof.
 FIXTURE_COMMIT :: "0123456789012345678901234567890123456789"
 
-FIXTURE_JET :: "#!/usr/bin/env bash\ncase \"$1\" in\n  */Tools/ci/TestShards.jet) printf 'golden\\nui\\ncases\\nregistries\\n'; exit 0 ;;\n  */Tools/agent/*.jet) exit 0 ;;\nesac\n[[ \"$1\" == test && \"$2\" == */Compiler && \"$3\" == --profile ]] || exit 64\nsuite=$4\n[[ $suite == golden && $FIXTURE_MODE == signal ]] && kill -TERM $$\n[[ $suite == golden && $FIXTURE_MODE == ordinary ]] && exit 17\nstatus=PASS\n[[ $suite == ui && $FIXTURE_MODE == refused ]] && status=REFUSED\n[[ $suite == ui && $FIXTURE_MODE == corrupt ]] && printf changed >>Tools/agent/core-module-check.mjs\nprintf '{{\"jet\":\"%s\",\"results\":[{{\"case\":\"%s\",\"suite\":\"%s\",\"tier\":\"o0\",\"status\":\"%s\"}}]}}' \"$JET\" \"$suite\" \"$suite\" \"$status\" >\"$JET_CI_EVIDENCE_DIR/$suite.json\"\n"
+FIXTURE_JET :: "#!/usr/bin/env bash\ncase \"$1\" in\n  */Tools/ci/TestShards.jet) printf 'golden\\nui\\ncases\\nregistries\\n'; exit 0 ;;\n  */Tools/agent/CloseoutGate.jet) [[ $FIXTURE_MODE == closeout ]] && exit 3; exit 0 ;;\n  */Tools/agent/ProofSource.jet) cat \"${{1%/Tools/agent/ProofSource.jet}}/fixture-export.txt\"; exit 0 ;;\n  */Tools/agent/*.jet) exit 0 ;;\nesac\n[[ \"$1\" == test && \"$2\" == */Compiler && \"$3\" == --profile ]] || exit 64\nsuite=$4\n[[ $suite == golden && $FIXTURE_MODE == signal ]] && kill -TERM $$\n[[ $suite == golden && $FIXTURE_MODE == ordinary ]] && exit 17\nstatus=PASS\n[[ $suite == ui && $FIXTURE_MODE == refused ]] && status=REFUSED\n[[ $suite == ui && $FIXTURE_MODE == corrupt ]] && printf changed >>Tools/agent/core-module-check.mjs\nprintf '{{\"jet\":\"%s\",\"results\":[{{\"case\":\"%s\",\"suite\":\"%s\",\"tier\":\"o0\",\"status\":\"%s\"}}]}}' \"$JET\" \"$suite\" \"$suite\" \"$status\" >\"$JET_CI_EVIDENCE_DIR/$suite.json\"\n"
 
 FIXTURE_GIT :: "#!/usr/bin/env bash\n[[ $FIXTURE_MODE == pinned ]] && exit 19\nprintf '0123456789012345678901234567890123456789\\n'\n"
 
@@ -526,14 +526,13 @@ fn fixture_put(tree: String, path: String, text: String) -[FS]> () {
 }
 
 // One fixture tree: this runner, the fake compiler and git, and the fake node
-// gates. `export` is what the fake proof-source.mjs prints.
+// gates. `export` is what the fake jet prints for ProofSource.jet.
 fn fixture_tree(tree: String, runner: String, export: String) -[FS]> [String] {
     written := [(path: String, text: String)]{
         (path: "Tools/agent/VerifyFull.jet", text: runner.copy()),
-        (path: "Tools/agent/closeout-gate.mjs", text: "if (process.env.FIXTURE_MODE === 'closeout') process.exit(3);\n"),
         (path: "Tools/agent/core-coverage-census.mjs", text: "// fixture gate: passes\n"),
         (path: "Tools/agent/core-module-check.mjs", text: "// fixture gate: passes\n"),
-        (path: "Tools/agent/proof-source.mjs", text: "console.log({json.dumps(Dyn.Text(export.copy())) ?? panic("export path")});\n"),
+        (path: "fixture-export.txt", text: "{export}\n"),
         (path: "Tools/agent/compiler-registries.mjs", text: FIXTURE_REGISTRIES),
         (path: "bin/jet", text: FIXTURE_JET),
         (path: "bin/git", text: FIXTURE_GIT),

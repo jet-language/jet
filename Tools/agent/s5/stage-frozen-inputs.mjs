@@ -3,11 +3,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {assertPinnedSource} from '../proof-source.mjs';
+import {pinnedHead} from './s5-lib.mjs';
 import {stateRoot} from '../roots.mjs';
 const [head, source, output] = process.argv.slice(2);
 if (!/^[a-f0-9]{40}$/.test(head ?? '') || !source || !output || process.argv.length !== 5) throw Error('usage: stage-frozen-inputs.mjs FULL_SHA SOURCE_DIRECTORY IMMUTABLE_INPUT_DIRECTORY');
-assertPinnedSource(source, head);
+pinnedHead(source, head);
 const table = JSON.parse(fs.readFileSync(path.join(source, 'Compiler/JetRuntime/Tests/AgeV1Fixtures.json'), 'utf8'));
 const scratch = path.join(stateRoot(), 'scratch');
 const files = [

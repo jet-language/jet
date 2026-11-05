@@ -5,15 +5,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
-import {assertPinnedSource} from '../proof-source.mjs';
 import {phaseSchema, readPrerequisite, writePhaseReceipt} from './receipts.mjs';
 
 export const W = process.cwd();
 
+// SOURCE's pinned commit, checked by Tools/agent/ProofSource.jet against the
+// sibling source.manifest.json; throws when the export changed.
+export function pinnedHead(source, expect) {
+  const result = spawnSync(process.env.JET || 'jet', ['run', '-A', path.join(source, 'Tools/agent/ProofSource.jet'), 'check', source, expect],
+    {encoding: 'utf8', env: {...process.env, JET_TOOLCHAIN_ROOT: source}});
+  if (result.status !== 0) throw Error(result.stderr.trim() || `proof source guard failed for ${source}`);
+  return result.stdout.trim();
+}
+
 export function phase(name) {
   const expect = process.env.S5_EXPECT_HEAD, D = process.env.S5_OUT;
   if (!expect || !D) throw Error('S5_EXPECT_HEAD and S5_OUT are required');
-  const head = assertPinnedSource(W, expect).commit;
+  const head = pinnedHead(W, expect);
   if (fs.existsSync(D) && fs.readdirSync(D).length) throw Error(`refusing to reuse ${D}`);
   fs.mkdirSync(D, {recursive: true});
   const steps = [], runners = [];

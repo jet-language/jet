@@ -227,7 +227,7 @@ All linked cards done makes a milestone `review-ready`. Commit the frozen
 source, then open the closeout token before broad proof:
 
 ```
-Tools/agent/closeout-gate.mjs open <id> --by orchestrator
+jet Tools/agent/CloseoutGate.jet open <id> --by orchestrator
 tower milestone criteria <id> --meet 1 --evidence "built" --by orchestrator
 tower milestone criteria <id> --verify 1 --evidence "reviewed" --by reviewer
 tower milestone verify <id> --evidence "milestone review complete" --by reviewer

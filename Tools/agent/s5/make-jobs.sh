@@ -54,10 +54,7 @@ export S5_SHARED_PACK_DIRECTORY="${W%/source}/runtime-pack"
 export COMPOSED_SHA="$JET_SHARED_SOURCE_SHA" JET_TOOLCHAIN_ROOT="$W"
 if [ ! -d "$W" ]; then blocked 'immutable source export absent'; fi
 cd "$W" || blocked 'cannot enter immutable source export'
-CARGO_TARGET_DIR="$(node --input-type=module -e 'const {assertPinnedSource,proofTargetDirectory}=await import("./Tools/agent/proof-source.mjs");assertPinnedSource(process.cwd(),process.argv[1]);console.log(proofTargetDirectory(process.argv[1]));' "$JET_SHARED_SOURCE_SHA")" || blocked 'immutable source guard or target derivation failed'
-export CARGO_TARGET_DIR
-if [ -z "$CARGO_TARGET_DIR" ]; then blocked 'per-SHA target directory absent'; fi
-mkdir -p "$CARGO_TARGET_DIR" || blocked 'cannot create per-SHA target directory'
+"${JET:-jet}" run -A Tools/agent/ProofSource.jet check "$W" "$JET_SHARED_SOURCE_SHA" >/dev/null || blocked 'immutable source guard failed'
 unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
 PREFLIGHT
     printf 'export JET_NO_SCCACHE=1 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=16\n'
