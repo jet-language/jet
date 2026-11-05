@@ -12463,7 +12463,7 @@ struct FrameScheduleConflict {
         detail :: true
         fn what(self) -> String { "Frame resource schedule refused: {self.detail}" }
         fn why(self) -> String { "The scheduler derives dependencies, transfers, lifetimes, and reuse only from checked access and completion facts; an unresolved alias or completion would make execution unsafe." }
-        fn fix(self) -> String { "Preserve source order, declare the complete resource access, or provide the real completion event before requesting parallel execution." }
+        fn fix(self) -> String { "Move the call out of the frame callback, or give the operation a complete checked access contract and its real completion event." }
     }
 }
 
@@ -12757,13 +12757,11 @@ struct MixedTaskBranches {
 struct TaskCancelled {
     impl Diagnostic {
         code :: "E3004"
-        stage :: [.Runtime]
-        meaning :: "task cancelled at a cooperative wait point"
-        detail :: true
-        no_fix :: .Behavior
-        fn what(self) -> String { "Task cancelled at a cooperative wait point" }
-        fn why(self) -> String { "The task control plane requested cancellation before this wait completed" }
-        fn fix(self) -> String { "Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: a task was cancelled at a cooperative wait point)" }
+        fn why(self) -> String { "Cancellation is a value, not a stop: a cancelled task's join gives `TaskFailure.Cancelled`, a cancelled root drains its scope and exits, and an unhandled `Cancelled` reports through the ordinary failure report; the code is registered again if cancellation ever becomes a coded stop" }
+        fn fix(self) -> String { "Do not use E3004" }
     }
 }
 

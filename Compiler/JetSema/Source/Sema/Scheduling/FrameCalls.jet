@@ -1,0 +1,161 @@
+// The checked operations of one `GameScene.on_frame` callback, in source
+// order, and the serial schedule Frames.jet derives from them.
+//
+// Source order is the reference order inside a callback; callbacks run one
+// after another in registration order, so no fact here relates two callbacks.
+// A call reaches the schedule from its checked contract only: a Core record's
+// access and completion rows, a registered Jet signature's parameter
+// conventions, a selected target machine's register and DMA facts. A foreign
+// callable's body is not visible, so it has no access contract to schedule.
+use jet_foundation.[
+    CallArg,
+    Expr,
+    FrameOperation,
+    Lambda,
+    Stmt,
+    SymbolID,
+    ast_visit_body,
+    ast_visit_expr,
+    core_call,
+    core_module_export,
+]
+
+struct SemaFrameCallScan {
+    operations: [FrameOperation]
+    dma_starts: [SemaFrameDMABinding]
+    // The refusal nearest the start of the callback, and its source index.
+    refusal: String?
+    refusal_index: Int
+}
+
+// The schedule facts of `lambda`, the callback of one `on_frame` call, checked
+// against the scope that encloses the call.
+fn sema_frame_lambda_schedule(lambda: Lambda, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameScheduleFacts {
+    scan := SemaFrameCallScan{operations: [FrameOperation]{}, dma_starts: [SemaFrameDMABinding]{}, refusal: None, refusal_index: -1}
+    if lambda.body == {
+        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_frame_note_call(&scan, expression, environment, program, scopes))
+        .Block(body) -> {
+            sema_frame_collect_dma_starts(&scan, body, environment, program, scopes)
+            ast_visit_body(body, (expression: Expr) -> sema_frame_note_call(&scan, expression, environment, program, scopes), true)
+        }
+    }
+    if scan.refusal != None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: scan.refusal}
+    operations := ^scan.operations
+    &operations.sort_by((left: FrameOperation, right: FrameOperation) -> left.source_index <=> right.source_index)
+    source :: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, lambda.span)
+    sema_frame_schedule_produce(operations, environment, program, source, lambda.span.start)
+}
+
+fn sema_frame_note_refusal(scan: &SemaFrameCallScan, detail: String, source_index: Int) Never! {
+    if scan.refusal != None && scan.refusal_index <= source_index -> return
+    scan.refusal = Val(detail)
+    scan.refusal_index = source_index
+}
+
+fn sema_frame_note_fact(scan: &SemaFrameCallScan, fact: SemaFrameOperationFact, source_index: Int) Never! {
+    if fact.error == .Val(detail) {
+        sema_frame_note_refusal(&scan, detail, source_index)
+        return
+    }
+    if fact.operation == .Val(operation) -> &scan.operations.push(operation)
+}
+
+fn sema_frame_note_call(scan: &SemaFrameCallScan, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+    if expression == {
+        .Call(call, _) -> {
+            index :: call.name_span.start
+            sema_frame_note_fact(&scan, sema_frame_direct_call_operation(call.name, call.args, index, environment, program, scopes), index)
+        }
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> {
+            index :: method_span.start
+            if sema_frame_module_call_operation(receiver, method, args, index, environment, program, scopes) == .Val(fact) {
+                sema_frame_note_fact(&scan, fact, index)
+                return
+            }
+            if sema_frame_hardware_register_operation(receiver, method, index, environment, program, scopes) == .Val(operation) {
+                &scan.operations.push(operation)
+                return
+            }
+            if method == "start" {
+                started :: sema_frame_hardware_dma_start(receiver, args, index, environment, program, scopes)
+                if started.operation == .Val(operation) -> &scan.operations.push(operation)
+                return
+            }
+            if method == "wait" && sema_frame_hardware_dma_wait(receiver, index, scan.dma_starts) == .Val(operation) -> &scan.operations.push(operation)
+        }
+        else -> {}
+    }
+}
+
+// A bare call: a registered callable's checked contract, else a callable the
+// callback check accepted with no registered row (a prelude builtin or a
+// closure value), whose call-site conventions are its checked accesses.
+fn sema_frame_direct_call_operation(name: String, args: [CallArg], index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameOperationFact {
+    binding :: sema_scope_resolve_index(scopes, name) ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
+    symbol :: sema_scope_binding_symbol(environment, scopes, binding)
+    sema_frame_registered_call_operation(name, args, symbol.id, index, program)
+}
+
+// `alias.member(...)` through a visible import: a Core record, or a module's
+// registered callable. None for any other receiver.
+fn sema_frame_module_call_operation(receiver: Expr, method: String, args: [CallArg], index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameOperationFact? {
+    path :: sema_expr_core_module_receiver_path(receiver) ?? return None
+    if !sema_expr_core_module_alias_visible(path.alias, scopes) -> return None
+    if sema_call_core_import_module(environment, program, path.alias) == .Val(core_module) {
+        module_name := core_module
+        loop leaf in path.leaves {
+            module_name = "{module_name}.{leaf}"
+            if core_module_export(module_name) == None -> return None
+        }
+        record :: core_call(module_name, method) ?? return None
+        return Val(sema_frame_core_call_operation(record, "{module_name}.{method}", args, index))
+    }
+    if path.leaves.len() > 0 -> return None
+    graph :: program.registration_graph ?? return None
+    resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, path.alias, method) ?? return None
+    Val(sema_frame_registered_call_operation("{path.alias}.{method}", args, sema_resolved_id(graph, resolved), index, program))
+}
+
+fn sema_frame_registered_call_operation(name: String, args: [CallArg], target: SymbolID, index: Int, program: SemaProgramTables) -> SemaFrameOperationFact {
+    graph :: program.registration_graph ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
+    abi :: sema_registration_callable_abi(graph, target) ?? return sema_frame_checked_call_operation(name, args, None, false, true, index)
+    declaration :: sema_registration_callable_declaration(graph, target) ?? return sema_frame_checked_call_operation(name, args, None, true, true, index)
+    conventions :: loop param in declaration.params -> param.convention
+    sema_frame_checked_call_operation(name, args, Val(conventions), abi.is_extern, !declaration.is_pure, index)
+}
+
+// The checked DMA starts bound to a source local anywhere in the callback's
+// statement blocks, so a later `transfer.wait()` names its exact start token.
+fn sema_frame_collect_dma_starts(scan: &SemaFrameCallScan, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+    loop statement in body {
+        if statement == {
+            .Val(binding) -> sema_frame_record_dma_start(&scan, binding.name, binding.init, environment, program, scopes)
+            .While(_, inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Reactive(inner, _) | .Shield(inner, _) | .Switched(_, inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .ComptimeBlock(inner, _, _) | .ContextBlock(_, inner, _) | .Live(inner, _) | .AssumeDet(_, _, inner, _) | .Transact(_, _, inner, _, _) | .ScopeMember(_, _, _, _, inner, _, _, _) -> sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+            .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+                loop arm in arms -> sema_frame_collect_dma_starts(&scan, arm.body, environment, program, scopes)
+                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+            }
+            .CountedLoop(init, _, step, inner, _, _, _) -> {
+                sema_frame_record_dma_start(&scan, init.name, init.init, environment, program, scopes)
+                if step == .Val(value) -> sema_frame_collect_dma_starts(&scan, [Stmt]{value}, environment, program, scopes)
+                sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+            }
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+                sema_frame_collect_dma_starts(&scan, then_body, environment, program, scopes)
+                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_frame_record_dma_start(scan: &SemaFrameCallScan, name: String, init: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+    if init == {
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> {
+            if method != "start" -> return
+            started :: sema_frame_hardware_dma_start(receiver, args, method_span.start, environment, program, scopes)
+            if started.dma_start == .Val(start) -> &scan.dma_starts.push(sema_frame_hardware_dma_bind_start(start, name))
+        }
+        else -> {}
+    }
+}

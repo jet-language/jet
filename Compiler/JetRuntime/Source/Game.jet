@@ -600,6 +600,9 @@ fn game_pairs_line(target: I64, label: I64, left: I64, right: I64, joiner: I64) 
         game_store(wrapping(frame + I64{16}), I64{1})
         game_store(slot, frame)
         stopped := false
+        // The callbacks run one after another in registration order. That is
+        // the reference order: a callback's checked frame schedule orders the
+        // work inside it, and no schedule reorders one callback against another.
         data :: game_word(wrapping(callbacks + I64{16}))
         at := I64{0}
         loop at < game_word(callbacks) {
