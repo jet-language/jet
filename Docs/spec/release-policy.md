@@ -171,6 +171,15 @@ projection; it consumes the bounded `manifest.capability_relation.rows`
 source and remains fail-closed for missing, stale, unavailable, failed, or
 unqualified rows. Telemetry reports observations only.
 
+`jet run Tools/hardening/Main.jet -- --write` generates that source as
+`.jet/hardening-manifest.json`. Its rows come from the Core registries and the
+route and dispatcher facts, and each covered row names the observable sink its
+conformance witness uses. `--check` fails unless the stored file is
+byte-identical to a fresh generation. It reports the file stale when the
+source snapshot hash has moved, so evidence recorded under the old hash no
+longer counts. `--repro-check` and `--repro-replay` validate and replay
+`jet.hardening.repro.v1` bundles.
+
 ## Exit codes
 
 `jet` returns stable documented exit codes so shells and CI can branch without

@@ -1,0 +1,19 @@
+# Surface rows whose route is a named compiler arm that the registries do not
+# expose as data. Columns: key, path, needle. The generator fails when a key is
+# not a surface row, when the row already has another route, or when the path
+# no longer contains the needle, so a stale row cannot survive a refactor.
+# key	path	needle
+module:core.args.decode	Compiler/JetSema/Source/Sema/Calls/Data.jet	if module_name == "core.args" && member == "decode" && type_args.len() == 1 -> return sema_data_args_decode(
+module:core.compiler.check	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.lex	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.lock	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.manifest	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.package	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.parse	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.profiles	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.compiler.source_map	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
+module:core.web.form	Compiler/JetSema/Source/Sema/Calls/Http.jet	if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(
+receiver:JobQueue.delay	Compiler/JetSema/Source/Sema/Calls/Services.jet	if method != "enqueue" && method != "delay" -> return unhandled
+receiver:JobQueue.enqueue	Compiler/JetSema/Source/Sema/Calls/Services.jet	if method != "enqueue" && method != "delay" -> return unhandled
+receiver:Measurement.uncertainty	Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet	if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}
+receiver:Measurement.value	Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet	if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}

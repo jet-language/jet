@@ -1,0 +1,136 @@
+// jet run Tools/hardening/Main.jet -- <command>
+//
+//   --write [PATH]      generate the manifest (default .jet/hardening-manifest.json)
+//   --check [PATH]      fail unless PATH is byte-identical to a fresh generation;
+//                       a moved source snapshot is reported as stale
+//   --repro-check FILE  validate a jet.hardening.repro.v1 bundle against the tree
+//   --repro-replay FILE --tier TIER --source-out PATH
+//                       write the bundle's exact source to PATH and print the
+//                       tier's command with that path in its {source} slot
+//   --root DIR          the checkout to read (default .)
+
+use {
+    files :: core.files
+    json :: core.encoding.json
+    process :: core.process
+    term :: core.term
+}
+
+struct Options {
+    root: String
+    command: String
+    path: String
+    tier: String
+    source_out: String
+}
+
+fn usage() -> String Never! {
+    "usage: jet run Tools/hardening/Main.jet -- [--root DIR] (--write [PATH] | --check [PATH] | --repro-check FILE | --repro-replay FILE --tier TIER --source-out PATH)"
+}
+
+fn parse_args(args: [String]) -> Options Err! {
+    options := Options{root: ".", command: "", path: "", tier: "", source_out: ""}
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        has_value :: index + 1 < args.len() && !args[index + 1].starts_with("--")
+        value :: if has_value -> args[index + 1].copy() else -> ""
+        if {
+            arg == "--write" || arg == "--check" || arg == "--repro-check" || arg == "--repro-replay" -> {
+                if options.command != "" -> return Err("choose one command\n{usage()}")
+                options.command = arg.copy()
+                options.path = value.copy()
+            }
+            arg == "--root" || arg == "--tier" || arg == "--source-out" -> {
+                if !has_value -> return Err("{arg} needs a value")
+                if {
+                    arg == "--root" -> options.root = value.copy()
+                    arg == "--tier" -> options.tier = value.copy()
+                    else -> options.source_out = value.copy()
+                }
+            }
+            else -> return Err("unknown option `{arg}`\n{usage()}")
+        }
+        index += if has_value -> 2 else -> 1
+    }
+    if options.command == "" -> return Err(usage())
+    if options.path == "" {
+        if options.command != "--write" && options.command != "--check" -> return Err("{options.command} needs a bundle path")
+        options.path = files.join(options.root, MANIFEST_PATH)
+    }
+    if options.command == "--repro-replay" && (options.tier == "" || options.source_out == "") -> return Err("--repro-replay needs --tier and --source-out")
+    Ok(options)
+}
+
+fn summary(manifest: Manifest) -> String Never! {
+    counts := [String]{}
+    loop status in STATUSES -> &counts.push("{status} {count_where(manifest, "status", status)}")
+    "{manifest.rows.len()} rows ({counts.join(", ")}), {manifest.orphans.len()} orphan witnesses, source snapshot {manifest.snapshot.hash}"
+}
+
+// Generate and self-validate; a manifest that breaks its own contract is
+// never written.
+fn generate(root: String) -[FS]> (manifest: Manifest, text: String) Err! {
+    inputs :: load_inputs(root) ?? return Err(err)
+    manifest :: build_manifest(inputs) ?? return Err(err)
+    problems :: validate_manifest(manifest)
+    if problems.len() > 0 -> return Err("generated manifest breaks its contract:\n{problems.join("\n")}")
+    text :: render_manifest(manifest) ?? return Err(err)
+    Ok((manifest: manifest, text: text))
+}
+
+fn read_bundle(path: String) -[FS]> Dyn Err! {
+    text :: files.read(path) ?? return Err("unreadable repro bundle {path}: {err}")
+    parsed :: json.parse(text) ?? return Err("repro bundle {path} is not JSON: {err}")
+    Ok(parsed)
+}
+
+fn hardening_main(args: [String]) -[FS, IO]> Bool Err! {
+    options :: parse_args(args) ?? return Err(err)
+    if options.command == "--write" {
+        fresh :: generate(options.root) ?? return Err(err)
+        parent :: options.path.rpartition("/").head
+        if parent != "" -> files.create_dir_all(parent) ?? return Err("cannot create {parent}: {err}")
+        files.write(options.path, fresh.text) ?? return Err("cannot write {options.path}: {err}")
+        print("hardening manifest: wrote {options.path}: {summary(fresh.manifest)}")
+        return Ok(true)
+    }
+    if options.command == "--check" {
+        fresh :: generate(options.root) ?? return Err(err)
+        stored :: files.read(options.path) ?? return Err("cannot read {options.path}: {err}")
+        problems :: check_manifest_text(stored, fresh.manifest, fresh.text)
+        if problems.len() > 0 {
+            term.eprint("hardening manifest: {options.path} is not current:\n{problems.join("\n")}")
+            return Ok(false)
+        }
+        print("hardening manifest: {options.path} is current: {summary(fresh.manifest)}")
+        return Ok(true)
+    }
+    bundle :: read_bundle(options.path) ?? return Err(err)
+    if options.command == "--repro-check" {
+        inputs :: load_inputs(options.root) ?? return Err(err)
+        snapshot :: build_snapshot(inputs)
+        check :: validate_repro(bundle, snapshot.hash)
+        if check.errors.len() > 0 {
+            term.eprint("hardening repro: {options.path}:\n{check.errors.join("\n")}")
+            return Ok(false)
+        }
+        print("hardening repro: {options.path} is sealed and current")
+        return Ok(true)
+    }
+    rebuilt :: reconstruct_repro(bundle, options.tier) ?? return Err(err)
+    files.write(options.source_out, rebuilt.source) ?? return Err("cannot write {options.source_out}: {err}")
+    command :: replay_command(bundle, options.tier, options.source_out) ?? return Err(err)
+    print(command)
+    Ok(true)
+}
+
+fn run() {
+    if hardening_main(process.args()) == {
+        .Ok(passed) -> if !passed -> process.exit(1)
+        .Err(message) -> {
+            term.eprint("hardening: {message}")
+            process.exit(1)
+        }
+    }
+}

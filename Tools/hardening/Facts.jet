@@ -1,0 +1,493 @@
+// The Core surface the hardening manifest counts, and the route behind each row.
+//
+// Membership comes from the compiler's own registries: module calls from
+// CORE_MODULE_EXPORTS, receiver methods from CORE_CALLS receiver rows, fields
+// from CORE_RECORD_FIELD_ROWS and nominal types from the module type exports.
+// A route is a fact read from the tree: a declaration in the parsed Core
+// source, an IR dispatcher arm, a compiler-owned record, or a verified entry
+// in special-routes.tsv. A row without a route is reported, never invented.
+use {
+    jet_lexer.[lex_generated]
+    jet_parser.[parse_lexed_with_source, parser_line_starts]
+    jet_ir.[IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_host_value_name, ir_handle_civil_time_route, ir_handle_precise_route, ir_handle_math_route, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_variants]
+    jet_eval.[jet_eval_compiler_value_method_record]
+}
+
+BUILD_ROUTES_PATH :: "Compiler/JetIR/Source/BuildRoutes.jet"
+BUILD_TYPES_PATH :: "Compiler/JetIR/Source/BuildTypes.jet"
+ROUTE_HANDLE_PATH :: "Compiler/JetIR/Source/RouteHandle.jet"
+RUNTIME_ROUTES_PATH :: "Compiler/JetIR/Source/RuntimeRoutes.jet"
+RUNTIME_RECORDS_PATH :: "Compiler/JetIR/Source/RuntimeRecords.jet"
+COMPILER_OWNED_PATH :: "Compiler/JetIR/Source/CompilerOwned.jet"
+EVAL_VALUES_PATH :: "Compiler/JetEval/Source/CompilerValueMethods.jet"
+SPECIAL_ROUTES_PATH :: "Tools/hardening/special-routes.tsv"
+
+// One file the manifest reads, by repository-relative path.
+struct SourceFile {
+    path: String
+    text: String
+}
+
+// Where a declaration sits.
+struct Declared {
+    path: String
+    line: Int
+}
+
+// The declarations of every Core source file, keyed for route lookups.
+struct ParsedCore {
+    // "<module>.<fn>" for top-level functions.
+    fns: [String: Declared]
+    // "<module>.<fn>" -> the declared return type; absent means Unit.
+    returns: [String: Type]
+    // "<type>" for every struct, enum, distinct, alias and trait.
+    types: [String: Declared]
+    // "<type>.<method>" for struct and impl methods.
+    methods: [String: Declared]
+    method_returns: [String: Type]
+    // "<type>.<field>" for struct fields.
+    fields: [String: Declared]
+    enums: [String: Bool]
+    // Structs that declare at least one field.
+    records: [String: Bool]
+    errors: [String]
+}
+
+struct Route {
+    kind: String
+    path: String
+    line: Int
+    symbol: String
+}
+
+struct SurfaceRow {
+    id: String
+    kind: String
+    owner: String
+    member: String
+    route: Route?
+    problem: String
+    declared_aot: Bool
+    result_type: String
+    result_class: String
+}
+
+struct SpecialRoute {
+    key: String
+    path: String
+    needle: String
+    row: Int
+}
+
+struct Surface {
+    rows: [SurfaceRow]
+    errors: [String]
+}
+
+// The 1-based line holding byte `offset`.
+fn line_at(starts: [Int], offset: Int) -> Int Never! {
+    lo := 0
+    hi := starts.len()
+    loop {
+        if hi - lo <= 1 -> break
+        mid :: (lo + hi) /% 2
+        if starts[mid] <= offset -> lo = mid else -> hi = mid
+    }
+    lo + 1
+}
+
+// The 1-based line of the first occurrence of `needle`, or 0.
+fn line_of(text: String, needle: String) -> Int Never! {
+    loop (index, line) in text.split("\n").to_list() {
+        if line.contains(needle) -> return index + 1
+    }
+    0
+}
+
+fn parse_core(sources: [SourceFile]) -> ParsedCore Never! {
+    out := ParsedCore{fns: [String: Declared]{}, returns: [String: Type]{}, types: [String: Declared]{}, methods: [String: Declared]{}, method_returns: [String: Type]{}, fields: [String: Declared]{}, enums: [String: Bool]{}, records: [String: Bool]{}, errors: [String]{}}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        source := SourceFile?{None}
+        loop file in sources { if file.path == row.path -> source = Val(file.copy()) }
+        file :: source ?? {
+            &out.errors.push("Core source `{row.path}` for `{row.module_name}` is missing")
+            next
+        }
+        parse_into(&out, row.module_name, file)
+    }
+    out
+}
+
+fn parse_into(out: &ParsedCore, module_name: String, file: SourceFile) Never! {
+    bytes :: file.text.bytes()
+    starts :: parser_line_starts(bytes)
+    lexed :: lex_generated(bytes)
+    parsed :: parse_lexed_with_source(^lexed, bytes, starts.copy())
+    loop item in parsed.program.items {
+        if item == {
+            .Func(f) -> {
+                key :: "{module_name}.{f.name}"
+                out.fns[key.copy()] = Declared{path: file.path.copy(), line: line_at(starts, f.span.start)}
+                if f.return_type == .Val(ty) -> out.returns[key] = ty.copy()
+            }
+            .Struct(s) -> {
+                out.types[s.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, s.span.start)}
+                if s.fields.len() > 0 -> out.records[s.name.copy()] = true
+                loop field in s.fields -> out.fields["{s.name}.{field.name}"] = Declared{path: file.path.copy(), line: line_at(starts, s.span.start)}
+                loop m in s.methods {
+                    key :: "{s.name}.{m.name}"
+                    out.methods[key.copy()] = Declared{path: file.path.copy(), line: line_at(starts, m.span.start)}
+                    if m.return_type == .Val(ty) -> out.method_returns[key] = ty.copy()
+                }
+            }
+            .Enum(e) -> {
+                out.types[e.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, e.span.start)}
+                out.enums[e.name.copy()] = true
+            }
+            .Distinct(d) -> out.types[d.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, d.span.start)}
+            .TypeAlias(a) -> out.types[a.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, a.span.start)}
+            .Trait(t) -> out.types[t.name.copy()] = Declared{path: file.path.copy(), line: line_at(starts, t.span.start)}
+            .Impl(i) -> {
+                loop m in i.methods {
+                    key :: "{i.type_name}.{m.name}"
+                    out.methods[key.copy()] = Declared{path: file.path.copy(), line: line_at(starts, m.span.start)}
+                    if m.return_type == .Val(ty) -> out.method_returns[key] = ty.copy()
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+// The rendered name of a result type, for the manifest.
+fn type_text(ty: Type) -> String Never! {
+    if ty == {
+        .Int -> "Int"
+        .Float -> "Float"
+        .Float32 -> "Float32"
+        .Bool -> "Bool"
+        .String -> "String"
+        .Char -> "Char"
+        .IntN(signed, bits) -> if signed -> "I{bits}" else -> "U{bits}"
+        .List(element) -> "[{type_text(element)}]"
+        .Map(key, _, value) -> "[{type_text(key)}: {type_text(value)}]"
+        .Option(inner) -> "{type_text(inner)}?"
+        .Result(ok, err) -> "{type_text(ok)} {type_text(err)}!"
+        .Named(name) -> name.copy()
+        .Apply(name, args) -> {
+            parts := [String]{}
+            loop arg in args -> &parts.push(type_text(arg))
+            "{name}<{parts.join(", ")}>"
+        }
+        .Tuple(fields) -> {
+            parts := [String]{}
+            loop field in fields -> &parts.push(if field.name == "" -> type_text(field.ty) else -> "{field.name}: {type_text(field.ty)}")
+            "({parts.join(", ")})"
+        }
+        .Shared(inner) -> "Shared<{type_text(inner)}>"
+        .Tagged(_, inner) -> type_text(inner)
+        else -> "value"
+    }
+}
+
+// How a witness can observe a result of this type: `unit` and `never` carry
+// nothing to print; `value` prints its content; `opaque` is a handle whose
+// printed form shows no state, so a witness must call into it.
+fn result_class(ty: Type?, core: ParsedCore) -> String Never! {
+    t :: ty ?? return "unit"
+    if t == {
+        .Named(name) -> {
+            if name == "Unit" -> return "unit"
+            if name == "Never" -> return "never"
+            if core.enums.get(name) != None || core_enum_variants(name) != None -> return "value"
+            if core.records.get(name) != None -> return "value"
+            if compiler_record_fields(name).len() > 0 -> return "value"
+            "opaque"
+        }
+        .Result(ok, _) -> {
+            if ok == .Named(name) && name == "Never" -> return "never"
+            result_class(Val(ok.copy()), core)
+        }
+        .Option(inner) -> result_class(Val(inner.copy()), core)
+        .Tagged(_, inner) -> result_class(Val(inner.copy()), core)
+        .Apply(_, _) -> "opaque"
+        .Fn(_, _, _, _, _, _) -> "opaque"
+        .TraitObject(_) -> "opaque"
+        .Shared(_) -> "opaque"
+        else -> "value"
+    }
+}
+
+fn compiler_record_fields(name: String) -> [String] Never! {
+    out := [String]{}
+    fields :: ir_compiler_owned_record_fields(name, ir_compiler_owned_core_fields()) ?? return out
+    loop field in fields -> &out.push(field.name.copy())
+    out
+}
+
+fn ir_route(symbol: String, route_files: [SourceFile]) -> Route? Never! {
+    routed :: ir_route_symbol(symbol)
+    if ir_route_builder_lowered(routed) -> return Val(Route{kind: "ir-builder", path: BUILD_ROUTES_PATH, line: file_line(route_files, BUILD_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    if ir_environment_route(routed) != None -> return Val(Route{kind: "ir-environment", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    if ir_runtime_route(routed) != None -> return Val(Route{kind: "ir-runtime", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{routed}\""), symbol: routed.copy()})
+    // ir_core_call's named arms: `if symbol == "<name>" -> return ir_<lowering>(…)`.
+    arm :: file_line(route_files, BUILD_ROUTES_PATH, "== \"{routed}\" -> return ir_")
+    if arm > 0 -> return Val(Route{kind: "ir-core-call", path: BUILD_ROUTES_PATH, line: arm, symbol: routed.copy()})
+    None
+}
+
+fn file_line(files: [SourceFile], path: String, needle: String) -> Int Never! {
+    loop file in files { if file.path == path -> return line_of(file.text, needle) }
+    0
+}
+
+fn symbol_name(symbol: CoreCallSymbol) -> String Never! {
+    if symbol == {
+        .Prelude(name) -> name.copy()
+        .Rust(name) -> name.copy()
+        .SourceOwned -> ""
+    }
+}
+
+// The special-route table: `key<TAB>path<TAB>needle`, one row per line, a
+// `#` line is a comment. Each row must name a surface row with no other route.
+fn parse_special_routes(text: String) -> [SpecialRoute] Err! {
+    out := [SpecialRoute]{}
+    loop (index, line) in text.split("\n").to_list() {
+        if line.trim() == "" || line.starts_with("#") -> next
+        cells :: line.split("\t").to_list()
+        if cells.len() != 3 || cells[0].trim() == "" || cells[1].trim() == "" || cells[2].trim() == "" {
+            return Err("{SPECIAL_ROUTES_PATH}:{index + 1}: a row needs key, path and needle separated by tabs")
+        }
+        &out.push(SpecialRoute{key: cells[0].copy(), path: cells[1].copy(), needle: cells[2].copy(), row: index + 1})
+    }
+    Ok(out)
+}
+
+fn surface(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFile], route_files: [SourceFile]) -> Surface Never! {
+    rows := [SurfaceRow]{}
+    errors := core.errors.copy()
+    seen := [String: Bool]{}
+    modules := [String: Bool]{}
+    loop export in CORE_MODULE_EXPORTS -> modules[export.module_name.copy()] = true
+    loop export in CORE_MODULE_EXPORTS {
+        loop member in export.members {
+            if member.starts_with("__") || member == "" -> next
+            first :: member.bytes()[0]
+            if first >= 65 && first <= 90 -> next
+            if modules.get("{export.module_name}.{member}") != None -> next
+            id :: "module:{export.module_name}.{member}"
+            if seen.get(id) != None -> next
+            seen[id.copy()] = true
+            &rows.push(module_call_row(id, export.module_name, member, core, route_files))
+        }
+        loop name in export.type_exports {
+            id :: "type:{export.module_name}.{name}"
+            if seen.get(id) != None -> next
+            seen[id.copy()] = true
+            &rows.push(nominal_row(id, export.module_name, name, core, route_files))
+        }
+    }
+    loop record in CORE_CALLS {
+        loop owner in record.receiver_types {
+            if owner == "" || owner.bytes()[0] == 0 -> next
+            id :: "receiver:{owner}.{record.member}"
+            if seen.get(id) != None -> next
+            seen[id.copy()] = true
+            &rows.push(receiver_row(id, owner, record.member, symbol_name(record.symbol), core, route_files, declared_aot: core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_AOT)))
+        }
+    }
+    compiler_fields :: ir_compiler_owned_core_fields()
+    loop field in CORE_RECORD_FIELD_ROWS {
+        if field.core_only -> next
+        id :: "field:{field.owner}.{field.field}"
+        if seen.get(id) != None -> next
+        seen[id.copy()] = true
+        &rows.push(field_row(id, field.owner, field.field, compiler_fields, core, route_files))
+    }
+    apply_specials(&rows, &errors, specials, special_files)
+    &rows.sort_by((left: SurfaceRow, right: SurfaceRow) -> left.id <=> right.id)
+    Surface{rows: rows, errors: errors}
+}
+
+fn unrouted(id: String, kind: String, owner: String, member: String, problem: String, declared_aot: Bool{false}) -> SurfaceRow Never! {
+    SurfaceRow{id: id.copy(), kind: kind.copy(), owner: owner.copy(), member: member.copy(), route: None, problem: problem.copy(), declared_aot: declared_aot, result_type: "", result_class: "unknown"}
+}
+
+fn module_call_row(id: String, module_name: String, member: String, core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
+    record :: core_call(module_name, member)
+    owned_path := String?{None}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name == module_name && row.owned_members.contains(member) -> owned_path = Val(row.path.copy())
+    }
+    declared_aot := false
+    target := member.copy()
+    source_owned := false
+    if record == .Val(found) {
+        declared_aot = core_call_coverage_contains(found.coverage, CORE_CALL_COVERAGE_AOT)
+        if found.symbol == .SourceOwned {
+            source_owned = true
+            if found.source_target == .Val(t) -> target = t.copy()
+        }
+    }
+    if owned_path != None || source_owned {
+        key :: "{module_name}.{target}"
+        if core.fns.get(key) == .Val(at) {
+            ty :: core.returns.get(key)
+            shown :: if ty == .Val(t) -> type_text(t) else -> "Unit"
+            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(Route{kind: "source", path: at.path.copy(), line: at.line, symbol: target.copy()}), problem: "", declared_aot: declared_aot, result_type: shown, result_class: result_class(ty, core)}
+        }
+        place :: owned_path ?? "its Core source"
+        return unrouted(id, "module_call", module_name, member, "`{place}` owns `{member}` but declares no top-level `fn {target}`", declared_aot: declared_aot)
+    }
+    // The typed signature the checker uses for this call, at any arity: the
+    // result type does not depend on how many optional arguments are passed.
+    fixed :: core_sig_fixed(CoreCallSignatureRequest{module_name: module_name.copy(), member: member.copy(), actual_arity: -1, actual_accesses: [AccessConvention]{}, type_args: [Type]{}})
+    signature := fixed
+    if fixed == .Val(found) && (found.module_name != module_name || found.member != member) -> signature = None
+    ty := Type?{None}
+    if signature == .Val(found) -> ty = found.return_type.copy()
+    shown :: if {
+        ty == .Val(t) -> type_text(t)
+        signature == None -> ""
+        else -> "Unit"
+    }
+    class :: if signature == None -> "unknown" else -> result_class(ty.copy(), core)
+    if record == .Val(found) {
+        name :: symbol_name(found.symbol)
+        if ir_route(name, route_files) == .Val(route) {
+            return SurfaceRow{id: id.copy(), kind: "module_call", owner: module_name.copy(), member: member.copy(), route: Val(route.copy()), problem: "", declared_aot: declared_aot, result_type: shown, result_class: class}
+        }
+        out := unrouted(id, "module_call", module_name, member, "registry symbol `{name}` has no IR dispatcher arm", declared_aot: declared_aot)
+        out.result_type = shown.copy()
+        out.result_class = class.copy()
+        return out
+    }
+    out := unrouted(id, "module_call", module_name, member, "`{module_name}` exports `{member}` but no Core source owns it and CORE_CALLS has no row", declared_aot: declared_aot)
+    out.result_type = shown.copy()
+    out.result_class = class.copy()
+    out
+}
+
+fn receiver_row(id: String, owner: String, member: String, symbol: String, core: ParsedCore, route_files: [SourceFile], declared_aot: Bool{false}) -> SurfaceRow Never! {
+    key :: "{owner}.{member}"
+    if core.methods.get(key) == .Val(at) {
+        ty :: core.method_returns.get(key)
+        shown :: if ty == .Val(t) -> type_text(t) else -> "Unit"
+        return SurfaceRow{id: id.copy(), kind: "receiver_method", owner: owner.copy(), member: member.copy(), route: Val(Route{kind: "source", path: at.path.copy(), line: at.line, symbol: key.copy()}), problem: "", declared_aot: declared_aot, result_type: shown, result_class: result_class(ty, core)}
+    }
+    if symbol != "" && ir_route(symbol, route_files) == .Val(route) {
+        return SurfaceRow{id: id.copy(), kind: "receiver_method", owner: owner.copy(), member: member.copy(), route: Val(route.copy()), problem: "", declared_aot: declared_aot, result_type: "", result_class: "unknown"}
+    }
+    if ir_handle_civil_time_route(owner, member) != None || ir_handle_precise_route(owner, member) != None || ir_handle_math_route(owner, member) != None {
+        return SurfaceRow{id: id.copy(), kind: "receiver_method", owner: owner.copy(), member: member.copy(), route: Val(Route{kind: "ir-handle-route", path: ROUTE_HANDLE_PATH, line: file_line(route_files, ROUTE_HANDLE_PATH, "\"{member}\""), symbol: key.copy()}), problem: "", declared_aot: declared_aot, result_type: "", result_class: "unknown"}
+    }
+    shown :: if symbol == "" -> "no registry symbol" else -> "registry symbol `{symbol}`"
+    unrouted(id, "receiver_method", owner, member, "no Core source declares `{owner}.{member}`, no IR handle route answers it and {shown} has no IR dispatcher arm", declared_aot: declared_aot)
+}
+
+fn field_row(id: String, owner: String, field: String, compiler_fields: [String: [TypeTupleField]], core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
+    if ir_compiler_owned_record_fields(owner, compiler_fields) == .Val(fields) {
+        loop known in fields {
+            if known.name == field {
+                return SurfaceRow{id: id.copy(), kind: "field", owner: owner.copy(), member: field.copy(), route: Val(Route{kind: "ir-compiler-record", path: COMPILER_OWNED_PATH, line: 0, symbol: "{owner}.{field}"}), problem: "", declared_aot: false, result_type: type_text(known.ty), result_class: "value"}
+            }
+        }
+    }
+    key :: "{owner}.{field}"
+    if core.fields.get(key) == .Val(at) {
+        return SurfaceRow{id: id.copy(), kind: "field", owner: owner.copy(), member: field.copy(), route: Val(Route{kind: "source", path: at.path.copy(), line: at.line, symbol: key.copy()}), problem: "", declared_aot: false, result_type: "", result_class: "value"}
+    }
+    if field_dispatch(owner, field, route_files) == .Val(route) {
+        return SurfaceRow{id: id.copy(), kind: "field", owner: owner.copy(), member: field.copy(), route: Val(route.copy()), problem: "", declared_aot: false, result_type: "", result_class: "value"}
+    }
+    unrouted(id, "field", owner, field, "no Core source struct, compiler-owned record, runtime record or compiler host value answers `{owner}.{field}`")
+}
+
+// A field the IR reads from a runtime handle or record schema, or the
+// evaluator answers on a compiler host value.
+fn field_dispatch(owner: String, field: String, route_files: [SourceFile]) -> Route? Never! {
+    if ir_runtime_handle(owner) == .Val(handle) {
+        if ir_runtime_handle_field(handle.runtime, field) != None {
+            return Val(Route{kind: "ir-handle-field", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "\"{handle.runtime}\""), symbol: "{handle.runtime}.{field}"})
+        }
+    }
+    if schema_route(IR_RECORD_SCHEMAS, RUNTIME_RECORDS_PATH, owner, field, route_files) == .Val(route) -> return Val(route.copy())
+    if schema_route(IR_GENERATED_RECORDS, RUNTIME_ROUTES_PATH, owner, field, route_files) == .Val(route) -> return Val(route.copy())
+    if ir_host_value_name(owner) && jet_eval_compiler_value_method_record(owner, field) {
+        return Val(Route{kind: "eval-host-field", path: EVAL_VALUES_PATH, line: file_line(route_files, EVAL_VALUES_PATH, "owner == \"{owner}\""), symbol: "{owner}.{field}"})
+    }
+    None
+}
+
+// A record schema row lists its fields as `name=Kind,…` or bare `name,…`.
+fn schema_route(schemas: [IRRecordSchema], path: String, owner: String, field: String, route_files: [SourceFile]) -> Route? Never! {
+    loop schema in schemas {
+        if schema.jet_name != owner -> next
+        loop part in schema.fields.split(",").to_list() {
+            if part.partition("=").head == field {
+                return Val(Route{kind: "ir-record-schema", path: path.copy(), line: file_line(route_files, path, "jet_name: \"{owner}\""), symbol: "{owner}.{field}"})
+            }
+        }
+    }
+    None
+}
+
+fn nominal_row(id: String, module_name: String, name: String, core: ParsedCore, route_files: [SourceFile]) -> SurfaceRow Never! {
+    if core.types.get(name) == .Val(at) {
+        return SurfaceRow{id: id.copy(), kind: "nominal_type", owner: module_name.copy(), member: name.copy(), route: Val(Route{kind: "source", path: at.path.copy(), line: at.line, symbol: name.copy()}), problem: "", declared_aot: false, result_type: name.copy(), result_class: "value"}
+    }
+    loop row in ir_compiler_owned_type_rows() {
+        if row.definition.name == name {
+            return SurfaceRow{id: id.copy(), kind: "nominal_type", owner: module_name.copy(), member: name.copy(), route: Val(Route{kind: "ir-compiler-type", path: BUILD_TYPES_PATH, line: 0, symbol: name.copy()}), problem: "", declared_aot: false, result_type: name.copy(), result_class: "value"}
+        }
+    }
+    if ir_runtime_handle(name) == .Val(handle) {
+        return SurfaceRow{id: id.copy(), kind: "nominal_type", owner: module_name.copy(), member: name.copy(), route: Val(Route{kind: "ir-runtime-handle", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "jet_name: \"{name}\""), symbol: handle.runtime.copy()}), problem: "", declared_aot: false, result_type: name.copy(), result_class: "value"}
+    }
+    unrouted(id, "nominal_type", module_name, name, "no Core source, compiler-owned type or runtime handle declares `{name}`")
+}
+
+// Route the remaining rows through the verified special table. A row the table
+// names must exist, must lack every other route, and its needle must be in the
+// named file; otherwise the table is wrong and generation fails.
+fn apply_specials(rows: &[SurfaceRow], errors: &[String], specials: [SpecialRoute], special_files: [SourceFile]) Never! {
+    keys := [String: Bool]{}
+    loop special in specials {
+        where :: "{SPECIAL_ROUTES_PATH}:{special.row}"
+        if keys.get(special.key) != None {
+            &errors.push("{where}: duplicate special route `{special.key}`")
+            next
+        }
+        keys[special.key.copy()] = true
+        text := String?{None}
+        loop file in special_files { if file.path == special.path -> text = Val(file.text.copy()) }
+        body :: text ?? {
+            &errors.push("{where}: `{special.path}` does not exist")
+            next
+        }
+        line :: line_of(body, special.needle)
+        if line == 0 {
+            &errors.push("{where}: `{special.path}` does not contain `{special.needle}`")
+            next
+        }
+        index := -1
+        loop (at, row) in rows { if row.id == special.key -> index = at }
+        if index < 0 {
+            &errors.push("{where}: `{special.key}` is not a surface row")
+            next
+        }
+        if rows[index].route != None {
+            &errors.push("{where}: `{special.key}` already routes through {route_text(rows[index].route)}; delete the special row")
+            next
+        }
+        rows[index].route = Val(Route{kind: "special", path: special.path.copy(), line: line, symbol: special.needle.copy()})
+        rows[index].problem = ""
+    }
+}
+
+fn route_text(route: Route?) -> String Never! {
+    r :: route ?? return "no route"
+    "{r.kind} `{r.path}:{r.line}`"
+}

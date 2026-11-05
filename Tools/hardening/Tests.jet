@@ -1,0 +1,391 @@
+// Contract tests for the hardening manifest and repro bundles. Run from the
+// repository root: `jet test Tools/hardening`. Each test pairs the accepted
+// case with the forged or broken case that must fail.
+
+use {
+    json :: core.encoding.json
+}
+
+// The tree's inputs with only the named witnesses, so a test builds the full
+// surface without inspecting the whole corpus.
+fn tree_inputs(keep: [String]) -[FS]> Inputs Never! {
+    inputs := load_inputs(".") ?? panic("the tree inputs did not load: {err}")
+    kept := [SourceFile]{}
+    loop file in inputs.witnesses {
+        if contains_text(keep, witness_key(file.path)) -> &kept.push(file.copy())
+    }
+    inputs.witnesses = kept
+    inputs
+}
+
+fn edited(list: [SourceFile], path: String, from: String, to: String) -> [SourceFile] Never! {
+    out := [SourceFile]{}
+    found := false
+    loop file in list {
+        if {
+            file.path == path && file.text.contains(from) -> {
+                found = true
+                &out.push(SourceFile{path: file.path.copy(), text: file.text.replace(from, to)})
+            }
+            else -> &out.push(file.copy())
+        }
+    }
+    if !found -> panic("`{path}` does not contain `{from}`")
+    out
+}
+
+fn row_index(manifest: Manifest, id: String) -> Int Never! {
+    loop (index, row) in manifest.rows {
+        if row.surface.id == id -> return index
+    }
+    panic("the manifest has no row `{id}`")
+}
+
+fn row_of(manifest: Manifest, id: String) -> ManifestRow Never! {
+    manifest.rows[row_index(manifest, id)].copy()
+}
+
+fn built(inputs: Inputs) -> Manifest Never! {
+    build_manifest(inputs) ?? panic("the manifest did not build: {err}")
+}
+
+fn build_error(inputs: Inputs) -> String Never! {
+    if build_manifest(inputs) == {
+        .Ok(_) -> panic("the manifest built from broken inputs")
+        .Err(error) -> error.message.copy()
+    }
+}
+
+// c28: membership comes from the registries and the route facts.
+
+#Test("a removed Core fn, dispatcher arm, receiver method or struct field unroutes its row") {
+    inputs :: tree_inputs([String]{"core.text.byte_count", "core.reactive.signal"})
+    clean :: built(inputs)
+    assert_eq(validate_manifest(clean).join("\n"), "")
+    assert_eq(row_of(clean, "module:core.text.byte_count").status, "covered")
+    assert_eq(row_of(clean, "module:core.reactive.signal").status, "covered")
+    assert(route_text(row_of(clean, "module:core.reactive.signal").surface.route).starts_with("ir-core-call "))
+    assert_eq(row_of(clean, "receiver:Condition.notify_all").status, "missing")
+    assert_eq(row_of(clean, "field:BuildGraph.action_keys").status, "missing")
+    broken := inputs.copy()
+    broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "fn byte_count(text: String)", "fn byte_count_gone(text: String)")
+    broken.core_sources = edited(broken.core_sources, "Core/Tasks/Tasks.jet", "fn notify_all(self)", "fn notify_all_gone(self)")
+    broken.core_sources = edited(broken.core_sources, "Core/Build/Build.jet", "    action_keys: [BuildGraphActionKey]\n", "    action_keys_gone: [BuildGraphActionKey]\n")
+    broken.route_files = edited(broken.route_files, BUILD_ROUTES_PATH, "if name == \"jet_std::JetSignal::new\" -> return ir_reactive_signal(", "if name == \"jet_std::JetSignal::gone\" -> return ir_reactive_signal(")
+    moved :: built(broken)
+    assert_eq(validate_manifest(moved).join("\n"), "")
+    assert_eq(moved.rows.len(), clean.rows.len())
+    ids :: [String]{"module:core.text.byte_count", "module:core.reactive.signal", "receiver:Condition.notify_all", "field:BuildGraph.action_keys"}
+    loop id in ids {
+        row :: row_of(moved, id)
+        assert_eq("{id} {row.status}", "{id} unrouted")
+        assert(row.surface.route == None)
+        assert(row.surface.problem != "")
+        assert(row.sink == None)
+    }
+    assert(moved.snapshot.hash != clean.snapshot.hash)
+}
+
+#Test("a forged covered row, forged exclusion or unused exclusion breaks the manifest contract") {
+    clean :: built(tree_inputs([String]{"core.text.byte_count"}))
+    assert_eq(validate_manifest(clean).join("\n"), "")
+    covered :: row_index(clean, "module:core.text.byte_count")
+    missing :: row_index(clean, "module:core.text.casefold")
+    assert_eq(clean.rows[missing].status, "missing")
+    unrouted := -1
+    excluded := -1
+    loop (index, row) in clean.rows {
+        if unrouted < 0 && row.status == "unrouted" -> unrouted = index
+        if excluded < 0 && row.status == "excluded" -> excluded = index
+    }
+    assert(unrouted >= 0 && excluded >= 0)
+    forged := clean.copy()
+    // A declared-covered row with no witness and no sink.
+    forged.rows[missing].status = "covered"
+    // A covered row with no route, borrowing a real witness and sink.
+    forged.rows[unrouted].status = "covered"
+    forged.rows[unrouted].witness = clean.rows[covered].witness.copy()
+    forged.rows[unrouted].sink = clean.rows[covered].sink.copy()
+    // An exclusion whose reason no longer matches exclusions.tsv.
+    if forged.rows[excluded].exclusion == .Val(claimed) {
+        changed := claimed.copy()
+        changed.reason = "forged reason"
+        forged.rows[excluded].exclusion = Val(changed)
+    }
+    // A ratified exclusion that applies to no excluded row.
+    &forged.exclusions.push(Exclusion{key: "core.text.casefold", reason: "r", owner: "o", decision: "d"})
+    errors :: validate_manifest(forged).join("\n")
+    assert(errors.contains("module:core.text.casefold: covered row has no witness"))
+    assert(errors.contains("module:core.text.casefold: covered row names no observable sink"))
+    assert(errors.contains("{clean.rows[unrouted].surface.id}: covered row has no route"))
+    assert(errors.contains("{clean.rows[excluded].surface.id}: exclusion does not match a ratified exclusions.tsv row"))
+    assert(errors.contains("module:core.text.casefold: exclusion applies to 0 rows"))
+}
+
+#Test("special routes and exclusions must name real rows and real source text") {
+    inputs :: tree_inputs([String]{})
+    specials := inputs.copy()
+    specials.specials_text = inputs.specials_text.replace("return sema_data_args_decode(", "return sema_data_args_gone(")
+    specials.specials_text = "{specials.specials_text}module:core.text.no_such\t{BUILD_ROUTES_PATH}\tir_host_method(\nmodule:core.text.byte_count\t{BUILD_ROUTES_PATH}\tir_host_method(\n"
+    message :: build_error(specials)
+    assert(message.contains("does not contain `if module_name == \"core.args\""))
+    assert(message.contains("`module:core.text.no_such` is not a surface row"))
+    assert(message.contains("`module:core.text.byte_count` already routes through source"))
+    exclusions := inputs.copy()
+    exclusions.exclusions_text = "{inputs.exclusions_text}core.text.no_such\treason\towner\tdecision\n"
+    assert(build_error(exclusions).contains("`core.text.no_such` names no surface row"))
+    assert(parse_exclusions("core.text.lower\treason\towner\n") == .Err(_))
+    assert(parse_exclusions("core.text.lower\treason\towner\t \n") == .Err(_))
+    assert(parse_exclusions("core.text.lower\tr\to\td\ncore.text.lower\tr\to\td\n") == .Err(_))
+    assert_eq((parse_exclusions(inputs.exclusions_text) ?? panic("the checked-in exclusions did not parse")).len() > 0, true)
+}
+
+// c29: every covered row names a type-aware observable sink.
+
+fn fixture(body: String, key: String) -> String Never! {
+    module_name :: key.rpartition(".").head
+    lines := [String]{"// core-conformance: {key}", "use api :: {module_name}", "", "fn run() {{"}
+    loop line in body.split("\n") -> &lines.push("    {line}")
+    &lines.push("}}")
+    lines.join("\n")
+}
+
+fn verdict_of(text: String, key: String, class: String) -> String Never! {
+    check :: inspect_witness(key, text, key.rpartition(".").head, key.rpartition(".").tail, class)
+    if check.sink == .Val(sink) -> return "{sink.kind}/{sink.operation}/{sink.follow_up}"
+    "rejected: {check.errors.join(" | ")}"
+}
+
+fn verdict(body: String, key: String, class: String) -> String Never! {
+    verdict_of(fixture(body, key), key, class)
+}
+
+#Test("observed results name a sink; an opaque result needs a follow-up operation first") {
+    open :: "core.test.open"
+    call :: "core.test.call"
+    helper :: "// core-conformance: {call}\nuse api :: core.test\n\nfn checked() -> Int Never! {{\n    return api.call(\"value\")\n}}\n\nfn run() {{\n    print(checked())\n}}"
+    carrier :: "// core-conformance: {call}\npackage {{\n    name: \"carrier\"\n    authority: {{ allow: [IO] }}\n}}\nuse api :: core.test\n\nfn run() {{\n    print(api.call(\"value\"))\n}}"
+    one_line :: "// core-conformance: {call}\npackage {{ name: \"brace}}in-text\" }}\nuse api :: core.test\n\nfn run() {{\n    print(api.call(\"value\"))\n}}"
+    seen :: [String]{
+        verdict("print(api.inspect(api.open(\"value\")))", open, "opaque"),
+        verdict("value :: api.open(\"value\") ?? panic(\"open\")\nprint(value == \"value\")", open, "opaque"),
+        verdict("value :: api.open(\"value\") ?? panic(\"open\")\nprint(value.len())", open, "opaque"),
+        verdict("value :: api.open(\"value\") ?? panic(\"open\")\nalias :: value\nprint(alias.len())", open, "opaque"),
+        verdict("api.call(\"value\") ?? panic(\"call\")\nprint(\"done\")", call, "value"),
+        verdict("print(api.call(\"value\"))", call, "value"),
+        verdict("api.call(\"value\")\nprint(\"done\")", call, "unit"),
+        // The observer runs after the invoked lambda body.
+        verdict("print((() -> {{\n    api.call(\"value\") ?? panic(\"call\")\n    true\n}})())", call, "unit"),
+        verdict("api.call(\"value\")", call, "never"),
+        // One call reached through both arms of a desugared match is one call.
+        verdict("print(api.call(\"value\") ? ok -> true ! error -> false)", call, "value"),
+        // A helper's returned result is judged at its single call site.
+        verdict_of(helper, call, "value"),
+        // The inline package carrier is masked the way the driver masks it.
+        verdict_of(carrier, call, "value"),
+        verdict_of(one_line, call, "value"),
+    }
+    expected :: [String]{
+        "direct/print/argument of .inspect",
+        "bound/print/operator",
+        "bound/print/method len",
+        "bound/print/method len",
+        "propagated/later-observer/error-propagation",
+        "direct/print/",
+        "unit-effect/later-observer/",
+        "propagated/later-observer/error-propagation",
+        "never-effect/exit/",
+        "direct/print/operator",
+        "direct/print/",
+        "direct/print/",
+        "direct/print/",
+    }
+    assert_eq(seen.join("\n"), expected.join("\n"))
+}
+
+#Test("bind-and-discard, compile-only and opaque results with no follow-up are rejected") {
+    open :: "core.test.open"
+    call :: "core.test.call"
+    assert(verdict("_ :: api.open(\"value\") ?? panic(\"open\")\nprint(\"done\")", open, "opaque").contains("discard name _"))
+    assert(verdict("value :: api.open(\"value\") ?? panic(\"open\")\nprint(\"done\")", open, "opaque").contains("never reaches print/eprint/assert"))
+    assert(verdict("print(api.open(\"value\"))", open, "opaque").contains("opaque result needs a follow-up operation"))
+    assert(verdict("api.open(\"value\")", open, "opaque").contains("no observable sink"))
+    assert(verdict("api.call(\"value\")", call, "value").contains("no observable sink"))
+    assert(verdict("api.call(\"value\")\nprint(\"done\")", call, "value").contains("no observable sink"))
+    assert(verdict("print((() -> {{\n    api.call(\"value\")\n    true\n}})())", call, "value").contains("no observable sink"))
+    assert(verdict("api.call(\"value\") ?? return Err(\"call\")\nprint(\"done\")", call, "value").contains("Unit run cannot use ?? return Err"))
+    assert(verdict("api.call(\"value\")\napi.call(\"again\")\nprint(\"done\")", call, "unit").contains("expected one call"))
+    // Compile-only: the only call sits in a function `run` never reaches.
+    unused :: "// core-conformance: {call}\nuse api :: core.test\n\nfn unused() {{\n    print(api.call(\"value\"))\n}}\n\nfn run() {{\n    print(\"done\")\n}}"
+    assert(verdict_of(unused, call, "value").starts_with("rejected:"))
+    unparsed :: verdict_of("// core-conformance: {call}\nuse api :: core.test\n\nfn run() {{\n    print(api.call(\"value\") == {{\n        .Ok(_) -> true\n    }})\n}}", call, "value")
+    assert(unparsed.contains("witness does not parse: line 6:"))
+}
+
+#Test("a covered row's sink must match the row's result class") {
+    clean :: built(tree_inputs([String]{"core.text.byte_count"}))
+    index :: row_index(clean, "module:core.text.byte_count")
+    forged := clean.copy()
+    if forged.rows[index].sink == .Val(sink) {
+        changed := sink.copy()
+        changed.result_class = "opaque"
+        changed.follow_up = ""
+        forged.rows[index].sink = Val(changed)
+    }
+    errors :: validate_manifest(forged).join("\n")
+    assert(errors.contains("module:core.text.byte_count: sink result class `opaque` is not the row's `value`"))
+    unit_effect := clean.copy()
+    unit_effect.rows[index].sink = Val(Sink{kind: "unit-effect", operation: "later-observer", follow_up: "", via: "", result_class: "value"})
+    assert(validate_manifest(unit_effect).join("\n").contains("only a unit result may be observed by a later effect"))
+}
+
+// c30: a repro bundle reconstructs the run exactly.
+
+fn repro_input() -> ReproInput Never! {
+    ReproInput{
+        run_id: "run-1",
+        started: "2026-11-05T00:00:00Z",
+        finished: "2026-11-05T00:00:01Z",
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        binary_sha256: digest("binary"),
+        host: "linux-x64",
+        target: "x86_64-linux",
+        registry_snapshot_hash: digest("snapshot"),
+        config_hash: digest("config"),
+        stable_surface_id: "module:core.text.lower",
+        tier_commands: [TierCommand]{
+            TierCommand{tier: "native", command: "jet build {SOURCE_SLOT} && ./a.out"},
+            TierCommand{tier: "aot", command: "jet run {SOURCE_SLOT}"},
+        },
+        seed: "42",
+        mutation_arm: "swap-args",
+        mutator_version: "1",
+        source: "fn run() {{\n    print(\"ÀB\")\n}}\n",
+        stdout: [U8]{0, 255, 10, 65},
+        stderr: [U8]{},
+        exit: Val(3),
+        signal: None,
+        timeout: false,
+        expected_relation: Dyn.Text("ab"),
+        actual_relation: Dyn.Text("AB"),
+        normalization: [String]{"trim-final-newline"},
+        oracle: Oracle{name: "unicode-lower", version: "17.0.0", input_digest: digest("oracle input"), independence_class: "external"},
+        classification: "mismatch",
+        tower_action: Dyn.Object([String: Dyn]{"kind": Dyn.Text("card")}),
+    }
+}
+
+fn with_field(tree: Dyn, name: String, value: Dyn) -> Dyn Never! {
+    kept := [String: Dyn]{}
+    if tree == .Object(entries) {
+        loop entry in entries -> kept[entry.key.copy()] = entry.value.copy()
+    }
+    kept[name.copy()] = value
+    Dyn.Object(kept)
+}
+
+fn errors_of(tree: Dyn) -> String Never! {
+    validate_repro(tree, "").errors.join("\n")
+}
+
+#Test("a sealed repro reconstructs source, oracle, commands, raw channels, exit, seed, mutation, commit and binary") {
+    input :: repro_input()
+    bundle :: make_repro(input) ?? panic("the repro did not seal: {err}")
+    // Store and read back exactly as a bundle file would be.
+    stored :: json.parse(json.canonical(bundle) ?? panic("no canonical form")) ?? panic("the stored bundle did not parse")
+    check :: validate_repro(stored, digest("snapshot"))
+    assert_eq(check.errors.join("\n"), "")
+    rebuilt :: reconstruct_repro(stored, "") ?? panic("the repro did not reconstruct: {err}")
+    assert_eq(rebuilt.source, input.source)
+    assert_eq(rebuilt.source_sha256, digest(input.source))
+    assert_eq(rebuilt.stdout, [U8]{0, 255, 10, 65})
+    assert_eq(rebuilt.stderr, [U8]{})
+    assert_eq(rebuilt.exit, Val(3))
+    assert(rebuilt.signal == None)
+    assert(!rebuilt.timeout)
+    assert_eq(rebuilt.seed, "42")
+    assert_eq(rebuilt.mutation_arm, "swap-args")
+    assert_eq(rebuilt.mutator_version, "1")
+    assert_eq(rebuilt.commit, input.commit)
+    assert_eq(rebuilt.binary_sha256, input.binary_sha256)
+    assert_eq(rebuilt.oracle.name, "unicode-lower")
+    assert_eq(rebuilt.oracle.version, "17.0.0")
+    assert_eq(rebuilt.oracle.input_digest, digest("oracle input"))
+    assert_eq(rebuilt.oracle.independence_class, "external")
+    assert_eq(rebuilt.tier_commands.len(), 2)
+    assert_eq(rebuilt.tier_commands[0].tier, "aot")
+    assert_eq(replay_command(stored, "native", "/tmp/r.jet") ?? panic("no replay"), "jet build /tmp/r.jet && ./a.out")
+    assert(replay_command(stored, "wasm", "/tmp/r.jet") == .Err(_))
+}
+
+#Test("a changed byte, a stale snapshot or a missing identity breaks a repro") {
+    bundle :: make_repro(repro_input()) ?? panic("the repro did not seal: {err}")
+    tampered :: [Dyn]{
+        with_field(bundle, "source", Dyn.Text("fn run() {{}}\n")),
+        with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQg==")),
+        with_field(bundle, "exit", Dyn.Int(0)),
+        with_field(bundle, "seed", Dyn.Text("43")),
+        with_field(bundle, "mutation_arm", Dyn.Text("none")),
+        with_field(bundle, "stable_surface_id", Dyn.Text("module:core.text.upper")),
+        with_field(bundle, "registry_snapshot_hash", Dyn.Text(digest("other"))),
+        with_field(bundle, "tier_commands", commands_dyn([TierCommand]{TierCommand{tier: "aot", command: "jet check {SOURCE_SLOT}"}})),
+        with_field(bundle, "oracle", Dyn.Object([String: Dyn]{"independence_class": Dyn.Text("external"), "input_digest": Dyn.Text(digest("forged")), "name": Dyn.Text("unicode-lower"), "version": Dyn.Text("17.0.0")})),
+    }
+    loop forged in tampered {
+        assert(errors_of(forged).contains("repro content digest does not match bundle"))
+    }
+    assert_eq(errors_of(bundle), "")
+    stale :: validate_repro(bundle, digest("moved"))
+    assert(stale.stale)
+    assert(stale.errors.join("\n").contains("repro registry snapshot is stale"))
+    missing := repro_input()
+    missing.binary_sha256 = ""
+    assert(make_repro(missing) == .Err(_))
+    short := repro_input()
+    short.commit = "0123456"
+    assert(make_repro(short) == .Err(_))
+    unslotted := repro_input()
+    unslotted.tier_commands = [TierCommand]{TierCommand{tier: "aot", command: "jet run main.jet"}}
+    assert(make_repro(unslotted) == .Err(_))
+    loose :: with_field(bundle, "stdout_bytes", Dyn.Text("AP8KQQ"))
+    assert(errors_of(loose).contains("not canonical base64") || errors_of(loose).contains("not valid base64"))
+    assert(reconstruct_repro(with_field(bundle, "seed", Dyn.Text("43")), "") == .Err(_))
+}
+
+// c31: generation is deterministic and staleness follows the snapshot.
+
+#Test("two generations from the same tree are byte-identical") {
+    first :: generate(".") ?? panic("the first generation failed: {err}")
+    second :: generate(".") ?? panic("the second generation failed: {err}")
+    assert(first.text == second.text)
+    assert_eq(check_manifest_text(first.text, second.manifest, second.text).len(), 0)
+    assert(first.text.ends_with("}}\n"))
+}
+
+#Test("an exclusion or registry change moves the snapshot hash and makes the stored manifest stale") {
+    inputs :: tree_inputs([String]{"core.text.byte_count"})
+    clean :: built(inputs)
+    stored :: render_manifest(clean) ?? panic("the manifest did not render: {err}")
+    assert_eq(check_manifest_text(stored, clean, stored).len(), 0)
+    excluded := inputs.copy()
+    excluded.exclusions_text = "{inputs.exclusions_text}# reviewed again\n"
+    registry := inputs.copy()
+    registry.registry_files = edited(inputs.registry_files, inputs.registry_files[0].path, "\n", "\n\n")
+    cases :: [(inputs: Inputs, part: String)]{(inputs: excluded, part: "exclusions"), (inputs: registry, part: "registries")}
+    loop case in cases {
+        fresh := clean.copy()
+        fresh.snapshot = build_snapshot(case.inputs)
+        assert(fresh.snapshot.hash != clean.snapshot.hash)
+        fresh_text :: render_manifest(fresh) ?? panic("the fresh manifest did not render: {err}")
+        problems :: check_manifest_text(stored, fresh, fresh_text).join("\n")
+        assert(problems.starts_with("stale: stored source_snapshot.hash {clean.snapshot.hash}"))
+        assert(problems.contains("stale: snapshot part `{case.part}` changed"))
+        assert(!problems.contains("stale: snapshot part `core` changed"))
+    }
+    // Same snapshot, edited bytes: reported as a hand edit, not as current.
+    edited_text :: stored.replace("\"status\":\"covered\"", "\"status\":\"missing\"")
+    assert(edited_text != stored)
+    hand :: check_manifest_text(edited_text, clean, stored).join("\n")
+    assert(hand.contains("module:core.text.byte_count: stored status `missing`, the tree derives `covered`"))
+    assert(hand.contains("stored manifest bytes differ from a fresh generation of the same snapshot"))
+}
