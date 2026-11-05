@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6567,
-    "rev": 92388,
+    "nextNum": 6568,
+    "rev": 92394,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91630,6 +91630,82 @@
       "created": "2026-11-04T21:02:54.914Z",
       "updated": "2026-11-05T00:02:51.015Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0q4s6en",
+      "num": 6567,
+      "title": "Leak freedom is structural: safe Jet cannot leak",
+      "body": "Owner rule, 2026-11-05: Jet never leaks memory. Leak freedom is part of the memory-safety guarantee (I1); only an expert #Unsafe block may leak, so the language must structurally prevent leaks rather than fix them case by case. On 2026-11-05 three lowering families leaked in safe code (c8a 5037b3ce72: a reassign after a move; c8b 2d712dd94a: a field read off a fresh call result; c8c: a loop over or an index into a fresh List or Map), found only because jet repl grew 6.2 GB over 9 turns. This card makes such a defect impossible to ship: the compiler checks its own output, and the suites fail any program that leaks.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "1. An ownership verifier pass after IR lowering. 2. A leak gate in the golden and cases suites, plus the compiler itself, using the checked allocator. 3. Fix every leak the two find, by lowering family. 4. An audit of every construct that could leak in safe code (shared values and cycles, tasks parked at exit, channels, globals, closures) with a structural rule for each, or an owner ballot where the rule is a language choice. 5. I1 in AGENTS.md states leak freedom.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "After IR lowering, a verifier checks that every owned value, temporaries included, is dropped or moved exactly once on every path out of its scope, outside #Unsafe. It runs on every compile at O0, O1 and O2; a violation is an internal compiler error (exit 101), never a user diagnostic. A negative-control case shows it catching each of the 2026-11-05 leak shapes when the matching fix is reverted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:14:15.148Z"
+        },
+        {
+          "n": 2,
+          "text": "The golden and cases suites run their programs with the checked allocator and fail any row whose program exits with a live owned block allocated outside #Unsafe, at o0, o1 and o2. The compiler itself passes the same check: jet check and jet build over Core and over the compiler's own sources end with zero leaked blocks, and 9 jet repl turns of repl_core_data_query_plans_and_typed_joins stay flat.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:14:15.813Z"
+        },
+        {
+          "n": 3,
+          "text": "Every leak the verifier or the leak gate finds is fixed at its root, per lowering family, each with a case per shape; the full suites then run with the leak gate on and show zero leak rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:14:16.513Z"
+        },
+        {
+          "n": 4,
+          "text": "An audit, committed under Docs/audits, lists every construct that can keep memory alive in safe Jet (shared values and reference cycles, tasks or generators parked at exit, channels, globals and caches, closures and captures) and states the structural rule that prevents a leak for each, with a case; any rule that is a language choice goes to an owner ballot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:14:17.202Z"
+        },
+        {
+          "n": 5,
+          "text": "AGENTS.md I1 states that safe Jet cannot leak memory (only #Unsafe may), and Docs/spec/philosophy.md's memory-safety guarantee says the same.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T13:14:17.878Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G19"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T13:14:14.496Z",
+      "updated": "2026-11-05T13:14:17.878Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -172751,6 +172827,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T13:14:17.878Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#5 AGENTS.md I1 states that safe Jet cannot leak memory (only #"
+    },
+    {
+      "at": "2026-11-05T13:14:17.202Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#4 An audit, committed under Docs/audits, lists every construct"
+    },
+    {
+      "at": "2026-11-05T13:14:16.513Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#3 Every leak the verifier or the leak gate finds is fixed at i"
+    },
+    {
+      "at": "2026-11-05T13:14:15.813Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#2 The golden and cases suites run their programs with the chec"
+    },
+    {
+      "at": "2026-11-05T13:14:15.148Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#1 After IR lowering, a verifier checks that every owned value,"
+    },
+    {
+      "at": "2026-11-05T13:14:14.496Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0q4s6en",
+      "note": "Leak freedom is structural: safe Jet cannot leak"
+    },
     {
       "at": "2026-11-05T13:10:22.655Z",
       "by": "Main",
