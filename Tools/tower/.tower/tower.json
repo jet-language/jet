@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92227,
+    "rev": 92233,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39674,6 +39674,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:32:09.515Z"
+        },
+        {
+          "n": 192,
+          "text": "Jetpack rejects an unknown flag on every verb with one registered generic error that lists the verb's legal flags (code, what/why/fix, UI snapshot); today an unknown --x becomes a positional (hangar doctor/du/shared read --repair/--all/--read-only from positionals). In the same patch the three retired-flag teaching rows in VerbDispatch.jet cli_unknown_flag (E1342 --env-profile, E1300 --profile, E1353 --prepare) and their ui/case/fixture rows are removed (D-TEACH-RECONCILE1=A).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T01:28:56.360Z"
         }
       ],
       "refs": [
@@ -39695,7 +39704,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-04T23:43:29.784Z",
+      "updated": "2026-11-05T01:28:56.361Z",
       "updatedBy": "Main",
       "goals": [
         "G15"
@@ -69030,6 +69039,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T00:30:07.979Z"
+        },
+        {
+          "n": 19,
+          "text": "jet fmt never changes meaning or order: on Compiler/JetCli/Tests/ReceiptStorePorts.jet (RustPorts-S7) it reordered the fields of a named tuple type and added a comma after a wrapped 'loop … in' head (formatted copy kept under $JET_SCRATCH_ROOT/held/). A case pins each, and jet fmt --check passes on the Compiler/JetCli/Tests folder (46 of 52 files flagged on 2026-11-04).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T01:22:19.219Z"
         }
       ],
       "refs": [],
@@ -69040,7 +69058,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:16.618Z",
-      "updated": "2026-11-05T00:30:07.979Z",
+      "updated": "2026-11-05T01:22:19.219Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -73689,11 +73707,11 @@
         {
           "n": 6,
           "text": "cffi-bindgen-cache: 8 deleted Rust tests have a Jet test covering the same behavior (tests/cffi.rs::auto_bind_on_cache_miss, tests/cffi.rs::descriptor_mismatch_rejects_generated_cache_before_call, tests/cffi.rs::cobol_cache_without_descriptor_rejects_abi_unknown, tests/cffi.rs::hash_invalidation_on_header_change, …)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T02:09:17.141Z"
+          "evidence": "bfbab8d726: tests/cases/cffi/: auto_bind_on_cache_miss and cobol_cache_without_descriptor_rejects_abi_unknown (.case, ported-failing on #6366); descriptor_mismatch_rejects_generated_cache_before_call, hash_invalidation_on_header_change, failed_rebind_rejects_stale_cffi_cache, missing_declared_header_rejects_stale_cffi_cache, absent_or_malformed_hash_regenerates_declared_header_cache and cache_hit_no_rebind (.case, ported-failing on #6418 c1)",
+          "at": "2026-11-05T01:24:37.222Z"
         },
         {
           "n": 7,
@@ -74323,7 +74341,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-05T01:01:10.072Z",
+      "updated": "2026-11-05T01:24:37.222Z",
       "updatedBy": "Main"
     },
     {
@@ -81361,6 +81379,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T01:01:07.326Z"
+        },
+        {
+          "n": 26,
+          "text": "tests/cases/cffi/auto_bind_on_cache_miss.case passes: with no binding cache, jet check on a header-path use (use m :: \"include/mylib.h\") runs the C binder, writes .jet/bindings/c/mylib.jet and checks with no error (today no cache is written and m.mylib_ping is E0102), and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T01:24:35.747Z"
+        },
+        {
+          "n": 27,
+          "text": "tests/cases/cffi/cobol_cache_without_descriptor_rejects_abi_unknown.case passes: use payroll :: cobol.payroll with a .jet/bindings/cobol/payroll.jet cache that has no descriptor stamp fails closed with E3208 (today E1002 'cobol is reserved'), and its known-failing row is removed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T01:24:36.533Z"
         }
       ],
       "refs": [
@@ -81371,7 +81407,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-05T01:01:07.326Z",
+      "updated": "2026-11-05T01:24:36.533Z",
       "updatedBy": "Main"
     },
     {
@@ -84887,6 +84923,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T00:45:42.366Z"
+        },
+        {
+          "n": 139,
+          "text": "jet test-compare resolves the corpus directory: ComparisonHistory.jet:93 and ReceiptIdentity.jet:250 pass the corpus file to AuthorityResolver.authority_walk_root, which needs a directory, so jet test-compare corpus.json fails 'could not resolve comparison corpus directory'. Pass jet_cli_parent(path) as ReceiptIdentity.jet:194 does, and add a case that runs jet test-compare on a one-entry corpus.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T01:24:38.063Z"
         }
       ],
       "refs": [],
@@ -84898,7 +84943,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-05T00:45:42.366Z",
+      "updated": "2026-11-05T01:24:38.063Z",
       "updatedBy": "Main"
     },
     {
@@ -172098,6 +172143,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T01:28:56.361Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uwol3w",
+      "note": "#192 Jetpack rejects an unknown flag on every verb with one regis"
+    },
+    {
+      "at": "2026-11-05T01:24:38.063Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hn7w1n",
+      "note": "#139 jet test-compare resolves the corpus directory: ComparisonHi"
+    },
+    {
+      "at": "2026-11-05T01:24:37.222Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-05T01:24:36.533Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#27 tests/cases/cffi/cobol_cache_without_descriptor_rejects_abi_"
+    },
+    {
+      "at": "2026-11-05T01:24:35.747Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#26 tests/cases/cffi/auto_bind_on_cache_miss.case passes: with n"
+    },
+    {
+      "at": "2026-11-05T01:22:19.219Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kob6cb",
+      "note": "#19 jet fmt never changes meaning or order: on Compiler/JetCli/T"
+    },
     {
       "at": "2026-11-05T01:16:44.652Z",
       "by": "Main",
