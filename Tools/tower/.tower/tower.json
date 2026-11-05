@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92315,
+    "rev": 92318,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70853,29 +70853,29 @@
         {
           "n": 36,
           "text": "(was #2342 c2) Generated valid programs are typed, bounded, and value-consuming across expressions, statements, control flow, patterns, generics, traits, effects, views, comptime, and nested places [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:40:07.377Z"
+          "evidence": "55a74a4ca0: c36 Tools/hardening/Generator.jet generates programs from 21 productions over expressions, statements, control flow, patterns, generics, traits, effects, views, comptime and nested places. Tools/hardening/Tests.jet #Test 'generated programs are typed, bounded and value-consuming, and every family leads a case' validates all 128 cases of seed 2342 (parse, fn run, range-or-list loops only, no self-call, construct text kept, each value traced by the parser to print) and asserts every family leads a case and every production is reached. 'jet check admits every production and every tier prints every generated value alike' runs one program holding all 21 productions, plus two seeded cases, through jet check, jet_run and aot_release.",
+          "at": "2026-11-05T06:03:23.002Z"
         },
         {
           "n": 37,
           "text": "(was #2342 c5) Negative controls for missing production, admitted-but-unlowered syntax, optimizer-only meaning change, and observerless generation all fail the layer [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:40:08.019Z"
+          "evidence": "55a74a4ca0: c37 Tools/hardening/Generator.jet layer_controls() feeds the layer a missing production (a table without one family), an admitted-but-unlowered construct (check passes, the release build exits 1), an optimizer-only meaning change (the release build prints other bytes) and observerless generation (a value never printed, statically and at run time). Tools/hardening/Tests.jet #Test 'a missing production, an unlowered construct, an optimizer-only change and observerless generation each fail the layer' asserts each fails with its class, plus unfilled holes, unbounded loops and self-calls. --generate stops if any control passes.",
+          "at": "2026-11-05T06:03:23.883Z"
         },
         {
           "n": 38,
           "text": "(was #2342 c6) A fixed seed yields stable ordered bundles, and minimization preserves both the construct identity and the observable mismatch [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:40:08.728Z"
+          "evidence": "55a74a4ca0: c38 Tools/hardening/Tests.jet #Test 'a fixed seed gives the same programs in the same order, and another seed gives others' (and case n is the same in a 32- and a 64-case run). 'minimizing a planted finding keeps its construct and mismatch, and its bundle is stable across runs' runs a three-instance case with a planted optimizer-only change, minimizes it to its primary construct with the same mismatch text, seals a bundle validate_repro accepts, reruns it under another run identity and gets the same stable digest.",
+          "at": "2026-11-05T06:03:24.634Z"
         },
         {
           "n": 39,
@@ -71112,7 +71112,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T05:39:51.568Z",
+      "updated": "2026-11-05T06:03:24.634Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -172395,6 +172395,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T06:03:24.634Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-05T06:03:23.883Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-05T06:03:23.002Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#36"
+    },
     {
       "at": "2026-11-05T05:39:51.568Z",
       "by": "Main",
