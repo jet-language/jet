@@ -1,0 +1,35 @@
+# Card #3590 c134/c135: a signed Nix closure (root -> lib -> runtime NARs from
+# the local catalog peer) on a real terminal drives the live aggregate line
+# with honest byte facts: the total grows as each narinfo discloses its
+# FileSize, and transferred bytes grow as NAR chunks land.
+fixture: local_catalog_mixes_native_recipe_and_nix_mapping.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: catalog
+artifact: run
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source normal {work}/catalog
+await: file peer.port timeout 30s
+capture: port = text file peer.port
+step: jet run --allow=Env,FS.Read,FS.Write native-setup.jet -- {work}/catalog {work}/project
+exit: 0
+step: script -qfec "stty rows 30 cols 120; exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog'" /dev/null
+cwd: project
+unset: NO_COLOR
+unset: FORCE_COLOR
+unset: CI
+exit: 0
+stdout: ~ "Resolving    0/2 packages  0 B / ?" # the aggregate counts packages; no total before any narinfo
+stdout: ~ "Resolving    1/2 packages" # the native package settles first
+stdout: ~ "Downloading  0/3 objects  0 B / 512 B" # the first narinfo discloses its FileSize
+stdout: ~ "Downloading  0/3 objects  512 B / 968 B" # the first NAR landed; the second FileSize grows the total
+stdout: ~ "Downloading  0/3 objects  968 B / 1.4 KB" # the second NAR landed; the third FileSize grows the total
+stdout: ~ "Downloading  3/3 objects  1.4 KB / 1.4 KB" # every byte of the closure transferred
+stdout: count "✓" = 2 # one settled row per package, native and Nix
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
