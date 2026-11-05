@@ -248,7 +248,13 @@ struct JetCLICanonicalTargetIdentity {
 fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity JetCLIReadError! {
     target_info :: cli_files.stat(target) ?? return Err(jet_cli_read_error("couldn't inspect canonical target `{target}`: {jet_cli_io_error_text(err)}"))
     if target_info.is_symlink -> return Err(jet_cli_read_error("canonical target `{target}` must not be a symlink"))
-    start :: AuthorityResolver.authority_walk_root(target) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
+    // The authority walk takes a directory: a file target (a comparison
+    // corpus) starts at the directory that holds it.
+    directory :: if target_info.is_dir -> target else -> {
+        absolute :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize canonical target `{target}`: {jet_cli_io_error_text(err)}"))
+        jet_cli_parent(absolute) ?? "/"
+    }
+    start :: AuthorityResolver.authority_walk_root(directory) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
     roots := [String]{}
     if jet_cli_find_workspace_root_checked(&cache, start) == {
         .Ok(found) -> { if found == .Val(root) -> &roots.push(root) }

@@ -11,6 +11,7 @@ use {
     jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
     receipt_crypto :: core.crypto
     cli_sys :: core.sys
+    cli_files :: core.files
 }
 
 fn jet_cli_comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome Never! {
@@ -100,7 +101,10 @@ fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [S
     claim :: jet_cli_receipt_claim("test-compare", paths, argv, terminal)
     // ReceiptStore's target_path consumes the full normalized argv, not the
     // display path. The dispatcher supplies that same selected corpus here.
-    start :: AuthorityResolver.authority_walk_root(target) ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
+    // The root walk starts at the corpus file's directory: the walk only
+    // accepts a directory.
+    corpus :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize comparison corpus {target}: {jet_cli_io_error_text(err)}"))
+    start :: AuthorityResolver.authority_walk_root(jet_cli_parent(corpus) ?? "/") ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
     receipt_root :: jet_cli_receipt_project_root(&cache, start)
     section :: jet_cli_receipt_section_new("comparison", "ComparisonRecord", bytes)
     consumed :: [JetCLIRecordLink]{JetCLIRecordLink{kind: "evidence", artifact_id: report_id}}
