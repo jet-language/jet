@@ -645,10 +645,6 @@ struct Theme {
             self.status("catalog setup cancelled.")
             return None
         }
-        if assume_yes || !term.stdin().is_tty() {
-            self.error_coded("E1340", "this environment needs a package catalog", "no official signed registry or local catalog was found", "run in a terminal to choose a local catalog, or pass --local-nix-catalog <dir>")
-            return None
-        }
         terminal_write_output("  {self.gutter()}  Local catalog directory: ")
         answer :: term.readline() ?? {
             self.status("catalog setup cancelled.")

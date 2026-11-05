@@ -157,6 +157,19 @@ fn provider_core_test_is_bad_output(error: ProviderError) -> Bool {
     files.remove_all(project) ?? panic("cleanup")
 }
 
+#Test("provider locked nix index key keeps the lock channel for a revision-pinned declaration") {
+    project :: provider_core_test_dir("locked-nix-index-key-revision-pin")
+    revision :: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
+    provider_core_test_write(files.join(files.join(project, SOURCE_ROOT_DIR), "lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{revision}\"\n\n[root]\ndependencies = []\n")
+    table :: provider_core_test_table("default", "NixOS/nixpkgs/{revision}@github", ProviderKind.Nix)
+    spec :: provider_core_test_spec_in("ripgrep@default", table)
+    ctx :: provider_core_test_ctx(files.join(project, "hangar"), false, None, Val(project))
+    key :: provider_locked_nix_index_key(spec, table, ctx, "x86_64-linux") ?? panic("locked key")
+    assert_eq(key.channel, "nixpkgs-unstable")
+    assert_eq(key.revision, revision)
+    files.remove_all(project) ?? panic("cleanup")
+}
+
 fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: String, references: [String], proof: String, nar_hash: String, size: Int) -> AdmittedNixObject {
     AdmittedNixObject{store_path, hangar_path, hangar_digest: digest, direct_reference_digests: references, upstream_proof_sha256: proof, nar_hash, size, compression: "zstd"}
 }

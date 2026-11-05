@@ -64,8 +64,9 @@ fn cli_test_criterion8_executable(path: String, text: String) -[FS]> {
     assert(imported_entry.out.starts_with(files.join(root, "hangar/objects")), "out: {imported_entry.out}")
     producer :: ProducerRecord.decode(imported_entry.producer_record) ?? panic("decode producer record")
     assert_eq(producer.facts.get("nix.fallback.schema"), Val("jetpack.nix-fallback.v1"))
+    // `use --prep` realizes a user profile independent of the project lock.
     lock :: files.read(files.join(project, ".jet/lock")) ?? panic("read lock")
-    assert(lock.contains("greet@jetpack"), "lock: {lock}")
+    assert(!lock.contains("greet@jetpack"), "lock: {lock}")
 
     build :: cli_test_criterion8_jetpack([String]{"use", "--prep", "greet@jetpack", "--no-color"}, project, cached, [String]{"JETPACK_FIXTURES"})
     assert(build.success, "cached build stderr: {build.errors}")

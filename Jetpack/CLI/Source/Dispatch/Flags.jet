@@ -1,7 +1,8 @@
 // Jetpack argv parsing, ported from jetpack::CLI::parse (Flags, Parsed,
 // parse_args_for). One ordered arm table maps each flag spelling to its
 // typed field; everything else is positional, and a `--` hands the rest to
-// the child command untouched.
+// the child command untouched. `cli_verb_flags` lists the flags each verb
+// takes, and `cli_unknown_flag` refuses any other flag before the command runs.
 
 // Parsed global flags shared by every command.
 struct CLIFlags {
@@ -17,11 +18,6 @@ struct CLIFlags {
     trust: Bool
     // U16: ad-hoc packages from `-p <pkg>...`, repeatable.
     packages: [String]
-    // Exact workspace member names from `-p` on
-    // build/test/run (cargo-style, repeatable).
-    workspace_members: [String]
-    affected: Bool
-    affected_since: String?
     // U16: force foreign-flake/devenv detection over declared `env.*`.
     flake: Bool
     // U16: isolate the foreign projected shell from host variables.
@@ -56,9 +52,10 @@ struct CLIFlags {
     lock_against: String?
     // `jetpack tool install <ref> --as <name>`.
     as_name: String?
-    // (#1187): browser lock/provision inputs.
+    // (#1187): browser lock/provision inputs; `--version` is also the
+    // `hangar ingest` object version.
     browser_binary: String?
-    browser_version: String?
+    version: String?
     browser_protocol: String?
     // Hangar archive destination, signer, and source.
     archive_to: String?
@@ -73,12 +70,12 @@ struct CLIFlags {
     cache_role: String?
     cache_credential: String?
     cache_write: Bool
-    // `--lang <language>` and the formatter modes of `fmt`.
-    fmt_language: String?
-    fmt_check: Bool
-    fmt_diff: Bool
-    fmt_dry_run: Bool
-    fmt_changed: Bool
+    // Hangar switches: `du --all`, `doctor --repair`, `shared enroll --read-only`.
+    hangar_all: Bool
+    hangar_repair: Bool
+    read_only: Bool
+    // `secrets keygen --force` overwrites an existing identity.
+    force: Bool
 
     fn empty() -> CLIFlags Never! {
         CLIFlags{
@@ -89,9 +86,6 @@ struct CLIFlags {
             online: false,
             trust: false,
             packages: [String]{},
-            workspace_members: [String]{},
-            affected: false,
-            affected_since: None,
             flake: false,
             pure: false,
             prep: false,
@@ -110,7 +104,7 @@ struct CLIFlags {
             lock_against: None,
             as_name: None,
             browser_binary: None,
-            browser_version: None,
+            version: None,
             browser_protocol: None,
             archive_to: None,
             archive_key: None,
@@ -120,11 +114,10 @@ struct CLIFlags {
             cache_role: None,
             cache_credential: None,
             cache_write: false,
-            fmt_language: None,
-            fmt_check: false,
-            fmt_diff: false,
-            fmt_dry_run: false,
-            fmt_changed: false,
+            hangar_all: false,
+            hangar_repair: false,
+            read_only: false,
+            force: false,
         }
     }
 }
@@ -158,18 +151,15 @@ fn cli_flag_argument(args: [String], index: Int) -> String? Never! {
     None
 }
 
-// Verb-agnostic parse; the verb-aware form decides what `-p` means.
+// Verb-agnostic parse.
 fn cli_parse_args(args: [String]) -> CLIParsed Never! {
     cli_parse_args_for("", args)
 }
 
-// Verb-aware parse: `-p` means ad-hoc packages on `env`/`use` and workspace
-// members on `build`/`test`/`run`.
+// Verb-aware parse: `update` and `lock` own their scope flags.
 fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
-    workspace_select :: verb == "build" || verb == "test" || verb == "run"
     lock_verb :: verb == JETPACK_LOCK_VERB
     lock_against_prefix :: "{LOCK_DIFF_FLAG_AGAINST}="
-    affected_since_prefix :: "{WS_FLAG_AFFECTED_SINCE}="
     flags := CLIFlags.empty()
     positional := [String]{}
     command := [String]?{None}
@@ -206,15 +196,10 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(name) -> flags.environment = Val(name)
             }
-            arg == FMT_FLAG_LANG -> {
-                index += 1
-                flags.fmt_language = Val(cli_flag_argument(args, index) ?? "")
-            }
-            arg.starts_with("--lang=") -> flags.fmt_language = Val(cli_trim_start_matches(arg, "--lang="))
-            verb == "fmt" && arg == "--check" -> flags.fmt_check = true
-            verb == "fmt" && arg == "--diff" -> flags.fmt_diff = true
-            verb == "fmt" && arg == "--dry-run" -> flags.fmt_dry_run = true
-            verb == "fmt" && arg == "--changed" -> flags.fmt_changed = true
+            arg == "--all" -> flags.hangar_all = true
+            arg == "--repair" -> flags.hangar_repair = true
+            arg == "--read-only" -> flags.read_only = true
+            arg == SECRETS_FLAG_FORCE -> flags.force = true
             arg == "--adapt" -> flags.adapt = true
             arg == "--json" -> flags.json = true
             arg == BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
@@ -243,25 +228,9 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
                 index += 1
                 if cli_flag_argument(args, index) == .Val(dir) -> flags.local_nix_catalog = Val(dir)
             }
-            arg == WS_FLAG_AFFECTED -> flags.affected = true
-            arg == WS_FLAG_AFFECTED_SINCE -> {
-                index += 1
-                flags.affected_since = Val(cli_flag_argument(args, index) ?? "")
-            }
-            arg.starts_with(affected_since_prefix) -> flags.affected_since = Val(arg.split_once("=")?.after ?? "")
             arg == ENV_FLAG_PACKAGE -> {
                 // U16 enter: `-p <pkg>...` greedily consumes bare tokens.
-                // This rule build/test/run: each `-p` takes exactly one
-                // member name (cargo-style, repeatable).
                 index += 1
-                if workspace_select {
-                    member :: cli_flag_argument(args, index) ?? ""
-                    if member != "" && member != "--" && !member.starts_with("-") {
-                        &flags.workspace_members.push(member)
-                        index += 1
-                    }
-                    next
-                }
                 loop index < args.len() {
                     package :: args[index]
                     if package == "--" || package.starts_with("-") -> break
@@ -280,7 +249,7 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
             }
             arg == BROWSER_FLAG_VERSION -> {
                 index += 1
-                if cli_flag_argument(args, index) == .Val(version) -> flags.browser_version = Val(version)
+                if cli_flag_argument(args, index) == .Val(version) -> flags.version = Val(version)
             }
             arg == BROWSER_FLAG_PROTOCOL -> {
                 index += 1
@@ -318,8 +287,8 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
     CLIParsed{flags, positional, command}
 }
 
-// The arguments before the first `--`; retired-spelling checks never read
-// the child command.
+// The arguments before the first `--`; invocation checks never read the
+// child command.
 fn cli_before_argument_separator(args: [String]) -> [String] Never! {
     out := [String]{}
     loop arg in args {
@@ -327,4 +296,83 @@ fn cli_before_argument_separator(args: [String]) -> [String] Never! {
         &out.push(arg)
     }
     out
+}
+
+// The flags every verb takes: color, machine output, the network policy,
+// captured fixtures, and the confirmation bypass.
+CLI_COMMON_FLAGS :: comptime { [String]{"--color=<when>", "--no-color", "--json", "--offline", "--fixtures <dir>", CLI_FLAG_YES_SHORT, CLI_FLAG_YES_LONG} }
+// The flags of every verb that realizes packages.
+CLI_REALIZE_FLAGS :: comptime { [String]{TRUST_BYPASS_FLAG, "--local-nix-catalog <dir>", BUILD_FLAG_SHELL_ON_FAIL} }
+// The environment selectors.
+CLI_SCOPE_FLAGS :: comptime { [String]{"{ENV_FLAG_ENV} <name>", "{ENV_FLAG_PRESET} <name>"} }
+
+// The flags `verb` takes, each written as the flag, then ` <value>` when it
+// takes the next argument or `=<value>` when the value joins it.
+fn cli_verb_flags(verb: String) -> [String] Never! {
+    realize :: verb == "env" || verb == "use" || verb == JETPACK_IMPORT_VERB || verb == "add" || verb == "update" || verb == "outdated" || verb == "search" || verb == "info" || verb == "explain" || verb == JETPACK_WHY || verb == "__service-probe" || verb == IMAGE_SUBCOMMAND || verb == BRIDGE_SUBCOMMAND || verb == SERVICES_SUBCOMMAND || verb == TOOL_SUBCOMMAND || verb == PROFILE_SUBCOMMAND || verb == BROWSER_SUBCOMMAND
+    scoped :: verb == "env" || verb == "update" || verb == "__service-probe" || verb == IMAGE_SUBCOMMAND || verb == SERVICES_SUBCOMMAND
+    own :: if verb == {
+        "doctor" -> [String]{"--online"}
+        "env" -> [String]{"{ENV_FLAG_PACKAGE} <pkg>...", ENV_FLAG_FLAKE, ENV_FLAG_PURE, ENV_FLAG_PREP, ENV_FLAG_EXPLAIN}
+        "use" -> [String]{ENV_FLAG_PREP, ENV_FLAG_EXPLAIN}
+        TRUST_SUBCOMMAND -> [String]{"{TRUST_FLAG_SCOPE} <user|repo>"}
+        "hangar" -> [String]{"--all", "--repair", "--read-only", "{OS_FLAG_NAME} <name>", "--version <version>", "--platform-artifact-kind <kind>", "--ref <ref>", "--output-dev <dir>", "--expires-in <duration>", "--if-etag <etag>", "--etag <etag>", "--to <path>", "--key <path-or-name>", "--from <path>", "--no-deps", "--allow-unsigned", "--write", "--role <role>", "--role=<role>", "--credential <provider>", "--credential=<provider>"}
+        "add" -> [String]{"--adapt"}
+        "update" -> [String]{UPDATE_FLAG_DEPS, UPDATE_FLAG_TOOLS}
+        JETPACK_LOCK_VERB -> [String]{"{LOCK_DIFF_FLAG_AGAINST} <rev>", "{LOCK_DIFF_FLAG_AGAINST}=<rev>"}
+        "override" -> [String]{"--overlay <name>", "--patch <file>", "--provider <provider>", "--channel <channel>", "--allow-unfree"}
+        IMAGE_SUBCOMMAND -> [String]{"{IMAGE_FLAG_PUSH} <ref>"}
+        SECRETS_SUBCOMMAND -> [String]{SECRETS_FLAG_FORCE}
+        TOOL_SUBCOMMAND -> [String]{"{TOOL_FLAG_AS} <name>"}
+        BROWSER_SUBCOMMAND -> [String]{"{BROWSER_FLAG_BINARY} <path>", "{BROWSER_FLAG_VERSION} <version>", "{BROWSER_FLAG_PROTOCOL} <protocol>"}
+        else -> [String]{}
+    }
+    out := [String]{}
+    loop flag in own -> &out.push(flag)
+    if scoped {
+        loop flag in CLI_SCOPE_FLAGS -> &out.push(flag)
+    }
+    if realize {
+        loop flag in CLI_REALIZE_FLAGS -> &out.push(flag)
+    }
+    loop flag in CLI_COMMON_FLAGS -> &out.push(flag)
+    out
+}
+
+// The flag a spelling matches: `--env` for `--env <name>`, `--color=` for
+// `--color=<when>`.
+fn cli_flag_spelling_head(spelling: String) -> String Never! {
+    if spelling.split_once(" ") == .Val(halves) -> return halves.before.copy()
+    if spelling.split_once("=") == .Val(halves) -> return "{halves.before}="
+    spelling.copy()
+}
+
+// The first flag before the argument separator that `verb` does not take, or
+// None. A value-taking flag's value is never read as a flag, as the parser
+// consumes it; only `--scope` leaves a following flag in place.
+fn cli_unknown_flag(verb: String, args: [String]) -> String? Never! {
+    legal :: cli_verb_flags(verb)
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        if arg == "--" -> break
+        index += 1
+        if !arg.starts_with("-") || arg == "-" -> next
+        takes_value := false
+        matched := false
+        loop spelling in legal {
+            head :: cli_flag_spelling_head(spelling)
+            if head.ends_with("=") {
+                matched = arg.starts_with(head)
+            } else {
+                matched = arg == head
+                takes_value = matched && spelling.contains(" <") && !spelling.ends_with("...")
+            }
+            if matched -> break
+        }
+        if !matched -> return Val(arg.copy())
+        scope_without_value :: arg == TRUST_FLAG_SCOPE && (args.get(index) ?? "-").starts_with("-")
+        if takes_value && !scope_without_value -> index += 1
+    }
+    None
 }

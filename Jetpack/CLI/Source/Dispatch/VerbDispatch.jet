@@ -1,8 +1,7 @@
 // The jetpack verb dispatcher, ported from jetpack::CLI::parse::main. It
-// refuses retired spellings with their teaching diagnostics, runs the legacy
-// Hangar migration and user-tools drift check before mutating commands, and
-// routes one typed verb to its command. JetOS verbs (`os`, `user`,
-// `studio`, `push`) are not part of this port.
+// refuses any flag the verb does not take, runs the user-tools drift check
+// before mutating commands, and routes one typed verb to its command. JetOS
+// verbs (`os`, `user`, `studio`, `push`) are not part of this port.
 
 // Every verb this dispatcher routes.
 enum JetpackVerb {
@@ -70,24 +69,6 @@ enum JetpackVerb {
     }
 }
 
-// The refusal for a flag jetpack does not have, before the argument separator,
-// or None. The argument parser has no unknown-flag check of its own.
-fn cli_unknown_flag(before_separator: [String]) -> Diagnostic? Never! {
-    env_prefix :: "{ENV_FLAG_ENV_UNKNOWN}="
-    loop arg in before_separator {
-        if arg == ENV_FLAG_ENV_UNKNOWN || arg.starts_with(env_prefix) {
-            return Val(diagnostic_from_registry("E1342", None, "jetpack has no `{ENV_FLAG_ENV_UNKNOWN}` flag", "the environment selector chooses one `env.<name>` module; `--preset` chooses a named composition", "select the module with `{ENV_FLAG_ENV} <name>`"))
-        }
-    }
-    if before_separator.contains(ENV_FLAG_PROFILE_UNKNOWN) {
-        return Val(diagnostic_from_registry("E1300", None, "jetpack has no `{ENV_FLAG_PROFILE_UNKNOWN}` flag", "profile answers how hard to optimize a build; a named environment composition is a preset", "select the composition with `{ENV_FLAG_PRESET} <name>`, declared under `{ENV_FIELD_PRESETS}:`"))
-    }
-    if before_separator.contains(ENV_FLAG_PREP_UNKNOWN) {
-        return Val(diagnostic_from_registry("E1353", None, "jetpack has no `{ENV_FLAG_PREP_UNKNOWN}` flag", "Jetpack materialization is an explicit preparation step, not a second command spelling", "use `{ENV_FLAG_PREP}` on `env` or `use`"))
-    }
-    None
-}
-
 // Read-only commands observe state without repairing or migrating it: a
 // `hangar list` must not create its profile lock or rewrite a drifted pin.
 fn cli_read_only_command(verb: String, parsed: CLIParsed) -> Bool Never! {
@@ -95,7 +76,7 @@ fn cli_read_only_command(verb: String, parsed: CLIParsed) -> Bool Never! {
     second :: parsed.positional.get(1) ?? ""
     hangar :: verb == "hangar"
     shared_status :: hangar && first == "shared" && second == "status"
-    hangar_doctor :: hangar && first == "doctor" && !parsed.positional.contains("--repair")
+    hangar_doctor :: hangar && first == "doctor" && !parsed.flags.hangar_repair
     hangar_list :: hangar && first == "list"
     shared_status || verb == "doctor" || verb == "audit" || verb == JETPACK_WHY || verb == JETPACK_LOCK_VERB || hangar_doctor || hangar_list
 }
@@ -119,13 +100,18 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
     parsed :: cli_parse_args_for(verb, rest)
     color :: if parsed.flags.json -> ColorChoice.Never else -> parsed.flags.color
     theme :: Theme.resolve_choice(color).with_invocation(invocation)
-    if env_reject_filter_dsl(rest) == .Val(diagnostic) {
-        theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
-        return EXIT_USAGE
+    known_verb :: JetpackVerb.parse(verb)
+    checks_flags :: if known_verb == {
+        .Val(_) -> verb != "help" && verb != "--help" && verb != "-h"
+        .None -> false
     }
-    if cli_unknown_flag(cli_before_argument_separator(rest)) == .Val(diagnostic) {
-        theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
-        return EXIT_USAGE
+    if checks_flags {
+        if cli_unknown_flag(verb, rest) == .Val(flag) {
+            legal := [String]{}
+            loop spelling in cli_verb_flags(verb) -> &legal.push("`{spelling}`")
+            theme.error_coded("E2102", "`{flag}` isn't a flag `{verb}` understands.", "Jet ignores no flags silently, so a typo cannot quietly change a command.", "`{verb}` takes {legal.join(", ")}.")
+            return EXIT_USAGE
+        }
     }
     read_only :: cli_read_only_command(verb, parsed)
     if !read_only {
@@ -144,7 +130,7 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
         drift_code :: cli_check_user_tools_drift(&verification, theme, parsed)
         if drift_code != 0 -> return drift_code
     }
-    code :: if JetpackVerb.parse(verb) == {
+    code :: if known_verb == {
         .Val(known) -> cli_dispatch_verb(&verification, known, theme, color, parsed)
         .None -> {
             theme.error("`{verb}` is not a jetpack command", "Phase 1 commands are: {JETPACK_VERBS.join(", ")}.", "run `jetpack help` to see them.")

@@ -1,0 +1,23 @@
+# U23 honest fallback, interactive half: on a terminal with no package
+# catalog, `jetpack env --prep` still asks for a local catalog directory
+# instead of degrading. An empty answer cancels the setup.
+requires: os:unix
+fixture: no_nix_mixed_env_realizes_core_then_reports_nix_hole.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: project
+mkdir: root
+chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+normalize: replace "\r" ""
+step: jetpack env --prep --no-color --trust
+cwd: project
+env: HOME={work}/home
+env: PATH=
+pty: true
+pty-send: "\r" after 300ms
+pty-close: after 150ms
+exit: 2
+stdout: ~ "package catalog setup" # the terminal run offers the catalog choice
+stdout: ~ "Local catalog directory:" # the prompt reads the directory
+stdout: ~ "catalog setup cancelled." # an empty answer cancels
+stdout: !~ "E1272" # no degraded hole report on the interactive path

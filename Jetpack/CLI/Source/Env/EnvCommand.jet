@@ -354,6 +354,13 @@ fn cli_configure_project_catalog(theme: Theme, roots: HangarRoots, project_dir: 
         return
     }
     detected :: cli_detected_project_catalog(project_dir)
+    if detected == None && (flags.assume_yes || !term.stdin().is_tty()) {
+        // Honest fallback (U23): with no catalog and no terminal to choose
+        // one, realize what needs no catalog; each package that needs one
+        // is reported as an E1272 hole naming the fix.
+        theme.detail("no package catalog is configured; packages that need one are reported, not realized")
+        return
+    }
     answer :: theme.choose_local_catalog(detected, flags.assume_yes) ?? return Err(CLIError.Reported(EXIT_USAGE))
     chosen :: if files.is_abs(answer) -> answer else -> files.join(project_dir, answer)
     catalog :: files.canonicalize(chosen) ?? {

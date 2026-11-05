@@ -55,7 +55,7 @@ fn store_reuse_entries_by_id(entries: [StoreEntry]) -> [StoreEntry] Never! {
 fn store_nix_store_projection_for_entry_index(roots: HangarRoots, entry: StoreEntry, snapshot_root: String, index: NixProjectionIndex) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
-    if producer.provider != "nix" -> return Ok([NixStoreProjection]{})
+    if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) -> return Ok([NixStoreProjection]{})
     pending := [String]{entry.envelope.output_hash}
     loop pair in entry.named_outputs -> &pending.push(pair.value)
     pending = store_sorted_unique(pending)
@@ -100,7 +100,7 @@ fn store_nix_store_projection_for_entry_index(roots: HangarRoots, entry: StoreEn
 fn store_nix_store_projection_for_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
-    if producer.provider != "nix" -> return Ok([NixStoreProjection]{})
+    if producer.provider != "nix" || !store_reuse_has_nix_store_output(producer) -> return Ok([NixStoreProjection]{})
     logical_digests := [String: String]{}
     fact_keys :: store_sorted_keys(producer.facts)
     loop key in fact_keys {
@@ -205,6 +205,18 @@ fn store_reuse_canonical_nix_output_path(producer: ProducerRecord, name: String)
     }
     path :: output ?? store_path ?? return Err(StoreError.Other("Nix output `{name}` has no canonical `/nix/store` path"))
     Ok(path)
+}
+
+// Whether any output fact names a `/nix/store` path. A Nix-format output
+// realized outside `/nix/store` (a pinned fixture or local compatibility
+// output) has no logical store path to project; its lease snapshot is the
+// whole runtime view, as for a native output.
+fn store_reuse_has_nix_store_output(producer: ProducerRecord) -> Bool Never! {
+    loop pair in producer.facts {
+        if pair.key != "nix.store-path" && !pair.key.starts_with("nix.output.") -> next
+        if store_reuse_store_fact(Val(pair.value)) != None -> return true
+    }
+    false
 }
 
 fn store_reuse_store_fact(value: String?) -> String? Never! {

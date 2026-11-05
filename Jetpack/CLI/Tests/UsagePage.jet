@@ -105,14 +105,6 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
     assert_eq(parsed.flags.local_nix_catalog, Val(catalog))
 }
 
-#Test("cli parse reads environment formatter flags") {
-    parsed :: cli_parse_args_for("fmt", [String]{"--lang", "nix", "--check", "--diff"})
-    assert_eq(parsed.flags.fmt_language, Val("nix"))
-    assert(parsed.flags.fmt_check)
-    assert(parsed.flags.fmt_diff)
-    assert_eq(parsed.positional.len(), 0)
-}
-
 #Test("cli parse reads the prep flag") {
     parsed :: cli_parse_args_for("env", [String]{ENV_FLAG_PREP, ENV_FLAG_EXPLAIN})
     assert(parsed.flags.prep)
@@ -146,7 +138,7 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
         first :: description.bytes()[0]
         assert(Int.from_u8(first) >= 97 && Int.from_u8(first) <= 122, "description starts lowercase: {description}")
     }
-    tokens_5 :: [String]{"jetpack tool install <ref>", "jetpack hangar list", "jetpack profile plan <name>", "<Component>", "fastfetch@nixpkgs", "--offline"}
+    tokens_5 :: [String]{"jetpack tool install <ref>", "jetpack hangar list", "jetpack profile plan <name>", "<Component>", "fastfetch@jetpack", "--offline"}
     loop token in tokens_5 {
         assert(jetpack.contains(token), "jetpack help lost `{token}`")
     }
@@ -188,21 +180,50 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
     assert_eq(parsed.flags.environment, Val("full"))
 }
 
-#Test("cli parse retired environment flag is not an alias") {
-    parsed :: cli_parse_args([String]{"--env-profile", "full"})
-    assert_eq(parsed.flags.environment, None)
-    assert_eq(parsed.positional, [String]{"--env-profile", "full"})
-    equals :: cli_parse_args([String]{"--env-profile=full"})
-    assert_eq(equals.flags.environment, None)
-    assert_eq(equals.positional, [String]{"--env-profile=full"})
+#Test("cli unknown flag is refused on every verb, retired spellings included") {
+    assert_eq(cli_unknown_flag("env", [String]{"info", "--env-profile", "full"}), Val("--env-profile"))
+    assert_eq(cli_unknown_flag("env", [String]{"--env-profile=full"}), Val("--env-profile=full"))
+    assert_eq(cli_unknown_flag("env", [String]{"--profile", "work"}), Val("--profile"))
+    assert_eq(cli_unknown_flag("use", [String]{"--prepare", "jq@jetpack"}), Val("--prepare"))
+    assert_eq(cli_unknown_flag("hangar", [String]{"du", "--bogus"}), Val("--bogus"))
+    assert_eq(cli_unknown_flag("doctor", [String]{"--filter=billing..."}), Val("--filter=billing..."))
+    assert_eq(cli_unknown_flag("search", [String]{"--repair"}), Val("--repair"))
 }
 
-#Test("cli parse retired environment flag after the separator stays with the child command") {
+#Test("cli unknown flag accepts each verb's own flags and their values") {
+    assert_eq(cli_unknown_flag("env", [String]{"--env", "full", "--preset", "work", "-p", "jq", "--prep", "--json"}), None)
+    assert_eq(cli_unknown_flag("hangar", [String]{"du", "--all"}), None)
+    assert_eq(cli_unknown_flag("hangar", [String]{"cache", "publish", "x", "--role=ci", "--yes"}), None)
+    assert_eq(cli_unknown_flag("trust", [String]{"grant", "x", "--scope", "--json"}), None)
+    assert_eq(cli_unknown_flag("lock", [String]{"diff", "--against", "--weird-rev"}), None)
+    assert_eq(cli_unknown_flag("logs", [String]{"pkg", "--color=never"}), None)
+    assert_eq(cli_unknown_flag("logs", [String]{"pkg", "-h"}), Val("-h"))
+    assert_eq(cli_unknown_flag("trust", [String]{"grant", "x", "--scope", "--bogus"}), Val("--bogus"))
+}
+
+#Test("cli unknown flag never reads the child command") {
+    assert_eq(cli_unknown_flag("env", [String]{"--", "--env-profile", "full"}), None)
     args :: [String]{"info", "--", "--env-profile", "full"}
     parsed :: cli_parse_args(args)
-    assert_eq(cli_before_argument_separator(args), [String]{"info"})
     assert_eq(parsed.positional, [String]{"info"})
     assert_eq(parsed.command, Val([String]{"--env-profile", "full"}))
+}
+
+#Test("cli verb flags list the verb's own flags before the shared ones") {
+    flags :: cli_verb_flags("hangar")
+    assert(flags.contains("--repair"))
+    assert(flags.contains("--fixtures <dir>"))
+    assert(!cli_verb_flags("search").contains("--repair"))
+    assert_eq(cli_verb_flags("logs"), CLI_COMMON_FLAGS)
+}
+
+#Test("cli parse reads hangar and secrets switches as typed flags") {
+    parsed :: cli_parse_args_for("hangar", [String]{"du", "--all", "--repair", "--read-only", "--force"})
+    assert(parsed.flags.hangar_all)
+    assert(parsed.flags.hangar_repair)
+    assert(parsed.flags.read_only)
+    assert(parsed.flags.force)
+    assert_eq(parsed.positional, [String]{"du"})
 }
 
 #Test("cli usage keeps preset and environment axes distinct") {
@@ -212,22 +233,9 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
     assert(!help.contains("--env-profile"))
 }
 
-#Test("cli parse build dash p is an exact repeatable member") {
-    parsed :: cli_parse_args_for("build", [String]{"-p", "billing", "-p", "shared", "--affected"})
-    assert_eq(parsed.flags.workspace_members, [String]{"billing", "shared"})
-    assert_eq(parsed.flags.packages.len(), 0)
-    assert(parsed.flags.affected)
-}
-
-#Test("cli parse build affected since takes a ref") {
-    parsed :: cli_parse_args_for("test", [String]{"--affected-since", "main"})
-    assert_eq(parsed.flags.affected_since, Val("main"))
-}
-
 #Test("cli parse env dash p still collects nixpkgs packages") {
     parsed :: cli_parse_args_for("env", [String]{"-p", "nodejs", "ripgrep"})
     assert_eq(parsed.flags.packages, [String]{"nodejs", "ripgrep"})
-    assert_eq(parsed.flags.workspace_members.len(), 0)
 }
 
 #Test("cli foreign flake is not detected without a flake file") {

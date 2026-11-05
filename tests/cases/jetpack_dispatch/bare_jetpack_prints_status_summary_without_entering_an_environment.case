@@ -1,0 +1,13 @@
+# Card #3590 c149: bare `jetpack` off a terminal prints the plain status
+# summary (the dashboard is TTY-only, Jetpack/CLI/Tests/Dashboard.jet) and
+# never enters or creates an environment.
+fixture: fixtures/bare_jetpack_prints_status_summary_without_entering_an_environment
+mkdir: root
+env: JETPACK_ROOT={work}/root
+step: jetpack
+exit: 0
+stdout: ^= "Jetpack status\n" # the plain summary, not the TTY dashboard
+stdout: ~ "Environment: ready · typed module env.dev · 1 package(s)" # names the project environment
+stdout: ~ "Store: 0 package(s), 0 B, health healthy" # summarizes the empty store
+stdout: ~ "Recent activity: none recorded" # no activity was journaled
+file: .jet absent

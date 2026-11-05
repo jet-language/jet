@@ -13,18 +13,18 @@ copy: left left-root/hangar/provider-fixture-left/bin/left
 when os unix: chmod: left-root/hangar/provider-fixture-left/bin/left 0555
 when os unix: chmod: left-root/hangar/provider-fixture-left/bin 0555
 when os unix: chmod: left-root/hangar/provider-fixture-left 0555
-write: fx/nixpkgs-left.json left.json
+write: fx/jetpack-left.json left.json
 mkdir: right-root/hangar/provider-fixture-right/bin
 copy: right right-root/hangar/provider-fixture-right/bin/right
 when os unix: chmod: right-root/hangar/provider-fixture-right/bin/right 0555
 when os unix: chmod: right-root/hangar/provider-fixture-right/bin 0555
 when os unix: chmod: right-root/hangar/provider-fixture-right 0555
-write: fx/nixpkgs-right.json right.json
-step: jetpack tool install left@nixpkgs --no-color --offline --fixtures {work}/fx
+write: fx/jetpack-right.json right.json
+step: jetpack tool install left@jetpack --no-color --offline --fixtures {work}/fx
 cwd: project
 env: JETPACK_ROOT={work}/left-root
 exit: 0
-step: jetpack tool install right@nixpkgs --no-color --offline --fixtures {work}/fx
+step: jetpack tool install right@jetpack --no-color --offline --fixtures {work}/fx
 cwd: project
 env: JETPACK_ROOT={work}/right-root
 env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=between-root-commits

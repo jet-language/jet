@@ -22,7 +22,11 @@ env: JETPACK_NIX_FALLBACK_BIN={work}/nix
 env: PATH=/usr/bin:/bin
 mkdir: root
 chmod: nix 0755
-chmod: staging/bin/postgres 0755
+# A Nix build output is read-only, like every /nix/store path; the sealed
+# Hangar copy then hashes to the digest computed at import.
+chmod: staging/bin/postgres 0555
+chmod: staging/bin 0555
+chmod: staging 0555
 copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
 step: jet build peer
 exit: 0
@@ -68,6 +72,10 @@ step cached: jetpack env --env dev --prep --trust --yes --no-color
 cwd: project
 unset: JETPACK_FIXTURES
 exit: 0
+# The cached prep reuses the verified import: Nix ran once, and the lock is unchanged.
+stderr: ~ "0 new, 1 cached" # the second prep is a cache hit
+stderr: !~ "Lock changes" # a warm prep reports no lock update
+file: nix-invocations == one-invocation.expected
 step run: jetpack env --env dev --trust --no-color -- postgres
 cwd: project
 unset: JETPACK_FIXTURES

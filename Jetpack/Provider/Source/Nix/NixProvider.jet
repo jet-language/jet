@@ -31,8 +31,12 @@ struct NixProvider {
                         nix_backed :: found.repository.starts_with(PROVIDER_NIXPKGS_EXACT_PREFIX) || found.authority.contains("jetpack-nix-fallback-v1")
                         if nix_backed && found.output != "" && found.envelope.output_hash == found.output && found.envelope.platform != "" {
                             roots :: ctx.nix_roots ?? return None
+                            // The Store records a Nix entry under its cache
+                            // key as the policy fingerprint; expect the same.
+                            identity := provider_nix_cache_identity(found.output, found.envelope.platform, spec, table, ctx)
+                            identity.policy_fingerprint = provider_nix_cache_key(identity)
                             return Val(CacheExpectation{
-                                identity: provider_nix_cache_identity(found.output, found.envelope.platform, spec, table, ctx),
+                                identity: identity,
                                 owned_output: Val(files.join(files.join(roots.hangar_dir(), STORE_OBJECTS_DIR), found.output)),
                                 allow_unsigned_local: true,
                             })

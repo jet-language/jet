@@ -106,16 +106,55 @@
     assert(projection.get("/nix/store/projection-dev") == Val((dev_object)))
     loop item in projection -> assert(!store_path_starts_with(item.value, "/nix/store"))
 
-    lease :: store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
-    stable :: lease.stable_path(files.join(entry.bin, "tool")) ?? panic("stable path")
-    assert_eq(files.read(stable) ?? panic("read stable"), "out")
-    assert(lease.projected_executable("tool") != None)
+    lease := store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
+    tool :: lease.executable_for(files.join(entry.bin, "tool")) ?? panic("leased tool")
+    if sys.is_linux() {
+        read :: store_test_run_leased(&lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("cat \"$0\""), tool}, None)
+        assert_eq(read.output, "out")
+    }
     assert(lease.executable_for_command(files.join(dev_object, "unrecorded")) == .Err(_))
     lease.validate() ?? panic("validate")
     if sys.is_linux() {
-        loop pair in lease.nix_store_projection() -> assert(pair.source.starts_with("/proc/self/fd/"))
+        // Each projected object is named by a descriptor the child holds.
+        loop pair in lease.nix_store_projection() -> assert(pair.source.render(LeaseBinding.empty()) == .Err(_))
     }
     lease.release()
+    store_test_drop_roots(roots)
+}
+
+#Test("store nix output outside the nix store projects nothing") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    out :: files.join(roots.hangar_dir(), "provider-fixture-greet")
+    files.create_dir_all(files.join(out, "bin")) ?? panic("fixture dir")
+    files.write(files.join(out, "bin/greet"), "greet") ?? panic("fixture tool")
+    store_seal_local_output(out) ?? panic("seal output")
+    drv :: "/nix/store/fixture-greet.drv"
+    producer_facts := provider_nix_build_facts_record()
+    producer_facts["nix.drv_path"] = drv
+    producer_facts["nix.output.out"] = out
+    plan :: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.output.out": out}) ?? panic("plan")
+    producer :: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:fixture-greet", "policy=test\nplatform=test", producer_facts) ?? panic("producer")
+    entry :: StoreEntry{
+        id: "fixture-greet",
+        name: "greet",
+        version: "",
+        reference: "greet@jetpack",
+        out: out,
+        bin: files.join(out, "bin"),
+        rlib: "",
+        envelope: Envelope.for_output(out, "greet@jetpack", "nix"),
+        cache_identity: CacheIdentity.empty(),
+        references: [String]{},
+        named_outputs: [String: String]{},
+        platform_artifact_kind: "",
+        producer_record: producer.encode(),
+        receipt: "",
+        realized_at: 0,
+        last_used_at: 0,
+    }
+    assert_eq((store_nix_store_projection_for_entry(&verification, roots, entry, out) ?? panic("projection")).len(), 0)
+    assert_eq((store_nix_store_projection_for_entry_index(roots, entry, out, NixProjectionIndex.from_entries([StoreEntry]{entry})) ?? panic("index projection")).len(), 0)
     store_test_drop_roots(roots)
 }
 
@@ -281,10 +320,45 @@
     lease_root :: files.dirname(verified.lease.snapshot_root)
     files.write(files.join(out, "payload"), "mutated outside cooperative lock") ?? panic("mutate")
     verified.lease.validate() ?? panic("validate")
-    stable :: verified.lease.stable_path(files.join(out, "payload")) ?? panic("stable path")
-    assert_eq(files.read(stable) ?? panic("read stable"), "trusted")
+    assert_eq(verified.lease.read_output("payload") ?? panic("read leased payload"), "trusted")
     ^verified.lease.release()
     assert(!files.exists(lease_root))
+    store_test_drop_roots(roots)
+}
+
+// Run `argv` in a child that `lease` is passed to, rendering each argument
+// and the optional PATH for exactly that child.
+fn store_test_run_leased(lease: &CacheLease, argv: [LeaseText], path: LeaseText?) -[FS, Env, Exec]> ProcessReceipt {
+    planned := LeaseBinding.empty()
+    lease.plan_binding(&planned)
+    rendered := [String]{}
+    loop arg in argv -> &rendered.push(arg.render(planned) ?? panic("render leased argv: {err.message()}"))
+    bound := LeaseBinding.empty()
+    spec := &lease.keep_open_for(process.cmd(rendered), &bound) ?? panic("pass lease: {err.message()}")
+    if path == .Val(search) -> spec = spec.env("PATH", search.render(bound) ?? panic("render leased PATH: {err.message()}"))
+    spec.run() ?? panic("run leased child: {err}")
+}
+
+#Test("store leased child path renders only for a child the lease is passed to") {
+    if !sys.is_linux() -> return
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    out :: files.join(roots.root, "child-path-output")
+    files.create_dir_all(out) ?? panic("fixture dir")
+    files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
+    envelope :: Envelope.for_output(out, "child-path@mine", "core-source")
+    entry :: store_record_verified(&verification, roots, "child-path", "1", "child-path@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
+    lease := store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
+    payload :: lease.child_path(files.join(out, "payload")) ?? panic("child path")
+    if payload.render(LeaseBinding.empty()) == {
+        .Err(error) -> assert(error == .Unbound(_))
+        .Ok(_) -> panic("lease text rendered for a child that holds no lease")
+    }
+    files.write(files.join(out, "payload"), "mutated after leasing") ?? panic("mutate")
+    read :: store_test_run_leased(&lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("cat \"$0\""), payload}, None)
+    assert(read.success)
+    assert_eq(read.output, "trusted")
+    lease.release()
     store_test_drop_roots(roots)
 }
 
@@ -318,18 +392,18 @@
     files.write(files.join(out, "payload"), "trusted") ?? panic("fixture payload")
     envelope :: Envelope.for_output(out, "typed@mine", "core-source")
     entry :: store_record_verified(&verification, roots, "typed", "1", "typed@mine", out, "", "", envelope, store_test_identity()) ?? panic("record")
-    fresh :: VerifiedRealization{lease: store_snapshot_lease(&verification, roots, entry) ?? panic("lease"), entry: entry, source_state_value: SourceState.Built}
+    fresh := VerifiedRealization{lease: store_snapshot_lease(&verification, roots, entry) ?? panic("lease"), entry: entry, source_state_value: SourceState.Built}
     assert(fresh.consumption_status() == ConsumptionStatus.Consumable)
     assert_eq(fresh.source_state(), SourceState.Built)
     assert_eq(fresh.lease.status(), ConsumptionStatus.Consumable)
-    assert_eq(fresh.lease.wrapper_dir(), None)
-    assert_eq(fresh.lease.nix_store_projection(), [NixProjectionPath]{})
-    assert(fresh.lease.stable_path(files.join(out, "payload")) == .Ok(_))
+    assert(fresh.lease.child_bin_dir() == None)
+    assert_eq(fresh.lease.nix_store_projection().len(), 0)
+    assert(fresh.lease.child_path(files.join(out, "payload")) == .Ok(_))
     if fresh.lease.profile_install_receipt() == {
         .Err(error) -> store_test_assert_other_read_error(error, "verified tool lease has no executables")
         .Ok(_) -> panic("empty lease acquired a profile receipt")
     }
-    if fresh.lease.copy_profile_executable("missing", files.join(roots.root, "unused-profile-copy")) == {
+    if &fresh.lease.copy_profile_executable("missing", files.join(roots.root, "unused-profile-copy")) == {
         .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
         .Ok(_) -> panic("missing member produced a profile copy")
     }
@@ -358,19 +432,19 @@
         realized_at: 0,
         last_used_at: 0,
     }
-    missing :: VerifiedRealization{lease: store_snapshot_lease(&verification, roots, missing_entry) ?? panic("lease"), entry: missing_entry, source_state_value: SourceState.Built}
+    missing := VerifiedRealization{lease: store_snapshot_lease(&verification, roots, missing_entry) ?? panic("lease"), entry: missing_entry, source_state_value: SourceState.Built}
     assert(missing.consumption_status() == .NonConsumable(_))
     assert_eq(missing.lease.status(), missing.consumption_status())
-    assert_eq(missing.lease.wrapper_dir(), None)
-    assert_eq(missing.lease.nix_store_projection(), [NixProjectionPath]{})
-    assert(missing.lease.stable_path(missing_out) == .Err(_))
-    // Rust CacheLease::stable_path returns io::Result, not a domain wrapper:
-    // its non-consumable Other kind and reason survive the consumer handoff.
+    assert(missing.lease.child_bin_dir() == None)
+    assert_eq(missing.lease.nix_store_projection().len(), 0)
+    assert(missing.lease.child_path(missing_out) == .Err(_))
+    // The non-consumable Other kind and reason survive the consumer handoff
+    // rather than collapsing into a domain wrapper.
     reason :: if missing.consumption_status() == {
         .NonConsumable(reason) -> reason
         .Consumable -> panic("missing output became consumable")
     }
-    if missing.lease.stable_path(missing_out) == {
+    if missing.lease.child_path(missing_out) == {
         .Err(error) -> if error == {
             .Other(context) -> assert_eq(context.cause, Val(reason))
             else -> panic("non-consumable lease changed its I/O error kind")
@@ -381,7 +455,7 @@
         .Err(error) -> store_test_assert_other_read_error(error, reason)
         .Ok(_) -> panic("non-consumable lease acquired a profile receipt")
     }
-    if missing.lease.copy_profile_executable("tool", files.join(roots.root, "unpublished-copy")) == {
+    if &missing.lease.copy_profile_executable("tool", files.join(roots.root, "unpublished-copy")) == {
         .Err(error) -> store_test_assert_other_read_error(error, reason)
         .Ok(_) -> panic("non-consumable lease produced a profile copy")
     }
@@ -405,16 +479,15 @@
     envelope :: Envelope.for_output(out, "fd-view@mine", "core-source")
     store_record_verified(&verification, roots, "fd-view", "1", "fd-view@mine", out, files.join(out, "bin"), "", envelope, store_test_identity()) ?? panic("record")
     hit :: store_find_verified_by_reference(&verification, roots, "fd-view@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
-    verified :: hit ?? panic("record must verify")
-    lease :: verified.lease
-    projected_bin :: lease.projected_bin_dir() ?? panic("projected bin")
-    assert(projected_bin.starts_with("/proc/self/fd/"))
-    assert(!store_path_starts_with(projected_bin, out))
-    stable_tool :: lease.stable_path(tool) ?? panic("stable tool")
-    explicit_tool :: lease.executable_for(tool) ?? panic("executable")
-    assert_eq((process.cmd([String]{explicit_tool}).run() ?? panic("run")).output, "trusted")
-    assert(lease.executable_for(files.join(out, "bin/other-tool")) == None)
-    assert(lease.executable_for_command(files.join(out, "bin/other-tool")) == .Err(_))
+    verified := hit ?? panic("record must verify")
+    bin :: verified.lease.child_bin_dir() ?? panic("leased bin")
+    // The leased bin is named by a descriptor, so only a child it was passed
+    // to can resolve it.
+    assert(bin.render(LeaseBinding.empty()) == .Err(_))
+    explicit_tool :: verified.lease.executable_for(tool) ?? panic("executable")
+    assert_eq(store_test_run_leased(&verified.lease, [LeaseText]{explicit_tool}, None).output, "trusted")
+    assert(verified.lease.executable_for(files.join(out, "bin/other-tool")) == None)
+    assert(verified.lease.executable_for_command(files.join(out, "bin/other-tool")) == .Err(_))
 
     moved :: files.join(roots.root, "fd-view-original")
     attacker :: files.join(roots.root, "fd-view-attacker")
@@ -424,27 +497,23 @@
     files.set_mode(files.join(attacker, "bin/tool"), 493) ?? panic("chmod")
     files.symlink(attacker, out) ?? panic("swap link")
 
-    lease.validate() ?? panic("validate")
-    confined_tool :: lease.executable_for(tool) ?? panic("confined executable")
-    assert_eq((process.cmd([String]{confined_tool}).run() ?? panic("run")).output, "trusted")
-    assert(lease.executable_for(files.join(attacker, "bin/tool")) == None)
-    wrapper :: lease.wrapper_dir() ?? panic("wrapper dir")
-    assert(files.set_mode(wrapper, 493) == .Err(_))
-    assert(files.remove(files.join(wrapper, "tool")) == .Err(_))
-    lease.validate() ?? panic("validate")
-    store_make_tree_writable_for_removal(lease.snapshot_root) ?? panic("chmod snapshot")
-    snapshot_tool :: files.join(lease.snapshot_root, "bin/tool")
-    files.remove(snapshot_tool) ?? panic("remove snapshot tool")
-    files.write(snapshot_tool, "#!/bin/sh\nprintf snapshot-attacker") ?? panic("snapshot attacker")
-    files.set_mode(snapshot_tool, 493) ?? panic("chmod")
-
-    output :: process.cmd([String]{stable_tool}).run() ?? panic("run stable")
-    assert(output.success)
-    assert_eq(output.output, "trusted")
-    nested :: process.cmd([String]{"/bin/sh", "-c", "exec tool"}).env("PATH", "{wrapper}:/usr/bin:/bin").run() ?? panic("run nested")
+    verified.lease.validate() ?? panic("validate")
+    confined_tool :: verified.lease.executable_for(tool) ?? panic("confined executable")
+    assert_eq(store_test_run_leased(&verified.lease, [LeaseText]{confined_tool}, None).output, "trusted")
+    assert(verified.lease.executable_for(files.join(attacker, "bin/tool")) == None)
+    nested :: store_test_run_leased(&verified.lease, [LeaseText]{LeaseText.plain("/bin/sh"), LeaseText.plain("-c"), LeaseText.plain("exec tool")}, Val(bin.append(":/usr/bin:/bin")))
     assert(nested.success)
     assert_eq(nested.output, "trusted")
     assert_eq(files.read(files.join(out, "bin/tool")) ?? panic("read attacker"), "#!/bin/sh\nprintf attacker")
+
+    // Tampering with the private snapshot itself is caught before any
+    // further consumer receives the lease.
+    store_make_tree_writable_for_removal(verified.lease.snapshot_root) ?? panic("chmod snapshot")
+    snapshot_tool :: files.join(verified.lease.snapshot_root, "bin/tool")
+    files.remove(snapshot_tool) ?? panic("remove snapshot tool")
+    files.write(snapshot_tool, "#!/bin/sh\nprintf snapshot-attacker") ?? panic("snapshot attacker")
+    files.set_mode(snapshot_tool, 493) ?? panic("chmod")
+    assert(verified.lease.validate() == .Err(_))
     ^verified.lease.release()
     store_test_drop_roots(roots)
 }
@@ -465,7 +534,7 @@
     }
     envelope :: Envelope.for_output(out, "profile@mine", "core-source")
     entry :: store_record_verified(&verification, roots, "profile", "1", "profile@mine", out, bin, "", envelope, store_test_identity()) ?? panic("record")
-    lease :: store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
+    lease := store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
     receipt :: lease.profile_install_receipt() ?? panic("profile receipt")
     assert_eq(receipt.store_root, roots.root)
     assert_eq(receipt.package, "profile")
@@ -474,19 +543,19 @@
     assert_eq(receipt.output_hash, entry.envelope.output_hash)
     assert_eq(receipt.executable_members, [String]{"a-tool", "z-tool"})
     destination :: files.join(roots.root, "profile-tool")
-    copied :: lease.copy_profile_executable("z-tool", destination) ?? panic("profile copy")
+    copied :: &lease.copy_profile_executable("z-tool", destination) ?? panic("profile copy")
     assert_eq(files.read(destination) ?? panic("read copy"), "abc")
     assert_eq(copied.digest, "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     proved :: store_profile_file_proof(destination) ?? panic("profile proof")
     assert_eq(proved.digest, copied.digest)
     assert_eq(proved.mode, copied.mode)
     if sys.is_unix() -> assert(((copied.mode).bit_and(0o111)) != 0)
-    if lease.copy_profile_executable("z-tool", destination) == {
+    if &lease.copy_profile_executable("z-tool", destination) == {
         .Err(error) -> assert(error == .AlreadyExists(_))
         .Ok(_) -> panic("exclusive profile create overwrote a destination")
     }
     assert_eq(files.read(destination) ?? panic("read refused destination"), "abc")
-    if lease.copy_profile_executable("not-a-member", files.join(roots.root, "unused-copy")) == {
+    if &lease.copy_profile_executable("not-a-member", files.join(roots.root, "unused-copy")) == {
         .Err(error) -> store_test_assert_other_read_error(error, "verified receipt lost executable member")
         .Ok(_) -> panic("unrecorded member produced a profile copy")
     }

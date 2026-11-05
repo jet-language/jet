@@ -341,13 +341,3 @@ fn env_e1292_bad_ref(query: String, suggestions: [String], why_detail: String) -
     fix :: if suggestions.len() == 0 -> "pass a valid git ref (branch, tag, or commit); {why_detail}" else -> "did you mean: {suggestions.join(", ")}?"
     MemberSelectError{diagnostic: diagnostic_from_registry("E1295", None, "git ref `{query}` not found", "`--affected-since` needs a resolvable git ref so Jet can diff member input hashes against that baseline ({why_detail}).", fix)}
 }
-
-// Reject the pnpm-style `--filter` pattern DSL.
-fn env_reject_filter_dsl(args: [String]) -> Diagnostic? Never! {
-    loop arg in args {
-        if arg == "--filter" || arg.starts_with("--filter=") {
-            return Val(diagnostic_from_registry("E1296", None, "`{arg}` is not a Jet workspace selector", "Jet rejects pnpm-style `--filter` pattern DSLs; Jet uses exact `-p <member>` and computed `--affected` / `--affected-since <ref>` instead.", "use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`."))
-        }
-    }
-    None
-}

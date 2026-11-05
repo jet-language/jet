@@ -348,7 +348,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     compose_started :: time.start()
     if phase_timing -> term.eprint("TIMING compose-preamble: {time.elapsed(compose_started)}")
     loop spec in plan.refs {
-        if live_tty -> &live.set_aggregate_status("Resolving {spec.package}", completed_steps, total_steps)
+        if live_tty -> &live.set_aggregate_status("Resolving", completed_steps, total_steps)
         style :: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
         warm_hit :: cli_take_warm_realization(&warm_pool, spec.raw)
         step_outcome :: if warm_hit == {

@@ -1,0 +1,26 @@
+# Card #3590 c192/c193: every jetpack verb refuses a flag it does not take
+# with the one generic E2102 error that lists the verb's flags. Retired
+# spellings (`--env-profile`, `--profile`, `--prepare`, `--filter`) get the
+# same error, and a switch no longer turns into a positional.
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+step: jetpack env info --env-profile full --no-color
+exit: 2
+stderr.trim_end: = ../../fixtures/jetpack-diagnostics/unknown_flag.stderr # trailing newline is the renderer's, not the report's
+step: jetpack env --profile work --no-color
+exit: 2
+stderr: ~ "`--profile` isn't a flag `env` understands." # retired spelling, generic error
+step: jetpack use --prepare jq@jetpack --no-color
+exit: 2
+stderr: ~ "`--prepare` isn't a flag `use` understands." # retired spelling, generic error
+step: jetpack env --filter=billing... --no-color
+exit: 2
+stderr: ~ "`--filter=billing...` isn't a flag `env` understands." # retired filter DSL, generic error
+step: jetpack hangar du --bogus --no-color
+exit: 2
+stderr: ~ "`--bogus` isn't a flag `hangar` understands." # unknown switch on a nested verb
+stderr: ~ "`--all`" # the error lists the verb's own flags
+step: jetpack search --repair ripgrep --no-color
+exit: 2
+stderr: ~ "Error [jet.UnknownFlag]: `--repair` isn't a flag `search` understands." # a switch never becomes a positional
