@@ -45,6 +45,7 @@ fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     plan :: kit_steps_parse_case(source)
     exact_id :: context.options.cases != "" || context.options.filter == entry.path || kit_expect_named(context.options.bless.ids, entry.path)
     if plan.error == "" && plan.opt_in != "" && !context.options.opt_in && !exact_id -> return [KitOutcome{verdict: kit_expect_verdict("OPT-IN", plan.opt_in), run: kit_steps_action_run()}]
+    if plan.error == "" && plan.repo_cwd != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", "repo-cwd is golden-only; a case runs in its own work directory"), run: kit_exec_failed("repo-cwd is golden-only")}]
     work :: files.join(context.scratch, "work")
     files.create_dir_all(work) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "case work: {err}"), run: kit_exec_failed("{err}")}]
     // Steps owns the single grammar, host requirements, fixture state staging,

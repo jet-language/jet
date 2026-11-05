@@ -194,6 +194,14 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.opt_in = value
             next
         }
+        if key == "repo-cwd" {
+            if value == "" || plan.repo_cwd != "" || plan.steps.len() != 0 {
+                plan.error = "line {line_number}: repo-cwd needs one nonempty header reason"
+                return plan
+            }
+            plan.repo_cwd = value
+            next
+        }
         if key == "host-port" {
             port :: Int.parse(value.copy()) ?? 0
             if port < 1 || port > 65535 || plan.host_port != 0 || plan.steps.len() != 0 {

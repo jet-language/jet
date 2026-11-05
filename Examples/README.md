@@ -34,6 +34,16 @@ An example that binds a fixed TCP port declares `host-port: N` in its `.case`;
 both runners hold that port's host-wide lock while it runs, so concurrent runs
 on one host take turns instead of failing to bind.
 
+An example that reads files by their repository path, such as
+[`path.jet`](features/io/path.jet) walking `Examples/features/io`, declares
+`repo-cwd: <reason>` once, before any steps, in its `.case`. The testkit then
+runs the built program from the root of its staged source copy, which keeps
+the repository layout, instead of from the project directory. The checkout is
+never written, and `file:` assertions stay relative to the project.
+`run-feature-examples.mjs` already runs such an example from the repository
+root, or from a staged copy with the same layout, and ignores the header. Only
+goldens take the header; a `tests/cases` case refuses it.
+
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 

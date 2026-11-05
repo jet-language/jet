@@ -127,6 +127,32 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     files.remove_all(root) ?? panic("remove tier-expected scratch")
 }
 
+#Test("golden repo-cwd runs the program from the staged source root, header only") {
+    root :: kit_test_golden_scratch("repo-cwd")
+    project :: "Examples/features/topic"
+    entry :: KitEntry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    kit_exec_write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    env :: kit_test_golden_env(root)
+    tier :: kit_golden_tiers()[1]
+    // Without the header the program runs from its staged project directory.
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_WHERE=1\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "project\n")
+    assert_eq(kit_golden_run_entry(entry, tier, env, files.join(root, "project"), kit_test_golden_bless()).verdict.status, "PASS")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "repo-cwd: the program reads its repository path\nenv: JET_TESTKIT_WHERE=1\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "source root\n")
+    assert_eq(kit_golden_run_entry(entry, tier, env, files.join(root, "source-root"), kit_test_golden_bless()).verdict.status, "PASS")
+    loop source in ["repo-cwd:\nstep: true\n", "repo-cwd: one\nrepo-cwd: two\nstep: true\n", "step: true\nrepo-cwd: late\n"] {
+        assert(kit_steps_parse_case(source).error.contains("repo-cwd needs one nonempty header reason"))
+    }
+    // A case has no staged source root, so it refuses the header.
+    cases_root :: cases_test_root("repo-cwd")
+    cases_test_source(cases_root, "rooted", "repo-cwd: cases have no staged source root\nstep: printf ok\n")
+    refused :: kit_cases_run(cases_test_entry("rooted"), cases_test_context(cases_root, files.join(cases_root, "scratch")))
+    assert_eq(refused[0].verdict.status, "REFUSED")
+    files.remove_all(cases_root) ?? panic("remove repo-cwd cases scratch")
+    files.remove_all(root) ?? panic("remove repo-cwd scratch")
+}
+
 #Test("feature discovery stops at projects and package workspace boundaries") {
     root :: kit_test_golden_scratch("discovery")
     kit_exec_write(files.join(root, "Examples/features/topic/flat.jet"), "fn run() {{}}\n")

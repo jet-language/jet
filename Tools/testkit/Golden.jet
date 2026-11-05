@@ -216,6 +216,15 @@ fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previo
         actual.argv = argv
     }
     if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
+    // `repo-cwd:` runs the program from the staged source root. The stage keeps
+    // the repository layout, so a repo-relative path the program reads (its own
+    // directory, say) resolves as it does from the checkout, and the checkout
+    // itself is never written. File assertions stay relative to the project.
+    if command == "built" && plan.repo_cwd != "" {
+        from_root := context
+        from_root.work = golden.source
+        return kit_steps_invoke(actual, index, from_root, state)
+    }
     kit_steps_invoke(actual, index, context, state)
 }
 

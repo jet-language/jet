@@ -20,6 +20,8 @@ case "$1" in
             program="$here/echo.sh"
         elif [ "${JET_TESTKIT_STDERR:-}" = 1 ]; then
             program="$here/notice.sh"
+        elif [ "${JET_TESTKIT_WHERE:-}" = 1 ]; then
+            program="$here/where.sh"
         else
             case "$*" in *--release*) program="$here/wrong.sh" ;; esac
         fi
