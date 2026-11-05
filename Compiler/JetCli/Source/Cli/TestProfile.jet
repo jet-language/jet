@@ -24,8 +24,7 @@ use {
         evidence_outcome_name,
         evidence_report_read,
     ]
-    jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_STRING, lex]
-    jet_pkg_model.[ComposeError, PackageFacts, TEST_SUITE_TESTS]
+    jet_pkg_model.[ComposeError, PackageFacts, TEST_CODE_SUITES_FILE, TEST_SUITE_TESTS, pkg_test_code_suites]
     jet_testkit.[kit_exec_defaults, kit_execute_suites, kit_expect_bless_error]
 }
 
@@ -42,8 +41,6 @@ JET_CLI_TEST_ROW_FAILED :: "failed"
 // `__suite_run`).
 JET_CLI_TEST_SUITE_ENV :: "JET_TEST_SUITE"
 JET_CLI_TEST_SUITE_ROWS_ENV :: "JET_TEST_SUITE_ROWS"
-// The file whose `fn test` declares a package's code suites.
-JET_CLI_TEST_SUITES_FILE :: "test.jet"
 
 // One child `jet test` of a profile run.
 struct JetCLITestProfileRun {
@@ -158,7 +155,7 @@ fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_def
     // Each code suite is one child running test.jet's `fn test`.
     loop suite in profile.suites {
         if !code_suites.contains(suite) -> next
-        args := [String]{"test", jet_cli_rooted_join(root, JET_CLI_TEST_SUITES_FILE)}
+        args := [String]{"test", jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)}
         if color -> &args.push("--color=always")
         &runs.push(JetCLITestProfileRun{label: suite.copy(), rows_file: "{suite}.rows", args: ^args, suite: suite.copy()})
     }
@@ -392,27 +389,11 @@ fn jet_cli_test_profile_rows(records: [EvidenceRecord]) -> [String] Never! {
     rows
 }
 
-// The code suites test.jet's `fn test` declares under `root`: the literal
-// name of each `.suite("name", …)` call, in source order. Sema refuses a
-// computed name (E0635), so the tokens hold every one without running code.
+// The code suites test.jet's `fn test` declares under `root` (PackageModel
+// `pkg_test_code_suites`).
 fn jet_cli_test_code_suites(root: String) -> [String] {
-    source :: cli_files.read(jet_cli_rooted_join(root, JET_CLI_TEST_SUITES_FILE)) ?? return [String]{}
-    jet_cli_test_code_suites_in(source)
-}
-
-fn jet_cli_test_code_suites_in(source: String) -> [String] Never! {
-    lexed :: lex(source.bytes())
-    names := [String]{}
-    loop index in 1..<lexed.tokens.len() {
-        if index + 2 >= lexed.tokens.len() -> break
-        method :: lexed.tokens[index]
-        literal :: lexed.tokens[index + 2]
-        if method.kind != TOKEN_IDENT || lexed.tokens[index - 1].kind != TOKEN_DOT || lexed.tokens[index + 1].kind != TOKEN_LPAREN || literal.kind != TOKEN_STRING -> next
-        if jet_cli_repl_bytes(source, method.span.start, method.span.end) != "suite" -> next
-        name :: jet_cli_repl_bytes(source, literal.span.start + 1, literal.span.end - 1)
-        if name != "" && !names.contains(name) -> &names.push(name)
-    }
-    names
+    source :: cli_files.read(jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)) ?? return [String]{}
+    pkg_test_code_suites(source)
 }
 
 // Why a code-suite child stopped: the first stderr line naming a panic (the
@@ -568,9 +549,4 @@ fn jet_cli_test_rows_report(site: String, shown: String, count: Int, diff: JetCL
     assert_eq(jet_cli_test_code_rows("", None).rows.len(), 0)
     assert_eq(jet_cli_test_stop_reason("building\npanic: no disk\n", 101), "panic: no disk")
     assert_eq(jet_cli_test_stop_reason("", 3), "exit code 3")
-}
-
-#Test("code suites are the literal names of `.suite(` calls") {
-    source :: "fn test(t: Test) -> Int {{\n    t.suite(\"perf\", perf_rows)\n    t.suite(\"selfhost\", rows -> rows.pass(\"x\"))\n    suite(\"no\")\n    t.run()\n}}\n"
-    assert_eq(jet_cli_test_code_suites_in(source), [String]{"perf", "selfhost"})
 }
