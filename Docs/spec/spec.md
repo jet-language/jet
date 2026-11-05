@@ -884,7 +884,7 @@ function-value effect bound is written `fn(T1, T2) -[]> R`; other effect sets
 replace the empty set. Unmarked parameters have plain read access. A named
 function becomes a value only when every parameter can be called with that read
 access; parameters requiring `&` or `^` keep the function direct-call-only
-(S47, D-MEM-PARAM1).
+(**E0227**; S47, D-MEM-PARAM1).
 
 The same structural callable-value comparison applies inside collection and
 aggregate slots: a named function's declaration call metadata does not make

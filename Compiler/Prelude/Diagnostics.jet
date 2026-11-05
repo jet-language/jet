@@ -2491,6 +2491,18 @@ struct ReceiverMarkMismatch {
     }
 }
 
+struct MarkedFunctionValue {
+    impl Diagnostic {
+        code :: "E0227"
+        meaning :: "A named function with a `&` or `^` parameter is used as a function value"
+        detail :: true
+        no_fix :: .Ambiguous
+        fn what(self) -> String { "A function whose parameter is marked `&` or `^` is used as a value instead of being called." }
+        fn why(self) -> String { "A function type gives each parameter plain read access. A value of this function would drop the `&` or `^` mark its callers must write, so the function can only be called directly." }
+        fn fix(self) -> String { "Call the function directly with the mark, or pass a lambda that makes that call." }
+    }
+}
+
 struct InvalidReceiverFootprint {
     impl Diagnostic {
         code :: "E0231"

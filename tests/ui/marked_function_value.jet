@@ -1,0 +1,31 @@
+// A function type gives each parameter read access, so a named function
+// with a `&` or `^` parameter is called directly and never used as a value.
+struct Hooks {
+    on_int: fn(Int) -> Unit
+    on_text: fn(String) -> Int
+}
+
+fn bump(x: &Int) {
+    x += 1
+}
+
+fn consume(s: ^String) -> Int {
+    s.len()
+}
+
+fn show(n: Int) {
+    print(n)
+}
+
+fn call_with(f: fn(Int) -> Unit) {
+    f.call(1)
+}
+
+fn run() {
+    hooks :: Hooks{on_int: bump, on_text: consume}
+    call_with(bump)
+    call_with(show)
+    n := 1
+    bump(&n)
+    print(hooks.on_text.call("a"))
+}

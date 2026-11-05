@@ -4134,11 +4134,22 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
+        if kind == SymbolKind.Function && sema_expr_marked_function_value(name, scopes.bindings[index].symbol.id, span, environment, program, &diagnostics) -> return None
         value_ty :: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_name) else -> ty
         value :: sema_node(&context, value_ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     result
+}
+
+// E0227: a named function with a `&` or `^` parameter stays direct-call-only.
+// A function type gives every parameter read access, so its value would drop
+// the mark each caller writes.
+fn sema_expr_marked_function_value(name: String, id: SymbolID, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+    param :: sema_scope_declaration_function_marked_param(environment, program, id) ?? return false
+    mark :: if param.convention == AccessConvention.Write -> "&" else -> "^"
+    &diagnostics.push(sema_error("E0227", span, "`{name}` can't be used as a function value because its parameter `{param.name}` is `{mark}`", "a function type gives each parameter plain read access, so a value of `{name}` would drop the `{mark}` its callers must write", "call `{name}` directly with the `{mark}` mark, or pass a lambda that makes that call"))
+    true
 }
 
 // A function's symbol type spells its parameter and result types as its

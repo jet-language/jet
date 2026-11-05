@@ -38,6 +38,7 @@ use jet_foundation.[
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
+    Param,
     TTypeDef,
     Type,
     TypeParam,
@@ -2463,4 +2464,26 @@ fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment
 fn sema_scope_nominal_function_type_params(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> [TypeParam] Never! {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
     [TypeParam]{}
+}
+
+// The first `&` or `^` parameter when sema_scope_declaration_site(environment,
+// program, id) is a function, else none. Such a function is direct-call-only:
+// a function type has read parameters only.
+fn sema_scope_declaration_function_marked_param(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Param? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+    if site == .Local(index) {
+        if environment.declarations[index].item == .Func(func) -> return sema_scope_first_marked_param(func.params)
+        return None
+    }
+    if program.registration_graph == .Val(graph) {
+        if site == .Function(module_index, row) -> return sema_scope_first_marked_param(graph.modules[module_index].functions[row].declaration.params)
+    }
+    None
+}
+
+fn sema_scope_first_marked_param(params: [Param]) -> Param? Never! {
+    loop param in params {
+        if param.convention != AccessConvention.Read -> return Val(param)
+    }
+    None
 }

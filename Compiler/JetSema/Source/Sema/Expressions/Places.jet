@@ -811,6 +811,7 @@ fn sema_expression_module_constant_read(graph: SemaRegistrationGraph, resolved: 
     if source_function {
         signature :: symbol.ty ?? return SemaMethodSpecialCheck{handled: false, value: None}
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
+        if sema_expr_marked_function_value(label, symbol.id, span, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         function :: sema_node(&context, sema_function_value_type(program, signature, symbol.module_name), NodeKind.ConstRef{symbol: symbol.id}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(function, expected, environment, program, &diagnostics)}
     }
