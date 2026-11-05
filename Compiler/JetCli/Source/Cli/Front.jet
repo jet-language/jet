@@ -218,10 +218,11 @@ enum JetCLIPlan {
     ReplChild(session: String, invocation: JetCLIInvocationAuthority?)
     // `jet eval <expression>` (Repl.jet): one REPL turn.
     EvalExpression(source: String, color: Bool, json: Bool)
-    // `jet prove TARGET [--lens L]...` (ProveReport.jet): the checked front
-    // end, the test producer, the ProofReport and its artifact. `lenses`
-    // only shape the human report.
-    Prove(target: JetCLIProveTarget, lenses: [String], color: Bool, json: Bool)
+    // `jet prove TARGET [--lens L]... [--capture | --capture-sensitive |
+    // --replay]` (ProveReport.jet): the checked front end, the test producer,
+    // the ProofReport and its artifact. `lenses` only shape the human report;
+    // `capture` and `replay` add the replay preflight (ProveReplay.jet).
+    Prove(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool)
 }
 
 // One native `jet fmt` invocation (Source/main.rs `"fmt"` -> `run_fmt`).

@@ -76,15 +76,12 @@ fn jet_cli_prove(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
         }
         return jet_cli_prove_fail(refusal, color, json)
     }
-    form := "prove"
-    if request.capture == .Val(capture) -> form = if capture.sensitive -> "prove --capture-sensitive" else -> "prove --capture"
-    if request.replay != None -> form = "prove --replay"
-    if request.save != None -> form = "prove --save"
-    if request.unsave != None -> form = "prove --unsave"
+    if request.unsave != None -> return jet_cli_not_ported("prove --unsave", color)
+    if request.save != None -> return jet_cli_not_ported("prove --save", color)
     // Lenses only choose what the human report shows; `solver` is the one
-    // producer lens, and it runs inside the same report.
-    if form == "prove" -> return JetCLIPlan.Prove{target: target, lenses: request.lenses.copy(), color: color, json: json}
-    jet_cli_not_ported(form, color)
+    // producer lens, and it runs inside the same report. Capture and replay
+    // run their preflight inside it too.
+    JetCLIPlan.Prove{target: target, lenses: request.lenses.copy(), capture: request.capture.copy(), replay: request.replay.copy(), color: color, json: json}
 }
 
 // Rust `lens_shows`: no lens shows every facet; `all` shows every facet but

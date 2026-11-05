@@ -1,7 +1,8 @@
 // Source/CmdProve.rs `run_prove` after its front, in the default form
 // (D-JPROOF1=A): the checked front end, the unit-test producer, the canonical
 // ProofReport, its `.jetproof` artifact and record index row, and the human
-// or `--json` output. Lenses, capture, replay, save and unsave are other forms.
+// or `--json` output. Capture and replay add their preflight
+// (ProveReplay.jet); lenses, save and unsave are other forms.
 use {
     cli_files :: core.files
     cli_process :: core.process
@@ -194,7 +195,7 @@ struct JetCLIProveStop {
     output: JetDriverVerbOutput
 }
 
-fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
     cwd :: cli_sys.current_dir() ?? return jet_cli_prove_refused(jet_cli_prove_target_refusal("couldn't resolve the current directory: {jet_cli_io_error_text(err)}"), color, json)
     members :: jet_cli_prove_members(target) ?? return jet_cli_prove_refused(err, color, json)
     groups :: jet_cli_prove_groups(members, color) ?? return err.output
@@ -205,6 +206,14 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], color: Bool, j
     failed := 0
     loop item in front.items {
         if item.diagnostic == None -> proved += 1 else -> failed += 1
+    }
+    // Capture and replay refuse what they cannot model before any program
+    // runs. A target that passed reaches the replay producer, which is not
+    // built; one whose front end failed reports that failure instead.
+    if capture != None || replay != None {
+        refused :: jet_cli_prove_replay_checks(identity.authority_root, members, capture, replay, color, json)
+        if refused == .Val(output) -> return output
+        if failed == 0 -> return jet_cli_not_ported_output(jet_cli_prove_replay_form(capture), color)
     }
     tests := JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts.copy(), consumed: [JetCLIRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
     if failed == 0 {
