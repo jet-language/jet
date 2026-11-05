@@ -86,7 +86,7 @@ fn store_hangar_doctor(verification: &StoreVerification, roots: HangarRoots, rep
     store_paths := requests.keys().to_list()
     &store_paths.sort()
     loop store_path in store_paths {
-        if store_admit_nix_closure_with_progress(&verification, roots, [NixOutputRequest]{requests[store_path]}, offline, None, None) == {
+        if store_admit_nix_closure_hangar_locked(&verification, roots, [NixOutputRequest]{requests[store_path]}, offline) == {
             .Ok(_) -> {}
             .Err(error) -> repair_errors[store_path] = error.message()
         }
@@ -275,8 +275,9 @@ fn store_scan_doctor_stage_dir(hangar: String, relative: String, admission_only:
 }
 
 // Rust `scan_doctor_cas`: CAS partials and files no object references. The
-// `.locks` namespace belongs to RuntimePolicy and is never removed: removing
-// it can split active shared-CAS lock holders across lock-file inodes.
+// `.locks` namespace and the `.jetpack.lock` owner file belong to
+// RuntimePolicy and are never removed: removing either can split active
+// shared-CAS lock holders across lock-file inodes.
 fn store_scan_doctor_cas(hangar: String, referenced: [String], report: &HangarDoctorReport) StoreError! -[FS]> {
     cas :: files.join(hangar, STORE_CAS_DIR)
     found :: store_node_stat(cas)
@@ -290,8 +291,11 @@ fn store_scan_doctor_cas(hangar: String, referenced: [String], report: &HangarDo
         metadata :: files.stat(entry.path)
         subject :: store_doctor_subject(hangar, entry.path)
         if {
-            entry.name == ".locks" -> {
+            entry.name == RUNTIME_LOCK_DIR -> {
                 if metadata.is_symlink || !metadata.is_dir -> &report.push("drift", subject, "CAS lock namespace is not a directory", DoctorRepair.NoRepair)
+            }
+            entry.name == RUNTIME_LOCK_OWNER_FILE -> {
+                if metadata.is_symlink || !metadata.is_file -> &report.push("drift", subject, "CAS lock owner file is not a regular file", DoctorRepair.NoRepair)
             }
             entry.name.ends_with(STORE_PARTIAL_SUFFIX) -> &report.push("stale stage", subject, "abandoned CAS partial", store_doctor_remove_repair(entry.path))
             referenced.contains(entry.name) -> {

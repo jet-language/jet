@@ -150,6 +150,11 @@ fn store_sorted_record_ids(graph: ClosureGraph) -> [String] Never! {
 // every consumer observes one receipt-bearing projection.
 fn store_list_checked(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
+    store_list_checked_unlocked(&verification, roots)
+}
+
+// `store_list_checked` for a caller that already holds the Hangar lock.
+fn store_list_checked_unlocked(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     _ :: store_migrate_closure_graph_unlocked(&verification, roots)
     entries :: store_list_unlocked(roots)
     healthy := [StoreEntry]{}
