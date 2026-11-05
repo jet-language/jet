@@ -50,15 +50,15 @@ extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
 extern Spec *jet_std_process_cmd(Text *const *, int64_t);
-extern Spec *jet_process_spec_stdout(const Spec *, int64_t);
-extern Spec *jet_process_spec_stderr(const Spec *, int64_t);
-extern Spec *jet_process_spec_timeout(const Spec *, int64_t);
+extern Spec *jet_process_spec_stdout(Spec *, int64_t);
+extern Spec *jet_process_spec_stderr(Spec *, int64_t);
+extern Spec *jet_process_spec_timeout(Spec *, int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
-extern Spec *jet_process_spec_output_limit(const Spec *, int64_t);
-extern Spec *jet_process_spec_env(const Spec *, const Text *, const Text *);
-extern Spec *jet_process_spec_terminal(const Spec *);
-extern Spec *jet_process_spec_detached(const Spec *);
-extern Spec *jet_std_process_spec_under(const Spec *, JetAuthority *);
+extern Spec *jet_process_spec_output_limit(Spec *, int64_t);
+extern Spec *jet_process_spec_env(Spec *, const Text *, const Text *);
+extern Spec *jet_process_spec_terminal(Spec *);
+extern Spec *jet_process_spec_detached(Spec *);
+extern Spec *jet_std_process_spec_under(Spec *, JetAuthority *);
 extern JetAuthority *jet_authority_from_rights(const uint64_t *, int64_t);
 extern void jet_rt_handle_drop_jet_authority(JetAuthority *);
 extern void jet_rt_handle_drop_process_spec(Spec *);
@@ -147,8 +147,9 @@ static bool receipt_has_signal(const ProcessReceipt *r) { return word(r, 32) != 
 static int64_t receipt_signal(const ProcessReceipt *r) { return jet_int_owned_to_i64(word(r, 32)); }
 static int64_t receipt_timed_out(const ProcessReceipt *r) { return word(r, 40); }
 
+// Builders consume the spec they are given and return it changed in place.
 static Spec *replace(Spec *old, Spec *next) {
-    jet_rt_handle_drop_process_spec(old);
+    check(next == old, "builder consumes its spec in place");
     return next;
 }
 

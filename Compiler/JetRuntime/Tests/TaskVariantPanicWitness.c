@@ -408,11 +408,11 @@ static void run_stop(int64_t mode) {
         assert(jet_rt_record_new_watch_event(mode == 9 ? 3 : 0, mode == 10 ? 6 : 0,
             WORD(&key), WORD(&other), 0, 0) == 0);
     } else if (mode >= 11 && mode <= 13) {
+        /* The builder consumes its spec before the range stop returns. */
         int64_t spec = jet_std_process_cmd(0, 0);
         int64_t result = mode == 11 ? jet_process_spec_stdin(spec, -1) :
             mode == 12 ? jet_process_spec_stdout(spec, -1) : jet_process_spec_stderr(spec, -1);
         assert(result == 0);
-        jet_rt_handle_drop_process_spec(spec);
     } else if (mode == 14) {
         int64_t size = jet_rt_record_new_terminal_size(80, 24);
         /* Constructor consumes Size before tag rejection, just like seed. */

@@ -74,6 +74,12 @@ fn process_text_list_push(list: I64, text: I64) {
     encoding_store(wrapping(list + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(list + DATA_SEQUENCE_LENGTH)) + I64{1})
 }
 #Export(c) fn jet_rt_handle_clone_process_spec(value: I64) -> I64 {
+    process_spec_clone(value, true)
+}
+// A launched execution keeps its spec for the receipt and limits, not for its
+// passed directories: the child already holds those, so the parent's copies
+// close when the spec that passed them ends, not when the collector lets go.
+fn process_spec_clone(value: I64, directories: Bool) -> I64 {
     result :: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
     coll_copy(value, result, PROCESS_SPEC_BYTES)
     // Field helpers lend Bool bytes, so ignore padding and normalize clone words.
@@ -92,7 +98,7 @@ fn process_text_list_push(list: I64, text: I64) {
     terminal :: encoding_word(wrapping(value + PROCESS_SPEC_TERMINAL))
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), if (terminal == I64{0}) -> I64{0} else -> jet_rt_handle_clone_terminal_policy(terminal))
     encoding_store(wrapping(result + PROCESS_SPEC_POLICY_WIRE), process_optional_text_clone(encoding_word(wrapping(value + PROCESS_SPEC_POLICY_WIRE))))
-    encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), spawn_dirs_clone(encoding_word(wrapping(value + PROCESS_SPEC_DIRECTORIES))))
+    encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), if directories -> spawn_dirs_clone(encoding_word(wrapping(value + PROCESS_SPEC_DIRECTORIES))) else -> I64{0})
     result
 }
 #Export(c) fn jet_rt_handle_drop_process_spec(value: I64) {
@@ -198,13 +204,16 @@ fn jet_std_process_cmd_owned(cmd: I64) -> I64 {
     }
     jet_std_process_cmd_owned(cmd)
 }
+// Each builder consumes the spec it is given (the route's receiver is moved,
+// RouteHandle `process.spec.*`) and returns it changed in place, so the rows
+// it owns, held directories included, have exactly one owner.
 #Export(c) fn jet_process_spec_arg(value: I64, extra: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     process_text_list_push(encoding_word(wrapping(result + PROCESS_SPEC_CMD)), extra)
     result
 }
 #Export(c) fn jet_process_spec_args_extend(value: I64, data: I64, length: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     if (data == I64{0}) -> return result
     cmd :: encoding_word(wrapping(result + PROCESS_SPEC_CMD))
     at := I64{0}
@@ -215,7 +224,7 @@ fn jet_std_process_cmd_owned(cmd: I64) -> I64 {
     result
 }
 #Export(c) fn jet_process_spec_cwd(value: I64, cwd: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     jet_rt_string_drop(encoding_word(wrapping(result + PROCESS_SPEC_CWD)))
     encoding_store(wrapping(result + PROCESS_SPEC_CWD), jet_rt_string_clone(cwd))
     result
@@ -244,7 +253,7 @@ fn process_spec_env_forget(list: I64, stride: I64, name: I64) {
     encoding_store(wrapping(list + DATA_SEQUENCE_LENGTH), kept)
 }
 #Export(c) fn jet_process_spec_env(value: I64, name: I64, text: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), DATA_TREE_ELEMENT_BYTES, name)
     process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET)), DATA_TREE_ENTRY_BYTES, name)
     list :: encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET))
@@ -255,31 +264,31 @@ fn process_spec_env_forget(list: I64, stride: I64, name: I64) {
     result
 }
 #Export(c) fn jet_process_spec_env_remove(value: I64, name: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_SET)), DATA_TREE_ENTRY_BYTES, name)
     process_spec_env_forget(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), DATA_TREE_ELEMENT_BYTES, name)
     process_text_list_push(encoding_word(wrapping(result + PROCESS_SPEC_ENV_REMOVE)), name)
     result
 }
 #Export(c) fn jet_process_spec_env_clear(value: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), I64{1})
     result
 }
 #Export(c) fn jet_process_spec_detached(value: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     encoding_store(wrapping(result + PROCESS_SPEC_DETACHED), I64{1})
     result
 }
 // core.process.__spec_parent_death (process.run_all): the child gets SIGKILL
 // when this process dies (PR_SET_PDEATHSIG); a detached spec ignores it.
 #Export(c) fn jet_process_spec_parent_death(value: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     encoding_store(wrapping(result + PROCESS_SPEC_PARENT_DEATH), I64{1})
     result
 }
 fn process_spec_raw_replace(value: I64, field: I64, raw: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     encoding_enum_drop(encoding_word(wrapping(result + field)))
     encoding_store(wrapping(result + field), process_raw_box(raw))
     result
@@ -296,10 +305,13 @@ fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
     // Frozen CAbiRoutes range_stop, not exact Int native() conversion.
     if (mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE) {
         trap_native_index_range_stop()
-        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_process_spec(value)
+            return I64{0}
+        }
     }
     if (field == PROCESS_SPEC_STDIN) -> return process_spec_raw_replace(value, field, mode)
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     encoding_store(wrapping(result + field), mode)
     result
 }
@@ -307,13 +319,13 @@ fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
 #Export(c) fn jet_process_spec_stdout(value: I64, mode: I64) -> I64 { process_spec_mode(value, mode, PROCESS_SPEC_STDOUT) }
 #Export(c) fn jet_process_spec_stderr(value: I64, mode: I64) -> I64 { process_spec_mode(value, mode, PROCESS_SPEC_STDERR) }
 #Export(c) fn jet_process_spec_terminal(value: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     jet_rt_handle_drop_terminal_policy(encoding_word(wrapping(result + PROCESS_SPEC_TERMINAL)))
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), ui_carrier_terminal_policy_new(I64{80}, I64{24}, I64{1}))
     result
 }
 #Export(c) fn jet_process_spec_terminal_with_policy(value: I64, policy: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     jet_rt_handle_drop_terminal_policy(encoding_word(wrapping(result + PROCESS_SPEC_TERMINAL)))
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), jet_rt_handle_clone_terminal_policy(policy))
     result

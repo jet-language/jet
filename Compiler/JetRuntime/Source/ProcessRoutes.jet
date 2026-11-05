@@ -1,5 +1,6 @@
 // Canonical C marshalling, not a second launch policy. Inputs borrow
-// E4/List24/Spec136; every returned carrier owns its children.
+// E4/List24/Spec136, except a ProcessSpec a builder route consumes and returns
+// changed (ProcessSpec.jet); every returned carrier owns its children.
 fn process_route_text_list(data: I64, length: I64) -> I64 {
     count :: if data == (I64{0}) || length <= (I64{0}) -> I64{0} else -> length
     result :: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
@@ -56,7 +57,7 @@ fn process_route_stream_mode(mode: I64) {
     result
 }
 #Export(c) fn jet_std_process_spec_under(value: I64, authority: I64) -> I64 {
-    result :: jet_rt_handle_clone_process_spec(value)
+    result :: value
     jet_rt_string_drop(encoding_word(wrapping(result + PROCESS_SPEC_POLICY_WIRE)))
     encoding_store(wrapping(result + PROCESS_SPEC_POLICY_WIRE), jet_authority_to_wire(authority))
     encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), I64{1})
@@ -67,8 +68,10 @@ fn process_route_i32(value: I64) -> I64 {
     if bits >= (I64{2147483648}) -> bits - I64{4294967296} else -> bits
 }
 #Export(c) fn jet_process_spec_with_directory_raw(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
-    // Duplicate its lent fd, never reopen a pathname.
-    result :: jet_rt_handle_clone_process_spec(value)
+    // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
+    // its earlier rows move into the returned one, so each passed descriptor
+    // has one owner and closes once.
+    result :: value
     target :: process_route_i32(child_fd)
     duplicated :: host_call(I64{72}, process_route_i32(source_fd), I64{1030}, target)
     assigned := I64{-1}
