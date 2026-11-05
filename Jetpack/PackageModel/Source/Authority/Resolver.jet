@@ -155,13 +155,22 @@ struct AuthorityResolver {
         Ok(checked)
     }
 
-    // Open and parse the only accepted manifest, `package.jet`.
+    // Open and parse the only accepted manifest, `package.jet`, and check
+    // its test profiles' suites against the code suites of test.jet beside it.
     fn checked_manifest(self, directory: String) -[FS, Env]> CheckedManifest AuthorityError! {
         relative :: self.relative_path(directory)
         canonical :: self.probe_file(pkg_authority_relative_join(relative, PACKAGE_FILE))
         file :: canonical ?? return Err(AuthorityError.Missing{path: files.join(pkg_authority_join(self.root, relative), PACKAGE_FILE), cause: "no regular `{PACKAGE_FILE}` entry"})
         text :: file.text()
         facts :: PackageFacts.parse_uncomposed(text, file.path) ?? return Err(AuthorityError.ManifestParse{path: file.path, error: err})
+        code_suites := [String]{}
+        if self.probe_file(pkg_authority_relative_join(relative, TEST_CODE_SUITES_FILE)) == .Val(test_file) {
+            code_suites = pkg_test_code_suites(test_file.text())
+            self.revalidate_file(test_file)
+        }
+        if facts.test_suites_refusal(code_suites) == .Val(refusal) {
+            return Err(AuthorityError.ManifestParse{path: file.path, error: PackageParseError.Composition(refusal)})
+        }
         self.revalidate_file(file)
         self.revalidate_root()
         Ok(CheckedManifest{file: ^file, facts: facts})

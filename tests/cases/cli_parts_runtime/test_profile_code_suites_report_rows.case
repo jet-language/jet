@@ -39,10 +39,10 @@ stderr: ~ "failed stopped:" # a suite that panics adds the failing row `stopped`
 stderr: ~ "out of disk" # with the panic's message
 stderr: ~ "changed: slow: was skipped, now missing" # rows after the panic are missing
 copy: alt/unknown-suite.jet app/package.jet
-step: jet test --profile sizes
+step: jet check
 cwd: {work}/app
 exit: 1
-stderr: ~ "profile `sizes` names unknown suite `browser` (known: tests, sizes)" # the known suites include the code suites
+stderr: ~ "profile `sizes` names unknown suite `browser` (known: tests, sizes)" # jet check reads the code suites of test.jet
 stderr: ~ "E1215" # it is a package.jet shape error
 copy: alt/twice.jet app/test.jet
 step: jet test --profile sizes
