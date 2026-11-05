@@ -1,0 +1,209 @@
+// `jet test`'s typed outcome (Rust CmdCompile.rs `append_harness_test_evidence`,
+// the test status envelope and `persist_optional_evidence_report_for_inputs`):
+// one evidence report of the run's test records, the `jet.status/v1` line
+// `--json` writes, and the optional `.jet/evidence` history entry.
+use {
+    cli_process :: core.process
+    cli_sys :: core.sys
+    cli_time :: core.time
+    receipt_crypto :: core.crypto
+    jet_driver.[JetDriverAuthorizedSourceRoot]
+    jet_foundation.[
+        BuildOptions, EvidenceBuild, EvidenceExpectation, EvidenceProducerKind, EvidenceReport,
+        EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
+        EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
+        EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, build_options_key,
+        evidence_expectation_error_text, evidence_merge_error_text, evidence_record_checked_derivation,
+        evidence_record_from_test_codes, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
+        evidence_report_encode, evidence_report_json, evidence_report_new,
+    ]
+    jet_pkg_model.[ClaimsGrade, ClaimsProjection, WorkspaceDeclarationCache]
+}
+
+// The first `Stop [CODE]: message` of a failed test's stderr and the
+// `--> file:line` under it: the canonical runtime stop report.
+struct JetCLITestStop {
+    code: String
+    message: String
+    file: String
+    line: U32
+}
+
+struct JetCLITestTally {
+    passed: Int
+    failed: Int
+    skipped: Int
+    expected_failures: Int
+    unexpected_passes: Int
+}
+
+// One run: its status line and the report it persists.
+struct JetCLITestOutcome {
+    status: String
+    report: EvidenceReport
+}
+
+// EvidenceBuild::from_environment with a fallback: an unset or empty
+// variable takes `fallback`.
+fn jet_cli_test_env(name: String, fallback: String) -[Env]> String Never! {
+    value :: cli_sys.get(name) ?? ""
+    if value == "" -> fallback.copy() else -> value
+}
+
+fn jet_cli_test_text(bytes: [U8], start: Int, end: Int) -> String Never! {
+    if start >= end -> return ""
+    String.from_bytes(bytes.slice(start, end)) ?? ""
+}
+
+fn jet_cli_test_stop(stderr: String) -> JetCLITestStop? Never! {
+    lines :: stderr.split("\n").to_list()
+    loop (index, line) in lines {
+        if !line.starts_with("Stop [") -> next
+        bytes :: line.bytes()
+        close :: line.find("]: ")
+        if close <= 6 -> next
+        stop := JetCLITestStop{code: jet_cli_test_text(bytes, 6, close), message: jet_cli_test_text(bytes, close + 3, bytes.len()), file: "", line: U32{0}}
+        if index + 1 < lines.len() {
+            location :: lines[index + 1].trim()
+            if location.starts_with("--> ") {
+                place :: location.bytes()
+                within :: location.find(" in ")
+                end :: if within < 0 -> place.len() else -> within
+                path_line :: jet_cli_test_text(place, 4, end)
+                colon :: path_line.rfind(":")
+                if colon > 0 {
+                    path_bytes :: path_line.bytes()
+                    number :: Int.parse(jet_cli_test_text(path_bytes, colon + 1, path_bytes.len())) ?? -1
+                    if number >= 0 {
+                        stop.file = jet_cli_test_text(path_bytes, 0, colon)
+                        stop.line = U32.from_int(number) ?? U32{0}
+                    }
+                }
+            }
+        }
+        return Val(stop)
+    }
+    None
+}
+
+// The tested root's `policy.claims.min` floor, if it declares one.
+fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade? Never! {
+    facts :: jet_cli_root_package_facts(root) ?? return None
+    facts.policy.claims_min
+}
+
+// The run's evidence and status line. `wires` are the settled outcome wires
+// (jet_cli_native_test_wire_parts), `ran_ok` the canonical receipt's verdict
+// (failed output checks included). The claims floor is reported, not enforced:
+// it never changes `ok` or the exit status.
+fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOptions, wires: [String], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
+    source_revision :: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
+    revision_bytes :: source_revision.bytes()
+    short :: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision.copy()
+    // The run, not only its source, names the report: two runs of one file
+    // never collide in `.jet/evidence` (Rust `test_report_id`).
+    report_id :: jet_cli_test_env(EVIDENCE_REPORT_ID_ENV, "test:{short}:{cli_process.current_pid()}:{cli_time.unix_ns()}")
+    profile_tag :: "{build_options_key(build_options)};aot-target=native"
+    default_profile :: if build_options.profile == "" -> "dev" else -> build_options.profile.copy()
+    build :: EvidenceBuild{
+        toolchain: jet_cli_test_env(EVIDENCE_TOOLCHAIN_ENV, JET_CLI_VERSION),
+        target: jet_cli_test_env(EVIDENCE_TARGET_ENV, jet_cli_host_triple(cli_sys.arch(), cli_sys.name())),
+        profile: jet_cli_test_env(EVIDENCE_PROFILE_ENV, default_profile),
+    }
+    build_revision :: jet_cli_test_env(EVIDENCE_BUILD_REVISION_ENV, receipt_crypto.sha256("jet-test-build-v1:{source_revision}:{profile_tag}".bytes()).hex())
+    run_revision :: jet_cli_test_env(EVIDENCE_REVISION_ENV, receipt_crypto.sha256("jet-test-mir-v1:{source_revision}:{profile_tag}".bytes()).hex())
+    revision :: EvidenceRevision{source: source_revision.copy(), build: build_revision, revision: run_revision}
+    report := evidence_report_new(report_id.copy(), EvidenceProducerKind.Test, EvidenceSource{path: file.copy(), line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
+    tally := JetCLITestTally{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
+    loop wire in wires {
+        parts :: jet_cli_native_test_wire_parts(wire) ?? return Err(err.message)
+        // `ok` is the runtime's verdict against the expectation: an
+        // expected-fail test is ok when it fails and not ok when it passes.
+        ok :: parts.flags.bit_and(1) != 0
+        expected_failure :: parts.flags.bit_and(2) != 0
+        skipped :: parts.flags.bit_and(4) != 0
+        ran_failed :: if expected_failure -> ok else -> !ok
+        if skipped {
+            tally.skipped += 1
+        } else if expected_failure && ok {
+            tally.expected_failures += 1
+        } else if expected_failure {
+            tally.unexpected_passes += 1
+        } else if ok {
+            tally.passed += 1
+        } else {
+            tally.failed += 1
+        }
+        stop := JetCLITestStop?{None}
+        if !skipped && ran_failed -> stop = jet_cli_test_stop(parts.stderr)
+        message :: if stop == .Val(found) -> found.message.copy() else -> ""
+        state :: if {
+            skipped -> 2
+            ran_failed -> 1
+            else -> 0
+        }
+        record := evidence_record_from_test_codes(0, state, parts.name, message, file, U32{0}, report_id, build, revision) ?? return Err(err.message)
+        if expected_failure && !skipped {
+            evidence_record_set_expectation(&record, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))
+        }
+        derivation :: evidence_record_checked_derivation(record)
+        evidence_report_add_record_with_derivation(&report, ^record, ^derivation) ?? return Err(evidence_merge_error_text(err))
+        if stop == .Val(found) {
+            place :: if found.file == "" -> file.copy() else -> found.file.copy()
+            observed := evidence_record_from_test_codes(2, 1, found.code, found.message, place, found.line, report_id, build, revision) ?? return Err(err.message)
+            if expected_failure {
+                evidence_record_set_expectation(&observed, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))
+            }
+            observed_derivation :: evidence_record_checked_derivation(observed)
+            // A stop of the same code at the same place under another
+            // expectation conflicts; each test's own unit record above still
+            // carries its outcome, so the duplicate observation is left out.
+            evidence_report_add_record_with_derivation(&report, ^observed, ^observed_derivation).drop("the test's unit record already carries this outcome")
+        }
+    }
+    ok :: ran_ok && tally.failed == 0 && tally.unexpected_passes == 0
+    projection :: ClaimsProjection.from_records(report.records)
+    grade :: projection.grade.render()
+    floor_text := String?{None}
+    if floor == .Val(required) -> floor_text = Val(required.render())
+    selected :: tally.passed + tally.failed + tally.skipped + tally.expected_failures + tally.unexpected_passes
+    test :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("failed", jet_cli_status_int(tally.failed)),
+        jet_cli_status_field("passed", jet_cli_status_int(tally.passed)),
+        jet_cli_status_field("skipped", jet_cli_status_int(tally.skipped)),
+        jet_cli_status_field("selected", jet_cli_status_int(selected)),
+        jet_cli_status_field("expectedFailures", jet_cli_status_int(tally.expected_failures)),
+        jet_cli_status_field("unexpectedPasses", jet_cli_status_int(tally.unexpected_passes)),
+    })
+    claims :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("grade", jet_cli_status_text(grade.copy())),
+        jet_cli_status_field("floor", jet_cli_status_optional_text(floor_text)),
+        jet_cli_status_field("floorMet", jet_cli_status_bool(projection.floor_met(floor))),
+        jet_cli_status_field("generatedAttempts", jet_cli_status_int(projection.generated_attempts)),
+        jet_cli_status_field("generated", jet_cli_status_int(projection.generated_successes)),
+        jet_cli_status_field("examples", jet_cli_status_int(projection.examples_successes)),
+    })
+    summaries :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("claims", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("grade", jet_cli_status_text(grade.copy()))})),
+    })
+    // `Float` carries JSON text already rendered: the canonical report JSON.
+    status :: jet_cli_status_render("test", ok, [JetCLIStatusField]{
+        jet_cli_status_field("test", test),
+        jet_cli_status_field("evidence", JetCLIStatusValue.Float{text: evidence_report_json(report)}),
+        jet_cli_status_field("grade", jet_cli_status_text(grade)),
+        jet_cli_status_field("claims", claims),
+        jet_cli_status_field("summaries", summaries),
+    })
+    Ok(JetCLITestOutcome{status: status, report: report})
+}
+
+// Optional history: the run's report as `.jet/evidence/<report id>.json`,
+// indexed against its source revision and unprotected. A failure is one
+// `history:` line for stderr; the run's own result stands.
+fn jet_cli_test_persist(report: EvidenceReport) -> String {
+    if report.records.len() == 0 -> return ""
+    bytes :: evidence_report_encode(report) ?? return jet_cli_history_notice("writing test evidence", err.message)
+    cache := WorkspaceDeclarationCache.new()
+    jet_cli_evidence_persist(&cache, report, bytes, report.identity.report_id, report.revision.source, false) ?? return jet_cli_history_notice("writing test evidence", err.message)
+    ""
+}

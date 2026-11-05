@@ -8,7 +8,7 @@ use {
     import_out_files :: core.files
     import_out_sys :: core.sys
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, DiagnosticMoment, EvidenceReport, diagnostic_display_name, diagnostic_from_registry, diagnostic_registry_row, evidence_producer_name, evidence_report_encode]
+    jet_foundation.[Diagnostic, DiagnosticMoment, EvidenceReport, diagnostic_display_name, diagnostic_from_registry, diagnostic_registry_row, evidence_report_encode]
     jet_pkg_model.[ForeignBoundaryContract, ForeignBoundaryDisposition, ForeignSourceReceipt, WorkspaceDeclarationCache, pkg_foreign_boundary_capability]
 }
 
@@ -137,17 +137,10 @@ fn jet_cli_import_attach_evidence(plan: &JetCLIImportPlan) JetCLIImportPlanError
 fn jet_cli_import_persist_evidence(report: EvidenceReport, target_inputs_sha256: String) JetCLIReadError! -[FS, Env, Time]> {
     report_id :: report.identity.report_id
     if report_id == "" || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{report_id}`"))
-    cwd :: import_out_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
-    cache := WorkspaceDeclarationCache.new()
-    root :: jet_cli_selected_project_root(&cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
     bytes :: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
     artifact_id :: import_crypto.sha256(bytes).hex()
-    held :: JetCLIRootedDirectory.open(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
-    _ :: held.publish_immutable("{artifact_id}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
-    index := jet_cli_record_index_load(root)
-    identity :: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: report.build.toolchain, engine: evidence_producer_name(report.producer)}
-    entry :: jet_cli_comparison_index_entry(index, identity, "evidence", artifact_id, ".jet/evidence/{artifact_id}.json", bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true)
-    jet_cli_record_index_publish_and_store(&index, root, ^entry)
+    cache := WorkspaceDeclarationCache.new()
+    jet_cli_evidence_persist(&cache, report, bytes, artifact_id, target_inputs_sha256, true) ?? return Err(err)
 }
 
 // `fs::read_to_string(path).ok()`.

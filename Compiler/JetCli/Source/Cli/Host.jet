@@ -1546,7 +1546,10 @@ fn jet_cli_native_test_unrun_check_report() -> String Never! {
 // records (Measure.jet) settle there too.
 fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFile], measure: JetCLIMeasurePlan?, color: Bool, verbose: Bool, options: JetCLITestOptions, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     if jet_cli_errors(result.diagnostics).len() > 0 {
-        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, jet_cli_present_shown(result, snapshot, verbose), color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        shown :: jet_cli_present_shown(result, snapshot, verbose)
+        // As `jet build --json`: the compile reports' status line on stderr.
+        if options.json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, shown, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if verbose -> jet_cli_write_verbose_lints(file, source, color, false, jet_cli_present_shown(result, snapshot, true))
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
@@ -1644,7 +1647,13 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     // The canonical report always prints; the children's own streams follow the capture policy.
     stdout :: if show -> ran.output else -> ran.receipt.output
     stderr :: if show -> ran.errors else -> ran.receipt.errors
-    if measure == None -> return JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
+    if measure == None {
+        outcome :: jet_cli_test_outcome(file, source, options.build, wires, passed, jet_cli_test_claims_floor(snapshot.roots[0])) ?? return jet_cli_ice(err.message)
+        notice :: jet_cli_test_persist(outcome.report)
+        // Under `--json` the status line is the whole stdout; the report moves to stderr.
+        if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n", stderr: "{stdout}{stderr}{notice}", exit_code: exit_code}
+        return JetDriverVerbOutput{stdout: stdout, stderr: "{stderr}{notice}", exit_code: exit_code}
+    }
     rendered :: (loop record in records -> jet_cli_measure_render(record, options.json)).join("")
     // Under `--json` the record lines are the whole stdout; the report moves to stderr.
     if options.json -> return JetDriverVerbOutput{stdout: rendered, stderr: "{stdout}{stderr}", exit_code: exit_code}

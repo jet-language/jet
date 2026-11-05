@@ -66,9 +66,13 @@ fn jet_cli_record_snapshot_validate(entries: [JetCLIRecordIndexEntry], budget: U
             }
         }
     }
-    ordered := entries
-    ordered = loop fresh_item in ordered -> fresh_item
-    &ordered.sort_by(jet_cli_record_entry_order)
+    // copy: `entries` stays with the caller (a read parameter: no move out of
+    // it, E0201) and the sorted rows own their own.
+    ordered := entries.copy()
+    // The comparator is a closure, not the named function: a named function
+    // passed as the `sort_by` value freed the compared rows, so the caller's
+    // rows were corrupt the next time they were read.
+    &ordered.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
     state := [String:Int]{}
     loop entry in ordered {
         if jet_cli_record_visit_cycle(jet_cli_record_key(entry.kind, entry.artifact_id), graph, &state) {
@@ -125,7 +129,8 @@ fn jet_cli_record_snapshot_query(entries: [JetCLIRecordIndexEntry], authenticate
         }
         &rows.push(row)
     }
-    &rows.sort_by(jet_cli_record_entry_order)
+    // A closure comparator, as in jet_cli_record_snapshot_validate.
+    &rows.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
     rows
 }
 

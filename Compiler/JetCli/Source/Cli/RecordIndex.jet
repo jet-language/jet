@@ -2,6 +2,12 @@
 // validation leaves the old snapshot intact. The stored form lives under
 // `<project>/.jet/records` and is read and published only through the rooted
 // store (RootedStore.jet), never by pathname.
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_sys :: core.sys
+}
+
 struct JetCLIRecordIndex {
     entries: [JetCLIRecordIndexEntry]
     budget: U64
@@ -376,4 +382,44 @@ fn jet_cli_record_index_remove_replay_and_store(index: &JetCLIRecordIndex, proje
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
     index = ^candidate
     Ok(removed)
+}
+
+fn jet_cli_record_index_test_row(run: Int) -> JetCLIRecordIndexEntry Never! {
+    name :: "test:cccccccccccccccc:{run}:{run * 1000}"
+    JetCLIRecordIndexEntry{identity: JetCLIRecordIdentity{target_inputs_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", tool_version: "0.1.0", engine: "jet-test"}, kind: "evidence", artifact_id: name, path: ".jet/evidence/{name}.json", recorded_sequence: U64.from_int(run) ?? panic("a test run number is non-negative"), size: U64{1103}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}
+}
+
+// Validation sorts its own copy of the rows; the caller's rows stay intact
+// (a named-function `sort_by` comparator freed them).
+#Test("record index validation leaves the caller's rows intact") {
+    rows :: [JetCLIRecordIndexEntry]{jet_cli_record_index_test_row(1), jet_cli_record_index_test_row(2)}
+    jet_cli_record_snapshot_validate(rows) ?? panic("validate: {err.message}")
+    jet_cli_record_snapshot_validate(rows) ?? panic("validate again: {err.message}")
+    assert_eq(rows[1].path, ".jet/evidence/test:cccccccccccccccc:2:2000.json")
+}
+
+// `jet test` history appends one unprotected evidence row per run to an
+// index a previous run stored.
+#Test("record index appends disposable rows to a restored index") {
+    index := jet_cli_record_index_new() ?? panic("index")
+    loop run in 1..<4 {
+        fresh :: jet_cli_record_index_fresh_sequence(index, jet_cli_record_index_test_row(run)) ?? panic("fresh sequence {run}")
+        jet_cli_record_index_update(&index, fresh) ?? panic("append {run}")
+        bytes :: jet_cli_record_index_to_bytes(index) ?? panic("store {run}")
+        index = jet_cli_record_index_from_bytes(bytes) ?? panic("reload {run}")
+    }
+    assert_eq(index.entries.len(), 3)
+}
+
+#Test("record index publishes disposable rows into a stored index") {
+    root :: cli_files.join(cli_sys.temp_dir(), "jet-record-index-{cli_process.current_pid()}")
+    cli_files.remove_all(root).drop("a stale test root may be absent")
+    cli_files.create_dir_all(root) ?? panic("create record test root")
+    loop run in 1..<4 {
+        index := jet_cli_record_index_load(root) ?? panic("load {run}: {err.message}")
+        jet_cli_record_index_publish_and_store(&index, root, jet_cli_record_index_test_row(run)) ?? panic("publish {run}: {err.message}")
+    }
+    stored :: jet_cli_record_index_load(root) ?? panic("reload: {err.message}")
+    cli_files.remove_all(root).drop("the test root is scratch")
+    assert_eq(stored.entries.len(), 3)
 }
