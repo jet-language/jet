@@ -110,7 +110,7 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     loop path in ["tests/ui/bad.stderr", "tests/ui/project/stderr"] -> kit_exec_write(files.join(root, path), "Error [jet.OperatorTypeMismatch]: mismatch\n")
     loop path in ["tests/ui/clean.stderr", "tests/ui/published.stderr", "tests/ui/extension.stderr"] -> kit_exec_write(files.join(root, path), "(no errors)\n")
     kit_exec_write(files.join(root, "tests/ui_lint/lint.warn"), "Warning [jet.SameEnumGuardTable]: lint\n")
-    kit_ui_stage(root, files.join(root, "ui-source"))
+    kit_ui_stage(root, root)
     entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
     loop (index, entry) in entries {
         outcomes :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
@@ -130,7 +130,7 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     loop path in ["tests/ui/owned.stderr", "tests/ui/unowned.stderr", "tests/ui/dir_owned/stderr"] -> kit_exec_write(files.join(root, path), "Error [jet.UnknownName]: other\n")
     kit_exec_write(files.join(root, "tests/ui/stale.stderr"), "Error [jet.OperatorTypeMismatch]: mismatch\n")
     kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "# repo-relative ID\tcard\treason\ntests/ui/owned\t#4868\towned ui mismatch\ntests/ui/stale\t#4869\tstale ui row\ntests/ui/dir_owned\t#4870\towned ui project\n")
-    kit_ui_stage(root, files.join(root, "ui-source"))
+    kit_ui_stage(root, root)
     entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
     assert_eq(entries.len(), 4)
     loop (index, entry) in entries {
@@ -151,7 +151,7 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI known-failing scratch: {err}")
 }
 
-#Test("UI shared staging preserves imported modules and route trees without discovering them") {
+#Test("UI staging gives a loose entry its imported modules route trees and data but no other entry") {
     root :: kit_ui_test_scratch("imports")
     main :: "use helper :: \"./modules/helper\"\nfn run() {{ print(helper.value()) }}\n"
     helper :: "fn value() -> Int {{ 7 }}\n// @fixture_module\n"
@@ -159,15 +159,25 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     kit_exec_write(files.join(root, "tests/ui/clean_import.stderr"), "(no errors)\n")
     kit_exec_write(files.join(root, "tests/ui/modules/helper.jet"), helper)
     kit_exec_write(files.join(root, "tests/ui/routes/Index.jet"), "fn page() {{}}\n// @fixture_module\n")
+    kit_exec_write(files.join(root, "tests/ui/embedded.dat"), "data\n")
+    kit_exec_write(files.join(root, "tests/ui/other.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/other.stderr"), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui/group/inner.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/project/run.jet"), "fn run() {{}}\n")
     context :: kit_ui_test_context(root, "case")
-    source :: files.join(root, "ui-source")
-    kit_ui_stage(root, source)
+    kit_ui_stage(root, root)
+    entries :: kit_ui_discover(context)
+    assert_eq(entries.len(), 4)
+    assert_eq(entries[0].path, "tests/ui/clean_import.jet")
+    assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
+    source :: files.join(context.scratch, "ui-source")
     assert_eq(files.read(files.join(source, "tests/ui/clean_import.jet")) ?? panic("staged entry"), main)
     assert_eq(files.read(files.join(source, "tests/ui/modules/helper.jet")) ?? panic("staged module"), helper)
     assert(files.exists(files.join(source, "tests/ui/routes/Index.jet")))
-    entries :: kit_ui_discover(context)
-    assert_eq(entries.len(), 1)
-    assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
+    assert(files.exists(files.join(source, "tests/ui/embedded.dat")))
+    loop path in ["tests/ui/other.jet", "tests/ui/other.stderr", "tests/ui/clean_import.stderr", "tests/ui/group", "tests/ui/project"] {
+        assert(!files.exists(files.join(source, path)), "a loose entry's stage holds no other entry: {path}")
+    }
     files.remove_all(root) ?? panic("remove imported UI scratch: {err}")
 }
 

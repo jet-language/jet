@@ -2214,9 +2214,14 @@ names and imports for the real parent fixtures. An absent expected-output file
 never causes exclusion: unmarked UI fixtures remain discovered and require an
 owner-reviewed snapshot.
 The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
-in external scratch, then checks each case in that shared source tree. Sibling
-imports, convention route roots and authored fixture state therefore resolve
-as in the original Rust runner, without per-case same-stem copy gaps. When outer
+in external scratch, where each project case compiles rooted at its own
+directory. A loose case's source root is its whole directory, and the compiler
+snapshots every `.jet` file under it, so each loose case is staged alone in its
+own scratch: the case, its `.fixed.jet` companion, and its directory's support,
+which is every file there but another case and its companion and snapshots,
+and every subdirectory that holds no case. Sibling imports, convention route
+roots, embedded data and authored fixture state therefore resolve as in the
+original Rust runner, and no case compiles beside another. When outer
 tracing is enabled, run-wide scratch also remains until the final trace audit;
 ordinary runs remove it after reporting.
 UI `@jetpack_e1250` copies its program as `main.jet` into a private scratch

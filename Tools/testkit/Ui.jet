@@ -100,6 +100,22 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
     call
 }
 
+// A project directory's entry file (`run.jet`, `main.jet`, `workspace.jet`), or "".
+fn kit_ui_project_entry(directory: String) -> String {
+    loop name in ["run.jet", "main.jet", "workspace.jet"] {
+        if files.exists(files.join(directory, name)) -> return name
+    }
+    ""
+}
+
+// Whether the file `name` at `path` is a loose corpus entry: a `.jet` source
+// that is not a fixed companion, a manifest, or an imported fixture module.
+fn kit_ui_loose(path: String, name: String) -> Bool {
+    if !name.ends_with(".jet") || name.ends_with(".fixed.jet") || name == "package.jet" || name == "workspace.jet" -> return false
+    source :: files.read(path) ?? panic("read UI fixture {path}: {err}")
+    kit_ui_arg(source, "fixture_module") == None
+}
+
 fn kit_ui_collect(root: String, directory: String, lint: Bool) -> [KitEntry] {
     entries := [KitEntry]{}
     if !files.exists(files.join(root, directory)) -> return entries
@@ -107,22 +123,14 @@ fn kit_ui_collect(root: String, directory: String, lint: Bool) -> [KitEntry] {
         if child.name.starts_with(".") -> next
         shown :: files.join(directory, child.name)
         if child.is_dir {
-            entry := ""
-            loop name in ["run.jet", "main.jet", "workspace.jet"] {
-                if files.exists(files.join(child.path, name)) {
-                    entry = name
-                    break
-                }
-            }
+            entry :: kit_ui_project_entry(child.path)
             if entry != "" {
                 expected :: if entry == "workspace.jet" -> "{shown}.stderr" else -> files.join(shown, "stderr")
                 &entries.push(KitEntry{path: files.join(shown, entry), expected: expected, project: shown, suite: "ui", mode: if lint -> "lint-project" else -> "project"})
             } else {
                 loop item in kit_ui_collect(root, shown, lint) -> &entries.push(item)
             }
-        } else if child.name.ends_with(".jet") && !child.name.ends_with(".fixed.jet") && child.name != "package.jet" && child.name != "workspace.jet" {
-            source :: files.read(child.path) ?? panic("read UI fixture {shown}: {err}")
-            if kit_ui_arg(source, "fixture_module") != None -> next
+        } else if kit_ui_loose(child.path, child.name) {
             stem :: kit_steps_byte_slice(shown, 0, shown.count_bytes() - 4)
             &entries.push(KitEntry{path: shown, expected: "{stem}{if lint -> ".warn" else -> ".stderr"}", project: directory, suite: "ui", mode: if lint -> "lint" else -> "plain"})
         }
@@ -195,7 +203,7 @@ fn kit_ui_snapshot(entry: KitEntry, call: KitUICall, result: KitRun, actual: Str
 
 fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> [KitOutcome] {
     outcomes := [KitOutcome]{}
-    fixed :: "{kit_steps_byte_slice(entry.path, 0, entry.path.count_bytes() - 4)}.fixed.jet"
+    fixed :: kit_ui_fixed_path(entry.path)
     if !files.exists(files.join(ctx.root, fixed)) -> return outcomes
     fixed_env := ctx.env.copy()
     fixed_env.trace_case = fixed
@@ -222,12 +230,77 @@ fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVa
     outcomes
 }
 
-// Preserve the real UI module/route tree once, just as the original runner did.
-fn kit_ui_stage(root: String, source: String) {
+fn kit_ui_fixed_path(path: String) -> String {
+    "{kit_steps_byte_slice(path, 0, path.count_bytes() - 4)}.fixed.jet"
+}
+
+// Stage the corpus once under the run's scratch. A project entry compiles in
+// the shared `ui-source` tree, rooted at its own project directory. A loose
+// entry's source root is its whole directory, and the compiler snapshots every
+// `.jet` file under it, so each loose entry is staged alone
+// (kit_ui_stage_entry) on top of its directory's support, kept here in
+// `ui-support`.
+fn kit_ui_stage(root: String, scratch: String) {
     loop directory in ["tests/ui", "tests/ui_lint"] {
         original :: files.join(root, directory)
-        if files.exists(original) -> kit_exec_copy_tree(original, files.join(source, directory), true, false)
+        if !files.exists(original) -> next
+        kit_exec_copy_tree(original, files.join(files.join(scratch, "ui-source"), directory), true, false)
+        _ :: kit_ui_stage_support(root, directory, scratch)
     }
+}
+
+fn kit_ui_support_key(directory: String) -> String {
+    directory.replace("/", "~")
+}
+
+// Copies the support of `directory`: every file there but a loose entry and its
+// companion and snapshots, and every subdirectory that holds no entry (imported
+// fixture modules, embedded data). Returns whether `directory` holds an entry;
+// a subdirectory that does gets its own support.
+fn kit_ui_stage_support(root: String, directory: String, scratch: String) -> Bool {
+    support :: files.join(files.join(scratch, "ui-support"), kit_ui_support_key(directory))
+    files.create_dir_all(support) ?? panic("mkdir {support}: {err}")
+    children :: files.list_dir(files.join(root, directory)) ?? panic("stage UI {directory}: {err}")
+    stems := [String]{}
+    loop child in children {
+        if !child.is_dir && !child.name.starts_with(".") && kit_ui_loose(child.path, child.name) -> &stems.push(kit_steps_byte_slice(child.name, 0, child.name.count_bytes() - 4))
+    }
+    holds := stems.len() > 0
+    loop child in children {
+        if child.name == ".git" || child.name == ".jet" -> next
+        name :: if child.name == "state" || child.name == "fixture-state" -> ".jet" else -> child.name
+        if {
+            child.is_dir && ((!child.name.starts_with(".") && kit_ui_project_entry(child.path) != "") || kit_ui_stage_support(root, files.join(directory, child.name), scratch)) -> holds = true
+            child.is_dir -> kit_exec_copy_tree(child.path, files.join(support, name), true, false)
+            !kit_ui_sidecar(stems, child.name) -> kit_exec_copy_file(child.path, files.join(support, child.name))
+        }
+    }
+    holds
+}
+
+// Whether the kit owns `name` for one of the loose entries `stems`: its
+// source, its fixed companion or a snapshot.
+fn kit_ui_sidecar(stems: [String], name: String) -> Bool {
+    loop stem in stems {
+        loop suffix in [".jet", ".fixed.jet", ".stderr", ".warn", ".published.snapshot"] {
+            sidecar :: "{stem}{suffix}"
+            if name == sidecar -> return true
+        }
+    }
+    false
+}
+
+// A loose entry's own source tree: its directory's support, the entry and its
+// fixed companion, under the entry's scratch.
+fn kit_ui_stage_entry(entry: KitEntry, ctx: KitCtx) -> String {
+    source :: files.join(ctx.scratch, "ui-source")
+    directory :: files.join(source, entry.project)
+    support :: files.join(files.join(ctx.env.scratch, "ui-support"), kit_ui_support_key(entry.project))
+    if files.is_dir(support) -> kit_exec_copy_tree(support, directory, false, false) else -> files.create_dir_all(directory) ?? panic("mkdir {directory}: {err}")
+    kit_exec_copy_file(files.join(ctx.root, entry.path), files.join(source, entry.path))
+    fixed :: kit_ui_fixed_path(entry.path)
+    if files.exists(files.join(ctx.root, fixed)) -> kit_exec_copy_file(files.join(ctx.root, fixed), files.join(source, fixed))
+    source
 }
 
 // The central known-failing ledger owns UI rows exactly as it owns cases and
@@ -246,7 +319,11 @@ fn kit_ui_outcomes(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     lint :: entry.mode.starts_with("lint")
     call :: kit_ui_invocation(text, entry.path, lint)
     if call.refused != "" -> return [KitOutcome{verdict: kit_expect_verdict("REFUSED", call.refused), run: kit_exec_failed(call.refused), tier: "-"}]
-    source :: if call.unlocked_toolchain -> files.join(ctx.scratch, "unlocked-toolchain") else -> files.join(ctx.env.scratch, "ui-source")
+    source :: if {
+        call.unlocked_toolchain -> files.join(ctx.scratch, "unlocked-toolchain")
+        entry.mode == "plain" || entry.mode == "lint" -> kit_ui_stage_entry(entry, ctx)
+        else -> files.join(ctx.env.scratch, "ui-source")
+    }
     work :: if call.unlocked_toolchain -> source else -> files.join(source, entry.project)
     if call.unlocked_toolchain {
         kit_exec_write(files.join(source, "package.jet"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n")
