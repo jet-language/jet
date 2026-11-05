@@ -1581,13 +1581,10 @@ fn policy_check_gate(manifest: PolicyManifest, root: String, gate: String) Polic
 }
 
 // Gates are deduplicated across callers, not weakened to a classification check.
-// Known failing: #6249 (the parser rejects `reactive.effect(...)` in
-// Examples/features/ui/reactive.jet; golden and dev-corpus both scan it).
 #Test("corpus policy golden gate") { policy_check_gate(policy_manifest(), ".", "golden") ?? panic("{err.message}") }
 #Test("corpus policy fixture gate") { policy_check_gate(policy_manifest(), ".", "fixture") ?? panic("{err.message}") }
 #Test("corpus policy bindgen gate") { policy_check_gate(policy_manifest(), ".", "bindgen") ?? panic("{err.message}") }
 #Test("corpus policy workload gate") { policy_check_gate(policy_manifest(), ".", "workload") ?? panic("{err.message}") }
-// Known failing: #6249 (Examples/features/ui/reactive.jet does not parse).
 #Test("corpus policy dev-corpus gate") { policy_check_gate(policy_manifest(), ".", "dev-corpus") ?? panic("{err.message}") }
 #Test("corpus policy conformance gate") { policy_check_gate(policy_manifest(), ".", "conformance") ?? panic("{err.message}") }
 #Test("corpus policy package gate") { policy_check_gate(policy_manifest(), ".", "package") ?? panic("{err.message}") }
