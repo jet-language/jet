@@ -23,7 +23,8 @@ use {
     recursive :: jet_cli_complexity_reports(recursion.program)
     if recursive.len() != 1 || recursive[0].score != 2 -> panic("direct recursion adds one per function")
 
-    mixed :: jet_driver_parse_user_source("fn mixed(a: Bool, b: Bool, c: Bool) -> Bool {{ a && b || c }}\n")
+    // Mixing `&&` and `||` needs parentheses (tests/ui/logic_mix_and_then_or.jet).
+    mixed :: jet_driver_parse_user_source("fn mixed(a: Bool, b: Bool, c: Bool) -> Bool {{ (a && b) || c }}\n")
     if mixed.diagnostics.len() != 0 -> panic("boolean fixture must parse")
     boolean :: jet_cli_complexity_reports(mixed.program)
     if boolean.len() != 1 || boolean[0].score != 1 -> panic("mixed boolean sequence score")

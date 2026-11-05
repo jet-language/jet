@@ -5,7 +5,7 @@ use {
     status_math :: core.math
     status_text :: core.text
     core.encoding.[Dyn]
-    jet_foundation.[foundation_json_integer]
+    jet_foundation.[foundation_float_display, foundation_json_integer]
 }
 
 // Rust's `String` refusals from the status readers (StatusValue::parse and
@@ -27,8 +27,10 @@ fn report_status_value_parse(text: String) -> Dyn JetCLIReadError! {
 }
 
 // Rust StatusValue::from_dyn over every Dyn variant: a Number lexeme is an
-// integer when it parses as one, else float text; Bytes are their base64
-// text and a DateTime its RFC 3339 text.
+// integer when it parses as one, an integer spelling past Int stays exact,
+// and a fraction or exponent is an f64 rendered in its Display form
+// (`1.2300e+4` is `12300`); Bytes are their base64 text and a DateTime its
+// RFC 3339 text.
 fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
     value :: if tree == {
         .Null -> JetCLIStatusValue.Null
@@ -38,12 +40,21 @@ fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
             if !status_math.is_finite(value) {
                 return Err(jet_cli_read_error("status fields cannot contain non-finite numbers"))
             }
-            JetCLIStatusValue.Float{text: "{value}"}
+            JetCLIStatusValue.Float{text: foundation_float_display(value)}
         }
         .Number(lexeme) -> {
             if foundation_json_integer(tree) == .Val(number) -> return Ok(jet_cli_status_int(number))
+            float_spelled := false
+            loop byte in lexeme.bytes() {
+                if byte == (U8{46}) || byte == (U8{101}) || byte == (U8{69}) -> float_spelled = true
+            }
             // copy: `lexeme` is a payload view of read parameter `tree`; the status value owns its text.
-            JetCLIStatusValue.Float{text: lexeme.copy()}
+            if !float_spelled -> return Ok(JetCLIStatusValue.Float{text: lexeme.copy()})
+            number :: Float.parse(lexeme) ?? return Err(jet_cli_read_error("status number `{lexeme}` is not a JSON number"))
+            if !status_math.is_finite(number) {
+                return Err(jet_cli_read_error("status fields cannot contain non-finite numbers"))
+            }
+            JetCLIStatusValue.Float{text: foundation_float_display(number)}
         }
         .Text(value) -> jet_cli_status_text(value)
         .Bytes(_) | .DateTime(_) -> jet_cli_status_text(tree.to_text() ?? panic("Bytes and DateTime always have a text form"))

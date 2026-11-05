@@ -20,11 +20,17 @@ fn jet_cli_maintainer_error(code: String, what: String, why: String?, fix: Strin
 
 // Path::file_stem/extension for a file the Unix host has successfully read.
 // Backslash is a filename byte, not a separator; a dotfile has no extension.
+// The indexes are byte offsets, so the parts are cut from the bytes
+// (`String.slice` counts characters).
+fn jet_cli_maintainer_bytes(text: String, start: Int, end: Int) -> String Never! {
+    bytes :: text.bytes()
+    String.from_bytes(bytes[start..<end]) ?? panic("a path cut at an ASCII byte is UTF-8")
+}
 fn jet_cli_maintainer_name(file: String) -> String Never! {
     bytes :: file.bytes()
     index := bytes.len() - 1
     loop index >= 0 {
-        if bytes[index] == 47 -> return file.slice(index + 1..<bytes.len())
+        if bytes[index] == 47 -> return jet_cli_maintainer_bytes(file, index + 1, bytes.len())
         index -= 1
     }
     // copy: `file` stays with the caller (`file` is a read parameter: no move out of it, E0201) and
@@ -42,14 +48,14 @@ fn jet_cli_maintainer_dot(name: String) -> Int? Never! {
 }
 fn jet_cli_maintainer_stem(file: String) -> String Never! {
     name :: jet_cli_maintainer_name(file)
-    if jet_cli_maintainer_dot(name) == .Val(dot) -> return name.slice(0..<dot)
+    if jet_cli_maintainer_dot(name) == .Val(dot) -> return jet_cli_maintainer_bytes(name, 0, dot)
     name
 }
 fn jet_cli_reduced_path(file: String) -> String Never! {
     name :: jet_cli_maintainer_name(file)
     dot :: jet_cli_maintainer_dot(name)
-    stem :: if dot == .Val(index) -> name.slice(0..<index) else -> name
-    extension :: if dot == .Val(index) -> name.slice(index + 1..<name.len()) else -> "jet"
+    stem :: if dot == .Val(index) -> jet_cli_maintainer_bytes(name, 0, index) else -> name
+    extension :: if dot == .Val(index) -> jet_cli_maintainer_bytes(name, index + 1, name.bytes().len()) else -> "jet"
     replacement :: "{stem}.reduced.{extension}"
     parent :: jet_cli_parent(file) ?? return replacement
     jet_cli_authority_path(parent, replacement)

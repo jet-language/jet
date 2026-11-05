@@ -30,18 +30,21 @@ fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: ResolvedOutp
     } ?? panic("selected Output lost its canonical module projection")
     projection :: query.compile.doc_modules[module_index]
     identity :: "{projection.module_name}::{output.semantic_name}"
+    // Output.source_path is the registration module key (`run`); the report
+    // names the declaring file the projection loaded.
+    source_path :: projection.physical_path
     failure :: type_name(failure_contract_shown_type(output.failure_contract))
     failure_source :: failure_contract_source(output.failure_contract)
     effects :: jet_cli_sorted_set(output.effects)
     authority :: jet_cli_application_authority(query.compile, None)
     kind :: jet_cli_output_kind(output.kind)
     if !json {
-        return "selected: {kind} \"{output.output_name}\"\nentry: {output.source_name}\nsource path: {output.source_path}\ncallable identity: {identity}\nfailure contract: {failure} ({failure_source})\nrequired effects: {jet_cli_output_effects_text(effects)}\ngranted effects: {jet_cli_output_effects_text(authority.granted)}\ndenied effects: {jet_cli_output_effects_text(authority.denied)}\nauthority: {authority.authority}\nselection reason: {output.selection_reason}\n"
+        return "selected: {kind} \"{output.output_name}\"\nentry: {output.source_name}\nsource path: {source_path}\ncallable identity: {identity}\nfailure contract: {failure} ({failure_source})\nrequired effects: {jet_cli_output_effects_text(effects)}\ngranted effects: {jet_cli_output_effects_text(authority.granted)}\ndenied effects: {jet_cli_output_effects_text(authority.denied)}\nauthority: {authority.authority}\nselection reason: {output.selection_reason}\n"
     }
     value :: jet_cli_status_object([
         jet_cli_status_field("binding", jet_cli_status_text(output.address)),
         jet_cli_status_field("kind", jet_cli_status_text(kind)), jet_cli_status_field("name", jet_cli_status_text(output.output_name)),
-        jet_cli_status_field("entry", jet_cli_status_text(output.source_name)), jet_cli_status_field("source_path", jet_cli_status_text(output.source_path)),
+        jet_cli_status_field("entry", jet_cli_status_text(output.source_name)), jet_cli_status_field("source_path", jet_cli_status_text(source_path)),
         jet_cli_status_field("callable_identity", jet_cli_status_text(identity)), jet_cli_status_field("failure_contract", jet_cli_status_text(failure)),
         jet_cli_status_field("failure_source", jet_cli_status_text(failure_source)), jet_cli_status_field("effects", jet_cli_status_texts(effects)),
         jet_cli_status_field("required_effects", jet_cli_status_texts(effects)), jet_cli_status_field("granted_effects", jet_cli_status_texts(authority.granted)),

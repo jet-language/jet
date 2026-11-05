@@ -57,10 +57,12 @@ fn cli_registry_moved_commands() Never! {
             cli_registry_require(owner.actions[moved.action].name == action.name, "{action.name} moved to the wrong action of {owner.name}")
         }
     }
-    // This rule retired the `report` root: `gc report` is nested only.
+    // `gc report` is nested only. Retired roots and their teaching are gone
+    // (greenfield), so bare `report` is the moved word of that nested action.
     report :: jet_cli_nested_command("gc", "report") ?? panic("gc report is registered")
     cli_registry_require(!JET_CLI_COMMANDS[report.group].actions[report.action].also_canonical_top_level, "gc report is not canonical at the top level")
-    cli_registry_require(jet_cli_moved_command("report") == .None && !jet_cli_is_canonical_top_level("report"), "the retired report root stays retired")
+    moved_report :: jet_cli_moved_command("report") ?? panic("bare report names its nested owner")
+    cli_registry_require(moved_report.group == report.group && moved_report.action == report.action && !jet_cli_is_canonical_top_level("report"), "bare report teaches gc report, not a top-level root")
 }
 
 fn cli_registry_typo_suggestions() Never! {

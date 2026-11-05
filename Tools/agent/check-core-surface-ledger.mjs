@@ -1484,6 +1484,8 @@ function coreCallEffectLeafFor(moduleName, member) {
     "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__walk_parallel_raw",
     "__entries_context", "__entries_close", "__entries_release", "__entries_read_dir",
     "__entries_next", "__entries_file_type", "__entries_before", "__entries_shown",
+    // The compiler-private non-blocking open only reads (RawHostKeys.jet).
+    "jet_std_files_open_reader_nonblocking",
   ])) return "FS.Read";
   if (moduleName === "core.files" && coreCallOneOf(member, [
     "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",

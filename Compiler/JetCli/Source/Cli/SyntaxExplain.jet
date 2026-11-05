@@ -86,7 +86,7 @@ fn jet_cli_rule_argument_declarations(signature: TAppliedRuleSignature) -> Strin
     if signature.variadic_source_type == .Val(source_type) -> &named.push(source_type)
     declarations := [String]{}
     loop name in named {
-        if menus.contains(name) -> &declarations.push(" `core.compiler.lang.{name}`")
+        if menus.contains(name) -> &declarations.push("`core.compiler.lang.{name}`")
     }
     &declarations.sort()
     unique := [String]{}
@@ -94,7 +94,7 @@ fn jet_cli_rule_argument_declarations(signature: TAppliedRuleSignature) -> Strin
         if unique.len() == 0 || unique[unique.len() - 1] != declaration -> &unique.push(declaration)
     }
     if unique.len() == 0 -> return ""
-    " Argument declarations: {unique.join(",")}."
+    " Argument declarations: {unique.join(", ")}."
 }
 
 // Explain.rs `rule_explanation`: one registered rule row's typed signature,

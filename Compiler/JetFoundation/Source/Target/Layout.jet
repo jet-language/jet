@@ -334,7 +334,7 @@ fn jet_target_layout_cache_identity(facts: LayoutCapabilityFacts) -> String Neve
     jet_target_layout_frame_support(&bytes, facts.global_placement)
     jet_target_layout_frame_support(&bytes, facts.heap_allocator)
     jet_target_layout_frame_support(&bytes, facts.foreign_by_value_abi)
-    "{JET_TARGET_LAYOUT_FACT_VERSION}:{sha256_hex_bytes(bytes)}"
+    "{JET_TARGET_LAYOUT_FACT_VERSION}:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
 }
 
 fn jet_target_layout_check_alignment(target: JetTargetLayout, requested: Int, natural: Int, target_mode: Bool) -> JetLayoutAlignmentResult Never! {

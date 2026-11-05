@@ -146,7 +146,7 @@ fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIPlan 
             code == 92 -> escaped = "{escaped}\\\\"
             code == 39 -> escaped = "{escaped}\\'"
             code == 34 -> escaped = "{escaped}\\\""
-            code >= 32 && code <= 126 -> escaped = "{escaped}{program.slice(index..<(index + 1))}"
+            code >= 32 && code <= 126 -> escaped = "{escaped}{String.from_bytes(bytes[index..<(index + 1)]) ?? ""}"
             else -> escaped = "{escaped}\\u{{{cli_completion_fmt.hex(code, 0)}}}"
         }
         index += width

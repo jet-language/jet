@@ -55,7 +55,7 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     }
 }
 #Test("perf profile counts snapshots, never guessed invocations") {
-    source :: jet_cli_perf_source("app.jet", "fn run() -> Int { 1 }")
+    source :: jet_cli_perf_source("app.jet", "fn run() -> Int {{ 1 }}")
     profile :: jet_cli_perf_source_profile(source, U64{2}, U64{1}, false) ?? panic(err.message)
     assert_eq(profile.status, "captured")
     assert_eq(profile.coverage, "partial")
@@ -73,7 +73,7 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
 #Test("perf capture keeps observed IO, locks and allocations causal") {
     live :: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     observations :: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
-    capture :: jet_cli_perf_capture_source("app.jet", "fn run() -> Int { 1 }", observations, "x86_64-unknown-linux-gnu") ?? panic(err.message)
+    capture :: jet_cli_perf_capture_source("app.jet", "fn run() -> Int {{ 1 }}", observations, "x86_64-unknown-linux-gnu") ?? panic(err.message)
     assert_eq(capture.io.len(), 1)
     assert_eq(capture.io[0].start_ns, U64{20})
     assert_eq(capture.io[0].end_ns, U64{20})
@@ -92,13 +92,13 @@ fn jet_cli_perf_test_snapshot(task_id: Int) -> JetCLILiveSnapshot Never! {
     other := live
     other.revision = "different"
     observations :: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: other}}
-    if jet_cli_perf_capture_source("app.jet", "fn run() -> Int { 1 }", observations, "test") == {
+    if jet_cli_perf_capture_source("app.jet", "fn run() -> Int {{ 1 }}", observations, "test") == {
         .Err(_) -> {}
         else -> panic("accepted mixed observation revisions")
     }
 }
 #Test("perf browser decode uses compiler source carrier and refuses unknown symbols") {
-    digest :: sha256_hex("fn run() -> Int { 1 }")
+    digest :: sha256_hex("fn run() -> Int {{ 1 }}")
     table :: "source\t{perf_hex.encode("app.jet".bytes())}\t{digest}\nsymbol\t{perf_hex.encode("app.jet".bytes())}\t{perf_hex.encode("run".bytes())}\tfn\n"
     header :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[],\"nonce\":\"n\",\"pid\":12,\"started\":\"123\",\"sources\":\"{perf_hex.encode(table.bytes())}\"}}"
     row :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay.row\",\"ok\":true,\"reports\":[],\"class\":\"wasm\",\"duration_ns\":4,\"start_ns\":5,\"symbol\":\"run\"}}"

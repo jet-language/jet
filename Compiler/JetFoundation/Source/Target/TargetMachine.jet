@@ -549,7 +549,7 @@ fn jet_target_provider_identity(machine: TargetMachine) -> String Never! {
     jet_target_append_frame(&bytes, "hardware", jet_target_hardware_json(machine.hardware))
     jet_target_append_frame(&bytes, "programmers", jet_target_programmers_json(machine.programmers))
     jet_target_append_frame(&bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
-    "target-providers-v1:{sha256_hex_bytes(bytes)}"
+    "target-providers-v1:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
 }
 
 fn jet_target_allocator_provides_heap(policy: AllocatorPolicy) -> Bool Never! {
@@ -580,7 +580,7 @@ fn jet_target_wasm_provider(name: String, implementation: String) -> ProviderCon
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "provider", name)
     jet_target_append_frame(&bytes, "implementation", implementation)
-    digest :: sha256_hex_bytes(bytes)
+    digest :: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
     ProviderContract{
         provider: name,
         sha256: "sha256:{digest}",

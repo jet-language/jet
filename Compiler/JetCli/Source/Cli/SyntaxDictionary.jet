@@ -38,8 +38,15 @@ fn jet_cli_edit_distance(left: String, right: String) -> Int Never! {
     previous[b.len()]
 }
 
+// An exact spelling wins before ASCII case folding: `Effect` (the type) and
+// `effect` (the keyword), or `#static` and `#Static`, are separate rows, and
+// each row's own display must find that row.
 fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
-    wanted :: jet_cli_ascii_lower(query.trim())
+    trimmed :: query.trim()
+    loop (index, row) in JET_CLI_SYNTAX_ROWS {
+        if trimmed == jet_cli_syntax_display(row) -> return Val(index)
+    }
+    wanted :: jet_cli_ascii_lower(trimmed)
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
         if wanted == row.query || wanted == row.display_query -> return Val(index)
     }
