@@ -3366,7 +3366,11 @@ one-branch-only E0141; lending instead E0142. A list of single-use values
 (`[Task<T>]`) is also consumed by a drain loop: `loop xs.len() > 0` (or
 `xs.len() != 0`, `!xs.is_empty()`) whose body names `xs` only to `pop` it or
 ask its length and never breaks out. Each popped value owes its own consume;
-a body that refills or lends `xs` leaves the list's duty (E0140).
+a body that refills or lends `xs` leaves the list's duty (E0140). Under
+D-LIN-CONTAINER1=A a List, Option, Result, Map, tuple or generic type argument
+holding a single-use value owes the duty too, so a dropped `[Lease]` or
+`Lease?` is E0140. A loop over such a list (or `loop (k, v) in ^table`) hands
+each element over, and each loop name owes its own consume.
 
 **D-PREPOST1 — Contracts** *(amended by D-FAIL-TIER1)*:
 `#Pre(cond, "msg")` / `#Post(cond, "msg")` on a signature (`result` in Post);

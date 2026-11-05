@@ -1,0 +1,14 @@
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Holder { res: Res }
+
+fn grab(res: ^Res) { print("took {res.name}") }
+
+fn run() {
+    holder :: Holder{res: Res{name: "b"}}
+    grab(^holder.res)
+    print(holder.res.name)
+}

@@ -78,13 +78,13 @@ fn sema_string_view_push_copies_policy(table: &SemaScopeTable, declarations: [Po
 }
 
 // Rust `string_view_call_source`: the owner places of a `trim`/`after`/
-// `before` call on a plain local or parameter `String` name; empty for any
-// other initializer.
+// `before`/`slice` call on a plain local or parameter `String` name; empty
+// for any other initializer.
 fn sema_string_view_call_sources(init: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> [SemaOwnershipPlace] {
     none := [SemaOwnershipPlace]{}
     if init == {
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            arity_ok :: (method == "trim" && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1)
+            arity_ok :: (method == "trim" && args.len() == 0) || ((method == "after" || method == "before") && args.len() == 1) || (method == "slice" && (args.len() == 1 || args.len() == 2))
             if !arity_ok -> return none
             if receiver == {
                 .Ident(name, _, _) -> {
@@ -100,20 +100,34 @@ fn sema_string_view_call_sources(init: Expr, scopes: SemaScopeTable, state: &Sem
     }
 }
 
+fn sema_string_view_is_slice_call(init: Expr) -> Bool Never! {
+    if init == .MethodCall(_, method, _, _, _, _, _) -> return method == "slice"
+    false
+}
+
 // Rust `lower_string_view_init`: the borrowed sibling of the owned String
-// operation, carried as `View<str>` so the place keeps the `&str` shape.
+// operation, carried as `View<str>` so the place keeps the `&str` shape. A
+// `slice` keeps its operation: only its type becomes the view.
 fn sema_string_view_lower_init(init: TExpr) -> TExpr? {
+    view_type :: Type.Apply{name: "View", args: [Type]{Type.Named{name: "str"}}}
     if init.kind == {
         .BuiltinMethod(receiver, operation, args) -> {
             view_operation :: if operation == {
                 .Trim -> TBuiltinOp.TrimView
                 .After -> TBuiltinOp.AfterView
                 .Before -> TBuiltinOp.BeforeView
+                .Slice(line) -> TBuiltinOp.Slice{line: line}
                 else -> {
                     return None
                 }
             }
-            return Val(TExpr{ty: Type.Apply{name: "View", args: [Type]{Type.Named{name: "str"}}}, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: view_operation, args: args}, span: init.span})
+            return Val(TExpr{ty: view_type, kind: TExprKind.BuiltinMethod{receiver: receiver, operation: view_operation, args: args}, span: init.span})
+        }
+        .Slice(base, _, _, _, _) -> {
+            if base.ty != Type.String -> return None
+            viewed := init
+            tree_expr_retype(&viewed, view_type)
+            return Val(viewed)
         }
         else -> return None
     }
@@ -231,10 +245,9 @@ fn sema_string_view_check_field(value: Expr, field_ty: Type, environment: SemaSc
         if sema_string_view_binding(scopes, name) -> view_name = name
     }
     if view_name != "" {
-        if !sema_string_view_stable_owner(scopes, state, view_name) {
-            sema_string_view_unsupported_use(view_name, "be stored in a struct field", span, scopes, state, &diagnostics)
-            return None
-        }
+        // The refusal does not end the check: the field still holds the
+        // view, so the enclosing return or binding judges its owner too.
+        if !sema_string_view_stable_owner(scopes, state, view_name) -> sema_string_view_unsupported_use(view_name, "be stored in a struct field", span, scopes, state, &diagnostics)
         viewed := checked
         tree_expr_retype(&viewed, field_ty)
         return Val(viewed)

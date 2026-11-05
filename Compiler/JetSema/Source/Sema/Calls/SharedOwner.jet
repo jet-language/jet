@@ -200,6 +200,7 @@ fn sema_call_cell_write(receiver: Expr, receiver_value: TExpr, owner: String, in
     checked :: sema_check_expression(updated_args[0].expr, Val(inner), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_expr_expected(checked, Val(inner), environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params :: [SemaCallParam]{sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
+    sema_receiver_mark_allow_write(&state, receiver)
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     result :: if method == "replace" -> inner else -> Type.Named{name: "Unit"}

@@ -1,0 +1,32 @@
+#SingleUse struct Lease {
+    name: String
+}
+
+fn acquire(name: String) -> Lease { Lease{name: name.copy()} }
+
+fn skip_inner() {
+    groups :: [[Lease]]{[Lease]{acquire("nested")}}
+    loop group in groups {
+        print(group.len())
+    }
+}
+
+fn skip_element() {
+    leases :: [Lease]{acquire("a")}
+    loop lease in leases {
+        print(lease.name)
+    }
+}
+
+fn skip_map_value() {
+    table :: [String: Lease]{"k": acquire("b")}
+    loop (key, lease) in ^table {
+        print(key)
+    }
+}
+
+fn run() {
+    skip_inner()
+    skip_element()
+    skip_map_value()
+}

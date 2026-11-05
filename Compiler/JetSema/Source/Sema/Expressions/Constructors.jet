@@ -345,13 +345,20 @@ struct SemaStructFieldFact {
     string_view: Bool
     symbol: Symbol
     boxed: Bool
+    // The field type holds a view (sema_check_type_contains_view).
+    holds_view: Bool
 }
 
 fn sema_expression_struct_field_fact(field: Field, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaStructFieldFact {
     field_ty :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), names, args)
     field_id :: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, field.name)
     symbol :: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner.module_name, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
-    SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name)}
+    holds_view := false
+    if program.registration_graph == .Val(graph) {
+        seen := [String:Bool]{}
+        holds_view = sema_check_type_contains_view(graph, owner.module_name, field_ty, &seen)
+    }
+    SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name), holds_view: holds_view}
 }
 
 // The facts of a non-generic struct's fields, in declaration order, from the
@@ -401,6 +408,7 @@ fn sema_expression_struct_field_finish(fact: SemaStructFieldFact, checked: TExpr
     }
     if !string_view && !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
     &context.name_references.push(SemaNameReferenceFact{span: field_reference_span, symbol: fact.symbol, kind: "field"})
+    if fact.holds_view -> &context.view_field_values.push(expr_span(field_value))
     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), field_ty)
     reference.boxed = fact.boxed
     initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked

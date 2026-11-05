@@ -1,0 +1,42 @@
+// A `String.slice` result fills a `View<str>` return or field as a view
+// of its source string, in either slice form; a plain `String` slot or
+// binding still takes the owned slice.
+struct Part {
+    head: View<str>
+}
+
+struct Named {
+    name: String
+}
+
+fn prefix(text: String) -> View<str> from text {
+    text.slice(0..<3)
+}
+
+fn middle(text: String) -> View<str> from text {
+    if text.len() < 4 -> return text.slice(0..<0)
+    text.slice(1, 4)
+}
+
+fn part(text: String) -> Part from text {
+    Part{head: text.slice(0..<2)}
+}
+
+fn named(text: String) -> Named {
+    Named{name: text.slice(0..<2)}
+}
+
+fn owned_local() -> Named {
+    local :: "local-text"
+    cut :: local.slice(0..<5)
+    Named{name: cut}
+}
+
+fn run() {
+    word :: "jetstream"
+    print(prefix(word))
+    print(middle(word))
+    print(part(word).head)
+    print(named(word).name)
+    print(owned_local().name)
+}

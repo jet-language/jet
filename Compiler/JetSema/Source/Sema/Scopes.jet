@@ -165,9 +165,12 @@ struct SemaCallReturnViewFact {
     access: AccessConvention
     places: [SemaOwnershipPlace]
     sources: [ViewSourcePath]
-    // Argument spans of parameter sources that name no place (a temporary
-    // owner dropped at the end of the statement).
+    // Argument or receiver spans of sources that name no place (a temporary
+    // owner the call drops when it returns).
     temporaries: [Span]{[Span]{}}
+    // The literal field value that holds this view inside a returned
+    // aggregate; a report names it rather than the whole returned value.
+    span: Span?{None}
 }
 
 struct SemaCallReturnView {
@@ -728,6 +731,11 @@ struct SemaCheckContext {
     // first field's fact.
     struct_field_fact_rows: [String:Int]{[String:Int]{}}
     struct_field_facts: [SemaStructFieldFact]{[SemaStructFieldFact]{}}
+    // Spans of the named-literal field values whose declared field type holds
+    // a view (`View<T>`, `View<str>` or a struct that stores one): only these
+    // keep a view into their source inside the literal; any other field owns
+    // its value (sema_stmt_local_view_facts_fields).
+    view_field_values: [Span]{[Span]{}}
 }
 
  
@@ -791,6 +799,11 @@ struct SemaScopeTable {
     // counts: each resolution adds one lookup and the binding rows it
     // examined. None for an uncounted table.
     lookup_counters: SemaScopeLookupCounters?{None}
+    // The inferred return-view provenance of this module's view-returning
+    // methods (sema_check_view_summaries), by registered method symbol key.
+    // A method call candidate carries the registered signature, which holds
+    // only a declared `from` contract.
+    method_return_views: [String:ViewProvenanceMap]{[String:ViewProvenanceMap]{}}
 }
 
 // A scope table's handle on the graph's counters. It shows as its name:
@@ -1500,6 +1513,7 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         light_types: source.light_types.copy(),
         position_free: source.position_free,
         lookup_counters: source.lookup_counters,
+        method_return_views: source.method_return_views.copy(),
     }
 }
 
@@ -2092,6 +2106,7 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
         location_function: source.location_function,
         light_types: ^light,
         lookup_counters: source.lookup_counters,
+        method_return_views: source.method_return_views.copy(),
     }
 }
 

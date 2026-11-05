@@ -3986,19 +3986,24 @@ fn sema_pass_facts_claimed(shared_state: Shared<SemaPassFactsShared>, queue: Sha
 // (Rust `check_module_bodies`): resolve callable view
 // summaries before the real body pass so declaration order cannot affect a
 // public owner contract. Only functions whose declared return type
-// structurally contains a view are summary jobs, checked in name order; each
+// structurally contains a view are summary jobs, checked in name order, then
+// the module's methods with such a return type
+// (sema_check_view_summary_method_jobs); each
 // check discards its diagnostics and other products and publishes only the
 // return-view provenance into `scopes`. A round that reproduces the previous
 // round's per-job provenance is the fixed point; jobs + 1 rounds is the upper
 // bound, and no jobs means no summary checks. `view_jobs`: the jobs a
 // declaration check found ahead (SemaDeclarationCheck), else None.
+// `summary_functions_checked` counts the function jobs only.
 fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, module_index: Int, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], view_jobs: [Int]?, counter_phase: String, trace_sink: CompilerTraceSink?) {
     summary_jobs :: if view_jobs == .Val(found) -> found.copy() else -> sema_check_sorted_view_summary_jobs(environment, program, module_index)
+    method_jobs :: sema_check_view_summary_method_jobs(program, module_index)
+    job_count :: summary_jobs.len() + method_jobs.len()
     summary_functions_checked := 0
     return_view_rows := [String:Int]{}
     previous_round := [ViewProvenanceMap?]{}
     summary_round := 0
-    loop summary_jobs.len() > 0 && summary_round <= summary_jobs.len() {
+    loop job_count > 0 && summary_round <= job_count {
         round := [ViewProvenanceMap?]{}
         loop item_index in summary_jobs {
             job :: SemaBodyJob.TopLevel{item_index: item_index}
@@ -4028,6 +4033,7 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaPr
             }
             &round.push(provenance)
         }
+        loop job in method_jobs -> &round.push(sema_check_view_summary_method(job, module_index, memory_plan, &environment, program, &scopes, host_hooks))
         if summary_round > 0 && sema_check_view_rounds_equal(previous_round, round) -> break
         previous_round = round
         summary_round += 1
@@ -4036,6 +4042,64 @@ fn sema_check_view_summaries(environment: &SemaScopeEnvironment, program: SemaPr
         sink.progress("counters.{counter_phase}.items_scanned", sema_check_registered_module_item_count(environment, program, module_index), -1)
         sink.progress("counters.{counter_phase}.summary_functions_checked", summary_functions_checked, -1)
     }
+}
+
+// The module's methods whose declared return type structurally contains a
+// view, in method body order (sema_check_method_jobs). A method call reads
+// the summary from `scopes.method_return_views`.
+fn sema_check_view_summary_method_jobs(program: SemaProgramTables, module_index: Int) -> [SemaBodyJob] {
+    if program.registration_graph == .Val(graph) {
+        jobs := [SemaBodyJob]{}
+        scanned := 0
+        loop job in sema_check_method_jobs(graph, graph.modules[module_index], &scanned, false) {
+            if job == {
+                .NominalMethod(ordinal, owner, row) -> {
+                    if sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].nominals[owner].methods[row].declaration) -> &jobs.push(SemaBodyJob.NominalMethod{ordinal: ordinal, nominal_index: owner, method_index: row})
+                }
+                .ImplMethod(ordinal, owner, row) -> {
+                    if sema_check_view_summary_method_selected(graph, module_index, graph.modules[module_index].impls[owner].methods[row].declaration) -> &jobs.push(SemaBodyJob.ImplMethod{ordinal: ordinal, implementation_index: owner, method_index: row})
+                }
+                .TopLevel(_) -> {}
+            }
+        }
+        return ^jobs
+    }
+    panic("an owning registered-module pass lost its registration graph")
+}
+
+fn sema_check_view_summary_method_selected(graph: SemaRegistrationGraph, module_index: Int, declaration: Func) -> Bool {
+    if declaration.compiler_generated || declaration.inline_foreign != None || sema_function_is_guest_import(declaration) -> return false
+    return_type :: declaration.return_type ?? return false
+    seen := [String:Bool]{}
+    sema_check_type_contains_view(graph, graph.modules[module_index].module_identity, return_type, &seen)
+}
+
+// One summary check of method `job`, set up as the method body pass sets it
+// up: the owner's generic parameters and the panic location stay installed
+// only for the check. Its diagnostics and other products are discarded; the
+// inferred provenance is published under the method's registered symbol key,
+// the key its call candidate carries.
+fn sema_check_view_summary_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, environment: &SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?) -> ViewProvenanceMap? {
+    memory_position :: sema_check_registered_memory_position(job, module_index, memory_plan, environment, program)
+    input :: sema_check_method_input(job, module_index, memory_plan, memory_position, environment, program)
+    owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
+    raw_protocol_return :: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
+    base_generic_params :: environment.generic_params.copy()
+    environment.generic_params = input.generic_params.copy()
+    // copy: `previous_location` restores scopes.location_function after the check overwrites it.
+    previous_location :: scopes.location_function.copy()
+    sema_function_check_registered_location(job, module_index, memory_plan, input.memory_position, environment, program, &scopes)
+    summary_diagnostics := [Diagnostic]{}
+    summary_calls := [SemaCallSiteFact]{}
+    summary_comptime_requests := [SemaComptimeRequest]{}
+    summary_name_references := [SemaNameReferenceFact]{}
+    checked := sema_function_check_registered(job, module_index, memory_plan, input.memory_position, owner_id, input.function_kind, raw_protocol_return, &environment, program, &scopes, host_hooks, &summary_diagnostics, &summary_calls, &summary_comptime_requests, &summary_name_references)
+    scopes.location_function = previous_location
+    environment.generic_params = base_generic_params.copy()
+    provenance := ViewProvenanceMap?{None}
+    if checked.value == .Val(function) -> provenance = function.return_view_provenance
+    if provenance == .Val(map) -> scopes.method_return_views[owner_id.key] = map
+    provenance
 }
 
 fn sema_check_registered_module_item_count(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int) -> Int {

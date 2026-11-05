@@ -1,0 +1,8 @@
+Error [jet.SingleUseDropped]: `leases` still owes `consume`
+  --> single_use_list_dropped_owes_consume.jet:8:5
+    |
+  8 |     leases :: [Lease]{acquire("a"), acquire("b")}
+    |     ^^^^^^
+ Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
+ Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(leases) }` to discard it deliberately
+More: jet-lang.dev/e/E0140

@@ -1444,7 +1444,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     value :: sema_call_with_binder_pins(^pins, ^contracted, call.name_span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return None
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
-    return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
+    return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span, &diagnostics)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 

@@ -157,7 +157,10 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     // callback's effects are the argument's, accounted where it is passed.
     // Any other unannotated function value stays an unknown callee.
     if facts.effect_bound == None && sema_call_value_is_parameter(callee, scopes) -> facts.effect_bound = Val([EffectRowEntry]{})
-    return_view_facts :: sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, &state, span)
+    return_view_facts :: if sema_call_value_undeclared_view_provenance(callee, resolved_signature, scopes) == {
+        .Val(provenance) -> sema_call_return_view_facts(Type.Fn{params: [Type]{}, ret: Val(result_type_raw), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}, None, checked_args, resolved_binding, scopes, &state, span, &diagnostics)
+        .None -> sema_call_return_view_facts(resolved_signature, None, checked_args, resolved_binding, scopes, &state, span, &diagnostics)
+    }
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
@@ -169,6 +172,25 @@ fn sema_call_value_is_parameter(callee: Expr, scopes: SemaScopeTable) -> Bool Ne
         }
         else -> false
     }
+}
+
+// A view returned through a function-typed parameter whose type declares no
+// view provenance borrows every non-scalar argument of the call: nothing
+// narrower is known about the callback, so each of them stays frozen while
+// the view lives.
+fn sema_call_value_undeclared_view_provenance(callee: Expr, signature: Type, scopes: SemaScopeTable) -> ViewProvenanceMap? {
+    if !sema_call_value_is_parameter(callee, scopes) -> return None
+    if signature == .Fn(params, ret, _, _, _, provenance) {
+        if provenance == .Val(_) -> return None
+        result :: ret ?? return None
+        access :: sema_stmt_view_access(sema_call_view_result_success(result)) ?? return None
+        sources := [ViewSourcePath]{}
+        loop index in 0..<params.len() {
+            if !sema_ownership_type_is_scalar(params[index]) -> &sources.push(ViewSourcePath{source: ViewSource.Parameter{index: index}, projections: [ViewSourceProjection]{}})
+        }
+        return Val(ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: sources, mutable: access == AccessConvention.Write}}}})
+    }
+    None
 }
 
 fn sema_call_value_is_declaration(callee: Expr, scopes: SemaScopeTable) -> Bool Never! {
@@ -216,7 +238,7 @@ fn sema_call_value_inline_loop(lambda: Lambda, span: Span, expected: Type?, envi
     // owner's statements): its body's calls are already facts of the owner,
     // so the loop site itself is known-pure rather than an unknown callee.
     facts.effect_bound = Val([EffectRowEntry]{})
-    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, &state, span)
+    return_view_facts := sema_call_return_view_facts(signature, None, checked_args, binding, scopes, &state, span, &diagnostics)
     Val(SemaCallChecked{value: checked_value, binding: binding, facts: facts, return_view_facts: return_view_facts})
 }
 

@@ -1376,7 +1376,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         sources :: [ViewSourcePath]{ViewSourcePath{source: ViewSource.Parameter{index: 0}, projections: [ViewSourceProjection]{}}}
         provenance :: ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: sources, mutable: false}}}}
         callable :: Type.Fn{params: [Type]{}, ret: Val(result_type), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}
-        facts :: sema_call_return_view_facts(callable, None, args, binding, scopes, &state, span)
+        facts :: sema_call_return_view_facts(callable, None, args, binding, scopes, &state, span, &diagnostics)
         &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
     }
     value :: sema_call_core_tree(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, environment, program, &diagnostics) ?? return None

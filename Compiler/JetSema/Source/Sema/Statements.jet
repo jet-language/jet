@@ -2434,7 +2434,7 @@ fn sema_stmt_for_in_range_zero(span: Span) -> TExpr Never! {
 // binds the loop name under the identity every body read resolves by. None
 // when the name could not be declared (reported here) or is untyped (the
 // loop is incomplete either way).
-fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> TLocal? {
+fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, owes_duty: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> TLocal? {
     owner := sema_scope_local_owner_key(scopes)
     symbol := Symbol{
         id: symbol_id(SymbolKind.Local, environment.module_identity, owner, name),
@@ -2452,7 +2452,16 @@ fn sema_stmt_for_in_decl_loop_local(name: String, name_span: Span, ty: Type?, en
     }
     checked_ty :: ty ?? return None
     sema_ownership_declare_binding(&state, symbol, false)
+    if owes_duty -> sema_single_use_note_binding(&state, symbol, environment, program)
     Val(checked_symbol_local(name, name_span, symbol.id, checked_ty))
+}
+
+// `loop (k, v) in ^table`: the loop takes the map, so its entries are owned.
+fn sema_stmt_for_in_takes_map(collection: Expr, collection_type: Type) -> Bool Never! {
+    if collection_type == .Map(_, _, _) {
+        if collection == .Place(_, access, _, _) -> return access == PlaceAccess.Take
+    }
+    false
 }
 
 // Rust lends each ViewMut item for one iteration; the descriptor may not
@@ -2772,7 +2781,7 @@ fn sema_stmt_local_view_facts_inner(expr: Expr, scopes: SemaScopeTable, state: &
                     &slot.push(fact.slot[index])
                     index += 1
                 }
-                &result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries})
+                &result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries, span: fact.span})
             }
             return result
         }
@@ -2786,24 +2795,56 @@ fn sema_stmt_local_view_facts_inner(expr: Expr, scopes: SemaScopeTable, state: &
             }
             return facts
         }
-        .StructLit(_, _, _, _, fields, _, _, _) -> {
-            result := [SemaCallReturnViewFact]{}
-            loop field in fields {
-                loop fact in sema_stmt_local_view_facts_inner(field.value, scopes, &state, context, true) {
-                    slot := [String]{field.name}
-                    loop part in fact.slot -> &slot.push(part)
-                    &result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries})
-                }
-            }
-            return result
+        .StructLit(_, _, _, _, fields, _, _, _) -> return sema_stmt_local_view_facts_fields(fields, false, scopes, &state, context)
+        // `Domain{ value: view }` with a written head: the same named fields,
+        // but only those whose declared type holds a view; any other field
+        // stores its own copy.
+        .TypedLit(_, body, _, _) -> {
+            if body == .Fields(fields) -> return sema_stmt_local_view_facts_fields(fields, true, scopes, &state, context)
+            return [SemaCallReturnViewFact]{}
         }
         .Slice(_, _, _, _, _, _) -> {
             if !aggregate -> return [SemaCallReturnViewFact]{}
             places :: sema_ownership_places_from_expr_in_state(expr, scopes, &state)
             return [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}}}
         }
+        // A `trim`/`after`/`before` window on a `String` name stored straight
+        // into an aggregate field borrows that name (Rust `view_call_sources`).
+        .MethodCall(_, _, _, _, _, _, _) -> {
+            if !aggregate -> return [SemaCallReturnViewFact]{}
+            places :: sema_string_view_call_sources(expr, scopes, &state)
+            if places.len() == 0 -> return [SemaCallReturnViewFact]{}
+            return [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}}}
+        }
         else -> [SemaCallReturnViewFact]{}
     }
+}
+
+// Rust `check_aggregate_view_return`: each field of a returned literal fills
+// its own output slot, and a report names the field value that holds the view.
+// `typed` keeps only fields checked against a view type (view_field_values);
+// a `s.slice(..)` field is a view only in such a field, so it is kept the
+// same way in either literal form.
+fn sema_stmt_local_view_facts_fields(fields: [ExprField], typed: Bool, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
+    result := [SemaCallReturnViewFact]{}
+    loop field in fields {
+        if (typed || sema_string_view_is_slice_call(field.value)) && !sema_stmt_view_field_value(field.value, context) -> next
+        loop fact in sema_stmt_local_view_facts_inner(field.value, scopes, &state, context, true) {
+            slot := [String]{field.name}
+            loop part in fact.slot -> &slot.push(part)
+            span :: if fact.span == None -> Val(expr_source_span(field.value)) else -> fact.span
+            &result.push(SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places, sources: fact.sources, temporaries: fact.temporaries, span: span})
+        }
+    }
+    result
+}
+
+fn sema_stmt_view_field_value(value: Expr, context: SemaCheckContext) -> Bool Never! {
+    span :: expr_span(value)
+    loop listed in context.view_field_values {
+        if listed.start == span.start && listed.end == span.end -> return true
+    }
+    false
 }
 
 fn sema_stmt_store_local_view_provenance(carrier_key: String, facts: [SemaCallReturnViewFact], context: &SemaCheckContext) Never! {
@@ -2870,23 +2911,19 @@ fn sema_stmt_string_view_type(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `report_temporary_view_source`: a view-returning call whose parameter
-// source is a temporary owner (dropped at the end of the statement). True
-// when the fact names a temporary.
+// Rust `report_temporary_view_source` at a binding or `return` that keeps a
+// returned view: every temporary source is refused, a static string literal
+// too, since the kept view outlives the statement. True when the fact names
+// a temporary.
 fn sema_stmt_report_temporary_view_sources(fact: SemaCallReturnViewFact, string_view: Bool, diagnostics: &[Diagnostic]) -> Bool {
-    loop span in fact.temporaries {
-        diagnostic :: if string_view -> sema_error("E2307", span, "A returned view cannot borrow from a temporary argument", "The temporary owner is dropped at the end of this statement, while the returned view remains live", "Store the owner in a named binding first, then pass that binding to the view-returning call") else -> sema_error("E2305", span, "a returned view cannot borrow from a temporary argument", "the temporary owner is dropped at the end of this statement, while the returned view remains live", "store the owner in a named binding first, then pass that binding to the view-returning call")
-        duplicate :: loop previous in diagnostics {
-            if previous.code == diagnostic.code && previous.span == diagnostic.span -> break true
-        } ?? false
-        if !duplicate -> &diagnostics.push(diagnostic)
-    }
+    loop span in fact.temporaries -> sema_call_report_temporary_view_source(span, string_view, &diagnostics)
     fact.temporaries.len() > 0
 }
 
 fn sema_stmt_has_struct_view_source(expr: Expr) -> Bool Never! {
     if expr == {
         .StructLit(_, _, _, _, _, _, _, _) -> true
+        .TypedLit(_, body, _, _) -> body == .Fields(_)
         .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) -> sema_stmt_has_struct_view_source(base)
         .Paren(value, _, _) | .Place(value, _, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) -> sema_stmt_has_struct_view_source(value)
         else -> false
@@ -2909,7 +2946,7 @@ fn sema_stmt_record_return_views(expr: Expr, ty: Type, scopes: SemaScopeTable, s
                 saw_direct = true
                 temporary :: sema_stmt_report_temporary_view_sources(fact, sema_stmt_string_view_type(ty), &diagnostics)
                 if temporary -> valid = false
-                if (!temporary || fact.places.len() > 0) && !sema_stmt_record_call_view_return(&state, fact, fact.slot, scopes, &context, expr_span(expr), &diagnostics) -> valid = false
+                if (!temporary || fact.places.len() > 0) && !sema_stmt_record_call_view_return(&state, fact, fact.slot, scopes, &context, fact.span ?? expr_span(expr), &diagnostics) -> valid = false
             }
             index += 1
         }
@@ -2929,7 +2966,7 @@ fn sema_stmt_record_return_views(expr: Expr, ty: Type, scopes: SemaScopeTable, s
         loop fact in local_facts {
             if !direct_view || fact.slot.len() == 0 {
                 saw_direct = true
-                if !sema_stmt_record_call_view_return(&state, fact, fact.slot, scopes, &context, expr_span(expr), &diagnostics) -> valid = false
+                if !sema_stmt_record_call_view_return(&state, fact, fact.slot, scopes, &context, fact.span ?? expr_span(expr), &diagnostics) -> valid = false
             }
         }
         if direct_view && !saw_direct {
@@ -2987,6 +3024,31 @@ fn sema_stmt_is_bare_range_place(expr: Expr, scopes: SemaScopeTable, state: &Sem
         }
     }
     false
+}
+
+// Rust `check_return` (`bare_place`): a bare whole list place (a name or a
+// field of one) returned at a named `View<T>` boundary is a read window over
+// all of it. It is written as its full range `place[0..<place.len()]`, so it
+// takes the range-window path: typed `View<T>`, owned by the place, and
+// lowered without a copy.
+fn sema_stmt_whole_list_window(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState) -> Expr? {
+    if value == {
+        .Ident(_, _, _) | .Field(_, _, _, _) -> {}
+        else -> return None
+    }
+    if sema_ownership_places_from_expr_in_state(value, scopes, &state).len() == 0 -> return None
+    ty :: sema_shared_access_place_type(value, environment, program, &scopes) ?? return None
+    if sema_expr_unwrap_tag(ty) == {
+        .List(_) | .FixedList(_, _) -> {}
+        else -> return None
+    }
+    span :: expr_span(value)
+    // copy: the full range reads the place twice, as its base and as the receiver of its length
+    length :: Expr.MethodCall{receiver: value.copy(), method: "len", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+    start :: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    // copy: the slice keeps its bounds both as `start`/`end` and inside its range, as the parser writes `xs[a..<b]`
+    whole :: Expr.Range{start: start.copy(), end: length.copy(), exclusive: true, span: span, id: AST_NODE_GENERATED}
+    Val(Expr.Slice{base: value, start: start, end: length, range: Val(whole), span: span, id: AST_NODE_GENERATED})
 }
 
 fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -3053,15 +3115,15 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
             &diagnostics.push(sema_error("E0213", expr_span(binding.init), "a window must start from a place", "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying", "bind the call or temporary to a name first, then take a window into that name"))
             return false
         }
-        // A window whose open is rejected holds no loan: the binding stays,
-        // but later uses of it are not judged against the conflict already
-        // reported. Inside a `task.group` body the window is still recorded,
-        // contested, so a child task that captures it is judged against its
-        // place.
+        // A window whose open is rejected is still recorded, contested: it
+        // neither blocks nor is blocked by other views, so later uses of it
+        // are not judged against the conflict already reported, but it stays
+        // a window into its place, so a write through it is not a write
+        // without a marker, and a child task that captures it inside a
+        // `task.group` body is judged against its place.
         if sema_ownership_view_producer(binding.init) == .Val(producer) {
             producer_places :: sema_ownership_places_from_expr_in_state(producer.source, scopes, &state)
             if !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer.source, producer_places, producer.access, scopes, &diagnostics) {
-                if !sema_taskgroup_in_group_body(context) -> return true
                 first :: state.views.len()
                 recorded :: sema_ownership_record_binding_view(&state, binding, scopes)
                 sema_ownership_mark_views_contested(&state, first)
@@ -4382,8 +4444,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // This rule stage S5 (Rust `string_view_call_source`): `x :: s.trim()`,
     // `s.after(sep)` or `s.before(sep)` on a local or parameter `String`
     // binds a scope-bound zero-copy view into `s`; a `:=` binding keeps the
-    // owned result, since it may later be reassigned an owned `String`.
-    view_sources := if binding.mutable -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, scopes, &state)
+    // owned result, since it may later be reassigned an owned `String`. A
+    // `s.slice(..)` binding stays owned too: a slice is a view only where a
+    // `View<str>` slot (a return or a field) asks for one.
+    view_sources := if binding.mutable || sema_string_view_is_slice_call(binding.init) -> [SemaOwnershipPlace]{} else -> sema_string_view_call_sources(binding.init, scopes, &state)
     view_init := if view_sources.len() > 0 -> sema_string_view_lower_init(init) else -> None
     string_view := view_init != None
     if !string_view && !sema_stmt_move_direct(binding_expr, &state, scopes, "the binding `{binding.name}`", &diagnostics) {
@@ -6599,21 +6663,8 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_is_bare_range_place(value, scopes, &state) {
         return sema_stmt_check_returned_value(Expr.Place{value: value, access: PlaceAccess.Read, span: expr_span(value), id: AST_NODE_GENERATED}, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    // `Ok(place)` fills the same view success slot (Rust `check_return`):
-    // return the window itself, lifted into the success rail like any plain
-    // success value, so the payload never materializes the view.
-    if sema_stmt_return_is_view_boundary(return_type) && sema_stmt_return_type_is_result(return_type) {
-        payload := Expr?{None}
-        // copy: `ok_value` is a payload of read parameter `value`, which keeps the original; the local `payload` owns this one
-        if value == .Ok(ok_value, _, _) -> payload = Val(ok_value.copy())
-        if value == .Call(ok_call, _) {
-            if ok_call.name == "Ok" && ok_call.args.len() == 1 -> payload = Val(ok_call.args[0].expr)
-        }
-        if payload == .Val(ok_value) {
-            if sema_stmt_is_bare_range_place(ok_value, scopes, &state) {
-                return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            }
-        }
+    if sema_stmt_return_is_view_boundary(return_type) {
+        if sema_stmt_whole_list_window(value, environment, program, &scopes, &state) == .Val(window) -> return sema_stmt_check_returned_value(window, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     // `Ok(place)` fills the same view success slot (Rust `check_return`):
     // return the window itself, lifted into the success rail like any plain
@@ -6629,6 +6680,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
             if sema_stmt_is_bare_range_place(ok_value, scopes, &state) {
                 return sema_stmt_check_returned_value(Expr.Place{value: ok_value, access: PlaceAccess.Read, span: expr_span(ok_value), id: AST_NODE_GENERATED}, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
+            if sema_stmt_whole_list_window(ok_value, environment, program, &scopes, &state) == .Val(window) -> return sema_stmt_check_returned_value(window, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
     checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -7355,7 +7407,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                                 }
                             }
                         }
-                        consumes_collection := sema_stmt_for_in_consumes_collection(collection.ty, item_type)
+                        // A list whose elements owe a `#SingleUse` duty hands each one over.
+                        consumes_collection := sema_stmt_for_in_consumes_collection(collection.ty, item_type) || (sema_stmt_for_in_is_list(collection.ty) && sema_single_use_type(item_type, environment, program))
                         task_list_consume :: consumes_collection && sema_stmt_for_in_is_list(collection.ty)
                         owns_collection := !consumes_collection || (sema_stmt_for_in_can_consume_collection(collection_expr) && (!task_list_consume || sema_stmt_for_in_frame_owns(collection_expr, scopes, &state)))
                         if !owns_collection {
@@ -7398,11 +7451,14 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             first_local_type = Val(first_type)
                             second_local_type = Val(second_type ?? item_type)
                         }
-                        first_local :: sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, environment, program, &scopes, &state, &diagnostics)
+                        // Each `#SingleUse` element a consuming loop hands over owes its
+                        // own duty in the body; task handles keep their join rule.
+                        element_owes_duty :: ((consumes_collection && sema_stmt_for_in_is_list(collection.ty)) || sema_stmt_for_in_takes_map(collection_expr, collection.ty)) && !sema_stmt_for_in_type_requires_owned_iteration(item_type)
+                        first_local :: sema_stmt_for_in_decl_loop_local(var, var_span, first_local_type, element_owes_duty, environment, program, &scopes, &state, &diagnostics)
                         if first_local == None -> valid = false
                         variable_two := TLocal?{None}
                         if var2 != None && (second_type != None || !source_checked || pair_rejected) {
-                            variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, environment, program, &scopes, &state, &diagnostics)
+                            variable_two = sema_stmt_for_in_decl_loop_local(var2.name, var2.span, second_local_type, element_owes_duty, environment, program, &scopes, &state, &diagnostics)
                             if variable_two == None -> valid = false
                         }
                         if borrowed_elements {
@@ -7460,7 +7516,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                                     else -> {
                                         source_value := sema_stmt_for_in_source(collection_expr, collection, method_kind)
                                         columnar := var2 == None && method_kind == None && sema_stmt_for_in_columnar_list_type(collection.ty) && sema_stmt_for_in_columnar(environment, program, item_type)
-                                        by_value := sema_stmt_for_in_by_value(collection.ty, item_type)
+                                        by_value := consumes_collection && (sema_stmt_for_in_by_value(collection.ty, item_type) || sema_stmt_for_in_is_list(collection.ty))
                                         stable := source_stable && method_kind == None && step_value == None && !by_value && !columnar && sema_stmt_for_in_stable_list(collection.ty)
                                         &output.push(TStmt.ForIn{label: label_name, variable: variable, variable_two: variable_two, source: source_value, collection: collection, step: step_value, method_kind: method_kind, columnar: columnar, by_value: by_value, source_stable: stable, body: nested.value, span: span})
                                     }

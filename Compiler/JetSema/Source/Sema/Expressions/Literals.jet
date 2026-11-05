@@ -1158,6 +1158,8 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment, prog
             return true
         }
         .Apply(name, args) -> {
+            // A string view shows its text, as the String it borrows from.
+            if sema_stmt_string_view_type(ty) -> return true
             // The owner's own rule is the reflection gate's, applied to the
             // bare owner; every argument is then shown in turn.
             if !sema_call_reflection_is_displayable(Type.Apply{name: name, args: [Type]{}}, environment, program) && !sema_expression_interpolation_derived(ty, environment, program) -> return false

@@ -8,6 +8,7 @@ use {
         AppliedRuleApplication,
         BodyNode,
         CallArg,
+        DIAGNOSTIC_ERROR,
         Diagnostic,
         DiagnosticFixApplicability,
         DiagnosticFixSafety,
@@ -430,6 +431,10 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
         }
         before :: diagnostics.len()
         checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        // The routine is the shipped Prelude declaration checked under this
+        // module's name: its spans are offsets into that generated text, not
+        // into anything the author wrote, so its warnings and lints are dropped.
+        sema_failure_keep_errors_since(&diagnostics, before)
         if !checked.complete {
             complete = false
             if keep_going {
@@ -452,6 +457,14 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
         }
     }
     complete
+}
+
+fn sema_failure_keep_errors_since(diagnostics: &[Diagnostic], start: Int) Never! {
+    kept := [Diagnostic]{}
+    loop index in 0..<diagnostics.len() {
+        if index < start || diagnostics[index].severity == DIAGNOSTIC_ERROR -> &kept.push(diagnostics[index])
+    }
+    diagnostics = kept
 }
 
 // E2417: an explicit `!` domain names `Err`, a Core

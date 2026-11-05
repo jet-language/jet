@@ -1,0 +1,22 @@
+#SingleUse struct Lease {
+    name: String
+}
+
+struct Box<T> {
+    item: T
+}
+
+fn acquire(name: String) -> Lease { Lease{name: name.copy()} }
+
+fn try_acquire(name: String) -> Lease Err! { Ok(acquire(name)) }
+
+fn run() {
+    leases :: [Lease]{acquire("list")}
+    maybe :: Lease?{acquire("option")}
+    outcomes :: [Lease Err!]{try_acquire("result")}
+    table :: [String: Lease]{"map": acquire("map")}
+    pair :: (first: acquire("tuple"), count: 1)
+    boxed :: Box<Lease>{item: acquire("generic")}
+    plain :: Box<[Int]>{item: [1, 2]}
+    print(plain.item.len())
+}

@@ -27,20 +27,38 @@ use jet_foundation.[
     expr_span,
 ]
 
-fn sema_single_use_type_name(ty: Type) -> String? {
+// Rust `type_is_single_use` over the registry: a value holding a task handle,
+// a `#SingleUse` struct or enum, or the Core `Delivery` handle (Rust
+// `core_single_use_type`). A value that holds one of those owes its duty too:
+// a List, Option, Result, Map, tuple or generic type argument that holds a
+// duty is dropped only once every duty inside it is done.
+fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if sema_stmt_for_in_type_requires_owned_iteration(ty) -> return true
     if ty == {
-        .Named(name) -> Val(name)
-        .Apply(name, _) -> Val(name)
-        else -> None
+        .Named(name) -> return sema_single_use_declared(name, environment, program)
+        .Apply(name, args) -> {
+            if name == "View" || name == "ViewMut" -> return false
+            if sema_single_use_declared(name, environment, program) -> return true
+            loop arg in args {
+                if sema_single_use_type(arg, environment, program) -> return true
+            }
+            return false
+        }
+        .List(inner) | .FixedList(inner, _) | .Option(inner) -> return sema_single_use_type(inner, environment, program)
+        .Result(ok, err) -> return sema_single_use_type(ok, environment, program) || sema_single_use_type(err, environment, program)
+        .Map(key, _, value) -> return sema_single_use_type(key, environment, program) || sema_single_use_type(value, environment, program)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_single_use_type(field.ty, environment, program) -> return true
+            }
+            return false
+        }
+        else -> return false
     }
 }
 
-// Rust `type_is_single_use` over the registry: a value holding a task handle,
-// a `#SingleUse` struct or enum, or the Core `Delivery` handle (Rust
-// `core_single_use_type`).
-fn sema_single_use_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    if sema_stmt_for_in_type_requires_owned_iteration(ty) -> return true
-    name :: sema_single_use_type_name(ty) ?? return false
+// A `#SingleUse` struct or enum by name, or the Core `Delivery` handle.
+fn sema_single_use_declared(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     if name == "Delivery" -> return true
     definition :: sema_serde_type_definition(environment, program, name) ?? return false
     definition.single_use

@@ -28,6 +28,7 @@ use {
         ast_empty_call_arg_flags,
         ast_visit_expr,
         diagnostic_registry_row,
+        expr_source_span,
         expr_span,
         symbol_id,
         checked_symbol_local,
@@ -210,12 +211,22 @@ fn sema_call_return_view_parameter_expr(parameter: Int, binding: SemaCallBinding
     None
 }
 
-fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span) -> [SemaCallReturnViewFact] {
+// The returned-view facts of one checked call. A source argument or receiver
+// with no caller place is a temporary. A binding or `return` that keeps the
+// view refuses every temporary (sema_stmt_report_temporary_view_sources). Here,
+// at the call, a temporary the call frees is refused whatever consumes the
+// result: a surrounding expression would read freed storage. A string literal
+// is static text that is never freed, so only a kept view refuses it.
+fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg], binding: SemaCallBinding, scopes: SemaScopeTable, state: &SemaOwnershipState, span: Span, diagnostics: &[Diagnostic]) -> [SemaCallReturnViewFact] {
     map :: if signature == {
         .Fn(_, _, _, _, _, return_view_provenance) -> return_view_provenance ?? return [SemaCallReturnViewFact]{}
         else -> {
             return [SemaCallReturnViewFact]{}
         }
+    }
+    string_result :: if signature == {
+        .Fn(_, ret, _, _, _, _) -> if ret == .Val(result) -> sema_stmt_string_view_type(sema_call_view_result_success(result)) else -> false
+        else -> false
     }
     facts := [SemaCallReturnViewFact]{}
     loop entry in map.entries {
@@ -232,7 +243,11 @@ fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg]
             }
             if source_expr == .Val(expression) {
                 source_places :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
-                if source_places.len() == 0 && source_path.source == .Parameter(_) -> &temporaries.push(expr_span(expression))
+                if source_places.len() == 0 {
+                    temporary :: expr_source_span(expression)
+                    &temporaries.push(temporary)
+                    if !sema_call_static_text_literal(expression) -> sema_call_report_temporary_view_source(temporary, string_result && entry.slot.len() == 0, &diagnostics)
+                }
                 loop source_place in source_places {
                     place :: sema_ownership_append_view_source_projections(source_place, source_path.projections, span)
                     duplicate :: loop existing in places {
@@ -253,6 +268,38 @@ fn sema_call_return_view_facts(signature: Type, receiver: Expr?, args: [CallArg]
     }
     sema_ownership_note_call_views(&state, span, facts)
     facts
+}
+
+// The value an infallible or fallible call returns on success (`T` of
+// `T Never!` / `T E!`), with user tags removed.
+fn sema_call_view_result_success(ty: Type) -> Type Never! {
+    if sema_expr_unwrap_tag(ty) == .Result(ok, _) -> return sema_expr_unwrap_tag(ok)
+    sema_expr_unwrap_tag(ty)
+}
+
+// A string literal with no interpolation is static text: no call frees it.
+fn sema_call_static_text_literal(expression: Expr) -> Bool Never! {
+    if expression == {
+        .Paren(inner, _, _) -> return sema_call_static_text_literal(inner)
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(_, _) -> return false
+            }
+            return true
+        }
+        else -> return false
+    }
+}
+
+// A view-returning call whose source owner is a temporary (Rust
+// `report_temporary_view_source`). A source span is reported once, whichever
+// of the two codes reached it first.
+fn sema_call_report_temporary_view_source(span: Span, string_view: Bool, diagnostics: &[Diagnostic]) Never! {
+    loop previous in diagnostics {
+        if (previous.code == "E2305" || previous.code == "E2307") && previous.span == span -> return
+    }
+    diagnostic :: if string_view -> sema_error("E2307", span, "A returned view cannot borrow from a temporary argument", "The temporary owner is dropped at the end of this statement, while the returned view remains live", "Store the owner in a named binding first, then pass that binding to the view-returning call") else -> sema_error("E2305", span, "a returned view cannot borrow from a temporary argument", "the temporary owner is dropped at the end of this statement, while the returned view remains live", "store the owner in a named binding first, then pass that binding to the view-returning call")
+    &diagnostics.push(diagnostic)
 }
 
 fn sema_call_validate_binding(callee: String, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], span: Span, diagnostics: &[Diagnostic]) -> Bool {
