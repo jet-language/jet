@@ -907,13 +907,18 @@ fn jet_cli_core_sources(input: String, checked: Bool) -> JetCLICoreSources Never
     JetCLICoreSources.Loaded{sources: core_sources}
 }
 
-// The CLI's read of one Core file for jet_driver_core_text_file.
+// The CLI's read of one Core file for jet_driver_core_text_file, and of the
+// assets a Core file embeds.
 struct JetCLICoreSourceReader {}
 
 impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
     fn read(self, file: String) -[FS.Read]> String? {
         text :: cli_files.read(file) ?? return None
         Val(text)
+    }
+    fn read_bytes(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        bytes :: cli_files.read_bytes(file) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+        Ok(bytes)
     }
 }
 

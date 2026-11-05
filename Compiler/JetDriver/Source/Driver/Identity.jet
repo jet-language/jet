@@ -192,9 +192,12 @@ struct JetDriverCoreText {
     text: String?
 }
 
-// The host's read of one Core file; `None` when it can't be read.
+// The host's read of one Core file; `None` when it can't be read. A Core
+// file's comptime inputs (`embed_bytes`, `embed_file`) are files beside it,
+// read with `read_bytes`.
 trait JetDriverCoreSourceReader {
     fn read(self, file: String) -[FS.Read]> String?
+    fn read_bytes(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!
 }
 
 fn jet_driver_core_text(text: String) -> Shared<JetDriverCoreText> Never! {

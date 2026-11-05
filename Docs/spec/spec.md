@@ -513,6 +513,8 @@ Paths and globs are string literals resolved relative to the embedding file, nev
 absolute and never escaping the project with `..` (E0957). Missing or unreadable
 input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched
 file records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1).
+A Core library file embeds files beside it in the toolchain's Core tree. They
+are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
 
 When a ratified feature has a staged diagnostic, unsupported syntax receives that
 registered error and its milestone rather than a generic syntax failure. A spelling
