@@ -33,8 +33,9 @@
 // publishes. One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
 // testkit shard gets --jobs entries at once (default: the slot's SLOT_MEMORY_MAX, 16G when
-// unset, split at 2 GiB per entry across the shards), because a kit left to size itself
-// reads the host's MemAvailable and every shard would claim all of it. --filter narrows
+// unset, split at 1 GiB per entry across the shards), because a kit left to size itself
+// reads the host's MemAvailable and every shard would claim all of it; with --jobs N a kit
+// claims N GiB for its memory-weighted pool. --filter narrows
 // the suites for dry runs of the tool itself: such a
 // run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
 //
@@ -62,7 +63,7 @@ const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x8
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
 const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
 // Memory one running testkit entry may claim (Tools/testkit/run.jet kit_job_memory).
-const KIT_JOB_GIB = 2;
+const KIT_JOB_GIB = 1;
 
 // Entries each shard runs at once: --jobs, else the slot's memory cap split across shards.
 export function shardJobs(options, slotMemory = process.env.SLOT_MEMORY_MAX) {

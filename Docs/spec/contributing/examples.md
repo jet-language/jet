@@ -63,7 +63,9 @@ builds with `--release`. Every tier compares against the same expected bytes,
 except that `<stem>.<tier>.out`, `.err.out` or `.stderr.out` replaces the stem's
 streams for that tier alone, for a program whose output follows its build
 profile. A rejected build compares its stderr against the tier's `.err.out`
-with exit 1, and no run follows it.
+with exit 1, and no run follows it. On `o0` an entry whose sidecar spells no
+steps gets no separate `jet check`: its `jet run` reports the rejection, and a
+diagnostic report (`Error [jet.…]`) expects exit 1 there too.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 
@@ -135,11 +137,21 @@ refused as `pty-stdio`.
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.
 Scratch must be disk-backed and outside the checkout; it is staged and removed
-per case. Selected entries run in one `task.group` whose limit is `--jobs N`;
-without it the kit admits one entry per core, capped so each running entry
-keeps 2 GiB of the host's available memory. Every child process keeps its own
-timeout and resident-memory guard. Rows, diffs and the results file stay in
-corpus order, identical to `--jobs 1`.
+per case. `JET_TEST_STATE_DIR` (default `state/` under the scratch root, under the
+same rule) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
+time and resident peak, and `ffi/` is the FFI cache every run shares.
+Selected entries run in one `task.group`. Measured entries start longest
+first, after every unmeasured one. An entry starts once fewer than `--jobs N`
+run (default one per core, capped so each keeps 1 GiB of the available
+memory) and its claim fits in the memory budget beside the running ones'; the
+first always starts. The claim is half again the entry's last peak (at least
+64 MiB; 1 GiB unmeasured). The budget is the memory the kit may still claim
+under its cgroup caps, or at most N GiB with `--jobs N`. Every child process
+keeps its own timeout and an 8 GiB resident-memory guard, raised to the
+entry's own claim and never above that room; a case's `limit: resident=`
+tightens it. Each entry's verdict diffs and rows
+print as soon as it finishes; the results file stays in corpus order and
+records every entry's `wall_ms` and `peak_kib`.
 Timeouts must be positive seconds within `Duration`'s representable range;
 out-of-range values are refused before corpus discovery with exit code 2.
 

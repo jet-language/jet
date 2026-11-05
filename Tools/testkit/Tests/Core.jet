@@ -237,6 +237,39 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq(kit_execute_jobs(0, 0, 16, 0), 1)
 }
 
+#Test("the pool runs measured entries longest first and weighs each by its last peak") {
+    slot :: kit_job_memory()
+    gib :: 1073741824
+    assert_eq(kit_execute_budget(0, 16 * gib), 16 * gib)
+    assert_eq(kit_execute_budget(3, 16 * gib), 3 * slot)
+    assert_eq(kit_execute_budget(3, slot), slot)
+    assert_eq(kit_execute_budget(3, 0), 3 * slot)
+    entries :: ["a", "b", "c", "d"].map(name -> KitSelected{entry: KitEntry{path: name, expected: name, project: "", suite: "cases", mode: ""}, suite: "cases"})
+    history := [String: KitHistory]{}
+    history[kit_history_key("cases", "b")] = KitHistory{wall_ms: 100, peak_kib: 10240}
+    history[kit_history_key("cases", "c")] = KitHistory{wall_ms: 9000, peak_kib: 8 * 1048576}
+    history[kit_history_key("cases", "d")] = KitHistory{wall_ms: 9000, peak_kib: 512 * 1024}
+    schedule :: kit_execute_schedule(entries, history, 4, 2 * gib, 16 * gib)
+    // Unmeasured first, then longest first; a tie keeps corpus order.
+    assert_eq(schedule.order, [0, 2, 3, 1])
+    // Unmeasured claims the default; a small peak claims the floor; a heavy one the whole budget.
+    assert_eq(schedule.weights, [slot, 64 * 1048576, 2 * gib, 768 * 1048576])
+    // The guard is the run-wide guard, raised to a heavy entry's own need; the
+    // jobs sharing the room never lower it.
+    assert_eq(schedule.guards, [8 * gib, 8 * gib, 12 * gib, 8 * gib])
+    // It never exceeds the whole room.
+    assert_eq(kit_execute_schedule(entries, history, 4, 2 * gib, 4 * gib).guards, [4 * gib, 4 * gib, 4 * gib, 4 * gib])
+    unknown :: kit_execute_schedule(entries, history, 4, 0, 0)
+    assert_eq(unknown.guards, [8 * gib, 8 * gib, 12 * gib, 8 * gib])
+    root :: cases_test_root("history")
+    kit_history_save(root, ["cases"], history, [KitCaseResult{suite: "cases", case: "a", tier: "-", status: "PASS", detail: "", exit: 0, wall_ms: 7, peak_kib: 3}])
+    loaded :: kit_history_load(root, ["cases", "ui"])
+    assert_eq((loaded.get(kit_history_key("cases", "a")) ?? KitHistory{wall_ms: 0, peak_kib: 0}).wall_ms, 7)
+    assert_eq((loaded.get(kit_history_key("cases", "c")) ?? KitHistory{wall_ms: 0, peak_kib: 0}).peak_kib, 8 * 1048576)
+    assert_eq(loaded.get(kit_history_key("ui", "a")) == None, true)
+    files.remove_all(root) ?? panic("remove history scratch")
+}
+
 #Test("the pool's memory is the room under the cgroup caps, not the whole host") {
     assert_eq(kit_exec_cgroup_path("0::/user.slice/jetslot-A-1.scope\n"), "/user.slice/jetslot-A-1.scope")
     assert_eq(kit_exec_cgroup_path("1:name=x:/y\n"), "")

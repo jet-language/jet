@@ -48,6 +48,7 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     assert_eq(kit_golden_failure_exit("unknown", "Stop [E3001]: panic\n"), Val(70))
     assert_eq(kit_golden_failure_exit("unknown", "Runtime fault [R0801]: bad pointer\nexit: 1\n"), None)
     assert_eq(kit_golden_failure_exit("Examples/features/expected/errors/fatal_exit", "entry report\n"), Val(1))
+    assert_eq(kit_golden_failure_exit("Examples/features/expected/unknown", "Error [jet.InvalidConstructionField]: missing fields\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/features/expected/unknown", "unregistered report\n"), None)
 }
 
@@ -91,7 +92,7 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     kit_exec_write(files.join(root, "{entry.expected}.case"), "")
     options := kit_exec_defaults()
     options.tiers = ["o1", "o2"]
-    context :: KitCtx{options: options, env: env, root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless()}
+    context :: KitCtx{options: options, env: env, root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless(), known: kit_known_load(root)}
     outcomes :: kit_golden_run_suite(entry, context)
     assert_eq(outcomes.len(), 2)
     assert_eq(outcomes[0].verdict.status, "PASS")
@@ -111,7 +112,7 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
     options := kit_exec_defaults()
     options.tiers = ["o1", "o2"]
-    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless()}
+    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless(), known: kit_known_load(root)}
     // o2 (`--release`) prints the release value; its own file pins it.
     kit_exec_write(files.join(root, "{entry.expected}.o2.out"), "wrong tier\n")
     loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "PASS")
@@ -181,7 +182,7 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "{project}/hello\t#4867\towned golden mismatch\n")
     options := kit_exec_defaults()
     options.tiers = ["o1", "o2"]
-    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "scratch"), bless: options.bless}
+    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "scratch"), bless: options.bless, known: kit_known_load(root)}
     failed :: kit_golden_run_suite(entry, context)
     assert_eq(failed.len(), 2)
     loop outcome in failed {

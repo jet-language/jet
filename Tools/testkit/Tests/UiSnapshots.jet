@@ -14,7 +14,7 @@ fn kit_ui_test_context(root: String, label: String) -> KitCtx {
     options := kit_exec_defaults()
     options.tiers = ["o0", "o1"]
     env :: KitEnv{root: root, scratch: root, jet: files.join(sys.current_dir(), "Tools/testkit/Fixtures/ui/compiler.sh"), jetpack: "", timeout: 5s, memory_limit: 0}
-    KitCtx{options: options, env: env, root: root, scratch: files.join(root, label), bless: options.bless}
+    KitCtx{options: options, env: env, root: root, scratch: files.join(root, label), bless: options.bless, known: kit_known_load(root)}
 }
 
 fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {

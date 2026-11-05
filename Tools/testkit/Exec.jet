@@ -56,7 +56,7 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
         // Cases run outside the checkout: the compiler under test reads this checkout's Core.
         name == "JET_TOOLCHAIN_ROOT" -> Val(sys.get(name) ?? env.root)
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
-        name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else -> Val(files.join(env.scratch, "ffi"))
+        name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
         name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
         name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
         name == "JET_SCHEMA_CACHE_DIR" -> Val(files.join(scratch, "schema"))
@@ -213,45 +213,58 @@ fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin
     }
     receipt :: child.wait() ?? {
         done.send(0)
-        _ :: ^watcher.join() ?? false
+        _ :: ^watcher.join() ?? KitResident{killed: false, peak: 0}
         return kit_exec_failed("wait: {err}")
     }
     done.send(0)
-    killed :: ^watcher.join() ?? false
+    watched :: ^watcher.join() ?? KitResident{killed: false, peak: 0}
+    if env.peaks != "" && watched.peak > 0 {
+        files.append_all(env.peaks, "{watched.peak}\n").drop("a missing peak only loses one scheduling weight")
+    }
     run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, receipt.errors))
-    if killed -> run.limit_hit = "memory"
+    if watched.killed -> run.limit_hit = "memory"
     run
+}
+
+// What the resident-memory watcher saw: whether it stopped the child, and the
+// largest resident size it sampled, in bytes.
+struct KitResident {
+    killed: Bool
+    peak: Int
 }
 
 // The run-wide memory guard counts resident memory, not address space: a
 // RLIMIT_AS limit fails thread-stack reservations long before the child uses
 // that memory. Polls VmRSS every 100 ms and kills the child above `limit`
-// bytes; true when it did. Under `tree` (a case's `limit: resident=`) it sums
-// the child and its live descendants and kills them all. A case's
-// `limit: memory=` keeps Core memory_limit.
-fn kit_exec_watch_resident(pid: Int, limit: Int, tree: Bool, done: Receiver<Int>) -> Bool Never! {
-    if pid <= 0 -> return false
+// bytes. Under `tree` (a case's `limit: resident=`) it sums the child and its
+// live descendants and kills them all. A case's `limit: memory=` keeps Core
+// memory_limit.
+fn kit_exec_watch_resident(pid: Int, limit: Int, tree: Bool, done: Receiver<Int>) -> KitResident Never! {
+    watched := KitResident{killed: false, peak: 0}
+    if pid <= 0 -> return watched
     tick := 0
     loop {
-        if done.is_ready() -> return false
+        if done.is_ready() -> return watched
         if tick % 10 == 0 {
             pids := [Int]{}
             used :: kit_exec_tree_resident(pid, tree, &pids)
-            if pids.len() == 0 -> return false
+            if pids.len() == 0 -> return watched
+            if used > watched.peak -> watched.peak = used
             if used > limit {
                 #Unsafe("the testkit stops its own step child at the resident-memory guard") {
-                    sys.kill(pid, 9) ?? return false
+                    sys.kill(pid, 9) ?? return watched
                     loop descendant in pids {
                         if descendant != pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
                     }
                 }
-                return true
+                watched.killed = true
+                return watched
             }
         }
         tick += 1
         time.sleep(10ms)
     }
-    false
+    watched
 }
 
 // The resident bytes of `pid`, plus under `tree` those of its live descendants

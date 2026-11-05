@@ -46,9 +46,12 @@ fn kit_golden_discover(root: String) -> [KitEntry] {
     all
 }
 
-// Same D-FAIL-EXIT1 oracle as the native comparator; unknown reports fail.
+// The native comparator's exit oracle; unknown reports fail. A
+// diagnostic report is a front-end rejection, exit 1 whether a build or the
+// direct tier's `jet run` printed it.
 fn kit_golden_failure_exit(expected: String, report: String) -> Int? {
     if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") -> return Val(70)
+    if report.starts_with("Error [jet.") -> return Val(1)
     if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
         loop raw in report.split("\n") {
             line :: raw.trim().copy()
@@ -60,7 +63,7 @@ fn kit_golden_failure_exit(expected: String, report: String) -> Int? {
     start :: expected.index(prefix) ?? return None
     stem :: kit_steps_byte_slice(expected, start + prefix.count_bytes(), expected.count_bytes())
     if report == "" -> return if stem == "io/log_fatal" -> Val(1) else -> None
-    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/or_err_journey", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run", "effects/authority_core_method", "effects/authority_denied", "effects/authority_partial", "effects/authority_undeclared"], stem) -> return Val(1)
+    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/or_err_journey", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run"], stem) -> return Val(1)
     None
 }
 
@@ -157,8 +160,9 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
     source :: files.join(scratch, "source")
     work :: files.join(source, entry.project)
     kit_exec_copy_tree(files.join(env.root, entry.project), work, true, false)
-    if plan.steps.len() == 0 {
-        &plan.steps.push(kit_golden_default_step("build"))
+    implicit :: plan.steps.len() == 0
+    if implicit {
+        if plan.compile_only || !tier.direct -> &plan.steps.push(kit_golden_default_step("build"))
         if !plan.compile_only -> &plan.steps.push(kit_golden_default_step("built"))
     }
     last_explicit := false
@@ -166,7 +170,7 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
         if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
     }
     context := kit_steps_context(plan, entry.path, env, work, scratch, files.dirname(expected), bless)
-    context.golden = Val(KitGoldenStepCtx{entry: entry, tier: tier, source: source, expected: expected, last_explicit: last_explicit})
+    context.golden = Val(KitGoldenStepCtx{entry: entry, tier: tier, source: source, expected: expected, last_explicit: last_explicit, implicit: implicit})
     kit_steps_execute(context, kit_golden_step_hooks())
 }
 
@@ -184,6 +188,13 @@ fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previo
         if !plan.compile_only && !golden.last_explicit && !can_create && !kit_golden_exists("{golden.expected}.out") && !kit_golden_exists("{golden.expected}.err.out") -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "missing expected stream: {golden.expected}")}
     }
     command :: step.argv[0]
+    // The direct tier's build is `jet check`, and its `jet run` runs the same
+    // front end: a run the kit implied needs no build first, since the run
+    // itself reports a rejection.
+    if command == "built" && !state.built_once && golden.implicit && golden.tier.direct {
+        state.built = context.env.jet
+        state.built_once = true
+    }
     if command == "build" || (command == "built" && !state.built_once) {
         if command == "build" && step.argv.len() != 1 -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step takes no arguments")}
         compiled :: kit_golden_build(golden.entry, golden.tier, plan, context.env, golden.source, context.work, context.scratch, step)
@@ -281,7 +292,7 @@ fn kit_golden_discover_suite(context: KitCtx) -> [KitEntry] { kit_golden_discove
 fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     source :: kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? ""
     plan :: kit_steps_parse(source)
-    annotation :: kit_cases_known_failure(entry, context.root, source)
+    annotation :: kit_cases_known_failure(entry, context.known, source)
     independent :: kit_golden_tier_independent(plan)
     results := [KitOutcome]{}
     loop (index, tier_name) in context.options.tiers {

@@ -37,9 +37,9 @@ test('options collect every problem at once', () => {
 });
 
 test('the shards split the slot memory cap instead of each claiming the host', () => {
-    assert.equal(shardJobs(parseArgs(['abc']), '16G'), 2);
-    assert.equal(shardJobs(parseArgs(['abc']), undefined), 2);
-    assert.equal(shardJobs(parseArgs(['abc', '--shards', '1']), '24G'), 12);
+    assert.equal(shardJobs(parseArgs(['abc']), '16G'), 4);
+    assert.equal(shardJobs(parseArgs(['abc']), undefined), 4);
+    assert.equal(shardJobs(parseArgs(['abc', '--shards', '1']), '24G'), 24);
     assert.equal(shardJobs(parseArgs(['abc', '--shards', '16']), '16G'), 1);
     assert.equal(shardJobs(parseArgs(['abc', '--jobs', '3']), '64G'), 3);
 });

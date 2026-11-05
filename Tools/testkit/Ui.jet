@@ -233,7 +233,7 @@ fn kit_ui_stage(root: String, source: String) {
 // The central known-failing ledger owns UI rows exactly as it owns cases and
 // golden examples; REFUSED and coverage rows are never owned.
 fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
-    annotation :: if entry.mode == "coverage" -> "" else -> kit_known_ledger(ctx.root, entry.path)
+    annotation :: if entry.mode == "coverage" -> "" else -> kit_known_ledger(ctx.known, entry.path)
     outcomes := [KitOutcome]{}
     loop outcome in kit_ui_outcomes(entry, ctx) -> &outcomes.push(kit_cases_known_verdict(outcome, annotation))
     outcomes

@@ -53,35 +53,45 @@ fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     // CLI scenarios run once, independent of the golden tier selection.
     steps :: kit_steps_context(plan, entry.path, context.env, work, context.scratch,
         files.join(context.root, entry.project), context.bless)
-    [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), kit_cases_known_failure(entry, context.root, source))]
+    [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), kit_cases_known_failure(entry, context.known, source))]
 }
 
 // An annotation changes the verdict, not execution or the underlying receipt.
 // Header ownership wins over the central ledger for the same case. Besides FAIL,
 // an annotation owns a crashed process (ICE exit 101 or a signal), keeping its
 // ERROR detail. Other ERRORs and TIMEOUT are never owned.
-fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> String {
+fn kit_cases_known_failure(entry: KitEntry, known: [String: String], source: String) -> String {
     prefix :: "# KNOWN-FAILING "
     loop raw in source.split("\n") {
         line :: raw.trim().copy()
         if line.starts_with(prefix) -> return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
     }
-    kit_known_ledger(root, entry.path)
+    kit_known_ledger(known, entry.path)
 }
 
-// The central ledger row owning one corpus entry: a row ID names the entry path
-// itself, a file entry without `.jet`, or a project entry's directory.
-fn kit_known_ledger(root: String, path: String) -> String {
-    ledger :: kit_exec_optional(files.join(root, "Tools/testkit/known-failing.tsv")) ?? ""
+// The central ledger, read once per run: each row ID maps to "<card> <reason>".
+// The first row for an ID wins.
+fn kit_known_load(root: String) -> [String: String] {
+    known := [String: String]{}
+    ledger :: kit_exec_optional(files.join(root, "Tools/testkit/known-failing.tsv")) ?? return known
     loop raw in ledger.split("\n") {
-        line :: raw.trim().copy()
+        line :: raw.trim()
         if line == "" || line.starts_with("#") -> next
         fields :: line.split("\t").to_list()
-        if fields.len() != 3 -> next
-        id :: fields[0]
-        if path == id || path == ("{id}.jet") || path == ("{id}/run.jet") -> return "{fields[1]} {fields[2]}"
+        if fields.len() != 3 || (known.get(fields[0]) ?? "") != "" -> next
+        known[fields[0]] = "{fields[1]} {fields[2]}"
     }
-    ""
+    known
+}
+
+// The ledger row owning one corpus entry: a row ID names the entry path itself,
+// a file entry without `.jet`, or a project entry's directory.
+fn kit_known_ledger(known: [String: String], path: String) -> String {
+    exact :: known.get(path) ?? ""
+    if exact != "" || !path.ends_with(".jet") -> return exact
+    project :: if path.ends_with("/run.jet") -> known.get(kit_steps_byte_slice(path, 0, path.count_bytes() - 8)) ?? "" else -> ""
+    if project != "" -> return project
+    known.get(kit_steps_byte_slice(path, 0, path.count_bytes() - 4)) ?? ""
 }
 
 fn kit_cases_known_verdict(outcome: KitOutcome, annotation: String) -> KitOutcome {
