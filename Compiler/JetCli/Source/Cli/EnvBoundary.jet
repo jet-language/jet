@@ -1,6 +1,6 @@
-// The project environment boundary (Source/CmdCompile.rs
-// `project_environment_requirement_with_root` and the E1355 half of
-// `prepare_project_environment`). A program that imports a package its
+// The project environment boundary: the check that refuses a program with
+// E1355 before it loads when it needs its project's declared environment
+// and runs outside it. A program that imports a package its
 // nearest `package.jet` declares needs that project's declared environment
 // active; outside a package, an inline-versioned import does. Local modules,
 // path dependencies (source in this checkout) and Core never need it.
@@ -32,7 +32,7 @@ use {
 // when it consumes a declared package outside the project's verified
 // environment; None otherwise. `jet_argv` is the invocation as typed.
 fn jet_cli_env_boundary_refusal(typed: String, jet_argv: [String], color: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
-    // Source/main.rs `resolve_source_path`: the typed spelling, else `<target>.jet`.
+    // The typed spelling when it names a file or directory, else `<typed>.jet`.
     start :: if !cli_files.is_dir(typed) && !cli_files.is_file(typed) && cli_files.is_file("{typed}.{FILE_EXT}") -> "{typed}.{FILE_EXT}" else -> typed
     preset := String?{None}
     environment := String?{None}
@@ -77,9 +77,9 @@ fn jet_cli_flag_before_separator(jet_argv: [String], flag: String) -> Bool Never
     false
 }
 
-// Rust `declared_project_environment`: the environment `root`'s `env.jet`
-// declares, without realizing it. A malformed typed environment still
-// declares the boundary; `jetpack` reports its source diagnostic.
+// The environment `root`'s `env.jet` declares, without realizing it. A
+// malformed typed environment still declares the boundary; `jetpack` reports
+// its source diagnostic.
 fn jet_cli_declared_environment(root: String, requested: String?) -[FS, Env, Exec]> String? Never! {
     source :: cli_files.read(cli_files.join(root, ENV_FILE)) ?? return None
     if envmodel_is_module_surface(source) {
@@ -109,7 +109,7 @@ fn jet_cli_environment_active(root: String, preset: String?, environment: String
     expected == active_hash
 }
 
-// Rust `project_package_import`: the first import in the program graph from
+// The first import in the program graph from
 // `start` that needs the environment. A directory target reads every
 // package source; a file follows its local imports.
 fn jet_cli_project_package_import(start: String, environment_root: String) -[FS, Env]> String? Never! {
@@ -161,7 +161,7 @@ fn jet_cli_project_package_import(start: String, environment_root: String) -[FS,
     None
 }
 
-// Rust `package_import_name`: the import's display text when it names a
+// The import's display text when it names a
 // declared package (or carries an inline version outside a package).
 fn jet_cli_package_import_name(import: ImportDecl, dependencies: [String], allow_inline: Bool) -> String? Never! {
     if import.kind == {
@@ -181,7 +181,7 @@ fn jet_cli_package_import_name(import: ImportDecl, dependencies: [String], allow
     }
 }
 
-// Rust `local_import_target`: the project source a local import loads. A
+// The project source a local import loads. A
 // file import resolves beside `importing` and stays under `root`; a module
 // import names the one source `<name>.jet` or `<name>/run.jet`.
 fn jet_cli_local_import_target(importing: String, import: ImportDecl, root: String, sources: [JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
@@ -216,7 +216,8 @@ fn jet_cli_local_import_target(importing: String, import: ImportDecl, root: Stri
     }
 }
 
-// Rust `Path::set_extension` on the last component: drop its extension.
+// `path` with the extension of its last component dropped; a name with no
+// dot, or only a leading dot, is kept whole.
 fn jet_cli_strip_extension(path: String) -> String Never! {
     name :: jet_cli_file_name(path)
     parts :: name.split(".").to_list()
