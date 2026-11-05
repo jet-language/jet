@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92442,
+    "rev": 92450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60339,7 +60339,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:37:15.355Z",
-      "updated": "2026-10-28T11:31:37.880Z",
+      "updated": "2026-11-05T15:14:25.734Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -71369,6 +71369,24 @@
           "verifiedBy": null,
           "evidence": "0de406f2c4: the root double free (ir_closure_sort freed a named comparator's Result carrier after ir_adapt took it) is fixed; tests/cases/testing_tiers/test_compare_records_two_corpora_in_one_project runs timeout.json, matched.json, then timeout.json in one project with exact status lines and empty stderr; chain fixed point; ui and golden lost 0, cases lost 0.",
           "at": "2026-11-05T09:00:39.021Z"
+        },
+        {
+          "n": 63,
+          "text": "A read-only (unmarked) Pool parameter cannot be changed through any method: pool.remove(id), insert and every other mutating Pool call on an unmarked Pool parameter is rejected at check time with the same diagnostic as a field write through a read-only parameter (E0205), not only direct field writes. Today remove through an unmarked Pool parameter compiles and runs (found by the 2026-11-05 Doom ballot review, probe in the D-POOL-HAS1 review). The fix is in the one rule that decides which methods need a writable receiver, with a census of every Core collection method that changes its receiver, not a Pool special case; a UI snapshot covers Pool, List and Map.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:14:45.198Z"
+        },
+        {
+          "n": 64,
+          "text": "Storing a named function whose parameter is marked & or ^ in a function value slot whose type does not carry the same mark (for example fn hurt(m: &Mobj) stored in a slot of type fn(Mobj)) is a checked type error from sema with a registered code, what, why and fix text and a UI snapshot, at O0, O1 and O2. Today sema accepts it and the backend fails with an internal compiler error (I2 and I3 violation; found by the 2026-11-05 D-FNVAL-WRITE1 review). The census covers every place a function value meets a typed slot: binding, field, list element, argument and return.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:14:45.866Z"
         }
       ],
       "refs": [
@@ -71384,7 +71402,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T14:13:37.290Z",
+      "updated": "2026-11-05T15:14:45.866Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -76210,6 +76228,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T14:36:18.002Z"
+        },
+        {
+          "n": 7,
+          "text": "Paired performance cell for a checked lane gather (draft ballot D-LANES-GATHER1, held until this passes): in the canonical performance manifest, two programs do the same Doom-style two-stage byte lookup (texture byte, then light-table byte) over the same tables and positions with the same output and the same bounds-checked safety, one with a checked Lanes<U8, N> gather and one with plain checked scalar reads. The cell records target, compiler commit, optimization level, cycles and bytes, and proves equal output. The gather ballot is posted for ratification only after the gather form strictly beats the scalar form; a loss stays logged on this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:07:19.890Z"
         }
       ],
       "refs": [],
@@ -76218,7 +76245,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-05T14:36:18.002Z",
+      "updated": "2026-11-05T15:07:19.890Z",
       "updatedBy": "Main"
     },
     {
@@ -79057,6 +79084,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:36:44.220Z"
+        },
+        {
+          "n": 122,
+          "text": "A typed literal written straight after a comparison in an if or loop condition (if a > I32{0} -> ..., if a <= I32{0} { ... }) reports one diagnostic that names the cause: the parser read the { as the start of the body. Its fix shows both working forms: compare with a plain number (if a > 0 ->, which already works for I32 values) or group the literal (if a > (I32{0}) ->). Today it reports a cascade of E0003 'Expected a call, binding, assignment, or return, found a number' errors that point inside the literal. A UI snapshot covers the if-arrow, if-block and loop forms; the grammar is unchanged (ballot draft D-COND-BRACE1 was withdrawn: the condition rule stands).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T15:07:19.242Z"
         }
       ],
       "refs": [],
@@ -79067,7 +79103,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-04T23:36:45.184Z",
+      "updated": "2026-11-05T15:07:19.242Z",
       "updatedBy": "Main"
     },
     {
@@ -81588,6 +81624,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "2026-11-05: E3014 (foreign panic stops the program at one Jet source frame) has no reachable path: its only snapshot (tests/ui/runtime_e3014) and c15's ffi_runtime_stop case go through a built-in extern rust call, which D-FFI-LANG1 (ratified) replaces with a Rust Language package. E3014 is built with the FFI v3 foreign-call path, not ported; until then ui --coverage shows it as a snapshot without an emitter. The ICE 'foreign import requires a checked direct C scalar signature' on extern rust is c28."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 8 criteria from archived #351, #1900, #2953, #2956, #2957, #2960, #3926: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -81894,7 +81935,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-05T14:36:16.677Z",
+      "updated": "2026-11-05T15:02:48.537Z",
       "updatedBy": "Main"
     },
     {
@@ -91283,6 +91324,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "2559996f5a: prove --capture and --replay refuse what they cannot model, built from the spec: E3620, E3623, E3625, E3627, E3628 and E3629 now have emitters; prove cases 33 PASS + 16 KF to 46 PASS + 5 KF, 0 FAIL; ui --coverage snapshot-without-emitter rows 26 to 20; chain fixed point. E3014 moves to #6366 (needs the FFI v3 foreign-call path)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "2559996f5a: the verify-full blocker's prove batch (6 of the 23 unported snapshot codes). jet prove --capture/--capture-sensitive/--replay run their checks from Docs/spec/proof-replay-decisions.md before any program runs: authority preflight (E3625, E3627, E3623), capture destination (E3629), and the complete v1 artifact reader (E3620, E3622, E3628). Only the producer is left, as E2104. ui --coverage snapshot-without-emitter rows 26 -> 20. Six tests/cli snapshots regenerated from Jet. prove cases 33 PASS + 16 KNOWN-FAILING on base -> 46 PASS + 5 KNOWN-FAILING (2 new cases, 11 ledger rows removed), 0 FAIL."
         },
         {
@@ -91612,7 +91658,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-05T15:02:15.029Z",
+      "updated": "2026-11-05T15:02:49.207Z",
       "updatedBy": "Main"
     },
     {
@@ -170372,6 +170418,388 @@
       "created": "2026-11-05T08:32:01.885Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-05"
+    },
+    {
+      "id": "D-POOL-HAS1",
+      "cardId": "c0grmd0j",
+      "group": "stdlib",
+      "title": "Ask whether a Pool id names a live entry: pool.has(id)",
+      "situation": "A Pool is Jet storage for game objects such as monsters. Adding an object returns an id, a small ticket that names its slot. A monster can store its target id. When the target is removed, that id goes stale, and reading through it stops the program. Today Pool has no way to ask first, so chase code cannot simply forget a dead target. You are deciding whether Pool should answer that question directly. We recommend A: pool.has(id) answers true or false and changes nothing.",
+      "gist": "Should Pool answer whether an id still names a live entry?",
+      "lesson": "An id holds a slot number and a generation count. Removing an entry bumps the count, so an old id never reads whatever later fills the slot; it stops instead. A query lets chase forget a removed target instead of stopping.",
+      "explainer": "",
+      "story": "Ana has an imp that chases a target it holds by id. The target dies and is removed between tics. On the next tic, chase must hit the target if it still exists, or else forget it. Every option runs this same program and prints 90, then true. No option may hit a new monster that reused the old slot.",
+      "inWild": "C can model the same check with a slot number, a generation, and an occupied flag. The check must test all three, not just whether the slot number exists.",
+      "detail": "RATIFIED RULES\n\nDocs/spec/spec.md:1569-1574 and syntax-decisions.md:2848-2856 (D-POOLID-API1) give Pool add, indexing, ids and remove. Ids are copyable and comparable. Indexing a stale id stops the program; remove returns an optional value. Tower ratifies D-HAS-VERB1=A, which makes has the membership word for lists, sets and map keys. D-GAME-ENTITY1=A covers optional scene lookup. Neither adds a Pool query.\n\nCHECKED TODAY\n\nWritten against 0ccdff27 and rechecked on 2559996f at O0 and O2. opus_pool_today prints 60, then stops with E3001 after removal. opus_pool_has_today fails with E0102 because Pool has no has. opus_pool_reuse shows a stale id still stops after a new entry is added, and removing a stale id again returns None. opus_pool_shape runs every line of option A except has, and prints 90 then true.\n\nKNOWN DEFECTS, NOT VOTES\n\nreview61_id_eq fails with E0312 even for id == id, against the comparable-id rule; option C needs that fixed. review61_edges removes an entry through a read-only Pool parameter, while a field write through one is E0205 (opus_fnval_pool_read). Both need defect cards whatever the vote. SharedOwner.jet:378-426 exposes add, remove and ids; indexing is separate.\n\nWHAT THE VOTE ADDS\n\nA adds a Bool query. B adds an optional owned copy under the ordinary copy rules, like Cell.get. C adds no API and scans the existing live-id snapshot. Only the chosen option is added; A and B are not a bundle. D-GAME-ENTITY1 concerns component lookup, not a second Pool entry point.\n\nSTALE IDS AND REUSE\n\nA returns false for a removed id, a slot out of range or a generation mismatch. So has(id) is false exactly when remove(id) would return None. B returns None in those cases. Reusing a slot must never make an old id live again, and generation wraparound must not revive one. Ids carry no pool identity: in review61_edges an id from one pool read 300 from another pool. has cannot catch that mix-up, so keep ids with the pool that issued them.\n\nCHECK THEN USE\n\nA true answer is a snapshot, not a lock. Do not call code that may remove the entry between has and indexing. If something does, the index still checks and stops. No option promises an atomic check-and-write.\n\nCOPYING\n\nB returns an independent copy and is unavailable when T cannot be copied. Changing the copy does not change the pool; writes still index the pool. No hidden copy-or-borrow split is introduced.\n\nBEGINNER AND EXPERT\n\nBeginners call has right before indexing. Experts who know an id is live index directly and keep the safety check. C suits rare queries or code that already holds a fresh ids snapshot. Proposed examples use the ratified name-first declaration spelling (D-DECL-BINDING1=B), which 2559996f does not build yet; probes use the current spelling.",
+      "options": [
+        {
+          "key": "A",
+          "name": "pool.has(id) -> Bool",
+          "detail": "Ask whether this pool still has a live entry for the id. Read and write the entry with pool[id], as today. The answer is a snapshot; it does not keep the entry alive.",
+          "technical": "Use the same validity test as indexing: slot in range, occupied, matching generation. It is false exactly when remove(id) would return None. The query does not read or copy T, and a later index still checks. This extends the existing Pool mechanism, not its ownership or locking rules.",
+          "code": "// Proposed API and ratified binding spelling; not executable today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        if world.has(t) {\n            world[t].health -= 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp) // forgets the removed target\n    print(world[imp].target == None) // true\n}"
+        },
+        {
+          "key": "B",
+          "name": "pool.get(id) -> T?: an optional owned copy",
+          "detail": "Return None for a stale id, or a copy of the entry for a live one. This suits read-only snapshots. Writes still use indexing.",
+          "technical": "Available only when T can be copied under the ordinary copy rules, like Cell.get. It never returns a hidden borrowed view. Copying a large entry costs more than a yes-or-no check, though one call can replace a separate has. It adds a second way to read an entry beside indexing; choosing B approves that second path.",
+          "code": "// Proposed API and ratified binding spelling; not executable today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        if world.get(t) == .Val(victim) {\n            world[t].health = victim.health - 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp)\n    print(world[imp].target == None) // true\n}"
+        },
+        {
+          "key": "C",
+          "name": "No new API: search pool.ids()",
+          "detail": "Take a fresh list of live ids and compare the target with each one. Pool gets no new API.",
+          "technical": "Uses only ratified operations. It needs id == id, which fails today with E0312; that bug fix needs no vote. Each check builds a list and scans it, so a tic with many chasers does work that grows with chasers times entries. Clearing every link to a target before removing it is another design, and it also needs id ==.",
+          "code": "// Ratified operations and binding spelling; ID equality is defective today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        live := false\n        loop candidate in world.ids() {\n            if candidate == t -> live = true\n        }\n        if live {\n            world[t].health -= 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp)\n    print(world[imp].target == None) // true\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C",
+          "note": "The same liveness test can be written over an explicit slot table; this is an illustration, not a claim about a third-party library.",
+          "code": "#include <stdbool.h>\n#include <stddef.h>\ntypedef struct { size_t slot; unsigned generation; } Id;\ntypedef struct { bool occupied; unsigned generation; int health; } Slot;\nbool has(const Slot *slots, size_t len, Id id) {\n    return id.slot < len && slots[id.slot].occupied\n        && slots[id.slot].generation == id.generation;\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A answers one yes-or-no question and copies nothing. It uses has, the word Jet already uses for map keys and set members. Indexing stays the one way to read and write an entry. It is a check, not a lock.",
+        "gains": [
+          "Small safe query with a familiar name.",
+          "No copy of the entry.",
+          "Removed targets need not stop the game."
+        ],
+        "losses": [
+          {
+            "loss": "has and the following index both check the id.",
+            "mitigation": "The second check reads the slot just read, a few compares. Code that already knows the id is live can skip has and index directly."
+          },
+          {
+            "loss": "The answer goes stale if something removes the entry before the index.",
+            "mitigation": "Call has right before indexing, with no call between. The index still checks, so a stale answer stops the program instead of reading the wrong monster."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Good for read-only snapshots, but this program writes the entry. A copy cannot write back, can be expensive, and adds a second way to read entries."
+          },
+          {
+            "key": "C",
+            "reason": "Sound once id == id is fixed, but every check builds and scans a list of all live ids, which is costly every tic."
+          }
+        ],
+        "tradeoff": "A adds a direct check; B adds copied reads; C keeps the API smaller but pays a scan per check."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT Sol. Fresh agent: BallotSol61. Checked the spec, Tower decisions, Pool lowering and O0/O2 probes, including removal through a read parameter and a cross-pool id. Replaced the dead-flag strawman with live-id search, removed false locking and optimizer claims, and defined copy and stale-id behavior."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Pool answer whether an id still names a live entry?",
+        "lesson": "An old id never reads a new entry that reused its slot; it stops the program instead. A has check lets chase forget a removed target. It does not lock the entry or tell which pool made the id.",
+        "trio": {
+          "current": {
+            "note": "Checked today at both optimization levels: reading a removed id stops the program, and has does not exist.",
+            "code": "world := Pool<Mobj>.new()\nid :: world.add(Mobj{health: 60})\n_ :: world.remove(id)\nprint(world[id].health) // E3001\n// world.has(id) is E0102 today"
+          },
+          "wild": {
+            "lang": "C",
+            "note": "An explicit slot table tests range, occupancy and generation.",
+            "code": "bool has(const Slot *slots, size_t len, Id id) {\n    return id.slot < len && slots[id.slot].occupied\n        && slots[id.slot].generation == id.generation;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "pool.has(id) -> Bool",
+            "gist": "Ask, then index immediately. The answer does not keep an entry alive.",
+            "gains": [
+              "No entry copy.",
+              "Indexing remains the entry-access operation."
+            ],
+            "losses": [
+              "Checks the id twice: has, then index.",
+              "Removal between the two steps makes the answer stale."
+            ],
+            "proposed": {
+              "code": "// Proposed; t is this monster's target id.\nif world.has(t) {\n    world[t].health -= 10\n} else {\n    world[id].target = None\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "pool.get(id) -> T?",
+            "gist": "Return None, or a copy of the entry.",
+            "gains": [
+              "Convenient read-only snapshot."
+            ],
+            "losses": [
+              "Copy cost; unavailable for entries that cannot be copied.",
+              "Writing still requires indexing.",
+              "A second way to read entries."
+            ],
+            "proposed": {
+              "code": "// Proposed; same target and damage.\nif world.get(t) == .Val(victim) {\n    world[t].health = victim.health - 10\n} else {\n    world[id].target = None\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No new API: search live ids",
+            "gist": "Scan the existing list of live ids.",
+            "gains": [
+              "No new Pool API.",
+              "Can use an already-fresh snapshot."
+            ],
+            "losses": [
+              "Builds and scans a list on every check.",
+              "Needs the id == id bug fixed first."
+            ],
+            "proposed": {
+              "code": "// Ratified operations; ID equality fails today.\nlive := false\nloop candidate in world.ids() {\n    if candidate == t -> live = true\n}\nif live {\n    world[t].health -= 10\n} else {\n    world[id].target = None\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A asks one yes-or-no question and copies nothing. It reuses has, the word maps and sets already use.",
+          "gains": [
+            "Small query.",
+            "No entry copy."
+          ],
+          "losses": [
+            {
+              "loss": "A check and a read are separate steps.",
+              "mitigation": "Check right before indexing. The index still checks, so a stale answer stops safely."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A copy cannot write this monster back."
+            },
+            {
+              "key": "C",
+              "reason": "Scanning all ids is fine for rare checks, costly every tic."
+            }
+          ],
+          "tradeoff": "A adds a direct check; C keeps the API smaller but scans."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-05T15:14:24.989Z"
+    },
+    {
+      "id": "D-FNVAL-WRITE1",
+      "cardId": "c0grmd0j",
+      "group": "syntax",
+      "title": "Preserve write and move parameters in stored function types",
+      "situation": "A function value is a function kept in a variable or table, like the action in each Doom monster state. Today a stored function may only read its inputs. A function that changes its input, such as chase spending a monster tic, cannot be stored. So a Doom-style action table cannot hold its actions directly. Programs must return a changed copy of the monster, or store an enum and switch on it. You are deciding whether stored functions may keep write and move inputs, which changes an earlier ruling. We recommend A: a function type uses the same input marks as a declaration.",
+      "gist": "May a stored function change or take over its input, as a directly called function can?",
+      "lesson": "A function value lets a table pick which code runs. A plain input is read-only: it is lent, not copied. An input marked & is lent so the function can change it in place. An input marked ^ is handed over for good.",
+      "explainer": "",
+      "story": "Ana has a monster table with two states, Look and Chase, each holding an action. Look heals the monster by 1, and Chase spends one tic. Three steps from state 0 must print 62 7 1. Every option runs this same program. It is a small model of the Doom table, not a line-for-line port.",
+      "inWild": "C stores a function pointer taking a monster pointer. Rust stores fn(&mut Mobj), which preserves exclusive write access in the pointer's type. These are comparisons of parameter passing, not claims that Jet has C's pointer layout or Rust's callable representation.",
+      "detail": "RATIFIED RULES\n\nS47 in syntax-decisions.md:467-483, with spec.md:881-887 and 927-930, governs function values; D-MEM-PARAM1 defines parameter marks. The spec records D-CALLVALUE1=B for .call; Tower ratifies D-LAMBDA-SHAPE1=C and D-DECL-BINDING1=B. A and D amend S47 on purpose. They do not treat the current rejection as a bug.\n\nWHAT CHANGES IN S47\n\nS47 has three parts. Part 1: fn(T1, T2) -> R, where an unmarked parameter is read-only. Every option keeps it. Part 2: a named function becomes a value only when every parameter is read-only. One with & or ^ stays direct-call-only, and a callback that must change a value returns the new value instead. Part 3: capture rules, closure copying and the invocation lock. Every option keeps it.\n\nA replaces part 2. Function types may mark parameters with & or ^, and a function becomes a value when its marks match the type. Returning a new value becomes one choice, not the rule. D replaces part 2 for & only; a function with a ^ parameter stays direct-call-only. B and C leave S47 unchanged. Under A or D, spec.md:881-887 and 927-930 and the syntax-surface.jet:444-446 comment change too.\n\nCHECKED TODAY\n\nWritten against 0ccdff27 and rechecked on 2559996f at O0 and O2. opus_fnval_return and opus_fnval_enum each print 62 7 1. opus_fnval_ref fails with E0003 at fn(&Mobj), and opus_fnval_move fails with E0003 at fn(^Mobj). review61_return_read shows that returning an unmarked m unchanged is E0120; m.copy() works. Parser/Types.jet:424-470 parses parameter types without marks.\n\nDEFECTS FOUND, NOT VOTES\n\nopus_fnval_coerce stores chase, which takes &Mobj, in a fn(Mobj) slot. Sema accepts it, then the backend fails with an internal compiler error at O0 and O2. S47 requires a user diagnostic there. That needs a defect card whatever the vote. Lambdas also cannot spell a marked parameter today: (m: &Mobj) -> is E0003 in opus_lambda_write.\n\nTHE PROPOSAL\n\nA accepts fn(&T) and fn(^T), mixed with unmarked parameters. The requirement survives assignment, fields, lists, generics and returned function values. A function needing & never fits fn(T). A move slot consumes its argument as a direct call does; using it afterward is an ownership error. D permits only the & part. Effects, labels, parameter zones and returned-view contracts remain obligations.\n\nLAMBDAS\n\nUnder A and D a lambda takes marks like a named function: (m: &Mobj) -> { m.tics -= 1 }. Where the slot fixes the type, m -> { m.tics -= 1 } takes its mark from the slot. The caller still writes .call(&m), so no write happens without the caller mark.\n\nALIASING\n\nA stored call must enforce the same exclusivity as a direct call. Two write arguments must not overlap, including paths through Pool ids or shared links. Known overlap is rejected; uncertain linked overlap follows the D-MEMREF-EXCL1=A runtime checks. A captured write path that overlaps an explicit argument is a conflict too. A function value cannot erase those checks.\n\nCAPTURES\n\nPassing &m lasts for the call; it does not authorize storing a writer to m in an escaping closure. The S47 capture ownership and lifetime checks still apply. Mutable closure environments keep the S47 invocation lock. That lock protects the environment, not explicit arguments or another closure captures. Move parameters transfer arguments on each call; they do not make every function value a one-shot callable.\n\nBEGINNER AND EXPERT\n\nBeginners keep plain parameters until they need to change an input. A stored writer uses the same & at declaration, type and call. Experts can pass ownership with ^ under A. No action-table speedup, unchanged call layout or allocation saving has been measured. The proposal avoids rebuilding Mobj in source, not every cost of function values.\n\nEXAMPLES AND I8\n\nFull options use ratified name-first bindings, which 2559996f does not build yet. B and C were run after translating only declaration heads to the current spelling. A and D reuse parameter marks and the existing .call mechanism; they add no special action-table or mutable-callback type. Changing S47 needs this explicit owner amendment.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Function types preserve both & and ^ parameters",
+          "detail": "A function type may mark inputs with & (write) or ^ (move), the same marks a declaration uses. A function or lambda fits only when its marks match. Calls write the same mark: .call(&m). Read-only types and calls do not change.",
+          "technical": "Access mode is part of the callable contract at every storage boundary. Reuse direct-call ownership checks and preserve effects, labels, zones and view provenance. Do not assume that the existing call representation already carries addresses correctly: lowering must implement marked arguments without copying the lent T.",
+          "code": "// Proposed marked types; ratified binding spelling, not built today.\nMobj :: struct { health: Int, tics: Int, state: Int }\nState :: struct { next: Int, action: fn(&Mobj) }\nlook :: fn(m: &Mobj) { if m.health < 100 -> m.health += 1 }\nchase :: fn(m: &Mobj) { m.tics -= 1 }\nthink :: fn(states: [State], m: &Mobj) {\n    st :: states[m.state]\n    st.action.call(&m)\n    m.state = st.next\n}\nrun :: fn() {\n    states :: [State]{State{next: 1, action: look}, State{next: 0, action: chase}}\n    imp := Mobj{health: 60, tics: 8, state: 0}\n    loop _ in 0..<3 -> think(states, &imp)\n    print(\"{imp.health} {imp.tics} {imp.state}\") // 62 7 1\n}\n// Ownership uses the same mechanism: fn(^Mobj), called with .call(^m)."
+        },
+        {
+          "key": "B",
+          "name": "Keep S47: return the updated monster",
+          "detail": "Actions read the original and return an owned replacement. The caller assigns the result. This is useful when actions are deliberately value transformations, not just a workaround.",
+          "technical": "Read access does not copy the input. Each call builds a new Mobj, and the caller assigns it back. Whether the optimizer removes that work is unmeasured. Forgetting to assign the result drops the update.",
+          "code": "// Ratified binding spelling. Behavior runs in today's declaration spelling.\nMobj :: struct { health: Int, tics: Int, state: Int }\nState :: struct { next: Int, action: fn(Mobj) -> Mobj }\nlook :: fn(m: Mobj) -> Mobj {\n    if m.health < 100 -> return Mobj{health: m.health + 1, tics: m.tics, state: m.state}\n    m.copy()\n}\nchase :: fn(m: Mobj) -> Mobj { Mobj{health: m.health, tics: m.tics - 1, state: m.state} }\nthink :: fn(states: [State], m: &Mobj) {\n    st :: states[m.state]\n    m = st.action.call(m)\n    m.state = st.next\n}\nrun :: fn() {\n    states :: [State]{State{next: 1, action: look}, State{next: 0, action: chase}}\n    imp := Mobj{health: 60, tics: 8, state: 0}\n    loop _ in 0..<3 -> think(states, &imp)\n    print(\"{imp.health} {imp.tics} {imp.state}\") // 62 7 1\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep S47: store an enum and call actions directly",
+          "detail": "The table stores an Action case. One dispatcher makes direct calls with &. It is a good fit when the application controls a fixed set of actions.",
+          "technical": "No replacement Mobj is required. The enum and dispatcher must be edited when an action is added; a new module cannot register an arbitrary function without changing that set. This can make the action list easy to audit. Dispatch speed is unmeasured and may be optimized differently from an indirect call.",
+          "code": "// Ratified binding spelling. Behavior runs in today's declaration spelling.\nMobj :: struct { health: Int, tics: Int, state: Int }\nAction :: enum {\n    Look\n    Chase\n}\nState :: struct { next: Int, action: Action }\nlook :: fn(m: &Mobj) { if m.health < 100 -> m.health += 1 }\nchase :: fn(m: &Mobj) { m.tics -= 1 }\nact :: fn(a: Action, m: &Mobj) {\n    if a == {\n        .Look -> look(&m)\n        .Chase -> chase(&m)\n    }\n}\nthink :: fn(states: [State], m: &Mobj) {\n    st :: states[m.state]\n    act(st.action, &m)\n    m.state = st.next\n}\nrun :: fn() {\n    states :: [State]{State{next: 1, action: .Look}, State{next: 0, action: .Chase}}\n    imp := Mobj{health: 60, tics: 8, state: 0}\n    loop _ in 0..<3 -> think(states, &imp)\n    print(\"{imp.health} {imp.tics} {imp.state}\") // 62 7 1\n}"
+        },
+        {
+          "key": "D",
+          "name": "Add write parameters only: fn(&T)",
+          "detail": "Permit fn(&T), but keep functions with move parameters direct-call-only. This solves the action-table example with a smaller amendment. It does not authorize fn(^T).",
+          "technical": "Write-argument alias and capture checks are exactly those required by A. Keeping ^ out reduces this ballot's ownership-transfer scope, but leaves function values unable to preserve one existing parameter mode. It creates no separate writer-callback mechanism.",
+          "code": "// Proposed write-only extension; same action-table program as A.\nMobj :: struct { health: Int, tics: Int, state: Int }\nState :: struct { next: Int, action: fn(&Mobj) }\nlook :: fn(m: &Mobj) { if m.health < 100 -> m.health += 1 }\nchase :: fn(m: &Mobj) { m.tics -= 1 }\nthink :: fn(states: [State], m: &Mobj) {\n    st :: states[m.state]\n    st.action.call(&m)\n    m.state = st.next\n}\nrun :: fn() {\n    states :: [State]{State{next: 1, action: look}, State{next: 0, action: chase}}\n    imp := Mobj{health: 60, tics: 8, state: 0}\n    loop _ in 0..<3 -> think(states, &imp)\n    print(\"{imp.health} {imp.tics} {imp.state}\") // 62 7 1\n}\n// fn(^Mobj) remains unavailable under D."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C",
+          "note": "A small state-table model changes the monster through a function pointer; not a quotation from Doom.",
+          "code": "typedef struct { int health, tics, state; } Mobj;\ntypedef struct { int next; void (*action)(Mobj*); } State;\nvoid look(Mobj *m) { if (m->health < 100) m->health++; }\nvoid chase(Mobj *m) { m->tics--; }\nvoid think(const State *states, Mobj *m) {\n    const State *st = &states[m->state];\n    st->action(m);\n    m->state = st->next;\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "The pointer type preserves exclusive write access to the argument.",
+          "code": "struct Mobj { health: i32, tics: i32, state: usize }\nstruct State { next: usize, action: fn(&mut Mobj) }\nfn think(states: &[State], m: &mut Mobj) {\n    let st = &states[m.state];\n    (st.action)(m);\n    m.state = st.next;\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A uses one rule: a function type carries the same input marks as a declaration. There is no second kind of callback and no exception to explain. D also fixes this program, but keeps move inputs as a special case that stays direct-call-only.",
+        "gains": [
+          "In-place actions without reconstructing Mobj.",
+          "Write and move obligations survive storage.",
+          "One set of parameter access rules."
+        ],
+        "losses": [
+          {
+            "loss": "This reverses part of an earlier ratified ruling on function types and adds ownership checks at stored calls.",
+            "mitigation": "Approve the amendment explicitly; require overlapping-argument, capture, move-after-call and nested-storage proofs before implementation is accepted."
+          },
+          {
+            "loss": "The vote includes move callbacks beyond this monster example.",
+            "mitigation": "D is an explicit write-only choice if the owner wants the narrower scope."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A fair design when actions really are transformations. For an in-place edit, every action must rebuild the whole monster, and forgetting to assign the result loses the change."
+          },
+          {
+            "key": "C",
+            "reason": "A strong choice for a closed game. It does not allow independently supplied action functions without editing the dispatcher."
+          },
+          {
+            "key": "D",
+            "reason": "Solves the demonstrated need with less scope, but keeps one parameter mode unavailable in function values, an exception users must learn."
+          }
+        ],
+        "tradeoff": "A preserves all access modes; D adds only writing; B and C keep the current callable restriction and change application design."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT Sol. Fresh agent: BallotSol61. Checked S47, callable grammar, Tower rulings and O0/O2 return-action, enum-action and rejection probes. Removed false copy-in, two-copy and unchanged-ABI claims, added write-only option D, and specified aliasing, capture and move obligations."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "May a stored function change or take over its input, as a direct call can?",
+        "lesson": "A plain input is lent read-only; it is not copied. A stored writer must keep the same exclusive access a direct call has, including against captured values. This vote changes an earlier ruling; it is not a bug fix.",
+        "trio": {
+          "current": {
+            "note": "This value-returning pattern runs today. Returning the unmarked m itself is E0120, so actions rebuild or copy it.",
+            "code": "struct Mobj { health: Int, tics: Int, state: Int }\nfn chase(m: Mobj) -> Mobj {\n    Mobj{health: m.health, tics: m.tics - 1, state: m.state}\n}\n// In think: m = st.action.call(m)"
+          },
+          "wild": {
+            "lang": "C",
+            "note": "A state can hold an action that changes its argument.",
+            "code": "typedef struct { int health, tics, state; } Mobj;\ntypedef struct { int next; void (*action)(Mobj*); } State;\nvoid chase(Mobj *m) { m->tics--; }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Preserve & and ^ in function types",
+            "gist": "Use the existing parameter modes through stored calls too.",
+            "gains": [
+              "In-place actions.",
+              "Ownership transfer is expressible too."
+            ],
+            "losses": [
+              "Changes an earlier ruling for write and move inputs."
+            ],
+            "proposed": {
+              "code": "// Proposed; same chase step under all options.\nState :: struct { next: Int, action: fn(&Mobj) }\nchase :: fn(m: &Mobj) { m.tics -= 1 }\nst :: states[m.state]\nst.action.call(&m)\nm.state = st.next\n// fn(^Mobj) also preserves a move requirement."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Return the changed monster",
+            "gist": "Keep read parameters; apply an owned replacement.",
+            "gains": [
+              "No new callable rules.",
+              "Useful value-transform design."
+            ],
+            "losses": [
+              "Must construct or copy a replacement.",
+              "Caller must apply the returned value."
+            ],
+            "proposed": {
+              "code": "// Ratified binding spelling; behavior checked in today's spelling.\nState :: struct { next: Int, action: fn(Mobj) -> Mobj }\nchase :: fn(m: Mobj) -> Mobj {\n    Mobj{health: m.health, tics: m.tics - 1, state: m.state}\n}\nst :: states[m.state]\nm = st.action.call(m)\nm.state = st.next"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Store an enum; dispatch direct calls",
+            "gist": "Keep a closed, auditable action list.",
+            "gains": [
+              "No replacement record.",
+              "No callable language change."
+            ],
+            "losses": [
+              "Adding an action edits the enum and dispatcher."
+            ],
+            "proposed": {
+              "code": "// Ratified spelling; behavior checked in today's spelling.\nAction :: enum {\n    Look\n    Chase\n}\nact :: fn(a: Action, m: &Mobj) {\n    if a == {\n        .Look -> look(&m)\n        .Chase -> chase(&m)\n    }\n}\nst :: states[m.state]\nact(st.action, &m)\nm.state = st.next"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Add only fn(&T)",
+            "gist": "Solve stored writers now; keep moves direct-call-only.",
+            "gains": [
+              "Same in-place chase.",
+              "Smaller amendment than A."
+            ],
+            "losses": [
+              "Stored functions still cannot take ownership."
+            ],
+            "proposed": {
+              "code": "// Proposed write-only extension; same chase as A.\nState :: struct { next: Int, action: fn(&Mobj) }\nchase :: fn(m: &Mobj) { m.tics -= 1 }\nst :: states[m.state]\nst.action.call(&m)\nm.state = st.next\n// fn(^Mobj) remains unavailable."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Preserve the existing parameter modes in the existing function-value mechanism. Choose D instead if this vote should authorize only the demonstrated writer case.",
+          "gains": [
+            "One access contract survives storage."
+          ],
+          "losses": [
+            {
+              "loss": "More scope than this example needs.",
+              "mitigation": "The write-only alternative is explicit; no call-layout or speed claim is assumed."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Good for transformations, less direct for an in-place update."
+            },
+            {
+              "key": "C",
+              "reason": "Good for a closed action set, not arbitrary supplied functions."
+            },
+            {
+              "key": "D",
+              "reason": "Smaller, but leaves ownership-taking callbacks unavailable."
+            }
+          ],
+          "tradeoff": "A is the full access contract; D is the narrower writer-only amendment."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-05T15:14:25.734Z"
     }
   ],
   "questions": [
@@ -173145,6 +173573,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T15:14:45.866Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#64 Storing a named function whose parameter is marked & or ^ in"
+    },
+    {
+      "at": "2026-11-05T15:14:45.198Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#63 A read-only (unmarked) Pool parameter cannot be changed thro"
+    },
+    {
+      "at": "2026-11-05T15:14:25.735Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FNVAL-WRITE1",
+      "note": "Preserve write and move parameters in stored function types"
+    },
+    {
+      "at": "2026-11-05T15:14:24.989Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-POOL-HAS1",
+      "note": "Ask whether a Pool id names a live entry: pool.has(id)"
+    },
+    {
+      "at": "2026-11-05T15:07:19.890Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05gn07n",
+      "note": "#7 Paired performance cell for a checked lane gather (draft bal"
+    },
+    {
+      "at": "2026-11-05T15:07:19.242Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#122 A typed literal written straight after a comparison in an if"
+    },
+    {
+      "at": "2026-11-05T15:02:49.207Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T15:02:48.537Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rkebo4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T15:02:15.029Z",
       "by": "Main",
