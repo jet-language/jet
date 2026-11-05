@@ -43,6 +43,7 @@ check)
     ;;
 build)
     if [ ! -f "$file" ]; then echo 'fixed was not staged' >&2; exit 9; fi
+    case "$file" in *crash*) echo 'fixed companion crashed' >&2; exit 70 ;; esac
     if [ "${2:-}" = --offline ]; then
         if [ "$file" != main.jet ] || [ ! -f package.jet ]; then echo 'unlocked fixture was not staged' >&2; exit 9; fi
         printf 'Error [jet.UnlockedToolchainChannel]: unlocked toolchain\n' >&2
@@ -56,6 +57,7 @@ build)
     ;;
 run)
     if [ ! -f "$file" ]; then echo 'fixed was not staged' >&2; exit 9; fi
+    case "$file" in *crash*) echo 'fixed companion crashed' >&2; exit 70 ;; esac
     ;;
 *) echo 'unexpected test invocation' >&2; exit 9 ;;
 esac

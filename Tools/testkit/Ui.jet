@@ -229,6 +229,7 @@ fn kit_ui_fixed(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVa
     outcomes
 }
 
+// The `.fixed.jet` companion of a UI entry: its own file, with its own ledger row.
 fn kit_ui_fixed_path(path: String) -> String {
     "{kit_steps_byte_slice(path, 0, path.count_bytes() - 4)}.fixed.jet"
 }
@@ -303,11 +304,15 @@ fn kit_ui_stage_entry(entry: KitEntry, ctx: KitCtx) -> String {
 }
 
 // The central known-failing ledger owns UI rows exactly as it owns cases and
-// golden examples; REFUSED and coverage rows are never owned.
+// golden examples; REFUSED and coverage rows are never owned. The entry's own
+// row (tier `-`) belongs to the entry's ledger row; its fixed companion's rows
+// belong to the companion's.
 fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
-    annotation :: if entry.mode == "coverage" -> "" else -> kit_known_ledger(ctx.known, entry.path)
+    owned :: entry.mode != "coverage"
+    annotation :: if owned -> kit_known_ledger(ctx.known, entry.path) else -> ""
+    fixed :: if owned -> kit_known_ledger(ctx.known, kit_ui_fixed_path(entry.path)) else -> ""
     outcomes := [KitOutcome]{}
-    loop outcome in kit_ui_outcomes(entry, ctx) -> &outcomes.push(kit_cases_known_verdict(outcome, annotation))
+    loop outcome in kit_ui_outcomes(entry, ctx) -> &outcomes.push(kit_cases_known_verdict(outcome, if outcome.tier == "-" -> annotation else -> fixed))
     outcomes
 }
 

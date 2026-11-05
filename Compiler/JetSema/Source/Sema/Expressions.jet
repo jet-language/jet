@@ -6,6 +6,7 @@ use {
     jet_foundation.[
         AST_NODE_GENERATED,
         AccessConvention,
+        access_sigil,
         ArithmeticOperation,
         ArithmeticPolicyFact,
         BinOp,
@@ -2620,6 +2621,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         discarded: false,
         foreign_effect_root: foreign_effect_root,
         unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
+        foreign_capability: sema_expr_call_foreign_capability(program, callee),
         replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
     })
     // Demand: a codec call requires the generated codec it reaches, and a
@@ -2697,6 +2699,25 @@ fn sema_expr_call_unsafe_foreign_name(program: SemaProgramTables, callee: Symbol
     if program.registration_graph == .Val(graph) {
         declaration :: sema_registration_callable_declaration(graph, symbol) ?? return None
         if declaration.inline_foreign != None && declaration.is_unsafe -> return Val(declaration.name)
+    }
+    None
+}
+
+// The raw `extern rust` callee whose parameter takes a capability, with the
+// first such sigil: `&` lets the foreign side write Jet storage and `^`
+// gives it away, so the call needs an audited region (E0702). A generated
+// binding is callable directly; None for any other callee.
+fn sema_expr_call_foreign_capability(program: SemaProgramTables, callee: SymbolID?) -> SemaForeignCapability? {
+    symbol :: callee ?? return None
+    if program.registration_graph == .Val(graph) {
+        row :: sema_registration_callable_row(graph, symbol.key) ?? return None
+        if row == .Foreign(module_index, index) {
+            if graph.modules[module_index].foreign_functions[index].owner != SemaRegistrationForeignOwner.ExternRust || graph.modules[module_index].foreign_functions[index].declaration.generated -> return None
+            loop parameter in graph.modules[module_index].foreign_functions[index].declaration.params {
+                sigil :: access_sigil(parameter.convention)
+                if sigil != "" -> return Val(SemaForeignCapability{name: graph.modules[module_index].foreign_functions[index].declaration.name.copy(), sigil: sigil})
+            }
+        }
     }
     None
 }

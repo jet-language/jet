@@ -160,11 +160,18 @@ test('retained sandbox binds exact readonly helper and writable output for build
     pass(inspection);
     assert.equal(inspection.allowedFfiBuilds[0].manifestPath, metadata);
     assert.equal(inspection.allowedFfiBuilds[0].manifestSha256, createHash('sha256').update(f.contents).digest('hex'));
+    const registry = join(f.home, 'registry');
+    pass(f.audit(branch('build', { extra: ['--overlay-src', registry, '--tmp-overlay', '/work/output/cargo-home/registry'] })));
     for (const changes of [
         { sourceMode: '--bind' }, { source: join(f.home, 'outside') },
         { output: source }, { output: join(workspace, 'other') },
         { extra: ['--bind', output, '/work/source/src'] },
         { extra: ['--tmpfs', '/work/output/metadata-source'] },
+        { extra: ['--tmp-overlay', '/work/output/cargo-home/registry'] },
+        { extra: ['--overlay-src', registry, '--tmp-overlay', '/work/output'] },
+        { extra: ['--overlay-src', registry, '--tmp-overlay', '/work/source/src'] },
+        { extra: ['--overlay-src', registry, '--tmp-overlay', '/work/output/metadata-source'] },
+        { extra: ['--overlay-src', registry, '--overlay', output, join(workspace, 'work'), '/work/output/cargo-home/registry'] },
     ]) fail(f.audit(branch('build', changes)), 'invalid-foreign-sandbox');
     f.put(manifest, f.contents.replace('0.22', '0.23'));
     fail(f.audit(branch()));

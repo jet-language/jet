@@ -139,6 +139,9 @@ struct SemaCallSiteFact {
     // The callee is the `#Unsafe` inline foreign function of this name: the
     // call needs an audited region (E3103).
     unsafe_foreign_name: String?{None}
+    // The callee is a raw `extern rust` function whose parameter takes a
+    // capability: the call needs an audited region (E0702).
+    foreign_capability: SemaForeignCapability?{None}
     // A resolved Core lifecycle marker, retained with the checked call site.
     lifecycle: CoreMarkerApplication?{None}
     // The declared callee's `#Deprecated(use:)` replacement name resolves at
@@ -148,6 +151,13 @@ struct SemaCallSiteFact {
     shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
+}
+
+// A raw `extern rust` callee's name and the capability sigil (`&` or `^`)
+// of its first parameter that takes one.
+struct SemaForeignCapability {
+    name: String
+    sigil: String
 }
 
 struct SemaCallReturnViewFact {

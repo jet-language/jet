@@ -151,6 +151,31 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI known-failing scratch: {err}")
 }
 
+#Test("a UI fixed companion's rows belong to the companion's own ledger row, not the entry's") {
+    root :: kit_ui_test_scratch("fixed-ledger")
+    loop stem in ["clean_crash", "clean_crash_entry"] {
+        kit_exec_write(files.join(root, "tests/ui/{stem}.jet"), "fn run() {{}}\n")
+        kit_exec_write(files.join(root, "tests/ui/{stem}.fixed.jet"), "fn run() {{}}\n")
+        kit_exec_write(files.join(root, "tests/ui/{stem}.stderr"), "(no errors)\n")
+    }
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "tests/ui/clean_crash.fixed\towner\tcompanion crash\ntests/ui/clean_crash_entry\towner\tentry row only\n")
+    kit_ui_stage(root, root)
+    entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.len(), 2)
+    loop (index, entry) in entries {
+        outcomes :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
+        statuses :: outcomes.map(outcome -> outcome.verdict.status.copy())
+        if entry.path == "tests/ui/clean_crash.jet" {
+            assert_eq(statuses, ["PASS", "KNOWN-FAILING", "KNOWN-FAILING"])
+            assert(outcomes[1].verdict.detail.starts_with("owner companion crash: "))
+        } else {
+            assert_eq(entry.path, "tests/ui/clean_crash_entry.jet")
+            assert_eq(statuses, ["UNEXPECTED-PASS", "FAIL", "FAIL"])
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI fixed-ledger scratch: {err}")
+}
+
 #Test("UI staging gives a loose entry its imported modules route trees and data but no other entry") {
     root :: kit_ui_test_scratch("imports")
     main :: "use helper :: \"./modules/helper\"\nfn run() {{ print(helper.value()) }}\n"

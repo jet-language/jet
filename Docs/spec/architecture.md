@@ -1445,7 +1445,15 @@ Cargo metadata and the helper build run under the mandatory Linux native
 sandbox, never an unsandboxed fallback. Input manifests/source, descriptor,
 toolchain, target, artifact mode, native tools/link inputs, artifact digest,
 and provenance govern cache reuse. A per-key OS lock outside the key directory
-and a shared-output publication lock retain one helper build under concurrency.
+retains one helper build per key under concurrency. A shared-output
+publication lock is held only while a build snapshots the shared Cargo target
+into its private output and while it publishes the result back, never while
+Cargo runs, so helpers that share a target build at once. A helper with
+dependencies reads the host Cargo registry through a memory-backed bubblewrap
+overlay (`--overlay-src`/`--tmp-overlay`, bubblewrap 0.11 or newer, checked by
+the backend probe): Cargo's writes end with the sandbox and nothing is copied.
+A raw `extern rust` call whose parameter takes `&` or `^` is a sema error
+(`E0702`) outside `#Unsafe`, so it fails before any Cargo work.
 `check`, `run` and `build` share this realization and its
 `E0703`/`E0704`/`E0705` errors, including canonical declaration hints and separate
 Cargo detail. Cargo is resolved only from `PATH`; the selected musl rustc,
@@ -2190,7 +2198,9 @@ under the same checks as builds. The immutable tracing wrapper enables retained
 private workspaces beneath `<cache>/<full-key>/.trace-workspaces/<pid>-<attempt>`;
 the source is mounted readonly at `/work/source`, output writable at
 `/work/output`. Audit maps those exact mounts back to retained manifests, rejects
-overlays/escapes, and records their bytes and hashes. Case/tier scratch is retained
+escapes and any mount or overlay that obscures them, admits only memory-backed
+`--tmp-overlay` layers (the registry overlay), and records the manifests' bytes
+and hashes. Case/tier scratch is retained
 only for the outer audit; ordinary runs keep their existing cleanup.
 The exact `rustc -vV` identity query is admitted only in an allowlisted case's
 Jet foreign branch, and is recorded separately. Extra query arguments or sysroot

@@ -31,6 +31,7 @@ use jet_foundation.[
     DeclTable,
     decl_table_find,
     Diagnostic,
+    diagnostic_registry_row,
     EffectRowEntry,
     FnBody,
     Func,
@@ -1706,6 +1707,10 @@ fn sema_effect_check_unsafe_enter(nodes: &[SemaEffectNode], facts: SemaEffectCal
             if facts.modules[caller.module_index].facts[position].unsafe_foreign_name == .Val(foreign) {
                 _ :: sema_effect_require_unsafe_call(foreign, true, audited, node.span, &diagnostics)
             }
+            if facts.modules[caller.module_index].facts[position].foreign_capability == .Val(capability) && !audited {
+                row :: diagnostic_registry_row("E0702") ?? panic("E0702 has no registry row")
+                &diagnostics.push(sema_error("E0702", node.span, row.what.replace("{{subject}}", "call `{capability.name}` uses capability `{capability.sigil}` outside `#Unsafe`"), "a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary", "call `{capability.name}` inside `#Unsafe(\"…\") {{ … }}`, or expose it through a generated typed binding"))
+            }
         }
     }
     if node.kind == {
@@ -2816,19 +2821,21 @@ fn sema_effect_collect_module(functions: [FnBody], module_row: SemaEffectModuleI
 fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, calls: SemaEffectCallIndex, module_index: Int, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
     sema_effect_collect_function(&nodes, node_index, function, calls, module_index, &diagnostics)
     // A call needs an audited region only when its callee is an
-    // `#Unsafe` function or inline foreign function; with none in the graph
-    // the walk finds nothing.
+    // `#Unsafe` function, an inline foreign function or a raw `extern rust`
+    // function taking a capability; with none in the graph the walk finds
+    // nothing.
     if any_unsafe {
         audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
         sema_effect_check_unsafe_statements_tree(&nodes, calls, sema_effect_caller_slot(calls, module_index, function.key), function.tree, function.body, audited, &diagnostics)
     }
 }
 
-// Whether any call site names an `#Unsafe` inline foreign callee.
+// Whether any call site names an `#Unsafe` inline foreign callee or a raw
+// `extern rust` callee taking a capability.
 fn sema_effect_calls_any_unsafe_foreign(modules: [SemaEffectModuleCalls]) -> Bool Never! {
     loop module_calls in modules {
         loop fact in module_calls.facts {
-            if fact.unsafe_foreign_name != None -> return true
+            if fact.unsafe_foreign_name != None || fact.foreign_capability != None -> return true
         }
     }
     false
