@@ -117,12 +117,15 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
     raised.claims_min = Val(ClaimsGrade.Proved)
     lowered := PackagePolicy.default()
     lowered.claims_min = Val(ClaimsGrade.Examples(1))
-    assert_eq(root.member_claims_floor(unset) ?? panic("an unset member inherits"), Val(ClaimsGrade.Examples(2)))
-    assert_eq(root.member_claims_floor(raised) ?? panic("a member may raise the floor"), Val(ClaimsGrade.Proved))
+    inherited :: root.member_claims_floor(unset) ? found -> found ! error -> panic("an unset member inherits: {error.message}")
+    assert_eq(inherited, Val(ClaimsGrade.Examples(2)))
+    tightened :: root.member_claims_floor(raised) ? found -> found ! error -> panic("a member may raise the floor: {error.message}")
+    assert_eq(tightened, Val(ClaimsGrade.Proved))
     if root.member_claims_floor(lowered) == {
         .Err(error) -> assert(error.message.contains("cannot weaken from `examples(2)` to `examples(1)`"))
         .Ok(_) -> panic("a member must not lower its root's floor")
     }
     // A root with no floor leaves each member its own.
-    assert_eq(unset.member_claims_floor(lowered) ?? panic("no root floor"), Val(ClaimsGrade.Examples(1)))
+    own :: unset.member_claims_floor(lowered) ? found -> found ! error -> panic("no root floor: {error.message}")
+    assert_eq(own, Val(ClaimsGrade.Examples(1)))
 }
