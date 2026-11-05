@@ -20,7 +20,7 @@ use {
     jet_build_session.[BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
-        pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_sorted_contributions,
+        pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_sorted_contributions, pkg_manifest_parse,
     ]
 }
 
@@ -77,7 +77,16 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
 // `build_args` (the words after `--`) are what its `b.args()` returns. Under
 // `write_generated: on` each generated source is first written to its
 // `.jet/generated/` path under the package root.
+// A workspace index first builds its members (jet_cli_build_workspace_members).
 fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    members :: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
+    if members.exit_code != JET_DRIVER_EXIT_OK -> return members
+    jet_cli_build_package_as(file, color, options, build_args, threads, invocation, None, trace_sink)
+}
+
+// `jet_cli_build_package` of one package; `member` names the workspace member
+// a workspace build runs it for (jet_cli_build_execute).
+fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, member: String?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     selection := BuildPlanSelection?{None}
     execution := BuildPlanExecution?{None}
     policy := JetDriverAuthorityPolicy?{None}
@@ -138,7 +147,7 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
     }
     graph :: execution ?? return jet_cli_ice("the completed build query has no plan")
     // copy: `failed` is a payload view of the execution's result.
-    if jet_cli_build_execute(graph, root, policy, invocation, color) == .Val(failed) -> return failed.copy()
+    if jet_cli_build_execute(graph, root, policy, invocation, member, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
         source_path :: jet_cli_entry_join(root, executable.source)
         source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
@@ -158,6 +167,97 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
         if jet_cli_top_level_function_lines(source, "run").len() > 0 -> return jet_cli_compile_target(file, jet_cli_stem(file), source, color, selected_options.copy(), threads, invocation, trace_sink)
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet build` of a workspace index builds its members before its own plan,
+// in dependency order (jet_cli_workspace_build_order). A member with a build
+// entry runs it granted only its own package authority and the workspace's
+// grant to it: the command line's grant is the root build's. A member
+// without one builds its run entry stock. A clean output when every member
+// built, or when `file` is not its directory's workspace index.
+fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    canonical :: build_files.realpath(file) ?? return built
+    root :: jet_cli_parent(canonical) ?? return built
+    index_path := ""
+    if jet_cli_workspace_source(root, color) == {
+        .Index(path) -> index_path = path
+        else -> return built
+    }
+    if (build_files.realpath(index_path) ?? index_path) != canonical -> return built
+    members := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_members(root, index_path, "build", color) == {
+        .Refused(plan) -> return jet_cli_execute(^plan)
+        .Members(found) -> members = found
+    }
+    loop member in jet_cli_workspace_build_order(root, members) {
+        notices := [String]{}
+        entry := JetCLIEntry?{None}
+        if jet_cli_find_command_entry(jet_cli_entry_join(root, member.path), "build", true, color, &notices) == {
+            .Entry(found) -> entry = Val(found)
+            .Refused(plan) -> return jet_cli_execute(^plan)
+            .Absent -> {}
+        }
+        loop notice in notices -> jet_cli_write_notice(notice)
+        found :: entry ?? next
+        if jet_cli_package_declares_build_entry(found.path) {
+            built = jet_cli_build_package_as(found.path, color, options.copy(), [String]{}, threads, None, Val(member.name), trace_sink)
+        } else {
+            source :: build_files.read(found.path) ?? next
+            if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
+            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, color, options.copy(), threads, None, trace_sink)
+        }
+        if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    }
+    built
+}
+
+// `members` with each after the members its manifest names as path `deps:`,
+// index order among those ready; members in a dependency cycle keep index order.
+fn jet_cli_workspace_build_order(root: String, members: [JetCLIWorkspaceMember]) -[FS, Env]> [JetCLIWorkspaceMember] Never! {
+    directories := [String]{}
+    loop member in members {
+        member_root :: jet_cli_entry_join(root, member.path)
+        &directories.push(build_files.realpath(member_root) ?? member_root)
+    }
+    needs := (loop directory in directories -> jet_cli_workspace_member_needs(directory, directories))
+    placed := (loop _ in directories -> false)
+    order := [JetCLIWorkspaceMember]{}
+    progressed := true
+    loop progressed {
+        progressed = false
+        loop (index, member) in members {
+            if placed[index] -> next
+            ready :: loop need in needs[index] {
+                if !placed[need] -> break false
+            } ?? true
+            if ready {
+                placed[index] = true
+                &order.push(member.copy())
+                progressed = true
+            }
+        }
+    }
+    loop (index, member) in members {
+        if !placed[index] -> &order.push(member.copy())
+    }
+    order
+}
+
+// The indexes in `directories` of the members `directory`'s manifest names as path dependencies.
+fn jet_cli_workspace_member_needs(directory: String, directories: [String]) -[FS, Env]> [Int] Never! {
+    needs := [Int]{}
+    manifest_path :: jet_cli_checked_file(directory, JET_CLI_PACKAGE_FILE) ?? return needs
+    manifest :: pkg_manifest_parse(manifest_path, build_files.read(manifest_path) ?? "") ?? return needs
+    loop name in manifest.dependencies.keys() {
+        if manifest.dependencies[name] == .Path(path) {
+            target :: build_files.realpath(jet_cli_entry_join(directory, path)) ?? next
+            loop (index, candidate) in directories {
+                if candidate == target && candidate != directory -> &needs.push(index)
+            }
+        }
+    }
+    needs
 }
 
 // A library target builds as its importers compile it: its source checks

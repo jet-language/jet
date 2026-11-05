@@ -1351,6 +1351,8 @@ fn jet_cli_compile_target(file: String, name: String, source: String, color: Boo
 }
 
 fn jet_cli_compile_build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    members :: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
+    if members.exit_code != JET_DRIVER_EXIT_OK -> return members
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if ^compiled == {

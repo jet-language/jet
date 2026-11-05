@@ -57,8 +57,10 @@ fn jet_cli_package_declares_build_entry(file: String) -[FS, Env]> Bool Never! {
 
 // Run the selected actions of `graph` under the project root `root`, granted
 // what the package `policy`, the enclosing workspace's build policy and this
-// invocation grant. None when every action ran or was restored.
-fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput? {
+// invocation grant. `member` names the workspace member a workspace build runs
+// this graph for; its invocation grant is None. None when every action ran or
+// was restored.
+fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, member: String?, color: Bool) -> JetDriverVerbOutput? {
     if graph.actions.len() == 0 && graph.probes.len() == 0 -> return None
     workspace := OverlayPolicy.empty()
     // copy: `refused` is a payload view of the policy read's result.
@@ -67,7 +69,7 @@ fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, policy: JetDri
     store :: BuildArtifactStoreHandle.open() ?? return Val(jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
     if build_execute_build_plan(plan, root, store, jet_cli_build_grants(policy, workspace, invocation)) == {
         .Ok(_) -> None
-        .Err(error) -> Val(jet_cli_build_execution_error(error, color))
+        .Err(error) -> Val(jet_cli_build_execution_error(error, member, color))
     }
 }
 
@@ -119,10 +121,14 @@ fn jet_cli_build_grants(policy: JetDriverAuthorityPolicy?, workspace: OverlayPol
     allowed
 }
 
-fn jet_cli_build_execution_error(error: BuildExecutionError, color: Bool) -> JetDriverVerbOutput Never! {
+// A workspace member's ungranted action is E3504: the command line grants the
+// root build only, so the member's own authority and the workspace's grant to
+// it are all it holds. The root build's is E3503.
+fn jet_cli_build_execution_error(error: BuildExecutionError, member: String?, color: Bool) -> JetDriverVerbOutput Never! {
     if error == {
         .MissingGrant(action, capability) -> {
             subject :: if action.starts_with("probe ") -> "build probe `{action.slice(6..<action.len())}`" else -> "build action `{action}`"
+            if member == .Val(name) -> return jet_cli_build_execution_failed("E3504", "{subject} of workspace member `{name}` asks for ungranted `{capability.name()}` authority", None, "grant `{capability.name()}` in `{name}`'s package authority or in the workspace's `policy: {{ grants: {{ \"{name}\": #({capability.name()}) }} }}`; `--allow` grants the root build only", color)
             jet_cli_build_execution_failed("E3503", "{subject} needs `{capability.name()}`, which this build does not grant", None, "grant it with `--allow={capability.name()}` or in package or workspace policy; `fn build` declares the effect and makes the call inside `#Impure(\"reason\")`", color)
         }
         .SandboxUnavailable -> jet_cli_build_execution_failed("E3505", "build actions run only in the native sandbox, and none is available here", None, "install bubblewrap (`bwrap`) with user namespaces enabled; Jet never runs a build action outside the sandbox", color)
