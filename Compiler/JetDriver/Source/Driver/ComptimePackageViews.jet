@@ -59,7 +59,7 @@ fn jet_driver_package_read_error(file: String, message: String, cause: String) -
 // `authority_reason`: the cause text of an authority failure.
 fn jet_driver_package_authority_reason(cause: AuthorityError) -> String Never! {
     if cause == {
-        .Missing(_) -> "authority input is missing; restore the required metadata and try again"
+        .Missing(_, why) -> "authority input is missing ({why}); restore the required metadata and try again"
         .ManifestParse(_, _) -> "package metadata is malformed; fix the metadata and try again"
         .IO(_, operation, _) -> "couldn't {operation} authority metadata; restore access and try again"
         .Symlink(_) -> "authority input is a symlink; replace it with the expected file or directory"
@@ -69,6 +69,7 @@ fn jet_driver_package_authority_reason(cause: AuthorityError) -> String Never! {
         .WorkspaceNoModule -> "the authority source has no workspace module; declare the workspace module"
         .NestedMembers(_, _) -> "a member Package cannot declare another members list; keep membership at one level"
         .Invalid(_, _) -> "authority metadata is invalid; fix the metadata fields and try again"
+        .NotText(_, detail) -> "authority metadata is not UTF-8 text ({detail}); save it as UTF-8 and try again"
         .Changed(_) -> "authority input changed during resolution; restore it and retry"
         .Unsupported(_) -> "authority resolution is unavailable on this platform"
     }
