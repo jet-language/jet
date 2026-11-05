@@ -794,11 +794,18 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         else -> {}
     }
     sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, program, scopes, &state, &context, &diagnostics)
+    // Rust infer_task_spawn reports the result crossing at `expr` of
+    // `task expr`, which the parser wraps in a zero-parameter expression
+    // lambda (parser_task_spawn); a call's span is its name.
+    spawned_span := expr_span(args[0].expr)
+    if args[0].expr == .Lambda(spawn_lambda, _) {
+        if spawn_lambda.params.len() == 0 && spawn_lambda.body == .Expr(spawned) -> spawned_span = expr_span(spawned)
+    }
     task_result_ty := body_ty
     problem := sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, environment, program, scopes, context)
     if problem == .Val(value) {
         sema_taskgroup_note_detach_problem(&context, value.kind == SemaSendProblemKind.ViewBorrow)
-        &diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, args[0].span))
+        &diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, spawned_span))
     }
     group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(context) != None {
