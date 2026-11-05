@@ -304,6 +304,17 @@ fn jet_native_test_settle(outcomes: &[U64:String], streamed: [U64:String], id: U
     &outcomes.add(id, kept).drop("only missing tests are retried")
 }
 
+// One test run again alone. Under `jet prove --capture-sensitive` it reads
+// the stdin the batch already read, then end of input, so the user is never
+// asked to type twice; the runtime journals the rerun's reads like any other.
+fn jet_native_test_alone_run(spec: ProcessSpec) -> ProcessReceipt IOError! {
+    journal :: native_test_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) ?? return spec.run()
+    child :: spec.stdin(.Stream).spawn() ?? return Err(err)
+    child.stdin.write_all(jet_cli_replay_journal_stdin(journal)).drop("a rerun that stops reading early reports why on stderr")
+    child.stdin.close()
+    child.wait()
+}
+
 // `spec` is the caller's already-configured test ProcessSpec, preserving every
 // JET_TEST_* / project / snapshot / tier option without mutating the parent env.
 // Raw child stdout/stderr never enter the separate framed outcome channel.
@@ -374,7 +385,7 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
         loop test in missing {
             path :: "{records_path}.{test.id}"
             native_test_files.write(path, "") ?? return Err("couldn't create selected native test records: {err}")
-            receipt :: alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).run() ?? {
+            receipt :: jet_native_test_alone_run(alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path)) ?? {
                 native_test_files.remove(path).drop("selected native test spawn already failed")
                 return Err("couldn't run native test {test.name}: {err}")
             }

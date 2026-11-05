@@ -726,7 +726,9 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
             .output_limit(67108864)
         if requested == None -> spec = spec.env("JET_PROP_SEED", "{seed}")
         if time_ms == .Val(ms) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{ms}")
-        if journal.capture != "" -> spec = spec.env(JET_CLI_REPLAY_CAPTURE_ENV, journal.capture)
+        // A capture hands the terminal to the tests, so a stdin read gets
+        // what the user types and the journal records it.
+        if journal.capture != "" -> spec = spec.env(JET_CLI_REPLAY_CAPTURE_ENV, journal.capture).stdin(.Inherit)
         if journal.records != "" -> spec = spec.env(JET_CLI_REPLAY_RECORDS_ENV, journal.records).env(JET_CLI_REPLAY_TRACE_ENV, journal.trace)
         receipt :: spec.run() ?? {
             &items.push(unavailable.copy())

@@ -1698,6 +1698,9 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
     spec = spec.env("JET_TEST_CAPTURE", options.capture)
     if measure != None -> spec = spec.env("JET_TEST_MEASURE", "1")
+    // Under `jet prove --capture-sensitive` the tests read the user's
+    // terminal, and the runtime journals every stdin read.
+    if cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) != None -> spec = spec.stdin(.Inherit)
     time_limit := Duration?{None}
     if options.time_limit_ms == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
     // The children's outcome records stay in memory: no test writes the disk.

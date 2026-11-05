@@ -13,12 +13,15 @@
 // served. After `D` every read fails, as an unrecorded authority would.
 //
 // A record: u8 kind, u64 LE request, u64 LE result, then, for an uppercase
-// kind, the result's bytes. Kinds: `R` Rand bytes (result = request) and `r`
-// a Rand read the OS refused (result 0).
+// kind, the result's bytes. Kinds: `R` Rand bytes (result = request), `r` a
+// Rand read the OS refused (result 0), `I` a stdin read of up to `request`
+// bytes that delivered `result` (0 at end of input), `i` one that failed
+// (result = errno).
 // Root48: lock0, mode8 (1 capture, 2 replay, 3 diverged), path16 (owned
 // journal or trace path), records24, length32, at40.
 PROVE_JOURNAL_HEAD :: I64{17}
 PROVE_JOURNAL_RAND :: I64{82}
+PROVE_JOURNAL_STDIN :: I64{73}
 prove_journal_root := I64{0}
 
 fn rt_prove_journal_open() {
@@ -111,6 +114,82 @@ fn rt_prove_rand_fill(out: I64, count: I64) -> I64 {
     }
     sync_mutex_unlock(root)
     status
+}
+
+// One raw read of up to `capacity` stdin bytes into `into` for the runtime's
+// stdin buffer (TerminalInput.jet): the count, 0 at end of input, or -errno.
+// Capture records each answer; replay serves it, and a replay that diverged
+// fails the read with EIO rather than reading the real stdin.
+fn rt_prove_stdin_read(into: I64, capacity: I64) -> I64 {
+    root :: prove_journal_root
+    if (root == I64{0}) -> return rt_prove_stdin_os_read(into, capacity)
+    sync_mutex_lock(root)
+    got := I64{-5}
+    if (trap_word(wrapping(root + I64{8})) == I64{1}) {
+        got = rt_prove_stdin_terminal_read(into, capacity)
+        if (got >= I64{0}) {
+            rt_prove_journal_record(root, PROVE_JOURNAL_STDIN, capacity, got, into)
+        } else {
+            rt_prove_journal_record(root, PROVE_JOURNAL_STDIN + I64{32}, capacity, I64{0} - got, into)
+        }
+    } else {
+        at :: rt_prove_journal_take(root, PROVE_JOURNAL_STDIN, capacity)
+        if (at >= I64{0}) {
+            records :: trap_word(wrapping(root + I64{24}))
+            result :: rt_prove_le(wrapping(records + at + I64{9}))
+            if (rt_text_byte(wrapping(records + at)) == PROVE_JOURNAL_STDIN) {
+                test_copy_bytes(into, wrapping(records + at + PROVE_JOURNAL_HEAD), result)
+                got = result
+            } else {
+                got = I64{0} - result
+            }
+        }
+    }
+    sync_mutex_unlock(root)
+    got
+}
+
+fn rt_prove_stdin_os_read(into: I64, capacity: I64) -> I64 {
+    got := I64{0}
+    #Unsafe("into lends `capacity` writable bytes for a raw Linux read of stdin") {
+        got = os_syscall_i64(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
+    }
+    got
+}
+
+// A capture's harness runs in its own process group (HostSpawn.jet), so a
+// read of the user's terminal would stop it with SIGTTIN. For the read it
+// takes the terminal's foreground, with SIGTTOU blocked so the kernel allows
+// that, then gives it back. Stdin that is no terminal reads as it is.
+fn rt_prove_stdin_terminal_read(into: I64, capacity: I64) -> I64 {
+    // cell0: a process group id; cell8: the SIGTTOU mask; cell16: the old mask.
+    cell :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(cell, I64{24})
+    owner := I64{0}
+    own := I64{0}
+    #Unsafe("cell lends 24 writable bytes to TIOCGPGRP and getpgrp takes none") {
+        if (os_syscall_i64(I64{16}, I64{0}, I64{21519}, cell, I64{0}, I64{0}, I64{0}) == I64{0}) -> owner = trap_word(cell).bit_and(I64{4294967295})
+        own = os_syscall_i64(I64{111}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    handoff :: owner > I64{0} && own > I64{0} && owner != own
+    if handoff {
+        trap_store(wrapping(cell + I64{8}), I64{1} << I64{21})
+        trap_store(cell, own)
+        #Unsafe("cell lends the new and old signal masks and the group id to rt_sigprocmask and TIOCSPGRP") {
+            _ := os_syscall_i64(I64{14}, I64{0}, wrapping(cell + I64{8}), wrapping(cell + I64{16}), I64{8}, I64{0}, I64{0})
+            _ := os_syscall_i64(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
+        }
+    }
+    got :: rt_prove_stdin_os_read(into, capacity)
+    if handoff {
+        trap_store(cell, owner)
+        #Unsafe("cell lends the group id to TIOCSPGRP and the old mask to rt_sigprocmask") {
+            _ := os_syscall_i64(I64{16}, I64{0}, I64{21520}, cell, I64{0}, I64{0}, I64{0})
+            _ := os_syscall_i64(I64{14}, I64{2}, wrapping(cell + I64{16}), I64{0}, I64{8}, I64{0}, I64{0})
+        }
+    }
+    jet_rt_free(cell, I64{24}, I64{8})
+    got
 }
 
 // The next record when it is a `kind` read (or its failed lowercase twin)

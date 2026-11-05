@@ -36,16 +36,34 @@ JET_CLI_REPLAY_MAX_EXACT :: 9007199254740991
 // The largest signed 64-bit clock value.
 JET_CLI_REPLAY_MAX_I64 :: 9223372036854775807
 JET_CLI_REPLAY_ADAPTER :: "mir-v1"
-// Frame kinds: TimeWall, RandBits, and the RunAct extension.
+// Frame kinds: TimeWall, RandBits, IORead, IOChunk, IOEnd, and the RunAct
+// extension.
 JET_CLI_REPLAY_KIND_TIME :: 1
 JET_CLI_REPLAY_KIND_RAND :: 16
+JET_CLI_REPLAY_KIND_IO_READ :: 32
+JET_CLI_REPLAY_KIND_IO_CHUNK :: 33
+JET_CLI_REPLAY_KIND_IO_END :: 34
 JET_CLI_REPLAY_KIND_ACT :: 4097
+// The kinds this reader decodes.
+JET_CLI_REPLAY_DECODED_KINDS :: [Int]{JET_CLI_REPLAY_KIND_TIME, JET_CLI_REPLAY_KIND_RAND, JET_CLI_REPLAY_KIND_IO_READ, JET_CLI_REPLAY_KIND_IO_CHUNK, JET_CLI_REPLAY_KIND_IO_END, JET_CLI_REPLAY_KIND_ACT}
 // Every v1 registry kind: TimeWall, TimeMonotonic, TimeSleep, RandBits, the
 // I/O and network records, Outcome and GameEvent. A registered kind this
 // reader does not replay needs a newer reader (E3620).
 JET_CLI_REPLAY_KINDS_V1 :: [Int]{1, 2, 3, 16, 32, 33, 34, 48, 49, 50, 51, 52, 240, 16384}
-// The ambient terminal builtins (Syntax `IMPURE_BUILTINS`): raw IO.
+// The ambient terminal builtins (Syntax `IMPURE_BUILTINS`): raw IO. Output
+// reaches the terminal live and is never recorded; `input` and
+// `read_all_input` read through the runtime's one stdin buffer, whose raw
+// reads a sensitive capture records.
 JET_CLI_REPLAY_IO_BUILTINS :: [String]{"print", "eprint", "input", "read_all_input"}
+JET_CLI_REPLAY_STDIN_BUILTINS :: [String]{"input", "read_all_input"}
+// The most bytes one IOChunk carries: its base64url text stays well under
+// the 1 MiB payload limit.
+JET_CLI_REPLAY_IO_CHUNK_BYTES :: 524288
+// The portable I/O error registry and the one Linux errno each name
+// replays as. An errno outside it, or one of two that share a name
+// (EPERM beside EACCES, EWOULDBLOCK is EAGAIN), cannot be replayed exactly.
+JET_CLI_REPLAY_IO_ERRORS :: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found"}
+JET_CLI_REPLAY_IO_ERRNOS :: [Int]{4, 110, 11, 32, 103, 111, 104, 107, 98, 99, 13, 2}
 JET_CLI_REPLAY_IDENTITY_KEYS :: [String]{"abi", "build_digest", "core_abi", "entry", "execution_adapter", "lock_digest", "mir_identity", "mir_schema", "optimized_mir_hash", "profile", "semantic_mir_hash", "source_digest", "target_triple", "time_site_id"}
 JET_CLI_REPLAY_MIR_KEYS :: [String]{"core_ids", "function_ids", "identity_digest", "optimized_hash", "schema", "semantic_hash", "source_map", "target_facts"}
 // The runtime's wall-clock override (JetRuntime HostTime.jet
@@ -59,40 +77,52 @@ JET_CLI_REPLAY_RECORDS_ENV :: "JET_PROVE_REPLAY_JOURNAL"
 JET_CLI_REPLAY_TRACE_ENV :: "JET_PROVE_REPLAY_TRACE"
 // A journal record: u8 kind, u64 LE request, u64 LE result, then the
 // result's bytes for an uppercase kind. `R` is a Rand read the OS answered,
-// `r` one it refused.
+// `r` one it refused; `I` is a stdin read of up to `request` bytes that
+// delivered `result` (0 at end of input), `i` one that failed with errno
+// `result`.
 JET_CLI_REPLAY_JOURNAL_HEAD :: 17
 JET_CLI_REPLAY_JOURNAL_RAND :: 82
 JET_CLI_REPLAY_JOURNAL_RAND_FAILED :: 114
+JET_CLI_REPLAY_JOURNAL_STDIN :: 73
+JET_CLI_REPLAY_JOURNAL_STDIN_FAILED :: 105
 // The exact phrase a terminal types to consent to sensitive capture.
 JET_CLI_REPLAY_CONSENT :: "capture sensitive"
 
 // A verified artifact: its id, the target identity it is bound to, its
-// capture mode and roots, the one recorded wall-clock value, the Rand reads
-// in order, and the exit status of the captured run.
+// capture mode and roots, the one recorded wall-clock value, the Rand and
+// stdin reads in the order the run made them, and the exit status of the
+// captured run.
 struct JetCLIReplayArtifact {
     artifact_id: String
     identity: [CanonicalJSONField]
     sensitive: Bool
     roots: [String]
     unix_ns: Int
-    rand: [JetCLIReplayRand]
+    reads: [JetCLIReplayRead]
     status: Int
 }
 
-// One RandBits record: the site it answers and the bytes the OS gave.
-struct JetCLIReplayRand {
+// One recorded raw read, as its journal record: `kind` `R` (Rand bytes),
+// `I` (stdin bytes, none at end of input) or `i` (a failed stdin read), the
+// site it answers, the count asked for, the count delivered (the errno for
+// `i`), and the delivered bytes.
+struct JetCLIReplayRead {
+    kind: Int
     site_id: String
-    bits: [U8]
+    request: Int
+    result: Int
+    bytes: [U8]
 }
 
 // A capture or replay whose checks passed: the wall-clock value the run's
-// programs read, the target identity, the capture mode and roots, the Time
-// and Rand site ids, and the replayed artifact.
+// programs read, the target identity, the capture mode and roots, the Time,
+// Rand and stdin site ids, and the replayed artifact.
 struct JetCLIReplayRun {
     time_ms: Int
     identity: [CanonicalJSONField]
     site_id: String
     rand_site_id: String
+    io_site_id: String
     sensitive: Bool
     roots: [String]
     replayed: JetCLIReplayArtifact?
@@ -144,6 +174,7 @@ fn jet_cli_prove_replay_checks(identity: JetCLIProveIdentity, members: [JetCLIPr
     sites :: jet_cli_replay_sites(members)
     site_id :: jet_cli_replay_site_id(identity, members, sites)
     rand_site_id :: jet_cli_replay_rand_site_id(identity, members, sites)
+    io_site_id :: jet_cli_replay_io_site_id(identity, members, sites)
     expected :: jet_cli_replay_target_identity(identity, members, site_id)
     if capture == .Val(request) {
         if jet_cli_replay_capture_refusal(root, request, sites) == .Val(refusal) -> return Err(JetCLIProveStop{output: jet_cli_prove_refused(refusal, color, json)})
@@ -151,18 +182,32 @@ fn jet_cli_prove_replay_checks(identity: JetCLIProveIdentity, members: [JetCLIPr
         if request.sensitive {
             if jet_cli_replay_consent(identity, members, request, roots) == .Val(refusal) -> return Err(JetCLIProveStop{output: jet_cli_prove_refused(refusal, color, json)})
         }
-        return Ok(JetCLIReplayRun{time_ms: jet_cli_replay_clock_ms(), identity: expected, site_id: site_id, rand_site_id: rand_site_id, sensitive: request.sensitive, roots: roots, replayed: None})
+        return Ok(JetCLIReplayRun{time_ms: jet_cli_replay_clock_ms(), identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, sensitive: request.sensitive, roots: roots, replayed: None})
     }
     raw :: replay ?? return Err(JetCLIProveStop{output: jet_cli_ice("prove replay checks ran without --capture or --replay")})
-    artifact :: jet_cli_replay_input(root, raw, sites, expected, rand_site_id) ?? return Err(JetCLIProveStop{output: jet_cli_prove_refused(err, color, json)})
-    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, rand_site_id: rand_site_id, sensitive: artifact.sensitive, roots: artifact.roots.copy(), replayed: Val(artifact)})
+    artifact :: jet_cli_replay_input(root, raw, sites, expected, rand_site_id, io_site_id) ?? return Err(JetCLIProveStop{output: jet_cli_prove_refused(err, color, json)})
+    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, sensitive: artifact.sensitive, roots: artifact.roots.copy(), replayed: Val(artifact)})
 }
 
-// The roots a capture records: Time always, since every capture pins the
-// clock, and Rand when a sensitive target reaches it.
+// The roots a capture records, in byte order: IO when a sensitive target
+// reaches the terminal builtins, Rand when it reaches Rand, and Time
+// always, since every capture pins the clock.
 fn jet_cli_replay_capture_roots(sites: [JetCLIReplaySite], sensitive: Bool) -> [String] Never! {
-    if sensitive && jet_cli_replay_reaches(sites, Effect.Rand) -> return [String]{"Rand", "Time"}
-    [String]{"Time"}
+    roots := [String]{}
+    if sensitive && jet_cli_replay_reaches(sites, Effect.IO) -> &roots.push("IO")
+    if sensitive && jet_cli_replay_reaches(sites, Effect.Rand) -> &roots.push("Rand")
+    &roots.push("Time")
+    roots
+}
+
+fn jet_cli_replay_is_terminal_io(site: JetCLIReplaySite) -> Bool Never! {
+    if site.authority == .Val(authority) -> return authority == Effect.IO && JET_CLI_REPLAY_IO_BUILTINS.contains(site.operation)
+    false
+}
+
+fn jet_cli_replay_is_stdin_read(site: JetCLIReplaySite) -> Bool Never! {
+    if site.authority == .Val(authority) -> return authority == Effect.IO && JET_CLI_REPLAY_STDIN_BUILTINS.contains(site.operation)
+    false
 }
 
 fn jet_cli_replay_reaches(sites: [JetCLIReplaySite], authority: Effect) -> Bool Never! {
@@ -179,7 +224,9 @@ fn jet_cli_replay_reaches(sites: [JetCLIReplaySite], authority: Effect) -> Bool 
 fn jet_cli_replay_consent(identity: JetCLIProveIdentity, members: [JetCLIProveMember], request: JetCLIProveCapture, roots: [String]) -> JetCLIProveRefusal? {
     stem :: jet_cli_replay_entry_stem(jet_cli_replay_entry(identity.authority_root, members))
     destination :: request.path ?? ".jet/replays/{stem}-<id>.jetproof-replay"
-    disclosed :: if roots.contains("Rand") -> "the random bytes the program reads, " else -> ""
+    disclosed := ""
+    if roots.contains("IO") -> disclosed = "the text the program reads from stdin, "
+    if roots.contains("Rand") -> disclosed = "{disclosed}the random bytes the program reads, "
     cli_term.eprint("jet prove --capture-sensitive stores raw values from this run in a file that is not encrypted:\n  authorities: {roots.join(", ")}\n  hosts: none\n  byte limits: {JET_CLI_REPLAY_MAX_PAYLOAD} bytes per record, {JET_CLI_REPLAY_MAX_FRAMES} records, {JET_CLI_REPLAY_MAX_ARTIFACT} bytes per artifact\n  may disclose: {disclosed}paths, host names, panic text and run metadata\n  destination: {destination} (mode 0600)\nType `{JET_CLI_REPLAY_CONSENT}` to record it:")
     input := cli_term.stdin()
     answer :: &input.read_line() ?? ""
@@ -264,6 +311,17 @@ fn jet_cli_replay_rand_site_id(identity: JetCLIProveIdentity, members: [JetCLIPr
     jet_cli_replay_site_digest("jet.replay.v1/rand-site", identity, members, operations.join("\n"))
 }
 
+// The site every IORead record answers: the target's stdin reads, which
+// the runtime sees as raw reads of its one stdin buffer, share one site
+// named by all of them, as Rand's do.
+fn jet_cli_replay_io_site_id(identity: JetCLIProveIdentity, members: [JetCLIProveMember], sites: [JetCLIReplaySite]) -> String Never! {
+    operations := [String]{}
+    loop site in sites {
+        if jet_cli_replay_is_stdin_read(site) -> &operations.push(site.operation.copy())
+    }
+    jet_cli_replay_site_digest("jet.replay.v1/io-site", identity, members, operations.join("\n"))
+}
+
 fn jet_cli_replay_site_digest(domain: String, identity: JetCLIProveIdentity, members: [JetCLIProveMember], operation: String) -> String Never! {
     out := [U8]{}
     loop field in ([String]{domain, jet_cli_replay_entry(identity.authority_root, members), identity.source_digest, operation}) -> jet_cli_receipt_frame(&out, field.bytes())
@@ -271,9 +329,10 @@ fn jet_cli_replay_site_digest(domain: String, identity: JetCLIProveIdentity, mem
 }
 
 // The v1 bytes of one capture: the canonical header, the TimeWall frame,
-// a RandBits frame per Rand read, and the footer, with the content id in
-// place.
-fn jet_cli_replay_encode(run: JetCLIReplayRun, rand: [JetCLIReplayRand], salt: String, status: Int) -> [U8] Never! {
+// then each raw read in the order the run made it (a RandBits frame, or an
+// IORead frame followed by the IOChunk frames it delivered or the IOEnd that
+// ended it), and the footer, with the content id in place.
+fn jet_cli_replay_encode(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: String, status: Int) -> [U8] Never! {
     header :: jet_cli_replay_header_bytes("0".repeat(24), run, salt, status)
     out := "JREPLAY".bytes()
     &out.push(U8{0})
@@ -291,24 +350,60 @@ fn jet_cli_replay_encode(run: JetCLIReplayRun, rand: [JetCLIReplayRand], salt: S
         jet_cli_replay_string("site_id", run.site_id),
         CanonicalJSONField{key: "unix_ns", value: ns},
     }))}
-    loop (call, drawn) in rand {
-        requested :: CanonicalJSON.Object([CanonicalJSONField]{
-            jet_cli_replay_integer_field("bits", 64),
-            jet_cli_replay_string("t", "uint"),
-            jet_cli_replay_string("v", jet_cli_replay_u64_text(drawn.bits.len() * 8)),
-        })
+    kinds := [Int]{JET_CLI_REPLAY_KIND_TIME}
+    rand_calls := 0
+    io_calls := 0
+    loop read in reads {
+        if read.kind == JET_CLI_REPLAY_JOURNAL_RAND {
+            &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+                CanonicalJSONField{key: "bits", value: jet_cli_replay_bytes_value(read.bytes)},
+                jet_cli_replay_integer_field("call_id", rand_calls),
+                CanonicalJSONField{key: "requested_bits", value: jet_cli_replay_uint(read.bytes.len() * 8)},
+                jet_cli_replay_string("site_id", read.site_id),
+            })))
+            &kinds.push(JET_CLI_REPLAY_KIND_RAND)
+            rand_calls += 1
+            next
+        }
+        // Each read is its own stream, named by its IORead frame's sequence.
+        stream :: jet_cli_replay_integer_field("stream_id", payloads.len())
         &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
-            CanonicalJSONField{key: "bits", value: jet_cli_replay_bytes_value(drawn.bits)},
-            jet_cli_replay_integer_field("call_id", call),
-            CanonicalJSONField{key: "requested_bits", value: requested},
-            jet_cli_replay_string("site_id", drawn.site_id),
+            jet_cli_replay_integer_field("call_id", io_calls),
+            CanonicalJSONField{key: "requested_bytes", value: jet_cli_replay_uint(read.request)},
+            jet_cli_replay_string("site_id", read.site_id),
+            stream,
         })))
+        &kinds.push(JET_CLI_REPLAY_KIND_IO_READ)
+        io_calls += 1
+        if read.kind == JET_CLI_REPLAY_JOURNAL_STDIN && read.result > 0 {
+            chunk := 0
+            loop chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES < read.result {
+                start :: chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES
+                end :: if read.result - start > JET_CLI_REPLAY_IO_CHUNK_BYTES -> start + JET_CLI_REPLAY_IO_CHUNK_BYTES else -> read.result
+                &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+                    CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(read.bytes.slice(start, end))},
+                    jet_cli_replay_integer_field("chunk_index", chunk),
+                    stream,
+                })))
+                &kinds.push(JET_CLI_REPLAY_KIND_IO_CHUNK)
+                chunk += 1
+            }
+            next
+        }
+        outcome :: if read.kind == JET_CLI_REPLAY_JOURNAL_STDIN -> jet_cli_replay_io_outcome(None) else -> jet_cli_replay_io_outcome(jet_cli_replay_io_error_name(read.result))
+        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+            jet_cli_replay_integer_field("chunks", 0),
+            CanonicalJSONField{key: "outcome", value: outcome},
+            stream,
+            CanonicalJSONField{key: "total_bytes", value: jet_cli_replay_uint(0)},
+        })))
+        &kinds.push(JET_CLI_REPLAY_KIND_IO_END)
     }
     payload_bytes := 0
     loop (sequence, record) in payloads {
         payload :: record.slice(0, record.len() - 1)
         frame := [U8]{U8{1}}
-        jet_cli_replay_put_le(&frame, if sequence == 0 -> JET_CLI_REPLAY_KIND_TIME else -> JET_CLI_REPLAY_KIND_RAND, 2)
+        jet_cli_replay_put_le(&frame, kinds[sequence], 2)
         jet_cli_replay_put_le(&frame, sequence, 8)
         jet_cli_replay_put_le(&frame, payload.len(), 4)
         &frame.extend(payload)
@@ -327,6 +422,38 @@ fn jet_cli_replay_encode(run: JetCLIReplayRun, rand: [JetCLIReplayRand], salt: S
     jet_cli_replay_put_le(&bytes, payload_bytes, 8)
     &bytes.extend(footer_hash)
     bytes
+}
+
+// Canonical Jet `{"bits":64,"t":"uint","v":"<decimal>"}`.
+fn jet_cli_replay_uint(value: Int) -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{
+        jet_cli_replay_integer_field("bits", 64),
+        jet_cli_replay_string("t", "uint"),
+        jet_cli_replay_string("v", jet_cli_replay_u64_text(value)),
+    })
+}
+
+// The portable name an errno replays as, None when it has none (or shares
+// it with another errno).
+fn jet_cli_replay_io_error_name(errno: Int) -> String? Never! {
+    loop (at, known) in JET_CLI_REPLAY_IO_ERRNOS {
+        if known == errno -> return Val(JET_CLI_REPLAY_IO_ERRORS[at].copy())
+    }
+    None
+}
+
+fn jet_cli_replay_io_errno(name: String) -> Int? Never! {
+    loop (at, known) in JET_CLI_REPLAY_IO_ERRORS {
+        if known == name -> return Val(JET_CLI_REPLAY_IO_ERRNOS[at])
+    }
+    None
+}
+
+// An IOEnd outcome: `{"kind":"eof"}` at end of input, else
+// `{"error":<portable name>,"kind":"error"}`.
+fn jet_cli_replay_io_outcome(error: String?) -> CanonicalJSON Never! {
+    name :: error ?? return CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("kind", "eof")})
+    CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("error", name), jet_cli_replay_string("kind", "error")})
 }
 
 // Canonical Jet bytes: `{"t":"bytes","v":"<unpadded base64url>"}`.
@@ -382,9 +509,9 @@ fn jet_cli_replay_put_le(out: &[U8], value: Int, width: Int) Never! {
 // the indexed copy at `.jet/replays/<id>`.
 fn jet_cli_replay_capture_write(identity: JetCLIProveIdentity, request: JetCLIProveCapture, run: JetCLIReplayRun, journal: JetCLIReplayJournal, status: Int) -> String JetCLIProveRefusal! {
     root :: identity.authority_root
-    rand :: jet_cli_replay_journal_reads(journal, run.rand_site_id) ?? return Err(err)
+    reads :: jet_cli_replay_journal_reads(journal, run) ?? return Err(err)
     salt :: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
-    bytes :: jet_cli_replay_encode(run, rand, salt, status)
+    bytes :: jet_cli_replay_encode(run, reads, salt, status)
     verified :: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_unfinalized("the encoded artifact failed its own check: {err.why}"))
     id :: verified.artifact_id
     entry :: jet_cli_replay_field_value(run.identity, "entry")
@@ -411,11 +538,11 @@ fn jet_cli_replay_capture_write(identity: JetCLIProveIdentity, request: JetCLIPr
 fn jet_cli_replay_journal_open(run: JetCLIReplayRun, folder: String) -> JetCLIReplayJournal JetCLIProveRefusal! {
     records := [U8]{}
     if run.replayed == .Val(artifact) {
-        loop drawn in artifact.rand {
-            &records.push(U8{82})
-            jet_cli_replay_put_le(&records, drawn.bits.len(), 8)
-            jet_cli_replay_put_le(&records, drawn.bits.len(), 8)
-            &records.extend(drawn.bits)
+        loop read in artifact.reads {
+            &records.push(U8.from_int(read.kind) ?? panic("journal kind"))
+            jet_cli_replay_put_le(&records, read.request, 8)
+            jet_cli_replay_put_le(&records, read.result, 8)
+            &records.extend(read.bytes)
         }
     } else {
         return Ok(JetCLIReplayJournal{capture: jet_cli_rooted_join(folder, "journal.bin"), records: "", trace: ""})
@@ -425,14 +552,18 @@ fn jet_cli_replay_journal_open(run: JetCLIReplayRun, folder: String) -> JetCLIRe
     Ok(JetCLIReplayJournal{capture: "", records: path, trace: jet_cli_rooted_join(folder, "trace.bin")})
 }
 
-// The Rand reads a capture's harnesses journaled, in order, as RandBits
-// records of `site_id`. A read the OS refused has no RandBits shape, so the
-// run cannot be modeled (E3625).
-fn jet_cli_replay_journal_reads(journal: JetCLIReplayJournal, site_id: String) -> [JetCLIReplayRand] JetCLIProveRefusal! {
-    reads := [JetCLIReplayRand]{}
+// The raw reads a capture's harnesses journaled, in order: Rand reads as
+// RandBits records of the run's Rand site, stdin reads as IORead records of
+// its stdin site. A read the OS refused with no RandBits shape, or with an
+// errno outside the portable registry, cannot be modeled (E3625).
+fn jet_cli_replay_journal_reads(journal: JetCLIReplayJournal, run: JetCLIReplayRun) -> [JetCLIReplayRead] JetCLIProveRefusal! {
+    reads := [JetCLIReplayRead]{}
     if journal.capture == "" || !cli_files.exists(journal.capture) -> return Ok(reads)
     bytes :: cli_files.read_bytes(journal.capture) ?? return Err(jet_cli_replay_unfinalized("couldn't read the capture journal: {jet_cli_io_error_text(err)}"))
     at := 0
+    // The TimeWall frame, then one frame per Rand read, and per stdin read an
+    // IORead frame and its IOChunk frames or IOEnd frame.
+    frames := 1
     loop at < bytes.len() {
         if at + JET_CLI_REPLAY_JOURNAL_HEAD > bytes.len() -> return Err(jet_cli_replay_unfinalized("the capture journal ends inside a record"))
         kind :: Int.from_u8(bytes[at])
@@ -441,13 +572,25 @@ fn jet_cli_replay_journal_reads(journal: JetCLIReplayJournal, site_id: String) -
         if kind == JET_CLI_REPLAY_JOURNAL_RAND_FAILED {
             return Err(jet_cli_replay_unmodeled("a refused OS randomness read", "the OS refused a Rand read during capture, and a RandBits record holds only delivered bits", "capture again once the OS randomness source answers"))
         }
+        if kind == JET_CLI_REPLAY_JOURNAL_STDIN_FAILED && jet_cli_replay_io_error_name(result) == None {
+            return Err(jet_cli_replay_unmodeled("a stdin read that failed with OS error {result}", "an IOEnd record names only errors in the portable I/O registry, and this error has no exact name there", "capture again with stdin open on a terminal, a file or a pipe"))
+        }
         start :: at + JET_CLI_REPLAY_JOURNAL_HEAD
-        if kind != JET_CLI_REPLAY_JOURNAL_RAND || request < 0 || result != request || result > bytes.len() - start {
+        size :: if kind == JET_CLI_REPLAY_JOURNAL_STDIN_FAILED -> 0 else -> result
+        rand :: kind == JET_CLI_REPLAY_JOURNAL_RAND
+        stdin :: kind == JET_CLI_REPLAY_JOURNAL_STDIN || kind == JET_CLI_REPLAY_JOURNAL_STDIN_FAILED
+        if !(rand || stdin) || request < 0 || result < 0 || (rand && result != request) || (kind == JET_CLI_REPLAY_JOURNAL_STDIN && result > request) || size > bytes.len() - start {
             return Err(jet_cli_replay_unfinalized("the capture journal holds a malformed record"))
         }
-        if reads.len() + 1 >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run read randomness more than {JET_CLI_REPLAY_MAX_FRAMES - 2} times", "capture a target that reads fewer random values"))
-        &reads.push(JetCLIReplayRand{site_id: site_id.copy(), bits: bytes.slice(start, start + result)})
-        at = start + result
+        if (rand && !run.roots.contains("Rand")) || (stdin && !run.roots.contains("IO")) {
+            source :: if rand -> "randomness" else -> "stdin"
+            return Err(jet_cli_replay_unmodeled("a raw read outside the capture's roots", "the run read {source} through a call the capture did not see", "change the target so it reads only through calls its source names directly"))
+        }
+        frames += if rand -> 1 else if kind == JET_CLI_REPLAY_JOURNAL_STDIN && result > 0 -> 1 + (result + JET_CLI_REPLAY_IO_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_IO_CHUNK_BYTES else -> 2
+        if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random and stdin reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that reads fewer random values or less input"))
+        site_id :: if rand -> run.rand_site_id else -> run.io_site_id
+        &reads.push(JetCLIReplayRead{kind: kind, site_id: site_id.copy(), request: request, result: result, bytes: bytes.slice(start, start + size)})
+        at = start + size
     }
     Ok(reads)
 }
@@ -458,6 +601,26 @@ fn jet_cli_replay_journal_u64(bytes: [U8], at: Int) -> Int Never! {
     jet_cli_replay_le(bytes, at, 4)
 }
 
+// The stdin bytes a capture's harnesses have read so far, in order. A test
+// that `jet test` runs again alone (NativeTests.jet) reads these rather
+// than the user's terminal a second time. A journal it can't read gives
+// none: the rerun then reads end of input, which its own record shows.
+fn jet_cli_replay_journal_stdin(path: String) -> [U8] Never! {
+    typed := [U8]{}
+    bytes :: cli_files.read_bytes(path) ?? return typed
+    at := 0
+    loop at + JET_CLI_REPLAY_JOURNAL_HEAD <= bytes.len() {
+        kind :: Int.from_u8(bytes[at])
+        result :: jet_cli_replay_journal_u64(bytes, at + 9)
+        start :: at + JET_CLI_REPLAY_JOURNAL_HEAD
+        size :: if kind < 97 -> result else -> 0
+        if size < 0 || size > bytes.len() - start -> return typed
+        if kind == JET_CLI_REPLAY_JOURNAL_STDIN -> &typed.extend(bytes.slice(start, start + size))
+        at = start + size
+    }
+    typed
+}
+
 // A sensitive replay consumed every record in order, or it diverged: the
 // trace holds `C` for each record a harness was served and `D` where a read
 // asked for what the next record does not hold.
@@ -466,10 +629,10 @@ fn jet_cli_replay_journal_divergence(journal: JetCLIReplayJournal, artifact: Jet
     trace :: if cli_files.exists(journal.trace) -> cli_files.read_bytes(journal.trace) ?? [U8]{} else -> [U8]{}
     served := 0
     loop byte in trace {
-        if byte != (U8{67}) -> return Val(jet_cli_replay_diverged("read {served + 1} of the replayed run asked for randomness the recording does not hold next"))
+        if byte != (U8{67}) -> return Val(jet_cli_replay_diverged("raw read {served + 1} of the replayed run asked for a value the recording does not hold next"))
         served += 1
     }
-    if served != artifact.rand.len() -> return Val(jet_cli_replay_diverged("the replayed run read {served} of the {artifact.rand.len()} recorded Rand values"))
+    if served != artifact.reads.len() -> return Val(jet_cli_replay_diverged("the replayed run made {served} of the {artifact.reads.len()} recorded raw reads"))
     None
 }
 
@@ -544,7 +707,7 @@ fn jet_cli_replay_capture_path_problem(path: String) -> String? Never! {
 
 // Capture records one `core.time.now` and refuses everything else it cannot
 // model; raw Rand, IO and Net need sensitive consent, and this adapter
-// records raw Rand only.
+// records raw Rand and the terminal builtins' stdin (their output is live).
 fn jet_cli_replay_capture_preflight(sites: [JetCLIReplaySite], sensitive: Bool) -> JetCLIProveRefusal? Never! {
     if jet_cli_replay_time_count(sites) > 1 {
         return Val(jet_cli_replay_unmodeled("multiple core.time.now sites", "the current replay adapter has one bounded Time record and cannot prove request order for multiple sites", "capture one Time request per target, or route time through an injected deterministic input"))
@@ -557,7 +720,7 @@ fn jet_cli_replay_capture_preflight(sites: [JetCLIReplaySite], sensitive: Bool) 
         }
         if authority == Effect.Rand || authority == Effect.IO || authority == Effect.Net {
             if !sensitive -> return Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "safe capture reached raw {sema_taint_effect_name(authority)} at {site.operation}; untainted values still require sensitive-data consent", "inject deterministic data, or explicitly use --capture-sensitive"))
-            if authority == Effect.Rand -> next
+            if authority == Effect.Rand || jet_cli_replay_is_terminal_io(site) -> next
         }
         return Val(jet_cli_replay_unmodeled(site.operation, "replay capture has no authority adapter for the {sema_taint_effect_name(authority)} effect", "route the operation through a supported deterministic input, or change the capture target"))
     }
@@ -574,7 +737,7 @@ fn jet_cli_replay_unmodeled(operation: String, why: String, fix: String) -> JetC
 // artifact is verified whole, then bound to the current target's exact
 // identity (E3621), before any value could be injected; the target preflight
 // runs first when there is no artifact to read.
-fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], expected: [CanonicalJSONField], rand_site_id: String) -> JetCLIReplayArtifact JetCLIProveRefusal! {
+fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], expected: [CanonicalJSONField], rand_site_id: String, io_site_id: String) -> JetCLIReplayArtifact JetCLIProveRefusal! {
     index :: jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_refusal("E2105", "could not load the replay record index", err.message, "repair or remove the project's `.jet/records` index, then run the command again"))
     found :: jet_cli_record_index_find(index, "replay", raw, true)
     if found == None {
@@ -597,8 +760,9 @@ fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], ex
     if !artifact.sensitive && jet_cli_replay_time_count(sites) == 0 {
         return Err(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target has no statically identified `core.time.now` call site for the captured Time record", "replay the matching target, or recapture a target with one supported Time call"))
     }
-    loop drawn in artifact.rand {
-        if drawn.site_id != rand_site_id -> return Err(jet_cli_replay_diverged("a recorded Rand value answers a different set of Rand call sites than the target's"))
+    loop read in artifact.reads {
+        if read.kind == JET_CLI_REPLAY_JOURNAL_RAND && read.site_id != rand_site_id -> return Err(jet_cli_replay_diverged("a recorded Rand value answers a different set of Rand call sites than the target's"))
+        if read.kind != JET_CLI_REPLAY_JOURNAL_RAND && read.site_id != io_site_id -> return Err(jet_cli_replay_diverged("a recorded stdin read answers a different set of stdin call sites than the target's"))
     }
     Ok(artifact)
 }
@@ -641,8 +805,9 @@ fn jet_cli_replay_input_problem(raw: String) -> String? Never! {
 }
 
 // The one Time record replays one statically identified `core.time.now`
-// site, and an artifact's Rand root replays every Rand site in read order;
-// any other reachable authority would run unrecorded.
+// site, an artifact's Rand root replays every Rand site in read order, and
+// its IO root the terminal builtins (stdin in read order, output live); any
+// other reachable authority would run unrecorded.
 fn jet_cli_replay_target_refusal(sites: [JetCLIReplaySite], roots: [String]) -> JetCLIProveRefusal? Never! {
     if jet_cli_replay_time_count(sites) > 1 {
         return Val(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target requests more than one `core.time.now` site, but the artifact has one bounded Time record", "recapture a target with one supported Time request, or route time through an injected deterministic input"))
@@ -652,6 +817,7 @@ fn jet_cli_replay_target_refusal(sites: [JetCLIReplaySite], roots: [String]) -> 
         why := "replay reached an opaque authority boundary at {site.operation}"
         if site.authority == .Val(authority) {
             if authority == Effect.Rand && roots.contains("Rand") -> next
+            if roots.contains("IO") && jet_cli_replay_is_terminal_io(site) -> next
             why = if authority == Effect.Time -> "replay reached unsupported Time operation at {site.operation}; the artifact records only `core.time.now`" else -> "replay reached unrecorded {sema_taint_effect_name(authority)} authority at {site.operation}"
         }
         return Val(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", why, "recapture the target with every authority it reaches recorded, or remove the unrecorded boundary"))
@@ -720,6 +886,11 @@ fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault!
     frames := 0
     payload_bytes := 0
     time_frames := 0
+    rand_calls := 0
+    io_calls := 0
+    stream := 0
+    chunks := 0
+    open := JetCLIReplayRead?{None}
     loop at < jend {
         if at + 15 > jend -> return Err(jet_cli_replay_corrupt("truncated frame header"))
         if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_limit("replay artifact exceeds the {JET_CLI_REPLAY_MAX_FRAMES}-frame limit"))
@@ -731,26 +902,60 @@ fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault!
         if frame_end > jend -> return Err(jet_cli_replay_corrupt("truncated frame payload"))
         if length > JET_CLI_REPLAY_MAX_PAYLOAD -> return Err(jet_cli_replay_limit("replay frame payload exceeds the {JET_CLI_REPLAY_MAX_PAYLOAD}-byte limit"))
         if prove_crypto.sha256(bytes.slice(at, payload_end)).as_bytes() != bytes.slice(payload_end, frame_end) -> return Err(jet_cli_replay_corrupt("frame hash mismatch"))
-        if kind != JET_CLI_REPLAY_KIND_TIME && kind != JET_CLI_REPLAY_KIND_RAND && kind != JET_CLI_REPLAY_KIND_ACT {
+        if !JET_CLI_REPLAY_DECODED_KINDS.contains(kind) {
             if JET_CLI_REPLAY_KINDS_V1.contains(kind) -> return Err(jet_cli_replay_unsupported("replay record kind {jet_cli_replay_kind_text(kind)} is not supported by this reader"))
             return Err(jet_cli_replay_corrupt("replay record kind {jet_cli_replay_kind_text(kind)} is not registered"))
         }
         if flags != 1 || !jet_cli_replay_le_is(bytes, at + 3, frames) || (frames == 0 && kind != JET_CLI_REPLAY_KIND_TIME) -> return Err(jet_cli_replay_corrupt("replay frame ordering or kind is invalid"))
         payload :: bytes.slice(at + 15, payload_end)
         _ :: String.from_bytes(payload) ?? return Err(jet_cli_replay_corrupt("replay frame payload is not UTF-8"))
+        // An open read that delivered chunks ends at the first frame that is
+        // not its next chunk; one with none needs its first chunk or IOEnd.
+        if open != None && kind != JET_CLI_REPLAY_KIND_IO_CHUNK {
+            if chunks == 0 && kind != JET_CLI_REPLAY_KIND_IO_END -> return Err(jet_cli_replay_corrupt("an IORead frame must be followed by its IOChunk frames or one IOEnd frame"))
+            if chunks > 0 {
+                delivered :: open ?? return Err(jet_cli_replay_corrupt("an IORead frame has no stream"))
+                &artifact.reads.push(delivered)
+                open = None
+            }
+        }
+        if open == None && (kind == JET_CLI_REPLAY_KIND_IO_CHUNK || kind == JET_CLI_REPLAY_KIND_IO_END) -> return Err(jet_cli_replay_corrupt("an IOChunk or IOEnd frame has no open IORead"))
         if kind == JET_CLI_REPLAY_KIND_TIME {
             time_frames += 1
             artifact.unix_ns = jet_cli_replay_time_payload(payload)
         } else if kind == JET_CLI_REPLAY_KIND_RAND {
             if !artifact.roots.contains("Rand") -> return Err(jet_cli_replay_corrupt("a RandBits frame needs the capture root `Rand`"))
-            drawn :: jet_cli_replay_rand_payload(payload, artifact.rand.len())
-            &artifact.rand.push(drawn)
+            drawn :: jet_cli_replay_rand_payload(payload, rand_calls)
+            &artifact.reads.push(drawn)
+            rand_calls += 1
+        } else if kind == JET_CLI_REPLAY_KIND_IO_READ {
+            if !artifact.roots.contains("IO") -> return Err(jet_cli_replay_corrupt("an IORead frame needs the capture root `IO`"))
+            started :: jet_cli_replay_io_read_payload(payload, io_calls, frames)
+            open = Val(started)
+            stream = frames
+            chunks = 0
+            io_calls += 1
+        } else if kind == JET_CLI_REPLAY_KIND_IO_CHUNK {
+            read :: open ?? return Err(jet_cli_replay_corrupt("an IOChunk frame has no open IORead"))
+            grown :: jet_cli_replay_io_chunk_payload(payload, read, stream, chunks)
+            open = Val(grown)
+            chunks += 1
+        } else if kind == JET_CLI_REPLAY_KIND_IO_END {
+            read :: open ?? return Err(jet_cli_replay_corrupt("an IOEnd frame has no open IORead"))
+            ended :: jet_cli_replay_io_end_payload(payload, read, stream)
+            &artifact.reads.push(ended)
+            open = None
         } else {
             jet_cli_replay_act_payload(payload)
         }
         frames += 1
         payload_bytes += length
         at = frame_end
+    }
+    if open != None {
+        if chunks == 0 -> return Err(jet_cli_replay_corrupt("an IORead frame must be followed by its IOChunk frames or one IOEnd frame"))
+        delivered :: open ?? return Err(jet_cli_replay_corrupt("an IORead frame has no stream"))
+        &artifact.reads.push(delivered)
     }
     if time_frames == 0 -> return Err(jet_cli_replay_limit("replay artifact contains no Time authority"))
     if time_frames > 1 -> return Err(jet_cli_replay_corrupt("replay must contain exactly one consumed Time frame"))
@@ -797,7 +1002,7 @@ fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> JetCLIReplayArtifact J
         loop (index, root) in roots {
             if !([String]{"IO", "Net", "Rand", "Time"}).contains(root) -> return Err(jet_cli_replay_corrupt("header capture root `{root}` is not an authority"))
             if index > 0 && roots[index - 1] >= root -> return Err(jet_cli_replay_corrupt("header capture roots must be distinct and in byte order"))
-            if root == "IO" || root == "Net" -> return Err(jet_cli_replay_unsupported("this reader replays the Rand and Time roots, not `{root}`"))
+            if root == "Net" -> return Err(jet_cli_replay_unsupported("this reader replays the IO, Rand and Time roots, not `Net`"))
         }
         if !roots.contains("Time") -> return Err(jet_cli_replay_corrupt("sensitive capture roots must include `Time`"))
     }
@@ -811,7 +1016,7 @@ fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> JetCLIReplayArtifact J
     if outcome != "exit" && outcome != "panic" -> return Err(jet_cli_replay_corrupt("header run outcome `{outcome}` is invalid"))
     if status < 0 || status > 255 -> return Err(jet_cli_replay_corrupt("header run status is not an exit status"))
     if (outcome == "panic") != (status == JET_CLI_EXIT_RUNTIME_STOP) -> return Err(jet_cli_replay_corrupt("header run outcome and status disagree"))
-    Ok(JetCLIReplayArtifact{artifact_id: artifact_id, identity: identity, sensitive: mode == "sensitive", roots: roots, unix_ns: 0, rand: [JetCLIReplayRand]{}, status: status})
+    Ok(JetCLIReplayArtifact{artifact_id: artifact_id, identity: identity, sensitive: mode == "sensitive", roots: roots, unix_ns: 0, reads: [JetCLIReplayRead]{}, status: status})
 }
 
 // The target identity a replay is bound to.
@@ -922,32 +1127,113 @@ fn jet_cli_replay_u64_text(value: Int) -> String Never! {
 // A RandBits record: `{bits, call_id, requested_bits, site_id}`, with
 // `bits` canonical Jet bytes, `requested_bits` a tagged u64 equal to eight
 // times their count, and `call_id` the record's place among the Rand reads.
-fn jet_cli_replay_rand_payload(payload: [U8], call: Int) -> JetCLIReplayRand JetCLIReplayFault! {
-    value :: jet_cli_replay_json(payload, "Rand payload")
+fn jet_cli_replay_rand_payload(payload: [U8], call: Int) -> JetCLIReplayRead JetCLIReplayFault! {
+    what :: "Rand payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"bits", "call_id", "requested_bits", "site_id"})
+    if !jet_cli_replay_integer_is(fields, "call_id", "{call}") -> return Err(jet_cli_replay_corrupt("Rand payload call_id is out of order"))
+    site :: jet_cli_replay_payload_site(fields, what)
+    bytes :: jet_cli_replay_payload_bytes(fields, "bits", what)
+    count :: jet_cli_replay_payload_uint(fields, "requested_bits", what)
+    if count != bytes.len() * 8 -> return Err(jet_cli_replay_corrupt("Rand payload requested_bits disagrees with its bits"))
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_RAND, site_id: site, request: bytes.len(), result: bytes.len(), bytes: bytes})
+}
+
+// An IORead record: `{call_id, requested_bytes, site_id, stream_id}`, with
+// `call_id` the record's place among the stdin reads and `stream_id` its
+// own frame sequence. Returns the read, which the next records complete.
+fn jet_cli_replay_io_read_payload(payload: [U8], call: Int, sequence: Int) -> JetCLIReplayRead JetCLIReplayFault! {
+    what :: "IORead payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"call_id", "requested_bytes", "site_id", "stream_id"})
+    if !jet_cli_replay_integer_is(fields, "call_id", "{call}") -> return Err(jet_cli_replay_corrupt("IORead payload call_id is out of order"))
+    site :: jet_cli_replay_payload_site(fields, what)
+    jet_cli_replay_payload_stream(fields, what, sequence)
+    requested :: jet_cli_replay_payload_uint(fields, "requested_bytes", what)
+    if requested <= 0 -> return Err(jet_cli_replay_corrupt("IORead payload requested_bytes must be positive"))
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: site, request: requested, result: 0, bytes: [U8]{}})
+}
+
+// An IOChunk record: `{bytes, chunk_index, stream_id}`, the open read's
+// next bytes. Every chunk but the last is full, and together they fit the
+// read's request. Returns the read with these bytes added.
+fn jet_cli_replay_io_chunk_payload(payload: [U8], open: JetCLIReplayRead, stream: Int, chunk: Int) -> JetCLIReplayRead JetCLIReplayFault! {
+    what :: "IOChunk payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"bytes", "chunk_index", "stream_id"})
+    if !jet_cli_replay_integer_is(fields, "chunk_index", "{chunk}") -> return Err(jet_cli_replay_corrupt("IOChunk payload chunk_index is out of order"))
+    jet_cli_replay_payload_stream(fields, what, stream)
+    bytes :: jet_cli_replay_payload_bytes(fields, "bytes", what)
+    if bytes.len() == 0 || bytes.len() > JET_CLI_REPLAY_IO_CHUNK_BYTES || open.result != chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES || open.result + bytes.len() > open.request -> return Err(jet_cli_replay_corrupt("IOChunk payload bytes disagree with their IORead"))
+    delivered := open.bytes.copy()
+    &delivered.extend(bytes)
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id.copy(), request: open.request, result: delivered.len(), bytes: delivered})
+}
+
+// An IOEnd record: `{chunks, outcome, stream_id, total_bytes}`, ending the
+// open read, which delivered nothing, at end of input or with a portable
+// I/O error.
+fn jet_cli_replay_io_end_payload(payload: [U8], open: JetCLIReplayRead, stream: Int) -> JetCLIReplayRead JetCLIReplayFault! {
+    what :: "IOEnd payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"chunks", "outcome", "stream_id", "total_bytes"})
+    if !jet_cli_replay_integer_is(fields, "chunks", "0") -> return Err(jet_cli_replay_corrupt("IOEnd payload chunks disagree with the stream"))
+    jet_cli_replay_payload_stream(fields, what, stream)
+    counted :: jet_cli_replay_payload_uint(fields, "total_bytes", what)
+    if counted != 0 -> return Err(jet_cli_replay_corrupt("IOEnd payload total_bytes disagree with the stream"))
+    outcome :: jet_cli_replay_object(fields, "outcome", what)
+    jet_cli_replay_keys(outcome, "IOEnd outcome", [String]{"kind"}, [String]{"error"}, "E3622")
+    ending :: jet_cli_replay_text(outcome, "kind", "IOEnd outcome")
+    if ending == "eof" && outcome.len() == 1 -> return Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id.copy(), request: open.request, result: 0, bytes: [U8]{}})
+    if ending != "error" || outcome.len() != 2 -> return Err(jet_cli_replay_corrupt("IOEnd outcome is neither `eof` nor an error"))
+    name :: jet_cli_replay_text(outcome, "error", "IOEnd outcome")
+    errno :: jet_cli_replay_io_errno(name) ?? return Err(jet_cli_replay_corrupt("IOEnd outcome error `{name}` is not a portable I/O error this reader replays"))
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN_FAILED, site_id: open.site_id.copy(), request: open.request, result: errno, bytes: [U8]{}})
+}
+
+// A record payload's object, with exactly `keys`.
+fn jet_cli_replay_payload_fields(payload: [U8], what: String, keys: [String]) -> [CanonicalJSONField] JetCLIReplayFault! {
+    value :: jet_cli_replay_json(payload, what)
     fields :: if value == {
         .Object(found) -> found
         else -> {
-            return Err(jet_cli_replay_corrupt("Rand payload must be an object"))
+            return Err(jet_cli_replay_corrupt("{what} must be an object"))
         }
     }
-    jet_cli_replay_keys(fields, "Rand payload", [String]{"bits", "call_id", "requested_bits", "site_id"}, [String]{}, "E3622")
-    if !jet_cli_replay_integer_is(fields, "call_id", "{call}") -> return Err(jet_cli_replay_corrupt("Rand payload call_id is out of order"))
-    site :: jet_cli_replay_text(fields, "site_id", "Rand payload")
-    if !jet_cli_replay_lower_hex(site, 64) || site == "0".repeat(64) -> return Err(jet_cli_replay_corrupt("Rand payload site_id is invalid"))
-    bits :: jet_cli_replay_object(fields, "bits", "Rand payload")
-    jet_cli_replay_keys(bits, "Rand payload bits", [String]{"t", "v"}, [String]{}, "E3622")
-    shape :: jet_cli_replay_text(bits, "t", "Rand payload bits")
-    if shape != "bytes" -> return Err(jet_cli_replay_corrupt("Rand payload bits type is invalid"))
-    text :: jet_cli_replay_text(bits, "v", "Rand payload bits")
-    bytes :: replay_base64.decode_url(text) ?? return Err(jet_cli_replay_corrupt("Rand payload bits are not base64url"))
-    if replay_base64.encode_url(bytes) != text -> return Err(jet_cli_replay_corrupt("Rand payload bits are not canonical unpadded base64url"))
-    requested :: jet_cli_replay_object(fields, "requested_bits", "Rand payload")
-    jet_cli_replay_keys(requested, "Rand payload requested_bits", [String]{"bits", "t", "v"}, [String]{}, "E3622")
-    width :: jet_cli_replay_text(requested, "t", "Rand payload requested_bits")
-    if !jet_cli_replay_integer_is(requested, "bits", "64") || width != "uint" -> return Err(jet_cli_replay_corrupt("Rand payload requested_bits type is invalid"))
-    count :: jet_cli_replay_text(requested, "v", "Rand payload requested_bits")
-    if count != "{bytes.len() * 8}" -> return Err(jet_cli_replay_corrupt("Rand payload requested_bits disagrees with its bits"))
-    Ok(JetCLIReplayRand{site_id: site, bits: bytes})
+    jet_cli_replay_keys(fields, what, keys, [String]{}, "E3622")
+    Ok(fields)
+}
+
+// A record's `site_id`: lowercase SHA-256 hex, not all zero.
+fn jet_cli_replay_payload_site(fields: [CanonicalJSONField], what: String) -> String JetCLIReplayFault! {
+    site :: jet_cli_replay_text(fields, "site_id", what)
+    if !jet_cli_replay_lower_hex(site, 64) || site == "0".repeat(64) -> return Err(jet_cli_replay_corrupt("{what} site_id is invalid"))
+    Ok(site)
+}
+
+// A record's `stream_id`: the sequence of the IORead frame that opened it.
+fn jet_cli_replay_payload_stream(fields: [CanonicalJSONField], what: String, stream: Int) JetCLIReplayFault! {
+    if !jet_cli_replay_integer_is(fields, "stream_id", "{stream}") -> return Err(jet_cli_replay_corrupt("{what} stream_id is not its IORead's sequence {stream}"))
+}
+
+// A record's canonical Jet bytes `{"t":"bytes","v":"<unpadded base64url>"}`.
+fn jet_cli_replay_payload_bytes(fields: [CanonicalJSONField], key: String, what: String) -> [U8] JetCLIReplayFault! {
+    value :: jet_cli_replay_object(fields, key, what)
+    jet_cli_replay_keys(value, "{what} {key}", [String]{"t", "v"}, [String]{}, "E3622")
+    shape :: jet_cli_replay_text(value, "t", "{what} {key}")
+    if shape != "bytes" -> return Err(jet_cli_replay_corrupt("{what} {key} type is invalid"))
+    text :: jet_cli_replay_text(value, "v", "{what} {key}")
+    bytes :: replay_base64.decode_url(text) ?? return Err(jet_cli_replay_corrupt("{what} {key} are not base64url"))
+    if replay_base64.encode_url(bytes) != text -> return Err(jet_cli_replay_corrupt("{what} {key} are not canonical unpadded base64url"))
+    Ok(bytes)
+}
+
+// A record's tagged `{"bits":64,"t":"uint","v":"<decimal>"}` count.
+fn jet_cli_replay_payload_uint(fields: [CanonicalJSONField], key: String, what: String) -> Int JetCLIReplayFault! {
+    value :: jet_cli_replay_object(fields, key, what)
+    jet_cli_replay_keys(value, "{what} {key}", [String]{"bits", "t", "v"}, [String]{}, "E3622")
+    width :: jet_cli_replay_text(value, "t", "{what} {key}")
+    if !jet_cli_replay_integer_is(value, "bits", "64") || width != "uint" -> return Err(jet_cli_replay_corrupt("{what} {key} type is invalid"))
+    count :: jet_cli_replay_text(value, "v", "{what} {key}")
+    parsed :: Int.parse(count) ?? return Err(jet_cli_replay_corrupt("{what} {key} is not a count"))
+    if parsed < 0 || count != "{parsed}" -> return Err(jet_cli_replay_corrupt("{what} {key} is not a canonical count"))
+    Ok(parsed)
 }
 
 // A RunAct extension record: `{function, line, locals}`.
