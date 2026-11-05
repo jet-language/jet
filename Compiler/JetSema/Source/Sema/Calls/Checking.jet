@@ -863,6 +863,17 @@ fn sema_crypto_argument_index(params: [SemaCallParam], slots: [Int], parameter: 
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
 fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
+    // Rust core_call.rs ("core.mem", "volatile_read" | "volatile_write"): the
+    // pointer argument is not a typed pointer, or the written value is not
+    // the pointer's element type.
+    if callee == "core.mem.volatile_read" || callee == "core.mem.volatile_write" {
+        operation :: sema_call_reflection_leaf_name(callee)
+        if index == 0 {
+            why :: if operation == "volatile_read" -> "a volatile read reads through a typed pointer" else -> "a volatile write writes through a typed pointer"
+            return sema_error("E0112", span, "`{operation}` needs a `Ptr<T>`, not {sema_type_show(offered)}", why, "build a pointer first with `mem.Ptr<T>.from_addr(addr)`")
+        }
+        return sema_error("E0112", span, "`{operation}` writes a {sema_type_show(required)} through this pointer, but the value is {sema_type_show(offered)}", "a volatile write stores a value of the pointer's element type", "write a `{type_name(required)}` value")
+    }
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
     if sema_plain_carrier_mismatch(required, offered, span) == .Val(carrier) -> return carrier
     // A value of a type that does not implement the one trait a trait-value
