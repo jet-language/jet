@@ -1,0 +1,38 @@
+# tests/pkg.rs::foreign_package_provider_fetch_lock_and_locked_round_trip at tests/pkg.rs:1900; hand-port
+# Claim: a foreign js@ dependency is realized from a pinned provider artifact: a stale binding descriptor or a missing artifact fails with E1256 before anything is written, a good one fetches, projects the binding into the project, records the foreign source in .jet/lock, compiles, and verifies again in locked mode (tests/pkg.rs:1953-2044)
+# The original called Fetch::fetch in-process (internal API); its public route is `jet fetch` / `jet fetch --locked` with the same JETPACK_ROOT and JETPACK_FIXTURES environment
+# Fixture: the three manifests are the original's manifest_with_deps bytes; the stale and good artifacts are the original's bytes, the good one carrying the canonical JS descriptor stamp (as in tests/cases/cffi/foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved.fixture); `use js.plotly as plot` is written `use plot :: js.plotly`
+# Not ported: dep_dirs["plotly"].is_dir() and the LockSource::Foreign / envelope.output_hash field matches (internal API); the lock must name the reference and round-trip byte-identical through locked mode
+fixture: foreign_package_provider_fetch_lock_and_locked_round_trip.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/store
+env: JETPACK_FIXTURES={work}/fixtures
+mkdir: store
+mkdir: fixtures/foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js
+write: fixtures/foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly.jet foreign_package_provider_fetch_lock_and_locked_round_trip.stale.template
+step: jet fetch
+cwd: stale
+exit: nonzero # tests/pkg.rs:1962 stale provider binding must fail before ingestion
+stderr: ~ "E1256" # tests/pkg.rs:1963
+stderr: !~ "E2104" # the failure comes from fetch itself, not from an unbuilt command
+write: fixtures/foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly.jet foreign_package_provider_fetch_lock_and_locked_round_trip.binding.template
+step: jet fetch
+cwd: proj
+exit: 0 # tests/pkg.rs:1982 foreign provider fetch should realize the package
+file: proj/.jet/bindings/js/plotly.jet is-file # tests/pkg.rs:1984-1988 Foreign::project_binding_path(project, JS, "plotly").is_file()
+file: proj/.jet/lock ~ "plotly#version=2.35.0@npm" # tests/pkg.rs:1996-2001 the foreign lock source keeps the reference
+copy: proj/.jet/lock fetched.lock
+step: jet check main.jet
+cwd: proj
+exit: 0 # tests/pkg.rs:2011 compiler must consume the provider-projected binding
+step: jet fetch --locked
+cwd: proj
+exit: 0 # tests/pkg.rs:2025 locked foreign provider round-trip should verify
+file: proj/.jet/lock == fetched.lock # tests/pkg.rs:2009,2026 the lock parses back and locked mode keeps the same packages
+remove: fixtures/foreign/npm
+step: jet fetch
+cwd: failed
+exit: nonzero # tests/pkg.rs:2042 missing provider artifact must fail before foreign fetch succeeds
+stderr: ~ "E1256" # tests/pkg.rs:2043
+stderr: !~ "E2104" # the failure comes from fetch itself, not from an unbuilt command
+file: failed/.jet/lock absent # tests/pkg.rs:2044
