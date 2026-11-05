@@ -5001,7 +5001,12 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
     // The value leaves with the caller: a variable it is read out of no
     // longer closes it (a held box is shared by ir_own, not moved).
     ir_close_disarm(&b, slot)
-    owned :: ir_own(&m, p, &b, slot)
+    owned := ir_own(&m, p, &b, slot)
+    // A drop-free aggregate ir_own leaves in place can be a window into
+    // storage the return's own drops free (a payload bound out of an Option
+    // or Result box, a part of a variable that drops): Return reads it only
+    // after those drops, so it leaves as a copy in this frame.
+    if owned == slot && !b.fresh[slot] && m.types[b.f.slot_type[slot]].kind == .Aggregate && !ir_has_drop(m, b, slot) -> owned = ir_copy_value(&m, p, &b, slot, span)
     ir_return_slot(&m, p, &b, owned, span)
 }
 
