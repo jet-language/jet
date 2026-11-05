@@ -1,0 +1,237 @@
+// crates/jet-driver/src/BudgetView.rs `read_compatible`
+// (D-PERFBUDGET-INTEGRATION1): a read-only projection of the canonical
+// performance budget reports under `<root>/.jet/perf/reports`. It never
+// measures, creates or rewrites a report. The budget engine's own verifier
+// checks each `.json` report, and only a report whose recorded member sources
+// all match the requested sources (path and SHA-256) is projected. When two
+// compatible reports decide one budget, the less favorable decision wins, so
+// a passing report never hides a failing one of the same program. A report
+// that can't be read or verified is rejected with its reason, never skipped.
+// Every read goes through a directory held open from `root`, so a link can't
+// redirect it (RootedStore.jet).
+use {
+    jet_foundation.[CanonicalJSON, canonical_json_parse, perf_verify_budget_report]
+}
+
+// BudgetView.rs MAX_REPORT_BYTES: a larger report is not projected.
+JET_CLI_BUDGET_REPORT_LIMIT :: 16777216
+
+// One requested source: its root-relative path and SHA-256.
+struct JetCLIBudgetSource {
+    path: String
+    sha256: String
+}
+
+// One budget's decision exactly as its canonical report recorded it.
+// `evidence` and `outcome` are the engine's `decision.evidence` and
+// `decision.policy_outcome`; consumers never evaluate policy themselves.
+struct JetCLIBudgetFact {
+    report_id: String
+    evidence_id: String
+    budget_id: String
+    evidence: String
+    outcome: String
+    enforcement: String
+    statistical: Bool
+}
+
+// The compatible facts, sorted by budget id, and each rejected report's
+// reason in name order.
+struct JetCLIBudgetProjection {
+    facts: [JetCLIBudgetFact]
+    rejected: [String]
+}
+
+fn jet_cli_budget_read_compatible(root: String, sources: [JetCLIBudgetSource]) -[FS, Time.Wait]> JetCLIBudgetProjection Never! {
+    projection := JetCLIBudgetProjection{facts: [JetCLIBudgetFact]{}, rejected: [String]{}}
+    parts :: [String]{".jet", "perf", "reports"}
+    // No reports folder is an empty projection; a folder that is a link or
+    // can't be opened is a rejection, so the proof can't read as complete.
+    present :: JetCLIRootedDirectory.present(root, parts) ?? {
+        &projection.rejected.push(jet_cli_budget_relative(root, err.message))
+        return projection
+    }
+    if !present -> return projection
+    held :: JetCLIRootedDirectory.open(root, parts, false) ?? {
+        &projection.rejected.push(jet_cli_budget_relative(root, err.message))
+        return projection
+    }
+    entries :: held.list() ?? {
+        &projection.rejected.push(jet_cli_budget_relative(root, err.message))
+        return projection
+    }
+    wanted :: loop source in sources -> JetCLIBudgetSource{path: jet_cli_budget_normal(source.path), sha256: source.sha256.copy()}
+    loop entry in entries {
+        if !entry.name.ends_with(".json") -> next
+        label :: entry.name
+        if !entry.is_file {
+            &projection.rejected.push("{label}: not a regular no-follow report")
+            next
+        }
+        if entry.size > JET_CLI_BUDGET_REPORT_LIMIT {
+            &projection.rejected.push("{label}: report exceeds 16 MiB projection limit")
+            next
+        }
+        bytes := [U8]{}
+        if held.read(entry.name, JET_CLI_BUDGET_REPORT_LIMIT) == {
+            .Ok(found) -> {
+                if found == {
+                    .Val(contents) -> bytes = contents
+                    None -> {
+                        &projection.rejected.push("{label}: unreadable: it was removed while it was read")
+                        next
+                    }
+                }
+            }
+            .Err(error) -> {
+                &projection.rejected.push("{label}: unreadable: {jet_cli_budget_relative(root, error.message)}")
+                next
+            }
+        }
+        report :: perf_verify_budget_report(bytes) ?? {
+            &projection.rejected.push("{label}: {err.message}")
+            next
+        }
+        facts := [JetCLIBudgetFact]{}
+        if jet_cli_budget_facts(label, report, wanted) == {
+            .Ok(found) -> {
+                // An incompatible report describes other sources: skip it.
+                if found == .Val(rows) -> facts = rows else -> next
+            }
+            .Err(error) -> {
+                &projection.rejected.push(error.message)
+                next
+            }
+        }
+        loop fact in facts {
+            replaced := false
+            loop (index, known) in projection.facts {
+                if known.budget_id != fact.budget_id -> next
+                replaced = true
+                if jet_cli_budget_worse(fact, known) -> projection.facts[index] = fact.copy()
+            }
+            if !replaced -> &projection.facts.push(fact.copy())
+        }
+    }
+    &projection.facts.sort_by((left: JetCLIBudgetFact, right: JetCLIBudgetFact) -> left.budget_id <=> right.budget_id)
+    projection
+}
+
+// Whether `fact` decides its budget less favorably than `known`: a failure
+// over a warning over a pass, then unavailable evidence over measured, then
+// the smaller report id, so the choice never depends on file names.
+fn jet_cli_budget_worse(fact: JetCLIBudgetFact, known: JetCLIBudgetFact) -> Bool Never! {
+    if jet_cli_budget_rank(fact.outcome) != jet_cli_budget_rank(known.outcome) -> return jet_cli_budget_rank(fact.outcome) > jet_cli_budget_rank(known.outcome)
+    if (fact.evidence == "unavailable") != (known.evidence == "unavailable") -> return fact.evidence == "unavailable"
+    fact.report_id < known.report_id
+}
+
+// A recorded policy outcome's severity: pass, then warn, then fail.
+fn jet_cli_budget_rank(outcome: String) -> Int Never! {
+    if outcome == {
+        "pass" -> 0
+        "warn" -> 1
+        else -> 2
+    }
+}
+
+// One verified report's facts, or None when a member source it recorded is
+// not a requested source with the same digest (an incompatible report).
+fn jet_cli_budget_facts(label: String, report: CanonicalJSON, wanted: [JetCLIBudgetSource]) -> [JetCLIBudgetFact]? JetCLIReadError! {
+    invalid :: jet_cli_read_error("{label}: report projection fields are invalid")
+    report_id :: jet_cli_budget_text(report, "report_id") ?? return Err(invalid)
+    content :: jet_cli_budget_member(report, "content") ?? return Err(invalid)
+    evidence_id :: jet_cli_budget_text(content, "evidence_id") ?? return Err(invalid)
+    subject :: jet_cli_budget_member(content, "subject") ?? return Err(invalid)
+    members :: jet_cli_budget_array(subject, "member_sources") ?? return Err(invalid)
+    measurements :: jet_cli_budget_array(content, "measurements") ?? return Err(invalid)
+    compatible := members.len() > 0
+    loop member in members {
+        path :: jet_cli_budget_text(member, "path") ?? return Err(invalid)
+        sha256 :: jet_cli_budget_text(member, "sha256") ?? return Err(invalid)
+        normal :: jet_cli_budget_normal(path)
+        matched := false
+        loop source in wanted {
+            if source.path == normal && source.sha256 == sha256 -> matched = true
+        }
+        if !matched -> compatible = false
+    }
+    if !compatible -> return Ok(None)
+    facts := [JetCLIBudgetFact]{}
+    loop measurement in measurements {
+        fact :: jet_cli_budget_fact(report_id, evidence_id, measurement) ?? return Err(jet_cli_read_error("{label}: measurement projection fields are invalid"))
+        &facts.push(fact)
+    }
+    Ok(Val(facts))
+}
+
+fn jet_cli_budget_fact(report_id: String, evidence_id: String, measurement: CanonicalJSON) -> JetCLIBudgetFact? Never! {
+    budget_id :: jet_cli_budget_text(measurement, "budget_id") ?? return None
+    decision :: jet_cli_budget_member(measurement, "decision") ?? return None
+    evidence :: jet_cli_budget_text(decision, "evidence") ?? return None
+    outcome :: jet_cli_budget_text(decision, "policy_outcome") ?? return None
+    enforcement :: jet_cli_budget_text(measurement, "enforcement") ?? return None
+    comparison :: jet_cli_budget_member(measurement, "comparison") ?? return None
+    kind :: jet_cli_budget_text(comparison, "kind") ?? return None
+    Val(JetCLIBudgetFact{report_id: report_id.copy(), evidence_id: evidence_id.copy(), budget_id: budget_id, evidence: evidence, outcome: outcome, enforcement: enforcement, statistical: kind != "absolute"})
+}
+
+fn jet_cli_budget_member(value: CanonicalJSON, key: String) -> CanonicalJSON? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == key -> return Val(field.value.copy())
+        }
+    }
+    None
+}
+
+fn jet_cli_budget_text(value: CanonicalJSON, key: String) -> String? Never! {
+    inner :: jet_cli_budget_member(value, key) ?? return None
+    if inner == .String(text) -> return Val(text.copy())
+    None
+}
+
+fn jet_cli_budget_array(value: CanonicalJSON, key: String) -> [CanonicalJSON]? Never! {
+    inner :: jet_cli_budget_member(value, key) ?? return None
+    if inner == .Array(items) -> return Val(items.copy())
+    None
+}
+
+// A report path as BudgetView.rs `normalize` compares it: `/` separators and
+// no leading `./`.
+fn jet_cli_budget_normal(path: String) -> String Never! {
+    path.replace("\\", "/").removeprefix("./")
+}
+
+// A store error with the project root removed, so a reason never carries an
+// absolute path into the proof.
+fn jet_cli_budget_relative(root: String, message: String) -> String Never! {
+    message.replace("{root}/", "").replace(root, ".")
+}
+
+#Test("budget view projects only reports of the requested sources") {
+    text :: "{{\"content\":{{\"evidence_id\":\"e1\",\"measurements\":[{{\"budget_id\":\"package:public-api\",\"comparison\":{{\"kind\":\"absolute\"}},\"decision\":{{\"evidence\":\"pass\",\"policy_outcome\":\"pass\"}},\"enforcement\":\"fail\"}}],\"subject\":{{\"member_sources\":[{{\"path\":\"./src/run.jet\",\"sha256\":\"aa\"}}]}}}},\"report_id\":\"r1\"}}\n"
+    report :: canonical_json_parse(text.bytes()) ?? panic(err.message)
+    same :: [JetCLIBudgetSource]{JetCLIBudgetSource{path: "src/run.jet", sha256: "aa"}}
+    if jet_cli_budget_facts("a.json", report, same) == {
+        .Ok(found) -> {
+            facts :: found ?? panic("a report of the same sources is compatible")
+            assert_eq(facts.len(), 1)
+            assert_eq(facts[0].budget_id, "package:public-api")
+            assert_eq(facts[0].report_id, "r1")
+            assert(!facts[0].statistical)
+        }
+        .Err(error) -> panic(error.message)
+    }
+    changed :: [JetCLIBudgetSource]{JetCLIBudgetSource{path: "src/run.jet", sha256: "bb"}}
+    if jet_cli_budget_facts("a.json", report, changed) == {
+        .Ok(found) -> assert(found == None)
+        .Err(error) -> panic(error.message)
+    }
+    assert_eq(jet_cli_budget_relative("/p", "store directory is a symlink: /p/.jet/perf"), "store directory is a symlink: .jet/perf")
+    passed :: JetCLIBudgetFact{report_id: "r2", evidence_id: "e2", budget_id: "b", evidence: "pass", outcome: "pass", enforcement: "fail", statistical: false}
+    failed :: JetCLIBudgetFact{report_id: "r9", evidence_id: "e9", budget_id: "b", evidence: "fail", outcome: "fail", enforcement: "fail", statistical: false}
+    assert(jet_cli_budget_worse(failed, passed))
+    assert(!jet_cli_budget_worse(passed, failed))
+    assert(jet_cli_budget_worse(JetCLIBudgetFact{report_id: "r1", evidence_id: "e1", budget_id: "b", evidence: "pass", outcome: "pass", enforcement: "fail", statistical: false}, passed))
+}

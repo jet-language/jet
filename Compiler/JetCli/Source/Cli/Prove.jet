@@ -81,9 +81,35 @@ fn jet_cli_prove(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
     if request.replay != None -> form = "prove --replay"
     if request.save != None -> form = "prove --save"
     if request.unsave != None -> form = "prove --unsave"
-    if form == "prove" && request.lenses.len() == 0 -> return JetCLIPlan.Prove{target: target, color: color, json: json}
-    if request.lenses.len() > 0 && form == "prove" -> form = "prove --lens"
+    // Lenses only choose what the human report shows. `solver` is the one
+    // producer lens; it waits for the solver producer.
+    if form == "prove" && !request.lenses.contains("solver") -> return JetCLIPlan.Prove{target: target, lenses: request.lenses.copy(), color: color, json: json}
+    if form == "prove" -> form = "prove --lens solver"
     jet_cli_not_ported(form, color)
+}
+
+// Rust `lens_shows`: no lens shows every facet; `all` shows every facet but
+// the solver's; otherwise a facet shows when its lens was named.
+fn jet_cli_prove_lens_shows(lenses: [String], facet: String) -> Bool Never! {
+    if lenses.len() == 0 -> return true
+    if lenses.contains("all") -> return facet != "solver"
+    lenses.contains(facet)
+}
+
+// The CHECKED line belongs to the front end's facets.
+fn jet_cli_prove_lens_checked(lenses: [String]) -> Bool Never! {
+    jet_cli_prove_lens_shows(lenses, "refinements") || jet_cli_prove_lens_shows(lenses, "effects") || jet_cli_prove_lens_shows(lenses, "taint")
+}
+
+// Rust `canonical_lens_names`: the named lenses once each, in vocabulary
+// order; `all` stands for every lens it already shows.
+fn jet_cli_prove_lens_names(lenses: [String]) -> [String] Never! {
+    if lenses.contains("all") -> return if lenses.contains("solver") -> [String]{"all", "solver"} else -> [String]{"all"}
+    names := [String]{}
+    loop lens in JET_CLI_PROOF_LENSES {
+        if lenses.contains(lens) -> &names.push(lens.copy())
+    }
+    names
 }
 
 // A refusal as the human report on stderr, or with `--json` as the one failed
@@ -286,4 +312,14 @@ fn jet_cli_prove_normalized(path: String, cwd: String) -> String Never! {
     if text.starts_with("/") -> return "/{joined}"
     if joined == "" -> return "."
     joined
+}
+
+#Test("proof lenses name each lens once in vocabulary order and all hides only the solver") {
+    assert_eq(jet_cli_prove_lens_names([String]{"budgets", "tests", "budgets"}), [String]{"tests", "budgets"})
+    assert_eq(jet_cli_prove_lens_names([String]{"all", "tests"}), [String]{"all"})
+    assert(jet_cli_prove_lens_shows([String]{}, "solver"))
+    assert(!jet_cli_prove_lens_shows([String]{"all"}, "solver"))
+    assert(jet_cli_prove_lens_shows([String]{"all"}, "contracts"))
+    assert(!jet_cli_prove_lens_checked([String]{"contracts"}))
+    assert(jet_cli_prove_lens_checked([String]{"taint"}))
 }
