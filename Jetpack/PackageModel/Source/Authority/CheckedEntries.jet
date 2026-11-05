@@ -63,7 +63,7 @@ struct CheckedFile {
 
     // Decode the bytes that were read from the opened object.
     fn text(self) -> String AuthorityError! {
-        text :: String.from_bytes(self.bytes) ?? return Err(AuthorityError.Invalid{path: self.path, detail: "authority file is not valid UTF-8: {pkg_authority_utf8_error(self.bytes)}"})
+        text :: String.from_bytes(self.bytes) ?? return Err(AuthorityError.NotText{path: self.path, detail: pkg_authority_utf8_error(self.bytes)})
         Ok(text)
     }
 }
@@ -98,7 +98,8 @@ struct CheckedPackage {
 // Failure from the shared authority resolver.
 #Error
 enum AuthorityError {
-    Missing(String)
+    // `cause` is the native open/stat failure text, or why a probe found nothing.
+    Missing(path: String, cause: String)
     // `package.jet` parsed as text but violates the manifest vocabulary; kept
     // typed so the registered manifest diagnostics reach the user.
     ManifestParse(path: String, error: PackageParseError)
@@ -110,12 +111,14 @@ enum AuthorityError {
     WorkspaceNoModule
     NestedMembers(root: String, member: String)
     Invalid(path: String, detail: String)
+    // The read bytes are not UTF-8; `detail` locates the first bad sequence.
+    NotText(path: String, detail: String)
     Changed(String)
     Unsupported(String)
 
     fn is_missing(self) -> Bool Never! {
         if self == {
-            .Missing(_) -> true
+            .Missing(_, _) -> true
             else -> false
         }
     }
@@ -123,7 +126,7 @@ enum AuthorityError {
     // The Rust `Display` text.
     fn message(self) -> String Never! {
         if self == {
-            .Missing(path) -> "authority path `{path}` is missing"
+            .Missing(path, _) -> "authority path `{path}` is missing"
             .IO(path, operation, detail) -> "couldn't {operation} `{path}`: {detail}"
             .Symlink(path) -> "authority path `{path}` is a symlink"
             .WrongKind(path, expected, actual) -> "authority path `{path}` is a {actual}, expected a {expected}"
@@ -132,6 +135,7 @@ enum AuthorityError {
             .WorkspaceNoModule -> "canonical workspace source has no workspace module"
             .NestedMembers(root, member) -> "Package root `{root}` cannot contain member Package `{member}` with its own members"
             .Invalid(path, detail) -> "invalid authority `{path}`: {detail}"
+            .NotText(path, detail) -> "invalid authority `{path}`: authority file is not valid UTF-8: {detail}"
             .ManifestParse(path, error) -> "invalid manifest `{path}`: {error.message()}"
             .Changed(path) -> "authority object `{path}` changed during resolution"
             .Unsupported(detail) -> detail
@@ -147,7 +151,7 @@ enum AuthorityError {
                 "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one",
                 "remove `members:` from `{member}` and lift its references into `{root}`")
             .ManifestParse(path, error) -> pkg_manifest_parse_diagnostic(path, error)
-            .Missing(path) -> pkg_authority_error_diagnostic("E1334",
+            .Missing(path, _) -> pkg_authority_error_diagnostic("E1334",
                 "authority file `{path}` is missing",
                 "authority metadata must exist before it can be used",
                 "restore the required metadata and try again")
@@ -166,6 +170,10 @@ enum AuthorityError {
             .Invalid(path, detail) -> pkg_authority_error_diagnostic("E1334",
                 "authority metadata `{path}` is invalid",
                 detail,
+                "fix the metadata fields and try again")
+            .NotText(path, detail) -> pkg_authority_error_diagnostic("E1334",
+                "authority metadata `{path}` is invalid",
+                "authority file is not valid UTF-8: {detail}",
                 "fix the metadata fields and try again")
             .Changed(path) -> pkg_authority_error_diagnostic("E1334",
                 "authority object `{path}` changed during resolution",
@@ -262,6 +270,18 @@ fn pkg_io_os_code(error: IOError) -> Int? Never! {
     }
 }
 
+// The native cause behind an IO failure (`No such file or directory (os error
+// 2)`), without the public IOError display prefix.
+fn pkg_io_cause(error: IOError) -> String Never! {
+    if error == {
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
+        .TimedOut(context) | .Cancelled(context) | .Closed(context) |
+        .Protocol(context) | .Other(context) | .AlreadyExists(context) |
+        .Unsupported(context) -> context.cause ?? "{error}"
+        else -> "{error}"
+    }
+}
+
 // ELOOP: the final component was a link opened with no-follow.
 fn pkg_io_is_symlink_error(error: IOError) -[Env]> Bool Never! {
     code :: pkg_io_os_code(error) ?? return false
@@ -285,7 +305,7 @@ fn pkg_io_is_not_found(error: IOError) -> Bool Never! {
 
 // `map_io`: the typed authority failure of one open.
 fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> AuthorityError Never! {
-    if pkg_io_is_not_found(error) -> return AuthorityError.Missing(path)
+    if pkg_io_is_not_found(error) -> return AuthorityError.Missing{path: path, cause: pkg_io_cause(error)}
     if pkg_io_is_symlink_error(error) -> return AuthorityError.Symlink(path)
     if directory && pkg_io_is_not_a_directory(error) {
         return AuthorityError.WrongKind{path: path, expected: AUTHORITY_KIND_DIRECTORY, actual: AUTHORITY_KIND_FILE}

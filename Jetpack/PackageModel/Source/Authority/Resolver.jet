@@ -159,7 +159,7 @@ struct AuthorityResolver {
     fn checked_manifest(self, directory: String) -[FS, Env]> CheckedManifest AuthorityError! {
         relative :: self.relative_path(directory)
         canonical :: self.probe_file(pkg_authority_relative_join(relative, PACKAGE_FILE))
-        file :: canonical ?? return Err(AuthorityError.Missing(files.join(pkg_authority_join(self.root, relative), PACKAGE_FILE)))
+        file :: canonical ?? return Err(AuthorityError.Missing{path: files.join(pkg_authority_join(self.root, relative), PACKAGE_FILE), cause: "no regular `{PACKAGE_FILE}` entry"})
         text :: file.text()
         facts :: PackageFacts.parse_uncomposed(text, file.path) ?? return Err(AuthorityError.ManifestParse{path: file.path, error: err})
         self.revalidate_file(file)
@@ -531,7 +531,7 @@ fn pkg_authority_effective_root(root: String) -> String Never! {
 
 fn pkg_authority_inspect_root(root: String) -[FS]> files.Stat AuthorityError! {
     info :: files.stat(root) ? found -> found ! error -> {
-        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing(root))
+        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
         return Err(AuthorityError.IO{path: root, operation: "inspect", detail: "{error}"})
     }
     if info.is_symlink -> return Err(AuthorityError.Symlink(root))
@@ -543,7 +543,7 @@ fn pkg_authority_inspect_root(root: String) -[FS]> files.Stat AuthorityError! {
 
 fn pkg_authority_canonicalize_root(root: String) -[FS, Env]> String AuthorityError! {
     canonical :: files.canonicalize(root) ? resolved -> resolved ! error -> {
-        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing(root))
+        if pkg_io_is_not_found(error) -> return Err(AuthorityError.Missing{path: root, cause: pkg_io_cause(error)})
         return Err(AuthorityError.IO{path: root, operation: "resolve", detail: "{error}"})
     }
     Ok(canonical)

@@ -405,9 +405,8 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// BLOCKED #4394, intentionally retains the original exact native detail.
-// This is not a relaxed authority-message assertion or a source-text test.
-#Test("missing entry retains exact native E1331 detail #4394") {
+// E1331 keeps the native open cause of a missing entry.
+#Test("missing entry retains exact native E1331 detail") {
     if !sys.is_linux() -> return
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("missing-native-detail")
@@ -421,16 +420,17 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// BLOCKED #4394: fs::read_to_string's original UTF-8 error must be retained
-// independently of the checked carrier's valid-UTF-8 authority diagnostic.
-#Test("invalid UTF8 entry retains exact E1331 read detail #4394") {
+// E1331 keeps Core's read-decode cause; the E1334 authority detail of the
+// checked carrier separately locates the bad byte.
+#Test("invalid UTF8 entry retains exact E1331 read detail") {
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("utf8-native-detail")
     path :: files.join(root, "run.jet")
     files.write_bytes(path, [U8]{U8{255}}) ?? panic("write invalid UTF8")
     diagnostic :: pkg_entry_test_failure(&cache, path)
     assert_eq(diagnostic.code, "E1331")
-    assert_eq(diagnostic.why, "stream did not contain valid UTF-8")
+    // Registry prose is sentence-cased.
+    assert_eq(diagnostic.why, "Stream did not contain valid UTF-8")
     assert(diagnostic.span == None)
     files.remove_all(root) ?? panic("cleanup")
 }
