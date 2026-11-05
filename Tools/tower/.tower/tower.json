@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92337,
+    "rev": 92340,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59094,20 +59094,20 @@
         {
           "n": 12,
           "text": "(was #6319) The repro prints a,b,c on o0 (jet run), o1 (jet build) and o2 (--release), with a golden example that sorts with a named comparator function that allocates.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:42.038Z"
+          "evidence": "0de406f2c4: Examples/features/collections/named_comparator_allocates sorts a, b, c with a named comparator that builds lists; the golden suite runs it at o0, o1 and o2, lost 0.",
+          "at": "2026-11-05T09:00:39.791Z"
         },
         {
           "n": 13,
           "text": "(was #6319) Root cause fixed where a named function is passed as a comparator value (not by wrapping it in a lambda); a case covers named functions passed to sort_by, map and filter with allocating bodies, and compares lose 0 rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:42.797Z"
+          "evidence": "0de406f2c4: a named comparator now goes through ir_call_callback, so its carrier is taken once (no lambda wrapper); tests/cases/core_and_closures/named_comparator_sort_frees_its_carrier_once covers named sort_by, map and filter callbacks with allocating bodies; ui, golden and cases A/B lost 0.",
+          "at": "2026-11-05T09:00:40.646Z"
         },
         {
           "n": 14,
@@ -59162,7 +59162,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-04T18:21:30.758Z",
+      "updated": "2026-11-05T09:00:40.646Z",
       "updatedBy": "Main",
       "goals": [
         "G19"
@@ -71127,11 +71127,11 @@
         {
           "n": 62,
           "text": "jet test-compare never faults: in one project, running it on a second distinct corpus (timeout.json, then matched.json) dies with SIGSEGV (exit 139) in jet_rt_alloc at address 0x1, under jet_cli_record_path_validate (Compiler/JetCli/Source/Cli/RecordCodec.jet:49, split(\"/\").to_list()) <- jet_cli_record_index_publish_and_store <- jet_cli_comparison_persist (ComparisonHistory.jet:86); a rerun does not crash. A fault inside checked code is an I1 defect: find the root (heap corruption or a bad ownership lowering), fix it, and add a case that runs the two corpora in sequence (found by BallotDesign-3, 2026-11-05).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T03:03:22.613Z"
+          "evidence": "0de406f2c4: the root double free (ir_closure_sort freed a named comparator's Result carrier after ir_adapt took it) is fixed; tests/cases/testing_tiers/test_compare_records_two_corpora_in_one_project runs timeout.json, matched.json, then timeout.json in one project with exact status lines and empty stderr; chain fixed point; ui and golden lost 0, cases lost 0.",
+          "at": "2026-11-05T09:00:39.021Z"
         }
       ],
       "refs": [
@@ -71147,7 +71147,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T08:46:47.687Z",
+      "updated": "2026-11-05T09:00:39.021Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -172622,6 +172622,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T09:00:40.646Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mj3ijb",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-05T09:00:39.791Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mj3ijb",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-05T09:00:39.021Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#62"
+    },
     {
       "at": "2026-11-05T08:46:47.687Z",
       "by": "Main",
