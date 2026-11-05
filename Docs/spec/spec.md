@@ -1571,7 +1571,9 @@ data. The pool owns each `T`; an `ID<T>` never accesses `T` by itself. `add`
 returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
 entries. Removing an entry bumps its generation and returns `?T`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
-storage.
+storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
+writable pool: a `:=` binding or a `&` parameter. Through an unmarked
+parameter, `add` and `remove` are **E0202**.
 
 ```jet
 struct Player {
@@ -1579,6 +1581,7 @@ struct Player {
     hp: Int
     attack: Int
     target: ID<Player>?
+}
 
 fn run() {
     world := Pool<Player>.new()
