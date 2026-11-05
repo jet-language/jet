@@ -5481,11 +5481,6 @@ fn sema_expr_check_call_expr(call: Call, expected: Type?, environment: SemaScope
 }
 
 fn sema_expr_check_method_call_expr(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // `expect(value).snapshot()` is the snapshot assertion builtin, unless a
-    // local or function named `expect` shadows it.
-    if method == "snapshot" && receiver == .Call(call, _) {
-        if call.name == "expect" && sema_call_gate_is_unshadowed(call.name, scopes) -> return sema_call_check_expect_snapshot(call, args, type_args, method_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    }
     // `value.copy()` with no arguments is the
     // compiler-owned copy, resolved before ordinary method lookup so
     // no type can redefine it; a type receiver keeps associated

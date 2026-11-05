@@ -1,0 +1,15 @@
+# tests/ui_fixes.rs::ownership_ui_fixes_compile at tests/ui_fixes.rs:17; hand-port
+# Claim: the ffi_* fixed companions compile; without cargo the original skips them
+# (tests/ui_fixes.rs:77-79), so this case needs cargo. The other companions are in
+# ownership_ui_fixes_compile.case.
+requires: tool:cargo
+fixture: ownership_ui_fixes_compile.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check c12/ffi_bad_path.fixed.jet
+exit: 0 # tests/ui_fixes.rs:34-69 companion ffi_bad_path.fixed.jet must compile (jet::compile_with_path)
+step: jet check c13/ffi_bad_type.fixed.jet
+exit: 0 # tests/ui_fixes.rs:34-69 companion ffi_bad_type.fixed.jet must compile (jet::compile_with_path)
+step: jet check c14/ffi_missing_version.fixed.jet
+exit: 0 # tests/ui_fixes.rs:34-69 companion ffi_missing_version.fixed.jet must compile (jet::compile_with_path)

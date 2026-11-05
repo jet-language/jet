@@ -15,7 +15,6 @@ use jet_foundation.[
     FunctionDefaultRef,
     CopyFact,
     Span,
-    StrFormat,
     StrPart,
     SymbolKind,
     TFailureCarrier,
@@ -827,44 +826,6 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     hook :: sema_call_assert_eq_hook(left_value, right_value, call.name_span, environment, program, &scopes, &diagnostics)
     stop := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value, hook: hook}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
-}
-
-// `expect(value).snapshot()` (D-TOOL4, D-TESTKIT1) asserts that `value`'s
-// Display text equals the snapshot `__snapshots__/<file>_<line>.snap` beside
-// the test. It is `assert(core.testing.snap(name, "{value}"))` with the name
-// taken from the call site, so the first run writes the snapshot, a mismatch
-// fails with `snap`'s unified diff, and `jet test -u` rewrites it.
-fn sema_call_check_expect_snapshot(call: Call, args: [CallArg], type_args: [Type], method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if call.args.len() != 1 || call.args[0].label != None || call.args[0].spread || call.type_args.len() != 0 {
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E0104", call.name_span, "`expect` takes exactly one value", "`expect(value).snapshot()` compares one value with its stored snapshot", "write `expect(value).snapshot()`"))
-        return None
-    }
-    if args.len() != 0 || type_args.len() != 0 {
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E0104", method_span, "`snapshot` takes no arguments", "the snapshot is named after the file and line of the call", "write `expect(value).snapshot()`"))
-        return None
-    }
-    value_span :: expr_span(call.args[0].expr)
-    text :: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: call.args[0].expr, format: StrFormat.Display}}, span: value_span, id: AST_NODE_GENERATED}
-    checked_text :: sema_check_expression(text, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    route :: sema_call_core_resolve_route(environment, program, "core.testing", "snap", [Type]{}, 2, false, call.name_span, &diagnostics) ?? return None
-    target :: if route == {
-        .Source(source) -> source
-        .Core(_) | .SharedSite(_) -> panic("expect(value).snapshot() must resolve core.testing.snap's Jet source body")
-    }
-    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "expect(value).snapshot()", call.name_span, [EffectRowEntry]{EffectRowEntry{name: "FS", span: call.name_span}, EffectRowEntry{name: "Env", span: call.name_span}}, &diagnostics) -> return None
-    callee :: sema_call_callee_decl(program, target.symbol.id, call.name_span, &diagnostics) ?? return None
-    file :: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, call.name_span)
-    parts :: file.split("/").to_list()
-    base :: if parts.len() > 0 && parts[parts.len() - 1] != "" -> parts[parts.len() - 1] else -> file
-    line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
-    stem :: base.replace(".", "_")
-    name :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "{stem}_{line}"}}}, call.name_span)
-    matched :: sema_tree_node(Type.Bool, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(name), sema_value_method_source_arg(checked_text)}}, call.name_span)
-    location := sema_expression_panic_location(environment, program, scopes, call.name_span)
-    location.locals = sema_expression_panic_locals(scopes, call.name_span)
-    Val(sema_tree_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: matched, msg: None}, location: location, always_stops: false}, call.name_span))
 }
 
 // The authored `equal` (or `compare`) `left == right` dispatches to on a

@@ -3802,16 +3802,6 @@ exactly, and a mismatch fails the doctest with E2901 at that line. With
 `--update-snapshots` a mismatched one-line rendering rewrites the claimed
 `VALUE` in the file instead. (D-TEST4)
 
-`expect(value).snapshot()` in a `#Test` asserts that the Display text of
-`value` equals the snapshot `__snapshots__/<file>_<line>.snap` beside the test
-(`run.jet` line 8 is `run_jet_8.snap`). It is
-`assert(core.testing.snap(name, "{value}"))` and needs no import: the first
-run writes a missing snapshot and passes, a different value fails with
-`snapshot differs: <name>` and a unified diff while the file stays as it was,
-and `jet test -u` (`--update-snapshots`) rewrites the snapshot with the new
-value. A local or function named `expect` shadows the builtin. (D-TOOL4,
-D-TESTKIT1)
-
 Bare `jet test` and `jet test <package dir>` discover every source member in the
 package's checked project set, not only the entry file, and run the aggregate
 `#Test` and contract harness exactly once. Documentation examples remain

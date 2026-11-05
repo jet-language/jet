@@ -3264,9 +3264,7 @@ struct JetDriverCoreIdentifierDemand {
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
     // A `.suite(…)` receiver call (`t.suite("perf", body)`, D-TEST-SUITE2=A)
-    // runs the `core.testing.__suite_run` source body, and
-    // a bare `expect(…)` call (`expect(value).snapshot()`) the `core.testing.snap`
-    // one, so core.testing loads.
+    // runs the `core.testing.__suite_run` source body, so core.testing loads.
     test_suite: Bool{false}
     // A `#UnitFamily` declaration: its explicit conversions lower to their
     // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
@@ -3317,7 +3315,6 @@ struct JetDriverCoreDemandNames {
     pattern_matches_name: Int
     pattern_match_name: Int
     test_suite_name: Int
-    expect_name: Int
     unit_family_name: Int
     decode_name: Int
     field_error_name: Int
@@ -3363,7 +3360,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
             if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), test_suite_name: jet_driver_core_demand_name(tables, "suite"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3398,7 +3395,6 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
             if name == names.unit_family_name && index > from && tokens[index - 1].kind == TOKEN_HASH -> demand.unit_family = true
             if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
-            if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path :: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
                 if !demand.core_paths.contains(path) -> &demand.core_paths.push(path)
@@ -4630,9 +4626,8 @@ fn jet_driver_load_reach(request: JetDriverCompileRequest, use_driven: Bool) -> 
                 }
             }
         }
-        // `t.suite(…)` and `expect(value).snapshot()` run `core.testing`
-        // source bodies, even when the caller has no explicit core.testing
-        // import.
+        // `t.suite(…)` runs the `core.testing.__suite_run` source body, even
+        // when the caller has no explicit core.testing import.
         if demand.test_suite {
             if !bare_modules.contains("core.testing") -> &bare_modules.push("core.testing")
             jet_driver_reach_open(&reach, "core.testing")
