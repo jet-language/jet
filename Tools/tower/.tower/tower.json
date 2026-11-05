@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92200,
+    "rev": 92201,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71230,7 +71230,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:04:51.939Z",
-      "updated": "2026-11-05T00:27:44.426Z",
+      "updated": "2026-11-05T00:27:52.810Z",
       "updatedBy": "Main",
       "goals": [
         "G17"
@@ -168413,80 +168413,64 @@
       "id": "D-REFLECT-EXPANDTYPE1",
       "cardId": "c03pi177",
       "group": "other",
-      "title": "What type does core.compiler give a marker's expand and a derive's expand?",
-      "situation": "Already ratified: a marker is a struct with an `impl Marker` block, and a derive is `impl Trait.Derive`. Both have `expand(..., target: Target)`, whose body is a template: every declaration written in it is added at the site. Derived code re-enters the compiler as source, never as an injected tree. The effects-on-types proposal lists compiler extension points as function types instead. It gives marker expansion the type `fn(Site) -[Compiler.Read]> Syntax` and derive the type `fn(TypeInfo) -[Compiler.Read]> Syntax`. That names two different input types and a returned syntax value, where the ratified form has one `Target` and a template body. The effects card will publish these types, so they must be settled first.",
-      "gist": "Does `Describe`'s expand appear in core.compiler as `expand(self, target: Target)` with a template body, or as `fn(Site) -> Syntax`?",
-      "lesson": "A marker's expand and a derive's expand both take one Target and write a template. The effect row adds only what expand may read.",
+      "title": "Does the public list of compiler extension points need a vote on how expand is written?",
+      "situation": "A library marker, such as one that adds a describe method to every struct it marks, runs inside the compiler while your program builds. Jet wants to promise that such a marker can only read your program, never your files or the network, and to show that promise in one public list. This ballot asked how that list writes a marker's entry, but the ratified marker rules already fix it, so no vote is needed. The draft that disagreed was never ratified and is already being corrected.",
+      "gist": "Is a vote needed on how the public list writes a marker's expand, or does the ratified rule already settle it?",
+      "lesson": "A marker is a struct whose expand adds code to the thing it marks. Its body is a template: code written there is added at that spot. The compiler can list what each marker may read.",
       "explainer": "",
-      "story": "Lee writes a Describe marker that adds a describe method to any struct. A language-server plug-in lists every extension point with its effect row so it can show what Lee's marker may do.",
-      "inWild": "Examples/features/reflection/user_rule_body.jet:14 fn expand(self, target: Target)\nDocs/proposals/effect-types-2026-10-29.md:367-368 fn(Site) / fn(TypeInfo) -[Compiler.Read]> Syntax\ncard #6129 [36]: core.compiler exposes the extension-point function types with their rows",
-      "detail": "WHAT IS ALREADY DECIDED\n\nD-DECL-TYPES1 A rule 6: the marker body is the trait method expand(self, target: Target). Its body is a template, and every declaration written in it is added at the site. Rule 9: a derive implements Derive with fn expand(target: Target).\n\nD-CTCODEGEN1: derive output re-enters lexer, parser and sema as source text; a pre-parsed tree is never injected. D-EFFTYPE-MODEL1 A ratified effect rows on types, and card #6129 [36] publishes the extension-point types.\n\nTHE CONFLICT\n\nThe 2026-10-29 effects-on-types proposal, section 9.1, types marker expansion as fn(Site) -[Compiler.Read]> Syntax and derive as fn(TypeInfo) -[Compiler.Read]> Syntax. That is two input types and a returned value, while the ratified form is one Target and a template body.\n\nWHAT A DOES\n\nThe published types are the ratified methods with a row: Marker.expand(self, target: Target) -[Compiler.Read]> and Derive.expand(target: Target) -[Compiler.Read]>. Target is the same value T.reflect() returns. The proposal's table is amended.",
+      "story": "Lee publishes a library with a Describe marker. Mia puts it on her Point struct and calls describe(), which prints Point has 2 fields. Her editor shows on hover that the marker can read her program but not her files.",
+      "inWild": "Swift: a macro is a function that receives syntax nodes and returns new syntax nodes.\nRust: a procedural macro is a function from a token stream to a token stream, and it may read files and the network.\nZig: comptime code reads types directly and cannot do input or output while compiling.",
+      "detail": "WHAT THIS IS FOR\n\nJet lets a library run code inside the compiler. A marker such as #lib.Describe runs its expand while Mia's program builds and adds a describe method to Point. Mia should not have to trust Lee's library with her files or the network. So card #6129 publishes one list of every place library code runs inside the compiler, each with a row that says what it may touch. Her editor reads that row and shows it on hover.\n\nThis ballot asked one thing: in that list, is a marker's entry the method Lee actually writes, or a function type that returns a syntax value?\n\nWHY NO VOTE IS NEEDED\n\nThe ratified rules already answer it. D-DECL-TYPES1=A rule 6 makes a marker's body the trait method expand(self, target: Target), whose body is a template. Rule 9 makes a derive fn expand(target: Target). D-CTCODEGEN1 makes added code re-enter the compiler as source, never as an injected tree. D-DERIVE-PROVIDER1=A (2026-11-04) keeps that form for derives without a trait.\n\nThe disagreeing text is Docs/proposals/effect-types-2026-10-29.md, section 9.1, lines 367-368. It lists fn(Site) -[Compiler.Read]> Syntax and fn(TypeInfo) -[Compiler.Read]> Syntax. Its header says \"Nothing here is ratified.\" Card #6129 criterion 44 already records that the published types are the ratified methods and that section 9.1 is amended to match.\n\nSo approving A changes no rule. It closes this ballot and leaves the fix with #6129 c44.\n\nTHE LIST UNDER A\n\nOne rule makes the list uniform: each entry is the code its author writes, plus its row.\n\nMarker expansion: Marker.expand(self, target: Target) -[Compiler.Read]>, with a template body.\n\nDerive: Derive.expand(target: Target) -[Compiler.Read]>, with a template body.\n\nLint, code generation and build actions keep their section 9.1 entries, which are already the functions their authors write.\n\nLast time's loss, \"the table mixes trait methods with plain function types\", is gone. Every entry follows that one rule, and a tool reads each the same way.\n\nWHAT RUNS TODAY\n\nProbes are in $JET_SCRATCH_ROOT/lanes/Research/ballots-2026-11-05/expand, run with the pinned compiler (jet@0.0.1#006bccd5).\n\nx01_describe: a Describe marker whose expand(self, target: Target) has a template body prints \"Point has 2 fields\".\n\nx02_expand_reads_file: a marker whose expand reads a file is refused with E0956, \"A derive template binding is not a known-time value\". So the template rules already stop a marker from reading files. The published row will say the same thing in the list.\n\nEDGE CASES\n\n- A marker that needs outside data, such as a file, uses the separate impure preparation entry. That entry has its own row and needs --gate impure=allow.\n\n- A derive takes no self, because a derive request carries no data.\n\n- The name of the row's effect, written Compiler.Read here, is settled by card #6129 itself, as criterion 44 says.\n\n- Target is the same value T.reflect() returns for the marked item.\n\nBEGINNER AND EXPERT\n\nA beginner writes #lib.Describe and calls describe(). They never see expand or the list. An expert writes expand as a template, and tools show its row on hover. Neither path changes under A.\n\nWHY NOT B\n\nB makes each entry a function that returns a syntax value, as Swift macros do. Every marker and derive body would build syntax values instead of writing a template. It reopens D-DECL-TYPES1 rules 6 and 9 and needs a Syntax builder. D-CTCODEGEN1 would then require each Syntax value to be printed back to source before it re-enters the compiler.\n\nDROPPED\n\nLast time's C kept the template but published a Syntax result in the type. Nobody writes or sees that value, so it described the code wrongly. It is dropped.",
       "options": [
         {
           "key": "A",
-          "name": "The ratified expand, with a row",
-          "detail": "core.compiler lists `Marker.expand(self, target: Target) -[Compiler.Read]>` and `Derive.expand(target: Target) -[Compiler.Read]>`. Marker authors keep writing a template. A tool reads the row from the trait method. No marker or app changes.",
-          "technical": "The extension-point table names trait methods, not free function types. Target is the reflect() value of the site. The effects-on-types proposal section 9.1 rows for marker expansion and derive are amended.",
-          "code": "// app/run.jet: the same under every option\nuse lib\n\n#lib.Describe\nstruct Point { x: Int  y: Int }\n\nfn run() {\n    print(Point{x: 1, y: 2}.describe())    // x y\n}\n\n// package lib\nstruct Describe {\n    impl Marker {\n        sites :: [.Type]\n        fn expand(self, target: Target) {   // core.compiler: -[Compiler.Read]>\n            names :: target.fields.map((f) { f.name }).join(\" \")\n            impl #{target} {\n                fn describe(self) -> String { names }\n            }\n        }\n    }\n}"
+          "name": "Not needed: list the ratified expand",
+          "detail": "No vote is needed. The ratified rules already make a marker's entry Marker.expand(self, target: Target) and a derive's entry Derive.expand(target: Target), each with a template body. The list writes every entry as the code its author writes, plus its row. Card #6129 criterion 44 already corrects the unratified draft.",
+          "technical": "No rule change. Covered by D-DECL-TYPES1=A rules 6 and 9, D-CTCODEGEN1 and D-DERIVE-PROVIDER1=A. Card #6129 c44 amends Docs/proposals/effect-types-2026-10-29.md section 9.1 lines 367-368 and settles the row's effect name. The core.compiler table names trait methods for marker and derive and keeps the other section 9.1 entries. Target is the reflect() value of the site.",
+          "code": "// A: not needed. The ratified expand, listed with its row.\n// app/run.jet: the same under every option\nuse lib\n\n#lib.Describe\nstruct Point { x: Int, y: Int }\n\nfn run() {\n    print(Point{x: 1, y: 2}.describe())    // Point has 2 fields\n}\n\n// package lib\nstruct Describe {\n    impl Marker {\n        sites :: [.Type]\n        // listed as: Marker.expand(self, target: Target) -[Compiler.Read]>\n        fn expand(self, target: Target) {\n            name :: target.name\n            count :: target.fields.len()\n            impl #{target} {\n                fn describe(self) -> String { \"{name} has {count} fields\" }\n            }\n        }\n    }\n}"
         },
         {
           "key": "B",
           "name": "Function types that return Syntax",
-          "detail": "core.compiler lists `fn(Site) -[Compiler.Read]> Syntax` for markers and `fn(TypeInfo) -[Compiler.Read]> Syntax` for derives. Authors return a syntax value instead of writing a template. Every marker body changes.",
-          "technical": "Reopens D-DECL-TYPES1 rules 6 and 9 and needs a Syntax builder; D-CTCODEGEN1 then requires Syntax to be printed back to source before it re-enters the compiler.",
-          "code": "// app/run.jet: the same under every option\nuse lib\n\n#lib.Describe\nstruct Point { x: Int  y: Int }\n\nfn run() {\n    print(Point{x: 1, y: 2}.describe())    // x y\n}\n\n// package lib\nstruct Describe {\n    impl Marker {\n        sites :: [.Type]\n        fn expand(self, site: Site) -[Compiler.Read]> Syntax {\n            names :: site.fields.map((f) { f.name }).join(\" \")\n            Syntax.impl_block(site.name, [Syntax.method(\"describe\", \"String\", Syntax.text(names))])\n        }\n    }\n}"
-        },
-        {
-          "key": "C",
-          "name": "Template body, Syntax in the published type",
-          "detail": "Authors keep writing templates with `target: Target`. The published type says the template produces Syntax: `fn(Target) -[Compiler.Read]> Syntax`. Marker code is unchanged; the public type names a value authors never see.",
-          "technical": "The template is specified as sugar for building a Syntax value. Tools see one function type per extension point. The proposal's Site and TypeInfo inputs become Target.",
-          "code": "// app/run.jet: the same under every option\nuse lib\n\n#lib.Describe\nstruct Point { x: Int  y: Int }\n\nfn run() {\n    print(Point{x: 1, y: 2}.describe())    // x y\n}\n\n// package lib\nstruct Describe {\n    impl Marker {\n        sites :: [.Type]\n        fn expand(self, target: Target) {   // core.compiler: fn(Target) -[Compiler.Read]> Syntax\n            names :: target.fields.map((f) { f.name }).join(\" \")\n            impl #{target} {\n                fn describe(self) -> String { names }\n            }\n        }\n    }\n}"
+          "detail": "The list writes fn(Site) -[Compiler.Read]> Syntax for markers and fn(TypeInfo) -[Compiler.Read]> Syntax for derives. Authors return a syntax value instead of writing a template, so every marker and derive body changes.",
+          "technical": "Reopens D-DECL-TYPES1=A rules 6 and 9 and needs a Syntax builder. D-CTCODEGEN1 then requires Syntax to be printed back to source before it re-enters the compiler. Site and TypeInfo become two input types where the ratified form has one Target.",
+          "code": "// proposed (B): expand returns a syntax value\n// app/run.jet: the same under every option\nuse lib\n\n#lib.Describe\nstruct Point { x: Int, y: Int }\n\nfn run() {\n    print(Point{x: 1, y: 2}.describe())    // Point has 2 fields\n}\n\n// package lib\nstruct Describe {\n    impl Marker {\n        sites :: [.Type]\n        fn expand(self, site: Site) -[Compiler.Read]> Syntax {\n            text :: \"{site.name} has {site.fields.len()} fields\"\n            Syntax.impl_block(site.name, [Syntax.method(\"describe\", \"String\", Syntax.text(text))])\n        }\n    }\n}"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A publishes exactly the ratified expand with its effect row, so no marker, derive or app changes. Markers, derives and T.reflect() keep one input type, Target, which the marker card already requires.",
+        "why": "The ratified marker and derive rules already answer this question, and card #6129 already corrects the draft that disagreed. Approving A closes the ballot with no rule change, no code change and one uniform list.",
         "gains": [
-          "No marker or derive body changes.",
-          "One input type, Target, for markers and derives.",
-          "Tools still read each extension point's row."
+          "No marker, derive or app code changes.",
+          "Every list entry is the code its author writes, plus its row.",
+          "Tools still show what each marker may read."
         ],
-        "losses": [
-          {
-            "loss": "The extension-point table mixes trait methods with plain function types.",
-            "mitigation": "Each row names the method and its row, so tools read it the same way."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B rewrites every marker body and reopens the ratified template model."
-          },
-          {
-            "key": "C",
-            "reason": "C publishes a Syntax value that authors never write and the ratified rule never injects."
+            "reason": "B rewrites every marker and derive body to build syntax values, and reopens three ratified rules."
           }
         ],
-        "tradeoff": "A slightly mixed table, for no code changes and one Target type."
+        "tradeoff": "None: A records what is already ratified."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the Research draft, because the owner caps agents at three. Findings were that the quoted sources match and no marker body changes under A or C, so nothing changed."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the BallotDesign-3 draft under the four-agent cap. Findings were that \"not needed\" must name what covers the need, and it cites D-DECL-TYPES1 rules 6 and 9, D-CTCODEGEN1 and #6129 c44 for the one open gap. No change."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "Is `Describe`'s expand published as `expand(self, target: Target)` or as `fn(Site) -> Syntax`?",
-        "lesson": "expand takes one Target and writes a template; only its effect row is new.",
+        "gist": "Is a vote needed on how the public list writes a marker's expand, or does the ratified rule already settle it?",
+        "lesson": "A marker's expand adds code where the marker is written. Jet will list what each marker may read.",
         "trio": {
           "current": {
-            "note": "Today expand takes Target and its body is a template.",
-            "code": "fn expand(self, target: Target) {\n    impl $tname { fn greeting(self) -> String { \"hello\" } }\n}"
+            "note": "Today expand takes one Target, its body is a template, and this prints Point has 2 fields.",
+            "code": "fn expand(self, target: Target) {\n    tname :: target.name\n    names :: target.fields.len()\n    impl $tname {\n        fn describe(self) -> String { \"{$tname} has {$names} fields\" }\n    }\n}"
           },
           "wild": {
             "lang": "Swift",
@@ -168497,72 +168481,47 @@
         "options": [
           {
             "key": "A",
-            "name": "The ratified expand, with a row",
-            "gist": "`expand(self, target: Target) -[Compiler.Read]>`, template body.",
+            "name": "Not needed",
+            "gist": "The ratified expand is listed as written, with its row.",
             "gains": [
               "No code changes.",
-              "One Target type."
+              "One uniform list."
             ],
-            "losses": [
-              "Mixed extension-point table."
-            ],
+            "losses": [],
             "proposed": {
-              "code": "fn expand(self, target: Target) {   // -[Compiler.Read]>\n    impl #{target} { fn describe(self) -> String { names } }\n}"
+              "code": "// listed as: Marker.expand(self, target: Target) -[Compiler.Read]>\nfn expand(self, target: Target) {\n    impl #{target} { fn describe(self) -> String { \"{name} has {count} fields\" } }\n}"
             }
           },
           {
             "key": "B",
-            "name": "Function types that return Syntax",
-            "gist": "`fn(Site) -> Syntax`; bodies build syntax values.",
+            "name": "Functions that return Syntax",
+            "gist": "expand returns a syntax value instead of a template.",
             "gains": [
-              "Uniform function types."
+              "Every entry is a plain function type."
             ],
             "losses": [
               "Every marker body changes."
             ],
             "proposed": {
-              "code": "fn expand(self, site: Site) -[Compiler.Read]> Syntax {\n    Syntax.impl_block(site.name, [Syntax.method(\"describe\", \"String\", Syntax.text(names))])\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Template body, Syntax in the type",
-            "gist": "Templates stay; the published type says `-> Syntax`.",
-            "gains": [
-              "No code changes."
-            ],
-            "losses": [
-              "Type names a value nobody writes."
-            ],
-            "proposed": {
-              "code": "fn expand(self, target: Target) {   // fn(Target) -[Compiler.Read]> Syntax\n    impl #{target} { fn describe(self) -> String { names } }\n}"
+              "code": "fn expand(self, site: Site) -[Compiler.Read]> Syntax {\n    Syntax.impl_block(site.name, [Syntax.method(\"describe\", \"String\", Syntax.text(text))])\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Publishes the ratified expand as written, with its row.",
+          "why": "Ratified rules already settle it; the draft that disagreed is being corrected.",
           "gains": [
             "No code changes.",
-            "One Target type."
+            "One uniform list."
           ],
-          "losses": [
-            {
-              "loss": "Mixed table.",
-              "mitigation": "Every row names its method and row."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Rewrites every marker."
-            },
-            {
-              "key": "C",
-              "reason": "Names an unseen value."
+              "reason": "Rewrites every marker body."
             }
           ],
-          "tradeoff": "A mixed table, for no changes."
+          "tradeoff": "None: A records what is ratified."
         }
       },
       "draft": false,
@@ -172023,6 +171982,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T00:27:52.810Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-REFLECT-EXPANDTYPE1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-11-05T00:27:45.626Z",
       "by": "Main",
