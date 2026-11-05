@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6569,
-    "rev": 92525,
+    "nextNum": 6571,
+    "rev": 92533,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54629,11 +54629,12 @@
         {
           "n": 54,
           "text": "(was #4766) (was #3908) [#3912] Workspace members and Jetpack package kinds (E1334, E0982, E0983, E1241, E3109, E3260) in JetDriver.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:14.515Z"
+          "evidence": "E0983 registry row is Retired (Do not use E0983); nothing to port (SemaParity)",
+          "at": "2026-11-05T21:10:13.329Z",
+          "closure": "obsolete"
         },
         {
           "n": 55,
@@ -54945,11 +54946,11 @@
         {
           "n": 89,
           "text": "(was #4766) (was #3881) [#3504] A lambda writes only params and an effect row (no result type). Syntax registry, grammars and snapshots updated. tests/ui/lambda_written_result_type and the callable/lambda_interface golden pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:45.437Z"
+          "evidence": "ui lambda_return_type_written + lambda_error_type_written PASS on 5dfbe82cd6; Tools/editors grammars carry no lambda result-type rule (SemaParity)",
+          "at": "2026-11-05T21:10:05.208Z"
         },
         {
           "n": 90,
@@ -55123,7 +55124,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-05T21:10:03.910Z",
+      "updated": "2026-11-05T21:10:13.329Z",
       "updatedBy": "Main",
       "goals": [
         "G3",
@@ -60442,8 +60443,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:37:15.355Z",
-      "updated": "2026-11-05T20:56:22.088Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-05T21:11:22.450Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -64502,7 +64503,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-05T20:52:45.873Z",
+      "updated": "2026-11-05T21:11:29.753Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -92507,6 +92508,66 @@
       "needsAcceptance": false,
       "created": "2026-11-05T14:08:03.130Z",
       "updated": "2026-11-05T19:04:42.603Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0iuwxty",
+      "num": 6569,
+      "title": "sema: Pool.remove through a read-only Pool parameter is accepted (must be E0202)",
+      "body": "Probe review61_edges (BallotLead, D-POOL-HAS1 review) removes an entry through a read-only Pool<T> parameter and compiles. spec.md:1574-1576 says add, remove and pool[id] = v need a writable pool (a := binding or & parameter). Fix in Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:378-429 so remove/add/index-write on a read-only Pool is E0202, with a UI snapshot.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "D-POOL-HAS1"
+      ],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:12:10.986Z",
+      "updated": "2026-11-05T21:12:10.986Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0xq1afz",
+      "num": 6570,
+      "title": "sema: Pool id equality id == id fails with E0312",
+      "body": "Probe review61_id_eq (D-POOL-HAS1 review): comparing two ID<T> values with == fails E0312, though D-POOLID-API1 makes ids copyable and comparable. Make ID<T> equality check and lower, with an example golden on every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "D-POOL-HAS1"
+      ],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-05T21:12:11.885Z",
+      "updated": "2026-11-05T21:12:11.885Z",
       "updatedBy": "Main"
     }
   ],
@@ -170861,74 +170922,79 @@
       "id": "D-POOL-HAS1",
       "cardId": "c0grmd0j",
       "group": "stdlib",
-      "title": "Ask whether a Pool id names a live entry: pool.has(id)",
-      "situation": "A Pool is Jet storage for game objects such as monsters. Adding an object returns an id, a small ticket that names its slot. A monster can store its target id. When the target is removed, that id goes stale, and reading through it stops the program. Today Pool has no way to ask first, so chase code cannot simply forget a dead target. You are deciding whether Pool should answer that question directly. We recommend A: pool.has(id) answers true or false and changes nothing.",
+      "title": "Ask whether a Pool id still names a live entry: pool.has(id)",
+      "situation": "A Pool is Jet's box for game objects such as monsters. Adding a monster gives you an id, a small ticket for its spot in the box. A monster can remember its target by id. When the target dies and is removed, reading through that old id stops the program, and today there is no way to ask first. We recommend pool.has(id): it answers yes or no, copies nothing, and the read after it still checks, so an old id can never reach the wrong monster.",
       "gist": "Should Pool answer whether an id still names a live entry?",
-      "lesson": "An id holds a slot number and a generation count. Removing an entry bumps the count, so an old id never reads whatever later fills the slot; it stops instead. A query lets chase forget a removed target instead of stopping.",
+      "lesson": "An id holds a spot number and a count. Removing an entry bumps the spot's count, so an old id never reaches a new monster that reuses the spot. Reading through an old id stops the program. A yes-or-no check lets a chasing monster forget a dead target instead.",
       "explainer": "",
-      "story": "Ana has an imp that chases a target it holds by id. The target dies and is removed between tics. On the next tic, chase must hit the target if it still exists, or else forget it. Every option runs this same program and prints 90, then true. No option may hit a new monster that reused the old slot.",
-      "inWild": "C can model the same check with a slot number, a generation, and an occupied flag. The check must test all three, not just whether the slot number exists.",
-      "detail": "RATIFIED RULES\n\nDocs/spec/spec.md:1569-1574 and syntax-decisions.md:2848-2856 (D-POOLID-API1) give Pool add, indexing, ids and remove. Ids are copyable and comparable. Indexing a stale id stops the program; remove returns an optional value. Tower ratifies D-HAS-VERB1=A, which makes has the membership word for lists, sets and map keys. D-GAME-ENTITY1=A covers optional scene lookup. Neither adds a Pool query.\n\nCHECKED TODAY\n\nWritten against 0ccdff27 and rechecked on 2559996f at O0 and O2. opus_pool_today prints 60, then stops with E3001 after removal. opus_pool_has_today fails with E0102 because Pool has no has. opus_pool_reuse shows a stale id still stops after a new entry is added, and removing a stale id again returns None. opus_pool_shape runs every line of option A except has, and prints 90 then true.\n\nKNOWN DEFECTS, NOT VOTES\n\nreview61_id_eq fails with E0312 even for id == id, against the comparable-id rule; option C needs that fixed. review61_edges removes an entry through a read-only Pool parameter, while a field write through one is E0205 (opus_fnval_pool_read). Both need defect cards whatever the vote. SharedOwner.jet:378-426 exposes add, remove and ids; indexing is separate.\n\nWHAT THE VOTE ADDS\n\nA adds a Bool query. B adds an optional owned copy under the ordinary copy rules, like Cell.get. C adds no API and scans the existing live-id snapshot. Only the chosen option is added; A and B are not a bundle. D-GAME-ENTITY1 concerns component lookup, not a second Pool entry point.\n\nSTALE IDS AND REUSE\n\nA returns false for a removed id, a slot out of range or a generation mismatch. So has(id) is false exactly when remove(id) would return None. B returns None in those cases. Reusing a slot must never make an old id live again, and generation wraparound must not revive one. Ids carry no pool identity: in review61_edges an id from one pool read 300 from another pool. has cannot catch that mix-up, so keep ids with the pool that issued them.\n\nCHECK THEN USE\n\nA true answer is a snapshot, not a lock. Do not call code that may remove the entry between has and indexing. If something does, the index still checks and stops. No option promises an atomic check-and-write.\n\nCOPYING\n\nB returns an independent copy and is unavailable when T cannot be copied. Changing the copy does not change the pool; writes still index the pool. No hidden copy-or-borrow split is introduced.\n\nBEGINNER AND EXPERT\n\nBeginners call has right before indexing. Experts who know an id is live index directly and keep the safety check. C suits rare queries or code that already holds a fresh ids snapshot. Proposed examples use the ratified name-first declaration spelling (D-DECL-BINDING1=B), which 2559996f does not build yet; probes use the current spelling.",
+      "story": "Ana's imp chases a target it holds by id. Between two game ticks the target dies and is removed. On the next tick the imp must hit the target if it still exists, or else forget it. Every option runs the same program and prints 90, then true. No option may hit a new monster that took over the old spot.",
+      "inWild": "Rust's slotmap crate, a widely used generational arena, offers contains_key(id) -> bool beside indexing. Source: https://docs.rs/slotmap/latest/slotmap/struct.SlotMap.html#method.contains_key\n\nIn C the same check is written by hand: the spot number is in range and the spot's count matches the id's count.",
+      "detail": "RATIFIED RULES\n\nDocs/spec/spec.md:1569-1576 and Docs/spec/syntax-decisions.md:2848-2856 (D-POOLID-API1) give Pool add, indexing, ids and remove. Ids are copyable and comparable. Indexing a stale id stops the program; remove returns an optional value. add, remove and pool[id] = v need a writable pool: a := binding or a & parameter. D-HAS-VERB1=A makes has the membership word for lists, sets and map keys. \n\nD-FNVAL-WRITE1=A lets a function type carry & and ^ input marks, which makes option B's write callback legal. D-WRITE-TAKE1=A gives replace(&place, value) and swap on any place, including pool[id].\n\nWHAT THE CODE DOES TODAY\n\nCompiler/JetIR/Source/BuildPools.jet:111-129 (ir_pool_find) computes one live bit: the spot number is below the pool length and the spot's count equals the id's count. remove (:133-155) and indexing (:192-217) both use that bit. Indexing stops with 'this ID no longer refers to a live value — its pool slot was removed' (:207). Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:378-429 checks add, remove and ids; has is unknown, E0102.\n\nProbes, rechecked on 2559996f at O0 and O2: opus_pool_today prints 60, then stops with E3001 after removal. opus_pool_has_today fails with E0102. opus_pool_reuse shows a stale id still stops after a new entry takes the spot, and removing it again returns None. opus_pool_shape runs every line of option A except has and prints 90, then true.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\nThe earlier draft listed two losses for A and a third caveat. Each now has a concrete answer.\n\n1. Two checks (has, then index). has returns the same live bit that indexing computes, so the extra cost is one length compare and one count compare on a spot just read. It never reads or copies the monster. Code that already knows an id is live indexes directly.\n\n2. The answer could go stale before the read. Only code that holds the pool for writing can remove an entry (spec.md:1574-1576). So between has and the read, only code written on that path can remove it. If it does, the read still checks and stops. It never reaches a newer monster in the same spot.\n\n3. Ids carry no pool identity. In review61_edges an id from one pool read 300 from another. This is true of indexing and remove today and of every option. It is shared, not a cost of A. A pool stamp in ids would fix it for all options and needs its own card.\n\nWHY B CHANGED\n\nThe earlier B returned a copy. A copy cannot write the target back, costs a full copy and does not work for entries that cannot be copied. With D-FNVAL-WRITE1=A, the honest alternative is a write callback, which removes A's two-step gap. So B is now that design.\n\nKNOWN DEFECTS, NOT VOTES\n\nreview61_id_eq fails with E0312 even for id == id, against the comparable-id rule; option C needs it fixed. review61_edges removes an entry through a read-only Pool parameter, against spec E0202. That defect weakens A's staleness argument until fixed and needs a defect card whatever the vote.\n\nSTALE IDS AND REUSE\n\nhas(id) is false exactly when remove(id) would return None: spot out of range or count mismatch. Reusing a spot never makes an old id live again. The count is a 64-bit number, so wraparound needs 2^63 removals of one spot.\n\nBEGINNER AND EXPERT\n\nBeginners call has right before indexing. Experts who know an id is live index directly and keep the safety check. Proposed examples use the ratified name-first declaration spelling (D-DECL-BINDING1=B); probes use the current spelling.",
       "options": [
         {
           "key": "A",
           "name": "pool.has(id) -> Bool",
-          "detail": "Ask whether this pool still has a live entry for the id. Read and write the entry with pool[id], as today. The answer is a snapshot; it does not keep the entry alive.",
-          "technical": "Use the same validity test as indexing: slot in range, occupied, matching generation. It is false exactly when remove(id) would return None. The query does not read or copy T, and a later index still checks. This extends the existing Pool mechanism, not its ownership or locking rules.",
-          "code": "// Proposed API and ratified binding spelling; not executable today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        if world.has(t) {\n            world[t].health -= 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp) // forgets the removed target\n    print(world[imp].target == None) // true\n}"
+          "detail": "Ask whether the pool still has a live entry for this id. Read and write the entry with pool[id], as today. The read still checks, so a stale answer stops the program and never reaches the wrong monster.",
+          "technical": "has returns the live bit that indexing already computes: spot in range and matching count. It is false exactly when remove(id) would return None. It neither reads nor copies the entry. Sema gains one Pool method beside add, remove and ids; the lowering reuses ir_pool_find.",
+          "code": "// Proposed API; ratified binding spelling, not built today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        if world.has(t) {\n            world[t].health -= 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp) // forgets the removed target\n    print(world[imp].target == None) // true\n}"
         },
         {
           "key": "B",
-          "name": "pool.get(id) -> T?: an optional owned copy",
-          "detail": "Return None for a stale id, or a copy of the entry for a live one. This suits read-only snapshots. Writes still use indexing.",
-          "technical": "Available only when T can be copied under the ordinary copy rules, like Cell.get. It never returns a hidden borrowed view. Copying a large entry costs more than a yes-or-no check, though one call can replace a separate has. It adds a second way to read an entry beside indexing; choosing B approves that second path.",
-          "code": "// Proposed API and ratified binding spelling; not executable today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        if world.get(t) == .Val(victim) {\n            world[t].health = victim.health - 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp)\n    print(world[imp].target == None) // true\n}"
+          "name": "pool.edit(id, action) -> Bool",
+          "detail": "Run an action on the entry if it is live, and return whether it ran. Check and write happen in one step. While the action runs, the pool is busy, so the action cannot touch other monsters in it.",
+          "technical": "action has type fn(&T), allowed by D-FNVAL-WRITE1=A. edit checks once, lends the entry to the action and returns true, or returns false for a stale id. The pool is borrowed for writing during the call, so a lambda that also uses the pool is refused. It adds a second way to write an entry beside indexing.",
+          "code": "// Proposed API; ratified binding spelling, not built today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        hit :: world.edit(t, (victim: &Mobj) -> victim.health -= 10)\n        if !hit -> world[id].target = None\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp)\n    print(world[imp].target == None) // true\n}"
         },
         {
           "key": "C",
           "name": "No new API: search pool.ids()",
-          "detail": "Take a fresh list of live ids and compare the target with each one. Pool gets no new API.",
-          "technical": "Uses only ratified operations. It needs id == id, which fails today with E0312; that bug fix needs no vote. Each check builds a list and scans it, so a tic with many chasers does work that grows with chasers times entries. Clearing every link to a target before removing it is another design, and it also needs id ==.",
-          "code": "// Ratified operations and binding spelling; ID equality is defective today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        live := false\n        loop candidate in world.ids() {\n            if candidate == t -> live = true\n        }\n        if live {\n            world[t].health -= 10\n        } else {\n            world[id].target = None\n        }\n    }\n}\nrun :: fn() {\n    world := Pool<Mobj>.new()\n    target :: world.add(Mobj{health: 100, target: None})\n    imp :: world.add(Mobj{health: 60, target: Val(target)})\n    chase(&world, imp)\n    print(world[target].health) // 90\n    _ :: world.remove(target)\n    chase(&world, imp)\n    print(world[imp].target == None) // true\n}"
+          "detail": "Take a fresh list of live ids and compare the target with each one. Pool gets no new method.",
+          "technical": "Uses only ratified operations. It needs id == id, which fails today with E0312; that bug fix needs no vote. Each check builds a list and scans it, so a tick with many chasers does work that grows with chasers times entries.",
+          "code": "// Ratified operations and binding spelling; id equality is broken today.\nMobj :: struct { health: Int, target: ID<Mobj>? }\nchase :: fn(world: &Pool<Mobj>, id: ID<Mobj>) {\n    if world[id].target == .Val(t) {\n        live := false\n        loop candidate in world.ids() {\n            if candidate == t -> live = true\n        }\n        if live {\n            world[t].health -= 10\n        } else {\n            world[id].target = None\n        }\n    }\n}"
         }
       ],
       "comparisons": [
         {
+          "lang": "Rust (slotmap)",
+          "note": "slotmap pairs a yes-or-no check with indexing, and indexing a removed key panics. Source: https://docs.rs/slotmap/latest/slotmap/struct.SlotMap.html",
+          "code": "if world.contains_key(t) {\n    world[t].health -= 10;\n} else {\n    world[id].target = None;\n}"
+        },
+        {
           "lang": "C",
-          "note": "The same liveness test can be written over an explicit slot table; this is an illustration, not a claim about a third-party library.",
-          "code": "#include <stdbool.h>\n#include <stddef.h>\ntypedef struct { size_t slot; unsigned generation; } Id;\ntypedef struct { bool occupied; unsigned generation; int health; } Slot;\nbool has(const Slot *slots, size_t len, Id id) {\n    return id.slot < len && slots[id.slot].occupied\n        && slots[id.slot].generation == id.generation;\n}"
+          "note": "The same check written by hand over a spot table.",
+          "code": "bool has(const Slot *slots, size_t len, Id id) {\n    return id.slot < len\n        && slots[id.slot].generation == id.generation;\n}"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A answers one yes-or-no question and copies nothing. It uses has, the word Jet already uses for map keys and set members. Indexing stays the one way to read and write an entry. It is a check, not a lock.",
+        "why": "A asks one yes-or-no question with the word maps and sets already use. It copies nothing, keeps pool[id] as the one way to read and write, and the read still checks, so the worst case is a clear stop.",
         "gains": [
-          "Small safe query with a familiar name.",
-          "No copy of the entry.",
-          "Removed targets need not stop the game."
+          "A dead target is forgotten instead of stopping the game.",
+          "No copy, no callback, no new way to write.",
+          "The same has word as maps and sets."
         ],
         "losses": [
           {
-            "loss": "has and the following index both check the id.",
-            "mitigation": "The second check reads the slot just read, a few compares. Code that already knows the id is live can skip has and index directly."
+            "loss": "The check and the read are two steps.",
+            "mitigation": "Only code you write between them can remove the entry. If it does, the read stops clearly, never reaching the wrong monster."
           },
           {
-            "loss": "The answer goes stale if something removes the entry before the index.",
-            "mitigation": "Call has right before indexing, with no call between. The index still checks, so a stale answer stops the program instead of reading the wrong monster."
+            "loss": "has and the read both check the id.",
+            "mitigation": "The second check is two number compares on the spot just read. Code that knows an id is live indexes directly."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Good for read-only snapshots, but this program writes the entry. A copy cannot write back, can be expensive, and adds a second way to read entries."
+            "reason": "B closes the two-step gap, but the action cannot touch other monsters and every write needs a callback."
           },
           {
             "key": "C",
-            "reason": "Sound once id == id is fixed, but every check builds and scans a list of all live ids, which is costly every tic."
+            "reason": "C needs no new method, but every check builds and scans a list of all monsters each tick."
           }
         ],
-        "tradeoff": "A adds a direct check; B adds copied reads; C keeps the API smaller but pays a scan per check."
+        "tradeoff": "A adds a small check and keeps one way to read and write. B joins check and write but locks the pool inside a callback. C adds nothing but scans."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -170940,49 +171006,47 @@
       "checkInstructions": null,
       "surface": {
         "gist": "Should Pool answer whether an id still names a live entry?",
-        "lesson": "An old id never reads a new entry that reused its slot; it stops the program instead. A has check lets chase forget a removed target. It does not lock the entry or tell which pool made the id.",
+        "lesson": "An id holds a spot number and a count. Removing an entry bumps the spot's count, so an old id never reaches a new monster in that spot. Reading through an old id stops the program. A yes-or-no check lets a chasing monster forget a dead target instead.",
         "trio": {
           "current": {
-            "note": "Checked today at both optimization levels: reading a removed id stops the program, and has does not exist.",
-            "code": "world := Pool<Mobj>.new()\nid :: world.add(Mobj{health: 60})\n_ :: world.remove(id)\nprint(world[id].health) // E3001\n// world.has(id) is E0102 today"
+            "note": "Checked today at two optimization levels. Reading a removed id stops the program, and has does not exist.",
+            "code": "world := Pool<Mobj>.new()\nid :: world.add(Mobj{health: 60})\n_ :: world.remove(id)\nprint(world[id].health) // E3001: this ID no longer refers to a live value\n// world.has(id) is E0102 today"
           },
           "wild": {
-            "lang": "C",
-            "note": "An explicit slot table tests range, occupancy and generation.",
-            "code": "bool has(const Slot *slots, size_t len, Id id) {\n    return id.slot < len && slots[id.slot].occupied\n        && slots[id.slot].generation == id.generation;\n}"
+            "lang": "Rust (slotmap)",
+            "note": "A popular Rust arena pairs a yes-or-no check with indexing. Source: docs.rs/slotmap",
+            "code": "if world.contains_key(t) {\n    world[t].health -= 10;\n} else {\n    world[id].target = None;\n}"
           }
         },
         "options": [
           {
             "key": "A",
             "name": "pool.has(id) -> Bool",
-            "gist": "Ask, then index immediately. The answer does not keep an entry alive.",
+            "gist": "Ask yes or no, then read as today. The read still checks.",
             "gains": [
-              "No entry copy.",
-              "Indexing remains the entry-access operation."
+              "No copy and no callback.",
+              "pool[id] stays the one way to read and write."
             ],
             "losses": [
-              "Checks the id twice: has, then index.",
-              "Removal between the two steps makes the answer stale."
+              "Check and read are two steps."
             ],
             "proposed": {
-              "code": "// Proposed; t is this monster's target id.\nif world.has(t) {\n    world[t].health -= 10\n} else {\n    world[id].target = None\n}"
+              "code": "// t is the imp's target id.\nif world.has(t) {\n    world[t].health -= 10\n} else {\n    world[id].target = None\n}"
             }
           },
           {
             "key": "B",
-            "name": "pool.get(id) -> T?",
-            "gist": "Return None, or a copy of the entry.",
+            "name": "pool.edit(id, action) -> Bool",
+            "gist": "Run an action on the entry if it is live, in one step.",
             "gains": [
-              "Convenient read-only snapshot."
+              "Check and write happen together."
             ],
             "losses": [
-              "Copy cost; unavailable for entries that cannot be copied.",
-              "Writing still requires indexing.",
-              "A second way to read entries."
+              "The action cannot touch other monsters in the pool.",
+              "Every write needs a callback."
             ],
             "proposed": {
-              "code": "// Proposed; same target and damage.\nif world.get(t) == .Val(victim) {\n    world[t].health = victim.health - 10\n} else {\n    world[id].target = None\n}"
+              "code": "hit :: world.edit(t, (victim: &Mobj) -> victim.health -= 10)\nif !hit -> world[id].target = None"
             }
           },
           {
@@ -170990,42 +171054,45 @@
             "name": "No new API: search live ids",
             "gist": "Scan the existing list of live ids.",
             "gains": [
-              "No new Pool API.",
-              "Can use an already-fresh snapshot."
+              "No new Pool method."
             ],
             "losses": [
               "Builds and scans a list on every check.",
-              "Needs the id == id bug fixed first."
+              "Needs the broken id == id fixed first."
             ],
             "proposed": {
-              "code": "// Ratified operations; ID equality fails today.\nlive := false\nloop candidate in world.ids() {\n    if candidate == t -> live = true\n}\nif live {\n    world[t].health -= 10\n} else {\n    world[id].target = None\n}"
+              "code": "live := false\nloop candidate in world.ids() {\n    if candidate == t -> live = true\n}\nif live { world[t].health -= 10 } else { world[id].target = None }"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A asks one yes-or-no question and copies nothing. It reuses has, the word maps and sets already use.",
+          "why": "A asks one yes-or-no question with the word maps and sets use. It copies nothing, and the read still checks, so the worst case is a clear stop.",
           "gains": [
-            "Small query.",
-            "No entry copy."
+            "A dead target is forgotten, not a crash.",
+            "One way to read and write stays."
           ],
           "losses": [
             {
-              "loss": "A check and a read are separate steps.",
-              "mitigation": "Check right before indexing. The index still checks, so a stale answer stops safely."
+              "loss": "The check and the read are two steps.",
+              "mitigation": "Only code you write between them can remove the entry. Then the read stops clearly, never reaching the wrong monster."
+            },
+            {
+              "loss": "has and the read both check the id.",
+              "mitigation": "The second check is two number compares on the spot just read."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A copy cannot write this monster back."
+              "reason": "B joins the steps, but its action cannot touch other monsters."
             },
             {
               "key": "C",
-              "reason": "Scanning all ids is fine for rare checks, costly every tic."
+              "reason": "C scans every monster on every check, each tick."
             }
           ],
-          "tradeoff": "A adds a direct check; C keeps the API smaller but scans."
+          "tradeoff": "A adds a small check and keeps one way to write. B joins check and write inside a callback. C adds nothing but scans."
         }
       },
       "draft": false,
@@ -171245,85 +171312,79 @@
       "id": "D-PACKAGE-PACKS1",
       "cardId": "c0fo37ov",
       "group": "tooling",
-      "title": "Allow checked packs for installed dependencies?",
-      "situation": "A dependency is a library your project uses, such as a geometry package. The current Jet driver reads dependency source again on each compile; the review's two-run probe did so for a small local package. The owner has ruled out incremental compilation and has allowed precompiled Core and runtime pieces, but has not expressly extended that exception to installed dependencies. This vote asks whether an exact installed dependency may also carry saved checking results, and whether those results may come from an already trusted builder. We recommend A: allow installed packs through Jetpack's existing verified store, while all code you edit compiles fresh. Packs still cost disk space, and a missing variant costs a build or download; verification also relies on the approved compiler and builder being honest.",
-      "gist": "May installed dependencies reuse checked packs despite the no-incremental rule?",
-      "lesson": "A pack holds checked library facts, checked function bodies and compiled code. The facts are the types, signatures and safety rules that callers need; Rust calls similar saved facts metadata, or rmeta. A pack matches exact build inputs, not just a version number. It avoids repeating some work while it is retained, but generic uses and program-specific checks still run.",
+      "title": "Check downloaded libraries once, not on every run?",
+      "situation": "Your project uses libraries, such as a geometry library called geo. Today Jet reads and checks every library from scratch on every run, even one you downloaded and never touch. You already ruled that your own code always compiles fresh and that Core ships already checked. The question is whether a downloaded library may also be checked once and then reused, the way Core is. We recommend yes for downloaded libraries only; any library in a folder you can edit still compiles fresh every time.",
+      "gist": "May Jet check a downloaded library once and reuse that result, like Core?",
+      "lesson": "A library you download at a fixed version, like geo#2.1.0, never changes. Jet still checks it from scratch on every run today. Core will ship already checked. A saved check holds a library's checked types and compiled code for one exact compiler and setup. Whatever wins, your own code is checked fresh, and so is library code used with your types.",
       "explainer": "",
-      "story": "Ana's game has 3 source files and uses the installed geometry package geo#2.1.0, with 40 files. She runs jet test twice without changing it, then upgrades the compiler. Her teammate edits a local path copy of geo. Every option must produce the same results and diagnostics for the same inputs. The examples below describe proposed behavior, not working package-install commands today.",
-      "inWild": "Go's command documentation describes a build cache that accounts for source, compiler and compiler-option changes. It also warns that changes to external C libraries used by cgo are not detected automatically. That is a warning for Jet's foreign-code inputs, not a guarantee that a version number is enough.\n\nSource: https://go.dev/cmd/go/ , 'Build and test caching'. This comparison was checked against the documentation, not a local Go run; Go is unavailable here.",
-      "detail": "WHAT IS ALREADY SETTLED\n\nThe 2026-11-05 log on #5910 records the owner's fresh-compilation and precompiled-Core ruling, with Main's checked-interface notes. It is in Tools/tower/.tower/tower.json. D-EXEC1=A ratifies shared compiled Prelude/Core. D-EXEC2=A retires the separate JIT and hot replacement; dev rebuilds and restarts. I9 requires one meaning across levels, not a separate package runtime. These execution rules do not alone authorize reuse of third-party checking results.\n\nOlder package law exists. D-LIB-REUSE1=B ratifies sealed dependency artifacts: compiled outputs tied to exact inputs, with shared restore and generic bodies. D-BUILD-NOCHANGE1=A permits saved checks only with every input covered. D-INCR-PARK1=C retired item reuse, not package reuse.\n\nBut #2517's answered question, 2026-10-30, explicitly asked whether package-level reuse remained in scope. The answer was 'no incremental compilation, period'. The older decisions and that answer are in Tools/tower/.tower/history.json. Docs/spec/syntax-decisions.md:9069-9070,9226,9387 lists the execution, incremental and library outcomes. The latest ruling wins. A, C and D request explicit exceptions. B adds none.\n\nThis is not another vote on stable binary compatibility or on whether Jetpack has a store. D-LIB-REUSE1 rejects a stable Jet ABI: a permanent promise about memory layout and calling rules. A different compiler build cannot consume a pack by matching only its version label.\n\nD-JPK-CACHE1=A already permits verified substitutes. CACHEAUTH1=D, CACHECONFIG1=D and REPROCACHE1=D govern builder authority, host-bound mirrors and reproducibility. These records are in history.json. Their rules appear in Docs/spec/syntax-decisions.md:6720-6748,6805-6849. D-JPK-TRUSTROOT1=D distinguishes public-release signatures from explicit private-registry policy. Publisher signing does not approve checking results. D-JPK-FRESHNESS1=D requires package#version, not package@version (:6750-6759).\n\nCHECKED CURRENT EVIDENCE\n\nThe review ran admitted compiler 66c2a661a6 with this checkout's toolchain sources. A two-package path-dependency program printed 42 twice. Both traces contain parsing of geo.jet and semantic checking of geo. They are in ../review-packs-probes/run1.trace and run2.trace relative to this ballot. Geo parsing starts at line 23 in each, its semantic module at line 53. This proves that small case, not a 40-file registry installation or a speed measurement.\n\nThe same compiler's 'jet update geo' exited 2 with E2104, 'jet update is not built yet'. Compiler/JetCli/Source/Cli/Front.jet:1930-1940 matches that narrow refusal. It does not establish that all Jetpack fetching is absent. Request.jet:936-944 sets record_store to None for CLI requests. Compiler/JetDriver/Source/Driver/Pipeline.jet:3319-3322 loads source; :3481-3504 registers it; :3542-3544 and :3642 check the graph.\n\nCompiler/JetDriver/Source/Driver/Identity.jet:929-941 defines jet_driver_package_check_key; no callers were found in Compiler or Jetpack. It includes compiler and package identity, selected source/manifest bytes, dependency interface digests and target facts. At :890-902 those facts are active OS, edition, target triple and applicable inline dependencies.\n\nThat is NOT a complete compiled-pack key. Profile, CPU features, other settings, embedded assets and foreign toolchains need coverage. A dependency's public signature digest cannot cover bodies used for generics, inlining or compile-time execution.\n\nThe admitted runtime provenance lists 340 source files, none under Core/. That describes that shipped runtime, not a working checked-Core pack. Compiler/JetFoundation/Source/Record/RecordCodec.jet:8-26 defines the existing indexed, checksummed format. The checked-library schema still needs implementation. The design source is ../precompiled-libraries-2026-11-05.md relative to this ballot, not an already-landed Docs/proposals file.\n\nCOMMON CONTRACT FOR CHECKED PACKS\n\nOne format and compiler reader serve Core and dependency packs (I8). Each pack contains interface facts, checked bodies, typed diagnostics and source locations, plus separate machine-code outputs. Run/dev/test link matching code; build compiles only reached bodies under #5910. Generics specialize where used. Caller policy, effects, ownership and safety checks still run. No option permits a second checker or language meaning.\n\nA pack's exact identity covers compiler build, provider/namespace/package, locked source digest, dependency artifacts and all facts read. Include selected features, profile, CPU/OS/architecture/ABI, settings, generated and embedded inputs, foreign sources, toolchains and relevant link inputs. Matching source labels are insufficient. A wrong compiler, target or configuration is refused before linking. Obtain or build the correct variant instead.\n\nDiscover and seal inputs before publishing a pack. An unrecorded check-time read is a pack-build error. Keep interface records independent of code-generation flags where possible; code outputs must still match their flags.\n\nCross builds distinguish the machine running compile-time code from the target whose layout and facts it uses. Never run a target executable on the host. Package compile-time code may depend on consumer arguments or build facts. Keep that work in checked bodies until its inputs are known. Never freeze the first consumer's values into a universal pack. Closed constants may be evaluated once with all inputs recorded. Generic and consumer-dependent checks remain per program.\n\nPacks preserve unsafe-call gates, reasons, effects, foreign descriptors, cleanup and diagnostics. A pack is not an unsafe-code audit. Executable package hooks and foreign builds keep exact grants and sandbox requirements under D-JPK-BUILDSCRIPT1=D and D-JPK-SANDBOX2=D. Metadata reads must not execute package code.\n\nA hash catches changed bytes, not false types or fabricated safety facts. A signature identifies the signer, not semantic truth. A and D trust the compiler that produced the facts. A also accepts builders authorized for that action before execution. Verify schema, bounds, digests, compiler/target/configuration and provenance on every store read. Provenance is the signed record binding a build's inputs, outputs and producer. Reject corrupt or unauthorized packs.\n\nA uses existing public trust roots or explicit private-registry policy, ordered host bindings and revocation rules. Private does not mean automatically trusted. A public registry is not automatically an approved builder. With no acceptable substitute, build locally from locked source under normal build authority and sandbox policy.\n\nUse the existing machine store under the user cache, not another pack cache. D-BUILD-STORE1=E supplies the cap, free-space reserve, admission checks and live leases that protect in-use entries. Add no cleanup command. Packs may be evicted and rebuilt. Compiler upgrades, new features or targets can need new packs. Storage and first-build cost cannot disappear.\n\nReproducibility means identical sealed inputs produce identical bytes. Keep timestamps and host paths out of identity. Preserve conflicting same-key outputs as evidence. D-JPK-REPROCACHE1 bars divergent outputs from trusted use. D-BUILD-NOCHANGE1's force-from-source and recompute-and-compare contracts remain the expert path for package packs. This adds no flag and does not make toolchain Core a mutable cache.\n\nThe gain is avoided parse/check work, not a measured latency promise. Every option pays for fresh project code, test execution, generic specialization, caller checks and linking. Pack options also pay for identity and trust verification. A missing or evicted pack can make a first run slower.\n\nWHAT THIS VOTE CHANGES\n\nA or D explicitly exempts exact installed dependencies from the 2026-10-30/11-05 no-incremental rule. It clarifies D-LIB-REUSE1's 'sema and diagnostics always run': dependency facts may come from a checked pack, but consumer-dependent checks and diagnostics remain. Path dependencies and workspace members compile fresh even when temporarily unchanged.\n\nC also exempts editable dependencies and thus reverses more of the ruling. B keeps dependency checks fresh. It does not repeal the store, signing, sealed-link format or unrelated dynamic-library contracts. No option permits item-level reuse or a stable cross-compiler pack format.",
+      "story": "Ana's game has 3 files and uses geo#2.1.0, a downloaded library with 40 files. She runs jet run ten times an hour. Today Jet checks all 43 files each time, though only her 3 change. Her teammate Ben keeps his own copy of geo in a folder and edits it. The examples show proposed behavior; installing libraries by version is not built yet.",
+      "inWild": "Cargo (Rust) compiles each downloaded crate once and keeps the result in the target folder. Later builds reuse it and recompile only your own crate. Source: https://doc.rust-lang.org/cargo/guide/build-cache.html\n\nGo keeps a build cache keyed by source, compiler and flags. Its documentation warns that changes in outside C libraries are not noticed automatically. Source: https://go.dev/cmd/go/ , 'Build and test caching'.\n\nNix downloads prebuilt results only from builders whose signing keys you trust, and builds locally otherwise. Source: https://nix.dev/manual/nix/latest/command-ref/conf-file.html#conf-trusted-public-keys",
+      "detail": "WHAT THE OWNER ALREADY RULED\n\n2026-10-30 (#2517): no incremental compilation, period. 2026-11-05 (#5910 log): jet run, dev and test link Core and the runtime as pieces built once with the compiler. Only the user program compiles fresh. Main noted on #5910 that the Core piece must carry checked types, not only machine code.\n\nD-EXEC1=A ratifies shared compiled Prelude/Core. Older law: D-LIB-REUSE1=B (sealed dependency outputs tied to exact inputs), D-BUILD-NOCHANGE1=A (saved checks only when every input is covered), D-INCR-PARK1=C (no reuse of single functions). The latest ruling wins, so A and C each need an explicit exception. B needs none.\n\nWHAT JET DOES TODAY (checked)\n\nA two-package program with a folder dependency printed 42 on two runs. Both traces show geo parsed and checked again (geo parse at trace line 23, its check at line 53). Compiler/JetDriver/Source/Driver/Pipeline.jet:3319-3322 loads source, :3481-3504 registers it, and :3542-3544 and :3642 check the whole graph.\n\nCompiler/JetDriver/Source/Driver/Identity.jet:932 defines jet_driver_package_check_key, which nothing calls yet. jet update exits 2 with E2104, not built yet (Compiler/JetCli/Source/Cli/Front.jet:1938, :367). The spec spelling for a versioned dependency is deps: { textkit: textkit#1.2.0 } (Docs/spec/syntax-decisions.md:5603-5606). The admitted runtime lists 340 source files and none under Core/, so the checked Core piece is not built yet either.\n\nThe Jetpack store already verifies and restores signed results from trusted builders. It checks revocation and reproducibility. Unsigned, mismatched, corrupt and revoked results are refused. Sources: Jetpack/Store/Source/Hangar/RealizeVerified.jet:642-687 and Jetpack/Store/Source/Cache/CachePublication.jet:279-301. Tests: Jetpack/Store/Tests/EngineCachePublication.jet:102-141. D-BUILD-STORE1=E gives the store its size cap, free-space reserve and leases that protect entries in use.\n\nHOW A REMOVES ITS DOWNSIDES\n\nThe earlier draft listed four costs for A. Each is now designed out or made negligible.\n\n1. Trusting an outside builder. A accepts a downloaded saved check only from a builder you already trust for your compiler. By default that is the Jet release builder that made the compiler itself, which could already change your compiler, so the default adds no new party to trust. A team may add its own builder to the store's trust list; that is an explicit choice to trust one more party, and nothing is added without it.\n\nEvery read checks the signature, the exact inputs and the revocation list. The existing rebuild-from-source-and-compare contract (D-BUILD-NOCHANGE1) stays available.\n\n2. Disk space. Saved checks live in the existing store, which already has a size cap and evicts the oldest unused entries (D-BUILD-STORE1=E). No new cache folder and no cleanup command.\n\n3. Exception to the no-incremental rule. A reuses only what can never change: an exact downloaded version. Nothing you can edit is ever reused, so the rule's purpose holds: your code always compiles fresh. This mirrors the Core exception the owner already granted.\n\n4. A missing saved check after a compiler upgrade. Jet downloads the matching one if the release builder published it; otherwise it checks the library once, which costs what B pays on every run.\n\nThe former option D (build saved checks only on this machine) is folded into A. A's only outside builder is the one that already made the compiler D runs, so D gave no extra safety and made every new machine pay a first build.\n\nWHAT EVERY OPTION KEEPS\n\nOne format and one reader serve Core and library saved checks (I8). A saved check holds checked types, checked bodies, diagnostics with source spans, and compiled code. Its key covers compiler build, package, locked source digest, dependency results, features, profile, CPU, OS and target. It also covers settings, embedded and generated files, foreign sources and toolchains. A wrong key is refused before linking.\n\nGeneric code is specialized where it is used. Checks that depend on the caller still run per program: authority grants, effects, ownership and unsafe gates. Consumer-dependent compile-time code stays in checked bodies and runs per program. Reading a saved check never runs package code. There is no second checker and no second language meaning.\n\nWHAT THIS VOTE CHANGES\n\nA exempts exact downloaded versions (registry or a git tag pinned in the lock) from the no-incremental rule. Folder dependencies and workspace members compile fresh even when unchanged. C also exempts unchanged folder libraries. B keeps every library fresh. No option allows reuse of single functions or a stable cross-compiler format.",
       "options": [
         {
           "key": "A",
-          "name": "Installed packs through the existing verified store",
-          "detail": "For an exact installed dependency, use a matching pack built locally or by an already approved builder. On a miss, build it from locked source under the normal grants. Ana's second test reuses the retained pack. Her teammate's editable geo compiles fresh each time.",
-          "technical": "This is the installed-input exception defined above. Reuse the sealed-artifact store and trust path, not a new download protocol. A valid hit must bind checked facts and code to the same source, compiler, configuration and approved build action. A compiler upgrade needs a different pack. Downloaded facts enlarge the trusted computing base to include the approved builder; signing alone cannot prove they are true. No extra builder is approved by this ballot.",
-          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # matching approved pack: verify and load; otherwise build it\n$ jet test   # verify retained geo pack; compile Ana fresh\n# Compiler upgrade: get or build a matching geo pack.\n# Teammate edits a path copy: compile that copy fresh on every run."
-        },
-        {
-          "key": "D",
-          "name": "Installed packs, built on this machine only",
-          "detail": "Build an installed dependency's checked pack locally on first use, when its exact configuration is known. Never accept someone else's checked facts. Ana's second test reuses the retained pack. Her teammate's editable geo compiles fresh each time.",
-          "technical": "Same installed-input exception and pack format as A, but checked packs may not be substituted from another builder. This deliberately narrows the earlier shared-restore policy for these facts. It avoids trusting an outside checker run, not trust in downloaded source or the local compiler. Fresh machines and compiler/configuration changes pay the full local pack build. Existing non-pack store use is unchanged.",
-          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # build geo's matching pack locally; compile Ana fresh\n$ jet test   # verify retained geo pack; compile Ana fresh\n# Compiler upgrade: rebuild geo's matching pack locally.\n# Teammate edits a path copy: compile that copy fresh on every run."
+          "name": "Check downloaded libraries once",
+          "detail": "A downloaded library at an exact version is checked once and the result is saved. Later runs reuse it. If the Jet release builder already published that result, Jet downloads it instead of checking. Libraries in your own folders compile fresh every run, like your code.",
+          "technical": "Exact downloaded versions get the same treatment as Core. Saved checks go in the existing Jetpack store and use its signature, revocation and size-cap rules. Downloads are accepted only from builders already trusted for the compiler. A compiler upgrade or setting change needs a different saved check, downloaded or built once.",
+          "code": "# package.jet\ndeps: { geo: geo#2.1.0 }\n\n$ jet run   # first time: check geo once and save it; check Ana's code\n$ jet run   # reuse saved geo; check Ana's code fresh\n\n# Ben's copy in a folder:\ndeps: { geo: ../geo }\n$ jet run   # geo is checked fresh on every run, as today"
         },
         {
           "key": "B",
-          "name": "No exception for dependency checking",
-          "detail": "Core and the runtime keep their toolchain packs. Ana's geo source is checked fresh on both tests, as is her own code. Her teammate's local copy is also checked fresh. There is no new trust in saved third-party checking results.",
-          "technical": "Keep the latest no-incremental ruling for dependency checks. Earlier sealed-artifact and Jetpack store contracts do not by themselves authorize skipping those checks. Do not delete the whole store or claim that no keys or disk space are needed. This avoids checked-pack production and retention for packages, but repeats dependency front-end work. Core precompilation and cold-compiler improvements can still help; no timing loss is asserted without a measurement.",
-          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # check geo source and Ana fresh\n$ jet test   # check geo source and Ana fresh again\n# Compiler upgrade: still check geo source each time.\n# Teammate edits a path copy: compile that copy fresh on every run."
+          "name": "Check every library on every run",
+          "detail": "Keep today's behavior. Only Core and the runtime come already checked. Every library, downloaded or not, is read and checked again on each run.",
+          "technical": "Keeps the no-incremental ruling with no exception. The store still holds downloaded source and other outputs. Each run repeats parsing and checking for every library. Core's saved check and faster cold compiles still help, but library cost grows with library size.",
+          "code": "# package.jet\ndeps: { geo: geo#2.1.0 }\n\n$ jet run   # check geo's 40 files and Ana's 3\n$ jet run   # check all 43 files again"
         },
         {
           "key": "C",
-          "name": "Reuse whole dependencies, including editable ones",
-          "detail": "Use A's verified packs for installed geo. Also keep a whole-package result for the teammate's local geo. Reuse it only when every input still matches. An edit rebuilds that dependency as a whole, not selected functions. Ana's root project stays fresh.",
-          "technical": "This is package-level incremental reuse, not item reuse. It explicitly reverses the latest no-incremental ruling for editable dependencies. It can help large workspaces, but needs change tracking and discovered-input validation on each reuse, and creates more variants to retain or evict. It uses the same store, key rules and trust path as A; no second mechanism is permitted.",
-          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # matching approved pack: verify and load; otherwise build it\n$ jet test   # verify retained geo pack; compile Ana fresh\n# Compiler upgrade: get or build a matching geo pack.\n# Teammate edits a path copy: rebuild it once; then reuse if all inputs match."
+          "name": "Also reuse unchanged folder libraries",
+          "detail": "Do everything A does. Also save checks for libraries in folders you can edit, and reuse them while their files are unchanged. An edit rechecks that whole library.",
+          "technical": "This is library-level incremental compilation. It reverses the no-incremental ruling for code people edit. It needs file-change tracking and must confirm every input on each reuse. It stores more versions and uses the same store as A.",
+          "code": "# Ben's copy in a folder:\ndeps: { geo: ../geo }\n\n$ jet run   # check geo once and save it\n$ jet run   # geo unchanged: reuse it\n# Ben edits geo/shape.jet\n$ jet run   # recheck all of geo, then save again"
         }
       ],
       "comparisons": [
         {
-          "lang": "Go",
-          "note": "Official build-cache documentation covers source, compiler and flag changes, but warns about external C libraries. Package reuse can cover local code too; that broader choice is C, not the installed-only exception. No local Go execution is claimed.",
-          "code": "# Documentation comparison, not an executed recipe:\n# Go reuses matching build outputs and periodically drops old ones.\n# Its documented cgo caveat requires a rebuild after external C-library changes.\n# Jet must cover foreign inputs rather than promise 'never stale'."
+          "lang": "Cargo (Rust)",
+          "note": "Cargo compiles each downloaded crate once per setup and reuses it. Your own crate is recompiled. It never downloads prebuilt crates. Source: https://doc.rust-lang.org/cargo/guide/build-cache.html",
+          "code": "$ cargo build   # compiles serde once, then your crate\n$ cargo build   # reuses serde; rebuilds only your crate if it changed"
+        },
+        {
+          "lang": "Nix",
+          "note": "Nix downloads a prebuilt result only when it is signed by a key you trust, and builds it locally otherwise. Source: https://nix.dev/manual/nix/latest/command-ref/conf-file.html#conf-trusted-public-keys",
+          "code": "# nix.conf\nsubstituters = https://cache.nixos.org\ntrusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A avoids repeating closed dependency checks without rebuilding a cache for edited code. It uses the already ratified store and builder policy instead of excluding trusted substitutes or adding another mechanism. This needs an explicit installed-input exception; it is not implied by the Core ruling.",
+        "why": "A downloaded library never changes, so checking it again on every run is wasted work. A saves that work, trusts only the builder that already made your compiler, and still compiles everything you can edit fresh.",
         "gains": [
-          "Retained exact packs avoid repeated dependency parsing and checking.",
-          "Approved substitutes can avoid a local first build on another machine.",
-          "Core and packages share a format and reader; packages use the existing store and trust policy."
+          "Runs stop rechecking libraries that cannot change.",
+          "A new machine can download checks instead of building them.",
+          "Core and libraries share one saved format and one reader."
         ],
         "losses": [
           {
-            "loss": "Code, checked bodies and configuration variants consume disk; eviction or a changed input can require another build.",
-            "mitigation": "Use existing cap, reserve, admission and lease rules. Retain only useful variants and build or fetch a missing one. This bounds storage, not first-run cost; no once-forever promise."
+            "loss": "After a compiler upgrade, each library is checked once more.",
+            "mitigation": "The release builder publishes matching checks; otherwise one check costs what option B pays on every single run."
           },
           {
-            "loss": "A trusted builder could lie about checked facts; hashes and signatures do not prove semantics.",
-            "mitigation": "Accept only pre-authorized builders with exact signed input/output provenance and reproducibility policy. Verify each read, enforce revocation, and keep force-from-source and comparison hatches. This reduces risk but cannot eliminate trust in the compiler and builder."
+            "loss": "A downloaded check is only as honest as its builder.",
+            "mitigation": "Only the builder that made your compiler, or one your team added, is accepted. Signatures and revocation are checked on every read."
           }
         ],
         "whyNot": [
           {
-            "key": "D",
-            "reason": "D is stronger when outside checking results must not be trusted. It makes every new machine build locally and deliberately excludes otherwise approved substitutes. A keeps that choice in the existing trust policy."
-          },
-          {
             "key": "B",
-            "reason": "B best preserves the latest no-incremental ruling and avoids checked-package machinery. It still repeats dependency front-end work. That is a real simplicity choice, not a claim that it cannot be fast."
+            "reason": "B rechecks libraries that never change on every run, and that cost grows with every library Ana adds."
           },
           {
             "key": "C",
-            "reason": "C helps multi-package development most, but reuses edited dependencies and needs change tracking. It reverses a larger part of the owner's ruling than this installed-only exception."
+            "reason": "C reuses code people edit, which is the incremental compilation you ruled out, and needs change tracking to stay correct."
           }
         ],
-        "tradeoff": "A permits verified installed packs, including approved substitutes. D limits their producer to this machine. B keeps dependency checking fresh. C also reuses unchanged editable dependencies. Disk use, first-build cost and producer trust remain real costs of packs."
+        "tradeoff": "A treats downloaded libraries like Core and keeps editable code fresh. B keeps everything fresh at a growing cost. C also reuses editable code."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -171332,118 +171393,96 @@
       "reviewPasses": {
         "adversarial": "Author model family: Claude. Adversarial model family: GPT Sol. Fresh agent: PacksSol. Checked active and archived decisions, driver and store sources, runtime provenance, and two native dependency runs plus the update refusal. Reframed this as an explicit installed-pack exception, corrected identity and trust claims, and added the existing verified-store alternative."
       },
-      "checkInstructions": "Review proof: admitted compiler 66c2a661a6 ran the path-dependency program twice, printing 42 both times. Both traces show geo parsing and semantic checking. jet update geo returned E2104, exit 2. These are not registry-install or pack-performance proofs.\n\nAcceptance must prove rejection for mismatched compiler, host/target, features and flags. Cover changed embedded/generated/foreign/dependency-body inputs and consumer-dependent comptime. Test unsafe and foreign gates, forged/revoked packs, deterministic independent builds and typed diagnostic replay. Prove bounded storage, lease-safe eviction and equal results across applicable execution levels. Validator success is not design approval.",
+      "checkInstructions": "Today's proof: admitted compiler 66c2a661a6 ran a folder-dependency program twice, printing 42 both times, and both traces show geo parsed and checked. jet update geo returned E2104, exit 2. These do not measure speed or prove registry installs.\n\nAcceptance for A: a saved check is refused when the compiler, target, features, flags or any embedded, generated, foreign or dependency input differs. Forged, unsigned and revoked checks are refused. Two independent builds of the same inputs give identical bytes. A folder dependency is checked fresh on every run. Diagnostics from a saved check match a fresh check. Eviction never removes an entry in use. Results match on every execution level.",
       "surface": {
-        "gist": "May installed dependencies reuse checked packs despite the no-incremental rule?",
-        "lesson": "A pack saves checked library facts, bodies and code for exact build inputs. Installed code may be fixed, but compiler, target, features and build inputs can differ. Generic uses and caller checks still run. Reuse needs an explicit exception, and a pack may later be evicted.",
+        "gist": "May Jet check a downloaded library once and reuse that result, like Core?",
+        "lesson": "A library you download at a fixed version, like geo#2.1.0, never changes. Jet still checks it from scratch on every run today. Core will ship already checked. A saved check holds a library's checked types and compiled code for one exact compiler and setup. Whatever wins, your own code is checked fresh, and so is library code used with your types.",
         "trio": {
           "current": {
-            "note": "The review's local dependency was parsed and checked on both native runs. This is not a working registry-install example.",
-            "code": "# Exercised small probe: main calls geo.answer().\n$ jet run main.jet\n42\n$ jet run main.jet\n42\n# Both traces contain geo parsing and semantic checking."
+            "note": "Tested today with a library in a folder. Both runs check geo again. A downloaded library would be checked the same way.",
+            "code": "# package.jet\ndeps: { geo: ../geo }\n\n$ jet run main.jet\n42            # Jet checked geo, then main\n$ jet run main.jet\n42            # Jet checked geo again"
           },
           "wild": {
-            "lang": "Go",
-            "note": "Go documents reuse across matching source, compiler and flags, and a caveat for changed external C libraries. Documentation comparison only.",
-            "code": "# Source: go.dev/cmd/go, Build and test caching.\n# Reuse matching outputs; remove old ones periodically.\n# External C-library changes can require forced rebuilding."
+            "lang": "Cargo (Rust)",
+            "note": "Cargo compiles each downloaded crate once and reuses it. Only your own crate is rebuilt. Source: doc.rust-lang.org/cargo/guide/build-cache.html",
+            "code": "$ cargo build   # compiles serde once, then your crate\n$ cargo build   # reuses serde; rebuilds your crate only"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Installed packs via the verified store",
-            "gist": "Reuse exact installed packs from this machine or an already approved builder.",
+            "name": "Check downloaded libraries once",
+            "gist": "A fixed-version library is checked once and reused. Folder libraries stay fresh.",
             "gains": [
-              "Avoid repeat dependency checks while a matching pack is retained.",
-              "An approved substitute can avoid a local first build."
+              "No rechecking of code that cannot change.",
+              "Matches how Core already works."
             ],
             "losses": [
-              "Needs an explicit exception to the ruling.",
-              "Disk and verification costs; trust in the approved producer."
+              "A compiler upgrade checks each library once more."
             ],
             "proposed": {
-              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # verify a matching pack, or build it\n$ jet test   # reuse retained geo; Ana compiles fresh\n# New compiler: another matching pack. Local geo: fresh each run."
-            }
-          },
-          {
-            "key": "D",
-            "name": "Installed packs built locally only",
-            "gist": "Same installed-only exception, but never accept another builder's checked pack.",
-            "gains": [
-              "Avoid repeat dependency checks while retained.",
-              "No outside producer of checked facts."
-            ],
-            "losses": [
-              "Every fresh machine builds its own pack.",
-              "Disk cost; narrows earlier shared-restore policy."
-            ],
-            "proposed": {
-              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # build geo's matching pack locally\n$ jet test   # reuse retained geo; Ana compiles fresh\n# New compiler: local rebuild. Local geo: fresh each run."
+              "code": "deps: { geo: geo#2.1.0 }\n$ jet run   # check geo once, save it; check Ana's code\n$ jet run   # reuse saved geo; check Ana's code fresh\n\ndeps: { geo: ../geo }   # Ben's editable copy\n$ jet run   # geo checked fresh every run"
             }
           },
           {
             "key": "B",
-            "name": "No dependency-check exception",
-            "gist": "Keep dependency checks fresh; only Core/runtime get the new toolchain treatment.",
+            "name": "Check every library every run",
+            "gist": "Keep today's behavior. Only Core comes already checked.",
             "gains": [
-              "Preserves the latest ruling.",
-              "No new trust in saved dependency checks."
+              "No exception to your no-incremental rule."
             ],
             "losses": [
-              "Repeats dependency parsing and checking.",
-              "Cold-compiler improvements must carry that cost."
+              "Every run rechecks all 40 geo files.",
+              "The cost grows with each library added."
             ],
             "proposed": {
-              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # check geo and Ana fresh\n$ jet test   # check geo and Ana fresh again\n# New compiler: still fresh. Local geo: fresh each run."
+              "code": "deps: { geo: geo#2.1.0 }\n$ jet run   # check geo's 40 files and Ana's 3\n$ jet run   # check all 43 files again"
             }
           },
           {
             "key": "C",
-            "name": "Whole-package reuse, including local code",
-            "gist": "Use A's store for installed packs and also reuse unchanged editable dependencies.",
+            "name": "Also reuse unchanged folder libraries",
+            "gist": "Like A, plus reuse editable libraries until a file changes.",
             "gains": [
-              "Also avoids repeated work in large local workspaces."
+              "Also saves work in big multi-library projects."
             ],
             "losses": [
-              "Reverses the ruling for edited dependencies too.",
-              "Needs change tracking and retains more variants."
+              "This is the incremental compilation you ruled out.",
+              "Needs file-change tracking to stay correct."
             ],
             "proposed": {
-              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # verify a matching pack, or build it\n$ jet test   # reuse retained geo; Ana compiles fresh\n# New compiler: another pack. Local geo: rebuild after an edit, then reuse."
+              "code": "deps: { geo: ../geo }   # Ben's editable copy\n$ jet run   # check geo once, save it\n$ jet run   # unchanged: reuse it\n# Ben edits geo/shape.jet\n$ jet run   # recheck all of geo"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "An explicit installed-only exception avoids repeated checks and keeps edited code fresh. The existing store can accept an approved substitute without adding a second trust path.",
+          "why": "A downloaded library never changes, so rechecking it every run is wasted work. A saves that work and still compiles everything you can edit fresh.",
           "gains": [
-            "Avoid repeat checks for exact retained dependencies.",
-            "Reuse approved builds across machines."
+            "Runs stop rechecking libraries that cannot change.",
+            "A new machine can download checks instead of building."
           ],
           "losses": [
             {
-              "loss": "Packs consume disk and missing variants cost a build or download.",
-              "mitigation": "Use existing store bounds and leases. Evict safely; never promise once forever."
+              "loss": "After a compiler upgrade, each library is checked once more.",
+              "mitigation": "The release builder publishes matching checks. Otherwise one check costs what B pays every run."
             },
             {
-              "loss": "Approved producers can still be wrong or dishonest.",
-              "mitigation": "Require exact provenance, reproducibility policy, read verification and revocation. Keep source rebuild and compare paths. These reduce, not remove, trust."
+              "loss": "A downloaded check is only as honest as its builder.",
+              "mitigation": "Jet accepts only the builder that made your compiler, or one your team added. It checks signatures every time."
             }
           ],
           "whyNot": [
             {
-              "key": "D",
-              "reason": "Good for local-only trust, but makes each machine rebuild even when an approved substitute exists."
-            },
-            {
               "key": "B",
-              "reason": "Simplest and closest to the ruling, but repeats dependency checks. No speed claim is measured here."
+              "reason": "B rechecks code that never changes on every run, and the cost grows with each library."
             },
             {
               "key": "C",
-              "reason": "Helps local workspaces too, but restores package-level incremental reuse for edited code."
+              "reason": "C reuses code people edit, which is the incremental compilation you ruled out."
             }
           ],
-          "tradeoff": "A accepts approved installed packs; D builds them only locally; B keeps checking fresh; C also reuses editable dependencies. None makes packs free or signatures a proof of safety."
+          "tradeoff": "A treats downloaded libraries like Core and keeps editable code fresh. B keeps everything fresh at a growing cost. C also reuses editable code."
         }
       },
       "draft": false,
@@ -173374,9 +173413,11 @@
       "by": "owner",
       "kind": "question",
       "text": "this is way too fucking wordy and verbose and confusing. state in plain english, make sure your code aligns. this means nothing to me",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-05T20:47:54.355Z"
+      "status": "answered",
+      "answer": "Should a library you download at a fixed version be checked once and reused like Core, instead of rechecked every run? We recommend yes; libraries in folders you edit, and your own code, still compile fresh. The ballot is revised: the only outside builder trusted by default is the one that made your compiler.",
+      "created": "2026-11-05T20:47:54.355Z",
+      "answeredAt": "2026-11-05",
+      "answeredBy": "Main"
     },
     {
       "id": "qflt97of",
@@ -173385,9 +173426,11 @@
       "by": "owner",
       "kind": "question",
       "text": "engineer away the downsides",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-05T20:56:22.088Z"
+      "status": "answered",
+      "answer": "has(id) stays the pick. Its downsides are designed away: the read after it still checks, so a stale answer stops clearly and never reaches the wrong monster, and the second check is two number compares. Option B is now a one-step edit callback (allowed by D-FNVAL-WRITE1), which closes the gap but locks the pool inside the callback.",
+      "created": "2026-11-05T20:56:22.088Z",
+      "answeredAt": "2026-11-05",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -174244,6 +174287,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T21:12:11.885Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0xq1afz",
+      "note": "sema: Pool id equality id == id fails with E0312"
+    },
+    {
+      "at": "2026-11-05T21:12:10.986Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0iuwxty",
+      "note": "sema: Pool.remove through a read-only Pool parameter is accepted (must be E0202)"
+    },
+    {
+      "at": "2026-11-05T21:11:29.753Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PACKAGE-PACKS1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-05T21:11:22.450Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qflt97of",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T21:11:21.778Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qecu53x9",
+      "note": ""
+    },
+    {
+      "at": "2026-11-05T21:11:21.116Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-POOL-HAS1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-05T21:10:13.329Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#54"
+    },
+    {
+      "at": "2026-11-05T21:10:05.208Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#89"
+    },
     {
       "at": "2026-11-05T21:10:03.910Z",
       "by": "Main",
