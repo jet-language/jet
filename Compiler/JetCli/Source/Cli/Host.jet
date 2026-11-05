@@ -1723,7 +1723,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
             }
         }
     }
-    ran :: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors}, "{binary}.records") ?? {
+    ran :: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts.copy()}, "{binary}.records") ?? {
         cli_files.remove(binary).drop("the native run already failed")
         return jet_cli_ice(err.message)
     }
@@ -1735,7 +1735,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     stdout :: if show -> ran.output else -> ran.receipt.output
     stderr :: if show -> ran.errors else -> ran.receipt.errors
     if measure == None {
-        outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, passed, jet_cli_test_claims_floor(snapshot.roots[0])) ?? return jet_cli_ice(err.message)
+        outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, jet_cli_test_claims_floor(snapshot.roots[0])) ?? return jet_cli_ice(err.message)
         notice :: jet_cli_test_persist(outcome.report)
         // Under `--json` the status line is the whole stdout; the report moves to stderr.
         if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n", stderr: "{stdout}{stderr}{notice}", exit_code: exit_code}

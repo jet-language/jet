@@ -353,7 +353,10 @@ fn scheduler_control_take_stop(control: I64) -> I64 {
 }
 fn scheduler_control_discard_stop(control: I64) { scheduler_stop_drop(scheduler_control_take_stop(control)) }
 
+// Every stop record settles the test harness's assertion mark (TestCapture.jet
+// test_stop_assertion_settle): only a rendered report (kind 5) keeps it.
 fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
+    test_stop_assertion_settle(kind == I64{5})
     record :: jet_rt_alloc(I64{56}, I64{8})
     sync_store(record, kind)
     sync_store(wrapping(record + I64{8}), I64{-1})

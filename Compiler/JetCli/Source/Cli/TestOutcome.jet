@@ -9,13 +9,14 @@ use {
     receipt_crypto :: core.crypto
     jet_driver.[JetDriverAuthorizedSourceRoot]
     jet_foundation.[
-        BuildOptions, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceProducerKind, EvidenceReport,
+        BuildOptions, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceKind, EvidenceOutcome,
+        EvidenceProducerKind, EvidenceRecord, EvidenceReport,
         EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
         EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
         EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, build_options_key,
-        evidence_expectation_error_text, evidence_merge_error_text, evidence_record_checked_derivation,
-        evidence_record_from_test_codes, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
-        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write,
+        evidence_expectation_error_text, evidence_identity_for_record, evidence_merge_error_text, evidence_record_checked_derivation,
+        evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
+        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token,
     ]
     jet_pkg_model.[ClaimsGrade, ClaimsProjection, WorkspaceDeclarationCache]
 }
@@ -153,10 +154,13 @@ fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade
 // The run's evidence and status line. `wires` are the settled outcome wires
 // (jet_cli_native_test_wire_parts) and `tests` their tests' claims in the
 // same order; a wire past them (an output check) is a unit claim of `file`.
+// `contracts` are the contract outcomes the children observed, each a
+// Contract record. A stop a test caught (a failed assertion, a property
+// case) is marked `caught_by`; an uncaught one is a runtime stop.
 // `ran_ok` is the canonical receipt's verdict (failed output checks included).
 // The claims floor is reported, not enforced: it never changes `ok` or the
 // exit status.
-fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
+fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], contracts: [JetNativeTestContract], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
     source_revision :: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
     revision_bytes :: source_revision.bytes()
     short :: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision.copy()
@@ -225,6 +229,18 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
         if stop == .Val(found) {
             place :: if found.file == "" -> file.copy() else -> found.file.copy()
             observed := evidence_record_from_test_codes(2, 1, found.code, found.message, place, found.line, report_id, build, revision) ?? return Err(err.message)
+            // A property case and a failed assertion catch their stop; any
+            // other stop (flag 8) ended the test at a runtime stop.
+            caught :: if {
+                claim.kind == 3 -> "property_case"
+                parts.flags.bit_and(8) == 0 -> "assertion"
+                else -> ""
+            }
+            if caught != "" {
+                &observed.attachments.push(EvidenceAttachment{name: "caught_by", value: caught})
+                // A caught and an uncaught stop at one site stay two records.
+                observed.identity.evidence_id = evidence_stable_token([String]{observed.identity.evidence_id.copy(), "caught_by", caught})
+            }
             if expected_failure {
                 evidence_record_set_expectation(&observed, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))
             }
@@ -237,6 +253,14 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
     }
     ok :: ran_ok && tally.failed == 0 && tally.unexpected_passes == 0
     projection :: ClaimsProjection.from_records(report.records)
+    // Contract records observe clauses; the test records above own pass and
+    // fail with their expectations, so the claims projection is taken first.
+    // A clause that fails inside an expected failure doesn't fail the floor.
+    loop contract in contracts {
+        record :: jet_cli_test_contract_record(contract, file, report_id, build, revision) ?? return Err(err.message)
+        derivation :: evidence_record_checked_derivation(record)
+        evidence_report_add_record_with_derivation(&report, ^record, ^derivation) ?? return Err(evidence_merge_error_text(err))
+    }
     grade :: projection.grade.render()
     floor_text := String?{None}
     if floor == .Val(required) -> floor_text = Val(required.render())
@@ -269,6 +293,30 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
         jet_cli_status_field("summaries", summaries),
     })
     Ok(JetCLITestOutcome{status: status, report: report})
+}
+
+// A contract outcome as a Contract record: the clause's marker (`Pre` or
+// `Post`) at its declared site, passed when it held and failed (E3005) when
+// it didn't. The outcome word is its detail, so a clause that both held and
+// failed is two records. A site the runtime didn't name falls on `file`.
+fn jet_cli_test_contract_record(contract: JetNativeTestContract, file: String, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Err! {
+    fields :: contract.site.split("\t").to_list()
+    if fields.len() < 4 || (fields[0] != "Pre" && fields[0] != "Post") -> return Err("native contract site `{contract.site}` is malformed")
+    line :: Int.parse(fields[1]) ?? return Err("native contract site line is invalid")
+    column :: Int.parse(fields[2]) ?? return Err("native contract site column is invalid")
+    named := fields[3].copy()
+    loop index in 4..<fields.len() -> named = "{named}\t{fields[index]}"
+    source :: EvidenceSource{
+        path: if named == "" -> file.copy() else -> named,
+        line: U32.from_int(line) ?? U32{0},
+        column: U32.from_int(column) ?? U32{1},
+    }
+    detail :: if contract.held -> "held" else -> "failed"
+    identity :: evidence_identity_for_record(report_id, fields[0], EvidenceProducerKind.Test, EvidenceKind.Contract, source, U64{1}, detail)
+    record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Test, if contract.held -> EvidenceOutcome.Passed else -> EvidenceOutcome.Failed, U64{1}, source.copy(), build, revision)
+    record.detail = detail
+    if !contract.held -> &record.diagnostics.push(EvidenceDiagnostic{code: "E3005", message: "#{fields[0]} contract failed", source: Val(source)})
+    Ok(record)
 }
 
 // Optional history: the run's report as `.jet/evidence/<report id>.json`,

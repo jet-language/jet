@@ -133,7 +133,7 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
             if sema_contract_function_has_pre(environment, program, target.id) -> contract_callee = sema_contract_function_for_symbol(environment, program, target.id)
             if contract_callee == .Val(contract) {
                 slots :: loop slot in 0..<params.len() -> slot
-                checked_contract :: sema_contract_check_call(contract, &lowered, slots, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+                checked_contract :: sema_contract_check_call(contract, target.id, &lowered, slots, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
                 contract_bindings = checked_contract.bindings
                 contract_nodes = checked_contract.contracts
             }

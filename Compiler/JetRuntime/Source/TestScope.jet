@@ -265,9 +265,11 @@ fn test_scope_code_word(code: I64) -> I64 {
 }
 
 // Native stopped IR has no host unwind to catch. Only a pending panic whose
-// stop the panic rail recorded raw (E3001/E3010/E3011, Sentry R0801-R0803) in
-// the innermost stopped expectation of this scope can consume it. Keep
-// cancellation, deadlines, skip, and unrelated scope probes untouched.
+// stop the panic rail recorded raw (E3001/E3010/E3011, Sentry R0801-R0803)
+// or a failed `#Pre`/`#Post` clause recorded (E3005, Trap.jet
+// trap_contract_stop) in the innermost stopped expectation of this scope can
+// consume it. Keep cancellation, deadlines, skip, and unrelated scope probes
+// untouched.
 #Export(c) fn jet_rt_test_catch_for_scope(scope: I64) -> Bool {
     control :: scheduler_control_current()
     if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return false
@@ -278,7 +280,7 @@ fn test_scope_code_word(code: I64) -> I64 {
     row :: wrapping(trap_word(wrapping(state + I64{48})) + index * I64{8})
     if (trap_word(row) != scope) -> return false
     word :: test_scope_code_word(trap_word(wrapping(row + I64{24})))
-    if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 &&
+    if (word != TEST_SCOPE_E3001 && word != TEST_SCOPE_E3005 && word != TEST_SCOPE_E3010 && word != TEST_SCOPE_E3011 &&
         word != TEST_SCOPE_R0801 && word != TEST_SCOPE_R0802 && word != TEST_SCOPE_R0803) -> return false
     // The original stop stays pending while deeper frames unwind; only a
     // mismatch replaces it (test_scope_catch native) with E3001 at once.

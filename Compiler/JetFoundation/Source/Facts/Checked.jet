@@ -358,6 +358,19 @@ enum TContractKind { Pre Post }
 
 enum TContractDisposition { Check Proven Stripped }
 
+// Where a contract clause is declared: the file, line and column of its
+// condition. A `#Pre` clause is checked at each call site, so its checked
+// contract's `file`/`line` are the caller's; this stays the callee's clause
+// (the site of `jet prove`'s contract evidence, JetIR BuildContracts.jet).
+// `core` is true for a clause declared in Core: Core's implementation, not a
+// claim of the program under test.
+struct TContractSite {
+    file: String
+    line: Int
+    column: Int
+    core: Bool
+}
+
 struct TContractResult {
     carrier_ty: Type
     binding_ty: Type

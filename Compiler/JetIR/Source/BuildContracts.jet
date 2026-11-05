@@ -15,7 +15,8 @@ struct IRContractFrame { result: TContractResult, post: [BodyContract] }
 // `#Pre contract failed: {msg}` or `#Post contract failed: {msg}`, the
 // registry row's what. Its report quotes the clause's source line with the
 // caret under its span: the callee name of a `#Pre` call site, the clause of
-// a `#Post`.
+// a `#Post`. In a test image (IRProgram.contract_records) the clause first
+// reports whether it held, at its declared site.
 fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
     if contract.disposition != .Check -> return
     if contract.file != b.f.source_file -> return ir_fail(&b, contract.span, "contract source differs from its function source")
@@ -31,6 +32,15 @@ fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract
         return
     }
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    if p.contract_records && !contract.site.core {
+        // A test image reports the clause's outcome at its declared site,
+        // `{marker}\t{line}\t{column}\t{file}` (JetRuntime TestContracts.jet).
+        // Core's own clauses are its implementation, not the program's claims.
+        marker :: if contract.kind == .Pre -> "Pre" else -> "Post"
+        args := ir_static_text(&m, &b, "{marker}\t{contract.site.line}\t{contract.site.column}\t{contract.site.file}")
+        &args.push(condition)
+        _ :: ir_runtime(&m, &b, "jet_rt_test_contract", args, -1)
+    }
     failed :: ir_temp(&m, &b, bool_row)
     ir_emit(&b.f, IROp.Not, failed, condition, -1, -1, b.line)
     ir_open_if(&b.f, failed, b.line)

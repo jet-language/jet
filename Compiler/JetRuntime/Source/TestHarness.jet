@@ -15,11 +15,16 @@
     // A failed expectation latches its state for the rest of its own test
     // only; the next unit starts with no expectation frames and no latch.
     jet_rt_test_expect_fail_abort()
+    _ :: test_stop_assertion_take()
     save :: jet_rt_alloc(I64{40}, I64{8})
     root :: jet_rt_root_begin(save)
     returned :: coll_call1(invoke, env)
     record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     jet_rt_root_leave(root, save)
+    // A stop that is not a failed assert/assert_eq is an uncaught runtime
+    // stop (proof-replay-decisions.md: caught assertions exit 1, runtime
+    // stops 70); the outcome's runtime_stop flag carries it to the host.
+    runtime_stop :: record != I64{0} && !test_stop_assertion_take()
     error := returned
     if (record != I64{0}) {
         error = scheduler_stop_take_message(record)
@@ -32,7 +37,9 @@
     jet_rt_free(save, I64{40}, I64{8})
     stdout :: jet_rt_test_capture_take()
     skipped :: jet_rt_test_take_whole_skip()
-    jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+    outcome :: jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+    if runtime_stop -> trap_store(outcome, trap_word(outcome).bit_or(I64{8}))
+    outcome
 }
 
 // `invoke(env)` returns one owned outcome; `release(env)` runs shielded once.

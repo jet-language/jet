@@ -824,7 +824,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         receiver_slot :: resolved_candidate.receiver_offset - 1
         slots := [Int]{receiver_slot}
         loop slot in 0..<params.len() -> &slots.push(slot + resolved_candidate.receiver_offset)
-        checked_contract :: sema_contract_check_call(contract, &all_args, slots, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        checked_contract :: sema_contract_check_call(contract, resolved_candidate.method.symbol, &all_args, slots, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         call_receiver = all_args[0].value
         lowered = [TCallArg]{}
         loop index in 1..<all_args.len() -> &lowered.push(all_args[index])

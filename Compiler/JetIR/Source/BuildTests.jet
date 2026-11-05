@@ -21,10 +21,14 @@
 //   JET_NATIVE_TEST_REPORT_PATH set: report the outcome file and exit
 //   (jet_rt_test_read, jet_rt_test_finish_wire; exit 1 when a test failed).
 //   Otherwise: call the package's `fn test(t: Test)` with a fresh suite, read
-//   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), spawn each selected
+//   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), open it for the
+//   contract records (jet_rt_test_contracts_open), spawn each selected
 //   test (only `JET_NATIVE_TEST_ID`'s when set) and append its record
 //   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
-//   after spawning; then, unfiltered, run each Check Output once.
+//   after spawning; then, unfiltered, run each Check Output once. A checked
+//   `#Pre`/`#Post` clause's first hold and first failure append
+//   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
+//   happen (JetRuntime TestContracts.jet).
 
 use {
     jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
@@ -49,6 +53,7 @@ fn ir_build_tests(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef]
     p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
     p.sentries = true
+    p.contract_records = true
     ir_foreign_index(&p, ^foreign, decls)
     m := ir_module_for(p)
     failures := [IRBuildFailure]{}
@@ -561,6 +566,9 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
     ir_open_if(&b.f, missing, b.line)
     ir_test_exit(&m, &b, 103)
     ir_end(&b.f, b.line)
+    // The checked contract clauses append their first hold and first failure
+    // to the same records file (BuildContracts.jet ir_contract).
+    _ :: ir_runtime(&m, &b, "jet_rt_test_contracts_open", [Int]{records_path}, -1)
     selected :: ir_test_env(&m, &b, "JET_NATIVE_TEST_ID")
     filtered :: ir_test_present(&m, &b, selected)
     tasks :: ir_temp(&m, &b, pointer_row)
