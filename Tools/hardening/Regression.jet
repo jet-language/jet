@@ -119,8 +119,10 @@ fn regression_tiers() -> [String] Never! {
 }
 
 // The shell command of a tier. `$JET` names the compiler, as everywhere in
-// the repo; a replay without it uses `jet` from PATH.
+// the repo; a replay without it uses `jet` from PATH. The `check` stage is
+// not a tier: it says whether the compiler admits the source at all.
 fn tier_command(tier: String) -> String Never! {
+    if tier == CHECK_STAGE -> return "\"${{JET:-jet}}\" check {SOURCE_SLOT}"
     if tier == AOT_RELEASE -> return "\"${{JET:-jet}}\" build {SOURCE_SLOT} --release --quiet --output-dir={SOURCE_SLOT}.out && {SOURCE_SLOT}.out/\"$(basename {SOURCE_SLOT} .jet)\""
     "\"${{JET:-jet}}\" run {SOURCE_SLOT}"
 }
@@ -156,12 +158,14 @@ fn failed_run(run: TierRun, message: String) -> TierRun Never! {
     out
 }
 
-// Runs one tier of the seed at `path`, feeding it `stdin` through the
-// child's pipe and closing it. An empty `stdin` leaves the pipe closed.
+// Runs one tier of the source at `path`, feeding it `stdin` through the
+// child's pipe and closing it. An empty `stdin` leaves the pipe closed. The
+// command runs in the source's directory and names it by its file name, so
+// no scratch path reaches the compiler's output.
 fn run_tier(jet: String, tier: String, path: String, stdin: String) -[Exec, Time.Wait]> TierRun Never! {
     command :: tier_command(tier)
     run :: TierRun{tier: tier.copy(), command: command.copy(), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
-    spec :: process.cmd([String]{"sh", "-c", command.replace(SOURCE_SLOT, shell_quoted(path))}).cwd(files.dirname(path)).env("JET", jet).timeout(time.Duration{ns: TIER_TIMEOUT_NS})
+    spec :: process.cmd([String]{"sh", "-c", command.replace(SOURCE_SLOT, shell_quoted(files.basename(path)))}).cwd(files.dirname(path)).env("JET", jet).timeout(time.Duration{ns: TIER_TIMEOUT_NS})
     receipt :: if {
         stdin == "" -> spec.run() ?? return failed_run(run, "sh did not start: {err}")
         else -> {

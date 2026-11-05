@@ -15,6 +15,14 @@
 //                       behavior back and fails unless every seed is found.
 //                       The commit is `git rev-parse HEAD` unless named, as an
 //                       export without .git must.
+//   --generate DIR [--seed S] [--cases N] [--invert] [--commit SHA]
+//                       write N generated programs from seed S (default 2342,
+//                       16 cases) under DIR/cases, run each through `jet check`
+//                       and every tier with $JET, and write each minimized
+//                       finding to DIR/<case>.repro.json; fails on any finding
+//                       or a surviving negative control. --invert plants an
+//                       optimizer-only change or an unlowered construct in
+//                       each case and fails unless every one is found.
 //   --root DIR          the checkout to read (default .)
 
 use {
@@ -34,14 +42,16 @@ struct Options {
     source_out: String
     commit: String
     invert: Bool
+    seed: String
+    cases: Int
 }
 
 fn usage() -> String Never! {
-    "usage: jet run Tools/hardening/Main.jet -- [--root DIR] (--write [PATH] | --check [PATH] | --repro-check FILE | --repro-replay FILE --tier TIER --source-out PATH | --regressions DIR [--invert] [--commit SHA])"
+    "usage: jet run Tools/hardening/Main.jet -- [--root DIR] (--write [PATH] | --check [PATH] | --repro-check FILE | --repro-replay FILE --tier TIER --source-out PATH | --regressions DIR [--invert] [--commit SHA] | --generate DIR [--seed S] [--cases N] [--invert] [--commit SHA])"
 }
 
 fn parse_args(args: [String]) -> Options Err! {
-    options := Options{root: ".", command: "", path: "", tier: "", source_out: "", commit: "", invert: false}
+    options := Options{root: ".", command: "", path: "", tier: "", source_out: "", commit: "", invert: false, seed: GENERATOR_SEED, cases: GENERATOR_CASES}
     index := 0
     loop index < args.len() {
         arg :: args[index]
@@ -53,17 +63,19 @@ fn parse_args(args: [String]) -> Options Err! {
                 index += 1
                 next
             }
-            arg == "--write" || arg == "--check" || arg == "--repro-check" || arg == "--repro-replay" || arg == "--regressions" -> {
+            arg == "--write" || arg == "--check" || arg == "--repro-check" || arg == "--repro-replay" || arg == "--regressions" || arg == "--generate" -> {
                 if options.command != "" -> return Err("choose one command\n{usage()}")
                 options.command = arg.copy()
                 options.path = value.copy()
             }
-            arg == "--root" || arg == "--tier" || arg == "--source-out" || arg == "--commit" -> {
+            arg == "--root" || arg == "--tier" || arg == "--source-out" || arg == "--commit" || arg == "--seed" || arg == "--cases" -> {
                 if !has_value -> return Err("{arg} needs a value")
                 if {
                     arg == "--root" -> options.root = value.copy()
                     arg == "--tier" -> options.tier = value.copy()
                     arg == "--commit" -> options.commit = value.copy()
+                    arg == "--seed" -> options.seed = value.copy()
+                    arg == "--cases" -> options.cases = Int.parse(value) ?? return Err("--cases needs a number, not `{value}`")
                     else -> options.source_out = value.copy()
                 }
             }
@@ -72,12 +84,14 @@ fn parse_args(args: [String]) -> Options Err! {
         index += if has_value -> 2 else -> 1
     }
     if options.command == "" -> return Err(usage())
+    runs :: options.command == "--regressions" || options.command == "--generate"
     if options.path == "" {
-        if options.command == "--regressions" -> return Err("--regressions needs a directory for the findings")
+        if runs -> return Err("{options.command} needs a directory for the findings")
         if options.command != "--write" && options.command != "--check" -> return Err("{options.command} needs a bundle path")
         options.path = files.join(options.root, MANIFEST_PATH)
     }
-    if (options.invert || options.commit != "") && options.command != "--regressions" -> return Err("--invert and --commit go with --regressions")
+    if (options.invert || options.commit != "") && !runs -> return Err("--invert and --commit go with --regressions or --generate")
+    if (options.seed != GENERATOR_SEED || options.cases != GENERATOR_CASES) && options.command != "--generate" -> return Err("--seed and --cases go with --generate")
     if options.command == "--repro-replay" && (options.tier == "" || options.source_out == "") -> return Err("--repro-replay needs --tier and --source-out")
     Ok(options)
 }
@@ -112,22 +126,20 @@ fn run_commit(options: Options) -[Exec, Time.Wait]> String Err! {
         return Ok(options.commit.copy())
     }
     head :: process.cmd([String]{"git", "-C", options.root, "rev-parse", "HEAD"}).run() ?? return Err("git did not start: {err}")
-    if head.code != 0 -> return Err("--regressions records the commit; outside a git checkout pass --commit SHA ({head.errors.trim()})")
+    if head.code != 0 -> return Err("{options.command} records the commit; outside a git checkout pass --commit SHA ({head.errors.trim()})")
     Ok(head.output.trim().copy())
 }
 
-// --regressions: every seed on every tier, each finding written as a bundle.
-// Without --invert a finding fails the run; with it, a seed the check
-// misses fails it.
-fn regressions(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
-    jet :: compiler_path() ?? return Err(err)
+// Who runs, on what: the compiler's digest, the commit and the registry
+// snapshot, for every bundle the run writes under options.path.
+fn run_identity(options: Options, jet: String, label: String) -[FS, Env, Exec, Time, Time.Wait]> RunIdentity Err! {
     inputs :: load_inputs(options.root) ?? return Err(err)
     snapshot :: build_snapshot(inputs)
     commit :: run_commit(options) ?? return Err(err)
     files.create_dir_all(options.path) ?? return Err("cannot create {options.path}: {err}")
     started :: time.isoformat(time.now())
-    identity := RunIdentity{
-        run_id: "regressions-{started}",
+    Ok(RunIdentity{
+        run_id: "{label}-{started}",
         started: started.copy(),
         finished: started.copy(),
         commit: commit,
@@ -135,7 +147,21 @@ fn regressions(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err
         host: sys.platform(),
         target: sys.platform(),
         registry_snapshot_hash: snapshot.hash.copy(),
-    }
+    })
+}
+
+fn write_bundle(bundle: Dyn, path: String) -[FS]> Bool Err! {
+    text :: json.canonical(bundle) ?? return Err("the finding at {path} has no canonical form: {err}")
+    files.write(path, "{text}\n") ?? return Err("cannot write {path}: {err}")
+    Ok(true)
+}
+
+// --regressions: every seed on every tier, each finding written as a bundle.
+// Without --invert a finding fails the run; with it, a seed the check
+// misses fails it.
+fn regressions(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
+    jet :: compiler_path() ?? return Err(err)
+    identity := run_identity(options, jet, "regressions") ?? return Err(err)
     passed := true
     loop seed in regression_seeds() {
         runs :: run_seed(seed, jet, files.join(options.path, "seeds"), invert: options.invert) ?? return Err(err)
@@ -144,8 +170,7 @@ fn regressions(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err
         findings :: seed_finding(seed, runs, identity, arm) ?? return Err(err)
         loop bundle in findings {
             path :: files.join(options.path, "{seed.seed}.repro.json")
-            text :: json.canonical(bundle) ?? return Err("the {seed.surface} finding has no canonical form: {err}")
-            files.write(path, "{text}\n") ?? return Err("cannot write {path}: {err}")
+            write_bundle(bundle, path) ?? return Err(err)
             print("finding {seed.surface}: {path}")
             if !options.invert -> passed = false
         }
@@ -161,9 +186,57 @@ fn regressions(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err
     Ok(passed)
 }
 
+// --generate: the negative controls first, then every generated case through
+// `jet check` and every tier. A finding is minimized and written as a
+// bundle. The last line names the ordered stable digests of the findings,
+// which a second run of the same seed on the same compiler repeats.
+fn generation(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
+    survived :: layer_controls()
+    if survived.len() > 0 {
+        term.eprint("hardening generator: negative controls passed the layer: {survived.join(", ")}")
+        return Ok(false)
+    }
+    programs :: generate_programs(options.seed, options.cases) ?? return Err(err)
+    jet :: compiler_path() ?? return Err(err)
+    identity := run_identity(options, jet, "generate") ?? return Err(err)
+    scratch :: files.join(options.path, "cases")
+    passed := true
+    stable := [String]{}
+    loop program in programs {
+        construct :: primary_instance(program).construct_id
+        plant :: if options.invert -> plant_for(program.index) else -> ""
+        run :: run_case(program, jet, scratch, plant) ?? return Err(err)
+        verdict :: classify(program, run)
+        if verdict.class == AGREEMENT {
+            print("agreement {program.case_id} {construct}")
+            if options.invert {
+                term.eprint("hardening generator: the planted {plant} in {program.case_id} was not found")
+                passed = false
+            }
+            next
+        }
+        if options.invert && verdict.class != plant {
+            term.eprint("hardening generator: {program.case_id} planted {plant} but showed {verdict.class}")
+            passed = false
+        }
+        if !options.invert -> passed = false
+        found :: minimize(program, run, jet, scratch, plant) ?? return Err(err)
+        identity.finished = time.isoformat(time.now())
+        arm :: if options.invert -> "planted:{AOT_RELEASE}:{plant}" else -> "none"
+        bundle :: finding_bundle(found, identity, arm) ?? return Err(err)
+        path :: files.join(options.path, "{program.case_id}.repro.json")
+        write_bundle(bundle, path) ?? return Err(err)
+        &stable.push(stable_digest(bundle) ?? return Err(err))
+        print("finding {program.case_id} {verdict.class} {construct} ({found.dropped.len()} instances dropped): {path}")
+    }
+    print("generated {programs.len()} programs from seed {options.seed}: {stable.len()} findings, stable digest {digest(stable.join("\n"))}")
+    Ok(passed)
+}
+
 fn hardening_main(args: [String]) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err! {
     options :: parse_args(args) ?? return Err(err)
     if options.command == "--regressions" -> return regressions(options)
+    if options.command == "--generate" -> return generation(options)
     if options.command == "--write" {
         fresh :: generate(options.root) ?? return Err(err)
         parent :: options.path.rpartition("/").head

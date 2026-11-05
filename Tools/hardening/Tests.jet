@@ -484,3 +484,165 @@ fn stored_finding(findings: [Dyn], surface: String) -> Dyn Never! {
     run_failed :: TierRun{tier: JET_RUN, command: tier_command(JET_RUN), stdout: "", stderr: "error\n", exit: Val(1), signal: None, timeout: false}
     assert_eq(inversion_problem(seed, [TierRun]{silent.copy(), run_failed}), "regression:release-emission failed on jet_run, which its inversion does not touch")
 }
+
+// c36: generated programs are typed, bounded and value-consuming across
+// every construct family, and agree on every tier.
+
+fn generated(seed: String, cases: Int) -> [Generated] Never! {
+    generate_programs(seed, cases) ?? panic("generation failed: {err}")
+}
+
+fn run_problem(program: Generated, run: CaseRun) -> String Never! {
+    stderr := run.check.stderr.copy()
+    loop tier_run in run.runs -> stderr = "{stderr}{tier_run.stderr}"
+    "{program.case_id}: {classify(program, run).mismatch}\n{validate_program(program).join("\n")}\n{stderr}"
+}
+
+#Test("generated programs are typed, bounded and value-consuming, and every family leads a case") {
+    programs :: generated(GENERATOR_SEED, GENERATOR_MAX_CASES)
+    assert_eq(programs.len(), GENERATOR_MAX_CASES)
+    leading := [String]{}
+    reached := [String]{}
+    sizes := [Int]{0, 0, 0}
+    loop program in programs {
+        assert_eq(validate_program(program).join("\n"), "")
+        assert(program.source.len() <= GENERATOR_SOURCE_LIMIT)
+        family :: primary_instance(program).family
+        if !leading.contains(family) -> &leading.push(family.copy())
+        loop item in program.instances {
+            if !reached.contains(item.construct_id) -> &reached.push(item.construct_id.copy())
+        }
+        sizes[program.instances.len() - 1] = sizes[program.instances.len() - 1] + 1
+    }
+    loop (index, family) in CONSTRUCT_FAMILIES -> assert_eq(primary_instance(programs[index]).family, family)
+    assert_eq(leading.len(), CONSTRUCT_FAMILIES.len())
+    assert_eq(reached.len(), productions().len())
+    // Programs of one, two and three instances all occur.
+    loop count in sizes -> assert(count > 0)
+    assert_eq(validate_program(coverage_program(GENERATOR_SEED)).join("\n"), "")
+}
+
+#Test("jet check admits every production and every tier prints every generated value alike") {
+    jet :: regression_compiler()
+    scratch :: regression_scratch()
+    coverage :: coverage_program(GENERATOR_SEED)
+    assert_eq(coverage.instances.len(), productions().len())
+    run :: run_case(coverage, jet, scratch, "") ?? panic("coverage: {err}")
+    if !case_passes(coverage, run) -> panic(run_problem(coverage, run))
+    loop tier_run in run.runs {
+        loop item in coverage.instances -> assert(tier_run.stdout.contains("value_{item.slot} "))
+    }
+    loop program in generated(GENERATOR_SEED, 2) {
+        case_run :: run_case(program, jet, scratch, "") ?? panic("{program.case_id}: {err}")
+        if !case_passes(program, case_run) -> panic(run_problem(program, case_run))
+    }
+}
+
+// c37: each negative control fails the layer.
+
+fn forged(decls: String, body: String) -> Generated Never! {
+    item :: Instance{construct_id: "construct:control-flow/forged", family: "control-flow", slot: 0, markers: [String]{}, decls: decls.copy(), body: body.copy()}
+    program_of("case-forged", "forged:0", 0, 0, [Instance]{item})
+}
+
+#Test("a missing production, an unlowered construct, an optimizer-only change and observerless generation each fail the layer") {
+    assert_eq(layer_controls(), [String]{})
+    rows :: productions()
+    no_places := [Production]{}
+    loop row in rows {
+        if row.family != "nested-places" -> &no_places.push(row.copy())
+    }
+    assert(validate_productions(no_places).contains("missing production: no template generates nested-places"))
+    assert(generate_programs(GENERATOR_SEED, 0) == .Err(_))
+    holed := rows.copy()
+    holed[0].body = holed[0].body.replace("$B * 2", "$Z * 2")
+    assert(validate_productions(holed).join("\n").contains("construct:expressions/arith-call: the template has a hole the generator does not fill"))
+    program :: generated(GENERATOR_SEED, 1)[0]
+    clean :: clean_runs(program)
+    assert(case_passes(program, clean))
+    unlowered := clean.copy()
+    unlowered.runs = [TierRun]{}
+    loop tier_run in clean.runs -> &unlowered.runs.push(planted(tier_run, program, UNLOWERED))
+    lowered :: classify(program, unlowered)
+    assert_eq(lowered.class, UNLOWERED)
+    assert_eq(lowered.mismatch, "{UNLOWERED}|{AOT_RELEASE}|exit 1 planted: {AOT_RELEASE} did not lower {primary_instance(program).construct_id}")
+    assert_eq(generated_severity(lowered.class), "P1")
+    optimizer := clean.copy()
+    optimizer.runs = [TierRun]{}
+    loop tier_run in clean.runs -> &optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
+    changed :: classify(program, optimizer)
+    assert_eq(changed.class, OPTIMIZER_ONLY)
+    assert_eq(changed.mismatch, "{OPTIMIZER_ONLY}|{AOT_RELEASE}|`value_{program.primary} 1` became `value_{program.primary} 1~`")
+    assert_eq(generated_severity(changed.class), "P0")
+    refused := clean.copy()
+    refused.check.exit = Val(1)
+    refused.check.stderr = "Error [jet.UnknownName]: Nothing named `x` exists here\n  --> case.jet:3:5\n"
+    assert_eq(classify(program, refused).mismatch, "{REJECTED_VALID}|{CHECK_STAGE}|exit 1 Error [jet.UnknownName]: Nothing named `x` exists here")
+    missing_tier := clean.copy()
+    missing_tier.runs = [TierRun]{clean.runs[1].copy()}
+    assert_eq(classify(program, missing_tier).class, UNLOWERED)
+    silent :: forged("", "value_0 :: 1\n_ :: value_0\nprint(\"done\")")
+    assert(validate_program(silent).join("\n").contains("construct:control-flow/forged #0: `value_0` never reaches an observer"))
+    unbounded :: validate_program(forged("fn spin_0(n: Int) -> Int Never! {{\n    spin_0(n)\n}}", "value_0 := spin_0(1)\nloop value_0 > 0 -> value_0 += 1\nprint(\"value_0 {{value_0}}\")")).join("\n")
+    assert(unbounded.contains("`spin_0` calls itself, so it may not end"))
+    assert(unbounded.contains("`loop value_0 > 0 -> value_0 += 1` is not a bounded loop"))
+}
+
+// c38: a fixed seed gives stable ordered bundles, and minimization keeps
+// the construct and the mismatch.
+
+fn fingerprint(programs: [Generated]) -> [String] Never! {
+    out := [String]{}
+    loop program in programs -> &out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
+    out
+}
+
+#Test("a fixed seed gives the same programs in the same order, and another seed gives others") {
+    first :: fingerprint(generated(GENERATOR_SEED, 32))
+    assert_eq(first, fingerprint(generated(GENERATOR_SEED, 32)))
+    assert(first != fingerprint(generated("2343", 32)))
+    loop (index, line) in first -> assert(line.starts_with("{case_name(index)} {GENERATOR_SEED}:{index} "))
+    // A longer run starts with the shorter one: case n never depends on the count.
+    assert_eq(fingerprint(generated(GENERATOR_SEED, 64)).slice(0, 32), first)
+}
+
+#Test("minimizing a planted finding keeps its construct and mismatch, and its bundle is stable across runs") {
+    jet :: regression_compiler()
+    scratch :: regression_scratch()
+    target := generated(GENERATOR_SEED, 1)[0]
+    loop program in generated(GENERATOR_SEED, GENERATOR_MAX_CASES) {
+        if target.instances.len() < 3 && program.instances.len() == 3 -> target = program.copy()
+    }
+    assert_eq(target.instances.len(), 3)
+    arm :: "planted:{AOT_RELEASE}:{OPTIMIZER_ONLY}"
+    run :: run_case(target, jet, scratch, OPTIMIZER_ONLY) ?? panic("{target.case_id}: {err}")
+    verdict :: classify(target, run)
+    if verdict.class != OPTIMIZER_ONLY -> panic(run_problem(target, run))
+    found :: minimize(target, run, jet, scratch, OPTIMIZER_ONLY) ?? panic("minimize: {err}")
+    assert_eq(found.dropped.len(), 2)
+    assert_eq(found.program.instances.len(), 1)
+    assert_eq(found.program.primary, target.primary)
+    assert_eq(primary_instance(found.program).construct_id, primary_instance(target).construct_id)
+    assert_eq(validate_program(found.program).join("\n"), "")
+    assert_eq(classify(found.program, found.run).mismatch, verdict.mismatch)
+    assert(found.program.source.len() < target.source.len())
+    bundle :: finding_bundle(found, regression_identity(), arm) ?? panic("seal: {err}")
+    stored :: stored_finding([Dyn]{bundle.copy()}, target.case_id)
+    assert_eq(field_text(stored, "stable_surface_id") ?? "", primary_instance(target).construct_id)
+    assert_eq(field_text(stored, "classification") ?? "", "P0")
+    assert_eq(field_text(stored, "seed") ?? "", target.seed)
+    assert_eq(field_text(stored, "mutation_arm") ?? "", arm)
+    rebuilt :: reconstruct_repro(stored, AOT_RELEASE) ?? panic("reconstruct: {err}")
+    assert_eq(rebuilt.source, found.program.source)
+    assert_eq(rebuilt.exit, Val(0))
+    // The same minimized case run again, by another run at another time,
+    // seals to the same stable digest.
+    again :: run_case(found.program, jet, regression_scratch(), OPTIMIZER_ONLY) ?? panic("rerun: {err}")
+    later := regression_identity()
+    later.run_id = "generate-later"
+    later.started = "2026-11-06T00:00:00Z"
+    later.finished = "2026-11-06T00:00:09Z"
+    second :: finding_bundle(Minimized{program: found.program.copy(), run: again, dropped: found.dropped.copy()}, later, arm) ?? panic("reseal: {err}")
+    assert(json.canonical(second) != json.canonical(bundle))
+    assert_eq(stable_digest(second) ?? "", stable_digest(bundle) ?? "")
+}

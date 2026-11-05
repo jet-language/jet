@@ -179,6 +179,21 @@ written to DIR as a `jet.hardening.repro.v1` bundle, and the run fails.
 `--invert` puts each seam's broken behavior back. That run fails unless every
 seed gives a bundle, so the check is proven to see each bug.
 
+`jet run Tools/hardening/Main.jet -- --generate DIR` writes programs from a
+seed (`--seed`, default 2342; `--cases`, default 16, at most 128). Each
+program joins one to three constructs from expressions, statements, control
+flow, patterns, generics, traits, effects, views, comptime and nested places.
+Every program parses, loops only over ranges or lists, and prints each
+value it makes. Each one must pass `jet check`, then print the same bytes
+under `jet run` and as a release build. A program that fails is shrunk to
+its main construct while the failure stays the same. It is then written to
+DIR as a bundle, and the run fails. The run first checks four planted faults:
+a missing family, an admitted but unlowered construct, an optimizer-only
+change and a program that prints nothing. Each must fail, or the run stops.
+`--invert` plants faults in every case and fails unless each one is found.
+One seed on one compiler gives the same bundles in the same order; the last
+line prints their digest without the run times.
+
 `jet run Tools/hardening/Main.jet -- --write` generates the rows source above as
 `.jet/hardening-manifest.json`. Its rows come from the Core registries and the
 route and dispatcher facts, and each covered row names the observable sink its
