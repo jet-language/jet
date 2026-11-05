@@ -81,7 +81,7 @@ fn app_surface() {
 fn router_surface() WebRouterError! {
     initial :: router.new()
     routed :: router.route(initial, "/rows", [], [], route_loader) ?? panic("route")
-    coded :: router.route_with_search_codec(routed, "/rows", [], [], .Query, route_loader) ?? panic("codec route")
+    coded :: router.route_with_search_codec(routed, "/search", [], [], .Query, route_loader) ?? panic("codec route")
     named := router.not_found(coded, not_found) ?? panic("not found")
     _stale :: router.stale(named, "rows")
     _invalidated :: router.invalidate(&named, "rows")
@@ -107,9 +107,9 @@ fn query_surface() (WebQueryError | StateError)! {
     _mutation_signal :: query.mutation_signal(created)
     _shown :: query.show(created)
     _facts :: query.facts(created)
-    _queued :: query.queue(&created, "offline payload")
     _refreshed :: query.refresh(&created)
     _cancelled :: query.cancel(&created)
+    _queued :: query.queue(&created, "offline payload")
     query.set_online(&created, false)
     query.set_mode(&created, .OfflineFirst)
     _mutation :: query.mutate(&created, "save", None, send_mutation)
@@ -120,6 +120,7 @@ fn query_surface() (WebQueryError | StateError)! {
         ["rows"],
         send_mutation,
     )
+    query.set_online(&created, true)
     _retry :: query.retry(&created, replay_mutation)
     _subscribed_value :: query.get(subscribed)
 }
@@ -145,7 +146,17 @@ fn form_surface() (WebFormActionError | WebFormError)! {
         group: Val("profile"),
         wire_name: "display_name",
     }
-    input0 :: forms.input("Profile", [field]) ?? panic("input")
+    note :: WebFormFieldSpec{
+        name: "note",
+        value_type: .String,
+        required: false,
+        default: None,
+        label: "Note",
+        control: .Text,
+        group: None,
+        wire_name: "note",
+    }
+    input0 :: forms.input("Profile", [field, note]) ?? panic("input")
     _renamed :: forms.input_rename(input0, "name", "display_name")
     _excluded :: forms.input_exclude(input0, "name")
     _grouped :: forms.input_group(input0, "name", "profile")
