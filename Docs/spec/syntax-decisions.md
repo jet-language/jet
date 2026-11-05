@@ -256,8 +256,10 @@ D-DOTCTOR3 whole-value reading, so `evens: [Int] :: xs.map(f)` becomes
 **S4 — Type annotations**: `name: Type` after the name on signatures and fields.
 Never on a local binding. Never `Type name`.
 
-**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
-`>>=`. Arithmetic four on Int/Float; the rest Int-only. `String += piece`
+**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `<<=` `>>=`.
+Arithmetic four on Int/Float; the rest Int-only. `&=`, `|=` and `^=` are
+retired with infix bit arithmetic (D-SIGIL-ALGEBRA1=B): an update assigns the
+`bit_and`, `bit_or` or `bit_xor` result back. `String += piece`
 appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
 copied values. The place must be mutable or reached through an `&` parameter.
