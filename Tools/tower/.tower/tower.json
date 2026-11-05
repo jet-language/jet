@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92492,
+    "rev": 92494,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63811,6 +63811,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "Correction to c57 (TestSpeedLead 2026-11-05, base 66c2a661a6): the '35 s fixed kit overhead' was a subtraction of in-pool time from solo time, not a fixed cost. Measured alone, golden cli_args takes 2.84 s wall in total: 3 compiles of 0.88-0.91 s at 720 MiB each, and about 0.15 s of kit overhead. The per-run cost is each compile re-checking Core (c55), not the testkit. Same run, 8 jobs, suites concurrent: ui 146 s for 2,384 rows, golden 561 s for 4,715 rows."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "Owner ruling 2026-11-05, compile model: no incremental compilation. jet run, jet dev and jet test link Core and the runtime as precompiled toolchain pieces built once with the compiler; only the user's program is compiled, fresh each time. jet build compiles from the entry points outward and includes only reached code: unreached Core code is never compiled, so it adds no bytes. Main's notes: the precompiled piece must carry Core's checked interface (not only machine code), because re-checking Core per program is c55's cost; generic Core bodies ship as IR and are specialized per program; it ships with the toolchain and is identified by compiler identity, so it is not a cache; I9 is kept because both paths compile the same Core source, and tier goldens compare them; reachability keeps methods of types used as trait objects, runtime roots, and everything in jet dev (hot reload)."
         },
         {
@@ -64435,7 +64440,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-05T16:20:37.321Z",
+      "updated": "2026-11-05T16:49:41.904Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -171127,6 +171132,215 @@
       "created": "2026-11-05T15:14:25.734Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-05"
+    },
+    {
+      "id": "D-PACKAGE-PACKS1",
+      "cardId": "c0fo37ov",
+      "group": "tooling",
+      "title": "Allow checked packs for installed dependencies?",
+      "situation": "A dependency is a library your project uses, such as a geometry package. The current Jet driver reads dependency source again on each compile; the review's two-run probe did so for a small local package. The owner has ruled out incremental compilation and has allowed precompiled Core and runtime pieces, but has not expressly extended that exception to installed dependencies. This vote asks whether an exact installed dependency may also carry saved checking results, and whether those results may come from an already trusted builder. We recommend A: allow installed packs through Jetpack's existing verified store, while all code you edit compiles fresh. Packs still cost disk space, and a missing variant costs a build or download; verification also relies on the approved compiler and builder being honest.",
+      "gist": "May installed dependencies reuse checked packs despite the no-incremental rule?",
+      "lesson": "A pack holds checked library facts, checked function bodies and compiled code. The facts are the types, signatures and safety rules that callers need; Rust calls similar saved facts metadata, or rmeta. A pack matches exact build inputs, not just a version number. It avoids repeating some work while it is retained, but generic uses and program-specific checks still run.",
+      "explainer": "",
+      "story": "Ana's game has 3 source files and uses the installed geometry package geo#2.1.0, with 40 files. She runs jet test twice without changing it, then upgrades the compiler. Her teammate edits a local path copy of geo. Every option must produce the same results and diagnostics for the same inputs. The examples below describe proposed behavior, not working package-install commands today.",
+      "inWild": "Go's command documentation describes a build cache that accounts for source, compiler and compiler-option changes. It also warns that changes to external C libraries used by cgo are not detected automatically. That is a warning for Jet's foreign-code inputs, not a guarantee that a version number is enough.\n\nSource: https://go.dev/cmd/go/ , 'Build and test caching'. This comparison was checked against the documentation, not a local Go run; Go is unavailable here.",
+      "detail": "WHAT IS ALREADY SETTLED\n\nThe 2026-11-05 log on #5910 records the owner's fresh-compilation and precompiled-Core ruling, with Main's checked-interface notes. It is in Tools/tower/.tower/tower.json. D-EXEC1=A ratifies shared compiled Prelude/Core. D-EXEC2=A retires the separate JIT and hot replacement; dev rebuilds and restarts. I9 requires one meaning across levels, not a separate package runtime. These execution rules do not alone authorize reuse of third-party checking results.\n\nOlder package law exists. D-LIB-REUSE1=B ratifies sealed dependency artifacts: compiled outputs tied to exact inputs, with shared restore and generic bodies. D-BUILD-NOCHANGE1=A permits saved checks only with every input covered. D-INCR-PARK1=C retired item reuse, not package reuse.\n\nBut #2517's answered question, 2026-10-30, explicitly asked whether package-level reuse remained in scope. The answer was 'no incremental compilation, period'. The older decisions and that answer are in Tools/tower/.tower/history.json. Docs/spec/syntax-decisions.md:9069-9070,9226,9387 lists the execution, incremental and library outcomes. The latest ruling wins. A, C and D request explicit exceptions. B adds none.\n\nThis is not another vote on stable binary compatibility or on whether Jetpack has a store. D-LIB-REUSE1 rejects a stable Jet ABI: a permanent promise about memory layout and calling rules. A different compiler build cannot consume a pack by matching only its version label.\n\nD-JPK-CACHE1=A already permits verified substitutes. CACHEAUTH1=D, CACHECONFIG1=D and REPROCACHE1=D govern builder authority, host-bound mirrors and reproducibility. These records are in history.json. Their rules appear in Docs/spec/syntax-decisions.md:6720-6748,6805-6849. D-JPK-TRUSTROOT1=D distinguishes public-release signatures from explicit private-registry policy. Publisher signing does not approve checking results. D-JPK-FRESHNESS1=D requires package#version, not package@version (:6750-6759).\n\nCHECKED CURRENT EVIDENCE\n\nThe review ran admitted compiler 66c2a661a6 with this checkout's toolchain sources. A two-package path-dependency program printed 42 twice. Both traces contain parsing of geo.jet and semantic checking of geo. They are in ../review-packs-probes/run1.trace and run2.trace relative to this ballot. Geo parsing starts at line 23 in each, its semantic module at line 53. This proves that small case, not a 40-file registry installation or a speed measurement.\n\nThe same compiler's 'jet update geo' exited 2 with E2104, 'jet update is not built yet'. Compiler/JetCli/Source/Cli/Front.jet:1930-1940 matches that narrow refusal. It does not establish that all Jetpack fetching is absent. Request.jet:936-944 sets record_store to None for CLI requests. Compiler/JetDriver/Source/Driver/Pipeline.jet:3319-3322 loads source; :3481-3504 registers it; :3542-3544 and :3642 check the graph.\n\nCompiler/JetDriver/Source/Driver/Identity.jet:929-941 defines jet_driver_package_check_key; no callers were found in Compiler or Jetpack. It includes compiler and package identity, selected source/manifest bytes, dependency interface digests and target facts. At :890-902 those facts are active OS, edition, target triple and applicable inline dependencies.\n\nThat is NOT a complete compiled-pack key. Profile, CPU features, other settings, embedded assets and foreign toolchains need coverage. A dependency's public signature digest cannot cover bodies used for generics, inlining or compile-time execution.\n\nThe admitted runtime provenance lists 340 source files, none under Core/. That describes that shipped runtime, not a working checked-Core pack. Compiler/JetFoundation/Source/Record/RecordCodec.jet:8-26 defines the existing indexed, checksummed format. The checked-library schema still needs implementation. The design source is ../precompiled-libraries-2026-11-05.md relative to this ballot, not an already-landed Docs/proposals file.\n\nCOMMON CONTRACT FOR CHECKED PACKS\n\nOne format and compiler reader serve Core and dependency packs (I8). Each pack contains interface facts, checked bodies, typed diagnostics and source locations, plus separate machine-code outputs. Run/dev/test link matching code; build compiles only reached bodies under #5910. Generics specialize where used. Caller policy, effects, ownership and safety checks still run. No option permits a second checker or language meaning.\n\nA pack's exact identity covers compiler build, provider/namespace/package, locked source digest, dependency artifacts and all facts read. Include selected features, profile, CPU/OS/architecture/ABI, settings, generated and embedded inputs, foreign sources, toolchains and relevant link inputs. Matching source labels are insufficient. A wrong compiler, target or configuration is refused before linking. Obtain or build the correct variant instead.\n\nDiscover and seal inputs before publishing a pack. An unrecorded check-time read is a pack-build error. Keep interface records independent of code-generation flags where possible; code outputs must still match their flags.\n\nCross builds distinguish the machine running compile-time code from the target whose layout and facts it uses. Never run a target executable on the host. Package compile-time code may depend on consumer arguments or build facts. Keep that work in checked bodies until its inputs are known. Never freeze the first consumer's values into a universal pack. Closed constants may be evaluated once with all inputs recorded. Generic and consumer-dependent checks remain per program.\n\nPacks preserve unsafe-call gates, reasons, effects, foreign descriptors, cleanup and diagnostics. A pack is not an unsafe-code audit. Executable package hooks and foreign builds keep exact grants and sandbox requirements under D-JPK-BUILDSCRIPT1=D and D-JPK-SANDBOX2=D. Metadata reads must not execute package code.\n\nA hash catches changed bytes, not false types or fabricated safety facts. A signature identifies the signer, not semantic truth. A and D trust the compiler that produced the facts. A also accepts builders authorized for that action before execution. Verify schema, bounds, digests, compiler/target/configuration and provenance on every store read. Provenance is the signed record binding a build's inputs, outputs and producer. Reject corrupt or unauthorized packs.\n\nA uses existing public trust roots or explicit private-registry policy, ordered host bindings and revocation rules. Private does not mean automatically trusted. A public registry is not automatically an approved builder. With no acceptable substitute, build locally from locked source under normal build authority and sandbox policy.\n\nUse the existing machine store under the user cache, not another pack cache. D-BUILD-STORE1=E supplies the cap, free-space reserve, admission checks and live leases that protect in-use entries. Add no cleanup command. Packs may be evicted and rebuilt. Compiler upgrades, new features or targets can need new packs. Storage and first-build cost cannot disappear.\n\nReproducibility means identical sealed inputs produce identical bytes. Keep timestamps and host paths out of identity. Preserve conflicting same-key outputs as evidence. D-JPK-REPROCACHE1 bars divergent outputs from trusted use. D-BUILD-NOCHANGE1's force-from-source and recompute-and-compare contracts remain the expert path for package packs. This adds no flag and does not make toolchain Core a mutable cache.\n\nThe gain is avoided parse/check work, not a measured latency promise. Every option pays for fresh project code, test execution, generic specialization, caller checks and linking. Pack options also pay for identity and trust verification. A missing or evicted pack can make a first run slower.\n\nWHAT THIS VOTE CHANGES\n\nA or D explicitly exempts exact installed dependencies from the 2026-10-30/11-05 no-incremental rule. It clarifies D-LIB-REUSE1's 'sema and diagnostics always run': dependency facts may come from a checked pack, but consumer-dependent checks and diagnostics remain. Path dependencies and workspace members compile fresh even when temporarily unchanged.\n\nC also exempts editable dependencies and thus reverses more of the ruling. B keeps dependency checks fresh. It does not repeal the store, signing, sealed-link format or unrelated dynamic-library contracts. No option permits item-level reuse or a stable cross-compiler pack format.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Installed packs through the existing verified store",
+          "detail": "For an exact installed dependency, use a matching pack built locally or by an already approved builder. On a miss, build it from locked source under the normal grants. Ana's second test reuses the retained pack. Her teammate's editable geo compiles fresh each time.",
+          "technical": "This is the installed-input exception defined above. Reuse the sealed-artifact store and trust path, not a new download protocol. A valid hit must bind checked facts and code to the same source, compiler, configuration and approved build action. A compiler upgrade needs a different pack. Downloaded facts enlarge the trusted computing base to include the approved builder; signing alone cannot prove they are true. No extra builder is approved by this ballot.",
+          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # matching approved pack: verify and load; otherwise build it\n$ jet test   # verify retained geo pack; compile Ana fresh\n# Compiler upgrade: get or build a matching geo pack.\n# Teammate edits a path copy: compile that copy fresh on every run."
+        },
+        {
+          "key": "D",
+          "name": "Installed packs, built on this machine only",
+          "detail": "Build an installed dependency's checked pack locally on first use, when its exact configuration is known. Never accept someone else's checked facts. Ana's second test reuses the retained pack. Her teammate's editable geo compiles fresh each time.",
+          "technical": "Same installed-input exception and pack format as A, but checked packs may not be substituted from another builder. This deliberately narrows the earlier shared-restore policy for these facts. It avoids trusting an outside checker run, not trust in downloaded source or the local compiler. Fresh machines and compiler/configuration changes pay the full local pack build. Existing non-pack store use is unchanged.",
+          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # build geo's matching pack locally; compile Ana fresh\n$ jet test   # verify retained geo pack; compile Ana fresh\n# Compiler upgrade: rebuild geo's matching pack locally.\n# Teammate edits a path copy: compile that copy fresh on every run."
+        },
+        {
+          "key": "B",
+          "name": "No exception for dependency checking",
+          "detail": "Core and the runtime keep their toolchain packs. Ana's geo source is checked fresh on both tests, as is her own code. Her teammate's local copy is also checked fresh. There is no new trust in saved third-party checking results.",
+          "technical": "Keep the latest no-incremental ruling for dependency checks. Earlier sealed-artifact and Jetpack store contracts do not by themselves authorize skipping those checks. Do not delete the whole store or claim that no keys or disk space are needed. This avoids checked-pack production and retention for packages, but repeats dependency front-end work. Core precompilation and cold-compiler improvements can still help; no timing loss is asserted without a measurement.",
+          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # check geo source and Ana fresh\n$ jet test   # check geo source and Ana fresh again\n# Compiler upgrade: still check geo source each time.\n# Teammate edits a path copy: compile that copy fresh on every run."
+        },
+        {
+          "key": "C",
+          "name": "Reuse whole dependencies, including editable ones",
+          "detail": "Use A's verified packs for installed geo. Also keep a whole-package result for the teammate's local geo. Reuse it only when every input still matches. An edit rebuilds that dependency as a whole, not selected functions. Ana's root project stays fresh.",
+          "technical": "This is package-level incremental reuse, not item reuse. It explicitly reverses the latest no-incremental ruling for editable dependencies. It can help large workspaces, but needs change tracking and discovered-input validation on each reuse, and creates more variants to retain or evict. It uses the same store, key rules and trust path as A; no second mechanism is permitted.",
+          "code": "# Proposed; geo#2.1.0 has 40 files; Ana has 3.\n$ jet test   # matching approved pack: verify and load; otherwise build it\n$ jet test   # verify retained geo pack; compile Ana fresh\n# Compiler upgrade: get or build a matching geo pack.\n# Teammate edits a path copy: rebuild it once; then reuse if all inputs match."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Official build-cache documentation covers source, compiler and flag changes, but warns about external C libraries. Package reuse can cover local code too; that broader choice is C, not the installed-only exception. No local Go execution is claimed.",
+          "code": "# Documentation comparison, not an executed recipe:\n# Go reuses matching build outputs and periodically drops old ones.\n# Its documented cgo caveat requires a rebuild after external C-library changes.\n# Jet must cover foreign inputs rather than promise 'never stale'."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A avoids repeating closed dependency checks without rebuilding a cache for edited code. It uses the already ratified store and builder policy instead of excluding trusted substitutes or adding another mechanism. This needs an explicit installed-input exception; it is not implied by the Core ruling.",
+        "gains": [
+          "Retained exact packs avoid repeated dependency parsing and checking.",
+          "Approved substitutes can avoid a local first build on another machine.",
+          "Core and packages share a format and reader; packages use the existing store and trust policy."
+        ],
+        "losses": [
+          {
+            "loss": "Code, checked bodies and configuration variants consume disk; eviction or a changed input can require another build.",
+            "mitigation": "Use existing cap, reserve, admission and lease rules. Retain only useful variants and build or fetch a missing one. This bounds storage, not first-run cost; no once-forever promise."
+          },
+          {
+            "loss": "A trusted builder could lie about checked facts; hashes and signatures do not prove semantics.",
+            "mitigation": "Accept only pre-authorized builders with exact signed input/output provenance and reproducibility policy. Verify each read, enforce revocation, and keep force-from-source and comparison hatches. This reduces risk but cannot eliminate trust in the compiler and builder."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "D",
+            "reason": "D is stronger when outside checking results must not be trusted. It makes every new machine build locally and deliberately excludes otherwise approved substitutes. A keeps that choice in the existing trust policy."
+          },
+          {
+            "key": "B",
+            "reason": "B best preserves the latest no-incremental ruling and avoids checked-package machinery. It still repeats dependency front-end work. That is a real simplicity choice, not a claim that it cannot be fast."
+          },
+          {
+            "key": "C",
+            "reason": "C helps multi-package development most, but reuses edited dependencies and needs change tracking. It reverses a larger part of the owner's ruling than this installed-only exception."
+          }
+        ],
+        "tradeoff": "A permits verified installed packs, including approved substitutes. D limits their producer to this machine. B keeps dependency checking fresh. C also reuses unchanged editable dependencies. Disk use, first-build cost and producer trust remain real costs of packs."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: GPT Sol. Fresh agent: PacksSol. Checked active and archived decisions, driver and store sources, runtime provenance, and two native dependency runs plus the update refusal. Reframed this as an explicit installed-pack exception, corrected identity and trust claims, and added the existing verified-store alternative."
+      },
+      "checkInstructions": "Review proof: admitted compiler 66c2a661a6 ran the path-dependency program twice, printing 42 both times. Both traces show geo parsing and semantic checking. jet update geo returned E2104, exit 2. These are not registry-install or pack-performance proofs.\n\nAcceptance must prove rejection for mismatched compiler, host/target, features and flags. Cover changed embedded/generated/foreign/dependency-body inputs and consumer-dependent comptime. Test unsafe and foreign gates, forged/revoked packs, deterministic independent builds and typed diagnostic replay. Prove bounded storage, lease-safe eviction and equal results across applicable execution levels. Validator success is not design approval.",
+      "surface": {
+        "gist": "May installed dependencies reuse checked packs despite the no-incremental rule?",
+        "lesson": "A pack saves checked library facts, bodies and code for exact build inputs. Installed code may be fixed, but compiler, target, features and build inputs can differ. Generic uses and caller checks still run. Reuse needs an explicit exception, and a pack may later be evicted.",
+        "trio": {
+          "current": {
+            "note": "The review's local dependency was parsed and checked on both native runs. This is not a working registry-install example.",
+            "code": "# Exercised small probe: main calls geo.answer().\n$ jet run main.jet\n42\n$ jet run main.jet\n42\n# Both traces contain geo parsing and semantic checking."
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go documents reuse across matching source, compiler and flags, and a caveat for changed external C libraries. Documentation comparison only.",
+            "code": "# Source: go.dev/cmd/go, Build and test caching.\n# Reuse matching outputs; remove old ones periodically.\n# External C-library changes can require forced rebuilding."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Installed packs via the verified store",
+            "gist": "Reuse exact installed packs from this machine or an already approved builder.",
+            "gains": [
+              "Avoid repeat dependency checks while a matching pack is retained.",
+              "An approved substitute can avoid a local first build."
+            ],
+            "losses": [
+              "Needs an explicit exception to the ruling.",
+              "Disk and verification costs; trust in the approved producer."
+            ],
+            "proposed": {
+              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # verify a matching pack, or build it\n$ jet test   # reuse retained geo; Ana compiles fresh\n# New compiler: another matching pack. Local geo: fresh each run."
+            }
+          },
+          {
+            "key": "D",
+            "name": "Installed packs built locally only",
+            "gist": "Same installed-only exception, but never accept another builder's checked pack.",
+            "gains": [
+              "Avoid repeat dependency checks while retained.",
+              "No outside producer of checked facts."
+            ],
+            "losses": [
+              "Every fresh machine builds its own pack.",
+              "Disk cost; narrows earlier shared-restore policy."
+            ],
+            "proposed": {
+              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # build geo's matching pack locally\n$ jet test   # reuse retained geo; Ana compiles fresh\n# New compiler: local rebuild. Local geo: fresh each run."
+            }
+          },
+          {
+            "key": "B",
+            "name": "No dependency-check exception",
+            "gist": "Keep dependency checks fresh; only Core/runtime get the new toolchain treatment.",
+            "gains": [
+              "Preserves the latest ruling.",
+              "No new trust in saved dependency checks."
+            ],
+            "losses": [
+              "Repeats dependency parsing and checking.",
+              "Cold-compiler improvements must carry that cost."
+            ],
+            "proposed": {
+              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # check geo and Ana fresh\n$ jet test   # check geo and Ana fresh again\n# New compiler: still fresh. Local geo: fresh each run."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Whole-package reuse, including local code",
+            "gist": "Use A's store for installed packs and also reuse unchanged editable dependencies.",
+            "gains": [
+              "Also avoids repeated work in large local workspaces."
+            ],
+            "losses": [
+              "Reverses the ruling for edited dependencies too.",
+              "Needs change tracking and retains more variants."
+            ],
+            "proposed": {
+              "code": "# Proposed: installed geo#2.1.0; Ana has 3 files.\n$ jet test   # verify a matching pack, or build it\n$ jet test   # reuse retained geo; Ana compiles fresh\n# New compiler: another pack. Local geo: rebuild after an edit, then reuse."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "An explicit installed-only exception avoids repeated checks and keeps edited code fresh. The existing store can accept an approved substitute without adding a second trust path.",
+          "gains": [
+            "Avoid repeat checks for exact retained dependencies.",
+            "Reuse approved builds across machines."
+          ],
+          "losses": [
+            {
+              "loss": "Packs consume disk and missing variants cost a build or download.",
+              "mitigation": "Use existing store bounds and leases. Evict safely; never promise once forever."
+            },
+            {
+              "loss": "Approved producers can still be wrong or dishonest.",
+              "mitigation": "Require exact provenance, reproducibility policy, read verification and revocation. Keep source rebuild and compare paths. These reduce, not remove, trust."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "D",
+              "reason": "Good for local-only trust, but makes each machine rebuild even when an approved substitute exists."
+            },
+            {
+              "key": "B",
+              "reason": "Simplest and closest to the ruling, but repeats dependency checks. No speed claim is measured here."
+            },
+            {
+              "key": "C",
+              "reason": "Helps local workspaces too, but restores package-level incremental reuse for edited code."
+            }
+          ],
+          "tradeoff": "A accepts approved installed packs; D builds them only locally; B keeps checking fresh; C also reuses editable dependencies. None makes packs free or signatures a proof of safety."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-05T16:49:41.904Z"
     }
   ],
   "questions": [
@@ -173900,6 +174114,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T16:49:41.904Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PACKAGE-PACKS1",
+      "note": "Allow checked packs for installed dependencies?"
+    },
+    {
+      "at": "2026-11-05T16:36:12.514Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T16:32:00.462Z",
       "by": "Main",
