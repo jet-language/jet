@@ -8,10 +8,8 @@
 // build exports COMMIT (it must be on dev) and runs the bootstrap chain of
 // Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on PATH: the seed builds
 // s1, s1 packs its runtime and builds s2, s2 packs its runtime and builds s3, and s2 and s3 must
-// be byte-identical. jet still records the absolute directory of `Compiler/JetCli` in the
-// image (its DWARF and the location table fault reports read), a defect, so every stage runs
-// in a mount namespace, as this user, where the export is /tmp/jet-src and /tmp is a directory
-// of OUT: every release records that same neutral path, wherever it was built. OUT (new or empty, not under /tmp)
+// be byte-identical. Every stage runs in the export as its working directory, so the images
+// record source directories relative to it. OUT (new or empty, outside the checkout and /tmp)
 // receives s2 as the release: jet, its aliases, jet-runtime/, IDENTITY (`<seed
 // version>#<sha256 of jet>`), COMMIT, SEED (the seed's identity) and SHA256SUMS. A shipped
 // file that names this machine's personal information (the rule table of
@@ -45,15 +43,9 @@ import { MUSL_DEFAULT, NORUST, SEED_FILES, STACK, fileHashes, linkCompilerAliase
 const SCRIPT = fileURLToPath(import.meta.url);
 const REPO = resolve(dirname(SCRIPT), '../..');
 const USAGE = 'usage: publish-release.mjs build COMMIT --seed DIR --out DIR [--threads N]\n       publish-release.mjs publish DIR [--evidence EVDIR] [--dry-run]';
-// Where the build stages see the export, and the namespace that puts it there: the outer
-// namespace (root over this user) binds NS_TMP over /tmp and the export at SOURCE_ROOT, the
-// inner one maps back to this user, so the stages write files as this user. A nested user
-// namespace cannot see host processes, so jet-env must not clean /tmp/nix-shell.* there.
-const SOURCE_ROOT = '/tmp/jet-src';
-const NAMESPACE = `mount --bind "$1" /tmp && mkdir -p /tmp/tmp ${SOURCE_ROOT} && mount --bind "$2" ${SOURCE_ROOT} && cd ${SOURCE_ROOT} || { echo "publish-release: cannot place the export at ${SOURCE_ROOT}" >&2; exit 97; }; u=$3 g=$4; shift 4; exec env JET_NIX_TMP_CLEANED=1 unshare --user --map-user="$u" --map-group="$g" "$@"`;
-
-export function namespaceArgv(nsTmp, tree, uid = process.getuid(), gid = process.getgid()) {
-    return ['unshare', '-r', '-m', '--propagation', 'private', 'bash', '-c', NAMESPACE, 'publish-release-ns', nsTmp, tree, String(uid), String(gid)];
+// Where the stages find their tools: the export's jet-env, under the stack, with no Rust on PATH.
+function stagedArgv(tree) {
+    return [...STACK, join(tree, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust'];
 }
 
 // ---- pure helpers (publish-release.test.mjs) ----
@@ -219,26 +211,23 @@ function build(options) {
     const inside = (root, path) => { const part = relative(root, path); return part === '' || (!part.startsWith('..') && !part.startsWith('/')); };
     if (inside(REPO, out)) return fail(2, `${out} is inside the checkout`);
     mkdirSync(out, { recursive: true });
-    // The stages see their own /tmp, so nothing they read may live under the host's.
-    const hidden = [['--out', realpathSync(out)], ['--seed', realpathSync(seed)], ['the musl lib', realpathSync(musl)]].filter(([, path]) => inside('/tmp', path));
-    if (hidden.length) return fail(2, `${hidden.map(([what, path]) => `${what} ${path}`).join(', ')} is under /tmp, which the build stages replace`);
+    if (inside(realpathSync('/tmp'), realpathSync(out))) return fail(2, `${out} is on RAM-backed /tmp; use a disk path`);
 
-    const work = join(out, 'work'), logs = join(out, 'logs'), tree = join(work, 'tree'), nsTmp = join(work, 'ns-tmp');
-    for (const dir of [work, logs, tree, nsTmp]) mkdirSync(dir, { recursive: true });
+    const work = join(out, 'work'), logs = join(out, 'logs'), tree = join(work, 'tree'), tmp = join(work, 'tmp');
+    for (const dir of [work, logs, tree, tmp]) mkdirSync(dir, { recursive: true });
     const archive = spawnSync('bash', ['-c', 'set -o pipefail; git -C "$0" archive "$1" | tar -x -C "$2"', REPO, sha, tree], { encoding: 'utf8' });
     if (archive.status !== 0) return fail(1, `git archive ${sha} failed: ${archive.stderr}`);
-    const env = { ...process.env, JET_PACK_MUSL_LIB: musl, TMPDIR: '/tmp/tmp', JET_TOOLCHAIN_ROOT: SOURCE_ROOT };
+    const env = { ...process.env, JET_PACK_MUSL_LIB: musl, TMPDIR: tmp, JET_TOOLCHAIN_ROOT: tree };
     delete env.JET;
-    // Each stage runs in a mount namespace where the export is SOURCE_ROOT, as this user, with no Rust on PATH.
-    const staged = [...namespaceArgv(nsTmp, tree), ...STACK, join(SOURCE_ROOT, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust'];
-    say(`chain of ${sha.slice(0, 10)} from seed ${seedIdentity} in ${work}, the export at ${SOURCE_ROOT}`);
+    const staged = stagedArgv(tree);
+    say(`chain of ${sha.slice(0, 10)} from seed ${seedIdentity} in ${work}`);
 
     // `builder` (a directory with jet and jet-runtime/) builds the stage `name`, which then packs its runtime.
     const stage = (name, builder, identity, pack) => {
         const built = join(tree, 'Compiler/JetCli/.jet/build/jet');
         rmSync(dirname(built), { recursive: true, force: true });
         const started = Date.now();
-        const rc = run([...staged, join(builder, 'jet'), 'build', '--threads', String(options.threads), 'Compiler'], { env: { ...env, JET_COMPILER_IDENTITY: identity }, log: join(logs, `${name}.log`), timeout: 3600 });
+        const rc = run([...staged, join(builder, 'jet'), 'build', '--threads', String(options.threads), 'Compiler'], { cwd: tree, env: { ...env, JET_COMPILER_IDENTITY: identity }, log: join(logs, `${name}.log`), timeout: 3600 });
         if (rc !== 0 || !existsSync(built)) return { error: `${name}: jet build Compiler rc=${rc}: ${tail(join(logs, `${name}.log`))}` };
         const dir = join(work, name);
         mkdirSync(dir, { recursive: true });
@@ -247,7 +236,7 @@ function build(options) {
         const own = `${version}#${sha256File(join(dir, 'jet'))}`;
         say(`${name}: ${own} (${Math.round((Date.now() - started) / 1000)}s)`);
         if (!pack) return { dir, identity: own };
-        const packRc = run([...staged, 'node', join(SOURCE_ROOT, 'Tools/packaging/prebuild-runtime.mjs'), join(dir, 'jet'), join(dir, 'jet-runtime'), '--repo', SOURCE_ROOT], { env: { ...env, JET_COMPILER_IDENTITY: own }, log: join(logs, `${name}-pack.log`), timeout: 3600 });
+        const packRc = run([...staged, 'node', join(tree, 'Tools/packaging/prebuild-runtime.mjs'), join(dir, 'jet'), join(dir, 'jet-runtime'), '--repo', tree], { cwd: tree, env: { ...env, JET_COMPILER_IDENTITY: own }, log: join(logs, `${name}-pack.log`), timeout: 3600 });
         if (packRc !== 0 || !existsSync(join(dir, 'jet-runtime/native.key'))) return { error: `${name}: prebuild-runtime.mjs rc=${packRc}: ${tail(join(logs, `${name}-pack.log`))}` };
         return { dir, identity: own };
     };

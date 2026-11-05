@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { personalInfoMatcher, personalInfoRules } from '../tower/app/personal-info.mjs';
-import { admissionProblems, evidenceProblems, githubSlug, namespaceArgv, parseArgs, personalSpans, releaseNotes, remoteTags } from './publish-release.mjs';
+import { admissionProblems, evidenceProblems, githubSlug, parseArgs, personalSpans, releaseNotes, remoteTags } from './publish-release.mjs';
 
 test('build and publish take their own options and refuse the other step\'s', () => {
     const build = parseArgs(['build', 'abc123', '--seed', 'seed', '--out', 'out', '--threads', '4']);
@@ -22,23 +22,13 @@ test('shipped bytes naming personal information or a build directory are found a
     assert.deepEqual(personalSpans(Buffer.from('dir\0/mnt/scratch/snap/Compiler/JetCli\0'), matcher, dirs), ['/mnt/scratch']);
     assert.deepEqual(personalSpans(Buffer.from('built on lovelace in /srv/build/out/jet by /home/ada'), matcher, dirs), ['/home/ada', 'lovelace', 'ada', '/srv/build/out']);
     // `ada` inside a longer word (`canadian`) is not the user name.
-    assert.deepEqual(personalSpans(Buffer.from('/tmp/jet-src/Compiler/JetCli\0<corelib>/Core/canadian.jet'), matcher, dirs), []);
+    assert.deepEqual(personalSpans(Buffer.from('Compiler/JetCli\0<corelib>/Core/canadian.jet'), matcher, dirs), []);
 });
 
 test('the GitHub slug comes from an ssh or https remote', () => {
     assert.equal(githubSlug('git@github.com:jet-language/jet'), 'jet-language/jet');
     assert.equal(githubSlug('https://github.com/jet-language/jet.git\n'), 'jet-language/jet');
     assert.equal(githubSlug('https://gitlab.com/jet-language/jet.git'), '');
-});
-
-test('every stage sees the export at one neutral path, as the same user', () => {
-    const argv = namespaceArgv('/out/work/ns-tmp', '/out/work/tree', 1000, 100);
-    assert.deepEqual(argv.slice(0, 7), ['unshare', '-r', '-m', '--propagation', 'private', 'bash', '-c']);
-    assert.deepEqual(argv.slice(8), ['publish-release-ns', '/out/work/ns-tmp', '/out/work/tree', '1000', '100']);
-    const script = argv[7];
-    assert.ok(script.includes('mount --bind "$1" /tmp'));
-    assert.ok(script.includes('mount --bind "$2" /tmp/jet-src && cd /tmp/jet-src'));
-    assert.ok(script.includes('unshare --user --map-user="$u" --map-group="$g" "$@"'));
 });
 
 test('a remote tag names the commit its peeled row gives', () => {

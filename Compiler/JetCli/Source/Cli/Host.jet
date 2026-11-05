@@ -937,7 +937,7 @@ fn jet_cli_native_program(result: JetDriverCompileResult, inputs: ^JetDriverLowe
     loop finding in lint -> jet_cli_ice_trap(&census, &built.program, finding.key, finding.pass, finding.rule, finding.message)
     if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
     built.program.single_thread = jet_cli_single_thread(built.program, runtime, closure_symbols)
-    built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
+    built.program.debug_directory = jet_cli_debug_directory(file, entry_source, cli_files.cwd() ?? "")
     // A field move shares the module's rows with `built`, which would keep
     // them until the caller's object is written and free them all there; a
     // fresh module in its place leaves the route their one owner
@@ -982,13 +982,19 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
 
 // The compilation directory the image's DWARF records for `file`, the entry
 // path the command named, whose module's source path is `source`: the part
-// of `file` before `source`, as written, so a fault report run from where
-// the command ran finds the source, and the image does not depend on where
-// the checkout lives. "" (the working directory) when `file` is `source` or
-// does not end with it.
-fn jet_cli_debug_directory(file: String, source: String) -> String Never! {
+// of `file` before `source`, relative to `cwd`, where the command ran, so a
+// fault report run from there finds the source, and the image depends
+// neither on where the checkout lives nor on whether the path was spelled
+// absolute (a workspace member's entry always is). "" (the working
+// directory) when `file` is `source` or does not end with it, when the
+// directory is `cwd` itself, or when `cwd` is unknown.
+fn jet_cli_debug_directory(file: String, source: String, cwd: String) -> String Never! {
     if source == "" || file == source || !file.ends_with("/{source}") -> return ""
-    file.slice(0, file.len() - source.len() - 1)
+    directory :: file.slice(0, file.len() - source.len() - 1)
+    if !cli_files.is_absolute(directory) -> return directory
+    if !cli_files.is_absolute(cwd) -> return ""
+    relative :: cli_files.relative(directory, cwd)
+    if relative == "." -> "" else -> relative
 }
 
 // The body of a function the IR builder can't build: one Unreachable. Its
