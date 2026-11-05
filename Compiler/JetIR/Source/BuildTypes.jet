@@ -1540,7 +1540,7 @@ fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mod
     row :: m.types[b.f.slot_type[slot]]
     symbol :: if kind == {
         .Int -> "jet_rt_int_to_string"
-        .Char -> "jet_rt_char_to_string"
+        .Char -> if mode == .Debug -> "jet_rt_char_debug" else -> "jet_rt_char_to_string"
         .Word -> if row.signed -> "jet_rt_i64_to_string" else -> "jet_rt_u64_to_string"
         .Bool -> "jet_rt_bool_to_string"
         .Float -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
