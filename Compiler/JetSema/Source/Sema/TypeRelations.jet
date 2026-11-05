@@ -137,6 +137,12 @@ fn sema_type_has_forbidden_never(ty: Type, allow_success_never: Bool) -> Bool Ne
     }
 }
 
+// The report for a `Never` that `sema_type_has_forbidden_never` (or a
+// constructor naming `Never`) finds in a value position.
+fn sema_never_as_value(span: Span) -> Diagnostic {
+    sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type.")
+}
+
 fn sema_effect_bound_compatible(required: [EffectRowEntry]?, offered: [EffectRowEntry]?) -> Bool Never! {
     required_row :: required ?? return true
     offered_row :: offered ?? return false

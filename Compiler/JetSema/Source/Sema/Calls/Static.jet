@@ -82,6 +82,8 @@ fn sema_call_registered_method_names(graph: SemaRegistrationGraph, nominal: Sema
     names
 }
 
+SEMA_CALL_SCALAR_OWNERS :: [String]{"Int", "Float", "Bool", "String", "Char", "F32", "F64", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64"}
+
 // `Owner.method(...)` where `Owner` is a registered type no scope binding
 // shadows and no static route resolved: the type exists, so the missing
 // member is reported, never the owner (E0311).
@@ -92,6 +94,18 @@ fn sema_call_static_missing_member(receiver: Expr, method: String, method_span: 
         else -> { return unhandled }
     }
     if sema_scope_resolve_index(scopes, owner) != None -> return unhandled
+    // A built-in scalar owner that no declaration takes over has no
+    // registered type; every documented static method on it resolved
+    // before this point.
+    scalar_owner := SEMA_CALL_SCALAR_OWNERS.contains(owner)
+    if scalar_owner && program.registration_graph == .Val(graph) {
+        scalar_owner = sema_type_graph_lookup_symbol(graph, environment.module_identity, owner) == None
+    }
+    if scalar_owner {
+        &diagnostics.push(sema_error("E0102", method_span, "`{owner}` has no static method `{method}`", "built-in types expose only their documented static methods", "call a documented static method on `{owner}`, or call `.{method}()` on a value that provides it"))
+        sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     if program.registration_graph == .Val(graph) {
         found :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner) ?? return unhandled
         if sema_resolved_kind(graph, found) != SymbolKind.Type -> return unhandled

@@ -1451,9 +1451,13 @@ fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, envir
     shorthand :: sema_expr_subject_shorthand(expr, expected, context, &diagnostics)
     if shorthand != None -> context.subject_shorthand_depth += 1
     source :: if shorthand == .Val(lambda) -> Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED} else -> expr
+    // A bare member chain that isn't shorthand (the slot takes more than one
+    // parameter) keeps the slot type, so it reports the slot's arity instead
+    // of reading as a name.
+    keeps_slot :: open_result && shorthand == None && sema_expr_is_bare_member_chain(source)
     checked := if source == {
         .Lambda(lambda, _) -> sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, true)
-        else -> sema_check_expression(source, if open_result -> None else -> expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        else -> sema_check_expression(source, if open_result && !keeps_slot -> None else -> expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if shorthand != None -> context.subject_shorthand_depth -= 1
     context.lambda_escapes = previous_lambda_escapes
@@ -2009,7 +2013,11 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             lambda_work.meta.loop_result_type = Val(result_type)
             body_result_ty = result_type
             if lambda_work.meta.requires_exhaustion_route && !lambda_work.meta.exhaustion_route_attached {
-                &diagnostics.push(sema_error("E0078", lambda_work.meta.exhaustion_span ?? lambda.span, "this finite value loop needs a written exhaustion route", "the source can end without a matching break, so the expression must state what exhaustion means", "add `?? fallback` after the closing `}}`, or use the labeled loop form for `next` or `break`"))
+                // The route is written after the loop's closing `}`, so the
+                // report points there: the body's span ends just past it.
+                body_span :: lambda_work.meta.exhaustion_span ?? lambda.span
+                closing :: Span{start: if body_span.end > body_span.start -> body_span.end - 1 else -> body_span.start, end: body_span.end}
+                &diagnostics.push(sema_error("E0078", closing, "this finite value loop needs a written exhaustion route", "the source can end without a matching break, so the expression must state what exhaustion means", "add `?? fallback` after the closing `}}`, or use the labeled loop form for `next` or `break`"))
                 return None
             }
         }

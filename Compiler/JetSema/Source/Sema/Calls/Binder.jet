@@ -434,7 +434,12 @@ fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[CallArg]
                 parameter_index = sema_call_param_index(params, label)
                 if parameter_index < 0 {
                     label_span :: (arg.label ?? CallLabel{name: label, span: arg.span}).span
-                    &diagnostics.push(sema_call_diag_unknown_label(callee, label, params, label_span))
+                    // Positional-only parameters carry no public label, so a
+                    // label naming one is found by the parameter's own name.
+                    positional_only :: loop parameter in params {
+                        if parameter.zone == ParamZone.PositionalOnly && parameter.name == label -> break true
+                    } ?? false
+                    &diagnostics.push(if positional_only -> sema_call_diag_forbidden_label(callee, label, label_span) else -> sema_call_diag_unknown_label(callee, label, params, label_span))
                     failed = true
                     skip_arg = true
                 }

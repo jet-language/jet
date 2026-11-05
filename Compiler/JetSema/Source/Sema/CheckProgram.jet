@@ -2153,8 +2153,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // nothing, so a value on its last line is lost (E0433). With a value
     // return (not a generator; written, or projected by the bundle failure
     // solve) the last line is the value handed back, and a table on the last
-    // line hands back the value its arms end in.
-    returns_value :: sema_function_returns_value(effective_return)
+    // line hands back the value its arms end in. A `Never` function hands
+    // back no value: E2423 (sema_check_never_fallthrough) owns its end.
+    returns_value :: sema_function_returns_value(effective_return) && !sema_function_promises_never(func)
     if func.body.len() > 0 && func.body[func.body.len() - 1] == .Expr(tail) {
         if {
             returns_value -> context.value_tail_span = Val(expr_span(tail))

@@ -426,6 +426,12 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     if matrix {
         rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
         if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) -> return
+        // A map pattern names some keys and a map can always hold others, so
+        // no arm list covers it: the only cover is `else`.
+        if subject_ty == .Map(_, _, _) {
+            &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every `{type_name(subject_ty)}` value — it needs an `else` arm", "every arm tests part of the value's shape, so some values match no arm", "add `else -> {{ … }}` after the last arm"))
+            return
+        }
         witness :: sema_pattern_collection_witness(subject_ty, rows, environment, program)
         &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {witness}", "pattern arms must cover every collection shape", "add an arm for `{witness}` or an `else` arm"))
         return
@@ -995,7 +1001,6 @@ fn sema_pattern_collection_witness(ty: Type, rows: [SemaPatternCoverageRow], env
         }
         return "[_, ..]"
     }
-    if ty == .Map(_, _, _) -> return "a map with other keys"
     "_"
 }
 

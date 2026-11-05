@@ -993,14 +993,18 @@ fn sema_never_module_call_diverges(receiver: Expr, method: String, arity: Int, e
     false
 }
 
-fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    declared :: func.return_type ?? return true
-    never_success :: if declared == {
+// A function whose written success type is `Never`: bare, or as the success of a fallible return.
+fn sema_function_promises_never(func: Func) -> Bool {
+    declared :: func.return_type ?? return false
+    if declared == {
         .Named(name) -> name == "Never"
         .Result(ok, _) -> ok == Type.Named{name: "Never"}
         else -> false
     }
-    if !never_success -> return true
+}
+
+fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if !sema_function_promises_never(func) -> return true
     loop statement in func.body {
         if statement == .Expr(expr) {
             if sema_never_expr_diverges(expr, environment, program, scopes) -> return true

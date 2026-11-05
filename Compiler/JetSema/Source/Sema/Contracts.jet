@@ -881,6 +881,12 @@ fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_sp
     context.fresh_expr_ids = true
     reads := [String:Bool]{}
     loop clause in func.pre {
+        // The declaration already reported `result` in this clause (E0144); checking
+        // it again here would only add an unknown-name report for the same span.
+        if sema_contract_result_ident_in_expr(clause.cond) != None {
+            complete = false
+            next
+        }
         condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", false, true, environment, program, checked_scopes, checked_state, &reads, &tail_store, &context, &diagnostics)
         if condition == None -> complete = false
         message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, checked_scopes, checked_state, &reads, &tail_store, &context, &diagnostics)

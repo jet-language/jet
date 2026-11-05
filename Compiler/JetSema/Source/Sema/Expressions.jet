@@ -3827,6 +3827,12 @@ fn sema_expr_check_declared_method(receiver: Expr, receiver_value: TExpr, method
             .None -> sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
         }
     }
+    // `.call(…)` on a value that is neither a function nor declares `call`
+    // is a call of a non-function, not a misspelt method.
+    if method == "call" && !sema_expr_candidates_accept_receiver(candidates, routed_method, receiver_value.ty, environment, program) {
+        &diagnostics.push(sema_call_projection_not_callable(receiver, receiver_value.ty, method_span, args))
+        return None
+    }
     candidate :: sema_call_resolve_method_with_inference(receiver_value.ty, routed_method, args, argument_types, expected, candidates, environment, program, &scopes, method_span, &diagnostics) ?? return None
     scopes.ownership_call_depth += 1
     checked := sema_call_check_method_candidate_from_value_owned(&state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, method_span, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
@@ -3835,6 +3841,16 @@ fn sema_expr_check_declared_method(receiver: Expr, receiver_value: TExpr, method
     &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: value.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, value, &diagnostics) -> return None
     Val(value.value)
+}
+
+fn sema_expr_candidates_accept_receiver(candidates: [SemaCallMethodCandidate], method: String, receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    loop candidate in candidates {
+        if candidate.method.name != method -> next
+        if sema_call_method_receiver_candidate_type(candidate) == .Val(expected) {
+            if sema_call_type_assignable(expected, receiver, environment, program) ?? false -> return true
+        }
+    }
+    false
 }
 
 // The secret type `T` of an `ExpiringSecret<T>` receiver.

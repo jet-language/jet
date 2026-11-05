@@ -2043,7 +2043,7 @@ fn sema_checked_struct_fields(graph: SemaRegistrationGraph, module_row: SemaRegi
         sema_checked_member_type_names(graph, module_row, definition.fields[source_index].ty, definition.fields[source_index].ty_span, generic_params, &diagnostics)
         ty :: sema_checked_qualify_type_with_generics(graph, definition.fields[source_index].ty, module_row.module_identity, generic_params)
         if sema_type_has_forbidden_never(definition.fields[source_index].ty, false) {
-            &diagnostics.push(sema_error("E0109", definition.fields[source_index].ty_span, "a stored field cannot contain Never", "Never may not appear in a value position", "use an optional or fallible value instead"))
+            &diagnostics.push(sema_never_as_value(definition.fields[source_index].ty_span))
         }
         sema_checked_validate_struct_field(definition, definition.fields[source_index], &diagnostics)
         &fields.push(sema_checked_field(definition.fields[source_index], ty, sema_checked_field_shape_names(definition, definition.fields[source_index])))

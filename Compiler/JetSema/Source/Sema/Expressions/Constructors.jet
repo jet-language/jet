@@ -81,11 +81,13 @@ fn sema_expression_type_symbol(scopes: &SemaScopeTable, environment: SemaScopeEn
     None
 }
 
-// A type name that resolves to nothing. `alias.Name` through a Core module
+// A type name that resolves to nothing. `Never` has no values, so naming it
+// in a constructor is E2422. `alias.Name` through a Core module
 // alias, naming a declaration that module doesn't export, is the E0609 its
 // `use core.X.[Name]` import gets; `alias.child.Name` into a `priv module`
 // of the imported module is E0605; anything else is an unknown name.
 fn sema_expression_unknown_type(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    if name == "Never" -> return sema_never_as_value(span)
     if program.registration_graph == .Val(graph) {
         caller :: sema_scope_caller_row(environment, graph)
         if caller >= 0 && name.split_once(".") == .Val(qualified) {
