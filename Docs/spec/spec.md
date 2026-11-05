@@ -3771,6 +3771,19 @@ source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
 
+A package's `policy: { claims: { min: <rung> } }` sets its claims floor
+(D-GRADE-POLICY1). The rungs, weakest first, are `.Unchecked`, `.Checked`,
+`examples(n)`, `generated(n)` and `.Proved`; a count is part of the rung. When
+nothing failed but the run's grade is below the floor, `jet test` and
+`jet prove` report E2942 and exit 1. Its fix names the evidence to add: more
+passing `#Test` examples, property tests (200 generated cases each), or
+`jet prove FILE --lens solver`. A run with a failure gets no E2942, because the
+failure already fails it and names its own fix. `jet prove` reaches `.Proved`
+only when the solver proves every obligation it found; its ProofReport carries
+`summaries.claims.floor` and `floorMet` when a floor is declared. `jet inspect
+claims` shows the grade of the newest `.jet/evidence` report for the target's
+current source, the floor, and whether it is met.
+
 A fenced ```` ```jet ```` block in a `///` doc comment is a doctest: a claim
 named `doctest at <file>:<fence line>` in the same harness, compiled after the
 file's own items so it can call them. Its lines run in order; each

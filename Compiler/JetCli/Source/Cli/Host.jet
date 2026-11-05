@@ -1735,11 +1735,16 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     stdout :: if show -> ran.output else -> ran.receipt.output
     stderr :: if show -> ran.errors else -> ran.receipt.errors
     if measure == None {
-        outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, jet_cli_test_claims_floor(snapshot.roots[0])) ?? return jet_cli_ice(err.message)
+        floor :: if jet_cli_test_handoff() -> None else -> jet_cli_test_claims_floor(snapshot.roots[0])
+        outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, floor) ?? return jet_cli_ice(err.message)
         notice :: jet_cli_test_persist(outcome.report)
-        // Under `--json` the status line is the whole stdout; the report moves to stderr.
-        if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n", stderr: "{stdout}{stderr}{notice}", exit_code: exit_code}
-        return JetDriverVerbOutput{stdout: stdout, stderr: "{stderr}{notice}", exit_code: exit_code}
+        below := ""
+        if outcome.below == .Val(diagnostic) -> below = diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)
+        floor_exit :: if outcome.below != None && exit_code == JET_DRIVER_EXIT_OK -> JET_DRIVER_EXIT_USER_ERROR else -> exit_code
+        // Under `--json` the status line is the whole stdout; the report moves to stderr,
+        // and E2942 rides in the status's `reports`.
+        if options.json -> return JetDriverVerbOutput{stdout: "{outcome.status}\n", stderr: "{stdout}{stderr}{notice}", exit_code: floor_exit}
+        return JetDriverVerbOutput{stdout: stdout, stderr: "{stderr}{notice}{below}", exit_code: floor_exit}
     }
     rendered :: (loop record in records -> jet_cli_measure_render(record, options.json)).join("")
     // Under `--json` the record lines are the whole stdout; the report moves to stderr.

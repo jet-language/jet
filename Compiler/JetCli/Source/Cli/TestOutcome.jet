@@ -9,14 +9,14 @@ use {
     receipt_crypto :: core.crypto
     jet_driver.[JetDriverAuthorizedSourceRoot]
     jet_foundation.[
-        BuildOptions, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceKind, EvidenceOutcome,
+        BuildOptions, Diagnostic, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceKind, EvidenceOutcome,
         EvidenceProducerKind, EvidenceRecord, EvidenceReport,
         EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
         EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
         EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, build_options_key,
         evidence_expectation_error_text, evidence_identity_for_record, evidence_merge_error_text, evidence_record_checked_derivation,
         evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
-        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token,
+        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry,
     ]
     jet_pkg_model.[ClaimsGrade, ClaimsProjection, WorkspaceDeclarationCache]
 }
@@ -57,10 +57,12 @@ struct JetCLITestTally {
     unexpected_passes: Int
 }
 
-// One run: its status line and the report it persists.
+// One run: its status line, the report it persists, and its E2942 when the
+// run's grade is below its package's claims floor.
 struct JetCLITestOutcome {
     status: String
     report: EvidenceReport
+    below: Diagnostic?
 }
 
 // EvidenceBuild::from_environment with a fallback: an unset or empty
@@ -151,6 +153,49 @@ fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade
     facts.policy.claims_min
 }
 
+// Whether this run hands its report to a `jet prove` parent, which holds the
+// whole proof run to the floor instead.
+fn jet_cli_test_handoff() -> Bool Never! {
+    if cli_sys.get(EVIDENCE_REPORT_ENV) == .Val(handoff) -> return handoff != ""
+    false
+}
+
+// E2942 when `grade` doesn't meet `floor`; `target` is the tested or proved
+// path. A run with failing evidence gets none: its failures already fail the
+// run and name their own fixes.
+fn jet_cli_claims_below_floor(grade: ClaimsGrade, floor: ClaimsGrade?, target: String) -> Diagnostic? Never! {
+    required :: floor ?? return None
+    if grade.meets(required) -> return None
+    have :: grade.render()
+    want :: required.render()
+    Val(diagnostic_from_registry("E2942", None, "claims grade `{have}` is below the package floor `{want}`", "`policy.claims.min` in `package.jet` asks for `{want}`, and this run's evidence reaches `{have}`", jet_cli_claims_floor_fix(grade, required, target)))
+}
+
+// The evidence that raises `grade` to `required` (D-GRADE-POLICY1=A): the
+// solver command for a proved floor, else the tests to write. A property
+// test runs 200 generated cases.
+fn jet_cli_claims_floor_fix(grade: ClaimsGrade, required: ClaimsGrade, target: String) -> String Never! {
+    if required == {
+        .Proved -> "run `jet prove {target} --lens solver` and change each claim it can't prove until it proves every one"
+        .Generated(count) -> {
+            have :: if grade == .Generated(found) -> found else -> 0
+            // Property tests of 200 cases each, rounded up, and at least one.
+            more := (count - have + 199).div_euclid(200)
+            if more < 1 -> more = 1
+            tests :: if more == 1 -> "1 more property test" else -> "{more} more property tests"
+            "add {tests} to `{target}`, written `#Test fn name(x: Int) {{ … }}`; each runs 200 generated cases, and the floor needs {count} to pass"
+        }
+        .Examples(count) -> {
+            have :: if grade == .Examples(found) -> found else -> 0
+            more := count - have
+            if more < 1 -> more = 1
+            tests :: if more == 1 -> "1 more passing `#Test`" else -> "{more} more passing `#Test` examples"
+            "add {tests} to `{target}`"
+        }
+        else -> "add a `#Test` to `{target}` and make it pass"
+    }
+}
+
 // The run's evidence and status line. `wires` are the settled outcome wires
 // (jet_cli_native_test_wire_parts) and `tests` their tests' claims in the
 // same order; a wire past them (an output check) is a unit claim of `file`.
@@ -158,8 +203,8 @@ fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade
 // Contract record. A stop a test caught (a failed assertion, a property
 // case) is marked `caught_by`; an uncaught one is a runtime stop.
 // `ran_ok` is the canonical receipt's verdict (failed output checks included).
-// The claims floor is reported, not enforced: it never changes `ok` or the
-// exit status.
+// The claims floor fails the run only through E2942 (`below`), which a run
+// with failing evidence never gets.
 fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], contracts: [JetNativeTestContract], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
     source_revision :: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
     revision_bytes :: source_revision.bytes()
@@ -251,8 +296,9 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
             evidence_report_add_record_with_derivation(&report, ^observed, ^observed_derivation).drop("the test's unit record already carries this outcome")
         }
     }
-    ok :: ran_ok && tally.failed == 0 && tally.unexpected_passes == 0
     projection :: ClaimsProjection.from_records(report.records)
+    below :: if projection.failed -> None else -> jet_cli_claims_below_floor(projection.grade, floor, file)
+    ok :: ran_ok && tally.failed == 0 && tally.unexpected_passes == 0 && below == None
     // Contract records observe clauses; the test records above own pass and
     // fail with their expectations, so the claims projection is taken first.
     // A clause that fails inside an expected failure doesn't fail the floor.
@@ -285,14 +331,16 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
         jet_cli_status_field("claims", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("grade", jet_cli_status_text(grade.copy()))})),
     })
     // `Float` carries JSON text already rendered: the canonical report JSON.
-    status :: jet_cli_status_render("test", ok, [JetCLIStatusField]{
+    // E2942 rides in `reports`, as every failing diagnostic does.
+    reports :: if below == .Val(diagnostic) -> jet_cli_reports_json(None, file, "", [Diagnostic]{diagnostic.copy()}) else -> [String]{}
+    status :: jet_cli_status_render_with_reports("test", ok, reports, [JetCLIStatusField]{
         jet_cli_status_field("test", test),
         jet_cli_status_field("evidence", JetCLIStatusValue.Float{text: evidence_report_json(report)}),
         jet_cli_status_field("grade", jet_cli_status_text(grade)),
         jet_cli_status_field("claims", claims),
         jet_cli_status_field("summaries", summaries),
     })
-    Ok(JetCLITestOutcome{status: status, report: report})
+    Ok(JetCLITestOutcome{status: status, report: report, below: below})
 }
 
 // A contract outcome as a Contract record: the clause's marker (`Pre` or

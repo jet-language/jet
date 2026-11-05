@@ -12398,6 +12398,20 @@ struct UnknownProofLens {
     }
 }
 
+struct ClaimBelowFloor {
+    grade: String
+    floor: String
+
+    impl Diagnostic {
+        code :: "E2942"
+        stage :: [.Compile]
+        detail :: true
+        fn what(self) -> String { "Claims grade `{self.grade}` is below the package floor `{self.floor}`" }
+        fn why(self) -> String { "`policy.claims.min` in `package.jet` asks for `{self.floor}`, and this run's evidence reaches `{self.grade}`." }
+        fn fix(self) -> String { "Add the evidence the floor names, then run the same command again." }
+    }
+}
+
 struct SolverCounterexample {
     obligation: String
 

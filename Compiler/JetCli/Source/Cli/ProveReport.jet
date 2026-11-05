@@ -39,13 +39,15 @@ struct JetCLIProveMember {
 
 // One front-end compile: the member it was started from (`entry`), its
 // presented diagnostics, the absolute files its snapshot authorized, whether
-// a member it covers declares a `#Test`, and where its named tests are.
+// a member it covers declares a `#Test`, where its named tests are, and its
+// package's `policy.claims.min` floor.
 struct JetCLIProveGroup {
     entry: Int
     diagnostics: [Diagnostic]
     files: [String]
     has_tests: Bool
     sites: [JetCLIProveTestSite]
+    floor: ClaimsGrade?
 }
 
 // A named `#Test` and the member line that declares it. `jet test` records
@@ -230,18 +232,47 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], color: Bool, j
     solver_failed :: jet_cli_solver_count(solver, "disproved") > 0
     exit_code := if failed > 0 || test_failed > 0 || budget_failed || solver_failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
     if jet_cli_prove_exit_rank(tests.exit_code) > jet_cli_prove_exit_rank(exit_code) -> exit_code = tests.exit_code
-    grade :: jet_cli_prove_grade(proved, failed, tests.items, tests.contracts)
-    report :: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, solver, proved, failed, grade, exit_code) ?? return jet_cli_ice(err.message)
+    grade :: jet_cli_prove_grade(proved, failed, tests.items, tests.contracts, solver)
+    floor :: jet_cli_prove_floor(groups)
+    // A run that already failed gets no E2942: its failures name their fixes.
+    below :: if exit_code == JET_DRIVER_EXIT_OK -> jet_cli_claims_below_floor(grade, floor, target.root) else -> None
+    if below != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+    report :: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, solver, proved, failed, grade, floor, exit_code) ?? return jet_cli_ice(err.message)
     // Rust `run_prove`: an internal compiler error produces no evidence artifact.
     if exit_code != JET_CLI_EXIT_ICE {
         jet_cli_prove_write(identity, report, tests.consumed) ?? return jet_cli_prove_refused(err, color, json)
     }
     if json {
-        reports :: jet_cli_prove_status_reports(members, front, tests.items, tests.contracts, solver)
+        reports := jet_cli_prove_status_reports(members, front, tests.items, tests.contracts, solver)
+        if below == .Val(diagnostic) {
+            loop entry in jet_cli_reports_json(jet_cli_report_base(target.root), target.root, "", [Diagnostic]{diagnostic}) -> &reports.push(entry)
+        }
         status :: jet_cli_status_render_with_reports("prove", exit_code == JET_DRIVER_EXIT_OK, reports, [JetCLIStatusField]{jet_cli_status_field("proof", JetCLIStatusValue.Float{text: report})})
         return JetDriverVerbOutput{stdout: "{status}\n", stderr: "", exit_code: exit_code}
     }
-    jet_cli_prove_human(members, front, tests, budgets, solver, lenses, proved, failed, grade, jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets, solver), color, exit_code)
+    human :: jet_cli_prove_human(members, front, tests, budgets, solver, lenses, proved, failed, jet_cli_prove_claims_text(grade, floor), jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets, solver), color, exit_code)
+    if below == .Val(diagnostic) -> return JetDriverVerbOutput{stdout: human.stdout, stderr: "{human.stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}", exit_code: human.exit_code}
+    human
+}
+
+// The strictest `policy.claims.min` of the groups' packages, or None.
+fn jet_cli_prove_floor(groups: [JetCLIProveGroup]) -> ClaimsGrade? Never! {
+    floor := ClaimsGrade?{None}
+    loop group in groups {
+        required :: group.floor ?? next
+        if floor == .Val(current) {
+            if current.meets(required) -> next
+        }
+        floor = Val(required.copy())
+    }
+    floor
+}
+
+// The CLAIMS line's text: the grade, and the floor when one is declared.
+fn jet_cli_prove_claims_text(grade: ClaimsGrade, floor: ClaimsGrade?) -> String Never! {
+    required :: floor ?? return grade.render()
+    verdict :: if grade.meets(required) -> "met" else -> "below"
+    "{grade.render()}, floor: {required.render()} ({verdict})"
 }
 
 // --- target members and identity -------------------------------------------
@@ -297,7 +328,7 @@ fn jet_cli_prove_groups(members: [JetCLIProveMember], color: Bool) -> [JetCLIPro
                     owned[other] = true
                     if jet_cli_prove_collect_tests(candidate, parse_source(candidate.source.bytes()).program.items, &sites) -> has_tests = true
                 }
-                &groups.push(JetCLIProveGroup{entry: index, diagnostics: diagnostics, files: files, has_tests: has_tests, sites: sites})
+                &groups.push(JetCLIProveGroup{entry: index, diagnostics: diagnostics, files: files, has_tests: has_tests, sites: sites, floor: jet_cli_test_claims_floor(snapshot.roots[0])})
             }
         }
     }
@@ -938,26 +969,28 @@ fn jet_cli_prove_paths_match(left: String, right: String) -> Bool Never! {
 
 // --- grade, result and report --------------------------------------------------
 
-// `claim_grade`: a failure establishes nothing; generated cases outrank
-// passing examples, which outrank a clean front end.
-fn jet_cli_prove_grade(proved: Int, failed: Int, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract]) -> String Never! {
+// `claim_grade`: a failure establishes nothing. The solver proves the run
+// only when it searched every obligation and proved each one; generated
+// cases outrank passing examples, which outrank a clean front end.
+fn jet_cli_prove_grade(proved: Int, failed: Int, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], solver: [JetCLISolverRow]) -> ClaimsGrade Never! {
     examples := 0
     generated := 0
     loop item in tests {
-        if item.state == 1 -> return ClaimsGrade.Unchecked.render()
+        if item.state == 1 -> return ClaimsGrade.Unchecked
         if (item.kind == 0 || item.kind == 2 || item.kind == 4) && item.state == 0 -> examples += 1
         if item.property == .Val(run) {
             if item.state == 0 -> generated += run.cases
         }
     }
     loop contract in contracts {
-        if contract.state == 1 -> return ClaimsGrade.Unchecked.render()
+        if contract.state == 1 -> return ClaimsGrade.Unchecked
     }
-    if failed > 0 -> return ClaimsGrade.Unchecked.render()
-    if generated > 0 -> return ClaimsGrade.Generated(generated).render()
-    if examples > 0 -> return ClaimsGrade.Examples(examples).render()
-    if proved > 0 -> return ClaimsGrade.Checked.render()
-    ClaimsGrade.Unchecked.render()
+    if failed > 0 || jet_cli_solver_count(solver, "disproved") > 0 -> return ClaimsGrade.Unchecked
+    if solver.len() > 0 && jet_cli_solver_count(solver, "proved") == solver.len() -> return ClaimsGrade.Proved
+    if generated > 0 -> return ClaimsGrade.Generated(generated)
+    if examples > 0 -> return ClaimsGrade.Examples(examples)
+    if proved > 0 -> return ClaimsGrade.Checked
+    ClaimsGrade.Unchecked
 }
 
 // A pass with unavailable tests, a declared contract no test reached, or a
@@ -1012,7 +1045,7 @@ fn jet_cli_prove_budget_json(count: JetCLIProveBudgetCount) -> String Never! {
 // `render_report`, canonicalized (A-canonical JSON: sorted keys, no
 // whitespace). The exact bytes are the `--json` proof and the artifact's
 // `proofReport`.
-fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], proved: Int, failed: Int, grade: String, exit_code: Int) -[FS, Env]> String JetCLIReadError! {
+fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], proved: Int, failed: Int, grade: ClaimsGrade, floor: ClaimsGrade?, exit_code: Int) -[FS, Env]> String JetCLIReadError! {
     diagnostics := [String]{}
     rows := [JetCLIProveRow]{}
     loop item in front.items {
@@ -1172,8 +1205,10 @@ fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             if item.state == 1 && run.minimized != "" -> property_shrunk += 1
         }
     }
-    quoted_grade :: foundation_json_quote(grade)
-    summaries :: "{{\"claims\":{{\"grade\":{quoted_grade}}},\"contract\":{{\"declared\":{contract_declared},\"failed\":{contract_failed},\"notObserved\":{contract_unreached},\"observed\":{contract_passed + contract_failed},\"passed\":{contract_passed},\"selected\":{contract_declared},\"skipped\":0}},\"deterministicBudget\":{jet_cli_prove_budget_json(deterministic)},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_passed + doctest_failed + doctest_skipped},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{proved + failed},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_passed + property_failed + property_skipped},\"shrunkFailures\":{property_shrunk},\"skipped\":{property_skipped}}},\"solver\":{jet_cli_solver_summary_json(solver)},\"statisticalBudget\":{jet_cli_prove_budget_json(statistical)},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_passed + unit_failed + unit_skipped},\"skipped\":{unit_skipped}}}}}"
+    quoted_grade :: foundation_json_quote(grade.render())
+    // A declared floor adds its rung and whether the grade meets it.
+    claims_floor :: if floor == .Val(required) -> ",\"floor\":{foundation_json_quote(required.render())},\"floorMet\":{grade.meets(required)}" else -> ""
+    summaries :: "{{\"claims\":{{\"grade\":{quoted_grade}{claims_floor}}},\"contract\":{{\"declared\":{contract_declared},\"failed\":{contract_failed},\"notObserved\":{contract_unreached},\"observed\":{contract_passed + contract_failed},\"passed\":{contract_passed},\"selected\":{contract_declared},\"skipped\":0}},\"deterministicBudget\":{jet_cli_prove_budget_json(deterministic)},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_passed + doctest_failed + doctest_skipped},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{proved + failed},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_passed + property_failed + property_skipped},\"shrunkFailures\":{property_shrunk},\"skipped\":{property_skipped}}},\"solver\":{jet_cli_solver_summary_json(solver)},\"statisticalBudget\":{jet_cli_prove_budget_json(statistical)},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_passed + unit_failed + unit_skipped},\"skipped\":{unit_skipped}}}}}"
     target_members :: loop member in identity.members -> "{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}"
     target :: "{{\"inputSha256\":{foundation_json_quote(identity.input_sha256)},\"kind\":{foundation_json_quote(identity.kind)},\"members\":[{target_members.join(",")}],\"mir\":{identity.mir_json},\"root\":{foundation_json_quote(identity.root)}}}"
     triple :: foundation_json_quote(jet_cli_prove_triple())
@@ -1343,9 +1378,9 @@ fn jet_cli_prove_line_span(source: String, line: Int) -> Span? Never! {
 // front-end errors (facet `all`) and every stop always show, anything else
 // failed or incomplete is listed outside the selection, and the exit and
 // the report never change.
-fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], lenses: [String], proved: Int, failed: Int, grade: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
+fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], lenses: [String], proved: Int, failed: Int, claims: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
     stdout := if lenses.len() > 0 -> "LENSES   {jet_cli_prove_lens_names(lenses).join(", ")}\n" else -> ""
-    stdout = "{stdout}CLAIMS   grade: {grade}\n"
+    stdout = "{stdout}CLAIMS   grade: {claims}\n"
     if failed > 0 || jet_cli_prove_lens_checked(lenses) -> stdout = "{stdout}CHECKED  front end: {proved} proved, {failed} failed\n"
     stderr := ""
     loop group in ([[JetCLIProveFrontItem]]{front.items, front.warnings}) {
