@@ -119,7 +119,7 @@ fn release_main(args: [String]) -[FS, Env, Exec, IO, Time, Time.Wait]> Int Never
         term.eprint("release: {dir} is not a directory")
         return 2
     }
-    programs :: Programs{gh: [String]{"gh"}, node: [String]{"node"}}
+    programs :: Programs{gh: [String]{"gh"}, jet: [String]{"jet"}}
     remote :: gather_remote(root, read_release(dir).commit, programs)
     trusted :: publication_read_public_key(options.key) ?? ""
     outcome :: if options.command == "candidate" -> candidate_step(dir, root, options.evidence, Signer{seed_path: publication_key_paths(options.key).seed_path, public_key: trusted}, remote, programs) else -> publish_step(dir, root, trusted, remote, programs, dry_run: options.dry_run)

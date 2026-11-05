@@ -26,7 +26,7 @@ struct Signer {
 // The external programs a run uses, as argv prefixes.
 struct Programs {
     gh: [String]
-    node: [String]
+    jet: [String]
 }
 
 struct Outcome {
@@ -155,11 +155,11 @@ fn archive_problems(first: [U8], second: [U8], name: String) -> [Problem] Never!
 }
 
 // Every listed path under `dir` that names this machine's home, user, host,
-// email or mounts (the rule table of Tools/tower/app/personal-info.mjs, the
-// rules Tools/agent/LaneCheck.jet's guard applies to a checkout) or one of `literals`. Binary
-// files are searched too: a path baked into jet is a leak.
+// email or mounts (the rules of Tools/agent/LaneCheck.jet's personal-information
+// guard, `--patterns`) or one of `literals`. Binary files are searched too: a
+// path baked into jet is a leak.
 fn personal_problems(root: String, dir: String, paths: [String], literals: [String], programs: Programs) -[FS, Exec, Time.Wait]> [Problem] Never! {
-    rules :: run_argv(with_args(programs.node, [String]{files.join(root, "Tools/tower/app/personal-info.mjs"), "patterns"}), dir)
+    rules :: run_argv(with_args(programs.jet, [String]{files.join(root, "Tools/agent/LaneCheck.jet"), "--patterns"}), dir)
     if rules.code != 0 -> return [Problem]{problem(PERSONAL, "cannot read the personal-information rules: {rules.errors.trim()}")}
     path_args := [String]{}
     word_args := [String]{}

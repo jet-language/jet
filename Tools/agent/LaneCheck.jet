@@ -21,6 +21,9 @@
 //   JET=/path/to/jet jet Tools/agent/LaneCheck.jet <path>   one file or project
 //   jet Tools/agent/LaneCheck.jet --runtime-generators      runtime tables only
 //   jet Tools/agent/LaneCheck.jet --personal-info [DIR]     the guard alone
+//   jet Tools/agent/LaneCheck.jet --patterns                the guard's rules,
+//     one "path<TAB>regex" (case-sensitive) or "word<TAB>regex" (any case)
+//     line each, for Tools/release/Publish.jet's release search
 //
 // Reading the output: errors are grouped by file. An error in a file YOU did not
 // touch belongs to another worker editing the same checkout: report it in your
@@ -56,6 +59,11 @@ fn run() {
     if args.len() > 0 && args[0] == "--personal-info" {
         if args.len() > 2 -> usage("jet Tools/agent/LaneCheck.jet --personal-info [DIR]")
         process.exit(personal_info_guard(if args.len() == 2 -> args[1] else -> repo))
+    }
+    if args.len() > 0 && args[0] == "--patterns" {
+        if args.len() != 1 -> usage("jet Tools/agent/LaneCheck.jet --patterns")
+        loop rule in personal_info_rules(machine_identity(files.cwd() ?? repo)) -> print("{rule.kind}\t{rule.source}")
+        return
     }
     if personal_info_guard(repo) != 0 {
         print("CHECK FAILED — personal or machine information in the checkout (see above)")

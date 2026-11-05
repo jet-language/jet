@@ -1,9 +1,9 @@
 // #6564 c5: personal and machine information never enters the board or a
-// committed file. One rule table serves Tower and the release: `tower redact`
-// rewrites the stored board, store.mutate refuses a write that adds a match,
-// and Tools/release/Publish.jet greps a release with the same patterns
-// (`node personal-info.mjs patterns`). Tools/agent/LaneCheck.jet builds the
-// same rules in Jet for its checkout guard; a change here changes it there.
+// committed file. This rule table serves Tower: `tower redact` rewrites the
+// stored board, and store.mutate refuses a write that adds a match.
+// Tools/agent/LaneCheck.jet builds the same rules in Jet for its checkout
+// guard and for Tools/release/Publish.jet (`--patterns`); a change here
+// changes it there.
 //
 // The rules come from the machine running Tower, so this file holds no
 // personal data: the home directory, the login name, the host name, the
@@ -15,7 +15,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
-import { fileURLToPath } from 'node:url';
 
 export const RULE_TABLE = 'personal-info/v2';
 
@@ -288,14 +287,4 @@ export function redactBoard(state, history, matcher) {
     }
   }
   return { ruleTable: RULE_TABLE, total, files, sections, rules };
-}
-
-// `node personal-info.mjs patterns` prints one rule per line for the shell
-// guard: "path<TAB>regex" (case-sensitive) or "word<TAB>regex" (any case).
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  if (process.argv[2] !== 'patterns') {
-    process.stderr.write('usage: node personal-info.mjs patterns\n');
-    process.exit(64);
-  }
-  for (const rule of personalInfoRules(machineIdentity())) process.stdout.write(`${rule.kind}\t${rule.source}\n`);
 }
