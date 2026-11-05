@@ -1,6 +1,6 @@
 // Adapted from the existing origin/port/compiler port. Score checked parser
 // nodes, never source heuristics.
-use jet_foundation.[Expr, Func, Item, Program, Span, Stmt, ast_visit_statement]
+use jet_foundation.[Expr, Func, Item, Program, Span, Stmt, ast_visit_body, ast_visit_expr, ast_visit_statement, expr_span]
 
 struct JetCLIComplexityReport {
     name: String
@@ -55,7 +55,7 @@ struct JetCLIComplexityVisitor {
         if expression == {
             .If(_, _, _, _, _, span, _) -> {
                 &self.controls.push(span)
-                &self.nesting.push(span)
+                &self.nesting.push(Span{start: span.start, end: jet_cli_complexity_extent(expression, span.end)})
             }
             .Lambda(lambda, _) -> {
                 &self.nesting.push(lambda.span)
@@ -75,6 +75,28 @@ struct JetCLIComplexityVisitor {
     }
 }
 
+// A control node's span covers its head only (`if`, `loop`): its nesting
+// scope runs to the end of the furthest expression under it, at least `end`.
+fn jet_cli_complexity_extent(expression: Expr, end: Int) -> Int Never! {
+    ends := [Int]{end}
+    ast_visit_expr(expression, (inner: Expr) -> &ends.push(expr_span(inner).end))
+    jet_cli_complexity_furthest(ends)
+}
+
+fn jet_cli_complexity_body_extent(bodies: [[Stmt]], end: Int) -> Int Never! {
+    ends := [Int]{end}
+    loop body in bodies -> ast_visit_body(body, (inner: Expr) -> &ends.push(expr_span(inner).end), true)
+    jet_cli_complexity_furthest(ends)
+}
+
+fn jet_cli_complexity_furthest(ends: [Int]) -> Int Never! {
+    furthest := ends[0]
+    loop value in ends {
+        if value > furthest -> furthest = value
+    }
+    furthest
+}
+
 fn jet_cli_complexity_function(function: Func, reports: &[JetCLIComplexityReport]) Never! {
     visitor := JetCLIComplexityVisitor{function_name: function.name, controls: [Span]{}, nesting: [Span]{}, mixed: 0, recursive: false}
     loop statement in function.body {
@@ -85,7 +107,7 @@ fn jet_cli_complexity_function(function: Func, reports: &[JetCLIComplexityReport
     loop inner in visitor.controls {
         score += 1
         loop outer in visitor.nesting {
-            if outer.start < inner.start && inner.end < outer.end -> score += 1
+            if outer.start < inner.start && inner.start < outer.end -> score += 1
         }
     }
     &reports.push(JetCLIComplexityReport{name: function.name, span: function.span, score: score})
@@ -119,15 +141,28 @@ fn jet_cli_complexity_statement(statement: Stmt, controls: &[Span], nesting: &[S
         }
         .Switch(_, arms, else_body, span) | .ComptimeSwitch(_, arms, else_body, span) -> {
             &controls.push(span)
-            &nesting.push(span)
-            loop arm in arms -> jet_cli_complexity_body(arm.body, &controls, &nesting)
-            if else_body == .Val(body) -> jet_cli_complexity_body(body, &controls, &nesting)
+            bodies := [[Stmt]]{}
+            loop arm in arms {
+                jet_cli_complexity_body(arm.body, &controls, &nesting)
+                // copy: the arm stays the statement's; the extent walk reads its own list.
+                &bodies.push(arm.body.copy())
+            }
+            if else_body == .Val(body) {
+                jet_cli_complexity_body(body, &controls, &nesting)
+                &bodies.push(body.copy())
+            }
+            &nesting.push(Span{start: span.start, end: jet_cli_complexity_body_extent(bodies, span.end)})
         }
         .ComptimeIf(_, _, then_body, else_body, span, _) -> {
             &controls.push(span)
-            &nesting.push(span)
             jet_cli_complexity_body(then_body, &controls, &nesting)
-            if else_body == .Val(body) -> jet_cli_complexity_body(body, &controls, &nesting)
+            // copy: the bodies stay the statement's; the extent walk reads its own list.
+            bodies := [[Stmt]]{then_body.copy()}
+            if else_body == .Val(body) {
+                jet_cli_complexity_body(body, &controls, &nesting)
+                &bodies.push(body.copy())
+            }
+            &nesting.push(Span{start: span.start, end: jet_cli_complexity_body_extent(bodies, span.end)})
         }
         .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) -> jet_cli_complexity_body(body, &controls, &nesting)
         else -> {}
