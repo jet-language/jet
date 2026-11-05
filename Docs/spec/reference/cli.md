@@ -304,9 +304,16 @@ out (one needing review, or one rolled back) with its reason. A `#Deprecated`
 declared function that takes the same call; otherwise L2001's Fix says to edit
 the use by hand. `--dry-run` renders the diff without publishing.
 `--edition=2027` performs the registered JSON/CBOR migrations first, retaining
-written propagation and making panic fallbacks idempotent. Human status is
-suppressed by `--quiet` and `--json`; machine mode does not create a fake fix
-receipt. Publication uses the held codemod transaction and its durable undo
+written propagation and making panic fallbacks idempotent. `--quiet` suppresses
+the human status. `--json` prints one `jet.status/v1` line with action `fix`
+instead: `fix.file`, `fix.dry_run`, `fix.applied` (the count), `fix.skipped`
+(each edit left out, with its `title`, `reason`, `span` and `new_text`) and
+`fix.log` (the replay log, or null when nothing was written); machine mode
+does not create a fake fix receipt. A script with no package block whose
+rights are undecided gets the leading `package` block that grants them as a
+needs-review edit: the E1803 report of `jet run --json` carries it, plain
+`jet fix` skips it, and `jet fix --all` applies it. Granting a right is a
+decision, not a repair. Publication uses the held codemod transaction and its durable undo
 journal. Rename provenance comes from uniquely matched checked before/after
 definition facts; when those checks cannot establish a rename, the receipt
 records the exact changed byte region instead.

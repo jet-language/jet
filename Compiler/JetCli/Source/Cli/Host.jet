@@ -1193,9 +1193,15 @@ fn jet_cli_authority_check(file: String, source: String, color: Bool, json: Bool
     jet_cli_authority_report(file, source, color, json, command, authority)
 }
 
-// The E1803 report of `authority`, or None when it allows the program.
+// The E1803 report of `authority`, or None when it allows the program. A
+// script with no package block reports its grant as a needs-review edit
+// (jet_cli_inline_grant_refusal), so `--json` names the decision `jet fix`
+// leaves to the author.
 fn jet_cli_authority_report(file: String, source: String, color: Bool, json: Bool, command: String, authority: JetCLIAuthority) -[FS, Env]> JetDriverVerbOutput? Never! {
-    refusal :: jet_cli_authority_refusal(authority, file, command) ?? return None
+    refusal :: if jet_cli_inline_grant_refusal(authority, file, source, command) == {
+        .Val(report) -> report
+        else -> jet_cli_authority_refusal(authority, file, command) ?? return None
+    }
     Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, [Diagnostic]{refusal}, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR})
 }
 
