@@ -212,15 +212,20 @@ that gate.
 
 One implementer owns each coherent patch. Concurrent writers need disjoint
 paths and one named close owner. The repository's working branches are
-`master` and `dev`, with one dev worktree. At the Rust cutover, the last
+`master` and `dev`. At the Rust cutover, the last
 commit that still contains the Rust implementation becomes the `rust` branch: a
 frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
 commits to it or merges it into `dev` or `master`. Every agent commits directly
 on `dev` in the dev worktree, in small commits that stage only its own paths.
-Never create any other branch, a worktree, or any other ref (`refs/keep`,
-`refs/salvage`, `refs/archive`, private lineages), for any purpose: experiments,
-candidates, measurements, and proofs included. Work happens in the dev
-worktree; no agent keeps its own copy of the repository. A `git archive` export
+Besides the master checkout, at most three worktrees may exist: the dev worktree
+and up to two more that the orchestrator creates as detached checkouts of
+`dev`. Each extra worktree has one named owner, is kept at a current `dev`
+commit, holds no build output, and is removed as soon as it is idle; its work
+reaches `dev` before removal. Never create any other branch, worktree, or other
+ref (`refs/keep`, `refs/salvage`, `refs/archive`, private lineages), for any
+purpose: experiments, candidates, measurements, and proofs included. Work
+happens in these worktrees; no agent keeps its own copy of the repository. A
+`git archive` export
 outside the repository is allowed only for one build or measurement that can
 use neither the worktree nor a published compiler (a release gate, or an A/B
 base whose compiler is not published), and the job that made it deletes it
