@@ -1963,7 +1963,12 @@ fn sema_expr_unit_arithmetic_mismatch(op: BinOp, lhs: Type, rhs: Type, span: Spa
 }
 
 fn sema_expr_unit_dimension_mismatch(op: BinOp, left: Dimension, right: Dimension, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0359", span, "{sema_expr_binary_name(op)} can't combine {dimension_display_name(left)} with {dimension_display_name(right)}", "physical quantities must have compatible dimensions before they can be added, subtracted, or compared", "use matching dimensions, or use `*` or `/` to derive a new dimension"))
+    &diagnostics.push(sema_error("E0359", span, "`{sema_expr_binary_name(op)}` can't combine {dimension_display_name(left)} with {dimension_display_name(right)}", "physical quantities must have compatible dimensions before they can be added, subtracted, or compared", "use matching dimensions, or use `*` or `/` to derive a new dimension"))
+}
+
+// Addition, subtraction and comparison need equal dimensions.
+fn sema_expr_unit_needs_equal_dimensions(op: BinOp) -> Bool Never! {
+    op == BinOp.Add || op == BinOp.Sub || op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge || op == BinOp.Compare
 }
 
 fn sema_expr_unit_is_time(fact: SemaRegistrationUnitFact) -> Bool Never! {
@@ -2090,6 +2095,12 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
         right :: right_fact ?? return None
         same_family := left.package == right.package && left.family == right.family
         if !same_family {
+            // Different dimensions are E0359 before the family check (spec
+            // "Physical dimensions"); same-dimension nominal families stay E0127.
+            if sema_expr_unit_needs_equal_dimensions(op) && left.dimension != None && right.dimension != None && !sema_expr_unit_dimensions_equal(left.dimension, right.dimension) {
+                sema_expr_unit_dimension_mismatch(op, left.dimension ?? Dimension{axes: [DimensionAxis]{}}, right.dimension ?? Dimension{axes: [DimensionAxis]{}}, span, &diagnostics)
+                return None
+            }
             sema_expr_unit_arithmetic_mismatch(op, lhs.ty, rhs.ty, span, &diagnostics)
             return None
         }
@@ -2128,7 +2139,7 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
                 return Val(sema_expr_unit_binary_result(op, lhs, rhs, left, right, destination, span, line, environment, program))
             }
             if (left.kind == QuantityKind.Point && right.kind == QuantityKind.Point) || (left.kind == QuantityKind.Delta && right.kind == QuantityKind.Point) {
-                sema_expr_unit_arithmetic_mismatch(op, lhs.ty, rhs.ty, span, &diagnostics)
+                &diagnostics.push(sema_error("E0127", span, "`{sema_expr_binary_name(op)}` is not available between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "affine points are positions; only point + delta, point - delta, point - point, and delta + delta are defined", "subtract two points for a delta, or add a matching Delta to a point"))
                 return None
             }
         }
@@ -2137,8 +2148,15 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
     }
 
     if left_dimension != None || right_dimension != None {
-        if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge || op == BinOp.Compare {
+        if sema_expr_unit_needs_equal_dimensions(op) {
             if left_dimension != None && right_dimension != None && !sema_expr_unit_dimensions_equal(left_dimension, right_dimension) {
+                sema_expr_unit_dimension_mismatch(op, left_dimension ?? Dimension{axes: [DimensionAxis]{}}, right_dimension ?? Dimension{axes: [DimensionAxis]{}}, span, &diagnostics)
+                return None
+            }
+            // A plain number has the Scalar dimension: `1meter < 1.0` compares
+            // Length with Scalar.
+            plain :: if left_dimension == None -> lhs.ty else -> rhs.ty
+            if (left_dimension == None) != (right_dimension == None) && (sema_expr_is_numeric(plain) || sema_expr_precise_name(plain) != None) {
                 sema_expr_unit_dimension_mismatch(op, left_dimension ?? Dimension{axes: [DimensionAxis]{}}, right_dimension ?? Dimension{axes: [DimensionAxis]{}}, span, &diagnostics)
                 return None
             }

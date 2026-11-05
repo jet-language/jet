@@ -388,8 +388,8 @@ struct InvalidEnumDiscriminant {
         meaning :: "enum discriminant is not a computable integer"
         detail :: true
         fn what(self) -> String { "An enum discriminant must be known at compile time and fit the signed integer representation used by the enum layout." }
-        fn why(self) -> String { "Use a literal, a same-file `@` binding, or another comptime expression that produces an in-range integer." }
-        fn fix(self) -> String { "Use a literal, a same-file `@` binding, or another comptime expression that produces an in-range integer." }
+        fn why(self) -> String { "The enum number is part of the type layout, so it must be known before code generation." }
+        fn fix(self) -> String { "Use an integer literal, a `NAME :: comptime {{ value }}` constant, or another compile-time expression that produces an in-range integer." }
     }
 }
 
