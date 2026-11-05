@@ -29,6 +29,7 @@ use {
         TextEdit,
         Type,
         ast_func,
+        ast_visit_expr,
         core_call_typed_signature,
         core_module_export,
         core_module_has_type,
@@ -1023,6 +1024,55 @@ fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, p
     if func.body.len() > 0 -> span = sema_compiler_index_stmt_span(func.body[func.body.len() - 1])
     &diagnostics.push(sema_error("E2423", span, "Function `{func.name}` promises `Never` but can reach the end.", "A declared `Never` return means every path must stop; this path falls through instead.", "End every path with `panic`, a `Never` call, or another diverging operation, or remove `Never`."))
     false
+}
+
+// L2421: a public function whose body stops on every path but whose written
+// return type doesn't say `Never` keeps that contract from its callers.
+fn sema_lint_inferred_never_return(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if !func.is_pub || func.compiler_generated || sema_function_promises_never(func) || environment.module_identity.starts_with("<corelib>/") -> return
+    if !sema_function_always_diverges(func.body, environment, program, scopes) -> return
+    name :: sema_inline_member_source_name(func.name)
+    &diagnostics.push(sema_lint("L2421", func.name_span, "Public function `{name}` always diverges but does not declare `Never`", "Inferred divergence is useful to callers but is not part of the written API contract", "Write `-> Never` as the return type, for example `fn {name}() -> Never`"))
+}
+
+// A body that reaches a diverging statement (`panic`, a `Never` call) on its
+// one straight-line path. Any statement that could branch or return first (a
+// table, a loop, an `if`, a `??` fallback that returns) leaves it unproven.
+fn sema_function_always_diverges(body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    loop statement in body {
+        if statement == {
+            .Expr(expr) -> {
+                if sema_expr_may_branch(expr) -> return false
+                if sema_never_expr_diverges(expr, environment, program, scopes) -> return true
+            }
+            .Val(binding) -> {
+                if binding.pattern == .Val(.Refutable(_, _, _, _)) || sema_expr_may_branch(binding.init) -> return false
+            }
+            .Assign(_, _, _, value) -> {
+                if sema_expr_may_branch(value) -> return false
+            }
+            else -> return false
+        }
+    }
+    false
+}
+
+// Whether evaluating `expr` could leave the straight-line path: it holds an
+// `if` or a `??` fallback that runs a block or returns.
+fn sema_expr_may_branch(expr: Expr) -> Bool {
+    probe := SemaBranchProbe{found: false}
+    ast_visit_expr(expr, (inner: Expr) -> &probe.visit(inner))
+    probe.found
+}
+
+struct SemaBranchProbe {
+    found: Bool
+    fn visit(&self, inner: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+        if inner == {
+            .If(_, _, _, _, _, _, _) | .OrFallback(_, .Block(_, _, _), _, _, _) | .OrFallback(_, .Return(_, _), _, _, _) -> self.found = true
+            else -> {}
+        }
+    }
 }
 
 // E0408/E0409: `err` names a failure report; an optional fallback or a pure

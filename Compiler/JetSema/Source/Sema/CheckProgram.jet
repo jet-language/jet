@@ -2179,6 +2179,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, updated, program, scopes, &diagnostics) -> complete = false
+    sema_lint_inferred_never_return(func, updated, program, scopes, &diagnostics)
     sema_function_header_external_target(func, &diagnostics, diagnostics_start)
     // Rust `check_value_block` over the body: a value body reports E0114 when
     // it can reach its end without a value.
@@ -5250,6 +5251,7 @@ fn sema_check_soft_public_uses(environment: SemaScopeEnvironment, program: SemaP
             leaf :: sema_soft_public_written_leaf(raw, codes, call.span) ?? next
             sema_soft_public_warn(leaf, &seen, &module_result.diagnostics)
         }
+        sema_check_soft_public_signatures(graph.modules[caller], codes, raw, &seen, &module_result.diagnostics)
     }
 }
 
@@ -5257,6 +5259,54 @@ fn sema_soft_public_warn(leaf: (start: Int, name: String), seen: &[Int:Bool], di
     if classify_identifier(leaf.name) != IdentifierClass.SoftPublic || seen.has_key(leaf.start) -> return
     seen[leaf.start] = true
     &diagnostics.push(sema_lint("L0601", Span{start: leaf.start, end: leaf.start + leaf.name.count_bytes()}, "`{leaf.name}` is a soft-public API", "A leading underscore allows outside use but carries no compatibility promise across minor releases.", "Use a public name without a leading underscore when callers need a stable API."))
+}
+
+// The soft-public type names one module's signatures write: in a parameter
+// or return type, or a generic bound. A qualified `alias._Cell` is always
+// outside; an unqualified `_Shape` is outside unless the module declares it
+// (a local declaration wins over an imported one) or the function's own
+// type parameters name it.
+fn sema_check_soft_public_signatures(source_module: SemaRegistrationModule, codes: [Int], raw: [U8], seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
+    loop item in source_module.declarations {
+        if item == {
+            .Func(function) -> sema_check_soft_public_signature(function, source_module.declaration_positions, codes, raw, &seen, &diagnostics)
+            .Impl(implementation) -> loop method in implementation.methods -> sema_check_soft_public_signature(method, source_module.declaration_positions, codes, raw, &seen, &diagnostics)
+            .Struct(definition) -> loop method in definition.methods -> sema_check_soft_public_signature(method, source_module.declaration_positions, codes, raw, &seen, &diagnostics)
+            .Enum(definition) -> loop method in definition.methods -> sema_check_soft_public_signature(method, source_module.declaration_positions, codes, raw, &seen, &diagnostics)
+            else -> {}
+        }
+    }
+}
+
+fn sema_check_soft_public_signature(function: Func, declared: [String:Int], codes: [Int], raw: [U8], seen: &[Int:Bool], diagnostics: &[Diagnostic]) {
+    if function.compiler_generated -> return
+    local := [String]{}
+    loop parameter in function.type_params -> &local.push(parameter.name)
+    ranges := [Span]{}
+    loop parameter in function.params -> &ranges.push(parameter.ty_span)
+    if function.return_type_span == .Val(span) -> &ranges.push(span)
+    // A bound runs from the parameter's name to its `,`, `>` or default `=`.
+    loop parameter in function.type_params {
+        end := parameter.name_span.end
+        loop end < codes.len() && codes[end] != 44 && codes[end] != 62 && codes[end] != 61 -> end += 1
+        &ranges.push(Span{start: parameter.name_span.end, end: end})
+    }
+    loop range in ranges {
+        at := if range.start < 0 -> 0 else -> range.start
+        limit :: if range.end > codes.len() -> codes.len() else -> range.end
+        loop at < limit {
+            if codes[at] != 95 || (at > 0 && sema_soft_public_word_byte(codes[at - 1])) {
+                at += 1
+                next
+            }
+            start :: at
+            loop at < limit && sema_soft_public_word_byte(codes[at]) -> at += 1
+            name :: String.from_bytes(raw[start..<at]) ?? next
+            qualified :: start > 0 && codes[start - 1] == 46
+            if !qualified && (declared.has_key(name) || local.contains(name)) -> next
+            sema_soft_public_warn((start: start, name: name), &seen, &diagnostics)
+        }
+    }
 }
 
 // The name a use site writes, with its byte offset in the source: the last

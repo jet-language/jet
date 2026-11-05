@@ -11,6 +11,8 @@ use jet_foundation.[
     CallArg,
     ContextField,
     Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
     EffectRowEntry,
     Expr,
     IndexKind,
@@ -85,6 +87,7 @@ use jet_foundation.[
     TextEdit,
     UnOp,
     diagnostic_with_edit,
+    diagnostic_with_edit_grade,
     checked_persistent_local,
 ]
 
@@ -3379,6 +3382,189 @@ fn sema_stmt_lint_same_enum_guards(arms: [SwitchArm], conditions: [SemaCheckedCo
         enum_name :: sema_stmt_leading_guard_enum(checked.condition) ?? next
         &diagnostics.push(sema_lint("L0302", span, "These arm heads all dispatch on `{enum_name}`", "Naming the subject makes one closed enum's cases explicit and exhaustively checked", "Write `if {first} == {{ ... }}` and put each variant pattern in an arm"))
         return
+    }
+}
+
+// L0514: three or more adjacent else-less guards that each compare one
+// stable local with literals (`if key == "rev" || key == "r" { … }`) are one
+// categorical dispatch; an ordered subject table states it once. A guard body
+// that assigns the subject makes the guards order-dependent, so it ends the run.
+fn sema_stmt_lint_same_subject_dispatch(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    index := 0
+    loop index < statements.len() {
+        run_end := index + 1
+        if sema_stmt_categorical_guard_subject(statements[index]) == .Val(subject) {
+            loop run_end < statements.len() && sema_stmt_categorical_guard_subject(statements[run_end]) == (Val(subject)) -> run_end += 1
+            if run_end - index >= 3 && sema_stmt_guard_run_keeps_subject(statements, index, run_end, subject) {
+                diagnostic := sema_lint("L0514", sema_compiler_index_stmt_span(statements[index]), "Adjacent categorical guards over `{subject}` can be one ordered subject table", "Exclusive guards repeat one stable subject; an ordered table keeps the categories together", "Rewrite as `if {subject} == {{ … }}` and group aliases with `|`; see `Examples/suites/dispatch.jet`")
+                if sema_stmt_same_subject_table_edit(statements, index, run_end, subject, environment, program) == .Val(edit) -> diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
+                &diagnostics.push(diagnostic)
+            }
+        }
+        index = run_end
+    }
+}
+
+// The L0514 rewrite: one `if subject == { … }` table whose arms keep the
+// guards' order, with each guard's literals as one `|` head and its body as
+// the arm body, closed by an empty `else` (a String or Int subject is open).
+fn sema_stmt_same_subject_table_edit(statements: [Stmt], start: Int, end: Int, subject: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph :: program.registration_graph ?? return None
+    caller :: sema_scope_caller_index(environment, graph) ?? return None
+    raw :: graph.modules[caller].source.bytes()
+    first :: sema_compiler_index_stmt_span(statements[start])
+    if first.start < 0 || first.start > raw.len() -> return None
+    line_start := first.start
+    loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
+    indent := ""
+    loop _ in line_start..<first.start -> indent = "{indent} "
+    text := "if {subject} == {{\n"
+    table_end := first.start
+    loop index in start..<end {
+        if statements[index] == {
+            .Switch(_, arms, _, _) -> {
+                heads := [String]{}
+                if !sema_stmt_category_heads(arms[0].cond, raw, &heads) -> return None
+                body :: sema_stmt_guard_body_text(raw, expr_span(arms[0].cond).end, indent) ?? return None
+                text = "{text}{indent}    {heads.join(" | ")} -> {body.text}\n"
+                table_end = body.end
+            }
+            else -> return None
+        }
+    }
+    text = "{text}{indent}    else -> {{}}\n{indent}}}"
+    Val(TextEdit{span: Span{start: first.start, end: table_end}, new_text: text})
+}
+
+// The literal source of each `subject == literal` disjunct, in order.
+fn sema_stmt_category_heads(condition: Expr, raw: [U8], heads: &[String]) -> Bool {
+    if condition == {
+        .Paren(inner, _, _) -> return sema_stmt_category_heads(inner, raw, &heads)
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Or -> return sema_stmt_category_heads(left, raw, &heads) && sema_stmt_category_heads(right, raw, &heads)
+            span :: expr_span(right)
+            if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return false
+            head :: String.from_bytes(raw[span.start..<span.end]) ?? return false
+            &heads.push(head)
+            return true
+        }
+        else -> return false
+    }
+}
+
+// A guard's body after its condition: an arrow body is the rest of its line,
+// a braced body with one line becomes an arrow body, and a longer braced body
+// stays braced one level deeper.
+fn sema_stmt_guard_body_text(raw: [U8], from: Int, indent: String) -> (text: String, end: Int)? {
+    at := from
+    loop at < raw.len() && (raw[at] == (U8{32}) || raw[at] == (U8{9})) -> at += 1
+    if at + 1 < raw.len() && raw[at] == (U8{45}) && raw[at + 1] == (U8{62}) {
+        at += 2
+        loop at < raw.len() && raw[at] == (U8{32}) -> at += 1
+        line_end := at
+        loop line_end < raw.len() && raw[line_end] != (U8{10}) -> line_end += 1
+        trimmed := line_end
+        loop trimmed > at && (raw[trimmed - 1] == (U8{32}) || raw[trimmed - 1] == (U8{13})) -> trimmed -= 1
+        if trimmed == at -> return None
+        text :: String.from_bytes(raw[at..<trimmed]) ?? return None
+        return Val((text: text, end: trimmed))
+    }
+    if at >= raw.len() || raw[at] != (U8{123}) -> return None
+    close := at + 1
+    depth := 1
+    in_string := false
+    loop close < raw.len() {
+        byte :: raw[close]
+        if in_string {
+            if byte == (U8{92}) {
+                close += 2
+                next
+            }
+            if byte == (U8{34}) -> in_string = false
+        } else if byte == (U8{34}) {
+            in_string = true
+        } else if byte == (U8{123}) {
+            depth += 1
+        } else if byte == (U8{125}) {
+            depth -= 1
+            if depth == 0 -> break
+        }
+        close += 1
+    }
+    if depth != 0 -> return None
+    inner :: String.from_bytes(raw[at + 1..<close]) ?? return None
+    lines := [String]{}
+    loop line in inner.split("\n") {
+        if line.trim().len() > 0 -> &lines.push(line.trim_end())
+    }
+    if lines.len() == 0 -> return Val((text: "{{}}", end: close + 1))
+    if lines.len() == 1 -> return Val((text: lines[0].trim(), end: close + 1))
+    text := "{{\n"
+    loop line in lines -> text = "{text}    {line}\n"
+    Val((text: "{text}{indent}    }}", end: close + 1))
+}
+
+// The local a classic else-less one-arm `if` compares with literals, when
+// every disjunct of its condition is `local == literal`.
+fn sema_stmt_categorical_guard_subject(statement: Stmt) -> String? Never! {
+    if statement == {
+        .Switch(subject, arms, else_body, span) -> {
+            if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) -> return None
+            return sema_stmt_categorical_condition_subject(arms[0].cond)
+        }
+        else -> return None
+    }
+}
+
+fn sema_stmt_categorical_condition_subject(condition: Expr) -> String? Never! {
+    if condition == {
+        .Paren(inner, _, _) -> return sema_stmt_categorical_condition_subject(inner)
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.Or {
+                left_subject :: sema_stmt_categorical_condition_subject(left) ?? return None
+                right_subject :: sema_stmt_categorical_condition_subject(right) ?? return None
+                return if left_subject == right_subject -> Val(left_subject) else -> None
+            }
+            if op != BinOp.Eq -> return None
+            if left == {
+                .Ident(name, _, _) -> return if sema_stmt_is_category_literal(right) -> Val("{name}") else -> None
+                else -> return None
+            }
+        }
+        else -> return None
+    }
+}
+
+fn sema_stmt_is_category_literal(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Str(_, _, _) | .Int(_, _, _, _, _) | .Char(_, _, _) -> return true
+        else -> return false
+    }
+}
+
+fn sema_stmt_guard_run_keeps_subject(statements: [Stmt], start: Int, end: Int, subject: String) -> Bool Never! {
+    loop index in start..<end {
+        if statements[index] == {
+            .Switch(_, arms, _, _) -> loop arm in arms {
+                loop statement in arm.body {
+                    if sema_stmt_assigned_local(statement) == (Val(subject)) -> return false
+                }
+            }
+            else -> {}
+        }
+    }
+    true
+}
+
+fn sema_stmt_assigned_local(statement: Stmt) -> String? Never! {
+    if statement == {
+        .Assign(target, _, _, _) -> {
+            if target == {
+                .Local(name, _) -> return Val("{name}")
+                else -> return None
+            }
+        }
+        else -> return None
     }
 }
 
@@ -7236,6 +7422,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
     if return_type != previous_return_type || (previous_failure_carrier == None && !context.failure_inference) -> scopes.failure_carrier = Val(sema_failure_carrier(return_type))
     scopes.return_type = return_type
     scopes.loop_depth = loop_depth
+    sema_stmt_lint_same_subject_dispatch(statements, environment, program, &diagnostics)
     output := [TStmt]{}
     complete := true
     reachable := true
