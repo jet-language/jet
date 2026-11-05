@@ -49,7 +49,7 @@ blanket worker requirement.
 ## Receipt shapes
 
 - **Code:** the first line is the exact final `CHECK OK` line emitted by
-  `Tools/agent/lane-check.sh`; then list changed paths, checks actually run,
+  `Tools/agent/LaneCheck.jet`; then list changed paths, checks actually run,
   blockers, and the named implementer. A missing or failed receipt is rejected
   and the same card is rebriefed with the exact error; the orchestrator does not
   repair the worker's implementation.

@@ -255,8 +255,8 @@ Committed files carry no personal or machine information: no home paths, user
 or host names, personal emails or machine mounts. Write a placeholder instead,
 such as `$HOME`, `$USER`, `$JET_SCRATCH_ROOT` or `$JET_STATE_ROOT`; fixtures
 use the example account `user` on `devhost`. This holds for recorded evidence
-too. `Tools/agent/lane-check.sh` refuses a checkout that breaks it, through
-`Tools/agent/personal-info-guard.sh` (#6564 c5).
+too. `Tools/agent/LaneCheck.jet` refuses a checkout that breaks it, through
+its personal-information guard (`--personal-info`, #6564 c5).
 
 ## Adversarial design review
 
@@ -289,7 +289,7 @@ may call a design better only where a passing review backs that exact claim.
 
 Use the most specific agent available for each role. Workers do not spawn
 workers. Every code worker returns the exact `CHECK OK` receipt from
-`Tools/agent/lane-check.sh`; prose-only or static-data-only work returns
+`Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
 `DOCS ONLY`. The orchestration skill defines briefs, liveness, integration,
 proof cadence, recovery, and closure.
 
@@ -383,12 +383,13 @@ of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs` (node). Their
 defaults derive from `$HOME` and the XDG directories; a machine sets its own
 values in the environment or in `${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
 committed file spells one machine's home, user, mounts or tool roots:
-`personal-info-guard.sh`, which `lane-check.sh` runs first, refuses them, and
+`Tools/agent/LaneCheck.jet`'s personal-information guard, which every lane
+check runs first, refuses them, and
 `tower redact` cleans the board.
 
 Hosted CI runs only the Core source-coverage ratchet
 (`.github/workflows/ci.yml`); until a pinned native seed release exists
-(D-SEED-DIST1), `Tools/agent/lane-check.sh` and the full gate
+(D-SEED-DIST1), `Tools/agent/LaneCheck.jet` and the full gate
 (`Tools/agent/verify-full.sh`) run locally with the admitted `JET`.
 
 ## References

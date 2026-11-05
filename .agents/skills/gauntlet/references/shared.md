@@ -24,7 +24,7 @@ implementation, check it in as a labeled sourced reference row. Pair it with a
 Jet expert variant authored with the same expert effort. Compare expert with
 expert, never a headline entry with an expert one. The orchestrator does not
 author corpus code. Workers do not run the harness; they type-check with
-`Tools/agent/lane-check.sh` only.
+`Tools/agent/LaneCheck.jet` only.
 
 ## Environment
 

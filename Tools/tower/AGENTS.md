@@ -190,8 +190,8 @@ run that counts old matches per file, per section and per rule. `tower redact
 and logs one `board.redact` event naming the rule table. On a board with
 nothing left to redact it writes nothing. This is the one change ratified
 text may take, because the owner ordered it and it keeps the meaning.
-`Tools/agent/personal-info-guard.sh` applies the same table to every checked-in
-file, and `lane-check.sh` runs it first.
+`jet Tools/agent/LaneCheck.jet --personal-info` applies the same rules to every
+checked-in file, and every lane check runs it first.
 
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
 with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real

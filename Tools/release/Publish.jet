@@ -155,8 +155,8 @@ fn archive_problems(first: [U8], second: [U8], name: String) -> [Problem] Never!
 }
 
 // Every listed path under `dir` that names this machine's home, user, host,
-// email or mounts (the rule table of Tools/tower/app/personal-info.mjs, as
-// Tools/agent/personal-info-guard.sh uses it) or one of `literals`. Binary
+// email or mounts (the rule table of Tools/tower/app/personal-info.mjs, the
+// rules Tools/agent/LaneCheck.jet's guard applies to a checkout) or one of `literals`. Binary
 // files are searched too: a path baked into jet is a leak.
 fn personal_problems(root: String, dir: String, paths: [String], literals: [String], programs: Programs) -[FS, Exec, Time.Wait]> [Problem] Never! {
     rules :: run_argv(with_args(programs.node, [String]{files.join(root, "Tools/tower/app/personal-info.mjs"), "patterns"}), dir)

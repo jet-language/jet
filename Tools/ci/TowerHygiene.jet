@@ -1,0 +1,352 @@
+#!/usr/bin/env jet
+// #805 / D-ONCE-LEDGER1=A: read-only Tower hygiene gate.
+//
+// The Tower store owns decisions; Docs/spec is the rendered surface. Keep the
+// scope as one configured input so the ledger home can change without another
+// directory list in CI.
+//
+// Usage: jet Tools/ci/TowerHygiene.jet
+//   JET_TOWER_LINT_SCOPE   lint scope, relative to the checkout (default docs)
+//   TOWER_DATA             Tower store directory or tower.json (default Tools/tower/.tower)
+//   JET_TOWER_HYGIENE_REPORT  report path (default .tmp/tower-hygiene/<commit>-<shard>.txt)
+//
+// Tower lint runs twice through node until Tower is a Jet program (#6311);
+// the gate proves both runs agree, emit a JSON finding array and leave the
+// store byte-for-byte unchanged. Exit 1 unless every check passes.
+use {
+    crypto :: core.crypto
+    files :: core.files
+    json :: core.encoding.json
+    process :: core.process
+    sys :: core.sys
+    term :: core.term
+}
+
+struct Lint {
+    status: String
+    output: String
+    errors: String
+}
+
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The checkout holding this tool, else the working directory.
+fn repo_root() -[Env, FS]> String Never! {
+    tool :: "/Tools/ci/TowerHygiene.jet"
+    script :: sys.executable()
+    if script.ends_with(tool) -> return script.removesuffix(tool)
+    files.cwd() ?? "."
+}
+
+fn absolute(root: String, path: String) -> String Never! {
+    if path.starts_with("/") -> return path.copy()
+    "{root}/{path}"
+}
+
+// `uname -s` spelling of the running system: Linux, Darwin, FreeBSD ...
+fn system_name() -[Env]> String Never! {
+    name :: sys.sysname()
+    if {
+        name == "macos" || name == "darwin" -> "Darwin"
+        name == "freebsd" -> "FreeBSD"
+        name == "" -> "unknown"
+        else -> "{name[0..<1].upper()}{name[1..<name.len()]}"
+    }
+}
+
+// `realpath -m`: resolve every existing link, then the rest lexically.
+fn canonical(path: String) -[FS]> String Never! {
+    current := ""
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            current = if current == "" -> "" else -> files.dirname(current)
+            if current == "/" -> current = ""
+            next
+        }
+        candidate :: "{current}/{part}"
+        current = if files.is_symlink(candidate) -> files.realpath(candidate) ?? candidate else -> candidate
+        if current == "/" -> current = ""
+    }
+    if current == "" -> "/" else -> current
+}
+
+fn physical(dir: String) -[FS]> String Never! { files.realpath(dir) ?? dir.copy() }
+
+fn inside(path: String, dir: String) -> Bool Never! { path == dir || path.starts_with("{dir}/") }
+
+fn append_text(buffer: &[U8], text: String) Never! {
+    &buffer.extend(text.bytes())
+    &buffer.push(U8{0})
+}
+
+fn walk(root: String, dir: String, buffer: &[U8]) -[FS]> Bool Never! {
+    entries :: files.list_dir(dir) ?? return false
+    names := loop entry in entries -> entry.name
+    &names.sort()
+    loop name in names {
+        path :: "{dir}/{name}"
+        relative :: path.removeprefix("{root}/")
+        info :: files.stat(path) ?? return false
+        kind :: if {
+            info.is_dir -> "d"
+            info.is_file -> "f"
+            info.is_symlink -> "l"
+            else -> "o"
+        }
+        append_text(&buffer, kind)
+        append_text(&buffer, "{info.mode}")
+        append_text(&buffer, relative)
+        if info.is_dir {
+            if !walk(root, path, &buffer) -> return false
+        } else if info.is_file {
+            &buffer.extend(files.read_bytes(path) ?? return false)
+        } else if info.is_symlink {
+            &buffer.extend((files.read_link(path) ?? return false).bytes())
+        }
+    }
+    true
+}
+
+// A fingerprint of every name, kind, mode and byte under `dir`; `missing`
+// when it is not a directory, None when it cannot be read.
+fn hash_tree(dir: String) -[FS]> String? Never! {
+    if !files.is_dir(dir) -> return Val("missing")
+    buffer := [U8]{}
+    if !walk(dir, dir, &buffer) -> return None
+    Val(crypto.sha256(buffer).hex())
+}
+
+fn text_field(fields: [(key: String, value: Dyn)], key: String) -> Bool Never! {
+    loop field in fields {
+        if field.key != key -> next
+        return if field.value == {
+            .Text(_) -> true
+            else -> false
+        }
+    }
+    false
+}
+
+// The trimmed stdout of a command that exits 0, else None.
+fn output_of(argv: [String]) -[Exec, Time.Wait]> String? Never! {
+    receipt :: process.cmd(argv).stderr(.Capture).run() ?? return None
+    if receipt.code != 0 -> return None
+    Val(receipt.output.trim())
+}
+
+fn abort(text: String) Never! -[Exec, IO]> {
+    term.eprint(text)
+    process.exit(1)
+}
+
+// Tower lint's `--json` shape: an array of {rule, ref, msg} text findings.
+fn finding_array(text: String) -> Bool Never! {
+    parsed :: json.parse(text) ?? return false
+    if parsed == {
+        .Array(items) -> {
+            loop item in items {
+                if item == {
+                    .Object(fields) -> {
+                        if !text_field(fields, "rule") || !text_field(fields, "ref") || !text_field(fields, "msg") -> return false
+                    }
+                    else -> return false
+                }
+            }
+            true
+        }
+        else -> false
+    }
+}
+
+fn lint(node: String, tower: String, root: String, docs_root: String) -[Exec, Time.Wait]> Lint Never! {
+    spec :: process.cmd([String]{node, tower, "lint", "--docs", "--docs-root", docs_root, "--json"}).cwd(root).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
+    results :: process.run_all([ProcessSpec]{spec}, 1) ?? return Lint{status: "127", output: "", errors: "{err}\n"}
+    receipt :: results[0] ?? return Lint{status: "127", output: "", errors: "{err}\n"}
+    code :: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+    Lint{status: "{code}", output: receipt.output, errors: receipt.errors}
+}
+
+fn run() -[Env, Exec, FS, IO, Time.Wait]> {
+    root :: repo_root()
+    tower :: "{root}/Tools/tower/tower.mjs"
+    scope_input :: env_or("JET_TOWER_LINT_SCOPE", "docs")
+    runner_os := env_or("RUNNER_OS", "")
+    runner_arch := env_or("RUNNER_ARCH", "")
+    if runner_os == "" -> runner_os = system_name()
+    if runner_arch == "" -> runner_arch = sys.arch()
+    result := "pass"
+    read_only := "not-checked"
+    errors := [String]{}
+
+    candidate := "unknown"
+    if output_of([String]{"git", "-C", root, "rev-parse", "--verify", "HEAD"}) == {
+        .Val(commit) -> candidate = commit
+        .None -> &errors.push("candidate commit is unavailable")
+    }
+
+    docs_root := absolute(root, scope_input)
+    data_path :: absolute(root, env_or("TOWER_DATA", "{root}/Tools/tower/.tower"))
+    tower_file := if data_path.ends_with(".json") -> data_path.copy() else -> "{data_path}/tower.json"
+    tower_dir := if data_path.ends_with(".json") -> files.dirname(data_path) else -> data_path.copy()
+    if files.is_dir(tower_dir) {
+        store_name :: files.basename(tower_file)
+        tower_dir = physical(tower_dir)
+        tower_file = "{tower_dir}/{store_name}"
+    }
+
+    report_input :: env_or("JET_TOWER_HYGIENE_REPORT", "")
+    report_path := if report_input == "" -> "{root}/.tmp/tower-hygiene/{candidate}-{env_or("JET_TEST_SHARD", "local")}.txt" else -> absolute(root, report_input)
+    canonical_report :: canonical(report_path)
+    if inside(canonical_report, canonical("{root}/Tools/tower")) || inside(canonical_report, canonical(tower_dir)) {
+        &errors.push("audit report may not be written under Tower data")
+        report_path = "{root}/.tmp/tower-hygiene/unsafe-report.txt"
+    }
+
+    node := process.which("node") ?? ""
+    node_version := "unavailable"
+    if node == "" {
+        &errors.push("node runner is unavailable")
+    } else {
+        node_version = output_of([String]{node, "--version"}) ?? "unavailable"
+        if node_version == "unavailable" {
+            node = ""
+            &errors.push("node runner did not report a version")
+        }
+    }
+
+    if !files.is_file(tower) -> &errors.push("Tower entrypoint is missing: {tower}")
+    if !files.is_dir(docs_root) -> &errors.push("configured Tower lint scope is missing: {docs_root}")
+    spec_root := "{docs_root}/spec"
+    if !files.is_dir(spec_root) -> &errors.push("configured Tower lint scope has no Docs/spec directory: {spec_root}")
+    if !files.is_file(tower_file) -> &errors.push("Tower store is missing: {tower_file}")
+
+    lint_blocked := false
+    repair_journal :: "{tower_dir}/backups/repair-transaction.json"
+    store_lock :: "{tower_file}.lock"
+    if files.exists(repair_journal) || files.is_symlink(repair_journal) {
+        lint_blocked = true
+        &errors.push("Tower store has a pending repair transaction: {repair_journal}")
+    }
+    if files.exists(store_lock) || files.is_symlink(store_lock) {
+        lint_blocked = true
+        &errors.push("Tower store has an active or stale write lock: {store_lock}")
+    }
+
+    if files.is_dir(docs_root) {
+        docs_root = physical(docs_root)
+        spec_root = "{docs_root}/spec"
+    }
+    report_parent :: files.dirname(report_path)
+    files.create_dir_all(report_parent) ?? return abort("cannot create the report directory {report_parent}: {err}")
+
+    tower_before := "unavailable"
+    if node != "" {
+        tower_before = hash_tree(tower_dir) ?? "unavailable"
+        if tower_before == "unavailable" -> &errors.push("Tower store could not be fingerprinted before lint")
+    }
+
+    first := Lint{status: "not-run", output: "", errors: ""}
+    repeat := Lint{status: "not-run", output: "", errors: ""}
+    if node != "" && files.is_file(tower) && files.is_dir(spec_root) && !lint_blocked {
+        first = lint(node, tower, root, docs_root)
+        repeat = lint(node, tower, root, docs_root)
+    } else if lint_blocked {
+        &errors.push("Tower lint was not run because the Tower store is not in a safe read-only state")
+    } else {
+        &errors.push("Tower lint was not run because a required runner, entrypoint, or scope is missing")
+    }
+
+    tower_after := "unavailable"
+    if node != "" {
+        tower_after = hash_tree(tower_dir) ?? "unavailable"
+        if tower_after == "unavailable" -> &errors.push("Tower store could not be fingerprinted after lint")
+        if tower_before == "unavailable" || tower_after == "unavailable" || tower_before == "missing" || tower_after == "missing" {
+            read_only = "fail"
+            &errors.push("Tower store fingerprint is unavailable; read-only state is unproven")
+        } else if lint_blocked {
+            read_only = "blocked"
+        } else if tower_before != tower_after {
+            read_only = "fail"
+            &errors.push("Tower store changed during read-only lint")
+        } else {
+            read_only = "pass"
+        }
+    }
+
+    lint_json := "not-run"
+    repeat_json := "not-run"
+    if first.status != "not-run" {
+        lint_json = if finding_array(first.output) -> "pass" else -> "fail"
+        if lint_json == "fail" -> &errors.push("tower lint did not emit a valid JSON finding array")
+    }
+    if repeat.status != "not-run" {
+        repeat_json = if finding_array(repeat.output) -> "pass" else -> "fail"
+        if repeat_json == "fail" -> &errors.push("repeat tower lint did not emit a valid JSON finding array")
+    }
+    if first.status != "0" {
+        result = "fail"
+        if first.status != "not-run" -> &errors.push("tower lint exited {first.status}")
+    }
+    if repeat.status != "0" {
+        result = "fail"
+        if repeat.status != "not-run" -> &errors.push("repeat tower lint exited {repeat.status}")
+    }
+    if first.status == "0" && repeat.status == "0" && (first.output != repeat.output || first.errors != repeat.errors) {
+        result = "fail"
+        &errors.push("tower lint output changed between identical runs")
+    }
+    if errors.len() > 0 -> result = "fail"
+
+    lines := [String]{
+        "schema=jet.tower-hygiene.v1",
+        "status={result}",
+        "candidate_commit={candidate}",
+        "runner_os={runner_os}",
+        "runner_arch={runner_arch}",
+        "node={node_version}",
+        "scope_input={scope_input}",
+        "docs_root={docs_root}",
+        "spec_root={spec_root}",
+        "tower_store={tower_file}",
+        "report_path={report_path}",
+        "tower_store_before_sha256={tower_before}",
+        "tower_store_after_sha256={tower_after}",
+        "read_only={read_only}",
+        "lint_exit={first.status}",
+        "lint_repeat_exit={repeat.status}",
+        "lint_json={lint_json}",
+        "lint_repeat_json={repeat_json}",
+        "errors={errors.len()}",
+    }
+    loop error in errors -> &lines.push("error={error}")
+    report :: "{lines.join("\n")}\nlint_stdout_begin\n{first.output}lint_stdout_end\nlint_stderr_begin\n{first.errors}lint_stderr_end\nlint_repeat_stdout_begin\n{repeat.output}lint_repeat_stdout_end\nlint_repeat_stderr_begin\n{repeat.errors}lint_repeat_stderr_end\n"
+    temporary :: "{report_path}.tmp.{sys.pid()}"
+    files.write(temporary, report) ?? return abort("cannot write the report {temporary}: {err}")
+    files.rename(temporary, report_path) ?? {
+        files.remove(temporary) ?? ()
+        return abort("cannot write the report {report_path}: {err}")
+    }
+    out := term.stdout()
+    &out.write(report).drop("report stdout")
+    if result != "pass" -> process.exit(1)
+}
+
+#Test("canonical resolves every dot-dot lexically past a missing path") {
+    assert_eq(canonical("/no-such-root/outside/../tower/report.txt"), "/no-such-root/tower/report.txt")
+    assert_eq(canonical("/no-such-root/a/./b/../../c"), "/no-such-root/c")
+    assert_eq(canonical("/.."), "/")
+}
+
+#Test("only an array of text rule, ref and msg findings is Tower lint JSON") {
+    assert(finding_array("[]"))
+    assert(finding_array("[{{\"rule\":\"r\",\"ref\":\"D-1\",\"msg\":\"m\"}}]"))
+    assert(!finding_array("[{{\"rule\":\"r\",\"ref\":\"D-1\"}}]"))
+    assert(!finding_array("[{{\"rule\":1,\"ref\":\"D-1\",\"msg\":\"m\"}}]"))
+    assert(!finding_array("{{}}"))
+    assert(!finding_array("not json"))
+}

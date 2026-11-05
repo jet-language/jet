@@ -5,7 +5,7 @@
 # ${XDG_CONFIG_HOME:-~/.config}/jet/env, which this file reads first; without
 # them the defaults derive from $HOME and the XDG directories, so a fresh clone
 # needs no setup. No committed file names one machine's copy
-# (personal-info-guard.sh).
+# (the personal-information guard of Tools/agent/LaneCheck.jet).
 #
 #   JET_STATE_ROOT    per-user dev state and caches  ($XDG_CACHE_HOME/jet-dev)
 #   JET_SCRATCH_ROOT  large shared scratch           ($JET_STATE_ROOT)

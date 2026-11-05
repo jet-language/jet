@@ -3549,7 +3549,7 @@ function harvestRefs(text) {
 
 const BRIEF_RULES = [
   'Log advances with --by.',
-  'Code workers return CHECK OK from Tools/agent/lane-check.sh; prose/static-data-only workers return DOCS ONLY.',
+  'Code workers return CHECK OK from Tools/agent/LaneCheck.jet; prose/static-data-only workers return DOCS ONLY.',
   'Workers never write Tower or run cargo test, generators, bless commands, cargo fmt, proof-parallel.sh, or verify-full.sh.',
   'After integration, the orchestrator runs the exact criterion proof once, records its real evidence, and marks the row met.',
   'The orchestrator closes immediately when every row is met or verified.',

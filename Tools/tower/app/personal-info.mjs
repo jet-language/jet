@@ -1,8 +1,9 @@
 // #6564 c5: personal and machine information never enters the board or a
-// committed file. One rule table serves three callers: `tower redact` rewrites
-// the stored board, store.mutate refuses a write that adds a match, and
-// Tools/agent/personal-info-guard.sh greps a checkout with the same patterns
-// (`node personal-info.mjs patterns`).
+// committed file. One rule table serves Tower and the release: `tower redact`
+// rewrites the stored board, store.mutate refuses a write that adds a match,
+// and Tools/release/Publish.jet greps a release with the same patterns
+// (`node personal-info.mjs patterns`). Tools/agent/LaneCheck.jet builds the
+// same rules in Jet for its checkout guard; a change here changes it there.
 //
 // The rules come from the machine running Tower, so this file holds no
 // personal data: the home directory, the login name, the host name, the

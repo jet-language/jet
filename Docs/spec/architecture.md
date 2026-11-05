@@ -232,7 +232,7 @@ three zeros.
 `RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
 its only home: its route, record and import rows are edited by hand, sorted,
 together with the runtime `#Export(c)` they name. After provider admission
-changes, run `Tools/agent/lane-check.sh --runtime-generators` to check the
+changes, run `jet Tools/agent/LaneCheck.jet --runtime-generators` to check the
 generated runtime message tables.
 
 Native `[U8]` payloads are packed one-byte elements, matching checked

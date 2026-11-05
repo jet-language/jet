@@ -3,7 +3,7 @@
 // roots.sh is the same table for shell tools. A machine sets its own values in
 // the environment (for example in ~/.config/jet/env); without them the
 // defaults derive from $HOME and the XDG directories, so a fresh clone needs
-// no setup. No committed file names one machine's copy (personal-info-guard.sh).
+// no setup. No committed file names one machine's copy (LaneCheck.jet --personal-info).
 //
 //   JET_STATE_ROOT    per-user dev state and caches  ($XDG_CACHE_HOME/jet-dev)
 //   JET_SCRATCH_ROOT  large shared scratch           ($JET_STATE_ROOT)
