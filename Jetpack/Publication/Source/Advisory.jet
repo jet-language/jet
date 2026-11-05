@@ -472,13 +472,13 @@ fn publication_audit_lockfile(lock: LockFile, advisories: [PublicationAdvisory])
     Ok(matches)
 }
 fn publication_e2609(package: String, version: String, mature_at: Int, source: PublicationSourceClass) -> Diagnostic Never! {
-    diagnostic_from_registry("E2609", None, "{package}#{version} is not mature under the advisory policy", "the signed feed classifies this {publication_source_class_label(source)} release as new until Unix time {mature_at}", "wait for the maturity window, or add a reviewed exact `policy.exceptions` record for {package}#{version} with an id, reason, and expiry")
+    diagnostic_from_registry("E2609", None, "`{package}#{version}` is not mature under the advisory policy", "the signed feed classifies this {publication_source_class_label(source)} release as new until Unix time {mature_at}", "wait for the maturity window, or add a reviewed exact `policy.exceptions` record for `{package}#{version}` with an id, reason, and expiry")
 }
 fn publication_e2610(source: String, detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E2610", None, "{source} was rejected: {detail}", "advisory policy is security-sensitive; Jet will not use unsigned, stale, rolled-back, forked, or downgraded evidence.", "refresh the signed offline feed and trust root, or repair the lock provenance before retrying.")
 }
 fn publication_e2611(input: String, fix: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E2611", None, "jet inspect audit needs {input}", "an audit without its lock or advisory database could report a false clean result.", fix)
+    diagnostic_from_registry("E2611", None, "`jet inspect audit` needs {input}", "an audit without its lock or advisory database could report a false clean result.", fix)
 }
 fn publication_e2607(source: String, detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E2607", None, "{source} is malformed: {detail}", "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them.", "fix the malformed {source} record and retry; use the documented parser contract and UTF-8 text.")
