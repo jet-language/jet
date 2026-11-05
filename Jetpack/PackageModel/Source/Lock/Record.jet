@@ -286,8 +286,10 @@ fn pkg_lock_nix_realization(project_root: String, reference: String) -[FS]> (clo
 // Strict `pkg_lock_nix_realization`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
 fn pkg_lock_nix_realization_strict(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
-    found :: pkg_lock_locked_nix_package_strict(project_root, reference) ?? return Ok(None)
-    Ok(Val((closure: found.closure, envelope: found.envelope)))
+    // `??` would fold a LockError into the miss; let the error propagate.
+    found :: pkg_lock_locked_nix_package_strict(project_root, reference)
+    record :: found ?? return Ok(None)
+    Ok(Val((closure: record.closure, envelope: record.envelope)))
 }
 
 // The package identity with its complete portable Nix lock record; None

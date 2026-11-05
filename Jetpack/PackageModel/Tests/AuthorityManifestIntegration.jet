@@ -37,9 +37,12 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
 
 #Test("policy_keeps_unsafe_mode_and_package_floors") {
     facts :: PackageFacts.parse("\nname: \"demo\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Deny, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }}\nauthority: {{ deny: [Mem.Alloc] }}\n", "package.jet") ?? panic("policy floors")
+    // `unsafe:` is a package-only field: `.Deny` is an empty path list beside
+    // the source policy declarations, never one of them.
+    assert_eq(facts.policy.unsafe_paths, Val([String]{}))
     keys := [String]{}
     loop declaration in facts.policy.declarations -> &keys.push(policy_key_name(declaration.key))
-    assert_eq(keys, [String]{"unsafe", "gc", "explicit_units", "copies", "sentries"})
+    assert_eq(keys, [String]{"gc", "explicit_units", "copies", "sentries"})
     assert_eq(facts.authority.deny, Val([String]{"Mem.Alloc"}))
     assert_eq(facts.authority.trust, None)
     assert(facts.authority.providers.is_empty())
@@ -52,11 +55,13 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
     }
 }
 
-#Test("retired_effect_budget_names_authority_holds") {
+// `effects:` is not a Package field: the unknown-field refusal names the one
+// `authority:` block among the fields to use.
+#Test("effect budget field is unknown and names the authority block") {
     diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\neffects: {{ deny: [Net] }}\n")
     assert_eq(diagnostic.code, "E1215")
-    assert(diagnostic.why.contains("authority"))
-    assert(diagnostic.fix.contains("authority"))
+    assert(diagnostic.what.contains("effects:"))
+    assert(diagnostic.fix.contains("`authority:`"))
 }
 
 #Test("e1220_keeps_dependency_and_effect_provenance_after_key_move") {

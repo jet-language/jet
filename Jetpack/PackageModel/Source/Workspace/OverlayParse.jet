@@ -336,9 +336,13 @@ fn pkg_overlay_parse_allow_unfree(body: String) -> [String] OverlayError! {
     Ok([String]{})
 }
 
+// Bind each `T? OverlayError!` before `??`: `??` would fold a malformed
+// (for example duplicated) policy block into an absent one.
 fn pkg_overlay_parse_build_deny(body: String) -> [String] OverlayError! {
-    policy_body :: pkg_overlay_named_block(body, MANIFEST_BLOCK_POLICY) ?? return Ok([String]{})
-    raw :: pkg_overlay_exact_field_value(policy_body, EFFECTS_FIELD_DENY) ?? return Ok([String]{})
+    named :: pkg_overlay_named_block(body, MANIFEST_BLOCK_POLICY)
+    policy_body :: named ?? return Ok([String]{})
+    field :: pkg_overlay_exact_field_value(policy_body, EFFECTS_FIELD_DENY)
+    raw :: field ?? return Ok([String]{})
     Ok(pkg_overlay_parse_effect_tuple(raw.trim(), "policy.deny"))
 }
 
@@ -346,7 +350,8 @@ fn pkg_overlay_reject_unsupported_policy_fields(body: String) OverlayError! {
     loop field in pkg_overlay_top_level_policy_fields(body) {
         if field.name != "allowUnfree" -> return Err(OverlayError.UnsupportedPolicy("workspace `policy.{field.name}` is unsupported; use `policy.allowUnfree`, `policy.deny`, or subject-scoped `policy.grants`"))
     }
-    policy_body :: pkg_overlay_named_block(body, MANIFEST_BLOCK_POLICY) ?? return
+    named :: pkg_overlay_named_block(body, MANIFEST_BLOCK_POLICY)
+    policy_body :: named ?? return
     if pkg_overlay_exact_field_value(policy_body, EFFECTS_FIELD_ALLOW) != None {
         return Err(OverlayError.UnsupportedPolicy("workspace `policy.allow` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"))
     }
@@ -394,8 +399,10 @@ fn pkg_overlay_top_level_policy_fields(body: String) -> [OverlayPolicyField] Ove
 }
 
 fn pkg_overlay_parse_build_grants(body: String) -> [BuildGrant] OverlayError! {
-    policy_body :: pkg_overlay_named_block(body, MANIFEST_BLOCK_POLICY) ?? return Ok([BuildGrant]{})
-    raw :: pkg_overlay_exact_field_value(policy_body, MANIFEST_BLOCK_GRANTS) ?? return Ok([BuildGrant]{})
+    named :: pkg_overlay_named_block(body, MANIFEST_BLOCK_POLICY)
+    policy_body :: named ?? return Ok([BuildGrant]{})
+    field :: pkg_overlay_exact_field_value(policy_body, MANIFEST_BLOCK_GRANTS)
+    raw :: field ?? return Ok([BuildGrant]{})
     inner :: pkg_overlay_strip_wrapped(raw.trim(), "{{", "}}") ?? return Err(OverlayError.Malformed("`policy.grants:` must be a package map like `{{ \"pkg\": #(Net) }}`"))
     grants := [BuildGrant]{}
     loop piece in pkg_overlay_top_level_commas(inner) {

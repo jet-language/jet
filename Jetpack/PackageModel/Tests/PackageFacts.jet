@@ -27,16 +27,18 @@ fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS
     assert_eq((facts.select_output("test", None, None) ?? panic("test")).name, "check")
 }
 
-#Test("formatter migrates retired record heads before validation") {
+// Greenfield: a retired `.{` record head is refused by the parser and the
+// formatter alike; neither rewrites it.
+#Test("parser and formatter refuse retired record heads") {
     retired :: "name: \"demo\"\noutputs: .{{ app: .Executable.{{ entry: run }} }}"
     if PackageFacts.parse(retired, "package.jet") == {
         .Err(error) -> assert(error == PackageParseError.RetiredRecordHead)
         .Ok(_) -> panic("retired record heads are refused")
     }
-    formatted :: pkg_format_source(retired, "package.jet") ?? panic("formats")
-    assert(!formatted.contains(".{{"))
-    facts :: PackageFacts.parse(formatted, "package.jet") ?? panic("formatted source parses")
-    assert(facts.outputs["app"].kind == PackageOutputKind.Executable)
+    if pkg_format_source(retired, "package.jet") == {
+        .Err(error) -> assert_eq(error.message, PackageParseError.RetiredRecordHead.message())
+        .Ok(_) -> panic("the formatter refuses retired record heads")
+    }
 }
 
 #Test("loadable library uses ratified field and formats round trip") {
@@ -250,16 +252,19 @@ fn pkg_facts_assert_nested_entry_rejected(label: String, entry_source: String, e
     pkg_facts_assert_nested_entry_rejected("output-entry-nested-escaping", "use app :: \"../../outside/main\"\n", [ManifestEntry]{})
 }
 
-#Test("public entry selectors migrate main and prefer run") {
+#Test("public entry selector run prefers run.jet and never migrates main.jet") {
     dir :: pkg_facts_test_dir("canonical-run")
     pkg_facts_test_write(dir, "main.jet", "fn run() {{ print(1) }}\n")
     facts :: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\noutputs: {{ app: .Executable{{ entry: run }} }}", "package.jet") ?? panic("parses")
     run_path :: files.join(dir, "run.jet")
     assert_eq((facts.select_output("run", Val("app"), None) ?? panic("select")).name, "app")
-    assert_eq(facts.resolve_run_entry(dir) ? found -> found ! error -> panic("run entry"), Val(run_path))
-    assert(!files.exists(files.join(dir, "main.jet")))
+    if facts.resolve_run_entry(dir) == {
+        .Err(error) -> assert(error.message.contains("no unique source entry"))
+        .Ok(_) -> panic("main.jet is not the `run` entry")
+    }
+    assert(files.exists(files.join(dir, "main.jet")))
+    assert(!files.exists(run_path))
     output :: facts.outputs["app"]
-    assert_eq(facts.entry_path(dir, output) ? found -> found ! error -> panic("entry"), Val(run_path))
 
     pkg_facts_test_write(dir, "run.jet", "fn run() {{ print(2) }}\n")
     pkg_facts_test_write(dir, "other.jet", "fn run() {{ print(3) }}\n")

@@ -203,10 +203,12 @@ impl PackageFacts {
         }
     }
 
-    // Resolve the stock runnable output's file.
+    // Resolve the stock runnable output's file. Each `T? PackageEntryError!`
+    // is bound before `??`, which would fold the error into absence.
     fn resolve_run_entry(self, root: String) -[FS, Env, IO]> String? PackageEntryError! {
         resolver :: AuthorityResolver.open(root) ?? return Err(pkg_entry_error(self.origin, err.message()))
-        entry :: self.resolve_run_entry_checked(resolver) ?? return Ok(None)
+        resolved :: self.resolve_run_entry_checked(resolver)
+        entry :: resolved ?? return Ok(None)
         Ok(Val(entry.file.path))
     }
 
@@ -248,7 +250,8 @@ impl PackageFacts {
     // The package's optional `fn build` from the checked source tree.
     fn resolve_build_entry(self, root: String) -[FS, Env]> String? PackageEntryError! {
         resolver :: AuthorityResolver.open(root) ?? return Err(pkg_entry_error(self.origin, err.message()))
-        file :: self.resolve_build_entry_checked(resolver) ?? return Ok(None)
+        resolved :: self.resolve_build_entry_checked(resolver)
+        file :: resolved ?? return Ok(None)
         Ok(Val(file.path))
     }
 
@@ -281,7 +284,8 @@ impl PackageFacts {
     // package-root role home, then one root file, then one `src/` file.
     fn resolve_command_entry(self, root: String, command: String) -[FS, Env]> String? PackageEntryError! {
         resolver :: AuthorityResolver.open(root) ?? return Err(pkg_entry_error(self.origin, err.message()))
-        file :: self.resolve_command_entry_checked(resolver, command) ?? return Ok(None)
+        resolved :: self.resolve_command_entry_checked(resolver, command)
+        file :: resolved ?? return Ok(None)
         Ok(Val(file.path))
     }
 
