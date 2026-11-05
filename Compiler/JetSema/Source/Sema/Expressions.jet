@@ -23,6 +23,7 @@ use {
         Diagnostic,
         Dimension,
         DimensionAxis,
+        EffectRowEntry,
         Expr,
         Func,
         Item,
@@ -3830,9 +3831,16 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
-    if !sema_expr_declares_nominal_method(environment, program, receiver_value.ty, routed_method, true) {
+    declared :: sema_expr_declares_nominal_method(environment, program, receiver_value.ty, routed_method, true)
+    if !declared {
         special := sema_expr_try_method_special_routes(receiver, receiver_value, method, owner_type_args, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if special.handled -> return special.value
+    } else if sema_time_handle_receiver_name(receiver_value.ty) == "Clock" {
+        // Core declares Clock's methods, but reading a Clock that is neither
+        // deterministic nor the system clock still reads ambient time (Rust
+        // `Clock.{method}` check): the time route records that site before
+        // the declared method checks the call.
+        if sema_time_clock_record(receiver_value, method, args, method_span, environment, program, &scopes, &context, &diagnostics) == .Val(recorded) && !recorded -> return None
     }
     if method == "with" && sema_expr_expiring_secret_inner(receiver_value.ty, environment, program) == .Val(secret_type) {
         return sema_expr_check_expiring_secret_with(receiver, receiver_value, secret_type, routed_method, method_span, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4062,6 +4070,11 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                 checked_value := sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 context.allow_string_view_read = previous_string_view_read
                 checked :: checked_value ?? return None
+                // Rust expr.rs: formatting a value that holds an observable
+                // Clock reads ambient time (E3403 `Clock formatting` in a pure body).
+                if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
+                    _ := sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Clock formatting", checked.span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: checked.span}}, &diagnostics)
+                }
                 if format == StrFormat.Display && !sema_expression_interpolation_display(checked, environment, program, &scopes, &diagnostics) -> return None
                 // Rust interpolation check: bare Display uses the relation above
                 // and the Debug family uses `is_debuggable`; only the numeric and
@@ -5147,6 +5160,11 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: S
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_string_view_read
     checked :: checked_value ?? return None
+    // Rust expr.rs `Expr::Copy`: copying a value that holds an observable
+    // Clock reads ambient time (E3403 `Clock copy` in a pure body).
+    if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
+        _ := sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, &diagnostics)
+    }
     window_copy :: sema_call_compute_window_copy(checked, span, expected, environment, program, &diagnostics)
     if window_copy.handled -> return window_copy.value
     sema_expr_check_copy_typed(checked, span, expected, environment, program, &context, &diagnostics, sema_expr_copy_string_view(value, &scopes), false)

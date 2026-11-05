@@ -2099,8 +2099,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             ty: Val(parameter_ty),
             visibility: 0,
         }
+        scope_symbol := sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program)
+        if func.is_pure && scope_symbol.ty == .Val(scope_ty) {
+            if sema_time_injected_clock(scope_ty) == .Val(injected) -> scope_symbol.ty = Val(injected)
+        }
         if {
-            !sema_scope_declare_local(&scopes, sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program), param_mutable, func.params[param_index].convention, param_bounds, false) -> {
+            !sema_scope_declare_local(&scopes, scope_symbol, param_mutable, func.params[param_index].convention, param_bounds, false) -> {
                 &diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }

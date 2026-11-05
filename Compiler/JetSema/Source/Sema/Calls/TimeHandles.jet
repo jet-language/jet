@@ -27,7 +27,7 @@ fn sema_time_named(name: String) -> Type Never! {
 
 fn sema_time_handle_receiver_name(ty: Type) -> String Never! {
     if ty == {
-        .Named(name) -> name
+        .Named(name) -> if sema_call_is_clock_type(ty) -> "Clock" else -> name
         .Tagged(_, inner) -> sema_time_handle_receiver_name(inner)
         else -> ""
     }
@@ -113,6 +113,15 @@ fn sema_time_clock_is_deterministic(ty: Type) -> Bool Never! {
     }
 }
 
+// A pure function's Clock parameter is injected by its caller, so the body
+// reads it as a deterministic clock (Rust Registration `deterministic_clock_type`).
+// None when `ty` is not an untagged Clock.
+fn sema_time_injected_clock(ty: Type) -> Type? Never! {
+    if !sema_call_is_clock_type(ty) || sema_time_clock_is_deterministic(ty) -> return None
+    // copy: `ty` is a read parameter; the tag's `inner` owns this one
+    Val(Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.DeterministicClock}, inner: ty.copy()})
+}
+
 fn sema_time_clock_is_system(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.SystemClock} && sema_time_handle_receiver_name(inner) == "Clock"
@@ -121,17 +130,25 @@ fn sema_time_clock_is_system(ty: Type) -> Bool Never! {
 }
 
 fn sema_time_clock_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    recorded :: sema_time_clock_record(receiver_value, method, args, span, environment, program, &scopes, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !recorded -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_call_check_method(&state, receiver, method, span, [Type]{}, [Type]{}, args, span, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+// Records a Clock read's `Clock.{method}` site: `Time` unless the receiver is
+// the deterministic or system clock. None when `method` reads no time; false
+// when the transaction wall refused the site (its diagnostic is the report).
+fn sema_time_clock_record(receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? Never! {
     result :: if {
         method == "now" && args.len() == 0 -> Val(Type.Int)
         (method == "tick" || method == "advance") && args.len() == 1 -> Val(Type.Int)
         method == "wait" && args.len() == 1 -> Val(Type.Int)
         else -> None
     }
-    if result == None -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if result == None -> return None
     effect_name :: if sema_time_clock_is_deterministic(receiver_value.ty) || sema_time_clock_is_system(receiver_value.ty) -> "" else -> "Time"
-    if !sema_time_record_intrinsic(result, effect_name, "Clock.{method}", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_call_check_method(&state, receiver, method, span, [Type]{}, [Type]{}, args, span, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
-    SemaMethodSpecialCheck{handled: true, value: value}
+    Val(sema_time_record_intrinsic(result, effect_name, "Clock.{method}", span, environment, program, &scopes, &context, &diagnostics))
 }
 
 fn sema_time_rng_fixed_signature(method: String, argc: Int) -> Type? {

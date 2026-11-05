@@ -1432,6 +1432,21 @@ fn sema_effect_exact_position(caller: SemaEffectCallerFacts, facts: [SemaCallSit
     None
 }
 
+// The caller's Clock intrinsic fact whose span is exactly `span`. A Clock
+// method is a declared Core method, so its call fact (with a callee) shares
+// the site with the intrinsic fact the time route recorded.
+fn sema_effect_clock_intrinsic_position(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
+    if caller.slot < 0 -> return None
+    calls :: index.modules[caller.module_index]
+    row :: calls.callers[caller.slot].starts.get(span.start) ?? return None
+    loop position in calls.callers[caller.slot].exact[row] {
+        fact :: calls.facts[position]
+        if fact.span.end != span.end || fact.callee != None -> next
+        if fact.intrinsic_api == .Val(api) && api.starts_with("Clock.") -> return Val(position)
+    }
+    None
+}
+
 fn sema_effect_is_call(kind: NodeKind) -> Bool Never! {
     if kind == {
         .Call(_, _, _)
@@ -1685,6 +1700,9 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         // The suspended determinism checks record nothing for the call.
         sema_effect_in_assume_det(nodes[node_index], node.span) -> {}
         sema_effect_is_call(node.kind) -> {
+            // Rust's `Clock.{method}` check runs before the declared method's
+            // call is recorded: a pure body reports E3403 and records nothing.
+            if sema_effect_clock_intrinsic_position(facts, caller, node.span) == .Val(clock) && sema_effect_report_nondeterministic_intrinsic(&nodes, node_index, facts.modules[caller.module_index].facts[clock], node.span, &diagnostics) -> return true
             found :: sema_effect_find_fact(facts, caller, node.span)
             if found == {
                 .Val(position) -> {
