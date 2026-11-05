@@ -326,6 +326,12 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
         .Index(_, _, _, _, checked_call, _) -> {
             if checked_call == Val(symbol) -> ir_core_reach_add(&keys, symbol.key)
         }
+        // assert_eq's authored `equal`/`compare` hook (ir_require_eq_hook).
+        .RequireStop(kind, _, _) -> {
+            if kind == .RequireEq(_, _, hook) {
+                if hook == .Val(method) -> ir_core_reach_add(&keys, method.symbol.key)
+            }
+        }
         .FnValue(kind) -> {
             if kind == .NamedFn(function, _) {
                 if function == .Val(id) {

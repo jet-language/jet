@@ -689,7 +689,8 @@ enum BodyHandleOp {
 
 enum BodyRequireKind {
     Require(cond: Int, msg: Int?)
-    RequireEq(left: Int, right: Int)
+    // `hook`: the authored `equal`/`compare` the sides compare through.
+    RequireEq(left: Int, right: Int, hook: TMethodRef?)
     Panic(msg: Int)
 }
 
@@ -1698,7 +1699,7 @@ fn body_each_require_kind_child(tree: BodyTree, value: BodyRequireKind, visit: f
                 visit(inner)
             }
         }
-        .RequireEq(f0, f1) -> {
+        .RequireEq(f0, f1, _) -> {
             visit(f0)
             visit(f1)
         }

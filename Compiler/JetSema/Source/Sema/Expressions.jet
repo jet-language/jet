@@ -537,6 +537,22 @@ fn sema_expr_operator_commutative(op: BinOp) -> Bool Never! {
 struct SemaExprOperatorResolution {
     candidate: SemaCallMethodCandidate
     receiver_is_left: Bool
+    // The hook is compiler-generated (a derive), not authored.
+    derived: Bool
+}
+
+// The `equal` or `compare` hook `==`/`!=` (and `assert_eq`) dispatch to. With
+// one of each, `compare` (tested against `Ordering.Equal`), unless only the
+// `equal` is authored: a derived order beside an authored equality compares
+// the fields the author's `equal` leaves out.
+fn sema_expr_equality_resolution(graph: SemaRegistrationGraph, op: BinOp, lhs: Type, rhs: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExprOperatorResolution? {
+    comparable :: sema_expr_registration_operator_candidates(graph, lhs, rhs, "Comparable", "compare", false, span, environment, program, &scopes, &diagnostics)
+    equatable :: sema_expr_registration_operator_candidates(graph, lhs, rhs, "Equatable", "equal", false, span, environment, program, &scopes, &diagnostics)
+    if comparable.len() == 1 && equatable.len() == 1 {
+        if comparable[0].derived && !equatable[0].derived -> return Val(equatable[0])
+        return Val(comparable[0])
+    }
+    sema_expr_operator_resolution(op, lhs, rhs, span, environment, program, &scopes, &diagnostics)
 }
 // `signature` is `function`'s signature specialized to the receiver; the
 // registered row itself is only read. `receiver_type` is the owner as its own
@@ -609,20 +625,8 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
     resolution := SemaExprOperatorResolution?{None}
     if {
         op == BinOp.Eq || op == BinOp.Ne -> {
-            if program.registration_graph == .Val(graph) {
-            comparable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Comparable", "compare", false, span, environment, program, &scopes, &diagnostics)
-            equatable := sema_expr_registration_operator_candidates(graph, lhs.ty, rhs.ty, "Equatable", "equal", false, span, environment, program, &scopes, &diagnostics)
-            if {
-                comparable.len() == 1 && equatable.len() == 1 -> {
-                    resolution = Val(comparable[0])
-                }
-                else -> {
-                    resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, program, &scopes, &diagnostics)
-                }
-            }
-            } else {
-                return None
-            }
+            graph :: program.registration_graph ?? return None
+            resolution = sema_expr_equality_resolution(graph, op, lhs.ty, rhs.ty, span, environment, program, &scopes, &diagnostics)
         }
         else -> {
             resolution = sema_expr_operator_resolution(op, lhs.ty, rhs.ty, span, environment, program, &scopes, &diagnostics)
@@ -861,7 +865,7 @@ fn sema_expr_operator_function_candidate(graph: SemaRegistrationGraph, function:
     loop existing in candidates {
         if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity -> return
     }
-    &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
+    &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true, derived: function.declaration.compiler_generated})
 }
 
 fn sema_expr_tree_binary_op(op: BinOp) -> TBinaryOp Never! {

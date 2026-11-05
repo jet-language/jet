@@ -722,7 +722,9 @@ enum THandleOp {
 
 enum TRequireKind {
     Require(cond: TExpr, msg: TExpr?)
-    RequireEq(left: TExpr, right: TExpr)
+    // `hook`: the authored `equal`/`compare` implementation `==` dispatches
+    // to for the operands' type; None compares them structurally.
+    RequireEq(left: TExpr, right: TExpr, hook: TMethodRef?)
     Panic(msg: TExpr)
 }
 
@@ -1060,7 +1062,7 @@ fn tree_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.All
             visit(condition)
             if message == Val(message_value) -> visit(message_value)
         }
-        .RequireEq(left, right) -> {
+        .RequireEq(left, right, _) -> {
             visit(left)
             visit(right)
         }

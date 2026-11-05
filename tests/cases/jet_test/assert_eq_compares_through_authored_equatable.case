@@ -1,0 +1,18 @@
+# #3590 c59: assert_eq compares through the authored `equal` (or `compare`)
+# hook `==` dispatches to, not the values' structure, and still reports both
+# sides when the hook rejects them.
+fixture: assert_eq_compares_through_authored_equatable.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet test --show-default --capture=all --serial --filter=agrees main.jet
+exit: 0
+stdout: ~ "assert_eq agrees with an authored equal: pass" # equal hook: metadata ignored
+stdout: ~ "assert_eq agrees with an authored compare: pass" # compare hook: label ignored
+stdout: ~ "2 passed, 0 failed, 0 skipped" # the summary line
+step: jet test --show-default --capture=all --serial --filter=rejects main.jet
+exit: 1
+stdout: ~ "assert_eq reports values the authored equal rejects: FAIL" # the hook said unequal
+stderr: ~ "Stop [E3001]: `panic: expected: " # both sides rendered
+stderr: ~ "--> main.jet:55" # the failing assert's Jet line
+stderr: !~ "internal compiler error" # no compiler fault

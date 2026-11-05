@@ -7065,14 +7065,17 @@ fn ir_require_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: BodyRequireK
             ir_stop(&m, p, &b, 0, text, null, null, report)
             if !always_stops -> ir_end(&b.f, b.line)
         }
-        .RequireEq(left, right) -> {
+        .RequireEq(left, right, hook) -> {
             left_slot :: ir_expr(&m, p, &b, left)
             right_slot :: ir_expr(&m, p, &b, right)
             if ir_failed(b) || left_slot < 0 || right_slot < 0 -> return -1
             site :: b.line
             left_ty :: ir_ty(p, b, left)
             right_ty :: ir_ty(p, b, right)
-            equal :: ir_binary(&m, p, &b, TBinaryOp.Eq, false, site, left_ty, left_slot, right_slot, right_ty, span)
+            equal :: if hook == {
+                .Val(method) -> ir_require_eq_hook(&m, p, &b, method, left_ty, left_slot, right_slot, span)
+                .None -> ir_binary(&m, p, &b, TBinaryOp.Eq, false, site, left_ty, left_slot, right_slot, right_ty, span)
+            }
             if ir_failed(b) -> return -1
             if !always_stops {
                 bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -7098,6 +7101,37 @@ fn ir_require_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, kind: BodyRequireK
         }
     }
     -1
+}
+
+// `assert_eq` through the operands' authored hook: `left.equal(right)`, or
+// `left.compare(right)` tested against `Ordering.Equal`, on the slots the
+// failure report renders, so each side is evaluated once. The call borrows
+// the slots; their fresh temporaries stay alive for the report.
+fn ir_require_eq_hook(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMethodRef, left_ty: Type, left: Int, right: Int, span: Span) -> Int Never! {
+    key :: ir_method_key(m, p, left_ty, method)
+    row :: ir_function_row(p, key) ?? return ir_fail_slot(&b, span, "assert_eq hook outside the checked program: {method.name}")
+    owner_args :: ir_owner_args(p, p.functions[row], left_ty) ?? return ir_fail_slot(&b, span, "assert_eq hook {method.name} on {ir_type_name(left_ty)}, which does not spell its owner's type arguments")
+    params :: p.functions[row].params
+    if params.len() != 1 || params[0].convention == .Write -> return ir_fail_slot(&b, span, "assert_eq hook {p.functions[row].key} takes one read or move argument")
+    left_fresh :: b.fresh[left]
+    right_fresh :: b.fresh[right]
+    b.fresh[left] = false
+    b.fresh[right] = false
+    // A moving receiver or argument takes a copy (ir_own of a non-fresh slot).
+    left_moves :: ir_receiver_access(p.functions[row].kind) == "move"
+    right_moves :: params[0].convention == .Move
+    left_arg :: if left_moves -> ir_own(&m, p, &b, left) else -> left
+    right_arg :: if right_moves -> ir_own(&m, p, &b, right) else -> right
+    returned :: ir_call_row_emit(&m, p, &b, row, owner_args, [Int]{left_arg, right_arg}, [Bool]{left_moves, right_moves}, [IRWriteBack]{}, [IRWriteBack]{}, span)
+    b.fresh[left] = left_fresh
+    b.fresh[right] = right_fresh
+    result_ty :: if method.name == "compare" -> Type.Named{name: "Ordering"} else -> Type.Bool
+    value :: ir_trait_propagate(&m, p, &b, method, returned, result_ty, span)
+    if ir_failed(b) || method.name != "compare" -> return value
+    ordering :: ir_type_def(p, "Ordering") ?? return ir_fail_slot(&b, span, "Comparable result Ordering has no definition")
+    equal :: ir_variant_index(p, ordering, "Equal") ?? return ir_fail_slot(&b, span, "Ordering has no Equal variant")
+    expected :: ir_word_const(&m, &b, equal)
+    ir_bool_op(&m, &b, IROp.Eq, value, expected)
 }
 
 // The stop call itself (then unreachable).

@@ -1,0 +1,56 @@
+// Versions equal by precedence: build metadata does not take part.
+struct Version {
+    number: Int
+    build: String
+}
+
+impl Version.Equatable {
+    fn equal(self, rhs: Version) -> Bool {
+        self.number == rhs.number
+    }
+}
+
+// Ordered by size alone; `==` (and so assert_eq) goes through `compare`.
+struct Box {
+    size: Int
+    label: String
+}
+
+impl Box.Equatable {
+    fn equal(self, rhs: Box) -> Bool {
+        self.size == rhs.size
+    }
+}
+
+impl Box.Comparable {
+    fn compare(self, rhs: Box) -> Ordering {
+        if {
+            self.size < rhs.size -> Ordering.Less
+            self.size > rhs.size -> Ordering.Greater
+            else -> Ordering.Equal
+        }
+    }
+}
+
+fn version(number: Int, build: String) -> Version {
+    Version{number: number, build: build}
+}
+
+// A call, not a literal: `x == Box{…}` is a struct pattern test.
+fn sized(size: Int, label: String) -> Box {
+    Box{size: size, label: label}
+}
+
+#Test("assert_eq agrees with an authored equal") {
+    assert(version(1, "a") == version(1, "b"))
+    assert_eq(version(1, "a"), version(1, "b"))
+}
+
+#Test("assert_eq agrees with an authored compare") {
+    assert(sized(2, "x") == sized(2, "y"))
+    assert_eq(sized(2, "x"), sized(2, "y"))
+}
+
+#Test("assert_eq reports values the authored equal rejects") {
+    assert_eq(version(1, "a"), version(2, "a"))
+}

@@ -921,7 +921,7 @@ fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
 fn body_flat_require_kind(value: TRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
         .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_flat_expr(f_cond, &flat), msg: body_flat_opt_expr(f_msg, &flat)}
-        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat)}
+        .RequireEq(f_left, f_right, f_hook) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat), hook: f_hook}
         .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_flat_expr(f_msg, &flat)}
     }
 }
@@ -1741,7 +1741,7 @@ fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp N
 fn body_copy_require_kind(value: BodyRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
         .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_copy_expr(f_cond, &flat), msg: body_copy_opt_expr(f_msg, &flat)}
-        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat)}
+        .RequireEq(f_left, f_right, f_hook) -> BodyRequireKind.RequireEq{left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat), hook: f_hook}
         .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_copy_expr(f_msg, &flat)}
     }
 }

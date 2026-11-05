@@ -797,7 +797,8 @@ fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment,
 }
 
 // `assert_eq(got, expected)`: both sides one Equatable type; the right side
-// takes the left's type as its expected type, as `==` does.
+// takes the left's type as its expected type, as `==` does, and the sides
+// compare through the implementation `==` dispatches to.
 fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 2 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`assert_eq` needs exactly two values to compare", "assert_eq checks that two values are equal", "e.g. assert_eq(got, expected)"))
@@ -822,8 +823,20 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     }
     location := sema_expression_panic_location(environment, program, scopes, call.name_span)
     location.locals = sema_expression_panic_locals(scopes, call.name_span)
-    stop := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
+    hook :: sema_call_assert_eq_hook(left_value, right_value, call.name_span, environment, program, &scopes, &diagnostics)
+    stop := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value, hook: hook}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
+}
+
+// The authored `equal` (or `compare`) `left == right` dispatches to on a
+// nominal operand (sema_expr_equality_resolution); None when the values
+// compare structurally, as a derived hook compares them.
+fn sema_call_assert_eq_hook(left: TExpr, right: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TMethodRef? {
+    graph :: program.registration_graph ?? return None
+    if !sema_expr_has_numeric_overload(left.ty) -> return None
+    resolved :: sema_expr_equality_resolution(graph, BinOp.Eq, left.ty, right.ty, span, environment, program, &scopes, &diagnostics) ?? return None
+    if !resolved.receiver_is_left || resolved.derived -> return None
+    Val(resolved.candidate.method)
 }
 
 // `("core.mem.scope", "guard")` (option B): the compiler-owned guard has no
