@@ -660,52 +660,6 @@ export function selectTests({ denominator, tests, candidate }) {
   };
 }
 
-export function parseSuiteInventory(path) {
-  if (!path || !existsSync(path)) return { path: path || null, sections: [], targets: [], missing: true };
-  const sections = [];
-  const targets = [];
-  let section = null;
-  for (const rawLine of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const line = rawLine.trimEnd();
-    if (!line.trim() || line.trimStart().startsWith("#")) continue;
-    const sectionMatch = line.match(/^([A-Za-z0-9_-]+):\s*$/);
-    if (sectionMatch) {
-      section = sectionMatch[1];
-      sections.push(section);
-      continue;
-    }
-    const target = line.trim();
-    if (section && target) targets.push({ section, target });
-  }
-  return {
-    path,
-    sections: [...new Set(sections)].sort(),
-    targets: targets.sort((left, right) => left.target.localeCompare(right.target)),
-    missing: false,
-  };
-}
-
-export function parseSuiteBudgets(path) {
-  if (!path || !existsSync(path)) return { path: path || null, rows: [], missing: true };
-  const rows = [];
-  for (const rawLine of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const match = line.match(/^(\S+)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
-    if (!match) continue;
-    const reason = match[3];
-    const measured = reason.match(/measured\s+(\d+(?:\.\d+)?)s/i);
-    rows.push({
-      target: match[1],
-      budget_seconds: Number(match[2]),
-      budget_wall_ms: Number(match[2]) * 1000,
-      measured_wall_ms: measured ? Number(measured[1]) * 1000 : null,
-      reason,
-    });
-  }
-  return { path, rows: rows.sort((left, right) => left.target.localeCompare(right.target)), missing: false };
-}
-
 function performanceEvidence(root, resultRoot) {
   const files = walkFiles(resultRoot).filter((path) => extname(path) === ".json");
   const rows = [];
@@ -878,8 +832,6 @@ export function buildReport(options = {}) {
   const manifestPath = pathFor(root, options.manifest || ".jet/hardening-manifest.json");
   const hardeningRoot = pathFor(root, options.hardeningRoot || process.env.JET_HARDENING_CACHE || "~/.cache/jet-hardening/v1".replace(/^~/, process.env.HOME || ""));
   const defectsPath = pathFor(root, options.defects || "Tools/agent-eval/domain-foundations/_defects/defects.json");
-  const suitesPath = pathFor(root, options.suites || "tests/suites.txt");
-  const budgetsPath = pathFor(root, options.budgets || "tests/suite_budgets.txt");
   const manifest = manifestPath && existsSync(manifestPath) ? readJson(manifestPath) : null;
   const manifestHash = manifest ? digest(manifest) : null;
   const denominator = normalizeDenominator(manifest, { manifest_hash: manifestHash, mandatory_obligations: historicalDefectObligations(defectsPath) });
@@ -891,8 +843,6 @@ export function buildReport(options = {}) {
   const hardening = hardeningStatus(hardeningRoot);
   const qualification = qualify({ denominator, selection, candidateSelection, controls, hardening });
   const performance = options.gauntlet === false ? [] : performanceEvidence(root, pathFor(root, options.gauntletRoot || "Tools/gauntlet/results"));
-  const suiteInventory = parseSuiteInventory(suitesPath);
-  const suiteBudgets = parseSuiteBudgets(budgetsPath);
   const report = {
     schema: SCHEMA,
     schema_version: SCHEMA_VERSION,
@@ -916,14 +866,10 @@ export function buildReport(options = {}) {
       manifest: manifestPath ? relPath(root, manifestPath) : null,
       manifest_sha256: manifestHash,
       defects_sha256: fileHash(defectsPath),
-      suites_sha256: fileHash(suitesPath),
-      budgets_sha256: fileHash(budgetsPath),
       hardening_result_sha256: fileHash(join(hardeningRoot, "result.json")),
       portfolio: portfolio.source,
       hardening_root: hardeningRoot ? relPath(root, hardeningRoot) : null,
       defects: defectsPath ? relPath(root, defectsPath) : null,
-      suites: suitesPath ? relPath(root, suitesPath) : null,
-      budgets: budgetsPath ? relPath(root, budgetsPath) : null,
       gauntlet: options.gauntlet === false ? null : relPath(root, pathFor(root, options.gauntletRoot || "Tools/gauntlet/results")),
     },
     candidate: {
@@ -933,8 +879,6 @@ export function buildReport(options = {}) {
       error: candidateSelection.error,
     },
     denominator,
-    suite_inventory: suiteInventory,
-    suite_budgets: suiteBudgets,
     hardening,
     performance,
     portfolio: {
@@ -1035,8 +979,6 @@ function usage() {
     "  --manifest PATH        canonical hardening manifest",
     "  --hardening-root PATH  existing hardening result directory",
     "  --defects PATH         historical defect records",
-    "  --suites PATH           canonical suite partition",
-    "  --budgets PATH          committed suite budgets",
     "  --gauntlet-root PATH   existing gauntlet results",
     "  --candidate KEY        frozen candidate key (commit=...|binary_sha256=...|registry_snapshot_hash=...|config_hash=...)",
     "  --no-controls          do not run false-green controls",
@@ -1052,8 +994,6 @@ function parseArgs(argv) {
     ["--manifest", "manifest"],
     ["--hardening-root", "hardeningRoot"],
     ["--defects", "defects"],
-    ["--suites", "suites"],
-    ["--budgets", "budgets"],
     ["--gauntlet-root", "gauntletRoot"],
     ["--candidate", "candidate"],
   ]);
