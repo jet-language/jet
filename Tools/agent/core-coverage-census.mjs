@@ -16,8 +16,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RATCHET = "Tools/agent/core-coverage-ratchet.json";
 const identifier = /^[A-Za-z_][A-Za-z_0-9]*$/;
 
+// `Core/Net/HttpServer.jet` is `core.net.http_server`: path parts in
+// snake_case, and a file named for its directory is that directory's module.
 export function moduleName(path) {
-  const parts = path.replaceAll("\\", "/").replace(/^Core\//, "").replace(/\.jet$/, "").split("/");
+  const parts = path.replaceAll("\\", "/").replace(/^Core\//, "").replace(/\.jet$/, "").split("/")
+    .map((part) => part.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase());
   if (parts.at(-1) === parts.at(-2)) parts.pop();
   return parts.join(".") === "app" ? "app" : `core.${parts.join(".")}`;
 }
@@ -111,11 +114,19 @@ export function publicFunctions(path, source) {
   const localTypes = new Set(tokens.flatMap((token, index) =>
     ["struct", "enum", "trait"].includes(token.value) ? [tokens[index + 1]?.value] : []));
   const rows = [];
+  const seen = new Set();
   const scopes = [];
   let pendingOwner = null;
   for (let i = 0; i < tokens.length; i++) {
     const value = tokens[i].value;
-    if (["struct", "enum", "impl", "trait"].includes(value)) pendingOwner = { name: tokens[i + 1]?.value, kind: value };
+    if (["struct", "enum", "trait"].includes(value)) pendingOwner = { name: tokens[i + 1]?.value, kind: value };
+    // `impl Type.Trait(Arg) {` names its type; a bare `impl Trait {` inside a
+    // type's body belongs to that type.
+    if (value === "impl") {
+      const enclosing = scopes.at(-1);
+      const nested = tokens[i + 2]?.value !== "." && enclosing && ["struct", "enum"].includes(enclosing.kind);
+      pendingOwner = { name: nested ? enclosing.name : tokens[i + 1]?.value, kind: value };
+    }
     if (value === "module") {
       const qualified = tokens[i - 1]?.value === ")" && tokens[i - 4]?.value === "priv";
       pendingOwner = tokens[i - 1]?.value === "priv" || qualified ? PRIVATE_SCOPE : { name: null, kind: "module" };
@@ -140,7 +151,12 @@ export function publicFunctions(path, source) {
       while (at < tokens.length && tokens[at].value !== "]") at++;
       if (tokens[at + 1]?.value === ">") result = resultType(source, tokens, at + 2, module, localTypes);
     }
-    rows.push({ module, name: owner ? `${owner}.${name}` : name, id: `${module}.${owner ? `${owner}.` : ""}${name}`,
+    const id = `${module}.${owner ? `${owner}.` : ""}${name}`;
+    // Operator overloads (`impl Vec2.Mul` and `impl Vec2.Mul(Float)`) share one
+    // callable name, and a call site cannot tell them apart: one row each.
+    if (seen.has(id)) continue;
+    seen.add(id);
+    rows.push({ module, name: owner ? `${owner}.${name}` : name, id,
       file: path, line: lineAt(source, tokens[i].offset), returnType: result,
       doctests: [], examples: [], tests: [] });
   }

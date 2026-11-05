@@ -24,6 +24,8 @@ test("module layout matches Core module keys, including app and nested roots", (
   assert.equal(moduleName("Core/Web/Storage/Local.jet"), "core.web.storage.local");
   assert.equal(moduleName("Core/App/App.jet"), "app");
   assert.equal(moduleName("Core/Mod/Mod.jet"), "core.mod");
+  assert.equal(moduleName("Core/Net/HttpServer.jet"), "core.net.http_server");
+  assert.equal(moduleName("Core/Time/Expiring.jet"), "core.time.expiring");
 });
 
 test("every public function, including same-named methods, is inventoried", () => {
@@ -39,6 +41,18 @@ test("every public function, including same-named methods, is inventoried", () =
   `);
   assert.deepEqual(found.map((row) => row.id), ["core.demo.A.new", "core.demo.B.new", "core.demo.new", "core.demo.generic"]);
   assert.deepEqual(found.map((row) => row.returnType), ["core.demo.A", "core.demo.B", "core.demo.A", "B<T>"]);
+});
+
+test("a bare impl inside a type belongs to it, and operator overloads share one row", () => {
+  const found = publicFunctions("Core/Demo/Demo.jet", `enum Kind {
+      One
+      impl Display { fn display(self) -> String Never! { "" } }
+    }
+    struct Vec { impl Debug { fn debug(^self) -> String Never! { "" } } }
+    impl Vec.Mul { fn mul(self, rhs: Vec) -> Vec Never! { rhs } }
+    impl Vec.Mul(Float) { fn mul(self, rhs: Float) -> Vec Never! { self } }
+  `);
+  assert.deepEqual(found.map((row) => row.id), ["core.demo.Kind.display", "core.demo.Vec.debug", "core.demo.Vec.mul"]);
 });
 
 test("return types preserve builtin, prelude and compound spellings", () => {

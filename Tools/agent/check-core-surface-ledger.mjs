@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { readHistoryDoc } from "../tower/app/store.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { FIXTURE_BINDINGS } from "./core-conformance.mjs";
@@ -3346,9 +3347,21 @@ function buildRows(modules, fixedPairs, collections, surfaces) {
 // ---------------------------------------------------------------------------
 // Owners.
 
+// The live board plus Tower's archive: a ratified decision or a done card
+// retires to history.json, and a declined row or a closed owner must still
+// resolve once it has.
 function towerBoard() {
   if (!existsSync(TOWER_PATH)) return null;
-  return JSON.parse(readFileSync(TOWER_PATH, "utf8"));
+  const board = JSON.parse(readFileSync(TOWER_PATH, "utf8"));
+  const history = readHistoryDoc(dirname(TOWER_PATH));
+  if (!history) return board;
+  const live = new Set((board.decisions || []).map(function (item) { return item.id; }));
+  const liveCards = new Set((board.cards || []).map(function (card) { return card.num; }));
+  return {
+    ...board,
+    decisions: (board.decisions || []).concat((history.decisions || []).filter(function (item) { return !live.has(item.id); })),
+    cards: (board.cards || []).concat((history.cards || []).filter(function (card) { return !liveCards.has(card.num); })),
+  };
 }
 
 function towerCards(board) {
@@ -4485,7 +4498,7 @@ function validateCoreApiSyntaxCoverage() {
     ["tests/ui/variadic_not_last.stderr", "jet.MisplacedVariadicParameter"],
     ["tests/ui/spread_bad_call.stderr", "jet.SpreadWithoutVariadic"],
     ["tests/ui/yield_type_mismatch.stderr", "jet.YieldTypeMismatch"],
-    ["tests/ui/user_policy_bad_args.stderr", "jet.ArgumentCountMismatch"],
+    ["tests/ui/user_policy_bad_args.stderr", "jet.MissingArgument"],
   ]) {
     const diagnostics = read(path);
     const report = diagnostics.split(/\n\s*\n/).find(function (entry) {
