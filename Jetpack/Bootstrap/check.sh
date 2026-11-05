@@ -329,8 +329,10 @@ if (( with_tests == 1 && overall == 0 )); then
   fi
   # Collect-all: a failing claim stops the driver with E3001 (exit 70) right
   # after its predecessors' `pass` lines; it is recorded as failed and the
-  # driver resumes at the next claim (JETPACK_CLAIM_FROM). Any other stop
-  # (ICE, timeout, memory cap) can't be attributed to a claim and ends the tier.
+  # driver resumes at the next claim (JETPACK_CLAIM_FROM). A fault (signal
+  # exit) whose backtrace names that claim's frame is attributed the same way.
+  # Any other stop (ICE, timeout, memory cap) can't be attributed to a claim
+  # and ends the tier.
   # The default-tier image (`jet run`'s options: `--optimize=none`) is built
   # once and every segment runs it, so a failing claim costs one restart, not
   # one recompile (#6293).
@@ -356,7 +358,9 @@ if (( with_tests == 1 && overall == 0 )); then
     run_passed=$(( run_passed + segment ))
     if (( run_status == 0 )) && grep -qx 'jetpack-bootstrap: claims done' "$scratch/$label.log"; then break; fi
     stopped=$(( from + segment ))
-    if (( run_status != 70 || stopped >= expected )); then
+    if (( run_status != 70 )) && (( stopped < expected )) && grep -q "^  jetpack_test_claim_${stopped} at " "$scratch/$label.log"; then
+      echo "jetpack-bootstrap: claim $stopped faulted (exit $run_status); see $scratch/$label.log" >&2
+    elif (( run_status != 70 || stopped >= expected )); then
       echo "jetpack-bootstrap: default tier stopped (exit $run_status) without a claim to attribute it to" >&2
       run_complete=0
       break
