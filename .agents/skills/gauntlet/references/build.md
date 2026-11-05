@@ -48,7 +48,7 @@ one run:
 - binary size;
 - readability proxies: LOC, tokens, distinct concepts, and ceremony ratio;
 - RLI5 rubric scores (advisory);
-- Luna authoring cost.
+- authoring cost.
 
 Comparisons use same-run ratios. Raw times are machine-local. A full run emits
 `Tools/gauntlet/results/<date>.json`; `--entry` and `--axis` emit
