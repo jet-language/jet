@@ -800,6 +800,15 @@ struct SemaRegistrationGraph {
     derive_demand: Shared<SemaDeriveDemand>
     derive_wave_rows: [String:Bool]{[String:Bool]{}}
     derive_checked: [String:Bool]{[String:Bool]{}}
+    // Demand-checked Core bodies under `jet check` (sema_core_demand_index):
+    // a Core module's top-level functions and inherent methods are checked
+    // only once a checked body names one. `core_demand_rows` maps each such
+    // function key to its module, `core_wave_rows` names the bodies the
+    // current wave checks (sema_core_demand_waves), and `core_checked` every
+    // body a wave of this finalization checked.
+    core_demand_rows: [String:Int]{[String:Int]{}}
+    core_wave_rows: [String:Bool]{[String:Bool]{}}
+    core_checked: [String:Bool]{[String:Bool]{}}
     // The canonical spellings of the nominals registered by the end of
     // sema_registration_prepare_graph (sema_registration_index_canonical_nominals);
     // None for a graph built another way, whose lookups cut each spelling.

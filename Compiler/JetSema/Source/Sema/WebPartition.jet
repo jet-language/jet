@@ -36,19 +36,15 @@ struct SemaWebTypes {
 fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     metas := [SemaWebMeta]{}
     types := SemaWebTypes{structs: [String:StructDef]{}, enums: [String:EnumDef]{}}
-    active := false
     loop module_index in 0..<modules.len() {
         registration :: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         program :: graph.modules[registration].program
-        if program.web_target_ceiling != None -> active = true
         is_entry :: graph.modules[registration].module_identity == graph.entry_module_identity
         file_prefix :: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
         sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, modules, &metas, &types)
     }
-    loop meta in metas {
-        if meta.marker != None -> active = true
-    }
     if metas.len() == 0 -> return
+    active :: sema_web_partition_active(graph)
     rows := [String:Int]{}
     loop at in 0..<metas.len() {
         if metas[at].row >= 0 -> rows[modules[metas[at].slot].functions[metas[at].row].key] = at
@@ -106,6 +102,57 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
         sema_attach_diagnostic_source_locations(&found, 0, graph.modules[meta.registration].source_segments)
         loop diagnostic in found -> &diagnostics.push(diagnostic)
     }
+}
+
+// Whether a program opts in to the partition's checks: a module has a file
+// `#Target` ceiling or a function a web marker. Before it does, the partition
+// only stamps buckets, so a check that leaves some bodies unchecked
+// (CoreDemand.jet) reports what checking every body would.
+fn sema_web_partition_active(graph: SemaRegistrationGraph) -> Bool Never! {
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].program.web_target_ceiling != None || sema_web_items_marked(graph.modules[module_index].program.items) -> return true
+    }
+    false
+}
+
+// Whether a function sema_web_collect visits in `items` has a web marker.
+fn sema_web_items_marked(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if function.web_marker != None -> return true
+            }
+            .Struct(structure) -> {
+                if sema_web_methods_marked(structure.methods) -> return true
+                loop implementation in structure.trait_impls {
+                    if sema_web_methods_marked(implementation.methods) -> return true
+                }
+            }
+            .Enum(enumeration) -> {
+                if sema_web_methods_marked(enumeration.methods) -> return true
+                loop implementation in enumeration.trait_impls {
+                    if sema_web_methods_marked(implementation.methods) -> return true
+                }
+            }
+            .Impl(implementation) -> {
+                if sema_web_methods_marked(implementation.methods) -> return true
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    if sema_web_items_marked(body) -> return true
+                }
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+fn sema_web_methods_marked(methods: [Func]) -> Bool Never! {
+    loop method in methods {
+        if method.web_marker != None -> return true
+    }
+    false
 }
 
 fn sema_web_collect(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
