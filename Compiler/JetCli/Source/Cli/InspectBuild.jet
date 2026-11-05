@@ -3,7 +3,7 @@ use {
     jet_driver.[
         JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
-        JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
+        JetDriverFailure, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
         jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
         jet_driver_report_problems, JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
@@ -17,7 +17,7 @@ use {
     build_files :: core.files
     build_math :: core.math
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
-    jet_build_session.[BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_generated, build_plan_selection]
+    jet_build_session.[BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
         pkg_lock_build_stamp, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_sorted_contributions,
@@ -63,19 +63,23 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     loop diagnostic in diagnostics {
         if verbose || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
     }
-    report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
-    return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if json -> return {stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, shown), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    // The reports ride along so a `--json` run reached without this flag
+    // (`jet build --json`) answers with them (jet_cli_json_outcome).
+    {stdout: "", stderr: jet_driver_report_problems(file, source, shown, color, verbose), exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: shown, notice: ""})}
 }
 // `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
 // record the values it contributes to the package's declared settings
-// (jet_cli_record_build_contributions), then compile each selected executable
-// target from its source, named after the target.
+// (jet_cli_record_build_contributions), run the selected actions
+// (jet_cli_build_execute), then compile each selected executable target from
+// its source, named after the target.
 // The options fn build set go between `options`' profile values and its flags;
 // `build_args` (the words after `--`) are what its `b.args()` returns. Under
 // `write_generated: on` each generated source is first written to its
 // `.jet/generated/` path under the package root.
 fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     selection := BuildPlanSelection?{None}
+    execution := BuildPlanExecution?{None}
     generated := [BuildSessionGeneratedModule]{}
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     if ^prepared == {
@@ -94,6 +98,7 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
                 if recorded == .Val(refusal) -> return refusal.copy()
             }
             selection = Val(build_plan_selection(plan))
+            execution = Val(build_plan_execution(plan))
             generated = build_plan_generated(plan)
         }
     }
@@ -129,11 +134,20 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
+    graph :: execution ?? return jet_cli_ice("the completed build query has no plan")
+    // copy: `failed` is a payload view of the execution's result.
+    if jet_cli_build_execute(graph, root, invocation, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
         source_path :: jet_cli_entry_join(root, executable.source)
         source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
         built :: jet_cli_compile_target(source_path, executable.name, source, color, selected_options.copy(), threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    }
+    // A `fn build` that selects no executable keeps the stock build of the
+    // program beside it, named after its file.
+    if selected.executables.len() == 0 {
+        source :: build_files.read(file) ?? ""
+        if jet_cli_top_level_function_lines(source, "run").len() > 0 -> return jet_cli_compile_target(file, jet_cli_stem(file), source, color, selected_options.copy(), threads, invocation, trace_sink)
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

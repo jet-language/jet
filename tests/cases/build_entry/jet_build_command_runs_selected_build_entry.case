@@ -1,7 +1,8 @@
 # Port of build_entry.rs:2051-2093.
-# PENDING-SAME-HEAD: historical dev-595e0dca3 rejects original --allow-exec with E2102.
 # ORACLE-LITERAL: cli-built.out is the original exact file assertion at build_entry.rs:2091.
 requires: tool:sh
+requires: tool:bwrap
 fixture: fixtures/selected-build
-step: jet build {work}/main.jet --allow-exec --allow-fs
+artifact: app
+step: jet build {work}/main.jet --allow=Exec,FS
 file: stamp.txt = cli-built.out

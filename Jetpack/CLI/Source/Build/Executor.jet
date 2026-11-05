@@ -7,6 +7,20 @@
 // rather than on scoped threads; every member still runs and the batch
 // reports its first error in action order, as the Rust join does.
 
+use {
+    jet_foundation.[DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]
+    jet_pkg_model.[pkg_json_text]
+    jetpack_foundation.[
+        BuildEffect, NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS, NativeSandboxError, NativeSandboxMount,
+        foundation_run_native_sandboxed_with_timeout_and_mounts,
+    ]
+    files :: core.files
+    random :: core.crypto.random
+    json :: core.encoding.json
+    sys :: core.sys
+    time :: core.time
+}
+
 struct BuildProbeFact {
     name: String
     success: Bool
@@ -60,6 +74,18 @@ fn build_action_failure_report(action: String, exit_code: Int, stderr: String) -
             source_span: None,
         }),
     }
+}
+
+// The failed action's stderr as it wrote it, read back from the report
+// build_action_failure_report keeps it quoted in.
+fn build_action_failure_stderr(report: DiagnosticBuildError) -> String? Never! {
+    details :: report.details ?? return None
+    loop field in details.fields {
+        if field.name != "stderr" -> next
+        tree :: json.parse(field.value) ?? return None
+        return pkg_json_text(tree)
+    }
+    None
 }
 
 // Execute the canonical action graph through the platform-native child

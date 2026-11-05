@@ -5,6 +5,18 @@
 // openat/mkdirat/renameat FFI is the ratified Core directory handle
 // whose relative opens refuse links.
 
+use {
+    jet_foundation.[
+        DiagnosticBuildError, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField,
+        DiagnosticErrorSpan, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, foundation_json_integer, foundation_json_quote,
+    ]
+    jet_pkg_model.[pkg_json_array, pkg_json_object, pkg_json_render, pkg_json_text]
+    files :: core.files
+    json :: core.encoding.json
+    random :: core.crypto.random
+    sys :: core.sys
+}
+
 // Host reads of build files (declared inputs, work-tree outputs, published
 // outputs) are bounded: one file at most 512 MiB and one action's files at
 // most 1 GiB together, checked against the opened file's size before any

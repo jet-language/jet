@@ -1,12 +1,13 @@
 # Port of tests/build_entry.rs:3369-3397; sources verbatim.
 # KNOWN-FAILING #4833 (Jet build --locked not ported). PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
 fixture: fixtures/locked_action_output_drift_rolls_back_filesystem
+artifact: app
 requires: tool:sh
-step: jet build main.jet --allow-exec --allow-fs --gate impure=allow
+step: jet build main.jet --allow=Exec,FS
 exit: 0
 file: artifact = "one"
 copy: changed.jet main.jet
-step: jet build main.jet --allow-exec --allow-fs --gate impure=allow --locked --json
+step: jet build main.jet --allow=Exec,FS --locked --json
 exit: nonzero
 json: machine doc $.reports[?code="E3512"] #>= 1
 file: artifact = "one"

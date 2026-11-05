@@ -3,9 +3,10 @@
 fixture: fixtures/sandbox_refuses_output_parent_symlink_escape
 requires: os:unix
 requires: tool:sh
+requires: tool:bwrap
 mkdir: {tmp}/outside
 symlink: {tmp}/outside redirect
-step: jet build main.jet --allow-exec --allow-fs --gate impure=allow --json
+step: jet build main.jet --allow=Exec,FS --json
 exit: nonzero
 json: machine doc $.reports[?code="E3505"] #>= 1
 file: {tmp}/outside/pwn absent
