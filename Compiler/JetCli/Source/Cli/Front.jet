@@ -73,8 +73,9 @@ enum JetCLIPlan {
     // `jet build <file>`: the entry and its bytes; `options` are the build
     // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows; `json` reports its
-    // compile errors as one machine status.
-    Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, json: Bool)
+    // compile errors as one machine status; `sbom` (`--sbom`) also writes the
+    // SPDX SBOM of its lock next to the binary.
+    Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, json: Bool, sbom: Bool)
     // A package build its `fn build(b: Build)` in `file` configures; its
     // option calls join `options` as their `fn build` layer, and its
     // `b.args()` returns `build_args` (the words after `--`).
@@ -804,7 +805,7 @@ fn jet_cli_doc(jet_argv: [String], args: [String], color: Bool, quiet: Bool, jso
 
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
-    "--lib", "--verify", "--sbom", "--import", "--set",
+    "--lib", "--verify", "--import", "--set",
     "--builder", "--locked", "-p", "--output", "--gate",
     // D-BUILD-WATCH1=A (#6322 C4): refused until the shared watch engine
     // drives `jet build`, never a silent single build.
@@ -944,13 +945,14 @@ fn jet_cli_stock_release_choices() -> [BuildOptionChoice] Never! {
 // compiles under, or the refusal of a profile or flag.
 fn jet_cli_with_build_options(plan: ^JetCLIPlan, jet_argv: [String], quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
     if plan == {
-        .Build(file, source, color, _, threads, invocation, notice, json) -> {
+        .Build(file, source, color, _, threads, invocation, notice, json, sbom) -> {
             if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
-                .Selected(options, notes) -> return JetCLIPlan.Build{file: ^file, source: ^source, color: color, options: ^options, threads: threads, invocation: ^invocation, notice: "{notice}{notes}", json: json}
+                .Selected(options, notes) -> return JetCLIPlan.Build{file: ^file, source: ^source, color: color, options: ^options, threads: threads, invocation: ^invocation, notice: "{notice}{notes}", json: json, sbom: sbom}
             }
         }
         .BuildPackage(file, color, _, build_args, threads, invocation, notice) -> {
+            if jet_argv.contains("--sbom") -> return jet_cli_not_ported("build --sbom of a package build", color)
             source :: cli_files.read(file) ?? ""
             if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
@@ -1085,7 +1087,7 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]
                 if (found.callable ?? "") == "build" -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join("")}
                 if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
                 planned :: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), json, false)
-                if planned == .Check(file, source, _, _, _, _, notice, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json}
+                if planned == .Check(file, source, _, _, _, _, notice, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom")}
                 return planned
             }
             .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
@@ -1099,7 +1101,7 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]
             // source file or in `package.jet`, builds through it.
             if jet_cli_declares_build_entry(source) || jet_cli_package_declares_build_entry(file) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice}
             if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(file, color)
-            return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json}
+            return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom")}
         }
         else -> {}
     }

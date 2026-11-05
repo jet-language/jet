@@ -139,6 +139,7 @@ use {
     jet_sema.[SemaCheckedForeignFunction, sema_no_run_diagnostic, sema_user_template_ct_value]
     jet_pkg_model.[
         ClaimsGrade,
+        LockFile,
         ManifestEntry,
         PackageFacts,
         pkg_format_source,
@@ -147,6 +148,7 @@ use {
         pkg_manifest_parse_diagnostic,
     ]
     jetpack_foundation.[ENV_FILE, PACKAGE_FILE]
+    jetpack_publication.[publication_emit_spdx, publication_load_publish_lock]
     jet_env_model.[envmodel_evaluate_env_with_selections, envmodel_has_whitespace]
     jetpack_trust.[trust_list_records, trust_store_path]
 }
@@ -1301,8 +1303,9 @@ fn jet_cli_present_shown(result: JetDriverCompileResult, snapshot: JetDriverAuth
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // (under `json`, one failed `diagnostics` status on stderr), check the
 // application authority, then write the executable, or under `os: web` the
-// web build (jet_cli_build_web).
-fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+// web build (jet_cli_build_web). `sbom` (`--sbom`) also writes the SPDX
+// document next to the executable (jet_cli_build_sbom).
+fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
@@ -1315,9 +1318,26 @@ fn jet_cli_build_result(file: String, name: String, source: String, color: Bool,
     if build_options_value(options, "os") == "web" -> return jet_cli_build_web(file, color, options, result, ^inputs, snapshot)
     if jet_cli_build_binary(file, name, "build", color, options, result, ^inputs, snapshot) == {
         .Failed(failure) -> return failure
-        .Image(_, _) -> {}
+        .Image(_, path) -> {
+            if sbom -> return jet_cli_build_sbom(file, name, source, path, color)
+        }
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet build --sbom` (D-SUPPLY1): the SPDX 2.3 document of the build's
+// package and its locked dependencies (the project's `.jet/lock`; none for a
+// loose file), written next to `binary` as `<name>.spdx`.
+fn jet_cli_build_sbom(file: String, name: String, source: String, binary: String, color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    directory :: jet_cli_parent(file) ?? "."
+    project :: jet_cli_manifest_root(directory) ?? directory
+    loaded :: publication_load_publish_lock(project) ? found -> found ! error -> return jet_cli_build_failed("couldn't read the lock of {project}: {error}", jet_cli_why("E2105"), "repair or regenerate `.jet/lock` with `jetpack lock`", color)
+    lock :: loaded ?? LockFile.empty()
+    root :: if jet_cli_file_manifest(file, source) == .Val(manifest) -> manifest.name else -> name
+    build_dir :: jet_cli_parent(binary) ?? "."
+    path :: "{build_dir}/{name}.spdx"
+    cli_files.write(path, publication_emit_spdx(lock, root, "NOASSERTION")) ?? return jet_cli_build_failed("couldn't write the SBOM {path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
+    JetDriverVerbOutput{stdout: "sbom: {path}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // One build target of a package build: compile `file` into .jet/build/`name` and return,
@@ -1326,16 +1346,16 @@ fn jet_cli_compile_target(file: String, name: String, source: String, color: Boo
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if ^compiled == {
         .Refused(refusal) -> refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, result, ^inputs, snapshot)
+        .Checked(result, inputs, snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, false, result, ^inputs, snapshot)
     }
 }
 
-fn jet_cli_compile_build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, result, ^inputs, snapshot))
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, result, ^inputs, snapshot))
     }
     // Reached only by a refusal: a value-returning verb never ends in its
     // Never exit call.
@@ -2813,9 +2833,19 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
+}
+
+// `jet build --locked`: the engine's locked fetch, then the build it guards,
+// planned and carried out as `jet build` is (jet_cli_main).
+fn jet_cli_locked_build_host(check: [String], build: [String]) -> JetDriverVerbOutput {
+    checked :: jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "build --locked", check)
+    if checked.exit_code != 0 -> return checked
+    plan :: jet_cli_front(build)
+    if jet_cli_plan_compiles(plan) -> return jet_cli_compile_on_worker(^plan, jet_cli_trace_flag(jet_cli_owned_flags(build)))
+    jet_cli_execute(^plan)
 }
 
 // Carry out one plan; a host step that finishes as a plan runs that plan.
@@ -2834,14 +2864,15 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             jet_cli_write_notice(notice)
             output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, trace_sink)
         }
-        .Build(file, source, color, options, threads, invocation, notice, json) -> {
+        .Build(file, source, color, options, threads, invocation, notice, json, sbom) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, trace_sink)
+            output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, trace_sink)
         }
         .BuildPackage(file, color, options, build_args, threads, invocation, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_build_package(file, color, options, build_args, threads, invocation, trace_sink)
         }
+        .LockedBuild(check, build) -> output = jet_cli_locked_build_host(check, build)
         .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {
             jet_cli_write_notice(notice)
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
