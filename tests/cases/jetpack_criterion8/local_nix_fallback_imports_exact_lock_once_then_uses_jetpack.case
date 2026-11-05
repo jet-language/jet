@@ -1,0 +1,80 @@
+# Port of tests/jetpack_criterion8.rs:189-310 (criterion 8): a local Nix
+# fallback imports the exact lock once, then later builds and runs stay on
+# Jetpack. The peer is the unindexed signed-index server from
+# jetpack_engine/no_nix_unindexed_nixpkgs_package_reports_e1349.fixture; it
+# serves postgres as not indexed (missing-narinfo).
+# Retargeted off the retired `jetpack build`/`jetpack run` (2b160ee885):
+# build -> env --prep, run -> env --. The Jet engine takes the local Nix
+# fallback only after a signed-index miss for a declared source, so env.jet
+# declares the nixpkgs-unstable source and postgres.
+# Store::find_by_reference and ProducerRecord::decode are read through
+# `jetpack explain --json`; Lock::parse is read as lock text.
+# The sibling imported_locked_package_runs_builds_and_restores_without_nix
+# (tests/jetpack_criterion8.rs:16-188) is the #Test in
+# Jetpack/CLI/Tests/Criterion8Import.jet.
+requires: os-name:linux
+fixture: local-nix-fallback.fixture
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+env: JETPACK_ROOT={work}/root
+env: JETPACK_NIX_FALLBACK_POLICY=allow
+env: JETPACK_NIX_FALLBACK_BIN={work}/nix
+env: PATH=/usr/bin:/bin
+mkdir: root
+chmod: nix 0755
+chmod: staging/bin/postgres 0755
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source unindexed -
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+step import: jetpack env --env dev --prep --trust --yes --no-color
+cwd: project
+unset: JETPACK_FIXTURES
+exit: 0
+file: nix-invocations == one-invocation.expected
+step: jetpack explain postgres@jetpack --json
+cwd: project
+exit: 0
+json: stdout doc $.explain.entry.reference = "postgres@jetpack"
+capture: out stdout doc $.explain.entry.output_path
+cap:out: ~ "{work}/root/hangar/objects/" # original: entry.out starts with root/hangar/objects
+json: stdout doc $.explain.provider.producer_facts["nix.fallback.invocation"] = "one-shot"
+capture: graph_fact stdout doc $.explain.provider.producer_facts["nix.fallback.graph"]
+cap:graph_fact: nonempty # original: producer fact nix.fallback.graph is present
+capture: proof_fact stdout doc $.explain.provider.producer_facts["nix.fallback.proof"]
+cap:proof_fact: nonempty # original: producer fact nix.fallback.proof is present
+# Lock::parse: the postgres package has a Registry source on registry
+# "jetpackage" and no nix-* closure key (any one would set nix_closure).
+file: project/.jet/lock ~ "name = \"postgres\"" # original: lock package postgres
+file: project/.jet/lock ~ "source = { registry = \"jetpackage\"" # original: LockSource::Registry with registry jetpackage
+file: project/.jet/lock !~ "nix-channel" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-revision" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-system" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-index-authority" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-derivation" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-output" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-nar-hash" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-size" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-compression" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-references" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-upstream-proof" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-cache-key" # original: nix_closure is none
+file: project/.jet/lock !~ "nix-project-cas-bundle" # original: nix_closure is none
+file: project/.jet/lock ~ "local-nix:" # original contains predicate
+file: project/.jet/lock ~ "github:NixOS/nixpkgs#" # original contains predicate
+step cached: jetpack env --env dev --prep --trust --yes --no-color
+cwd: project
+unset: JETPACK_FIXTURES
+exit: 0
+step run: jetpack env --env dev --trust --no-color -- postgres
+cwd: project
+unset: JETPACK_FIXTURES
+exit: 0
+stdout.trim: = "local fallback package" # original compares trimmed run stdout
+file: nix-invocations == one-invocation.expected
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
