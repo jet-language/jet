@@ -76,6 +76,9 @@ enum JetCLIPlan {
     // compile errors as one machine status; `sbom` (`--sbom`) also writes the
     // SPDX SBOM of its lock next to the binary.
     Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, json: Bool, sbom: Bool)
+    // `jet build --locked`: `check` is the engine's locked-fetch argv; when
+    // it passes, `build` (the raw words without `--locked`) runs as `jet build`.
+    LockedBuild(check: [String], build: [String])
     // A package build its `fn build(b: Build)` in `file` configures; its
     // option calls join `options` as their `fn build` layer, and its
     // `b.args()` returns `build_args` (the words after `--`).
