@@ -16,7 +16,7 @@ use {
         EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV, EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV,
         DIAGNOSTIC_ERROR, canonical_json_bytes, canonical_json_value, derivation_identity, derivation_record,
         derivation_record_json, diagnostic_column_at, diagnostic_from_registry, diagnostic_line_at,
-        diagnostic_registry_row, diagnostic_render_all, evidence_kind_code, evidence_outcome_is_incomplete,
+        diagnostic_more_line, diagnostic_registry_row, diagnostic_render_all, diagnostic_stop_line, evidence_kind_code, evidence_outcome_is_incomplete,
         evidence_outcome_test_state, evidence_report_encode, evidence_report_read, expr_span, foundation_json_quote,
     ]
     jet_parser.[parse_source]
@@ -1503,7 +1503,7 @@ fn jet_cli_prove_stop_text(item: JetCLIProveTestItem) -[FS]> String Never! {
         replay = "  property failed on case {run.case_index + 1} (seed {run.seed}; replay with JET_PROP_SEED={run.seed})\n"
         if run.minimized != "" -> replay = "{replay}  minimized_inputs: {run.minimized}\n"
     }
-    "  Stop [{item.code}]: {item.message}\n    --> {item.path}:{item.line}\n{shown}{replay}  More: jet-lang.dev/e/{item.code}\n"
+    "  {diagnostic_stop_line(item.code, item.message)}\n    --> {item.path}:{item.line}\n{shown}{replay}  {diagnostic_more_line(item.code)}"
 }
 
 // --- artifact ----------------------------------------------------------------------

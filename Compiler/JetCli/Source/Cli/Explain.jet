@@ -7,9 +7,11 @@ use {
 
 fn jet_cli_explanation_output(explanation: DiagnosticExplanation, color: Bool, json: Bool) -> JetCLIPlan Never! {
     if !json -> return jet_cli_renderable(diagnostic_explanation_render(explanation, color), false)
+    // A retired or reserved row runs in no stage: its stage is null.
+    stage :: if explanation.stage == "" -> None else -> Val(explanation.stage)
     fields :: [JetCLIStatusField]{
         jet_cli_status_field("code", jet_cli_status_text(explanation.code)),
-        jet_cli_status_field("stage", jet_cli_status_text(explanation.stage)),
+        jet_cli_status_field("stage", jet_cli_status_optional_text(stage)),
         jet_cli_status_field("what", jet_cli_status_text(explanation.what ?? explanation.meaning)),
         jet_cli_status_field("why", jet_cli_status_optional_text(explanation.why)),
         jet_cli_status_field("fix", jet_cli_status_optional_text(explanation.fix)),

@@ -13,12 +13,11 @@ use {
     cli_term :: core.term
     jet_backend.[X64Jetline, X64JetlineFunction, x64_jetline_find, x64_jetline_line, x64_jetline_read]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[diagnostic_registry_row]
+    jet_foundation.[diagnostic_registry_row, diagnostic_stop_footer, diagnostic_stop_line]
 }
 
 JET_CLI_CRASH_BUILD :: "Build "
 JET_CLI_CRASH_NAMES :: " (names and lines: jet crash)"
-JET_CLI_CRASH_STOP :: "Stop [E3012]: Stack overflow"
 JET_CLI_CRASH_FRAME :: "  0x"
 
 fn jet_cli_crash(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! {
@@ -56,7 +55,7 @@ fn jet_cli_crash(args: [String], color: Bool) -[FS, Env, IO]> JetCLIPlan Never! 
         }
     }
     head :: lines[build - 1]
-    report :: if head.starts_with(JET_CLI_CRASH_STOP) -> jet_cli_crash_stop(head, addresses, table) else -> jet_cli_crash_fault(head, backtrace, addresses, table)
+    report :: if head.starts_with(jet_cli_crash_stop_head()) -> jet_cli_crash_stop(head, addresses, table) else -> jet_cli_crash_fault(head, backtrace, addresses, table)
     before :: jet_cli_prefix(lines, build - 1)
     after :: jet_cli_tail(lines, at)
     leading :: if before.len() == 0 -> "" else -> "{before.join("\n")}\n"
@@ -115,26 +114,38 @@ fn jet_cli_crash_side(store: String) -[FS, Env]> String? Never! {
     }
 }
 
+// The E3012 row's What, for the function `name`.
+fn jet_cli_crash_stop_what(name: String) -> String Never! {
+    row :: diagnostic_registry_row("E3012") ?? panic("E3012 is not registered")
+    if !row.what.ends_with(" in `{{fn_name}}`") -> panic("E3012's What no longer ends in its function")
+    row.what.replace("{{fn_name}}", name)
+}
+
+// The first words of every E3012 stop: the row's What before its function.
+fn jet_cli_crash_stop_head() -> String Never! {
+    with_name :: jet_cli_crash_stop_what("")
+    diagnostic_stop_line("E3012", with_name.slice(0, with_name.len() - " in ``".len()))
+}
+
 // report.S's E3012 report: the overflowing function, found at the faulting
 // instruction or else at the nearest named caller, with its declaration
 // and that source line. Unnamed, or with no backtrace (`fault_report:
 // off`), the release line is the dev line.
 fn jet_cli_crash_stop(head: String, addresses: [Int], table: X64Jetline) -[FS]> String Never! {
-    row :: diagnostic_registry_row("E3012") ?? panic("E3012 is not registered")
-    why :: " Why: {row.why}\n Fix: {row.fix}\nMore: jet-lang.dev/e/E3012\n"
+    footer :: diagnostic_stop_footer("E3012")
     found := -1
     loop (k, address) in addresses {
         found = x64_jetline_find(table, if k == 0 -> address else -> address - 1)
         if found >= 0 -> break
     }
-    if found < 0 -> return "{head}\n{why}"
+    if found < 0 -> return "{head}\n{footer}"
     function :: table.functions[found]
-    out := "{JET_CLI_CRASH_STOP} in `{function.name}`\n  --> {function.file}:{function.decl} in {function.name}\n"
+    out := "{diagnostic_stop_line("E3012", jet_cli_crash_stop_what(function.name))}\n  --> {function.file}:{function.decl} in {function.name}\n"
     if jet_cli_crash_source(function) == .Val(source) {
         gutter :: " ".repeat("{function.decl}".len() + 3)
         out = "{out}{gutter}|\n{function.decl} | {source}\n{gutter}| ^\n"
     }
-    "{out}{why}"
+    "{out}{footer}"
 }
 
 // report.S's signal report: the first line, then, with a backtrace, the

@@ -9,7 +9,6 @@ use {
     cli_process :: core.process
     cli_sys :: core.sys
     jet_driver.[
-        JetDriverFailure,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USAGE,
@@ -22,7 +21,6 @@ use {
         DiagnosticRegistryFix,
         MARKER_SOURCE,
         TAppliedRule,
-        diagnostic_from_registry,
         diagnostic_registry_rows,
         diagnostic_render_all,
         marker_source_read,
@@ -603,18 +601,12 @@ fn jet_cli_find_engine_binary(name: String) -[FS, Env]> String? Never! {
     None
 }
 
-// An engine refusal: the Rust host's exact `text` on stderr, and the same
-// What, Why, and Fix as the typed report a `--json` run prints.
-fn jet_cli_engine_refusal(text: String, code: String, what: String, why: String, fix: String) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: text, exit_code: JET_DRIVER_EXIT_USER_ERROR, failure: Val(JetDriverFailure{reports: [Diagnostic]{diagnostic_from_registry(code, None, what, why, fix)}, notice: ""})}
-}
-
 // E1228 `engine-missing` (`missing_engine_message`).
 fn jet_cli_missing_engine(engine: String, verb: String) -> JetDriverVerbOutput Never! {
     what :: "`{verb}` needs the `{engine}` engine, which isn't installed"
     why :: "`{verb}` is a jetpack engine verb — {JET_CLI_BINARY} execs `{engine}` for it rather than building package-manager logic into the compiler"
     fix :: "install the matching Jet toolchain (the `{engine}` binary ships alongside `{JET_CLI_BINARY}`)"
-    jet_cli_engine_refusal("Error [jet.MissingEngine]: {what}\n Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/E1228\n", "E1228", what, why, fix)
+    jet_cli_report_output("", "E1228", what, why, fix, false, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // E1227 `engine-version-skew` (`version_skew_message`); `engine_version` is
@@ -628,7 +620,7 @@ fn jet_cli_version_skew(engine: String, jet_version: String, engine_version: Str
         what = "`{bin}` {jet_version} and `{engine}` {version} disagree"
         why = "`{bin}` and `{engine}` ship as one toolchain and must match exactly, or the engine may not understand what `{bin}` sends it"
     }
-    jet_cli_engine_refusal("Error [jet.EngineProtocolMismatch]: {what}\n Why: {why}\n Fix: {fix}\n More: jet-lang.dev/e/E1227\n", "E1227", what, why, fix)
+    jet_cli_report_output("", "E1227", what, why, fix, false, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // `query_engine_protocol`: the trimmed stdout of `<engine> --engine-protocol`,

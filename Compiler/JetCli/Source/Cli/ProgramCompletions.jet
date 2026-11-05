@@ -1,7 +1,7 @@
 // crates/jet-cli/src/CLI.rs:1676-1963. Scripts consume only the canonical
 // verified executable schema. The host never executes the described program.
 use {
-    jet_foundation.[CLICommandSchema, CLIInputSchema, RECORD_VERSION, read_executable]
+    jet_foundation.[CLICommandSchema, CLIInputSchema, RECORD_VERSION, diagnostic_registry_row, read_executable]
     cli_completion_text :: core.text
     cli_completion_fmt :: core.text.fmt
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
@@ -151,7 +151,9 @@ fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIPlan 
         }
         index += width
     }
-    jet_cli_done("", "Error [jet.UnreadableCommandSchema]: Couldn't read command metadata from `{escaped}`.\n Why: {why}.\n Fix: Rebuild the program with this Jet toolchain, then try again.\nMore: jet-lang.dev/e/E2103\n", JET_DRIVER_EXIT_USER_ERROR)
+    row :: diagnostic_registry_row("E2103") ?? panic("E2103 is not registered")
+    report :: jet_cli_report("E2103", row.what.replace("{{program}}", escaped), "{why}.", row.fix.replace("{{program}}", escaped), false)
+    jet_cli_done("", report, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Called only after the host's single nonblocking open, opened-file metadata

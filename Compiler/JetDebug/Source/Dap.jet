@@ -511,9 +511,10 @@ impl DapServer {
             return ExitCodes.USER_ERROR
         }
         if closed == .Err(error) {
-            (id, message) :: cleanup_error_details(error)
-            diagnostic :: if id == 22037 -> "E2231" else if id == 22038 -> "E2237" else -> "E2234"
-            io.eprintln("error [{diagnostic}]: {message}")
+            // The debugger codes (E2231-E2239) have no registry rows yet, so this
+            // line cannot render as a report; it prints the message alone.
+            (_, message) :: cleanup_error_details(error)
+            io.eprintln("error: {message}")
         }
         return ExitCodes.USER_ERROR
     }

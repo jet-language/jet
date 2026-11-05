@@ -16,7 +16,7 @@ use {
         EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, build_options_key,
         evidence_expectation_error_text, evidence_identity_for_record, evidence_merge_error_text, evidence_record_checked_derivation,
         evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
-        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry,
+        evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry, diagnostic_stop_parse,
     ]
     jet_pkg_model.[ClaimsGrade, ClaimsProjection, WorkspaceDeclarationCache]
 }
@@ -80,11 +80,8 @@ fn jet_cli_test_text(bytes: [U8], start: Int, end: Int) -> String Never! {
 fn jet_cli_test_stop(stderr: String) -> JetCLITestStop? Never! {
     lines :: stderr.split("\n").to_list()
     loop (index, line) in lines {
-        if !line.starts_with("Stop [") -> next
-        bytes :: line.bytes()
-        close :: line.find("]: ")
-        if close <= 6 -> next
-        stop := JetCLITestStop{code: jet_cli_test_text(bytes, 6, close), message: jet_cli_test_text(bytes, close + 3, bytes.len()), file: "", line: U32{0}}
+        head :: diagnostic_stop_parse(line) ?? next
+        stop := JetCLITestStop{code: head.code, message: head.what, file: "", line: U32{0}}
         if index + 1 < lines.len() {
             location :: lines[index + 1].trim()
             if location.starts_with("--> ") {

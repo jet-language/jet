@@ -321,9 +321,9 @@ int main(int argc, char **argv, char **envp) {
         assert(jet_rt_session_status() == 0);
     } else if (!strcmp(mode, "deadline")) {
         static const unsigned char deadline[] =
-            "Error [E3003]: Deadline exceeded while waiting in time sleep\n"
-            " Why: This wait point observed the task context deadline from `#Context(deadline: …)`\n"
-            " Fix: Raise the deadline budget or shorten the work before this wait point\n"
+            "Error [E3003]: `deadline exceeded while waiting in time sleep`.\n"
+            " Why: A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed.\n"
+            " Fix: Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope.\n"
             "More: jet-lang.dev/e/E3003";
         int64_t deadline_save[2];
         jet_ctx_push_deadline(-1, WORD(deadline_save));

@@ -19,7 +19,8 @@ literal whose `{self.field}` holes the report fills. Preserve the code and its
 meaning when changing an impl. `Tools/agent/DiagnosticRows.jet` reads the impls
 as source and writes the Foundation rows in `Registry/DiagnosticRows.jet`
 (`--check` proves they agree). Retired and reserved codes stay types with their
-status.
+status. They run in no stage, so they state no `stage`, and `jet explain`
+prints none for them (`--json` gives `"stage": null`).
 
 A diagnostic's name is its type path: `jet.UnusedParameter` for the compiler's
 own, `web.BadPath` for a library's. The current registered code shapes are `E`
@@ -71,6 +72,20 @@ target, and a package may deny a named lint through its lint policy, but a
 diagnostic code is never a policy value. JSON and LSP `code` stays the
 registered code.
 
+Every human report renders from its row through
+`Compiler/JetFoundation/Source/Diagnostics/Render.jet`: `diagnostic_render`,
+`diagnostic_render_all`, and the `Stop` line helpers (one of which reads a
+`Stop` line back, for `jet test`). Extra lines go in the
+diagnostic's detail. No other source file under `Compiler/`, `Core/` or
+`Jetpack/` writes a heading such as `Error [E0102]` or `Stop [{code}]`, or a
+`jet-lang.dev/e/` link. Runtime reports cannot reach the registry while they
+run, so their texts are generated from the rows by
+`Tools/agent/gen-runtime-*-messages.mjs`. The stack-overflow report in the
+runtime's assembly stays hand-written, because its handler runs on an exhausted
+stack. `Tools/agent/DiagnosticRows.jet --check` fails on a hand-built report,
+on a generated or assembly copy whose heading, Why or Fix differs from its
+row, and on a generated heading or link that names no code.
+
 Package-budget reports retain the authored callable witness's span and source
 snapshot, including witnesses in dependency modules. A named witness must not
 be rendered against the entry file merely because enforcement runs there.
@@ -109,7 +124,8 @@ errors. Their `exit:` metadata is rendered from the same exit-code fact that
 the returned runtime report carries: 70 under S36 / D-FAIL-EXIT1. Execution
 boundaries deliver that report and preserve its status; they do not classify
 the fault from its prose. An unresolved diagnostic row remains a host defect
-with status 101.
+with status 101. No row speaks for it, so it is not a report: it prints one
+`internal error:` line that names the code, with no Why, Fix or More.
 
 A native program's fatal signal is reported the same way under `jet run` and
 `jet build`. The handler runs on a per-thread alternate stack, so an exhausted

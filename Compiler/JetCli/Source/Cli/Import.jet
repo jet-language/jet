@@ -8,7 +8,7 @@ use {
     import_out_files :: core.files
     import_out_sys :: core.sys
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, DiagnosticMoment, EvidenceReport, diagnostic_display_name, diagnostic_from_registry, diagnostic_registry_row, evidence_report_encode]
+    jet_foundation.[Diagnostic, DiagnosticMoment, EvidenceReport, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_render_all, evidence_report_encode]
     jet_pkg_model.[ForeignBoundaryContract, ForeignBoundaryDisposition, ForeignSourceReceipt, WorkspaceDeclarationCache, pkg_foreign_boundary_capability]
 }
 
@@ -44,7 +44,7 @@ fn jet_cli_import_operation_error(what: String, why: String, json: Bool) -> JetD
     row :: diagnostic_registry_row("JT0198") ?? panic("JT0198 is not registered")
     diagnostic :: diagnostic_from_registry("JT0198", None, row.what.replace("{{operation}}", what), row.why.replace("{{reason}}", why), row.fix)
     if json -> return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)}, [JetCLIStatusField]{})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_import_output("", "error[{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_import_output("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Rust `migration_source_conversion` / `migration_mode`.
@@ -207,9 +207,7 @@ fn jet_cli_import_apply(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bo
             paths :: jet_cli_status_texts(shown)
             return jet_cli_import_output("{jet_cli_status_render_with_reports("import", false, [String]{jet_cli_import_tool_report(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)}, [JetCLIStatusField]{jet_cli_status_field("paths", paths)})}\n", "", JET_DRIVER_EXIT_USER_ERROR)
         }
-        stderr := "error[{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}\n"
-        loop path in shown -> stderr = "{stderr}  {path}\n"
-        return jet_cli_import_output("", "{stderr}  why: {diagnostic.why}\n  fix: {diagnostic.fix}\n", JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_import_output("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, false), JET_DRIVER_EXIT_USER_ERROR)
     }
     loop write in writes {
         parent :: import_out_files.dirname(write.path)
@@ -230,8 +228,9 @@ fn jet_cli_import_apply(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: Bo
     boundary :: current.boundary
     out := "{verb} {current.source} -> {current.target}\n  {current.functions} functions, {current.tests} carried tests, {current.todos.len()} TODO diagnostics\n  migration: {boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(boundary)}; source conversion: {jet_cli_import_migration_source_conversion(boundary)}; source authority: {boundary.source_authority.as_str()})\n"
     loop todo in current.todos {
-        diagnostic :: jet_cli_import_todo_diagnostic(todo)
-        out = "{out}  {diagnostic.code} {diagnostic.what}\n    why: {diagnostic.why}\n    fix: {diagnostic.fix}\n    target: {todo.target}  status: {todo.status}\n"
+        diagnostic := jet_cli_import_todo_diagnostic(todo)
+        diagnostic.detail = Val(" Target: {todo.target}\n Status: {todo.status}")
+        out = "{out}{diagnostic_render(diagnostic, "", "", false)}"
     }
     jet_cli_import_output(out, "", JET_DRIVER_EXIT_OK)
 }

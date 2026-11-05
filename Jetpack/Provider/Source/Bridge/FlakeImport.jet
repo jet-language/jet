@@ -282,7 +282,7 @@ fn provider_report_import_gap(file: String, gap: ImportGap) Never! -[IO]> {
         "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits",
     )
     stderr_handle := term.stderr()
-    &stderr_handle.write_line("Warning [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
+    &stderr_handle.write_line(diagnostic_render(diagnostic, file, "", false).trim_end()).drop("warnings are best-effort output")
 }
 
 // Carriage returns and newlines as spaces.

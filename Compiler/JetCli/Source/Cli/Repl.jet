@@ -922,11 +922,8 @@ fn jet_cli_repl_run_program(session: JetCLIReplSession, statements: String) -> S
     if outcome == {
         .Done(stdout, stderr, _) -> "{stdout}{stderr}"
         .Interrupted -> "{JET_CLI_REPL_INTERRUPTED}\n"
-        .Unstarted(diagnostic) -> "error: couldn't invoke jet run: {diagnostic.what}\n"
-        .Refused(diagnostics) -> {
-            lines :: loop diagnostic in diagnostics -> "error [{diagnostic.code}]: {diagnostic.what}\n"
-            lines.join("")
-        }
+        .Unstarted(diagnostic) -> diagnostic_render_all("", "", [Diagnostic]{diagnostic}, session.color)
+        .Refused(diagnostics) -> diagnostic_render_all("", "", diagnostics, session.color)
         .Stopped(stdout, report) -> if report == "" || report.ends_with("\n") -> "{stdout}{report}" else -> "{stdout}{report}\n"
     }
 }

@@ -121,12 +121,17 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     assert_eq(teaching.join("\n"), "")
 }
 
-// Every stage column holds one value of the closed stage set: in the generated
-// rows, and in each Prelude diagnostic type's `stage` list, whose parts join
-// in the registered order (`[.Parse, .Sema]` is `parse/sema`).
+// Every active row's stage holds one value of the closed stage set: in the
+// generated rows, and in each Prelude diagnostic type's `stage` list, whose
+// parts join in the registered order (`[.Parse, .Sema]` is `parse/sema`). A
+// retired or reserved row runs in no stage, so its stage is empty.
 #Test("every_diagnostic_stage_is_in_the_closed_set") {
     unknown := [String]{}
     loop row in diagnostic_registry_rows() {
+        if row.status != DiagnosticRegistryStatus.Active {
+            if row.stage != "" -> &unknown.push("{row.code}: an inactive row has stage `{row.stage}`")
+            next
+        }
         if !diagnostic_stage_is_registered(row.stage) -> &unknown.push("{row.code}: `{row.stage}`")
     }
     source :: registry_coverage_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")

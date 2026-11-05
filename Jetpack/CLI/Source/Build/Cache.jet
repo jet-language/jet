@@ -660,14 +660,16 @@ fn build_report_encode_value(value: Dyn) -> String Never! {
 }
 
 // Rust `JetErrorReport::render` on the stderr edge (no `--json` wire in this
-// process): the E3015 entry report, the structured rows, and the More line.
-// The executor's reports carry no journey, so no journey block is written.
+// process): the E3015 entry report through its registry row, with the
+// structured rows as its detail. The executor's reports carry no journey, so
+// no journey block is written.
 fn build_report_render(report: DiagnosticBuildError) -> String Never! {
     row :: diagnostic_registry_row("E3015") ?? panic("registered entry error row is missing")
     message :: build_terminal_text(report.message)
-    out := "Error [{row.name}]: {row.what.replace("{{msg}}", message)}\n Why: {row.why.replace("{{msg}}", message)}\n Fix: {row.fix.replace("{{msg}}", message)}\n"
-    out = "{out}{build_report_render_rows(report, 0)}"
-    "{out}More: jet-lang.dev/e/E3015\n"
+    diagnostic := diagnostic_from_registry("E3015", None, row.what.replace("{{msg}}", message), row.why.replace("{{msg}}", message), row.fix.replace("{{msg}}", message))
+    rows :: build_report_render_rows(report, 0)
+    if rows != "" -> diagnostic.detail = Val(rows)
+    diagnostic_render(diagnostic, "", "", false)
 }
 
 fn build_report_render_rows(report: DiagnosticBuildError, depth: Int) -> String Never! {
