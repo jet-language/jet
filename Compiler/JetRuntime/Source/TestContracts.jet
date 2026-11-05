@@ -12,8 +12,10 @@
 // pairs, open addressing), capacity24 (a power of two), count32.
 test_contract_root := I64{0}
 
-// The harness main opens the run's records file once, before any test runs.
+// The harness main opens the run's records file once, before any test runs;
+// it arms `jet prove`'s authority journal then too (ProveJournal.jet).
 #Export(c) fn jet_rt_test_contracts_open(path: I64) {
+    rt_prove_journal_open()
     if (test_contract_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(root, I64{40})

@@ -216,10 +216,21 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCL
         if failed == 0 -> session = Val(checked)
     }
     time_ms := Int?{None}
-    if session == .Val(run) -> time_ms = Val(run.time_ms)
+    // A sensitive run's harnesses journal raw reads in a private folder that
+    // lives, then goes, with this run.
+    journal := JetCLIReplayJournal{capture: "", records: "", trace: ""}
+    _journal_folder := cli_files.TempDir?{None}
+    if session == .Val(run) {
+        time_ms = Val(run.time_ms)
+        if run.sensitive {
+            scratch :: cli_files.temp_dir("jet-prove-replay") ?? return jet_cli_prove_refused(jet_cli_prove_evidence_refusal("couldn't create the replay journal folder: {jet_cli_io_error_text(err)}"), color, json)
+            journal = jet_cli_replay_journal_open(run, scratch.path) ?? return jet_cli_prove_refused(err, color, json)
+            _journal_folder = Val(^scratch)
+        }
+    }
     tests := JetCLIProveTests{items: [JetCLIProveTestItem]{}, contracts: front.contracts.copy(), consumed: [JetCLIRecordLink]{}, exit_code: JET_DRIVER_EXIT_OK, errors: ""}
     if failed == 0 {
-        ran :: jet_cli_prove_tests(identity, members, groups, cwd, front.contracts, time_ms) ?? return jet_cli_prove_refused(err, color, json)
+        ran :: jet_cli_prove_tests(identity, members, groups, cwd, front.contracts, time_ms, journal) ?? return jet_cli_prove_refused(err, color, json)
         tests = ran
     }
     test_failed := 0
@@ -248,20 +259,22 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCL
     // A run that already failed gets no E2942: its failures name their fixes.
     below :: if exit_code == JET_DRIVER_EXIT_OK -> jet_cli_claims_below_floor(grade, floor, target.root) else -> None
     if below != None -> exit_code = JET_DRIVER_EXIT_USER_ERROR
-    // A replay reproduces the captured run's exit or it diverged; a capture
-    // records how this run ended. An internal error does neither.
+    // A replay consumed exactly its records and reproduces the captured
+    // run's exit, or it diverged; a capture records how this run ended. An
+    // internal error does neither.
     replayed := JetCLIReplayArtifact?{None}
     replay_note := ""
     if session == .Val(run) {
         if exit_code != JET_CLI_EXIT_ICE && run.replayed == .Val(artifact) {
+            if jet_cli_replay_journal_divergence(journal, artifact) == .Val(refusal) -> return jet_cli_prove_refused(refusal, color, json)
             if exit_code != artifact.status {
-                return jet_cli_prove_refused(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the replayed run exited {exit_code}, but the captured run exited {artifact.status}", "recapture and replay the matching target"), color, json)
+                return jet_cli_prove_refused(jet_cli_replay_diverged("the replayed run exited {exit_code}, but the captured run exited {artifact.status}"), color, json)
             }
             replayed = Val(artifact.copy())
             replay_note = "REPLAY   reproduced {artifact.artifact_id} · parity: not available\n"
         }
         if exit_code != JET_CLI_EXIT_ICE && capture == .Val(request) {
-            written :: jet_cli_replay_capture_write(identity, request, run, exit_code) ?? return jet_cli_prove_refused(err, color, json)
+            written :: jet_cli_replay_capture_write(identity, request, run, journal, exit_code) ?? return jet_cli_prove_refused(err, color, json)
             replay_note = "REPLAY   captured {written}\n"
         }
     }
@@ -672,8 +685,10 @@ fn jet_cli_prove_fact(identity: JetCLIProveIdentity, member: JetCLIProveMember, 
 // JET_PROP_SEED reaches the child, whose properties fail naming the range.
 // A test that ended at an uncaught runtime stop makes the run exit 70, and
 // each `declared` contract is settled by what the children observed of it.
-// A capture or replay hands every child its one wall-clock value, `time_ms`.
-fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, declared: [JetCLIProveContract], time_ms: Int?) -> JetCLIProveTests JetCLIProveRefusal! {
+// A capture or replay hands every child its one wall-clock value, `time_ms`,
+// and a sensitive one its harness journal; the children run one at a time,
+// so their reads share one journal in order.
+fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMember], groups: [JetCLIProveGroup], cwd: String, declared: [JetCLIProveContract], time_ms: Int?, journal: JetCLIReplayJournal) -> JetCLIProveTests JetCLIProveRefusal! {
     items := [JetCLIProveTestItem]{}
     observed := [JetCLIProveObserved]{}
     consumed := [JetCLIRecordLink]{}
@@ -711,6 +726,8 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
             .output_limit(67108864)
         if requested == None -> spec = spec.env("JET_PROP_SEED", "{seed}")
         if time_ms == .Val(ms) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{ms}")
+        if journal.capture != "" -> spec = spec.env(JET_CLI_REPLAY_CAPTURE_ENV, journal.capture)
+        if journal.records != "" -> spec = spec.env(JET_CLI_REPLAY_RECORDS_ENV, journal.records).env(JET_CLI_REPLAY_TRACE_ENV, journal.trace)
         receipt :: spec.run() ?? {
             &items.push(unavailable.copy())
             next

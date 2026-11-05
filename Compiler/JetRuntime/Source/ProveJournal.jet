@@ -1,0 +1,200 @@
+// `jet prove --capture-sensitive` and its `--replay` (JetCli ProveReplay.jet):
+// the raw authority values a test program reads, journaled in read order.
+// Only a test harness arms the journal (jet_rt_test_contracts_open runs once,
+// before any test), so the `jet` processes around it never record their own
+// reads.
+//
+// Capture: JET_PROVE_CAPTURE_JOURNAL names a file each read appends one
+// record to. Replay: JET_PROVE_REPLAY_JOURNAL names the records the parent
+// wrote from the artifact, served in order instead of the OS, and
+// JET_PROVE_REPLAY_TRACE a file that gains `C` for each record served and one
+// `D` at the first read the next record does not answer. A later harness of
+// the same run (a rerun child) starts after the records the trace shows
+// served. After `D` every read fails, as an unrecorded authority would.
+//
+// A record: u8 kind, u64 LE request, u64 LE result, then, for an uppercase
+// kind, the result's bytes. Kinds: `R` Rand bytes (result = request) and `r`
+// a Rand read the OS refused (result 0).
+// Root48: lock0, mode8 (1 capture, 2 replay, 3 diverged), path16 (owned
+// journal or trace path), records24, length32, at40.
+PROVE_JOURNAL_HEAD :: I64{17}
+PROVE_JOURNAL_RAND :: I64{82}
+prove_journal_root := I64{0}
+
+fn rt_prove_journal_open() {
+    if (prove_journal_root != I64{0}) -> return
+    capture_key :: jet_rt_string_clone(rt_static_text("JET_PROVE_CAPTURE_JOURNAL"))
+    capture :: rt_env_get(capture_key)
+    test_text_drop(capture_key)
+    if (capture != I64{0}) {
+        rt_prove_journal_publish(rt_prove_journal_root_new(I64{1}, capture))
+        return
+    }
+    records_key :: jet_rt_string_clone(rt_static_text("JET_PROVE_REPLAY_JOURNAL"))
+    records :: rt_env_get(records_key)
+    test_text_drop(records_key)
+    if (records == I64{0}) -> return
+    trace_key :: jet_rt_string_clone(rt_static_text("JET_PROVE_REPLAY_TRACE"))
+    trace :: rt_env_get(trace_key)
+    test_text_drop(trace_key)
+    if (trace == I64{0}) {
+        jet_rt_string_drop(records)
+        return
+    }
+    root :: rt_prove_journal_root_new(I64{2}, trace)
+    out :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(out, I64{16})
+    if (jet_time_raw_zone_file_bytes(records, out, wrapping(out + I64{8})) == I64{0}) {
+        trap_store(wrapping(root + I64{8}), I64{3})
+        rt_prove_journal_trace(root, I64{68})
+    } else {
+        trap_store(wrapping(root + I64{24}), trap_word(out))
+        trap_store(wrapping(root + I64{32}), trap_word(wrapping(out + I64{8})))
+        // A missing trace is a run nothing has read from yet.
+        trap_store(out, I64{0})
+        trap_store(wrapping(out + I64{8}), I64{0})
+        if (jet_time_raw_zone_file_bytes(trace, out, wrapping(out + I64{8})) != I64{0}) {
+            served :: trap_word(wrapping(out + I64{8}))
+            seen := I64{0}
+            loop seen < served {
+                if (rt_text_byte(wrapping(trap_word(out) + seen)) != I64{67} || !rt_prove_journal_skip(root)) {
+                    trap_store(wrapping(root + I64{8}), I64{3})
+                    break
+                }
+                seen += I64{1}
+            }
+            if (served != I64{0}) -> jet_rt_free(trap_word(out), served, I64{8})
+        }
+    }
+    jet_rt_free(out, I64{16}, I64{8})
+    jet_rt_string_drop(records)
+    rt_prove_journal_publish(root)
+}
+
+fn rt_prove_journal_root_new(mode: I64, path: I64) -> I64 {
+    root :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(root, I64{48})
+    trap_store(wrapping(root + I64{8}), mode)
+    trap_store(wrapping(root + I64{16}), path)
+    root
+}
+
+fn rt_prove_journal_publish(root: I64) {
+    #Unsafe("the harness main arms the journal before any test, so before any other thread reads it") {
+        prove_journal_root = root
+    }
+}
+
+// `rt_crypto_entropy_fill` for a test program's Core-visible OS entropy
+// (jet_random_os_entropy): capture records each read, replay serves it.
+fn rt_prove_rand_fill(out: I64, count: I64) -> I64 {
+    root :: prove_journal_root
+    if (root == I64{0}) -> return rt_crypto_entropy_fill(out, count)
+    sync_mutex_lock(root)
+    status := I64{1}
+    if (trap_word(wrapping(root + I64{8})) == I64{1}) {
+        status = rt_crypto_entropy_fill(out, count)
+        if (status == I64{0}) {
+            rt_prove_journal_record(root, PROVE_JOURNAL_RAND, count, count, out)
+        } else {
+            rt_prove_journal_record(root, PROVE_JOURNAL_RAND + I64{32}, count, I64{0}, out)
+        }
+    } else {
+        at :: rt_prove_journal_take(root, PROVE_JOURNAL_RAND, count)
+        if (at >= I64{0}) {
+            records :: trap_word(wrapping(root + I64{24}))
+            if (rt_text_byte(wrapping(records + at)) == PROVE_JOURNAL_RAND && rt_prove_le(wrapping(records + at + I64{9})) == count) {
+                test_copy_bytes(out, wrapping(records + at + PROVE_JOURNAL_HEAD), count)
+                status = I64{0}
+            }
+        }
+    }
+    sync_mutex_unlock(root)
+    status
+}
+
+// The next record when it is a `kind` read (or its failed lowercase twin)
+// asking for `request`: its offset, with `C` traced. Otherwise -1, with `D`
+// traced once, and every later read fails. The caller holds the lock.
+fn rt_prove_journal_take(root: I64, kind: I64, request: I64) -> I64 {
+    if (trap_word(wrapping(root + I64{8})) != I64{2}) -> return I64{-1}
+    at :: trap_word(wrapping(root + I64{40}))
+    records :: trap_word(wrapping(root + I64{24}))
+    if rt_prove_journal_skip(root) {
+        found :: rt_text_byte(wrapping(records + at))
+        if ((found == kind || found == kind + I64{32}) && rt_prove_le(wrapping(records + at + I64{1})) == request) {
+            rt_prove_journal_trace(root, I64{67})
+            return at
+        }
+    }
+    trap_store(wrapping(root + I64{8}), I64{3})
+    rt_prove_journal_trace(root, I64{68})
+    I64{-1}
+}
+
+// Moves past the record at the cursor; false when it does not fit.
+fn rt_prove_journal_skip(root: I64) -> Bool {
+    at :: trap_word(wrapping(root + I64{40}))
+    length :: trap_word(wrapping(root + I64{32}))
+    if (at + PROVE_JOURNAL_HEAD > length) -> return false
+    records :: trap_word(wrapping(root + I64{24}))
+    payload :: if (rt_text_byte(wrapping(records + at)) < I64{97}) -> rt_prove_le(wrapping(records + at + I64{9})) else -> I64{0}
+    if (payload < I64{0} || payload > length - at - PROVE_JOURNAL_HEAD) -> return false
+    trap_store(wrapping(root + I64{40}), at + PROVE_JOURNAL_HEAD + payload)
+    true
+}
+
+// Appends one record, with `result` bytes from `data` for an uppercase kind.
+fn rt_prove_journal_record(root: I64, kind: I64, request: I64, result: I64, data: I64) {
+    payload :: if (kind < I64{97}) -> result else -> I64{0}
+    total :: PROVE_JOURNAL_HEAD + payload
+    record :: jet_rt_alloc(total, I64{8})
+    trap_put(record, kind)
+    rt_prove_put_le(wrapping(record + I64{1}), request)
+    rt_prove_put_le(wrapping(record + I64{9}), result)
+    test_copy_bytes(wrapping(record + PROVE_JOURNAL_HEAD), data, payload)
+    rt_prove_journal_write(root, record, total)
+    jet_rt_free(record, total, I64{8})
+}
+
+fn rt_prove_journal_trace(root: I64, mark: I64) {
+    byte :: jet_rt_alloc(I64{8}, I64{8})
+    trap_put(byte, mark)
+    rt_prove_journal_write(root, byte, I64{1})
+    jet_rt_free(byte, I64{8}, I64{8})
+}
+
+// A journal the parent cannot read whole is a protocol failure (exit 103),
+// as for the harness's own records (TestContracts.jet).
+fn rt_prove_journal_write(root: I64, data: I64, length: I64) {
+    error :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(error, I64{0})
+    if (jet_files_append_bytes_os(trap_word(wrapping(root + I64{16})), data, length, error) == I64{0}) {
+        message :: jet_rt_handle_show_io_error(trap_word(error))
+        jet_rt_test_eprint(message)
+        jet_std_process_exit_owned(I64{103})
+    }
+    jet_rt_free(error, I64{8}, I64{8})
+}
+
+fn rt_prove_le(address: I64) -> I64 {
+    value := I64{0}
+    at := I64{8}
+    first :: I64{0}
+    loop at > first {
+        at -= I64{1}
+        value = value * I64{256} + rt_text_byte(wrapping(address + at))
+    }
+    value
+}
+
+fn rt_prove_put_le(address: I64, value: I64) {
+    rest := value
+    at := I64{0}
+    width :: I64{8}
+    loop at < width {
+        trap_put(wrapping(address + at), rest.bit_and(I64{255}))
+        rest = rest >> I64{8}
+        at += I64{1}
+    }
+}
