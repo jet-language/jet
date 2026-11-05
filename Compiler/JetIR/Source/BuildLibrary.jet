@@ -9,8 +9,8 @@
 // builds each call of one as its machine operation (ir_intrinsic_call).
 
 use {
-    jet_backend.[X64_FAULT_REPORT, X64_RAX]
-    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_set, name_rows_value]
+    jet_backend.[LINK_FAULT_REPORT]
+    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -47,7 +47,7 @@ enum IRRuntimeIntrinsic {
     FunctionAddress(key: String)
     // The immortal String of a literal (the value a ConstText gives).
     StaticText
-    // A call of the fault report's machine code (ir_fault_report_call).
+    // A call of the fault report the linker writes (ir_fault_report_call).
     FaultReport
 }
 
@@ -626,7 +626,7 @@ fn ir_address_target_signature(function: FnBody, arity: Int) -> Bool Never! {
 // ConstText of its data row) as an I64; a bit cast stores its operand in a
 // frame word and loads it back in the other class; an address intrinsic is
 // the FunctionAddress of its export; rt_fault_print is a call of the fault
-// report's machine code.
+// report the linker writes.
 fn ir_intrinsic_call(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, args: [BodyCallArg], span: Span) -> Int Never! {
     word_row :: ir_word_row(&m)
     float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "type Float")
@@ -639,22 +639,14 @@ fn ir_intrinsic_call(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRun
     }
 }
 
-// A call of rt_fault_print: the native fault report's machine code
-// (JetBackend X64/FaultReport.jet, from JetRuntime Assets/FaultReport/
-// report.S) as an asm leaf, its six I64 arguments in the C argument
-// registers and its I64 result in rax. Built once per module, by key.
+// A call of rt_fault_print: a C call of LINK_FAULT_REPORT, the native fault
+// report the static linker writes into each image (JetBackend
+// Image/StaticLink.jet link_fault_report, from JetRuntime
+// Assets/FaultReport/), its six I64 arguments and I64 result in the C
+// argument and result registers. It never stops: the report is the last
+// thing a faulting process runs.
 fn ir_fault_report_call(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], word_row: Int, span: Span) -> Int Never! {
     if args.len() != IR_X64_ARGUMENT_REGISTERS.len() -> return ir_fail_slot(&b, span, "rt_fault_print reads six I64 values")
-    leaf := name_rows_value(m.function_rows, IR_FAULT_REPORT_KEY) ?? -1
-    if leaf < 0 {
-        f := ir_function_new("rt_fault_print", IR_FAULT_REPORT_KEY, "jet_rt_fault_print__asm", "", 0)
-        loop index in 0..<args.len() -> _ := ir_slot(&f, word_row, IRSlotKind.Param, ir_intern_name(&m, "a{index}"), 0)
-        f.result = word_row
-        f.asm = Val(IRAsmLeaf{code: X64_FAULT_REPORT, regs: IR_X64_ARGUMENT_REGISTERS, result: X64_RAX})
-        leaf = m.functions.len()
-        &m.functions.push(^f)
-        name_rows_set(&m.function_rows, IR_FAULT_REPORT_KEY, leaf)
-    }
     values := [Int]{}
     loop arg in args {
         value :: ir_value_as(&m, p, &b, arg.value, word_row, span)
@@ -663,7 +655,7 @@ fn ir_fault_report_call(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCa
     }
     out :: ir_temp(&m, &b, word_row)
     start :: ir_args(&b.f, values)
-    ir_emit(&b.f, IROp.Call, out, leaf, start, values.len(), b.line)
+    ir_emit(&b.f, IROp.CallRuntime, out, ir_intern_name(&m, LINK_FAULT_REPORT), start, values.len(), b.line)
     out
 }
 

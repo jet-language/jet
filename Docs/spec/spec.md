@@ -3965,7 +3965,15 @@ image that links no unwinder (no code of it unwinds the stack; a crash report
 walks frame pointers) moves its call frame information to the side file too,
 as `.debug_frame`, so its loaded segments hold no `.eh_frame`; with an
 unwinder `.eh_frame` stays loaded. A crash report of the image prints
-addresses, as under `false`.
+addresses: its first line, then `Build <id> (names and lines: jet crash)`
+with the image's build id, then `Backtrace:` with the faulting address and,
+under `backtrace: full` or for a stack overflow, the return addresses
+(`backtrace: off` prints no frame). `jet crash < report.txt`, run in the
+package that built the image or a directory below it, reads that report,
+finds the side file in the symbol store and prints the report a
+`debug_info: true` build of the program prints: the same functions, lines and
+source. A report with no `Build` line is E2114, and a build id the store
+doesn't hold is E2115.
 `jet run`, `jet dev` and `jet test` keep the debug info in the image under
 `split`, as under `true`, so their crash reports name functions and lines.
 `backtrace: full` stays legal with `split`. A user who wants the debug info

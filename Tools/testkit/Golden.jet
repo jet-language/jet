@@ -229,6 +229,15 @@ fn kit_golden_step_check(step: KitStep, index: Int, context: KitStepCtx, state: 
         streams := state.last
         if state.json_stdout == .Val(text) -> streams.stdout = text
         if state.json_stderr == .Val(text) -> streams.stderr = text
+        // A release image's own fault report gives its build id and the
+        // frames' addresses (D-RT-DEFECT-REPORT1 A); `jet crash` names them
+        // from the debug info the build saved, so the report compares with
+        // the one `.err.out` every tier shares.
+        if streams.stderr.contains(" (names and lines: jet crash)\n") {
+            named :: kit_exec_invoke(context.env, [context.env.jet, "crash"], context.work, context.scratch, streams.stderr)
+            if named.code != 0 -> return kit_expect_verdict("FAIL", "jet crash exit {named.code}: {named.stderr}")
+            streams.stderr = named.stdout
+        }
         // The direct tier runs the staged entry by its absolute path; a report
         // that echoes the path compares repo-relative, as the snapshot spells it.
         streams.stderr = streams.stderr.replace("{golden.source}/", "")

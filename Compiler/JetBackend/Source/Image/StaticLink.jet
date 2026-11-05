@@ -136,6 +136,24 @@ LINK_R_REX_GOTPCRELX :: 42
 
 LINK_MEMBER_SCALE :: 16777216
 
+// The runtime's fault report (JetIR BuildLibrary.jet ir_fault_report_call),
+// which each image link writes (link_fault_report) as the object below.
+LINK_FAULT_REPORT :: "jet_rt_fault_report"
+LINK_FAULT_REPORT_OBJECT :: "<linker fault report>"
+
+// Which fault report a link writes.
+enum LinkFaultReport {
+    // The report naming Jet frames from the image's own .debug_jetline
+    // (JetRuntime Assets/FaultReport/report.S).
+    Full
+    // A release image's (`debug_info: split`): its frames as addresses
+    // under its build id, which `jet crash` names from the side debug file
+    // (Assets/FaultReport/addresses.S).
+    Addresses
+    // None: a runtime pack imports the name, and the program's link writes it.
+    Import
+}
+
 struct LinkContext {
     bufs: [[U8]]
     archives: [LinkArchive]
@@ -242,6 +260,12 @@ struct LinkContext {
     eh_debug: Bool
     // The address of the first loaded byte (the ELF header).
     base: Int
+    fault_report: LinkFaultReport
+    // The fault report's section (link_fault_report; -1: none) and the first
+    // live section calling it, which the report follows in the image
+    // (link_rows_in_order).
+    fault_report_section: Int
+    fault_report_caller: Int
     errors: [String]
 }
 
@@ -259,7 +283,7 @@ fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
         ep_sec: [Int]{}, ep_obj: [Int]{}, ep_start: [Int]{}, ep_len: [Int]{}, ep_cie: [Int]{}, ep_target: [Int]{},
         ep_first_reloc: [Int]{}, ep_reloc_count: [Int]{}, ep_next: [Int]{}, ep_keep: [Bool]{}, ep_out: [Int]{}, sec_fde: [Int]{},
         got: [Int:Int]{}, got_keys: [Int]{}, rel_base: [Int]{}, rel_slot: [Int]{}, got_start: 0, tls_start: 0, tls_end: 0, tls_align: 1,
-        eh_start: 0, eh_size: 0, eh_debug: false, base: base, errors: [String]{},
+        eh_start: 0, eh_size: 0, eh_debug: false, base: base, fault_report: LinkFaultReport.Full, fault_report_section: -1, fault_report_caller: -1, errors: [String]{},
     }
 }
 
@@ -1157,7 +1181,7 @@ fn link_owned_fits(c: LinkContext, start_g: Int) -> Bool Never! {
             if class < 0 || class == LINK_EH -> next
             if class == LINK_TDATA || class == LINK_TBSS || class == LINK_PREINIT -> return false
             b :: c.obj_buffer[obj]
-            if obj != program && class != LINK_INIT && class != LINK_FINI {
+            if obj != program && class != LINK_INIT && class != LINK_FINI && c.obj_name[obj] != LINK_FAULT_REPORT_OBJECT {
                 if obj != pack || !link_cstr(c.bufs, b, link_sec_name(c, obj, s)).ends_with(LINK_NOLIBC_SUFFIX) -> return false
             }
             r :: link_rela_of(c, obj, s)
@@ -1195,11 +1219,13 @@ fn link_owned_piece(c: LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Nev
 
 // Write the shims for every strong reference still undefined: LFS64 names
 // become aliases; the allocator shim, `__res_init` and
-// `gnu_get_libc_version` become code, and once no other shim is wanted,
+// `gnu_get_libc_version` become code, the fault report its own object
+// (link_fault_report), and once no other shim is wanted,
 // `__jet_eh_startup` and `_dl_find_object` (link_eh_shims). Returns whether
 // anything was added.
 fn link_shims(c: &LinkContext) -> Bool Never! {
     s := link_synth()
+    report := link_synth()
     changed := false
     count :: c.g_name.len()
     loop g in 0..<count {
@@ -1212,6 +1238,10 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
                 link_reference(&c, target, false)
                 changed = true
             }
+            next
+        }
+        if name == LINK_FAULT_REPORT {
+            if c.fault_report != .Import -> link_fault_report(&report, c.fault_report)
             next
         }
         if link_alloc_shim_target(name) == .Val(target) {
@@ -1245,12 +1275,33 @@ fn link_shims(c: &LinkContext) -> Bool Never! {
             &s.data.push(U8{0})
         }
     }
-    if s.def_names.len() == 0 && !changed -> link_eh_shims(c, &s)
+    if s.def_names.len() == 0 && report.def_names.len() == 0 && !changed -> link_eh_shims(c, &s)
     if s.def_names.len() > 0 {
         link_load_synth(&c, s, "<linker shims>")
         changed = true
     }
+    if report.def_names.len() > 0 {
+        link_load_synth(&c, report, LINK_FAULT_REPORT_OBJECT)
+        // Its .text, the synthetic object's section 1 (link_synth_object).
+        c.fault_report_section = c.obj_first_section[c.obj_name.len() - 1] + 1
+        changed = true
+    }
     changed
+}
+
+// The runtime's fault report: the machine code of JetRuntime
+// Assets/FaultReport/ (X64/FaultReport.jet), one whole C function needing
+// no relocation. Its own object, so a program that starts without libc
+// keeps doing so (link_owned_fits). The image places it right after the
+// section calling it (link_rows_in_order), so the handler and its report
+// share one run of code as they would in one function.
+fn link_fault_report(s: &LinkSynth, report: LinkFaultReport) Never! {
+    link_synth_function(&s, LINK_FAULT_REPORT)
+    if report == .Addresses {
+        &s.text.extend(X64_FAULT_REPORT_ADDRESSES)
+    } else {
+        &s.text.extend(X64_FAULT_REPORT)
+    }
 }
 
 // The unwind shims, written in the round no other shim is wanted, so every
@@ -1440,6 +1491,7 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
                     symbol :: link_u32(c.bufs, b, at + 12)
                     t :: link_target_section(c, obj, symbol)
                     link_mark(&c, &work, t)
+                    if t >= 0 && t == c.fault_report_section && c.fault_report_caller < 0 -> c.fault_report_caller = s
                     slot :: link_scan_reloc(&c, &reported, linker_names, obj, s, at, symbol)
                     &c.rel_slot.push(slot)
                 }
@@ -1592,10 +1644,18 @@ fn link_priority(c: LinkContext, s: Int) -> Int Never! {
 }
 
 // Live rows in section id order: the order objects and their sections were
-// read.
+// read, except that the fault report follows the first section calling it
+// (link_fault_report).
 fn link_rows_in_order(c: LinkContext) -> [Int] Never! {
+    report :: link_live_row(c, c.fault_report_section)
+    caller :: link_live_row(c, c.fault_report_caller)
+    moved :: report >= 0 && caller >= 0 && c.live_class[report] == c.live_class[caller]
     rows := [Int]{}
-    loop row in c.live { if row >= 0 -> &rows.push(row) }
+    loop row in c.live {
+        if row < 0 || (moved && row == report) -> next
+        &rows.push(row)
+        if moved && row == caller -> &rows.push(report)
+    }
     rows
 }
 
@@ -2946,9 +3006,12 @@ fn x64_link_executable_split(names: [String], bufs: ^[[U8]], base: Int, threads:
 
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
-// `split` writes the debug tail to a side file (x64_link_executable_split).
+// `split` writes the debug tail to a side file (x64_link_executable_split),
+// and the image's fault report gives addresses under the build id that names
+// it.
 fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
     c := link_context(^bufs, base)
+    if split -> c.fault_report = LinkFaultReport.Addresses
     if request == .Val(wanted) {
         if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
     }

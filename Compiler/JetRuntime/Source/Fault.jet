@@ -11,16 +11,21 @@
 //   where enabled, exactly as without the report.
 // How much of the stack follows a report's first line is the image's
 // `backtrace` build option (fault_backtrace).
-// The report is machine code (rt_fault_print, from Assets/FaultReport/
-// report.S): Jet frames come from the frame-pointer chain and the image's
-// location table (.debug_jetline, which Image/Dwarf.jet dwarf_jet_line
-// writes beside the DWARF from the same rows, so the report needs no DWARF
-// reader: D-SIZE-PAYUSE1 A). Under `jet run` the image is the loader's
-// mapping (HOST_AT_IMAGE), else /proc/self/exe mapped read-only, so `jet
-// run` and the built program print the same report. The report never
-// allocates: every byte goes through one buffer on the alternate stack to
-// fd 2. Source lines are read from the file the table names, under the
-// compilation directory, else under the working directory.
+// The report is machine code the static linker writes into each image
+// (rt_fault_print, from Assets/FaultReport/report.S): Jet frames come from
+// the frame-pointer chain and the image's location table (.debug_jetline,
+// which Image/Dwarf.jet dwarf_jet_line writes beside the DWARF from the same
+// rows, so the report needs no DWARF reader: D-SIZE-PAYUSE1 A). Under `jet
+// run` the image is the loader's mapping (HOST_AT_IMAGE), else
+// /proc/self/exe mapped read-only, so `jet run` and the built program print
+// the same report. The report never allocates: every byte goes through one
+// buffer on the alternate stack to fd 2. Source lines are read from the file
+// the table names, under the compilation directory, else under the working
+// directory.
+// A release image (`debug_info: split`) keeps no location table: its report
+// (Assets/FaultReport/addresses.S) gives the first line, the build id and the
+// frames' addresses, and `jet crash` turns it into the text above from the
+// side debug file (D-RT-DEFECT-REPORT1 A).
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
 fn rt_fault_signal_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }

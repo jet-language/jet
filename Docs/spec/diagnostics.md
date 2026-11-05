@@ -131,6 +131,15 @@ the DWARF from the same rows). It then re-raises the signal with its default act
 status is the signal's (128 + number in a shell). Addresses other than the
 faulting one are not printed, because they differ between the two tiers.
 
+A release image (`debug_info: split`) holds no location table, so its report
+keeps the first line with the address in place of the name, then
+`Build <id> (names and lines: jet crash)` and `Backtrace:` with the faulting
+address and the return addresses. `jet crash < report.txt` names them from
+the side debug file the build filed under that id in `.jet/symbols` and
+prints the report the same program built with `debug_info: true` prints, so
+a fault reads alike on every tier (D-RT-DEFECT-REPORT1). A report without the
+`Build` line is E2114; a build id with no side file in the store is E2115.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is

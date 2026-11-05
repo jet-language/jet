@@ -262,6 +262,7 @@ jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Ru
 jet shared-store <command>           Manage the optional shared package broker
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
 jet fold [args]                      Reverse a recorded Package source transition
+jet crash < <report.txt>             Name the functions and lines of a release crash report
 ```
 
 `jet try` reports compiler-query and checked-index failures through its existing
@@ -274,6 +275,14 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --preview` or
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
+
+`jet crash < report.txt` reads the stderr of a crashed release program, whose
+report gives addresses and a `Build <id> (names and lines: jet crash)` line,
+and prints the report a dev build gives: the function, file, line and source
+of each frame, from the side debug file the build saved under
+`.jet/symbols/.build-id/` (searched from the current directory upward). Text
+around the report passes through. A report without the build line is E2114;
+no side file for its build is E2115. The command takes no arguments.
 
 Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
 editor code actions. Without `--all`, both the applicability and safety class

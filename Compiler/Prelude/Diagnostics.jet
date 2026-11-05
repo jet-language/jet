@@ -10802,6 +10802,32 @@ struct PinnedBuildOption {
     }
 }
 
+struct CrashReportWithoutBuild {
+    impl Diagnostic {
+        code :: "E2114"
+        stage :: [.Jet]
+        meaning :: "`jet crash` read a report with no `Build <id>` line to find its debug info by (#6035, D-RT-DEFECT-REPORT1)"
+        detail :: true
+        fn what(self) -> String { "This crash report has no `Build <id> (names and lines: jet crash)` line." }
+        fn why(self) -> String { "`jet crash` names a release program's frames from the debug info its build saved under the build id the report gives; without that line it can't tell which build crashed." }
+        fn fix(self) -> String { "Pipe in the whole stderr of the crashed release program: `jet crash < report.txt`." }
+    }
+}
+
+struct CrashSymbolsMissing {
+    build: String
+
+    impl Diagnostic {
+        code :: "E2115"
+        stage :: [.Jet]
+        meaning :: "`jet crash` found no debug info for the report's build id under `.jet/symbols` (#6035, D-RT-DEFECT-REPORT1)"
+        detail :: true
+        fn what(self) -> String { "No debug info for build `{self.build}` is in `.jet/symbols` here or in a directory above." }
+        fn why(self) -> String { "A release build saves its function names and lines under `.jet/symbols/.build-id/` in the project that built it; any other build, even of the same source, has another id." }
+        fn fix(self) -> String { "Run `jet crash` in the project that built the crashed program, and keep its `.jet/symbols` with each release you ship." }
+    }
+}
+
 struct RetiredDevPrescan {
     impl Diagnostic {
         code :: "E2201"

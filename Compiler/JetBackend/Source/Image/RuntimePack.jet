@@ -471,6 +471,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8] 
 // private functions and imports are not exports. Archives only satisfy roots.
 fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
     c := link_context(^bufs, LINK_BASE)
+    c.fault_report = LinkFaultReport.Import
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     if c.obj_name.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
@@ -527,9 +528,11 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
         if c.g_section[f] >= 0 -> &sections.push(c.g_section[f])
         &exports.push(f)
     }
-    // The program provides `main`; the program link defines the rest.
+    // The program provides `main`; the program link writes the fault report
+    // (StaticLink.jet link_fault_report) and defines the rest.
     imports := [String:Bool]{}
     &imports.add("main", true).drop("a fresh map")
+    &imports.add(LINK_FAULT_REPORT, true).drop("a fresh name")
     loop name in link_linker_names() -> &imports.add(name, true).drop("names are unique")
     link_collect(&c, sections, imports)
     loop name in c.g_name {
