@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92487,
+    "rev": 92492,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63809,6 +63809,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-05, compile model: no incremental compilation. jet run, jet dev and jet test link Core and the runtime as precompiled toolchain pieces built once with the compiler; only the user's program is compiled, fresh each time. jet build compiles from the entry points outward and includes only reached code: unreached Core code is never compiled, so it adds no bytes. Main's notes: the precompiled piece must carry Core's checked interface (not only machine code), because re-checking Core per program is c55's cost; generic Core bodies ship as IR and are specialized per program; it ships with the toolchain and is identified by compiler identity, so it is not a cache; I9 is kept because both paths compile the same Core source, and tier goldens compare them; reachability keeps methods of types used as trait objects, runtime roots, and everything in jet dev (hot reload)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Owner 2026-11-05: the goal is the fastest test suites of any language; tests should run almost instantly. c54's 60 s for the full ui, golden and cases suites is an upper bound, not the target; c58 sets the target against peers."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "The recovered SP05 work is now in the repo at Tools/tower/held/5910/ (landed e07c1b85ae): sp05c.patch (applies to 512356f682, not to dev), sp05b.patch, the sp05b delta and the SP05b/SP05c proof scripts and logs, byte-identical to the rescued copies except $HOME in 2 script lines. c17 integrates it; the SelfMem lane is rebasing it onto dev now."
@@ -64398,6 +64408,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-05T13:50:26.292Z"
+        },
+        {
+          "n": 57,
+          "text": "Running one test costs about that test's own time. The testkit's fixed startup cost is measured phase by phase (building or loading the kit, compiling the harness, scanning the corpora, loading Core, starting workers), each phase is listed with its time, and everything that is not the test itself is cut, cached or done once, so a run filtered to one golden entry at --jobs 1 finishes within 0.5 s of that entry's own compile-and-run time. Today a single golden entry pays about 35 s of fixed kit overhead (2026-11-04 gate run: cli_args.jet 3.1 s and fidelity.jet 5.5 s alone, plus about 35 s each run). This also speeds every agent's A/B proof run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T16:14:50.485Z"
+        },
+        {
+          "n": 58,
+          "text": "Jet's test runner is the fastest of any language, shown by a peer-matched cell in the canonical performance manifest. The same test corpus (a few thousand small unit tests with assertions, plus a set of whole-program golden tests) is written in Jet and in each peer (Rust with cargo test and nextest, Go with go test, Zig with zig build test, TypeScript with Bun test and Vitest, Python with pytest), and the cell measures, per peer: a cold full run, a warm full run, and the edit-one-test-and-rerun loop, in wall time and peak memory on the same machine. Jet/peer is below 1.00 for every peer in every metric, per the AGENTS performance gate; any loss stays logged here.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T16:14:51.176Z"
         }
       ],
       "refs": [],
@@ -64407,7 +64435,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-05T13:50:26.292Z",
+      "updated": "2026-11-05T16:20:37.321Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -70630,6 +70658,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "c15 progress: an impl of a name that is no trait (impl Point.Hash, a type's name, or the inline impl Clone {}) compiled silently, and its methods became plain methods. Coherence's one registration path now requires an owned trait, a declared or imported trait, or a bare core trait (Diagnostic); otherwise it reports E0923 jet.ImplOfUnknownTrait (a registered code with what/why/fix, and the ui snapshot tests/ui/impl_unknown_trait). Chain FIXED_POINT, lane-check CHECK OK; ui, cases (60 impl areas) and golden A/B lost=0."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "2afa42226a (c15h): the 4 golden rows that timed out in the parallel A/B run were rerun alone (--jobs 1 --timeout 300). All 4 pass with the patch; without it, 3 pass and service_partition_reconcile hits the wall-clock limit. No golden loss."
         },
         {
@@ -71526,7 +71559,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T15:43:32.211Z",
+      "updated": "2026-11-05T16:32:00.461Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -173867,6 +173900,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T16:32:00.462Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T16:20:37.322Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T16:14:51.176Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#58 Jet's test runner is the fastest of any language, shown by a"
+    },
+    {
+      "at": "2026-11-05T16:14:50.485Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fo37ov",
+      "note": "#57 Running one test costs about that test's own time. The testk"
+    },
+    {
+      "at": "2026-11-05T16:14:49.747Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T16:03:32.493Z",
       "by": "Main",
