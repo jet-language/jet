@@ -583,10 +583,6 @@ fn sema_call_resolve_method_with_inference(receiver_type: Type, method: String, 
         }
     }
     if shape_matches.len() == 0 {
-        if sema_call_retired_raw_directory_error(receiver_type, method, span) == .Val(diagnostic) {
-            &diagnostics.push(diagnostic)
-            return None
-        }
         if receiver_matches.len() == 1 {
             reported :: diagnostics.len()
             probe := args
@@ -1378,100 +1374,6 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
-// Rust `FOREIGN_METHOD_ALIASES` (Sema/Diagnostics.rs:1176): another
-// language's primary name for one operation, the receiver family that
-// carries it, and the Jet spelling.
-struct SemaCallForeignMethodAlias {
-    foreign: String
-    family: String
-    target: String
-}
-
-SEMA_CALL_FOREIGN_METHOD_ALIASES :: comptime { [SemaCallForeignMethodAlias]{
-    {foreign: "append", family: "List", target: "push"},
-    {foreign: "add", family: "List", target: "push"},
-    {foreign: "push_back", family: "List", target: "push"},
-    {foreign: "extend", family: "List", target: "push"},
-    {foreign: "size", family: "List", target: "len"},
-    {foreign: "size", family: "Map", target: "len"},
-    {foreign: "size", family: "String", target: "len"},
-    {foreign: "length", family: "List", target: "len"},
-    {foreign: "length", family: "Map", target: "len"},
-    {foreign: "length", family: "String", target: "len"},
-    {foreign: "count", family: "List", target: "len"},
-    {foreign: "count", family: "Map", target: "len"},
-    {foreign: "count", family: "String", target: "len"},
-    {foreign: "contains_key", family: "Map", target: "has_key"},
-    {foreign: "contains_key", family: "Set", target: "has"},
-    {foreign: "has", family: "Map", target: "has_key"},
-    {foreign: "contains", family: "List", target: "contains"},
-    {foreign: "contains", family: "Set", target: "has"},
-    {foreign: "includes", family: "List", target: "contains"},
-    {foreign: "set", family: "Map", target: "add"},
-    {foreign: "put", family: "Map", target: "add"},
-    {foreign: "insert", family: "Map", target: "add"},
-    {foreign: "upper", family: "String", target: "to_upper"},
-    {foreign: "lower", family: "String", target: "to_lower"},
-    {foreign: "strip", family: "String", target: "trim"},
-    {foreign: "substring", family: "String", target: "slice"},
-    {foreign: "substr", family: "String", target: "slice"},
-    {foreign: "to_str", family: "String", target: "to_string"},
-} }
-
-// Rust `MethodSuggestion`: the Jet spelling to write instead (also the rename
-// edit) and the rendered `Fix:` sentence.
-struct SemaCallMethodSuggestion {
-    name: String
-    fix: String
-}
-
-// Rust `alias_target`: the first alias row the receiver really carries; a
-// target equal to the refused name is never offered back.
-fn sema_call_method_alias_target(name: String, family: String, candidates: [String]) -> String? {
-    loop row in SEMA_CALL_FOREIGN_METHOD_ALIASES {
-        if row.foreign == name && row.family == family && row.target != name && candidates.contains(row.target) -> return Val(row.target.copy())
-    }
-    None
-}
-
-// Rust `snake_case_of_camel`: `indexOf` → `index_of`; none without a capital.
-fn sema_call_snake_case_of_camel(name: String) -> String? {
-    capital := false
-    bytes := [U8]{}
-    upper_a :: U8{65}
-    upper_z :: U8{90}
-    loop byte in name.bytes() {
-        upper :: byte >= upper_a && byte <= upper_z
-        if upper {
-            capital = true
-            if bytes.len() > 0 -> &bytes.push(U8{95})
-            &bytes.push(byte + U8{32})
-        } else {
-            &bytes.push(byte)
-        }
-    }
-    if !capital -> return None
-    snake :: String.from_bytes(bytes) ?? return None
-    Val(snake)
-}
-
-fn sema_call_foreign_method_fix(name: String, jet: String) -> String Never! {
-    "did you mean `{jet}`? `{name}` is another language's name for the same operation"
-}
-
-// Rust `suggest_method_for_receiver` (Sema/Diagnostics.rs:1272): an exact
-// camelCase → snake_case hit first, a cross-language alias next, edit
-// distance last.
-fn sema_call_suggest_method_for_receiver(name: String, family: String, candidates: [String]) -> SemaCallMethodSuggestion? {
-    if sema_call_snake_case_of_camel(name) == .Val(snake) {
-        if candidates.contains(snake) -> return Val(SemaCallMethodSuggestion{name: snake.copy(), fix: "did you mean `{snake}`? Jet method names are snake_case"})
-        if sema_call_method_alias_target(snake, family, candidates) == .Val(jet) -> return Val(SemaCallMethodSuggestion{name: jet.copy(), fix: sema_call_foreign_method_fix(name, jet)})
-    }
-    if sema_call_method_alias_target(name, family, candidates) == .Val(jet) -> return Val(SemaCallMethodSuggestion{name: jet.copy(), fix: sema_call_foreign_method_fix(name, jet)})
-    candidate :: sema_suggest_field(name, candidates) ?? return None
-    Val(SemaCallMethodSuggestion{name: candidate.copy(), fix: "did you mean `{candidate}`?"})
-}
-
 // Rust `receiver_method_label` (method_calls.rs:128).
 fn sema_call_receiver_method_label(receiver: Type) -> String Never! {
     if receiver == {
@@ -1644,28 +1546,44 @@ fn sema_call_push_instance_method_names(names: &[String], methods: [Func]) Never
     }
 }
 
-// Rust `method_suggestion` (method_calls.rs:89): built-in names plus the
-// receiver type's declared instance methods.
-fn sema_call_method_suggestion(method: String, receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallMethodSuggestion? {
-    candidates := sema_call_builtin_method_names(receiver)
+// The current method name nearest `method` in spelling — within two edits,
+// else the one name that is a prefix of the other — among the receiver's
+// built-in methods that take `actual` arguments and its declared instance
+// methods; none when two candidates tie.
+fn sema_call_method_suggestion(method: String, receiver: Type, actual: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    candidates := [String]{}
+    loop name in sema_call_builtin_method_names(receiver) {
+        if sema_call_builtin_method_arities(receiver, name).contains(actual) -> &candidates.push(name)
+    }
     loop name in sema_call_declared_method_names(receiver, environment, program) {
         if !candidates.contains(name) -> &candidates.push(name)
     }
-    sema_call_suggest_method_for_receiver(method, sema_call_receiver_method_label(receiver), candidates)
+    if sema_suggest_field(method, candidates) == .Val(near) -> return Val(near)
+    prefixed := String?{None}
+    loop candidate in candidates {
+        if candidate == method || candidate.len() < 3 || method.len() < 3 -> next
+        if !candidate.starts_with(method) && !method.starts_with(candidate) -> next
+        if prefixed != None -> return None
+        prefixed = Val(candidate.copy())
+    }
+    prefixed
+}
+
+fn sema_call_method_fix(suggestion: String?, otherwise: String) -> String Never! {
+    if suggestion == .Val(name) -> "did you mean `{name}`?" else -> otherwise
 }
 
 // The suggested spelling is also the rename edit.
-fn sema_call_method_error(code: String, span: Span, what: String, why: String, fix: String, suggestion: SemaCallMethodSuggestion?) -> Diagnostic {
+fn sema_call_method_error(code: String, span: Span, what: String, why: String, fix: String, suggestion: String?) -> Diagnostic {
     diagnostic :: sema_error(code, span, what, why, fix)
-    if suggestion == .Val(found) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: found.name})
+    if suggestion == .Val(name) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: name})
     diagnostic
 }
 
 // Rust `missing_instance_method_diagnostic` (method_calls.rs:181).
-fn sema_call_missing_instance_method(method: String, receiver: Type, why: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
-    suggestion :: sema_call_method_suggestion(method, receiver, environment, program)
-    fix :: if suggestion == .Val(found) -> "{found.fix}" else -> "check the spelling of `{method}`"
-    sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, fix, suggestion)
+fn sema_call_missing_instance_method(method: String, receiver: Type, actual: Int, why: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    suggestion :: sema_call_method_suggestion(method, receiver, actual, environment, program)
+    sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, sema_call_method_fix(suggestion, "check the spelling of `{method}`"), suggestion)
 }
 
 // Rust `builtin_method_arity_diagnostic` (method_calls.rs:147): the method
@@ -1711,14 +1629,14 @@ fn sema_call_missing_method_diagnostic(receiver: Type, method: String, actual: I
     }
     if sema_call_builtin_method_names(ty).len() > 0 && !source_owned && !sema_call_is_iter_receiver(ty) {
         if sema_call_builtin_method_arity(ty, method, actual, span) == .Val(diagnostic) -> return diagnostic
-        return sema_call_missing_instance_method(method, ty, "this `{sema_call_receiver_method_label(ty)}` value has no instance method named `{method}`", span, environment, program)
+        return sema_call_missing_instance_method(method, ty, actual, "this `{sema_call_receiver_method_label(ty)}` value has no instance method named `{method}`", span, environment, program)
     }
     nominal :: sema_call_option_nominal(ty)
     type_name_value :: if nominal == {
         .Named(name) | .Apply(name, _) -> name
         else -> ""
     }
-    if type_name_value == "" -> return sema_call_missing_instance_method(method, ty, "this value does not expose an instance method named `{method}`", span, environment, program)
+    if type_name_value == "" -> return sema_call_missing_instance_method(method, ty, actual, "this value does not expose an instance method named `{method}`", span, environment, program)
     display :: sema_call_method_leaf(type_name_value)
     // Rust `infer_method_call`: a static method named through a value.
     if sema_call_declares_static_method(nominal, method, program) -> return sema_error("E0311", span, "`{method}` is a static method on `{display}`", "static methods belong to the type name, not a value", "write `{display}.{method}(...)` instead")
@@ -1727,10 +1645,10 @@ fn sema_call_missing_method_diagnostic(receiver: Type, method: String, actual: I
         element :: sema_collection_receiver_element(ty) ?? Type.Int
         if sema_call_builtin_method_arities(Type.List{element: element}, method).len() > 0 -> return sema_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list", "materialize it first with `.to_list()`; this consumes the source and allocates a list")
     }
-    suggestion :: sema_call_method_suggestion(method, nominal, environment, program)
+    suggestion :: sema_call_method_suggestion(method, nominal, actual, environment, program)
     protected :: !source_owned && (sema_reserved_type_name(display) || type_name_value.starts_with("<corelib>/"))
     if protected {
-        fix :: if suggestion == .Val(found) -> "{found.fix}" else -> "use a documented method on `{display}`"
+        fix :: sema_call_method_fix(suggestion, "use a documented method on `{display}`")
         return sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a protected Core type with a closed method surface", fix, suggestion)
     }
     loop param in environment.generic_params {
@@ -1748,6 +1666,6 @@ fn sema_call_missing_method_diagnostic(receiver: Type, method: String, actual: I
         fix :: if bound_names.len() == 0 -> "add a trait bound that defines `{method}`, or use a method available on `{type_name_value}`" else -> "add a bound that defines `{method}`, or use a method from {bound_names.join(" + ")}"
         return sema_error("E0102", span, "`{display}` has no method `{method}`", why, fix)
     }
-    fix :: if suggestion == .Val(found) -> "{found.fix}" else -> "define it inside `struct {display}` or `impl {display}`"
+    fix :: sema_call_method_fix(suggestion, "define it inside `struct {display}` or `impl {display}`")
     sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "check the method name on this type", fix, suggestion)
 }

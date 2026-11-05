@@ -103,7 +103,7 @@ LAYOUT_CONSTRAINT_TYPE :: "Constraint"
 
 LAYOUT_TYPE :: "Layout"
 
-/// Retired spelling of `Layout` — teaching error E2936 only.
+/// Retired spelling of `Layout`; no rule accepts it.
 LAYOUT_HANDLE_TYPE_RETIRED :: "LayoutHandle"
 
 /// Transitional alias — every consumer should migrate to `LAYOUT_TYPE`.
@@ -403,8 +403,8 @@ KW_BREAK :: "break"
 /// Contextual statement/fallback control.
 KW_NEXT :: "next"
 
-/// Common foreign spelling recognized only for an ordinary E0003;
-/// it is not accepted as a loop-control alias.
+/// Common foreign spelling; it is not a loop-control word and no rule
+/// accepts it.
 FOREIGN_CONTINUE :: "continue"
 
 /// (ratified 2026-08-19): one arrow for callable results,
@@ -449,7 +449,7 @@ OP_PIPE :: "|"
 OP_CARET :: "^"
 
 /// (ratified 2026-08-05): bitwise exclusive-or, the exclusive
-/// variant of `|`. Prefix `~` is the retired copy sigil (E0941).
+/// variant of `|`. Prefix `~` is the retired copy sigil; no rule accepts it.
 OP_TILDE_PIPE :: "~|"
 
 OP_SHL :: "<<"
@@ -514,10 +514,10 @@ OP_AMP_EQ :: "&="
 
 OP_PIPE_EQ :: "|="
 
-/// Retained only to teach a `pow` assignment.
+/// Retired spelling; power assignment is `x = x.pow(n)`. No rule accepts it.
 OP_CARET_EQ :: "^="
 
-/// Retained only to teach a `bit_xor` assignment.
+/// Retired spelling; no rule accepts it.
 OP_TILDE_PIPE_EQ :: "~|="
 
 OP_SHL_EQ :: "<<="
@@ -529,7 +529,7 @@ OP_SHR_EQ :: ">>="
 /// No bare `_` arm in a switch — only `else ->` acts as a catch-all.
 PAT_WILDCARD_SLOT :: "_"
 
-/// S13 (ratified): word forms recognized only for S14 teaching errors.
+/// S13 (ratified): foreign word forms; no rule accepts them.
 FOREIGN_AND :: "and"
 
 FOREIGN_OR :: "or"
@@ -647,8 +647,7 @@ MARKER_BINDGEN :: "Bindgen" // S59
 /// Marker on user C import modules — `#Import module`.
 /// The same marker name is used by per-function `#Import(c)` declarations.
 /// `CModuleKind::Extern` remains an internal AST compatibility name only.
-/// Retired C FFI marker spellings,
-/// recognized only for E0060 teaching diagnostics.
+/// Retired C FFI marker spellings; no rule accepts them.
 MARKER_BINDGEN_RETIRED :: "bindgen"
 
 MARKER_EXTERN_MODULE_RETIRED :: "Extern"
@@ -670,9 +669,8 @@ CPP_MODULE_ROOT :: "cpp"
 /// inline-only); it never appears as a `<lang>.<lib>` mount.
 ASM_LANG :: "asm"
 
-/// (retired marker): `#Audit("…")` is the old two-line form;
-/// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
-/// only to emit the E0055 teaching error.
+/// (retired marker): `#Audit("…")` is the old two-line form; the reason is
+/// now the argument of `#Unsafe("reason")` itself. No rule accepts it.
 MARKER_AUDIT :: "Audit" // retired
 
                                         // Named loops use `outer :: loop { … }`;
@@ -689,16 +687,14 @@ BINDINGS_C_SUBDIR :: "bindings/c" // S59
 /// Generated foreign bindings live under `.jet/bindings/<lang>/`.
 BINDINGS_ROOT_SUBDIR :: "bindings"
 
-/// Retired foreign loop words are recognized only long enough to
-/// report an ordinary current-syntax error; none is accepted as Jet syntax.
+/// Retired foreign loop words; none is Jet syntax.
 FOREIGN_WHILE :: "while"
 
 FOREIGN_FOR :: "for"
 
 FOREIGN_DO :: "do"
 
-/// `repeat` and `until` are foreign loop words; they are
-/// recognized only long enough to report an ordinary current-syntax error.
+/// `repeat` and `until` are foreign loop words; no rule accepts them.
 FOREIGN_REPEAT :: "repeat"
 
 FOREIGN_UNTIL :: "until"
@@ -729,20 +725,20 @@ FOREIGN_PRINTLN :: "println"
 
 FOREIGN_TEXT :: "Text"
 
-/// S24: `match` recognized only for a teaching error naming `when`.
+/// S24: foreign spelling of `when`; no rule accepts it.
 FOREIGN_MATCH :: "match"
 
-/// S24 `switch` recognized only for a teaching error naming `when`
-/// (the keyword was `switch` before the 2026-06-15 rename).
+/// S24: foreign spelling of `when` (the keyword was `switch` before the
+/// 2026-06-15 rename); no rule accepts it.
 FOREIGN_SWITCH :: "switch"
 
-/// S29 (ratified M3): `class` recognized only for teaching error E0021.
+/// S29 (ratified M3): foreign spelling; no rule accepts `class`.
 FOREIGN_CLASS :: "class"
 
 /// S28 (ratified M9): trait declaration keyword.
 /// (ratified 2026-06-26): the trait separator in top-level impl blocks
-/// is `.` — `impl Type.Trait { … }` / `impl Type.Trait using field`. The old `:`
-/// separator emits E0320 (teaching error). Amends S28/S62; retires `~~` (S83).
+/// is `.` — `impl Type.Trait { … }` / `impl Type.Trait using field`. Amends
+/// S28/S62; retires `~~` (S83).
 KW_TRAIT :: "trait"
 
 /// (ratified 2026-06-21): tag declaration keyword — a marker qualifier
@@ -758,26 +754,25 @@ KW_DERIVE :: "derive"
 /// `comptime loop`, `comptime fn` and `comptime N: Int` must run while building.
 KW_COMPTIME :: "comptime"
 
-/// S28: foreign trait spellings for teaching error E0022.
+/// S28: foreign trait spellings; no rule accepts them.
 FOREIGN_INTERFACE :: "interface"
 
 FOREIGN_TRAIT :: "trait"
 
 /// `namespace { }` is declined; in-file grouping uses `module name { }`.
-/// Recognized to emit teaching error E0323 (S14-style).
 FOREIGN_NAMESPACE :: "namespace"
 
-/// S48 (M9): foreign dynamic-dispatch spellings for teaching error E0036.
+/// S48 (M9): foreign dynamic-dispatch spellings; no rule accepts them.
 FOREIGN_DYN :: "dyn"
 
 FOREIGN_BOX :: "Box"
 
-/// S24 (ratified M3): foreign switch arm spellings for teaching error E0023.
+/// S24 (ratified M3): foreign switch arm spellings; no rule accepts them.
 FOREIGN_CASE :: "case"
 
 FOREIGN_DEFAULT :: "default"
 
-/// S10 (ratified M2): foreign read/write forms for teaching errors.
+/// S10 (ratified M2): foreign read/write forms; no rule accepts them.
 FOREIGN_READ :: "read"
 
 FOREIGN_WRITE :: "write"
@@ -804,8 +799,8 @@ OP_FALLBACK :: "??"
 /// and short-circuits to absent on the first missing link.
 OP_OPTIONAL_CHAIN :: "?."
 
-/// S71 (ratified 2026-06-15): the retired word fallback, kept only for
-/// the teaching error that points at `??`.
+/// S71 (ratified 2026-06-15): the retired word fallback; the fallback is
+/// `??` and no rule accepts `or`.
 FOREIGN_OR_FALLBACK :: "or"
 
 /// S36 (ratified M4): bug-stop builtins (like `print`).
@@ -858,8 +853,8 @@ BUILTIN_FETCH :: "fetch"
 /// argument, matching the `#FX(…)` marker family.
 /// (ratified 2026-08-12): the optional `faults: [Effect]`
 /// argument names effect-root call sites for the deterministic test harness.
-/// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
-/// recognized only to emit the E0052 teaching error pointing at `#Test("name")`.
+/// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling;
+/// no rule accepts it.
 KW_TEST :: "Test"
 
 TEST_FAULTS_PARAM :: "faults"

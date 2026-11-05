@@ -53,24 +53,22 @@ use {
         TOKEN_EQ_EQ,
         TOKEN_FALSE,
         TOKEN_FLOAT,
-        TOKEN_GT,
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_COMPTIME,
         TOKEN_KW_ELSE,
         TOKEN_KW_FN,
-        TOKEN_KW_COPY,
         TOKEN_KW_IF,
         TOKEN_KW_IN,
         TOKEN_KW_IT,
         TOKEN_KW_LOOP,
         TOKEN_KW_MOVE,
+        TOKEN_KW_PUB,
         TOKEN_KW_YIELD,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
-        TOKEN_LT,
         TOKEN_MINUS,
         TOKEN_MINUS_EQ,
         TOKEN_NULL,
@@ -878,14 +876,8 @@ fn parser_if_body_is_arms(state: &JetParserState) -> Bool {
     first :: parser_current_kind(&state)
     if first == TOKEN_KW_ELSE && parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW -> return true
     if first == TOKEN_RBRACE -> return false
-    // `lo .. hi ->`, plus the `lo .. hi step n ->` (E0319) and
-    // `lo ..= hi ->` (E0318) porting hazards, without a full expression parse.
-    if first == TOKEN_INT && parser_kind_at(&state, 1) == TOKEN_DOT_DOT {
-        if parser_kind_at(&state, 3) == TOKEN_UNIFIED_ARROW -> return true
-        third :: parser_lookahead(&state, 3)
-        if third.kind == TOKEN_IDENT && parser_value(state, third) == "step" && parser_kind_at(&state, 5) == TOKEN_UNIFIED_ARROW -> return true
-        return parser_kind_at(&state, 2) == TOKEN_EQ && parser_kind_at(&state, 4) == TOKEN_UNIFIED_ARROW
-    }
+    // `lo .. hi ->` without a full expression parse.
+    if first == TOKEN_INT && parser_kind_at(&state, 1) == TOKEN_DOT_DOT -> return parser_kind_at(&state, 3) == TOKEN_UNIFIED_ARROW
     // An arm head is followed by `->` on its own line, outside any group.
     // Without one the line is a statement, and the expression parse below
     // would read a nested body (`if c {`, `loop x in xs {`) only to undo it.
@@ -900,8 +892,8 @@ fn parser_if_body_is_arms(state: &JetParserState) -> Bool {
     is_arm
 }
 
-// Pure token scan: does the line at the cursor hold an arrow (`->`, or the
-// retired `=>`) outside its groups before the line ends?
+// Pure token scan: does the line at the cursor hold an arrow (`->`) outside
+// its groups before the line ends?
 fn parser_line_arrow_ahead(state: JetParserState) -> Bool Never! {
     depth := 0
     index := state.position
@@ -1004,39 +996,21 @@ fn parser_parse_if_arm_head(state: &JetParserState, subject: Expr, pattern_subje
     parser_expression_form_dispatch_condition(&state, subject, op, 1)
 }
 
-// C25: a `lo..hi` range arm head. Rust's inclusive `..=` (E0318) and
-// a trailing loop `step n` (E0319) are porting hazards that teach and
-// recover; None when the cursor is not a range head.
+// C25: a `lo..hi` range arm head; None when the cursor is not a range head.
 fn parser_parse_range_arm_head(state: &JetParserState, subject: Expr) -> Expr? {
     low_token :: parser_current(&state)
     if low_token.kind != TOKEN_INT || parser_kind_at(&state, 1) != TOKEN_DOT_DOT -> return None
     low :: parser_integer(state, low_token) ?? 0
     parser_bump(&state)
     parser_bump(&state)
-    inclusive :: parser_current_kind(&state) == TOKEN_EQ
-    if inclusive -> parser_bump(&state)
     high_token :: parser_current(&state)
     if high_token.kind != TOKEN_INT {
-        if inclusive {
-            parser_add_error_code(&state, "E0318", high_token.span, "`..=` is not a Jet operator — Jet's `..` is already inclusive", "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends", "write `lo..hi` — that already includes `hi`")
-        } else {
-            parser_add_error(&state, high_token.span, "expected an integer after `..` in a range arm", "range arms need both ends: `lo..hi -> body`", "write `0..59 -> {{ body }}` for an inclusive range arm")
-        }
+        parser_add_error(&state, high_token.span, "expected an integer after `..` in a range arm", "range arms need both ends: `lo..hi -> body`", "write `0..59 -> {{ body }}` for an inclusive range arm")
         return Val(Expr.Bool{value: false, span: high_token.span, id: parser_node_id(&state)})
     }
     parser_bump(&state)
     high :: parser_integer(state, high_token) ?? 0
     span :: parser_cover(low_token.span, high_token.span)
-    if inclusive {
-        parser_add_error_code(&state, "E0318", span, "`..=` is not a Jet operator — Jet's `..` is already inclusive", "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends", "write `{low}..{high}` — that already includes `{high}`")
-    } else {
-        step :: parser_current(&state)
-        if step.kind == TOKEN_IDENT && parser_value(state, step) == "step" {
-            parser_add_error_code(&state, "E0319", span, "`step` is not allowed in a range arm — range arms test a band, not a sequence", "`step` is a retired loop spelling; a range arm just checks if the subject falls between the two ends", "remove `step …`, or use a full condition: `subject >= {low} && subject <= {high} && subject % n == 0 ->`")
-            parser_bump(&state)
-            if parser_current_kind(&state) == TOKEN_INT -> parser_bump(&state)
-        }
-    }
     Val(Expr.PatternTest{subject: subject, pattern: Pattern.Range{lo: ^low, hi: ^high, span: span}, span: span, id: parser_node_id(&state)})
 }
 
@@ -1358,13 +1332,12 @@ fn parser_parse_prep_loop(state: &JetParserState) -> Stmt {
 }
 
 // S74 (Rust `looks_like_sigil_binding` destructuring arms): a
-// `[ … ]`, `( … )`, `Type{ … }` or retired `Type.{ … }` target whose matching
-// close is followed by `::` or `:=`. Bounded by the bracket depth.
+// `[ … ]`, `( … )` or `Type{ … }` target whose matching close is followed by
+// `::` or `:=`. Bounded by the bracket depth.
 fn parser_pattern_binding_ahead(state: &JetParserState) -> Bool Never! {
     offset := 0
     if parser_current_kind(&state) == TOKEN_IDENT {
         offset = 1
-        if parser_kind_at(&state, 1) == TOKEN_DOT && parser_kind_at(&state, 2) == TOKEN_LBRACE -> offset = 2
         if parser_kind_at(&state, offset) != TOKEN_LBRACE -> return false
     }
     open :: parser_kind_at(&state, offset)
@@ -1431,11 +1404,6 @@ fn parser_parse_pattern_binding_statement(state: &JetParserState) -> Stmt {
         }
         else -> {
             type_name :: parser_expect_name(&state, "for a struct pattern")
-            if parser_current_kind(&state) == TOKEN_DOT {
-                dot :: parser_bump(&state)
-                name :: parser_value(state, type_name)
-                parser_add_fatal_code(&state, "E0320", dot.span, "struct pattern uses `{name}{{…}}`, not `{name}.{{…}}`", "literal heads place no dot before their brace", "write `{name}{{…}}`")
-            }
             parser_expect(&state, TOKEN_LBRACE, "`{{` to open the struct pattern")
             fields := [BindName]{}
             rest := Span?{None}
@@ -1694,10 +1662,8 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
         parser_add_error(&state, start.span, "`in` is reserved as the source-loop keyword", "the `in` keyword marks the boundary between a loop binding and its source", "choose a different identifier name, or use `in` in a source loop; after `.` it is allowed as a member name")
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
     }
-    if parser_at_foreign_loop_statement(&state) {
-        word :: parser_value(state, start)
-        parser_bump(&state)
-        parser_report_foreign_loop_word(&state, word, start.span)
+    if start.kind == TOKEN_IDENT && parser_word_follows(&state) {
+        parser_report_unknown_word(&state, false)
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
     }
     named :: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
@@ -1725,12 +1691,6 @@ fn parser_parse_assignment_or_expression(state: &JetParserState) -> Stmt {
         return Stmt.Assign{target: ^target, op: parser_assignment_binop(operator), op_span: op_token.span, value: right.expr}
     }
     if named && !parser_named_line_does_work(&state, left.expr) {
-        // Rust `stmt`: a bare foreign loop word computes nothing; it is a word
-        // Jet does not spell, not an unused value.
-        if left.expr == .Ident(word, span, _) && parser_is_foreign_loop_word(word) {
-            parser_report_foreign_loop_word(&state, word, span)
-            return Stmt.Expr{expr: left.expr}
-        }
         parser_add_error(&state, expr_span(left.expr), "this line computes a value but doesn't do anything with it", "only calls, bindings, assignments, and `return` are allowed here", "use the value, e.g. `x :: ...` or `print(...)`")
         return Stmt.Expr{expr: left.expr}
     }
@@ -1747,66 +1707,43 @@ fn parser_report_not_a_statement(state: &JetParserState, start: Token) {
     parser_add_error(&state, start.span, "expected a call, binding, assignment, or `return`, found {found}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x :: 1")
 }
 
-// Rust `foreign_keyword_kind`: the retired foreign loop words (D-S14-PAUSE).
-// None is Jet syntax; each is recognized only to report a current-syntax error.
-fn parser_is_foreign_loop_word(word: String) -> Bool Never! {
-    word == "for" || word == "while" || word == "continue" || word == "do" || word == "repeat" || word == "until"
+// A name followed by another name or a declaration keyword on the same line
+// starts no Jet declaration or statement. `shared` and the `task` surface
+// before a name are expressions: the shared-cell construction and a spawn.
+fn parser_word_follows(state: &JetParserState) -> Bool Never! {
+    next :: parser_kind_at(&state, 1)
+    if !(next == TOKEN_IDENT || next == TOKEN_KW_PUB || parser_is_item_keyword(next)) -> return false
+    if next != TOKEN_IDENT -> return true
+    current :: parser_current(&state)
+    word :: parser_value(state, current)
+    word != "shared" && !(word == "task" && parser_task_surface_ahead(&state))
 }
 
-// Rust `at_foreign_loop_word_statement`: the current name opens a foreign
-// loop statement. `for`/`while` need a block ahead on the line, `continue`
-// ends the line (optionally with a label name), and `do`/`repeat`/`until`
-// open a block directly.
-fn parser_at_foreign_loop_statement(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(&state) != TOKEN_IDENT -> return false
-    word :: parser_value_at(&state, 0)
-    if word == "for" || word == "while" -> return parser_foreign_loop_has_block(&state)
-    if word == "continue" {
-        next_kind :: parser_kind_at(&state, 1)
-        if next_kind == TOKEN_SEMI || next_kind == TOKEN_RBRACE || next_kind == TOKEN_EOF -> return true
-        after :: parser_kind_at(&state, 2)
-        return next_kind == TOKEN_IDENT && (after == TOKEN_SEMI || after == TOKEN_RBRACE || after == TOKEN_EOF)
-    }
-    if word == "do" || word == "repeat" || word == "until" -> return parser_kind_at(&state, 1) == TOKEN_LBRACE
-    false
+// At the top level: a word that starts no declaration or script line, either
+// a name followed by another word or a keyword no top-level form begins with.
+fn parser_unknown_top_word_ahead(state: &JetParserState) -> Bool Never! {
+    token :: parser_current(&state)
+    if token.kind == TOKEN_IDENT -> return parser_word_follows(&state)
+    if !parser_is_keyword_token(state, token) || parser_starts_expression(token.kind) -> return false
+    kind :: token.kind
+    !(kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP || kind == TOKEN_RETURN || kind == TOKEN_BREAK || kind == TOKEN_KW_YIELD || kind == TOKEN_KW_COMPTIME)
 }
 
-// Rust `foreign_loop_has_block`: a `{` at bracket depth zero before the line ends.
-fn parser_foreign_loop_has_block(state: &JetParserState) -> Bool Never! {
-    parens := 0
-    brackets := 0
-    offset := 1
-    loop {
-        kind :: parser_kind_at(&state, offset)
-        if kind == TOKEN_LPAREN -> parens += 1
-        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
-        if kind == TOKEN_LBRACKET -> brackets += 1
-        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
-        if parens == 0 && brackets == 0 {
-            if kind == TOKEN_LBRACE -> return true
-            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE -> return false
-        }
-        if kind == TOKEN_EOF -> return false
-        offset += 1
-    }
-    false
-}
-
-// Rust `foreign_keyword_diagnostic` for the loop words.
-fn parser_report_foreign_loop_word(state: &JetParserState, word: String, span: Span) {
-    current :: "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords"
-    if {
-        word == "for" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `loop item in source {{ … }}`")
-        word == "while" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `loop condition {{ … }}`; for repeated input, use `loop line in io.stdin().lines()` and stop in the body with `if test {{ break }}`")
-        word == "continue" -> parser_add_error(&state, span, "expected a statement, found `{word}`", current, "write `next`")
-        else -> parser_add_error(&state, span, "expected a statement, found `{word}`", "Jet uses one body-first loop form; put the stop test inside the body and exit with `break`", "write `loop {{ … if test {{ break }} }}`; for repeated input, use `loop line in io.stdin().lines()`")
-    }
+// The one error for a word Jet does not spell at a declaration or statement
+// start; it lists the forms the grammar accepts there and consumes the word.
+fn parser_report_unknown_word(state: &JetParserState, top_level: Bool) {
+    token :: parser_bump(&state)
+    word :: parser_text(state, token)
+    site :: if top_level -> "declaration" else -> "statement"
+    what :: if token.kind == TOKEN_IDENT -> "`{word}` is not a Jet word" else -> "the keyword `{word}` doesn't start a {site}"
+    why :: if top_level -> "a declaration here starts with `fn`, `struct`, `enum`, `trait`, `impl`, `module`, `use` or `extern`, and a script line with a call, binding or assignment" else -> "a statement here starts with a binding (`name :: value`), an assignment, a call, `if`, `loop`, `return`, `break` or `next`"
+    parser_add_error(&state, token.span, what, why, "start the line with one of these forms")
 }
 
 // Rust `starts_expr`: the tokens that can open an expression line.
 fn parser_starts_expression(kind: Int) -> Bool Never! {
     if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_RAW_STRING || kind == TOKEN_STRING || kind == TOKEN_CHAR -> return true
-    if kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_NULL || kind == TOKEN_KW_IT || kind == TOKEN_SELF || kind == TOKEN_KW_LOOP || kind == TOKEN_KW_IF || kind == TOKEN_KW_MOVE || kind == TOKEN_KW_COPY -> return true
+    if kind == TOKEN_TRUE || kind == TOKEN_FALSE || kind == TOKEN_NULL || kind == TOKEN_KW_IT || kind == TOKEN_SELF || kind == TOKEN_KW_LOOP || kind == TOKEN_KW_IF || kind == TOKEN_KW_MOVE -> return true
     if kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET || kind == TOKEN_HASH || kind == TOKEN_DOLLAR || kind == TOKEN_DOT -> return true
     kind == TOKEN_MINUS || kind == TOKEN_BANG || kind == TOKEN_STAR || kind == TOKEN_AMP || kind == TOKEN_CARET
 }
@@ -2018,9 +1955,7 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     // S82: an allowance attaches to one ordinary statement,
     // not an invented block node. Its target stays for sema and gate audit.
-    // The retired `#allow` spelling parses the same way so sema can refuse it
-    // with the `jet fix` edit to `#Allow`.
-    if word == "Allow" || word == "allow" {
+    if word == "Allow" {
         parser_skip_semicolons(&state)
         target_start :: parser_current(&state).span.start
         statement :: parser_parse_statement(&state)
@@ -2062,16 +1997,6 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
             &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(switched_span), site: Val(RuleSite.Statement)})
             return Stmt.Switched{marker: marker, body: [Stmt]{statement}, span: switched_span}
         }
-    }
-    // The retired angle form `#SQL<Row> { … }` names its row type with the
-    // ordinary call form now.
-    if word == "SQL" && parser_current_kind(&state) == TOKEN_LT && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_GT && parser_kind_at(&state, 3) == TOKEN_LBRACE {
-        parser_bump(&state)
-        parser_bump(&state)
-        close :: parser_bump(&state)
-        parser_parse_body_block(&state, false)
-        parser_add_error_code(&state, "E0927", parser_cover(marker_span, close.span), "`#{word}<…>` is retired", "marker arguments use the ordinary call form from the registry", "write `#{word}(Row) {{ … }}`")
-        return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(&state)}}
     }
     // A name the registry doesn't know, written before an ordinary statement,
     // applies to that statement, so sema reports it from the shared applied-rule

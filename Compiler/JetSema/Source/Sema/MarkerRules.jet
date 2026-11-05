@@ -3,8 +3,6 @@ use jet_foundation.[
     CallArg,
     Call,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     Expr,
     Func,
     Item,
@@ -31,10 +29,8 @@ use jet_foundation.[
     UnOp,
     diagnostic_from_registry,
     diagnostic_with_edit,
-    diagnostic_with_edit_grade,
     diagnostic_with_label,
     expr_span,
-    lint_by_name,
     symbol_id,
     type_name,
 ]
@@ -1543,7 +1539,6 @@ fn sema_marker_rules_edit_distance(left: String, right: String) -> Int Never! {
 }
 
 fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic {
-    if marker.name == "allow" -> return sema_marker_rules_allow_migration(marker)
     names := [String]{}
     loop rule in registry.applied_rules {
         sema_marker_rules_append_name(&names, rule.name)
@@ -1573,31 +1568,9 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
             }
         }
     }
-    fix := if {
-        // A retired rule names the form that replaced it.
-        marker.name == "Invariant" -> "`#Invariant` is retired: use `distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline"
-        nearest != "" && !ambiguous -> "did you mean `#{nearest}`?"
-        else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
-    }
+    fix := if nearest != "" && !ambiguous -> "did you mean `#{nearest}`?" else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
     diagnostic := sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.", fix)
-    if nearest != "" && !ambiguous && marker.name != "Invariant" -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
-}
-
-// `#allow(lint_name, "why")` became `#Allow(jet.LintName, "why")`: `jet fix`
-// renames the marker and carries a registered lint name to its type path.
-fn sema_marker_rules_allow_migration(marker: Marker) -> Diagnostic {
-    why :: "a lint allowance names its lint by the diagnostic's type path"
-    if marker.args.len() > 0 {
-        if marker.args[0] == .Expr(expr) {
-            if expr == .Ident(lint, span, _) {
-                if lint_by_name(lint) == .Val(row) {
-                    diagnostic :: sema_error("E0927", marker.name_span, "`#allow({lint}, …)` is now `#Allow({row.name}, …)`", why, "write `#Allow({row.name}, …)`")
-                    return diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: marker.name_span.start, end: span.end}, new_text: "Allow({row.name}"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
-                }
-            }
-        }
-    }
-    sema_error("E0927", marker.name_span, "`#allow` is now `#Allow`", why, "write `#Allow(jet.LintName, \"why this lint does not apply\")` with the lint's diagnostic type path")
+    if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
 fn sema_marker_rules_repeated_error(marker: Marker, first: Marker) -> Diagnostic {
@@ -1717,10 +1690,6 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
         application_row :: application_rows.get("{marker.name_span.start}:{marker.name_span.end}|{marker.name}") ?? -1
         site := if application_row >= 0 -> applications[application_row].site else -> None
         if sema_marker_rules_is_guest_marker(marker, site) {
-            next
-        }
-        if marker.name == "Align" {
-            &diagnostics.push(diagnostic_from_registry("E1118", Val(marker.span), "`#Align(…)` is not a supported layout marker.", "Jet puts alignment in the registered `#Layout(c, align(N))` rule so the layout kind and alignment remain one declaration fact.", "Replace `#Align(64)` with `#Layout(c, align(64))` on the struct declaration."))
             next
         }
         if sema_marker_rules_builtin_index(registry, marker) == None && !sema_marker_rules_marker_is_known(registry, marker) {

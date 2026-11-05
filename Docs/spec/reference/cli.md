@@ -228,7 +228,6 @@ jet audit [args]                     Inspect implicit copies, exercised memory w
 jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle
 jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
 jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>] Flash firmware to a target board
-jet fuzz <file.jet> [<test>]         Find failing inputs for property tests
 jet gc <command>                     Show values moved into automatic memory management
 jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
 jet status [<file.jet|dir>]          Show what the project has proved

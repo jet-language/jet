@@ -89,9 +89,8 @@ vocabulary](vocabulary.md).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. The block's settings are written
   `name :: value` (`sites :: [...]`, `repeatable :: true`, …) and its template
-  is `fn expand(self, target: Target) { … }`; the retired `marker Name(…)`
-  and `marker Name = #[…]` declarations are E0381 with the struct rewrite
-  (D-DECL-TYPES1=A, D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
+  is `fn expand(self, target: Target) { … }` (D-DECL-TYPES1=A,
+  D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
   A fixed named group instead is a field-less marker struct whose block sets
   `group :: #[Inline, Scalar]`; it has at least two members and no parameters,
@@ -412,8 +411,7 @@ results unify (D-IF1, D-IF2, D-IF3, D-IFGUARD1=A, D-IFDIST1=A).
 `if subject == { head -> body }` compares a bare value head with the subject.
 A range head `lo..hi` tests inclusive membership. The subject and both bounds
 must be an ordered scalar type (`Int` or `Char`). Open `Int` and `Char` domains
-still require `else`. `..=` in an arm head is E0318 because `..` is already
-inclusive; `step` in an arm head is E0319 because stride belongs to loops; an
+still require `else`. `..=` and `step` are not arm-head syntax; an
 inverted or empty band is E0316. Range heads are literals. A `distinct Int`
 constraint likewise requires literal bounds because a runtime `Range` cannot
 define a type (D-PATR, D-RANGE1, D-RANGE-VALUE1=A).
@@ -1247,8 +1245,7 @@ bound with `::`, wrapped in a carrier, or taken apart, it closes nothing, and
 its owner closes it. `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
-syntax; the retired prefix `~x` teaches E0941 (whose Safe fix writes `x.copy()`)
-and the retired `copy x` word teaches E0991. Copying a value that Jet cannot
+syntax. Copying a value that Jet cannot
 duplicate, such as a function or trait value, is E0211. Copying a scalar is
 legal but redundant.
 The Core-only `IOOperation` carrier is a payload-free runtime `Copy` enum;
@@ -1765,8 +1762,8 @@ enum FS {
 ```
 
 An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
-The `effect` declaration word is retired for Prelude effects and bare roots
-(E0381; `jet fix` deletes a re-declared Prelude effect). A package may still
+An effect is a type with an `impl Effect` block; `effect` is not a declaration
+word. A package may still
 declare a leaf beneath a Prelude root at compile time:
 
 ```jet
@@ -2216,9 +2213,7 @@ body-less `module owner` declares, a file import's alias, or a package
 dependency), binds that member; any other path keeps its module error. A
 member list names its members unrenamed: a renamed member is its own
 `alias :: owner.name` row. A row takes one alias, so `alias ::` with a member
-list is an error, and an empty block is an error. The retired spellings
-`use path as alias`, `owner.[name as alias]` and `owner.{…}` are E0630, a
-teaching error that `jet fmt` rewrites to the rows above.
+list is an error, and an empty block is an error.
 
 An unquoted module name is resolved by recursively searching from the project
 root for `name.jet` and for `name/run.jet`; `core` is a compiler-provided
@@ -2341,11 +2336,10 @@ Declarations are public by default (S18, D-VIS-MODULE1). `priv module name`
 keeps a module's contents to its enclosing module, and `priv(package) module
 name` keeps them inside the package; a `priv` struct field is usable only by its
 type's module. Reaching into a private module or field across files reports
-**E0605**, importing a member of a private module **E0609**. The retired
-markers are errors whose fix deletes them: `pub` (**E0411**), `private`
-(**E0412**), `priv` on another declaration (**E0413**), an unknown `priv(...)`
-qualifier (**E0414**), section labels (**E0415**), `priv(package)` on a field
-(**E0417**), and `#PubFile` (**E0418**). Inline-module bodies are type-checked
+**E0605**, importing a member of a private module **E0609**. These markers are
+errors whose fix deletes them: `priv` on another declaration (**E0413**), an
+unknown `priv(...)` qualifier (**E0414**), section labels (**E0415**) and
+`priv(package)` on a field (**E0417**). Inline-module bodies are type-checked
 in their defining scope, so siblings call each other freely.
 
 A member import names any top-level declaration: a function, type, enum,
@@ -2747,12 +2741,6 @@ For a relative wall-clock budget, derive that absolute millisecond value from
 `time.unix_ns() /% 1_000_000 + budget_ms`; `time.now()` returns a civil
 `DateTime`, not the deadline's integer epoch.
 
-The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
-**E0041** directs `Mutex`/`lock` users to channels.
-These direct-call teaching forms are diagnosed before ordinary name resolution.
-Likewise, `getenv(name)` and `os.environ` teach `core.sys` access with E0039.
-The field-form diagnostic marks `environ`, rather than the whole access path.
-
 ### Parallel collection adapters
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.
@@ -2908,8 +2896,7 @@ numeric, and encoding operations. `core.encoding` uses one `Dyn` value for
 JSON, CSV, TOML, and YAML and supports `#Codable`. Every fallible call returns
 `T !E`; handle it with `??`, a pattern test, or contextual `?(text)`. Importing
 a core namespace does not by itself emit every helper: code generation keeps
-the helpers a program calls. Teaching errors are **E0037**–**E0039**
-(D-CORENS1, D-CORENS-CANON1).
+the helpers a program calls (D-CORENS1, D-CORENS-CANON1).
 
 Core surface diagnostics and examples are exercised by the `tests/ui/core_*`
 fixtures.
@@ -5161,7 +5148,7 @@ under `.jetos/proof/`.
 These are intentional boundaries, not implied promises:
 
 - Jet does not provide a general `Any` top type. Use a precise type, a generic,
-  a trait, or a closed data carrier; E0350 explains the boundary.
+  a trait, or a closed data carrier.
 - Stored-borrow reference fields and their `refs` expansion lens are absent.
   Borrowed views may still be used where their checked callable contract allows.
 - Nested `#CLI` structs and implicit grouped flag prefixes are not part of the

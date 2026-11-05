@@ -162,7 +162,6 @@ reason rather than silently inventing a receiver, default, or source edge.
 - [Expr::Absent] status=graph optional-absent node.
 - [Expr::Todo] status=readonly typed goal, source edits.
 - [Expr::NoElse] status=readonly dispatch no-else arm, source edits.
-- [Expr::ReduceMarker] status=readonly SIMD marker, source edits.
 - [Expr::PatternTest] status=graph pattern-test node.
 - [Expr::Ok] status=graph fallible-ok node.
 - [Expr::Err] status=graph fallible-err node.

@@ -368,7 +368,7 @@ fn sema_http_route_invalid_diagnostic(pattern: String, reason: String, span: Spa
 // route literal before any other argument check.
 fn sema_http_route_check_literal(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaHTTPRouteLiteral {
     if sema_http_route_interpolated_source(argument.expr) == .Val(source) {
-        &diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{{name}}` parameter spelling", argument.span))
+        &diagnostics.push(sema_http_route_invalid_diagnostic(source, "brace interpolation is not allowed in route patterns", argument.span))
         return SemaHTTPRouteLiteral{pattern: None, interpolated: true, invalid: false}
     }
     pattern :: sema_http_route_constant_string(argument.expr, environment, program, scopes) ?? return SemaHTTPRouteLiteral{pattern: None, interpolated: false, invalid: false}

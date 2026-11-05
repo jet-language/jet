@@ -127,7 +127,6 @@ use {
         TOKEN_SLASH,
         TOKEN_STAR,
         TOKEN_STRING,
-        TOKEN_TILDE_TILDE,
         TOKEN_UNIFIED_ARROW,
         Token,
     ]
@@ -150,8 +149,6 @@ struct ParsedItemModifiers {
     is_comptime: Bool
     markers: [Marker]
     start_span: Span
-    // The retired bare `sanitizer` word before `fn` (E0059).
-    is_sanitizer: Bool{false}
     // `pub use` re-exports (the only remaining `pub`, ballot pending).
     reexport: Bool{false}
     // The markers came from at least one `#[…]` list (Rust's grouped marker path).
@@ -167,22 +164,12 @@ struct ParsedUserPolicy {
 }
 
 fn parser_user_policy_ahead(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(&state) == TOKEN_KW_PUB {
-        token := parser_lookahead(&state, 1)
-        return token.kind == TOKEN_IDENT && parser_value(state, token) == "policy"
-    }
     token := parser_current(&state)
     token.kind == TOKEN_IDENT && parser_value(state, token) == "policy"
 }
 
-// `policy name(params…) { wrap(call) { … } }`, public
-// like every declaration a retired `pub` is E0411.
+// `policy name(params…) { wrap(call) { … } }`, public like every declaration.
 fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
-    if parser_current_kind(&state) == TOKEN_KW_PUB {
-        word :: parser_bump(&state)
-        deletion :: parser_deletion_edit(state, word.span)
-        parser_add_error_code_edit(&state, "E0411", word.span, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `pub`", deletion)
-    }
     start :: parser_expect_name(&state, "to start a policy declaration")
     name :: parser_expect_name(&state, "as the policy setting name")
     params := parser_parse_param_list(&state)
@@ -252,10 +239,6 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         }
         parser_protocol_ahead(&state) -> {
             value :: parser_parse_protocol(&state, modifiers)
-            return ParsedItemOrImport{item: Val(value), handled: true}
-        }
-        parser_marker_decl_ahead(&state) -> {
-            value :: parser_parse_marker_decl(&state, modifiers)
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_fact_decl_ahead(&state) -> {
@@ -356,14 +339,14 @@ fn parser_report_repeated_state_section(state: &JetParserState, section: StateDe
 
 // (card #4723): declarations are public by default. `priv` and
 // `priv(package)` mark a module (`item_visibility`) or a field (members);
-// `pub`, `pub(…)`, `private`, and `priv` on any other declaration are reported
-// with a fix that deletes them, and the declaration parses as if they were absent.
+// `priv` on any other declaration is reported with a fix that deletes it, and
+// the declaration parses as if it were absent. `pub use` and
+// `pub(package) use` are the re-export spellings.
 fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) -> ParsedItemModifiers {
     start := parser_current(&state).span
     is_pub := true
     is_package_pub := false
     is_comptime := false
-    is_sanitizer := false
     reexport := false
     markers := [Marker]{}
     marker_chunks := 0
@@ -372,8 +355,6 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     loop {
         kind := parser_current_kind(&state)
         if kind == TOKEN_KW_PUB && item_visibility && (parser_kind_at(&state, 1) == TOKEN_KW_USE || (parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 4) == TOKEN_KW_USE)) {
-            // `pub use` stays the re-export spelling; a `pub(…)`
-            // qualifier on it was removed (E0411) and is deleted.
             parser_bump(&state)
             if parser_current_kind(&state) == TOKEN_LPAREN {
                 parser_bump(&state)
@@ -389,32 +370,13 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
                         parser_add_error(&state, close_span, "expected `)` to close `pub(package)`", "write `pub(package)` with no extra content inside the parentheses", "use `pub(package)` to restrict access to sibling packages in the same payload")
                     }
                 } else {
-                    parser_add_error_code(&state, "E0411", qualifier.span, "unknown `pub(…)` qualifier — only `pub(package)` is supported", "`pub(package)` restricts access to sibling packages in the same payload", "write `pub` (public to all) or `pub(package)` (package-scoped)")
+                    found :: parser_describe_token(state, qualifier)
+                    parser_add_error(&state, qualifier.span, "expected `package` inside `pub(…)`, found {found}", "a re-export is `pub use` (public to all) or `pub(package) use` (sibling packages in the same payload)", "write `pub use` or `pub(package) use`")
                     loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
                     if parser_current_kind(&state) == TOKEN_RPAREN -> parser_bump(&state)
                 }
             }
             reexport = true
-            next
-        }
-        if kind == TOKEN_KW_PUB {
-            word :: parser_bump(&state)
-            removed := word.span
-            if parser_current_kind(&state) == TOKEN_LPAREN {
-                loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF -> parser_bump(&state)
-                if parser_current_kind(&state) == TOKEN_RPAREN -> removed = parser_cover(word.span, parser_bump(&state).span)
-            }
-            written :: parser_source_slice(state, removed.start, removed.end)
-            shown :: if written == "" -> "pub" else -> written
-            deletion :: parser_deletion_edit(state, removed)
-            parser_add_error_code_edit(&state, "E0411", removed, "`pub` was removed: everything is public by default", "privacy belongs to a `priv module` (or `priv(package) module`) and to `priv` fields", "delete `{shown}`", deletion)
-            next
-        }
-        foreign_private :: item_visibility && kind == TOKEN_IDENT && parser_value_at(&state, 0) == "private" && parser_foreign_private_ahead(&state)
-        if foreign_private {
-            word :: parser_bump(&state)
-            deletion :: parser_deletion_edit(state, word.span)
-            parser_add_error_code_edit(&state, "E0412", word.span, "Jet has no `private`", "declarations are public by default; privacy belongs to a `priv module` or a `priv` field", "delete `private`; move the declaration into a `priv module` if it must stay internal", deletion)
             next
         }
         if kind == TOKEN_KW_PRIV {
@@ -470,7 +432,7 @@ fn parser_parse_item_modifiers(state: &JetParserState, item_visibility: Bool) ->
     }
     noun :: parser_marker_sequence_noun(&state, item_visibility)
     if noun != "" -> parser_report_adjacent_markers(&state, markers, marker_chunks, bracket_chunks, sequence, noun)
-    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, is_sanitizer: is_sanitizer, reexport: reexport, grouped_markers: bracket_chunks > 0}
+    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, reexport: reexport, grouped_markers: bracket_chunks > 0}
 }
 
 // The target a declaration marker sequence attaches to, named as Rust's
@@ -485,12 +447,6 @@ fn parser_marker_sequence_noun(state: &JetParserState, item_visibility: Bool) ->
     if kind == TOKEN_KW_IMPL -> return "impl"
     if !item_visibility && kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON -> return "field"
     ""
-}
-
-// The foreign `private` word before an item (E0412 teaches `priv`).
-fn parser_foreign_private_ahead(state: &JetParserState) -> Bool Never! {
-    next_kind :: parser_kind_at(&state, 1)
-    parser_is_item_keyword(next_kind) || next_kind == TOKEN_KW_PUB || next_kind == TOKEN_HASH
 }
 
 fn parser_expect_marker_path(state: &JetParserState, reason: String) -> Token {
@@ -580,13 +536,6 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
             alias = parser_value(state, name)
             alias_span = name.span
         }
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-            alias_token :: parser_retired_import_as(&state, path.span.start, named != None)
-            if named == None {
-                alias = parser_value(state, alias_token)
-                alias_span = alias_token.span
-            }
-        }
         parser_finish_statement(&state)
         end := path.span
         if state.position > 0 -> end = parser_lookahead(&state, -1).span
@@ -598,7 +547,7 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
     parts := [Token]{first}
     loop parser_current_kind(&state) == TOKEN_DOT {
         next_kind := parser_lookahead(&state, 1).kind
-        if next_kind == TOKEN_LBRACKET || next_kind == TOKEN_LBRACE || next_kind == TOKEN_STAR -> break
+        if next_kind == TOKEN_LBRACKET || next_kind == TOKEN_STAR -> break
         parser_bump(&state)
         member :: parser_expect_name(&state, "after `.` in an import path")
         &parts.push(member)
@@ -608,14 +557,10 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
     module_span := parser_cover(first.span, last_span)
     if parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
-        if parser_current_kind(&state) == TOKEN_LBRACKET || parser_current_kind(&state) == TOKEN_LBRACE {
+        if parser_current_kind(&state) == TOKEN_LBRACKET {
             if named == .Val(name) {
                 named_text :: parser_value(state, name)
                 parser_add_error(&state, name.span, "a member list takes no `{named_text} ::` alias", "`alias :: path` names one module or item, and a member list names several", "drop `{named_text} ::`, or write one `alias :: {path}.member` row per member")
-            }
-            if parser_current_kind(&state) == TOKEN_LBRACE {
-                brace :: parser_current(&state).span
-                parser_add_error_code(&state, "E0630", brace, "`.{{…}}` is not an import member list", "a member list is written in brackets, as `owner.[a, b]` (#6542)", "write `use {path}.[…]`")
             }
             return parser_parse_import_member_list(&state, start, path, module_span)
         }
@@ -643,14 +588,6 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
         alias_span = name.span
         explicit_alias = true
     }
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-        alias_token :: parser_retired_import_as(&state, first.span.start, named != None)
-        if named == None {
-            alias = parser_value(state, alias_token)
-            alias_span = alias_token.span
-            explicit_alias = true
-        }
-    }
     parser_finish_statement(&state)
     end := last_span
     if state.position > 0 -> end = parser_lookahead(&state, -1).span
@@ -662,29 +599,9 @@ fn parser_parse_import_row(state: &JetParserState, start: Span) -> ImportDecl {
     ImportDecl{kind: ImportKind.Module{name: path, span: module_span}, alias: alias, alias_span: alias_span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: inline_version}
 }
 
-// `path as alias` is the retired import alias (#6542): E0630 teaches
-// `alias :: path`, and the row keeps the alias so `jet fmt` rewrites it. A
-// row that already has an `alias ::` keeps that one.
-fn parser_retired_import_as(state: &JetParserState, path_start: Int, named: Bool) -> Token {
-    path_end :: parser_lookahead(&state, -1).span.end
-    word :: parser_bump(&state)
-    alias_token :: parser_expect_name(&state, "after `as` in an import")
-    local :: parser_value(state, alias_token)
-    if named {
-        edit :: TextEdit{span: Span{start: path_end, end: alias_token.span.end}, new_text: ""}
-        parser_add_error_code_edit(&state, "E0630", word.span, "`as {local}` names an import that already has an alias", "`alias :: path` is the one import alias; `as` is retired (#6542)", "delete `as {local}`", edit)
-        return alias_token
-    }
-    path :: parser_source_slice(state, path_start, path_end)
-    edit :: TextEdit{span: Span{start: path_start, end: alias_token.span.end}, new_text: "{local} :: {path}"}
-    parser_add_error_code_edit(&state, "E0630", word.span, "`as` no longer names an import", "an import's local name comes first, as `alias :: path` (#6542)", "write `{local} :: {path}`", edit)
-    alias_token
-}
-
 fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_alias: String, module_alias_span: Span) -> ImportDecl {
     open :: parser_bump(&state)
-    // `.{…}` was reported (E0630) and reads like `.[…]`.
-    close_kind :: if open.kind == TOKEN_LBRACE -> TOKEN_RBRACE else -> TOKEN_RBRACKET
+    close_kind :: TOKEN_RBRACKET
     items := [ImportedItem]{}
     item_spans := [Span]{}
     local_spans := [Span]{}
@@ -704,22 +621,13 @@ fn parser_parse_import_member_list(state: &JetParserState, start: Span, module_a
             item_end = part.span
             local_span = part.span
         }
-        alias := String?{None}
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "as" {
-            word :: parser_bump(&state)
-            local :: parser_expect_name(&state, "after `as` in an imported member")
-            local_name :: parser_value(state, local)
-            parser_add_error_code(&state, "E0630", word.span, "`as` no longer renames an imported member", "a renamed member is a row of its own, `alias :: owner.member` (#6542)", "write `{local_name} :: {module_alias}.{name}` as its own `use` row; `jet fmt` moves it")
-            alias = Val(local_name)
-            local_span = local.span
-        }
-        &items.push(ImportedItem{original: name, alias: alias})
+        &items.push(ImportedItem{original: name, alias: None})
         &item_spans.push(parser_cover(first.span, item_end))
         &local_spans.push(local_span)
         if parser_current_kind(&state) != TOKEN_COMMA -> break
         parser_bump(&state)
     }
-    close :: if close_kind == TOKEN_RBRACE -> parser_expect(&state, TOKEN_RBRACE, "`}}` after imported members") else -> parser_expect(&state, TOKEN_RBRACKET, "`]` after imported members")
+    close :: parser_expect(&state, TOKEN_RBRACKET, "`]` after imported members")
     items_span := parser_cover(open.span, close.span)
     parser_finish_statement(&state)
     end := parser_lookahead(&state, -1).span
@@ -1070,19 +978,15 @@ fn parser_parse_param(state: &JetParserState, zone: ParamZone) -> Param {
 
 fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers, body_required: Bool) -> ParsedFunction {
     start :: parser_bump(&state)
-    // Callable declarations share the contextual `.copy(...)` spelling;
-    // bare `copy value` remains a retired keyword expression.
+    // Callable declarations share the contextual `.copy(...)` spelling; a
+    // bare `copy` starts no expression.
     name :: if parser_current_kind(&state) == TOKEN_KW_COPY -> parser_bump(&state) else -> parser_expect_name(&state, "after `fn`")
     func_name := if name.kind == TOKEN_KW_COPY -> parser_text(state, name) else -> parser_value(state, name)
     func_name_span := name.span
     external_type := NamedSpan?{None}
-    // `fn Type.method(` attaches an external method. The retired `~~`
-    // connector (D-EXTMETH1) still parses, so E0325 can teach the `.`.
-    if parser_current_kind(&state) == TOKEN_DOT || (parser_current_kind(&state) == TOKEN_TILDE_TILDE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN) {
-        connector :: parser_bump(&state)
-        if connector.kind == TOKEN_TILDE_TILDE {
-            parser_add_error_code(&state, "E0325", connector.span, "external methods attach with `.`, not `~~`", "the dot connector matches trait impls and ordinary member access", "write `fn {func_name}.method(...)`")
-        }
+    // `fn Type.method(` attaches an external method.
+    if parser_current_kind(&state) == TOKEN_DOT {
+        parser_bump(&state)
         method :: parser_expect_name(&state, "after `.` in an external method name")
         external_type = Val(NamedSpan{name: func_name, span: name.span})
         func_name = parser_value(state, method)
@@ -1190,7 +1094,6 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     func.is_pub = modifiers.is_pub
     func.is_package_pub = modifiers.is_package_pub
     func.is_comptime = modifiers.is_comptime
-    func.is_sanitizer = modifiers.is_sanitizer
     func.external_type = external_type
     func.type_params = type_params
     func.params = params
@@ -1709,8 +1612,8 @@ fn parser_return_type_has_value(return_type: Type?) -> Bool Never! {
 
 // Rust `apply_callable_markers`: the typed projections of the function rules,
 // applied once the function is parsed. The marker list itself stays on the
-// function. Retired spellings (`#Pure`, `#Sanitizer`, `#InlineAlways`) project
-// nothing; sema teaches their replacement (E0927). A refused rule ends the
+// function. A rule with no projection here projects nothing; sema reports an
+// unknown rule (E0927). A refused rule ends the
 // function (a fatal diagnostic), as Rust's applicator returns its error.
 fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [Marker]) {
     policy := [PolicyDeclaration]{}
@@ -1782,7 +1685,6 @@ fn parser_apply_function_markers(state: &JetParserState, func: &Func, markers: [
             // A callable chain (`#Policy(retry(3))`) stays a marker; the scoped
             // form declares function-scoped policies targeting the function.
             "Policy" -> {
-                if parser_policy_retired_marker(&state, marker) -> return
                 if parser_callable_policy_marker(marker) {
                     if callable_policy_seen {
                         parser_add_fatal_code(&state, "E0355", marker.span, "a function can have only one `#Policy` callable chain", "the declaration marker supplies one default chain; a call-site `apply(...)` supplies replacements", "merge the policies into one `#Policy(...)` marker")
@@ -2399,8 +2301,8 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
 
 // `name :: value` / `name := value` at file scope declares a
 // module binding, not an executable script statement (Rust
-// `module_binding_def`). The retired typed form `name : Type …` takes the same
-// route so the binding parser teaches it.
+// `module_binding_def`). `name : …` takes the same route so the binding
+// parser reports the expected `::` or `:=`.
 fn parser_module_binding_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_IDENT -> return false
     next :: parser_kind_at(&state, 1)
@@ -2681,8 +2583,8 @@ fn parser_parse_impl(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
         parser_bump(&state)
         &parts.push(parser_expect_name(&state, "after `.` in `impl`"))
     }
-    // `impl Stack<T> {` from other languages: an impl names its type bare and
-    // its methods already see the struct's type parameters.
+    // `impl Stack<T> {`: an impl names its type bare and its methods already
+    // see the struct's type parameters.
     if parser_current_kind(&state) == TOKEN_LT && !parser_aborting(&state) {
         open :: parser_current(&state).span
         _ :: parser_parse_type_params(&state)
@@ -2716,7 +2618,7 @@ fn parser_parse_impl(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
     type_name := parser_value(state, first)
     loop index in 1..<owner_count -> type_name = "{type_name}.{parser_value(state, parts[index])}"
     type_span :: parser_cover(first.span, parts[owner_count - 1].span)
-    has_trait := owner_count < count
+    has_trait :: owner_count < count
     trait_name := String?{None}
     trait_span := Span?{None}
     if has_trait {
@@ -2740,15 +2642,6 @@ fn parser_parse_impl(state: &JetParserState, modifiers: ParsedItemModifiers) -> 
         }
         body :: parser_parse_block(&state)
         return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
-    }
-    // The retired `impl Type: Trait` separator teaches `impl Type.Trait`.
-    if !has_trait && parser_current_kind(&state) == TOKEN_COLON {
-        has_trait = true
-        colon :: parser_bump(&state)
-        parser_add_error_code(&state, "E0321", colon.span, "trait separator is now `.`, not `:`", "the impl separator reads \"Type's Trait\", matching the dot accessor", "write `impl {type_name}.Trait {{ … }}`")
-        named :: parser_expect_name(&state, "after `:` in `impl Type: Trait`")
-        trait_name = Val(parser_value(state, named))
-        trait_span = Val(named.span)
     }
     operator_rhs :: parser_parse_operator_rhs(&state, trait_name)
     operator_marker := parser_operator_marker(modifiers.markers)

@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0911 — Jet diagnostic</title>
-<meta name="description" content="Migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed)">
+<meta name="description" content="A migration block uses a word that is not a migration verb">
 <meta property="og:title" content="E0911 — Jet diagnostic">
-<meta property="og:description" content="Migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed)">
+<meta property="og:description" content="A migration block uses a word that is not a migration verb">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0911</h1>
-<p>Migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed)</p>
+<p>A migration block uses a word that is not a migration verb</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed)</p>
+<p class="diag-copy what" data-registry-field="what">A migration block uses a word that is not a migration verb</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The registered parse rule applies here</p>
+<p class="diag-copy why" data-registry-field="why">A migration block contains only `rename`, `add`, `remove`, and `change` operations</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Use the supported migration verb, such as `remove`, and omit `reorder`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write the operation with one of `rename`, `add`, `remove`, or `change`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0911</code>: <code>tests/ui/migration_unknown_op.stderr</code>.</p>
-<pre class="diag">Error [jet.UnknownMigrationVerb]: `drop` isn&#39;t a migration verb — use `remove`
+<pre class="diag">Error [jet.UnknownMigrationVerb]: `frobnicate` isn&#39;t a known migration verb
   --&gt; tests/ui/migration_unknown_op.jet:7:5
     |
-  7 |     drop x
-    |     ^^^^
- Why: A migration deletes a field with `remove`; `drop` is not a Jet keyword here
- Fix: Write `remove &lt;field&gt;` to delete a published field
+  7 |     frobnicate x
+    |     ^^^^^^^^^^
+ Why: A migration block contains `rename`, `add`, `remove`, or `change` operations
+ Fix: Use `rename old -&gt; new`, `add f: T = default`, `remove f`, or `change f: Old -&gt; New via { … }`
 More: jet-lang.dev/e/E0911
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

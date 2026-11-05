@@ -209,16 +209,9 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
         assert(once == entry02_format(once))
     }
 }
-// Rust: crates/jet-parser/src/Parser/mod.rs:2226
-// `#PubFile` was retired when every declaration became public by default: the
-// marker now reports E0418 (its old default-visibility flip has nothing to flip).
-#Test("retired_pub_file_marker_reports_e0418") {
-    src :: "#PubFile\n\nfn greet() -> String {{\n    return \"hi\"\n}}\n\nfn run() {{\n    return\n}}"
-    _ :: entry02_diag(entry02_errors(src), "E0418")
-}
 // Rust: crates/jet-parser/src/Parser/mod.rs:2260
-#Test("pub_file_section_label_emits_e0415") {
-    lexed :: lex("#PubFile\n\npriv:\nfn run() {{ return }}\n".bytes())
+#Test("section_label_emits_e0415") {
+    lexed :: lex("priv:\nfn run() {{ return }}\n".bytes())
     assert(lexed.diagnostics.is_empty())
     parsed :: parse_tokens(lexed.tokens, lexed.tables)
     _ :: parser_test_diagnostic(parsed.diagnostics, "E0415")

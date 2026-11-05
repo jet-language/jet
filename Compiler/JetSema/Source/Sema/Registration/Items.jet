@@ -709,6 +709,10 @@ struct SemaRegistrationGraph {
     internal_problem: String?
     diagnostics: [Diagnostic]
     complete: Bool
+    // Per module row, its markers that no rule, marker declaration or derive
+    // provider names (E0927, sema_marker_module_check); the module's
+    // declaration check reports them, so they do not stop registration.
+    unknown_rule_diagnostics: [[Diagnostic]]{[[Diagnostic]]{}}
     // The run-wide declaration table (Cutover B L2b): one DeclID row per
     // registered callable (functions, foreign functions, nominal methods,
     // impl methods; module order, a key's first row found), and each row's
@@ -4238,7 +4242,9 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     marker_diagnostics := [Diagnostic]?{None}
     if sema_marker_module_applied_catalog(graph) == .Val(applied) {
         graph.marker_catalog = sema_marker_module_catalog_registry(applied)
-        if graph.marker_catalog == .Val(catalog) -> marker_diagnostics = Val(sema_marker_module_check(graph, applied, catalog))
+        unknown_rules := [[Diagnostic]]{}
+        if graph.marker_catalog == .Val(catalog) -> marker_diagnostics = Val(sema_marker_module_check(graph, applied, catalog, &unknown_rules))
+        graph.unknown_rule_diagnostics = ^unknown_rules
     }
     if marker_diagnostics == .Val(found) {
         loop diagnostic in found -> &graph.diagnostics.push(diagnostic)

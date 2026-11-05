@@ -555,7 +555,6 @@ fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScope
 fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
-            if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type."))
             sema_check_private_module_type(name, span, environment, program, &diagnostics)
             // Compiler-owned IO enum/record rows have no public annotation origin.
@@ -618,7 +617,6 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
             if ret == .Val(value) -> sema_check_failure_contract_type(value, span, true, generic_names, environment, program, &diagnostics)
         }
         .Apply(name, args) -> {
-            if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             sema_check_private_module_type(name, span, environment, program, &diagnostics)
             if sema_failure_written_name_unknown(name, generic_names, environment, program) -> sema_unknown_generic_type_name(name, span, &diagnostics)
             sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, &diagnostics)
@@ -693,10 +691,6 @@ fn sema_failure_written_name_unknown(name: String, generic_names: [String], envi
     if program.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
     if environment.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
     false
-}
-
-fn sema_no_any_type(span: Span) -> Diagnostic {
-    sema_error("E0350", span, "Jet does not have an `Any` type", "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Dyn` for parsed dynamic data", "replace `Any` with the specific mechanism for this value")
 }
 
 // Rust `union_member_has_open_shape`, or a member that mentions one of the

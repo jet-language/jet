@@ -363,13 +363,15 @@ struct RetiredForeignAs {
     }
 }
 
-struct ForeignUnsafeFfi {
+struct RetiredForeignUnsafeFfi {
     impl Diagnostic {
         code :: "E0031"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: `unsafe` / C-style FFI → `extern rust` (S50)" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `unsafe` FFI teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Use `extern rust` for foreign functions and place the call behind its required gate." }
+        fn fix(self) -> String { "Follow the guidance for E0031" }
     }
 }
 
@@ -397,13 +399,15 @@ struct RetiredForeignPipeLambda {
     }
 }
 
-struct ForeignBracketTypeArguments {
+struct RetiredForeignBracketTypeArguments {
     impl Diagnostic {
         code :: "E0034"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: `Type[Args]` → `Type<Args>` (S33)" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `Type[Args]` teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Write generic arguments as `Type<Args>`." }
+        fn fix(self) -> String { "Follow the guidance for E0034" }
     }
 }
 
@@ -430,15 +434,14 @@ struct RetiredForeignDynBox {
     }
 }
 
-struct ForeignPrintMacro {
+struct RetiredForeignPrintMacro {
     impl Diagnostic {
         code :: "E0037"
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "Teaching: `println!`/`eprintln!` → `print`/`io.eprint`" }
+        fn what(self) -> String { "*Retired* (was: `println!` teaching)" }
         fn why(self) -> String { "The registered sema rule applies here" }
-        fn fix(self) -> String { "Replace `println!`/`eprintln!` with `print`/`io.eprint`." }
+        fn fix(self) -> String { "Follow the guidance for E0037" }
     }
 }
 
@@ -453,34 +456,36 @@ struct RetiredForeignFileOpen {
     }
 }
 
-struct ForeignEnvironmentRead {
+struct RetiredForeignEnvironmentRead {
     impl Diagnostic {
         code :: "E0039"
-        fn what(self) -> String { "Teaching: `os.environ`/`getenv` → `env.get`" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `os.environ`/`getenv` teaching)" }
         fn why(self) -> String { "The registered sema rule applies here" }
-        fn fix(self) -> String { "Use `env.get` instead of `os.environ` or `getenv`." }
+        fn fix(self) -> String { "Follow the guidance for E0039" }
     }
 }
 
-struct ForeignAsyncAwait {
+struct RetiredForeignAsyncAwait {
     impl Diagnostic {
         code :: "E0040"
-        meaning :: "Teaching: `async`/`await` → blocking tasks/channels"
-        detail :: true
-        fn what(self) -> String { "`async` or `await` was written." }
-        fn why(self) -> String { "Jet uses blocking tasks and channels rather than async syntax." }
-        fn fix(self) -> String { "Use `core.tasks as tasks` and call `tasks.spawn(() -> work())`." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `async`/`await` teaching)" }
+        fn why(self) -> String { "The registered sema rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0040" }
     }
 }
 
-struct ForeignConcurrencyPrimitive {
+struct RetiredForeignConcurrencyPrimitive {
     impl Diagnostic {
         code :: "E0041"
-        meaning :: "Foreign concurrency primitive (`Mutex`/`lock`/`Semaphore`) is not a Jet API"
-        detail :: true
-        fn what(self) -> String { "`Mutex` is not a Jet API; use a channel, or `Shared<T>` with `Condition`" }
-        fn why(self) -> String { "Tasks pass owned values over channels; when tasks must share memory, `Shared<T>` guards the state under a lock and `Condition` coordinates predicate waits." }
-        fn fix(self) -> String { "Create `channel<T>()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `Mutex`/`Semaphore` teaching)" }
+        fn why(self) -> String { "The registered sema rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0041" }
     }
 }
 
@@ -496,16 +501,15 @@ struct MisplacedShebang {
     }
 }
 
-struct ForeignInstallCommand {
+struct RetiredForeignInstallCommand {
     impl Diagnostic {
         code :: "E0043"
         stage :: [.Jet]
-        meaning :: "Teaching: `jet install` -> `jet fetch`"
-        detail :: true
-        no_fix :: .Behavior
-        fn what(self) -> String { "`jet install` isn't a Jet command" }
-        fn why(self) -> String { "Jet uses `jet fetch` to download and link dependencies" }
-        fn fix(self) -> String { "Run `jet fetch` to install all dependencies listed in package.jet" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `jet install` teaching)" }
+        fn why(self) -> String { "The registered jet rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0043" }
     }
 }
 
@@ -554,23 +558,27 @@ struct OptionalChainOnNonOptional {
     }
 }
 
-struct ForeignPositionalTuple {
+struct RetiredForeignPositionalTuple {
     impl Diagnostic {
         code :: "E0048"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: positional tuples → named members (S73)" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: positional tuple teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Use named tuple members instead of positional tuple access." }
+        fn fix(self) -> String { "Follow the guidance for E0048" }
     }
 }
 
-struct ForeignTupleIndex {
+struct RetiredForeignTupleIndex {
     impl Diagnostic {
         code :: "E0049"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: `.0` field access → named members (S73)" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `.0` field access teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Use named tuple members instead of `.0` field access." }
+        fn fix(self) -> String { "Follow the guidance for E0049" }
     }
 }
 
@@ -689,9 +697,10 @@ struct RetiredSanitizerFunction {
         code :: "E0059"
         stage :: [.Parse]
         status :: .Retired
-        fn what(self) -> String { "Teaching: bare `sanitizer fn` → `#Scrub(Tag) fn`" }
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: bare `sanitizer fn` teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Write `#Scrub(Tag) fn` instead of a bare `sanitizer fn`." }
+        fn fix(self) -> String { "Follow the guidance for E0059" }
     }
 }
 
@@ -1097,9 +1106,11 @@ struct RetiredCopyKeyword {
     impl Diagnostic {
         code :: "E0991"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: the old `copy` keyword → the built-in method `x.copy()`" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `copy` keyword teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Replace the old `copy` keyword with the method `x.copy()`." }
+        fn fix(self) -> String { "Follow the guidance for E0991" }
     }
 }
 
@@ -1107,13 +1118,11 @@ struct RetiredCopySigil {
     impl Diagnostic {
         code :: "E0941"
         stage :: [.Parse]
-        meaning :: "Teaching: the retired prefix copy sigil `~x` → the built-in method `x.copy()`"
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "The `~` copy sigil is retired; a copy is the method `x.copy()`" }
-        fn why(self) -> String { "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()`, so a copy reads as a word and chains like any method" }
-        fn fix(self) -> String { "Write `x.copy()`; `jet fix` applies this edit." }
+        fn what(self) -> String { "*Retired* (was: `~x` copy sigil teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0941" }
     }
 }
 
@@ -2895,28 +2904,27 @@ struct OrPatternBindingMismatch {
     }
 }
 
-struct ForeignInclusiveRange {
+struct RetiredForeignInclusiveRange {
     impl Diagnostic {
         code :: "E0318"
         stage :: [.Parse]
-        meaning :: "C25/`..=` in an arm head — Jet's `..` is already inclusive; write `lo..hi`"
-        detail :: true
-        fn what(self) -> String { "`` `..=` `` is not a Jet operator — Jet's `..` is already inclusive." }
-        fn why(self) -> String { "In Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` always includes both ends, so there is no `..=`." }
-        fn fix(self) -> String { "Write `lo..hi` — it already means \"lo through hi inclusive.\"" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `..=` teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0318" }
     }
 }
 
-struct StepInRangeArm {
+struct RetiredStepInRangeArm {
     impl Diagnostic {
         code :: "E0319"
         stage :: [.Parse]
-        meaning :: "C25/`step` in an arm head — `step` is a loop modifier, not an arm construct"
-        detail :: true
-        no_fix :: .Ambiguous
-        fn what(self) -> String { "`` `step` `` is not allowed in a range arm — range arms test a band, not a sequence." }
-        fn why(self) -> String { "A stride modifies a loop range to skip values (`loop i in 0..10, 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing." }
-        fn fix(self) -> String { "Remove the stride; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `step` in a range arm teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0319" }
     }
 }
 
@@ -2924,10 +2932,11 @@ struct RetiredDottedLiteral {
     impl Diagnostic {
         code :: "E0320"
         stage :: [.Parse]
-        meaning :: "Teaching: dotted literal construction → dotless `Type{{ … }}` / `{{ … }}`"
-        fn what(self) -> String { "A literal constructor places no dot before its brace." }
-        fn why(self) -> String { "Literal heads have no leading dot; leading-dot enum unit selectors such as `.Tls13` remain valid." }
-        fn fix(self) -> String { "Remove the dot before `{{`, for example write `Point{{ x: 1 }}`, `[Int]{{ 1, 2 }}`, or `{{ x: 1 }}`." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: dotted literal teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0320" }
     }
 }
 
@@ -2935,9 +2944,11 @@ struct RetiredImplColon {
     impl Diagnostic {
         code :: "E0321"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: `impl Type: Trait` old colon separator → `impl Type.Trait`" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `impl Type: Trait` teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Replace `impl Type: Trait` with `impl Type.Trait`." }
+        fn fix(self) -> String { "Follow the guidance for E0321" }
     }
 }
 
@@ -2951,13 +2962,15 @@ struct AssignmentInCondition {
     }
 }
 
-struct ForeignNamespaceKeyword {
+struct RetiredForeignNamespaceKeyword {
     impl Diagnostic {
         code :: "E0323"
         stage :: [.Parse]
-        fn what(self) -> String { "`namespace` keyword not in Jet — use `module name {{ }}` for in-file grouping" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `namespace` teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Use `module name {{ }}` instead of the unsupported `namespace` keyword." }
+        fn fix(self) -> String { "Follow the guidance for E0323" }
     }
 }
 
@@ -2974,9 +2987,11 @@ struct RetiredMethodConnector {
     impl Diagnostic {
         code :: "E0325"
         stage :: [.Parse]
-        fn what(self) -> String { "Teaching: external inherent method `~~` connector → `.`" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `~~` method connector teaching)" }
         fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Replace the external method `~~` connector with `.`." }
+        fn fix(self) -> String { "Follow the guidance for E0325" }
     }
 }
 
@@ -3121,11 +3136,11 @@ struct ComputedFieldAssigned {
 struct RetiredDirectoryHelper {
     impl Diagnostic {
         code :: "E0340"
-        meaning :: "Raw-string directory helper; user-declared methods are unaffected"
-        fix_next :: "Use typed paths instead of the raw-string directory helper."
-        fn what(self) -> String { "`read_dir` is not a method in Jet" }
-        fn why(self) -> String { "Jet uses typed paths; raw-string directory helpers are not exposed" }
-        fn fix(self) -> String { "Write `Path.from(path).walk()` to list a directory recursively" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: raw-string `read_dir` teaching)" }
+        fn why(self) -> String { "The registered sema rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0340" }
     }
 }
 
@@ -3226,14 +3241,14 @@ struct MetaNotAllowedHere {
     }
 }
 
-struct ForeignAnyType {
+struct RetiredForeignAnyType {
     impl Diagnostic {
         code :: "E0350"
-        meaning :: "`Any` type requested, but Jet has no general top type"
-        detail :: true
-        fn what(self) -> String { "Jet does not have an `Any` type." }
-        fn why(self) -> String { "A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Dyn` for parsed dynamic data." }
-        fn fix(self) -> String { "Replace `Any` with the specific mechanism for this value." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `Any` type teaching)" }
+        fn why(self) -> String { "The registered sema rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0350" }
     }
 }
 
@@ -3549,11 +3564,11 @@ struct EffectBodyWithoutBraces {
     }
 }
 
-struct ForeignSemicolon {
+struct ExplicitSemicolon {
     impl Diagnostic {
         code :: "E0373"
         stage :: [.Parse]
-        meaning :: "Teaching: explicit semicolons are statement boundaries, not canonical Jet syntax"
+        meaning :: "Explicit semicolons are statement boundaries, not canonical Jet syntax"
         detail :: true
         edit :: .SourceEdit
         no_fix :: None
@@ -3668,14 +3683,11 @@ struct RetiredDeclarationWord {
     impl Diagnostic {
         code :: "E0381"
         stage :: [.Parse]
-        meaning :: "Retired `marker` or `effect` declaration word; a marker or an effect is a type with an `impl Marker` or `impl Effect` block"
-        detail :: true
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "A `marker` or `effect` declaration is a retired spelling of a type." }
-        fn why(self) -> String { "A marker or an effect is a struct or enum: a marker's `impl Marker {{ … }}` block gives its settings, its group or its `fn expand(self, target: Target)` template, and an effect's `impl Effect {{ … }}` block says whether its work can be rolled back." }
-        fn fix(self) -> String { "Write `struct Name {{ impl Marker {{ sites :: [.Function] }} }}` or `struct Name {{ impl Effect {{}} }}`; `jet fix` rewrites the declaration." }
+        fn what(self) -> String { "*Retired* (was: `marker`/`effect` declaration word teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0381" }
     }
 }
 
@@ -4017,25 +4029,23 @@ struct RetiredPub {
     impl Diagnostic {
         code :: "E0411"
         stage :: [.Parse]
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "`pub` on a declaration or field was removed; everything is public by default" }
-        fn why(self) -> String { "Jet declarations are public by default; only `pub use` re-exports keep `pub` until the re-export ballot" }
-        fn fix(self) -> String { "Delete the `pub` / `pub(…)` marker." }
+        fn what(self) -> String { "*Retired* (was: `pub` teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0411" }
     }
 }
 
-struct ForeignPrivate {
+struct RetiredForeignPrivate {
     impl Diagnostic {
         code :: "E0412"
         stage :: [.Parse]
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .NeedsReview
-        fn what(self) -> String { "Teaching: Jet has no `private`; privacy lives on `priv module` and `priv` fields" }
-        fn why(self) -> String { "Privacy is a property of a module or a field, never of a single declaration" }
-        fn fix(self) -> String { "Delete `private`; move the declaration into a `priv module` if it must stay internal." }
+        fn what(self) -> String { "*Retired* (was: `private` teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0412" }
     }
 }
 
@@ -4107,12 +4117,11 @@ struct RetiredPubFile {
     impl Diagnostic {
         code :: "E0418"
         stage :: [.Parse]
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "`#PubFile` was removed; every file is public by default" }
-        fn why(self) -> String { "Declarations are public by default, so the file marker has nothing left to flip" }
-        fn fix(self) -> String { "Delete the `#PubFile` marker." }
+        fn what(self) -> String { "*Retired* (was: `#PubFile` teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0418" }
     }
 }
 
@@ -5284,12 +5293,11 @@ struct RetiredImportAlias {
     impl Diagnostic {
         code :: "E0630"
         stage :: [.Parse]
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "Teaching: an import uses the retired `as` alias or `.{{…}}` member list" }
-        fn why(self) -> String { "An import's local name comes first, as `alias :: path`, and a member list is written in brackets" }
-        fn fix(self) -> String { "Write `alias :: path` for `path as alias`, give each renamed member its own `alias :: owner.member` row, and write `owner.[…]` for `owner.{{…}}`; `jet fmt` rewrites the import." }
+        fn what(self) -> String { "*Retired* (was: import `as` alias and `.{{…}}` member list teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0630" }
     }
 }
 
@@ -5646,6 +5654,17 @@ struct IrreversibleEffectInTransaction {
         fn what(self) -> String { "`{self.api}` has the `{self.effect_name}` effect, which can't be rolled back inside a `#Transact` block." }
         fn why(self) -> String { "A `#Transact` block undoes its work on a `?`-failure; network, file, subprocess, and foreign effects leave external state a rollback can't take back unless the foreign binding declares a compensating undo." }
         fn fix(self) -> String { "Move the call after the block, register it with `<handle>.on_commit(() -> {{ … }})`, or declare `#Undo(inverse)` on the foreign binding." }
+    }
+}
+
+struct AtomicInsideTransaction {
+    impl Diagnostic {
+        code :: "E0752"
+        meaning :: "An `Atomic<T>` operation used inside a `#Transact {{ … }}` block, which has no commit for it"
+        detail :: true
+        fn what(self) -> String { "`Atomic` cannot be used inside `#Transact`" }
+        fn why(self) -> String { "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics" }
+        fn fix(self) -> String { "Move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together" }
     }
 }
 
@@ -7240,7 +7259,7 @@ struct CalledNonFunction {
     }
 }
 
-struct RetiredAdjacentCall {
+struct AdjacentCallResult {
     impl Diagnostic {
         code :: "E-CALL-VALUE"
         stage :: [.Parse]
@@ -7449,11 +7468,11 @@ struct UnknownMigrationVerb {
     impl Diagnostic {
         code :: "E0911"
         stage :: [.Parse]
-        meaning :: "migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed)"
+        meaning :: "migration block uses a word that is not a migration verb"
         no_fix :: .Ambiguous
-        fn what(self) -> String { "Migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed)" }
-        fn why(self) -> String { "The registered parse rule applies here" }
-        fn fix(self) -> String { "Use the supported migration verb, such as `remove`, and omit `reorder`." }
+        fn what(self) -> String { "A migration block uses a word that is not a migration verb" }
+        fn why(self) -> String { "A migration block contains only `rename`, `add`, `remove`, and `change` operations" }
+        fn fix(self) -> String { "Write the operation with one of `rename`, `add`, `remove`, or `change`." }
     }
 }
 
@@ -8807,11 +8826,11 @@ struct RetiredParallelCrossing {
 struct RetiredAlignMarker {
     impl Diagnostic {
         code :: "E1118"
-        meaning :: "Legacy `#Align(…)` marker is not supported"
-        detail :: true
-        fn what(self) -> String { "`#Align(…)` is not a supported layout marker." }
-        fn why(self) -> String { "Jet puts alignment in the registered `#Layout(c, align(N))` rule so the layout kind and alignment remain one declaration fact." }
-        fn fix(self) -> String { "Replace `#Align(64)` with `#Layout(c, align(64))` on the struct declaration." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: `#Align(…)` teaching)" }
+        fn why(self) -> String { "The registered sema rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E1118" }
     }
 }
 
@@ -9114,10 +9133,11 @@ struct RetiredPackageKind {
     impl Diagnostic {
         code :: "E1211"
         stage :: [.Jet]
-        no_fix :: .Behavior
-        fn what(self) -> String { "`packages:` block-form entry uses the removed `kind:` field — write `targets:`" }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: package `kind:` field teaching)" }
         fn why(self) -> String { "The registered jet rule applies here" }
-        fn fix(self) -> String { "Replace the removed `kind:` field with `targets:`." }
+        fn fix(self) -> String { "Follow the guidance for E1211" }
     }
 }
 
@@ -9725,7 +9745,7 @@ struct UntrustedEnvironment {
     }
 }
 
-struct ForeignEnvironmentNotProjectable {
+struct EnvironmentNotProjectable {
     cmd: String
 
     impl Diagnostic {
@@ -11404,7 +11424,7 @@ struct DuplicateErrorConversion {
     }
 }
 
-struct ForeignErrorConversion {
+struct OrphanErrorConversion {
     source: String
     target: String
 
@@ -12708,18 +12728,15 @@ struct RetiredInOperator {
     }
 }
 
-struct ForeignPowerOperator {
+struct RetiredForeignPowerOperator {
     impl Diagnostic {
         code :: "E0396"
         stage :: [.Parse]
-        meaning :: "Teaching: power uses `.pow(exponent)`, not `**`"
-        detail :: true
-        edit :: .SourceEdit
+        status :: .Retired
         no_fix :: None
-        fix_safety :: .BehaviorPreserving
-        fn what(self) -> String { "Jet writes power as `value.pow(exponent)`, not `**`." }
-        fn why(self) -> String { "`**` is a power operator in some other languages; Jet uses the `pow` method." }
-        fn fix(self) -> String { "Write `base.pow(exponent)`, for example `2.pow(3)`." }
+        fn what(self) -> String { "*Retired* (was: `**` power operator teaching)" }
+        fn why(self) -> String { "The registered parse rule applies here" }
+        fn fix(self) -> String { "Follow the guidance for E0396" }
     }
 }
 

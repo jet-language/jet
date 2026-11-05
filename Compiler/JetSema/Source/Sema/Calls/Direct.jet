@@ -1526,37 +1526,10 @@ fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDir
 }
 
 // The Rust direct_calls forms ahead of ordinary name resolution
-// (check_call_inner), taken first by sema_expr_check_direct_call. The
-// getenv/async/await teaching errors win even over a same-spelled lexical
-// binding and still infer every argument; `measurement(value, uncertainty:)`
-// and 's `apply(policy..., f)` apply only unshadowed.
+// (check_call_inner), taken first by sema_expr_check_direct_call.
+// `measurement(value, uncertainty:)` and 's `apply(policy..., f)` apply
+// only unshadowed.
 fn sema_call_try_direct_forms(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if call.name == "getenv" || call.name == "async" || call.name == "await" {
-        if call.name == "getenv" {
-            &diagnostics.push(sema_error("E0039", call.name_span, "`getenv` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
-        } else {
-            &diagnostics.push(sema_error("E0040", call.name_span, "`{call.name}` is not in Jet; use the `task` keyword instead", "Jet uses blocking tasks and channels, not async/await — simpler and race-free", "write `task your_work()` or `task {{ … }}`"))
-        }
-        loop argument_index in 0..<call.args.len() {
-            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        }
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
-    // E0041 (spec.md:2702-2704): an unshadowed foreign lock or semaphore
-    // call teaches channels and `Shared<T>`.
-    mutex_form :: call.name == "Mutex" || call.name == "mutex" || call.name == "lock"
-    semaphore_form :: call.name == "Semaphore" || call.name == "semaphore"
-    if (mutex_form || semaphore_form) && sema_scope_resolve_index(scopes, call.name) == None {
-        if mutex_form {
-            &diagnostics.push(sema_error("E0041", call.name_span, "`{call.name}` is not a Jet API; use a channel, or `Shared<T>` with `Condition`", "tasks pass owned values over channels; when tasks must share memory, `Shared<T>` guards the state under a lock and `Condition` coordinates predicate waits", "create `channel<T>()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)"))
-        } else {
-            &diagnostics.push(sema_error("E0041", call.name_span, "`{call.name}` is not in Jet; use a bounded channel as a token pool", "each received token admits one worker until that worker sends the token back", "create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"))
-        }
-        loop argument_index in 0..<call.args.len() {
-            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        }
-        return SemaDirectSpecialCheck{handled: true, value: None}
-    }
     if call.name == "measurement" && sema_scope_resolve_index(scopes, call.name) == None {
         labeled :: call.args.len() == 2 && call.args[0].label == None && (if call.args[1].label == { .Val(label) -> label.name == "uncertainty" else -> false })
         if !labeled {

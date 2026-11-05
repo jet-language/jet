@@ -305,7 +305,7 @@ fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: Str
     owner := sema_value_method_owner(receiver_value.ty)
     if row.lowering == BuiltinMethodLowering.Atomic && scopes.transaction_wall_depth > 0 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E0041", span, "`Atomic` cannot be used inside `#Transact`", "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics", "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together"))
+        &diagnostics.push(sema_error("E0752", span, "`Atomic` cannot be used inside `#Transact`", "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics", "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     labels_valid := sema_value_method_check_labels(method, args, &diagnostics)

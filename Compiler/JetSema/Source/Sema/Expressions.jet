@@ -2952,7 +2952,7 @@ fn sema_expr_local_call_span(call: Call) -> Span Never! {
 }
 
 fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // `Float(n)` from other languages: a number type is built with braces.
+    // `Float(n)`: a number type is built with braces, not called.
     if call.type_args.len() == 0 && call.args.len() == 1 && SEMA_NUMBER_TYPE_NAMES.contains(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
         &diagnostics.push(sema_error("E0102", call.name_span, "`{call.name}` is a number type, not a function", "Jet builds a value of a number type with braces; parentheses call a function", "write `{call.name}{{{sema_expr_number_type_argument_text(call.args[0].expr)}}}`"))
         return None
@@ -5123,10 +5123,6 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
         .Try(value, span, conversion, note, _) -> sema_expression_try(value, span, conversion, note, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .If(condition, then_body, then_value, else_body, else_value, span, _) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Lambda(lambda, _) -> sema_expression_lambda(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        .ReduceMarker(name, span, _) -> {
-            &diagnostics.push(sema_error("E2510", span, "`#{name}` is only valid inside a lane `.reduce(…)`", "a reduce-op marker names the fold operation; it isn't a value on its own", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
-            None
-        }
         .Todo(span, _, _) -> sema_expression_todo(expected, span, &context)
         .NoElse(span, _) -> Val(sema_node(&context, expected ?? Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm"}, span))
         .RawOf(value, span, _) -> {

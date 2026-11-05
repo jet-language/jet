@@ -23,6 +23,15 @@ fn gh_slice(text: String, start: Int, end: Int) -> String {
     String.from_bytes(raw[start..(end - 1)]) ?? panic("grammar slice must end on UTF-8 boundaries")
 }
 
+// The byte offset of the first `needle` in `text`, for gh_slice. `String.index`
+// counts Unicode scalars, so its offset only matches gh_slice while every byte
+// before the needle is ASCII.
+fn gh_index(text: String, needle: String) -> Int? {
+    parts :: text.split(needle).to_list()
+    if parts.len() < 2 -> return None
+    Val(parts[0].count_bytes())
+}
+
 fn gh_has(values: [String], value: String) -> Bool {
     loop item in values {
         if item == value -> return true
@@ -60,7 +69,7 @@ fn gh_constants() -> [(name: String, value: String)] {
     loop child in (gh_files.list_dir(GH_SYNTAX_DIR) ?? panic("list {GH_SYNTAX_DIR}: {err}")) {
         if child.is_dir || !child.name.ends_with(".jet") -> next
         loop line in gh_read(child.path).split("\n") {
-            at :: line.index(" :: \"") ?? next
+            at :: gh_index(line, " :: \"") ?? next
             name :: gh_slice(line, 0, at)
             if !gh_is_ident(name) -> next
             rest :: gh_slice(line, at + 5, line.count_bytes())
@@ -101,7 +110,7 @@ fn gh_active_markers() -> [String] {
     current := String?{None}
     loop line in gh_read("Compiler/Prelude/Markers.jet").split("\n") {
         if line.starts_with("struct ") {
-            open :: line.index("{{") ?? panic("marker struct without a body: {line}")
+            open :: gh_index(line, "{{") ?? panic("marker struct without a body: {line}")
             current = Val(gh_slice(line, 7, open).trim().copy())
         } else if line.starts_with("}}") {
             current = None
@@ -118,9 +127,9 @@ fn gh_active_markers() -> [String] {
 // every active marker rule.
 fn gh_tokens() -> [GhToken] {
     source :: gh_read("{GH_SYNTAX_DIR}/Highlights.jet")
-    start :: source.index("JET_HIGHLIGHT_TOKENS :: [HighlightToken]{{") ?? panic("missing JET_HIGHLIGHT_TOKENS table")
+    start :: gh_index(source, "JET_HIGHLIGHT_TOKENS :: [HighlightToken]{{") ?? panic("missing JET_HIGHLIGHT_TOKENS table")
     table :: gh_slice(source, start, source.count_bytes())
-    end :: table.index("\n}}") ?? panic("unterminated JET_HIGHLIGHT_TOKENS table")
+    end :: gh_index(table, "\n}}") ?? panic("unterminated JET_HIGHLIGHT_TOKENS table")
     constants :: gh_constants()
     tokens := [GhToken]{}
     pending := String?{None}
@@ -143,8 +152,8 @@ fn gh_tokens() -> [GhToken] {
 // through the end marker's line.
 fn gh_generated_section(path: String) -> String {
     text :: gh_read(path)
-    start :: text.index("BEGIN GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated start")
-    end :: text.index("END GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated end")
+    start :: gh_index(text, "BEGIN GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated start")
+    end :: gh_index(text, "END GENERATED JET SYNTAX HIGHLIGHTS") ?? panic("{path} is missing the generated end")
     assert(end > start, "{path} generated end precedes its start")
     gh_slice(text, start, end)
 }
@@ -176,10 +185,10 @@ fn gh_anonymous_node_types() -> [String] {
             current = None
             named = 0
         } else if trimmed.starts_with("\"type\":") && current == None {
-            colon :: trimmed.index(":") ?? next
+            colon :: gh_index(trimmed, ":") ?? next
             value :: gh_slice(trimmed, colon + 1, trimmed.count_bytes()).trim().copy()
             if value.starts_with("\"") {
-                close :: gh_slice(value, 1, value.count_bytes()).index("\"") ?? next
+                close :: gh_index(gh_slice(value, 1, value.count_bytes()), "\"") ?? next
                 current = Val(gh_slice(value, 1, close + 1))
             }
         } else if trimmed.starts_with("\"named\":") && named == 0 {
@@ -213,9 +222,9 @@ fn gh_query_string_literals(query: String) -> [String] {
 
 fn gh_keyword_list() -> [String] {
     source :: gh_read("{GH_SYNTAX_DIR}/PackageFiles.jet")
-    start :: source.index("JET_KEYWORD_LIST :: [String]{{") ?? panic("missing JET_KEYWORD_LIST")
+    start :: gh_index(source, "JET_KEYWORD_LIST :: [String]{{") ?? panic("missing JET_KEYWORD_LIST")
     body :: gh_slice(source, start, source.count_bytes())
-    end :: body.index("\n}}") ?? panic("unterminated JET_KEYWORD_LIST")
+    end :: gh_index(body, "\n}}") ?? panic("unterminated JET_KEYWORD_LIST")
     constants :: gh_constants()
     words := [String]{}
     loop raw in gh_slice(body, 0, end).split("\n") {
@@ -241,16 +250,16 @@ fn gh_grammar_keyword_words() -> [String] {
         depth += line.bytes().count(U8{123})
         depth -= line.bytes().count(U8{125})
         if depth <= 0 && !line.contains("\"keywords\"") -> inside = false
-        at :: line.index("\"match\"") ?? next
+        at :: gh_index(line, "\"match\"") ?? next
         after :: gh_slice(line, at + 7, line.count_bytes())
-        colon :: after.index(":") ?? next
+        colon :: gh_index(after, ":") ?? next
         value :: gh_slice(after, colon + 1, after.count_bytes()).trim().copy()
         if !value.starts_with("\"") -> next
         rest := gh_slice(value, 1, value.count_bytes())
         loop {
-            open :: rest.index("(") ?? break
+            open :: gh_index(rest, "(") ?? break
             tail :: gh_slice(rest, open + 1, rest.count_bytes())
-            close :: tail.index(")") ?? break
+            close :: gh_index(tail, ")") ?? break
             group :: gh_slice(tail, 0, close)
             if !group.contains("(") && !group.contains("\\") {
                 loop word in group.split("|") {

@@ -84,19 +84,16 @@ fn run() {}
     assert_eq(names, [String]{"$holds", "$safe", "$gates", "$decision"})
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1013
-#Test("former_text_contract_is_rejected") {
+#Test("an_unknown_top_word_lists_the_declaration_forms") {
     diagnostics :: parser_test_errors(`
-marker Selector on [.Text] {
+frobnicate Selector on [.Text] {
     check @body
-    hole @value
 }
 fn run() {}
 `)
-    assert_eq(diagnostics.len(), 1)
-    assert_eq(diagnostics[0].code, "E0381")
-    assert(diagnostics[0].what.contains("retired"))
-    assert(diagnostics[0].fix.contains("impl Marker"))
+    assert_eq(diagnostics[0].code, "E0003")
+    assert(diagnostics[0].what.contains("`frobnicate` is not a Jet word"), diagnostics[0].what)
+    assert(diagnostics[0].why.contains("`fn`, `struct`, `enum`"), diagnostics[0].why)
 }
 
 #Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
@@ -146,38 +143,6 @@ fn run() {}
 fn run() {}
 `)
     assert(template.body != None)
-}
-
-#Test("retired_declarations_teach_the_struct_form_with_an_edit") {
-    diagnostics :: parser_test_errors(`marker Pre(condition: String, $sites: [.Function], $repeatable: true)
-
-marker Fast = #[Inline(.Always), Scalar]
-
-fn run() {}
-`)
-    assert_eq(diagnostics.len(), 2)
-    loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E0381")
-    rule :: diagnostics[0].edit ?? panic("the parameter form carries its rewrite")
-    assert_eq(rule.new_text, "struct Pre {{\n    condition: String\n\n    impl Marker {{\n        sites :: [.Function]\n        repeatable :: true\n    }}\n}}")
-    group :: diagnostics[1].edit ?? panic("the group form carries its rewrite")
-    assert_eq(group.new_text, "struct Fast {{\n    impl Marker {{\n        group :: #[Inline(.Always), Scalar]\n    }}\n}}")
-}
-
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1078
-#Test("rejected_trailers_each_teach_the_struct_form") {
-    diagnostics :: parser_test_errors(`
-marker Inline(mode: String) on [.Function]
-
-marker Pre(condition: String)(sites: [.Function])
-
-fn run() {}
-`)
-    assert_eq(diagnostics.len(), 2)
-    loop diagnostic in diagnostics {
-        assert_eq(diagnostic.code, "E0381")
-        assert(diagnostic.fix.contains("impl Marker"))
-        assert(diagnostic.edit == None)
-    }
 }
 
 #Test("impl_marker_rejects_what_a_marker_does_not_have") {

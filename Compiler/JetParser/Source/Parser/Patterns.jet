@@ -101,18 +101,12 @@ fn parser_try_take_pattern_body(state: &JetParserState, depth: Int) -> ParsedTak
         state.pending_type_gt_span = saved_pending_gt_span
         return None
     }
-    dotted := parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE
-    if !dotted && parser_current_kind(&state) != TOKEN_LBRACE {
+    if parser_current_kind(&state) != TOKEN_LBRACE {
         state.position = saved_position
         loop state.diagnostics.len() > saved_diagnostics -> _ := &state.diagnostics.pop()
         state.pending_type_gt = saved_pending_gt
         state.pending_type_gt_span = saved_pending_gt_span
         return None
-    }
-    if dotted {
-        dot :: parser_bump(&state)
-        label := if kind == 2 -> "[U8]" else -> "String"
-        parser_add_error_code(&state, "E0320", dot.span, "typed pattern construction uses `{label}{{…}}`, not `{label}.{{…}}`", "the constructor dot is omitted from typed literal heads", "write `{label}{{…}}`")
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a take_pattern literal")
     literal :: parser_current(&state)
@@ -519,11 +513,6 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
         return ParsedPattern{pattern: Pattern.Variant{variant: "None", bindings: [PatSlot]{}, leading_dot: false, span: start.span}, span: start.span}
     }
     if start.kind == TOKEN_LBRACE -> return parser_parse_struct_pattern(&state, start.span, depth + 1, None)
-    if start.kind == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_LBRACE {
-        parser_add_fatal_code(&state, "E0320", start.span, "inferred record patterns use `{{…}}`, not `.{{…}}`", "literal heads place no dot before their brace", "write `{{ kind: …, field, .. }}`")
-        parser_bump(&state)
-        return parser_parse_struct_pattern(&state, start.span, depth + 1, None)
-    }
     if start.kind == TOKEN_STRING -> return parser_parse_string_pattern(&state)
     leading_dot := false
     path := ""

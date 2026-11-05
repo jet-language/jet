@@ -904,18 +904,13 @@ fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, tables: &Token
     (decoded: decoded, literal: literal_row(&tables, number_literal(Val(parse_integer_literal(number_text) ?? 0), None, suffix)))
 }
 
-// Identifier checks: reserved double-underscore names and the `r"…"` prefix.
-// No identifier is respelled.
+// Identifier check: reserved double-underscore names. No identifier is
+// respelled.
 fn identifier_respelling(source: [U8], start: Int, end: Int, allow_reserved_identifiers: Bool, diagnostics: &[Diagnostic]) -> String? {
     width :: end - start
     if !allow_reserved_identifiers && width >= 2 && byte_at(source, start) == 95 && byte_at(source, start + 1) == 95 {
         text :: slice_text(source, start, end)
         add_diagnostic(&diagnostics, "E0067", start, end, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore")
-    }
-    raw_prefix :: (width == 1 && byte_at(source, start) == 114) || (width == 3 && byte_at(source, start) == 114 && byte_at(source, start + 1) == 97 && byte_at(source, start + 2) == 119)
-    if raw_prefix && byte_at(source, end) == 34 {
-        text :: slice_text(source, start, end)
-        add_diagnostic(&diagnostics, "E0003", start, end, "`{text}\"…\"` is not a Jet raw-string prefix", "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names", "write the text as ``…`` instead")
     }
     None
 }

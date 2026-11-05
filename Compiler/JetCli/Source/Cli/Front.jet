@@ -1369,41 +1369,6 @@ fn jet_cli_lint(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
     JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice, category: if complexity -> "complexity" else if cost -> "cost" else -> "a11y", raw: jet_argv, json: json}
 }
 
-// `jet fuzz <file> [<test-name>] [--iterations=N]` (Source/main.rs `"fuzz"`):
-// with no target the command's help is a usage error; the target resolves as
-// `resolve_source_path` does; Fuzz.jet reports the retirement. `--time`,
-// `--seed` and `--corpus` do not change the report.
-fn jet_cli_fuzz_command(jet_argv: [String], args: [String], color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
-    if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fuzz"), JET_DRIVER_EXIT_USAGE)
-    target :: args[1]
-    file := target
-    notice := ""
-    if cli_files.is_dir(target) {
-        if jet_cli_resolve_source_path("fuzz", target, color, [String]{}) == {
-            .File(path, _, written) -> {
-                file = path
-                notice = written
-            }
-            .Refused(plan) -> return plan
-        }
-    } else {
-        if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
-    }
-    // Rust: the first `--iterations=` value, as a u64, else None.
-    iterations := Int?{None}
-    loop argument in jet_argv {
-        if !argument.starts_with("--iterations=") -> next
-        text :: argument.slice(13..<argument.len())
-        // A negative or non-numeric value is not a u64: no count.
-        count :: Int.parse(text) ?? -1
-        if count >= 0 -> iterations = Val(count)
-        break
-    }
-    test_name := String?{None}
-    if args.len() > 2 -> test_name = Val(args[2])
-    jet_cli_with_notices([String]{notice}, jet_cli_fuzz(file, test_name, iterations, color))
-}
-
 // The tiers `jet emit` prints, one mode flag each (`--ast`, `--ir`).
 JET_CLI_EMIT_TIERS :: [String]{"ast", "ir"}
 
@@ -1794,7 +1759,6 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
                 else -> {}
             }
         }
-        "fuzz" -> return jet_cli_fuzz_command(jet_argv, args, color, quiet)
         "explain" -> return jet_cli_explain(jet_argv, args, color, json)
         "crash" -> return jet_cli_crash(args, color)
         "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)

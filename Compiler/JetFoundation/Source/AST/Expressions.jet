@@ -46,7 +46,6 @@ enum Expr {
     Absent(span: Span, id: Int)
     Todo(span: Span, expected_type: String?, id: Int)
     NoElse(span: Span, id: Int)
-    ReduceMarker(name: String, span: Span, id: Int)
     PatternTest(subject: Expr, pattern: Pattern, span: Span, id: Int)
     Ok(value: Expr, span: Span, id: Int)
     Err(value: Expr, span: Span, id: Int)
@@ -521,7 +520,6 @@ fn expr_span(expr: Expr) -> Span {
         .Absent(span, _) -> return span
         .Todo(span, _, _) -> return span
         .NoElse(span, _) -> return span
-        .ReduceMarker(_, span, _) -> return span
         .PatternTest(_, _, span, _) -> return span
         .Ok(_, span, _) -> return span
         .Err(_, span, _) -> return span
@@ -578,7 +576,6 @@ fn expr_node_id(expr: Expr) -> Int Never! {
         .Absent(_, id) -> id
         .Todo(_, _, id) -> id
         .NoElse(_, id) -> id
-        .ReduceMarker(_, _, id) -> id
         .PatternTest(_, _, _, id) -> id
         .Ok(_, _, id) -> id
         .Err(_, _, id) -> id

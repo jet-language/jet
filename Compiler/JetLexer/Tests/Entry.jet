@@ -472,9 +472,9 @@ fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [
     assert_eq(first_span.start, 0)
     assert_eq(second_span.start, 2)
     prefix :: lexer_test_raw(`r"bad"`)
-    assert_eq(prefix.diagnostics[0].code, "E0003")
-    prefix_span :: prefix.diagnostics[0].span ?? panic("retired prefix span")
-    assert_eq(prefix_span.end, 1)
+    assert_eq(prefix.diagnostics.len(), 0)
+    assert_eq(prefix.tokens[0].kind, 1)
+    assert_eq(prefix.tokens[1].kind, 3)
 }
 
 // Rust: tests/selfhost_terminators.rs:514-537

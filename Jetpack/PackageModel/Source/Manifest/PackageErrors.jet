@@ -19,8 +19,6 @@ enum PackageParseError {
     LintPolicyCode(code: String, name: String)
     // An unknown or not-yet-shipped target.
     BadTarget(name: String, value: String, reserved: Bool)
-    // A `packages:` entry uses the removed `kind:` field.
-    KindFieldRemoved(name: String)
     // A target block carries an unknown field.
     BadTargetField(name: String, detail: String)
     // U1/S52/E1209: a reserved top-level key was used non-empty.
@@ -54,7 +52,6 @@ enum PackageParseError {
             .NestedMembers(root, member) -> "member Package `{member}` declares `members`; Package root `{root}` owns membership"
             .LintPolicyCode(code, name) -> "`{code}` is a diagnostic code; use `{name}` in `policy.lints.deny`"
             .BadTarget(name, value, reserved) -> "package `{name}` names {if reserved -> "the reserved" else -> "the unknown"} target `{value}`"
-            .KindFieldRemoved(name) -> "package `{name}` uses the removed `kind:` field"
             .BadTargetField(name, detail) -> "package `{name}`: {detail}"
             .ReservedSection(section) -> "`{section}` is reserved"
             .BadEffectsBlock(detail) -> detail

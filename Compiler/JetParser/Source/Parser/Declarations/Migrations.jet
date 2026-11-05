@@ -99,16 +99,6 @@ fn parser_parse_migration(state: &JetParserState) -> MigrationDecl {
                 &ops.push(MigrationOp.Change{field: parser_value(state, field), field_span: field.span, from_ty: from_ty.ty, from_span: from_ty.span, to_ty: to_ty.ty, to_span: to_ty.span, converter: converter, converter_span: converter_span, conv_fn: None})
                 next
             }
-            if keyword == "drop" {
-                parser_add_error_code(&state, "E0911", op_token.span, "`drop` isn't a migration verb — use `remove`", "a migration deletes a field with `remove`; `drop` is not a Jet keyword here", "write `remove <field>` to delete a published field")
-                parser_migration_recover_operation(&state)
-                next
-            }
-            if keyword == "reorder" {
-                parser_add_error_code(&state, "E0911", op_token.span, "`reorder` isn't a migration verb — field order isn't a migration", "a `#PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration", "delete the `reorder` line; just write the fields in the order you want")
-                parser_migration_recover_operation(&state)
-                next
-            }
             parser_add_error_code(&state, "E0911", op_token.span, "`{keyword}` isn't a known migration verb", "a migration block contains `rename`, `add`, `remove`, or `change` operations", "use `rename old -> new`, `add f: T = default`, `remove f`, or `change f: Old -> New via {{ … }}`")
             parser_migration_recover_operation(&state)
             next

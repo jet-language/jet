@@ -855,7 +855,6 @@ fn semantic_token_type_for(tokens: [Token], idx: USize, src: String) -> (U32, U3
         .KwMutate | .KwMove -> None
         .Ident(name) -> {
             if name == Syntax.KW_NEXT && is_contextual_next(tokens, idx) -> return Val((st.KEYWORD, 0))
-            if is_live_teaching_semantic_word(name) -> return None
             if name.chars().next().is_some_and((c) -> { c.is_uppercase() }) { Val((st.TYPE, 0)) } else { Val((st.VARIABLE, 0)) }
         }
         .Str(_) -> Val((st.STRING, 0))
@@ -930,13 +929,6 @@ fn is_trivia(tok: Token) -> Bool {
 // Rust: Source/LSP/Features.rs:3983
 fn token_text(src: String, tok: Token) -> String {
     src.get(tok.span.start..<tok.span.end.min(src.len())) ?? ""
-}
-// Rust: Source/LSP/Features.rs:3988
-fn is_live_teaching_semantic_word(name: String) -> Bool {
-    [Syntax.METHOD_VIEW, Syntax.FOREIGN_PRIVATE, Syntax.FOREIGN_UNSAFE, Syntax.FOREIGN_NAMESPACE,
-     Syntax.FOREIGN_OWNED, Syntax.FOREIGN_SANITIZER, Syntax.FOREIGN_VEC, Syntax.FOREIGN_DICT,
-     Syntax.FOREIGN_EPRINTLN, Syntax.FOREIGN_OPEN, Syntax.FOREIGN_GETENV, Syntax.FOREIGN_OS,
-     Syntax.FOREIGN_ASYNC, Syntax.FOREIGN_AWAIT, Syntax.FOREIGN_MUTEX, Syntax.FOREIGN_LOCK].contains(name)
 }
 // Rust: Source/LSP/Features.rs:4010
 fn encode_semantic_tokens_with_arithmetic(tokens: [Token], src: String, arithmetic: [jet_semindex.ArithmeticOperationFact]) -> [U32] {

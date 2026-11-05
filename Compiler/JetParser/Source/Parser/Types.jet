@@ -347,14 +347,6 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 name = "{name}.{parser_value(state, member)}"
                 end = member.span
             }
-            // S33: the built-in generic constructors take `<…>`; square
-            // brackets after them are the foreign `Type[Args]` spelling.
-            if parser_current_kind(&state) == TOKEN_LBRACKET && (name == "Shared" || name == "Ptr" || name == "Result") {
-                bracket_span :: parser_current(&state).span
-                parser_add_error_code(&state, "E0034", bracket_span, "`{name}[...]` isn't how Jet writes generic types", "square brackets start collection types like `[Int]` or `[String:Int]`, and collection values like `[1, 2]`", "write angle brackets for generic arguments, or use `[Int]` for a list type")
-                parser_skip_group(&state)
-                return ParsedType{ty: Type.Named{name: "__jet_error"}, span: parser_cover(start.span, end)}
-            }
             if parser_current_kind(&state) == TOKEN_LT {
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
             }

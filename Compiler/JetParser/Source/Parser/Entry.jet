@@ -306,7 +306,7 @@ fn parser_chunk_head_kind(kind: Int) -> Bool Never! {
 // (parser_finish_statement consumed the terminator) and the next begins
 // where its item loop would. The stream stays whole when the parser reads
 // whole-file state: an authored `;` (E0373 reports once per file), a file rule
-// (`#PubFile`, `#NoPrelude`, `#HTML`, `#Target`, `#Policy` set program
+// (`#NoPrelude`, `#HTML`, `#Target`, `#Policy` set program
 // fields that later rules read), or unbalanced delimiters.
 fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threads: CompilerThreads) -> [Int] Never! {
     whole :: [Int]{0, tokens.len()}
@@ -320,7 +320,7 @@ fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threa
 // The name ids of the file rules (parser_chunk_bounds).
 fn parser_chunk_file_rules(tables: TokenTables) -> [Int] Never! {
     file_rules := [Int]{}
-    file_rule_names :: [String]{"PubFile", "PublicFile", "NoPrelude", "HTML", "Html", "Target", "Policy"}
+    file_rule_names :: [String]{"NoPrelude", "HTML", "Target", "Policy"}
     loop rule in file_rule_names {
         if name_find(tables.names, rule) == .Val(name) -> &file_rules.push(name_index(name))
     }
@@ -844,7 +844,6 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 if declaration.valid -> &program.user_policy_declarations.push(declaration.value)
             }
             parser_section_label_ahead(&state) -> parser_report_section_label(&state)
-            parser_foreign_top_word_ahead(&state) -> parser_report_foreign_top_word(&state)
             parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
             parser_policy_file_decl_ahead(&state) -> parser_parse_policy_file_decl(&state, &program)
             parser_unattached_marker_at_end(&state) -> {
@@ -918,6 +917,10 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 }
                 if state.position == before -> parser_bump(&state)
             }
+            parser_unknown_top_word_ahead(&state) -> {
+                parser_report_unknown_word(&state, true)
+                parser_sync_top(&state)
+            }
             else -> {
                 // Rust resynchronizes a failed script line like a block line
                 // and steps over a token the line could not consume.
@@ -937,26 +940,6 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         }
     }
     program
-}
-
-// Foreign top-level words that teach the Jet spelling: `namespace` (E0323)
-// and `unsafe` (E0031). `unsafe extern rust` keeps its block.
-fn parser_foreign_top_word_ahead(state: &JetParserState) -> Bool Never! {
-    token :: parser_current(&state)
-    if token.kind != TOKEN_IDENT -> return false
-    word :: parser_value(state, token)
-    word == "namespace" || word == "unsafe"
-}
-
-fn parser_report_foreign_top_word(state: &JetParserState) {
-    word :: parser_bump(&state)
-    if parser_value(state, word) == "namespace" {
-        parser_add_error_code(&state, "E0323", word.span, "in-file grouping uses `module name {{ }}`, not `namespace`", "Jet has one spelling for in-file grouping: a named `module` block", "write `module mygroup {{ fn foo() {{ … }} }}` instead")
-        parser_sync_top(&state)
-        return
-    }
-    parser_add_error_code(&state, "E0031", word.span, "Jet doesn't use `unsafe` to call Rust crates", "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`", "write: extern rust \"crate@version\" {{ fn name(...) T = \"rust::path\"; }}")
-    if parser_current_kind(&state) != TOKEN_KW_EXTERN -> parser_sync_top(&state)
 }
 
 // Imported group heads cannot reveal their file members until the loader has
@@ -1026,20 +1009,19 @@ fn parser_marked_module_binding_ahead(state: &JetParserState) -> Bool Never! {
 }
 
 // File rules bare
-// `#PubFile`/`#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]`
-// list of them. The retired `#PublicFile`/`#Html` spellings are read to teach.
+// `#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]` list of them.
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(&state)
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
     rule :: parser_value(state, name)
-    if rule == "PubFile" || rule == "PublicFile" || rule == "NoPrelude" || rule == "HTML" || rule == "Html" -> return true
+    if rule == "NoPrelude" || rule == "HTML" -> return true
     rule == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
 }
 
 fn parser_is_file_rule(name: String) -> Bool Never! {
-    name == "PubFile" || name == "NoPrelude" || name == "Target" || name == "HTML" || name == "Html"
+    name == "NoPrelude" || name == "Target" || name == "HTML"
 }
 
 // Rust `marker_list_is_file_rules`: a `#[…]` list whose every entry is a file
@@ -1137,11 +1119,6 @@ fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: M
     hash :: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
-        // The retired file marker; E0418 deletes it.
-        "PubFile" | "PublicFile" -> {
-            deletion :: parser_deletion_edit(state, marker.span)
-            parser_add_error_code_edit(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker", deletion)
-        }
         "NoPrelude" -> {
             if program.no_prelude {
                 parser_report_repeated_file_marker(&state, "NoPrelude", repeat_span)
@@ -1243,8 +1220,8 @@ fn parser_report_grouped_target_conflict(state: &JetParserState, marker: Marker)
 // the visibility of everything below it; E0415 rejects the label itself.
 fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
     if parser_kind_at(&state, 1) != TOKEN_COLON -> return false
-    token :: parser_current(&state)
-    token.kind == TOKEN_KW_PUB || token.kind == TOKEN_KW_PRIV || (token.kind == TOKEN_IDENT && parser_value(state, token) == "private")
+    kind :: parser_current_kind(&state)
+    kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV
 }
 
 fn parser_report_section_label(state: &JetParserState) {
@@ -1257,17 +1234,22 @@ fn parser_report_section_label(state: &JetParserState) {
 
 fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
-    token :: parser_current(&state)
     if {
         parser_item_declaration_ahead_at(&state, 0) -> true
         parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
-        kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> true
+        kind == TOKEN_KW_PUB -> parser_pub_use_ahead(&state)
+        kind == TOKEN_KW_PRIV -> true
         parser_type_alias_ahead_at(&state, 0) -> true
-        token.kind == TOKEN_IDENT && parser_value(state, token) == "private" -> parser_foreign_private_ahead(&state)
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
     }
+}
+
+// `pub use` (or `pub(package) use`) is the re-export spelling; `pub` starts
+// no other declaration.
+fn parser_pub_use_ahead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_KW_PUB && (parser_kind_at(&state, 1) == TOKEN_KW_USE || (parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 4) == TOKEN_KW_USE))
 }
 
 fn parser_is_item_keyword(kind: Int) -> Bool Never! {

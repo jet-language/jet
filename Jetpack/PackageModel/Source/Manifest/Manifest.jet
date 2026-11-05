@@ -10,7 +10,7 @@ use {
     ]
     jetpack_foundation.[
         BINARY_NAME, FILE_EXT, LANG_NAME, MANIFEST_BLOCK_AUTHORITY, MANIFEST_FIELD_EDITION,
-        PACKAGE_FIELD_KIND_REMOVED, PACKAGE_FIELD_TARGETS, PACKAGE_FILE, TARGET_EXAMPLE,
+        PACKAGE_FILE, TARGET_EXAMPLE,
         TARGET_EXECUTABLE, TARGET_FIELD_ENTRY, TARGET_FIELD_NAME, TARGET_LIBRARY, TARGET_SANDBOX,
         TARGET_TEST,
     ]
@@ -309,7 +309,6 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
             if reserved -> return pkg_e1210("package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)")
             pkg_e1210("package `{name}` lists target `{value}`, which is not a known target")
         }
-        .KindFieldRemoved(name) -> pkg_e1211("package `{name}` uses `{PACKAGE_FIELD_KIND_REMOVED}:`, which was removed")
         .BadTargetField(name, detail) -> pkg_e1216("package `{name}`: {detail}")
         .ReservedSection(section) -> pkg_e1209(path, section)
         .BadEffectsBlock(detail) -> pkg_e1221(detail)
@@ -374,13 +373,6 @@ fn pkg_e1210(detail: String) -> Diagnostic Never! {
         "`{PACKAGE_FILE}` lists an unknown target",
         detail,
         "use a shipped target: `{TARGET_LIBRARY}`, `{TARGET_EXECUTABLE}`, `{TARGET_TEST}`, `{TARGET_EXAMPLE}`, or `{TARGET_SANDBOX}`")
-}
-
-fn pkg_e1211(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1211", None,
-        "`{PACKAGE_FILE}` uses the removed `kind:` field",
-        detail,
-        "write `{PACKAGE_FIELD_TARGETS}: [{TARGET_EXECUTABLE}]` (or `[{TARGET_LIBRARY}]`) instead")
 }
 
 fn pkg_e1216(detail: String) -> Diagnostic Never! {

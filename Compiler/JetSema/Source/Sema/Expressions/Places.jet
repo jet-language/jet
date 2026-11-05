@@ -531,14 +531,6 @@ fn sema_expression_vjp_run_field(gradient: Type, member: String) -> Type? {
 // `field` is the whole `base.member` expression (spanning `span`): the moved
 // checks read it in place instead of rebuilding it around a copy of `base`.
 fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // Rust infer_field diagnoses the foreign surface before reading `os`,
-    // without treating a lexical `os` binding as an exemption.
-    if base == .Ident(root, _, _) && root == "os" && member == "environ" {
-        // Native Field carries the whole path; Rust Field carries its member.
-        member_span :: Span{start: span.end - member.len(), end: span.end}
-        &diagnostics.push(sema_error("E0039", member_span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
-        return None
-    }
     // `task.x` with no local named `task` in scope: `x` is not a task
     // combinator (the parser takes only the complete task surface), so teach
     // the selectors rather than report an unknown `task`.

@@ -1,6 +1,6 @@
-// Marker types (a struct's `impl Marker { … }` block), the retired `marker`
-// declarations, fact declarations and bracketed marker groups. Fact
-// parameters read typed arguments and fixed `$` facts in one list.
+// Marker types (a struct's `impl Marker { … }` block), fact declarations and
+// bracketed marker groups. Fact parameters read typed arguments and fixed `$`
+// facts in one list.
 use {
     jet_foundation.[
         AccessConvention,
@@ -28,7 +28,6 @@ use {
         TOKEN_COMMA,
         TOKEN_DOT_DOT_DOT,
         TOKEN_EOF,
-        TOKEN_EQ,
         TOKEN_GT,
         TOKEN_HASH,
         TOKEN_IDENT,
@@ -75,92 +74,8 @@ fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
     if label == { .Val(value) -> value.name else -> "" }
 }
 
-// The retired `marker Name(…)` and `marker Name = #[…]` declarations, and the
-// older checked-text `marker Name on …`, read only so the parser can teach
-// the struct form.
-fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
-    if !(parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT) -> return false
-    third :: parser_lookahead(&state, 2)
-    third.kind == TOKEN_LPAREN || third.kind == TOKEN_EQ || (third.kind == TOKEN_IDENT && parser_value(state, third) == "on")
-}
-
 fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "fact" && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN
-}
-
-// A retired marker declaration teaches E0381 with the struct form as its
-// edit, so `jet fix` rewrites it. The declaration still reaches sema, so its
-// uses report nothing more. The checked-text form and the rejected trailers
-// (an `on` clause, a second parameter list) teach E0381 without an edit.
-fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
-    start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "the marker name after `marker`")
-    marker_name :: parser_value(state, name)
-    head :: parser_cover(start.span, name.span)
-    if parser_current_kind(&state) == TOKEN_EQ {
-        parser_bump(&state)
-        group :: parser_parse_marker_group_entries(&state, true)
-        span :: parser_cover(start.span, group.span)
-        struct_text :: parser_retired_marker_group_text(state, start.span.start, marker_name, group.span)
-        parser_report_retired_marker(&state, marker_name, head, span, struct_text)
-        return Item.MarkerDecl{value: MarkerDecl{
-            name: marker_name, name_span: name.span, is_pub: modifiers.is_pub,
-            is_package_pub: modifiers.is_package_pub, group: Val(group.markers),
-            params: [MarkerDeclParam]{}, body: None, span: span,
-        }}
-    }
-    on :: parser_current(&state)
-    if on.kind == TOKEN_IDENT && parser_value(state, on) == "on" {
-        parser_skip_marker_trailer(&state)
-        parser_add_fatal_code(&state, "E0381", on.span, "the checked-text marker declaration is retired", "a marker is a struct whose `impl Marker` block gives its settings; `sites` records legal sites, and checked-text contracts are not a separate marker form", "write `struct {marker_name} {{ impl Marker {{ sites :: [.Text] }} }}` for a plain rule, or use a built-in typed text head")
-        return Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
-    }
-    open :: parser_current(&state).span
-    params :: parser_marker_decl_params(&state)
-    close :: parser_lookahead(&state, -1).span
-    body := [DeriveBodyItem]?{None}
-    body_span := Span?{None}
-    rejected := false
-    end := close
-    trailer :: parser_current(&state)
-    if {
-        trailer.kind == TOKEN_LBRACE -> {
-            body = Val(parser_marker_body(&state))
-            end = parser_lookahead(&state, -1).span
-            body_span = Val(parser_cover(trailer.span, end))
-        }
-        trailer.kind == TOKEN_IDENT && parser_value(state, trailer) == "on" -> {
-            parser_skip_marker_trailer(&state)
-            parser_add_error_code(&state, "E0381", trailer.span, "a trailing `on` clause isn't how a marker states a fact", "a marker is a struct whose `impl Marker` block gives its settings, the legal sites among them — not a clause after a parameter list", "declare `struct {marker_name} {{ impl Marker {{ sites :: [.Function, …] }} }}`")
-            end = parser_lookahead(&state, -1).span
-            rejected = true
-        }
-        trailer.kind == TOKEN_LPAREN -> {
-            parser_skip_marker_trailer(&state)
-            parser_add_error_code(&state, "E0381", trailer.span, "a second parameter list isn't how a marker states a fact", "a marker's arguments are its struct's fields and its facts are the settings of its `impl Marker` block — not two parameter lists", "declare `struct {marker_name} {{ impl Marker {{ sites :: […]  repeatable :: true }} }}`")
-            end = parser_lookahead(&state, -1).span
-            rejected = true
-        }
-        else -> {}
-    }
-    if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
-    span :: parser_cover(start.span, end)
-    if !rejected {
-        struct_text :: parser_retired_marker_struct_text(state, start.span.start, marker_name, open, close, body_span)
-        parser_report_retired_marker(&state, marker_name, head, span, struct_text)
-    }
-    Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, body: body, span: span}}
-}
-
-fn parser_report_retired_marker(state: &JetParserState, name: String, head: Span, span: Span, struct_text: String?) {
-    what :: "`marker {name}` is a retired declaration"
-    why :: "a marker is a struct: its fields are the marker's arguments, and its `impl Marker {{ … }}` block gives the marker's settings, its group or its `fn expand(self, target: Target)` template"
-    fix :: "declare `struct {name} {{ … impl Marker {{ … }} }}`; `jet fix` rewrites this declaration"
-    if struct_text == .Val(new_text) {
-        parser_add_error_code_edit(&state, "E0381", head, what, why, fix, TextEdit{span: span, new_text: new_text})
-    } else {
-        parser_add_error_code(&state, "E0381", head, what, why, fix)
-    }
 }
 
 // The settings an `impl Marker` block may give.
@@ -283,159 +198,6 @@ fn parser_finish_marker_struct(state: &JetParserState, value: &StructDef) {
     declaration.params = params
     declaration.span = value.span
     value.marker = Val(declaration)
-}
-
-// The leading blanks of the line `offset` sits on.
-fn parser_line_indent(state: JetParserState, offset: Int) -> String Never! {
-    source :: state.sources[0]
-    line := offset
-    loop line > 0 && Int.from_u8(source[line - 1]) != 10 -> line -= 1
-    end := line
-    loop end < offset && (Int.from_u8(source[end]) == 32 || Int.from_u8(source[end]) == 9) -> end += 1
-    String.from_bytes(source.slice(line, end)) ?? ""
-}
-
-fn parser_marker_source_text(state: JetParserState, span: Span) -> String? Never! {
-    if span.start < 0 || span.end > state.sources[0].len() || span.end < span.start -> return None
-    text :: String.from_bytes(state.sources[0].slice(span.start, span.end)) ?? return None
-    Val(text)
-}
-
-fn parser_bytes_text(bytes: [U8], start: Int, end: Int) -> String Never! {
-    String.from_bytes(bytes.slice(start, end)) ?? ""
-}
-
-// Every line after the first gains `prefix`; blank lines stay empty.
-fn parser_indent_lines(text: String, prefix: String) -> String Never! {
-    out := [String]{}
-    loop line in text.split("\n") {
-        if {
-            out.len() == 0 -> &out.push(line)
-            line.trim() == "" -> &out.push("")
-            else -> &out.push("{prefix}{line}")
-        }
-    }
-    out.join("\n")
-}
-
-// The top-level comma-separated parts of a parameter list, each trimmed and
-// folded onto one line.
-fn parser_marker_param_parts(text: String) -> [String] Never! {
-    bytes :: text.bytes()
-    parts := [String]{}
-    depth := 0
-    quoted := false
-    escaped := false
-    start := 0
-    loop (index, byte) in bytes {
-        code :: Int.from_u8(byte)
-        if quoted {
-            if {
-                escaped -> escaped = false
-                code == 92 -> escaped = true
-                code == 34 -> quoted = false
-                else -> {}
-            }
-            next
-        }
-        if {
-            code == 34 -> quoted = true
-            code == 40 || code == 91 || code == 123 -> depth += 1
-            code == 41 || code == 93 || code == 125 -> depth -= 1
-            code == 44 && depth == 0 -> {
-                &parts.push(parser_one_line(parser_bytes_text(bytes, start, index)))
-                start = index + 1
-            }
-            else -> {}
-        }
-    }
-    last :: parser_one_line(parser_bytes_text(bytes, start, bytes.len()))
-    if last != "" -> &parts.push(last)
-    parts
-}
-
-fn parser_one_line(text: String) -> String Never! {
-    lines := [String]{}
-    loop line in text.split("\n") {
-        trimmed :: line.trim()
-        if trimmed != "" -> &lines.push(trimmed)
-    }
-    lines.join(" ")
-}
-
-// The struct form of a retired `marker Name(…) { … }`; None when a comment
-// inside the parameter list has no place to move to.
-fn parser_retired_marker_struct_text(state: JetParserState, start: Int, name: String, open: Span, close: Span, body: Span?) -> String? Never! {
-    indent :: parser_line_indent(state, start)
-    inner :: parser_marker_source_text(state, Span{start: open.end, end: close.start}) ?? return None
-    if inner.contains("//") || inner.contains("/*") -> return None
-    fields := [String]{}
-    settings := [String]{}
-    loop part in parser_marker_param_parts(inner) {
-        bytes :: part.bytes()
-        colon := 0
-        loop colon < bytes.len() && Int.from_u8(bytes[colon]) != 58 -> colon += 1
-        if colon == bytes.len() -> return None
-        label :: parser_bytes_text(bytes, 0, colon).trim()
-        rest :: parser_bytes_text(bytes, colon + 1, bytes.len()).trim()
-        if {
-            label.starts_with("$") -> &settings.push("{parser_bytes_text(label.bytes(), 1, label.bytes().len())} :: {rest}")
-            rest.starts_with("...") -> &fields.push("{label}: [{parser_bytes_text(rest.bytes(), 3, rest.bytes().len()).trim()}]")
-            else -> &fields.push("{label}: {rest}")
-        }
-    }
-    lines := [String]{"struct {name} {{"}
-    loop field in fields -> &lines.push("{indent}    {field}")
-    if fields.len() > 0 -> &lines.push("")
-    &lines.push("{indent}    impl Marker {{")
-    loop setting in settings -> &lines.push("{indent}        {setting}")
-    if body == .Val(span) {
-        written :: parser_marker_source_text(state, span) ?? return None
-        if settings.len() > 0 -> &lines.push("")
-        &lines.push("{indent}        fn expand(self, target: Target) {parser_indent_lines(written, "        ")}")
-    }
-    &lines.push("{indent}    }}")
-    &lines.push("{indent}}}")
-    Val(lines.join("\n"))
-}
-
-// The struct form of a retired `marker Name = #[…]` group.
-fn parser_retired_marker_group_text(state: JetParserState, start: Int, name: String, group: Span) -> String? Never! {
-    indent :: parser_line_indent(state, start)
-    written :: parser_marker_source_text(state, group) ?? return None
-    members :: parser_indent_lines(written, "    ")
-    Val("struct {name} {{\n{indent}    impl Marker {{\n{indent}        group :: {members}\n{indent}    }}\n{indent}}}")
-}
-
-// Consume a rejected marker-declaration trailer (the `on` word and its
-// bracketed list, or a second parameter list) so parsing resumes after the
-// one teaching diagnostic; an enclosing closer is never eaten.
-fn parser_skip_marker_trailer(state: &JetParserState) Never! {
-    depth := 0
-    opened := false
-    loop {
-        kind :: parser_current_kind(&state)
-        if kind == TOKEN_EOF -> return
-        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET {
-            depth += 1
-            opened = true
-            parser_bump(&state)
-            next
-        }
-        if parser_is_closer(kind) {
-            if depth == 0 -> return
-            parser_bump(&state)
-            depth -= 1
-            if depth == 0 && parser_current_kind(&state) != TOKEN_LBRACE -> return
-            next
-        }
-        if kind == TOKEN_SEMI && depth == 0 {
-            parser_bump(&state)
-            return
-        }
-        if depth == 0 && opened -> return
-        parser_bump(&state)
-    }
 }
 
 fn parser_parse_fact_decl(state: &JetParserState) -> Item {

@@ -158,7 +158,6 @@ struct JetCLIReservedEntry {
 JET_CLI_TEACHING_RESERVED :: [JetCLIReservedEntry]{
     {spelling: "copy", kind: "reserved word", note: "a copy is the method `value.copy()`"},
     {spelling: "const", kind: "reserved word", note: "a constant is `NAME :: value`"},
-    {spelling: "unsafe", kind: "reserved word", note: "the foreign spelling; write `#Unsafe(\"reason\") {{ … }}` instead (E0031/E0003)"},
 }
 
 // CLI.rs `RESERVED_SIGILS`: sigils with compiler meaning outside ordinary operators.
@@ -886,9 +885,6 @@ fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPl
     positional :: jet_cli_inspect_positionals(args)
     dry_run :: args.contains("--dry-run")
     yes :: args.contains("--yes")
-    if positional.len() == 2 && positional[0] == "dry-run" {
-        return jet_cli_inspect_b_error("E2105", "`jet inspect codemod dry-run` is retired; use `jet inspect codemod <plan.json> --dry-run`", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    }
     if {
         positional.len() == 1 && dry_run -> return JetCLIPlan.Codemod{action: "plan", path: positional[0], yes: yes, color: color, json: json}
         positional.len() == 2 && positional[0] == "apply" && !dry_run -> return JetCLIPlan.Codemod{action: "apply", path: positional[1], yes: yes, color: color, json: json}

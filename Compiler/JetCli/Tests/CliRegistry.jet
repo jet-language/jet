@@ -41,11 +41,6 @@ fn cli_registry_tables() Never! {
 fn cli_registry_moved_commands() Never! {
     loop group in JET_CLI_COMMANDS {
         loop action in group.actions {
-            if action.name == "install" {
-                cli_registry_require(action.handler == "SharedStore", "install routes to the shared store")
-                cli_registry_require(jet_cli_moved_command(action.name) == .None, "install keeps its E0043 teaching")
-                next
-            }
             if action.also_canonical_top_level || cli_registry_is_command(action.name) {
                 cli_registry_require(jet_cli_is_canonical_top_level(action.name), "{action.name} is canonical")
                 cli_registry_require(jet_cli_moved_command(action.name) == .None, "{action.name} is not moved")

@@ -229,18 +229,11 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
 }
 
 // Rust: crates/jet-parser/src/lib.rs:430
-#Test("retired_memory_policy_names_point_to_effect_denials") {
-    loop testcase in [
-        (source: "#Policy(no_alloc)\nfn run() {{}}\n", replacement: "!Mem.Alloc"),
-        (source: "#Policy(zero_rc)\nfn run() {{}}\n", replacement: "!Mem.Rc"),
-        (source: "#Policy(arena_bounded(65536))\nfn run() {{}}\n", replacement: "!Mem.Alloc(above: 65536)"),
-    ] {
-        source :: testcase.source
-        replacement :: testcase.replacement
+#Test("memory floor words are not scoped policies") {
+    loop source in ["#Policy(no_alloc)\nfn run() {{}}\n", "#Policy(zero_rc)\nfn run() {{}}\n"] {
         result :: parser_test_result(source)
-        assert(!result.diagnostics.is_empty(), "memory floor words are retired")
         found := false
-        loop diagnostic in result.diagnostics { if diagnostic.code == "E0355" && diagnostic.fix.contains(replacement) -> found = true }
+        loop diagnostic in result.diagnostics { if diagnostic.code == "E0355" && diagnostic.fix.contains("`!Mem.*` effect denials") -> found = true }
         assert(found)
     }
 }

@@ -728,7 +728,7 @@ fn sema_incremental_function_header(function: Func) -> Func Never! {
         gc_return: function.gc_return, diverges: function.diverges, gc_scope: function.gc_scope,
         is_unsafe: function.is_unsafe, unsafe_reason: function.unsafe_reason,
         unsafe_span: function.unsafe_span, is_pure: function.is_pure,
-        is_sanitizer: function.is_sanitizer, scrub_tag: function.scrub_tag,
+        scrub_tag: function.scrub_tag,
         declared_effects: function.declared_effects, effect_via: function.effect_via,
         state_requires: function.state_requires, state_transition: function.state_transition,
         is_reactive: function.is_reactive, reactive_upgrades: function.reactive_upgrades,
@@ -3088,7 +3088,6 @@ fn sema_keep_going_stub_source(func: Func) -> Func {
         unsafe_reason: func.unsafe_reason,
         unsafe_span: func.unsafe_span,
         is_pure: func.is_pure,
-        is_sanitizer: func.is_sanitizer,
         scrub_tag: func.scrub_tag,
         declared_effects: func.declared_effects,
         effect_via: func.effect_via,
@@ -3174,6 +3173,8 @@ fn sema_check_registered_method_stub(job: SemaBodyJob, module_index: Int, memory
 fn sema_check_registration_module_start(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], scopes: &SemaScopeTable) -> SemaGraphModuleResult {
     if program.registration_graph == .Val(graph) {
         diagnostics := [Diagnostic]{}
+        // The module's unknown applied rules (E0927) do not stop its check.
+        if module_index < graph.unknown_rule_diagnostics.len() -> loop diagnostic in graph.unknown_rule_diagnostics[module_index] -> &diagnostics.push(diagnostic)
         complete := graph.complete
         incomplete_reasons := [String]{}
         if !graph.complete -> &incomplete_reasons.push("registration graph is incomplete")

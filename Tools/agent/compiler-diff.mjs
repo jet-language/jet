@@ -345,7 +345,6 @@ function uiCommands(source, file) {
   const arg = (directive) => lines.find((line) => line.startsWith(`// @${directive} `))?.slice(directive.length + 4).trim();
   const complexity = arg("complexity_cli");
   if (has("typed_settings_cli")) return [{ phase: "check", args: ["check", file, "--set", "cli_only=true"] }];
-  if (has("cli_e0043")) return [{ phase: "check", args: ["install"] }];
   if (has("cli_e2101")) return [{ phase: "check", args: ["bench"] }];
   if (has("cli_e1219")) return [{ phase: "build", args: ["build", file, "--profile=turbo"] }];
   if (has("cli_build")) return [{ phase: "build", args: ["build", file] }];

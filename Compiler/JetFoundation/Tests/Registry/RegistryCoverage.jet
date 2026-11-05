@@ -33,7 +33,7 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
 
 // tests/diagnostics_coverage.rs:514.
 #Test("registered_codes_keep_explicit_severity_and_lint_names") {
-    loop expected in [(code: "E2930", severity: DIAGNOSTIC_LINT), (code: "W0410", severity: DIAGNOSTIC_LINT), (code: "R0801", severity: DIAGNOSTIC_ERROR), (code: "E0043", severity: DIAGNOSTIC_ERROR)] {
+    loop expected in [(code: "E2930", severity: DIAGNOSTIC_LINT), (code: "W0410", severity: DIAGNOSTIC_LINT), (code: "R0801", severity: DIAGNOSTIC_ERROR), (code: "E0003", severity: DIAGNOSTIC_ERROR)] {
         row :: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
         assert(row.severity == expected.severity, "{expected.code} must keep the registry row's explicit severity")
     }
@@ -102,6 +102,23 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     }
     assert(seen.len() > 100, "the typed diagnostic rows must be populated")
     assert_eq(duplicates.join("\n"), "")
+}
+
+// Jet teaches no foreign or retired spelling, so no Active row is named for
+// one. The FFI rows name the foreign-function boundary itself. The Jetpack
+// rows are retired with Jetpack's generic flag and ref errors.
+REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E3215", "E3216", "E3220", "E3222"}
+REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
+
+#Test("no_active_row_teaches_a_foreign_or_retired_spelling") {
+    teaching := [String]{}
+    loop row in diagnostic_registry_rows() {
+        if row.status != DiagnosticRegistryStatus.Active -> next
+        if !row.name.starts_with("jet.Foreign") && !row.name.starts_with("jet.Retired") -> next
+        if registry_coverage_has(REGISTRY_COVERAGE_FFI_ROWS, row.code) || registry_coverage_has(REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS, row.code) -> next
+        &teaching.push("{row.code} {row.name}")
+    }
+    assert_eq(teaching.join("\n"), "")
 }
 
 // Every stage column holds one value of the closed stage set: in the generated

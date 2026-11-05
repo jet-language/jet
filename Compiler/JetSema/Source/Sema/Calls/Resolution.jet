@@ -19,7 +19,6 @@ use jet_foundation.[
     TMethodRef,
     TextEdit,
     Type,
-    diagnostic_registry_row,
     diagnostic_with_edit,
     type_name,
 ]
@@ -435,12 +434,6 @@ fn sema_call_method_shape_matches(candidate: SemaCallMethodCandidate, method: St
     sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, &probe, span, &probe_diagnostics) != None
 }
 
-fn sema_call_retired_raw_directory_error(receiver_type: Type, method: String, span: Span) -> Diagnostic? {
-    if receiver_type != Type.String || method != "read_dir" -> return None
-    row :: diagnostic_registry_row("E0340") ?? panic("E0340 must have a registry row")
-    Val(sema_error("E0340", span, row.what, row.why, row.fix))
-}
-
 fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     receiver_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
@@ -452,10 +445,6 @@ fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg]
         }
     }
     if receiver_matches.len() == 0 {
-        if sema_call_retired_raw_directory_error(receiver_type, method, span) == .Val(diagnostic) {
-            &diagnostics.push(diagnostic)
-            return None
-        }
         &diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
         return None
     }

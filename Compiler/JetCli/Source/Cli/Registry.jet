@@ -60,7 +60,7 @@ fn jet_cli_nested_command(group: String, action: String) -> JetCLIActionRef? Nev
 
 // A bare nested-action word typed as a top-level command (`jet publish`).
 // Group names, top-level commands, and actions that are also canonical at the
-// top level win the bare word; E0043 keeps bare `install` for its own teaching.
+// top level win the bare word.
 fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     if jet_cli_command_index(name) != None -> return None
     loop command in JET_CLI_COMMANDS {
@@ -71,7 +71,7 @@ fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     loop (group_index, command) in JET_CLI_COMMANDS {
         loop (action_index, action) in command.actions {
             if action.name == name {
-                if action.also_canonical_top_level || action.name == "install" -> return None
+                if action.also_canonical_top_level -> return None
                 return Val(JetCLIActionRef{group: group_index, action: action_index})
             }
         }
@@ -79,14 +79,13 @@ fn jet_cli_moved_command(name: String) -> JetCLIActionRef? Never! {
     None
 }
 
-// Canonical top-level spellings: never a moved action or the E0043
-// teaching-only `install`.
+// Canonical top-level spellings: never a moved action.
 fn jet_cli_is_canonical_top_level(name: String) -> Bool Never! {
-    jet_cli_moved_command(name) == None && name != "install"
+    jet_cli_moved_command(name) == None
 }
 
-// Is `name` a word the host dispatches: a command, a normalized handler
-// word, or the E0043 `install` teaching path?
+// Is `name` a word the host dispatches: a command or a normalized handler
+// word?
 fn jet_cli_is_builtin(name: String) -> Bool Never! {
     if jet_cli_command_index(name) != None -> return true
     loop command in JET_CLI_COMMANDS {
@@ -95,7 +94,7 @@ fn jet_cli_is_builtin(name: String) -> Bool Never! {
             if JET_CLI_HANDLERS[handler].dispatch_word == name -> return true
         }
     }
-    name == "install"
+    false
 }
 
 fn jet_cli_is_known_flag(flag: String) -> Bool Never! {

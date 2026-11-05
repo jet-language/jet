@@ -42,8 +42,8 @@ COMMAND_ROLE_FILES :: [String]{
 
 /// (ratified 2026-08-20): named struct construction `Type{ field: val }`.
 /// Inferred form (type from context): `{ field: val }` — no type name.
-/// The retired dotted forms (`.{…}`, `Type.{…}`) are compile errors (E0320).
-/// `jet fmt` still rewrites them. (ratified 2026-06-30): the same
+/// The retired dotted forms (`.{…}`, `Type.{…}`) are not Jet syntax.
+/// (ratified 2026-06-30): the same
 /// sigil also constructs a named-payload enum variant — `.Variant{ field: val }`
 /// / `Type.Variant{ field: val }` (S30 multi-field variants). No new token;
 /// `enum_lit_named_fields` in `Parser/Expressions.rs` parses `{` immediately
@@ -264,12 +264,11 @@ KW_CHANGE :: "change"
 /// escapes, vs. the conservative flow-through default). Erased in codegen (I3).
 KW_VIA :: "via"
 
-/// (ratified): the rejected `reorder` verb — field reordering is not
-/// a tracked breaking change and needs no migration. Kept only to teach.
+/// The rejected `reorder` verb: field reordering is not a tracked breaking
+/// change and needs no migration. No rule accepts it.
 KW_REORDER_RETIRED :: "reorder"
 
-/// The `drop` verb a user might reach for instead of `remove` — kept
-/// only to emit the E0911 teaching error pointing at `remove`.
+/// `drop` is not a migration verb; the verb is `remove`. No rule accepts it.
 KW_DROP_RETIRED :: "drop"
 
 /// (ratified): `jet inspect schema` subcommand and its verbs. `status`
@@ -483,8 +482,7 @@ METHOD_DROP :: "drop" // This rule method; distinct from consume builtin
 /// Canonical list of real Jet keywords for LSP completion and rename validation.
 ///
 /// Every entry corresponds to a `KW_*`, `LIT_*`, or `BUILTIN_*` constant above.
-/// FOREIGN_* teaching-error words must NOT appear here — they are recognized only
-/// to emit a diagnostic, not valid syntax.
+/// FOREIGN_* words must NOT appear here — no rule accepts them.
 JET_KEYWORD_LIST :: [String]{
     // Core structure (S1 S16, S50, U3)
     KW_FN,
@@ -526,13 +524,11 @@ JET_KEYWORD_LIST :: [String]{
     KW_REMOVE,
     KW_CHANGE,
     KW_VIA,
-    // Ownership / borrow keywords (S10, M2). Retired KW_MUTATE/KW_MOVE
-    // in favor of the `&`/`^` sigils, and retired KW_COPY (a
-    // copy is now the method `x.copy()`) — they live only as teaching errors (E0056/E0057/
-    // E0991) now, so none of them are in the keyword list. The retired
-    // `ref[label]` field spelling (once taught via KW_STORED) is gone
-    // outright with stored-reference fields (S3) — `ref` is an
-    // ordinary identifier again.
+    // Ownership / borrow keywords (S10, M2). The retired KW_MUTATE/KW_MOVE
+    // (now the `&`/`^` sigils) and KW_COPY (now the method `x.copy()`) stay
+    // lexer-reserved with no grammar rule, so none of them are in the
+    // keyword list. The retired `ref[label]` field spelling is gone outright
+    // with stored-reference fields (S3) — `ref` is an ordinary identifier.
     KW_SELF,
     // Memory / expert tier (S58)
     KW_UNSAFE,
@@ -579,7 +575,7 @@ JET_KEYWORD_LIST :: [String]{
 /// Canonical list of built-in type names for LSP completion and rename guard.
 ///
 /// Only types a user writes in source. `Result` is the legacy fallible type
-/// (S34) kept for teaching errors; it is intentionally excluded here since
+/// (S34); it is intentionally excluded here since
 /// failure contracts use the prefix spelling `!E` (or `!(E1 | E2)`).
 JET_TYPE_LIST :: [String]{
     TYPE_INT,

@@ -20,8 +20,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
-| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row; the retired `use path as alias`, `owner.[x as y]` and `owner.{…}` teach E0630 | — |
-| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
+| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row | — |
+| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
 | `struct Name { impl Marker { group :: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
@@ -32,13 +32,13 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
-| `@` | live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$` | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
+| `@` | live link (D-MEMREF1); the retired compile-time `@NAME` constant, `@` template name splices and `@` fact spellings are not Jet syntax | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
 | `comptime` | compile-time block `comptime { … }`; `NAME :: comptime { value }` is the only binding that forces compile time (a plain `NAME :: value` folds while building when it can); `@ { … }` and `prep` are retired | `D-PREP-SURFACE2=A` |
 | `comptime if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
 | `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
 | `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
-| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
+| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left` | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
 | `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) | `D-BUILD-FACT3=A; D-CACHE-CONTROL1=A` |
 | `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
 | `$phase` | total evaluation-site phase fact | `D-PREP-SURFACE2=A; D-META-ROOT3=A` |
@@ -73,7 +73,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `__core_intrinsic` | compiler-only namespace | `D-CORE-CALL1` |
 | `<:` | open a lock-step statement-expansion fence | `D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A` |
 | `:>` | close a lock-step statement-expansion fence | `D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A` |
-| `@[ … ]@` | retired fence spelling; E-FENCE-SPELLING teaches `<: … :>` | `D-FENCE2=A` |
+| `@[ … ]@` | retired fence spelling; the fence is `<: … :>` | `D-FENCE2=A` |
 
 <!-- END GENERATED LEXICAL LEDGER -->
 

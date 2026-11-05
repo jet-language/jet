@@ -83,16 +83,11 @@ fn sema_call_math_reduce_error(span: Span, what: String, why: String, fix: Strin
 }
 
 // D-REDUCE-VALUE1: `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
-// value. A retired `#Op` marker, or a written value that names no `ReduceOp`
-// variant, is E2510 before the Core `reduce` method checks the call; true
-// when it was.
+// value. A written value that names no `ReduceOp` variant is E2510 before the
+// Core `reduce` method checks the call; true when it was.
 fn sema_call_math_lane_reduce_rejected(receiver: Type, method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool Never! {
     if method != "reduce" || args.len() != 1 || sema_call_math_lane_name(receiver) == None -> return false
     if args[0].expr == {
-        .ReduceMarker(marker, marker_span, _) -> {
-            &diagnostics.push(sema_call_math_reduce_error(marker_span, "`#{marker}` is retired as a reduce selector", "reduce operations are ordinary Core `ReduceOp` enum values", "write `v.reduce(.Add)`"))
-            return true
-        }
         .EnumLit(enum_type, variant, _, payload, _, value_span, _) -> {
             if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant) -> return false
             &diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
