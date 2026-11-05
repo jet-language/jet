@@ -1,0 +1,50 @@
+# Port of tests/jetpack_nix_index.rs:100-159 (card #2158). The peer is the Jet
+# port of tests/support/nix_index_cache_server.rs; no Nix process runs.
+# Store::list_checked/closure_graph/ProducerRecord::decode are read through
+# `jetpack explain --json`: its entry, graph and provider.producer_facts.
+requires: os-name:linux
+fixture: nix-index.fixture
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/root/hangar/cas
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: PATH=/usr/bin
+mkdir: root
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet {work}/peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
+await: file {work}/peer.port timeout 30s
+capture: port = text file {work}/peer.port
+step prepare: jetpack env --env dev --prep --trust --yes --no-color
+isolate: no-nix network=enabled
+unset: JETPACK_FIXTURES
+exit: 0
+step: jetpack explain ripgrep@jetpack --json
+exit: 0
+json: stdout doc $.explain.entry.reference = "ripgrep@jetpack"
+json: stdout doc $.explain.entry.version = "15.2.0"
+# Realized.references is not empty, and every reference is a known Hangar object.
+json: stdout doc $.explain.graph.direct_dependencies #>= 1
+json: stdout doc $.explain.graph.direct_dependencies[*].known = [true]
+json: stdout doc $.explain.graph.closure #= 3
+json: stdout doc $.explain.graph.dependencies #>= 2
+capture: index_proof stdout doc $.explain.provider.producer_facts["nix.index.proof.v1"]
+cap:index_proof: nonempty # original: provenance fact nix.index.proof.v1 is present
+cap:index_proof: ~ "fixture-index-signer-v1" # original: the index proof names the index signer
+capture: record_fact stdout doc $.explain.provider.producer_facts["nix.index.record.sha256"]
+cap:record_fact: nonempty # original: provenance fact nix.index.record.sha256 is present
+capture: target_fact stdout doc $.explain.provider.producer_facts["nix.index.target.sha256"]
+cap:target_fact: nonempty # original: provenance fact nix.index.target.sha256 is present
+capture: manifest_fact stdout doc $.explain.provider.producer_facts["nix.index.manifest.sha256"]
+cap:manifest_fact: nonempty # original: provenance fact nix.index.manifest.sha256 is present
+capture: output_proof stdout doc $.explain.provider.producer_facts["nix.cache.output.out.proof.sha256"]
+cap:output_proof: nonempty # original: provenance fact nix.cache.output.out.proof.sha256 is present
+capture: closure_receipt stdout doc $.explain.provider.producer_facts["nix.cache.closure.receipt.sha256"]
+cap:closure_receipt: nonempty # original: provenance fact nix.cache.closure.receipt.sha256 is present
+json: stdout doc $.explain.provider.producer_facts["nix.native.format"] = "jet-nixpkgs-index-v1"
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
