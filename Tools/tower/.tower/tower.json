@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92500,
+    "rev": 92501,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63811,6 +63811,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "a99bc00dd4: c57 progress: a ui run filtered to one loose entry falls from 1.4-14.9 s to 0.16-0.35 s (the test's own jet call 0.06 s); golden one-entry testkit overhead is about 0.2 s, the rest is the entry's compiles. ui A/B 2,383 rows lost=0 (147.2 s -> 148.5 s at 8 jobs), golden 4,715 rows lost=0."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "c54 findings (TestSpeedLead 2026-11-05, dev 3a87a96858): (1) every jet test call does 4 fsyncs (the .jet/evidence test record and its directory via ComparisonHistory.jet:84-89 publish_immutable; the .jet/records index and its directory via RecordIndex.jet:290); check, run and build do none. At 25-30 ms per fsync on an idle disk, a 3-call case pays 0.3 s; under suite load on a 91%-full disk a 0.02 s-CPU test call took 45-50 s (0.4-0.75 s alone), and cases A/B runs swung 2,658 s vs 609 s for the same 224 test calls. (2) The golden long tail is disk and load: service_runtime 3.9 s and files_descriptor_transactions 4.4 s alone against 100+ s in suite runs. (3) ui CPU: 280 of 2,233 checks use 442 of 493 s (Core closure load, about 290 MiB of it the Unicode tables); the rest take 10 ms each. (4) suite job count is capped at memory/3 while the testkit's own budget is cgroup-aware; ui ran at a mean of 3.15 of 8 jobs."
         },
         {
@@ -64465,7 +64470,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-24T14:29:56.203Z",
-      "updated": "2026-11-05T18:49:17.993Z",
+      "updated": "2026-11-05T18:59:46.636Z",
       "updatedBy": "Main",
       "goals": [
         "G23"
@@ -174144,6 +174149,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T18:59:46.636Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fo37ov",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T18:49:17.993Z",
       "by": "Main",
