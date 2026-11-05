@@ -1,6 +1,5 @@
 /* Real Jet providers only. Separate process modes must exit 70 and match
- * DataPlotStops-{ctor-range,getter-variant}.stderr byte-for-byte.
- * Ctor range_stop: CAbiRoutes.rs:11-13,9766; wrong variant:10137-10139. */
+ * DataPlotStops-{ctor-range,getter-variant}.stderr byte-for-byte. */
 #include <stdint.h>
 #include <string.h>
 extern void jet_rt_alloc_init(void);

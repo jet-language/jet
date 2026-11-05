@@ -67,7 +67,7 @@ fn process_route_i32(value: I64) -> I64 {
     if bits >= (I64{2147483648}) -> bits - I64{4294967296} else -> bits
 }
 #Export(c) fn jet_process_spec_with_directory_raw(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
-    // ProcessSpec.rs42: duplicate its lent fd, never reopen a pathname.
+    // Duplicate its lent fd, never reopen a pathname.
     result :: jet_rt_handle_clone_process_spec(value)
     target :: process_route_i32(child_fd)
     duplicated :: host_call(I64{72}, process_route_i32(source_fd), I64{1030}, target)

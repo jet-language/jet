@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compile and execute the production Rust/Jet inline-bridge build-script templates.
+// Compile and execute the Jetpack inline-bridge build-script template.
 // Usage: node Compiler/JetIR/Tests/run-inline-foreign-link.mjs OUTDIR [SELFHOST.JET]
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -21,13 +21,11 @@ function command(label,exe,args,cwd,env={}){
 }
 const version=command('rust-version',rustc,['-vV'],root);
 assert.equal(version.status,0);const target=version.stdout.match(/^host: (.+)$/m)?.[1];assert(target);
-const rustSource=readFileSync(join(root,'crates/jet-pkg-model/src/FFI.rs'),'utf8');
 const pkgSource=readFileSync(join(root,'Jetpack/Integrations/Source/Foreign/RustBridge/WrapperEmit.jet'),'utf8');
-const rustTemplate=rustSource.split('fn emit_inline_build_rs(')[1].match(/r#"([\s\S]*?)"#/)[1];
 const pkgTemplate=pkgSource.split('fn pkg_ffi_emit_inline_build_rs(')[1].match(/\n    """\n([\s\S]*?)\n[ \t]*"""/)[1];
-function render(kind,files){
+function render(files){
  const cpp=files.some(row=>row.cpp),fileRows=files.map(row=>`(${JSON.stringify(row.name)}, ${JSON.stringify(row.cpp?cxx:cc)}, ${row.cpp}, "")`).join(', ');
- let text=kind==='rust'?rustTemplate:pkgTemplate;
+ let text=pkgTemplate;
  const quote=JSON.stringify;
  const fields={target:quote(target),proof_suffix:quote('so'),undefined:quote('-Wl,--no-undefined'),archiver:quote(ar),files:fileRows,runtime:cpp?'println!("cargo:rustc-link-lib=dylib=stdc++");':'',target_debug:quote(target),proof_suffix_debug:quote('so'),undefined_debug:quote('-Wl,--no-undefined'),archiver_debug:quote(ar),file_rows:fileRows,file_rows_text:fileRows};
  for(const [name,value]of Object.entries(fields))text=text.replaceAll('{'+name+':?}',value).replaceAll('{'+name+'}',value);
@@ -38,11 +36,11 @@ const cases=[
  {name:'mixed-cpp',files:[{name:'owner.c',source:'#include <stdint.h>\nint64_t inline_shared_word=40;',cpp:false},{name:'read.cpp',source:'#include <stdint.h>\n#include <string>\nextern "C" { extern int64_t inline_shared_word; int64_t inline_read(void){return inline_shared_word+(int64_t)std::string("a").size();}}',cpp:true}],main:'#include <stdint.h>\nint64_t inline_read(void); int main(void){return inline_read()!=41;}'},
  {name:'missing-definition',files:[{name:'missing.c',source:'#include <stdint.h>\nextern int64_t inline_missing_definition; int64_t inline_read(void){return inline_missing_definition;}',cpp:false}],reject:true},
 ];
-for(const kind of ['rust','package'])for(const fixture of cases){
- const label=kind+'-'+fixture.name,folder=join(out,label);mkdirSync(folder,{recursive:true});mkdirSync(join(folder,'objects'),{recursive:true});
+for(const fixture of cases){
+ const label='package-'+fixture.name,folder=join(out,label);mkdirSync(folder,{recursive:true});mkdirSync(join(folder,'objects'),{recursive:true});
  try{
   for(const file of fixture.files)writeFileSync(join(folder,file.name),file.source);
-  writeFileSync(join(folder,'build.rs'),render(kind,fixture.files));
+  writeFileSync(join(folder,'build.rs'),render(fixture.files));
   let result=command(label+'-rustc',rustc,['--edition=2021','build.rs','-o','build-script'],folder);assert.equal(result.status,0,result.stderr);
   result=command(label+'-build',join(folder,'build-script'),[],folder,{TARGET:target,OUT_DIR:join(folder,'objects')});
   if(fixture.reject){assert.notEqual(result.status,0,'undefined-symbol proof unexpectedly accepted a missing definition');assert.match(result.stderr,/inline_missing_definition/);}

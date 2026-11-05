@@ -541,7 +541,7 @@ int main(int argc, char **argv, char **envp) {
             jet_rt_native_task_cancel(task);
             atomic_store_explicit(&env.proceed, true, memory_order_release);
         }
-        /* Observe.rs prefixes the canonical child identity + ': '. */
+        /* The panic report prefixes the canonical child identity + ': '. */
         Text *identity = jet_rt_string_clone(*(Text **)((unsigned char *)(uintptr_t)task + 128));
         int64_t out[4] = {0};
         assert(jet_rt_native_task_join(task, 0, WORD(out)) == 0);

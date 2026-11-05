@@ -1,9 +1,9 @@
-// PBKDF2-HMAC-SHA256, RFC8018/RFC7914 section11; SHAFamily.rs395-426.
-// Borrowed password/salt and disjoint caller-owned output; scratch872 aligned8
-// is exclusive/disjoint and wiped on every return. No allocation/concatenation.
-// Layout: HMAC672, prepared ipad64/opad64, U32, accumulator32, BE counter4 +4.
-// Password normalization and key XOR pads are computed once per derivation.
-// All loops/addresses depend on public lengths/iteration count, not secrets.
+// PBKDF2-HMAC-SHA256, RFC8018/RFC7914 section11. Borrowed password/salt and
+// disjoint caller-owned output; scratch872 aligned8 is exclusive/disjoint and
+// wiped on every return. No allocation/concatenation. Layout: HMAC672, prepared
+// ipad64/opad64, U32, accumulator32, BE counter4 +4. Password normalization and
+// key XOR pads are computed once per derivation. All loops/addresses depend on
+// public lengths/iteration count, not secrets.
 fn rt_crypto_pbkdf2(password: I64, password_len: I64, salt: I64, salt_len: I64, iterations: I64, output: I64, length: I64, scratch: I64) -> Bool {
     if (iterations <= I64{0} || length < I64{0} || length > I64{67108864} || password_len < I64{0} || password_len > I64{9223372036854775735} || salt_len < I64{0} || salt_len > I64{9223372036854775667}) {
         rt_crypto_wipe(scratch, I64{872})

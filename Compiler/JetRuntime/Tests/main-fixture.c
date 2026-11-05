@@ -81,8 +81,8 @@ static int64_t fatal_worker(int64_t env, int64_t out) {
     return 0;
 }
 static void observe_cycles(int enabled) {
-    /* Rust Observe.rs:730/734-753 returns for disabled/invalid identity and
-       resets EXIT_REPORTED on accepted starts; report:850 swaps true.
+    /* The Rust original returned for disabled/invalid identity and
+       reset EXIT_REPORTED on accepted starts; its report swapped true.
        Jet ObserveLive:582-635/710-712 already has the same accepted reset.
        These are real API cycles, not two parked Main returns (first exits70). */
     for (unsigned cycle = 0; cycle != 2; ++cycle) {

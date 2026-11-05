@@ -11,7 +11,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const here=join(root,'Compiler/JetRuntime/Tests');
 const [mode,outArg,object]=process.argv.slice(2);
 if (mode === '--freeze') {
-  console.log(JSON.stringify({status: 'UNCOVERED', cardRequired: true, reason: '--freeze Rust seed oracle (cargo build of the Layout.rs reference) retired (owner #38/#59; Tower #4923): LayoutSeed.json is not regenerated; no cargo/rustc invoked'}));
+  console.log(JSON.stringify({status: 'UNCOVERED', cardRequired: true, reason: '--freeze Rust seed oracle (cargo build of the Rust layout reference) retired (owner #38/#59; Tower #4923): LayoutSeed.json is not regenerated; no cargo/rustc invoked'}));
   process.exit(2);
 }
 if(mode!=='--native'||!outArg||!object) throw Error('usage: run-native-layout.mjs --native OUT fresh-runtime.o');

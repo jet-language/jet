@@ -1,6 +1,6 @@
 // Real Jet-object client; link --wrap=jet_rt_free. No runtime substitutes.
-// Native TextGlueABI layout. Goldens: FieldError.rs10-16, Regex.rs294-307,
-// CommonTypes.rs6647-6696 (single message copied verbatim by every render).
+// Native TextGlueABI layout. Goldens: a single message copied verbatim by every
+// render.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>

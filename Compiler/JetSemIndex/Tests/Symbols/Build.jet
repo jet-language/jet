@@ -17,7 +17,6 @@ fn semantic_s14_from_checked(db: SymbolDB, registration: SemaRegistrationGraph, 
     semindex_build_semantic_symbol_index(db, registration, names, module_sources, loaded_module_rows)
 }
 
-// tests/semindex.rs98–109.
 fn semantic_s14_contextual_result_source() -> String Never! { "fn run() {{}}\n" }
 fn semantic_s14_contextual_result_names_are_not_advertised_as_keywords(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
@@ -29,7 +28,7 @@ fn semantic_s14_contextual_result_names_are_not_advertised_as_keywords(db: Symbo
     }
 }
 
-// tests/semindex.rs132–165. Exact initial and final LF are part of the fixture.
+// Exact initial and final LF are part of the fixture.
 fn semantic_s14_distinct_unit_source() -> String Never! {
     "\n#Numeric UserID :: distinct Int\n#UnitFamily(Currency) {{ usd }}\n\nfn run() {{}}\n"
 }
@@ -48,14 +47,13 @@ fn semantic_s14_source_distinct_and_unit_conversion_members_are_cataloged(db: Sy
     assert(found)
 }
 
-// tests/semindex.rs169–226. C4 must use semindex_s20_checked_text_source().
-// json and dossier_text must be the real S19 codec/dossier outputs over db.index.
+// C4 must use semindex_s20_checked_text_source(). json and dossier_text must be
+// the real S19 codec/dossier outputs over db.index.
 fn semantic_s14_checked_text_contract_is_one_tooling_fact(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int], json: String, dossier_text: String) Never! {
     symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
     semindex_s20_checked_text_assertions(db.index, symbols, json, dossier_text)
 }
 
-// tests/semindex.rs230–248.
 fn semantic_s14_affine_unit_source() -> String Never! {
     "\n#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}}\n\nfn run() {{}}\n"
 }
@@ -66,7 +64,7 @@ fn semantic_s14_affine_unit_point_and_delta_members_are_cataloged(db: SymbolDB, 
     assert(symbols.lookup_qualified("Celsius.from_float") == None)
 }
 
-// tests/semindex.rs612–645, exact original docs and checked local producer.
+// Exact original docs and checked local producer.
 fn semantic_s14_shared_docs_source() -> String Never! {
     "\n/// Scores one name.\n/// Example: score(\"Ada\")\nfn score(name: String) -> Int {{\n    return 1\n}}\n\nfn run() {{\n    local_total :: score(\"Ada\")\n    print(local_total)\n}}\n"
 }
@@ -85,8 +83,8 @@ fn semantic_s14_semantic_symbols_carry_shared_docs_and_provenance(db: SymbolDB, 
     assert_eq(local[0][0].kind, SemanticSymbolKind.Local)
 }
 
-// tests/semindex.rs649–689: exact source and UTF8 BYTE binding start, including
-// typed origin read facts and full index JSON from the real codec producer.
+// Exact source and UTF8 BYTE binding start, including typed origin read facts
+// and full index JSON from the real codec producer.
 fn semantic_s14_tracked_float_source() -> String Never! {
     "fn run() {{\n    #Track speed :: 3.5\n    origin :: comptime {{ speed.$origin }}\n    print(origin?.source ?? \"missing\")\n}}\n"
 }
@@ -138,7 +136,7 @@ fn semantic_s14_tracked_float_symbol_exposes_its_binding_site(db: SymbolDB, regi
     assert(fact_found)
 }
 
-// tests/semindex.rs693–720: same names in two actual inline modules.
+// Same names in two actual inline modules.
 fn semantic_s14_collisions_source() -> String Never! {
     "\nmodule first {{\n    struct Item {{\n        value: Int\n    }}\n}}\n\nmodule second {{\n    struct Item {{\n        value: String\n    }}\n}}\n\nfn run() {{}}\n"
 }
@@ -152,9 +150,9 @@ fn semantic_s14_semantic_symbols_keep_module_and_member_collisions_distinct(db: 
     assert(values[0][0].identity != values[1][0].identity)
 }
 
-// tests/semindex.rs724–739. S16 owns checked builtin contracts and the approved
-// no-arrow catalog golden cutover; compare to its SAME shared doc symbol,
-// retain exact substantive summary/provenance/completion assertions.
+// S16 owns checked builtin contracts and the approved no-arrow catalog golden
+// cutover; compare to its SAME shared doc symbol, retain exact substantive
+// summary/provenance/completion assertions.
 fn semantic_s14_builtins_source() -> String Never! { "fn run() {{}}\n" }
 fn semantic_s14_semantic_symbols_include_language_builtins(db: SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     symbols :: semantic_s14_from_checked(db, registration, names, module_sources, loaded_module_rows)
@@ -180,7 +178,6 @@ fn semantic_s14_semantic_symbols_include_language_builtins(db: SymbolDB, registr
     assert(found)
 }
 
-// tests/semindex.rs743–770.
 fn semantic_s14_value_tail_source() -> String Never! {
     "\nfn label(value: Int) -> String {{\n    if value == {{\n        1 -> {{ \"one\" }}\n        else -> {{ \"other\" }}\n    }}\n}}\n\nfn run() {{\n    print(label(1))\n}}\n"
 }
@@ -198,8 +195,8 @@ fn semantic_s14_semantic_symbols_index_value_tail_callable(db: SymbolDB, registr
     assert(found)
 }
 
-// tests/semindex.rs774–795: the canonical loader must persist both files under
-// one actual fixture root, load/check main, then pass its real graph/DB here.
+// The canonical loader must persist both files under one actual fixture root,
+// load/check main, then pass its real graph/DB here.
 fn semantic_s14_import_library_source() -> String Never! { "fn score(name: String) -> Int {{ return 1 }}\n" }
 fn semantic_s14_import_main_source() -> String Never! {
     "use api :: \"./library\"\nuse imported_score :: api.score\nfn run() {{ print(imported_score(\"Ada\")) }}\n"
@@ -235,11 +232,11 @@ fn semantic_s14_checked_import_identity_matches_definition_anchors(db: SymbolDB,
     }
 }
 
-// Real REPL Docs.rs170–181/197–217 assertion helpers, UNREGISTERED until
-// R2/R15B's NativeSession producer is available. The canonical session MUST
-// evaluate the live answer::42 binding over item fn answer()->Int{return1},
-// and the live items=[1,2] binding over Core math alias items, respectively.
-// These inputs are actual REPL completion results, never constructed symbols.
+// Real REPL assertion helpers, UNREGISTERED until R2/R15B's NativeSession
+// producer is available. The canonical session MUST evaluate the live
+// answer::42 binding over item fn answer()->Int{return1}, and the live
+// items=[1,2] binding over Core math alias items, respectively. These inputs
+// are actual REPL completion results, never constructed symbols.
 fn semantic_s14_completion_dedups_shadowed_session_item(candidates: [SemanticSymbol]) Never! {
     assert_eq(candidates.len(), 1)
     assert_eq(candidates[0].identity, "session:binding:answer")

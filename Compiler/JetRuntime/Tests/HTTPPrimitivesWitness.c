@@ -1,5 +1,5 @@
 // Real Jet-object client: link with -Wl,--wrap=jet_rt_free; no provider mocks.
-// HTTPMessage.rs195-270 supplies semantic values, not native layout.
+// The Rust original supplies semantic values, not native layout.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

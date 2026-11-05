@@ -4,9 +4,8 @@
 // C4/CP-NAMES/S12 and S7's CP-AST optional-projection/#4397 gate. No checked
 // graph or reference target is synthesized. Policy regions recurse exactly as
 // Rust3110–3115: CP-POLICY's canonical Foundation POLICY_RULES/resolver/explain
-// belong to the item walker, not here. CP-AST must publish stmt_span
-// (AST/statements.rs865–902) and the borrowed bind_pattern_names projection
-// (AST/patterns.rs278–284); no local replicas.
+// belong to the item walker, not here. CP-AST must publish stmt_span and the
+// borrowed bind_pattern_names projection; no local replicas.
 use jet_foundation.[Stmt, LValue, Binding, NamedSpan, Span, CallArg, Program, NameFacts, expr_span, type_name]
 
 fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {
@@ -104,8 +103,8 @@ fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
             semindex_collect_loop_label_def(&db, ctx, label, mp)
             semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
         }
-        // Build.rs3104–3115,3122,3142–3147: these arms deliberately index only
-        // bodies, not reason/limit/caps/member-argument/name metadata.
+        // These arms deliberately index only bodies, not
+        // reason/limit/caps/member-argument/name metadata.
         .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _)
         | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _)
         | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _)
@@ -114,7 +113,7 @@ fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program
         | .Live(body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> {
             semindex_structural_slot(&db, &ctx, "body", StructuralSlotKind.List, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_stmts(&db, &ctx, names, program, source, body, mp))
         }
-        // Original no-reference branches, Build.rs3117 (still record stmt node).
+        // Original no-reference branches (still record stmt node).
         .Break(_) | .Continue(_) -> {}
         .BreakLabel(name, span) | .ContinueLabel(name, span) -> semindex_collect_loop_label_ref(&db, ctx, names, name, span, mp)
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {

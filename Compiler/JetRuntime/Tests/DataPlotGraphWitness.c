@@ -1,6 +1,5 @@
 /* Real Jet provider only: -Wl,--wrap=jet_rt_free.
- * Private client-created carriers mirror DataABI, NOT Rust or IR layouts.
- * Derive policy: DataPlot.rs:481-485,662-666,692-711,772-804,929-967. */
+ * Private client-created carriers mirror DataABI, NOT Rust or IR layouts. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

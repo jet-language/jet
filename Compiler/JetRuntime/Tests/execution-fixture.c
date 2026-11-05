@@ -89,7 +89,7 @@ static void budget_case(unsigned mode, bool depth) {
     jet_rt_execution_end();
 }
 
-/* Scheduler.rs:855-884 old encode goldens, including exact control escapes
+/* The retired Rust scheduler's encode goldens, including exact control escapes
  * and unchanged UTF-8 bytes. Comptime's old writer only accepted budgets. */
 static const char message[] = "quote\"slash\\lf\ncr\rtab\tctl\001é中";
 static const char escaped[] = "quote\\\"slash\\\\lf\\ncr\\rtab\\tctl\\u0001é中";

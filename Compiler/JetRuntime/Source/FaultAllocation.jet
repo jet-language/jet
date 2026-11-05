@@ -1,8 +1,8 @@
 // Allocation channel of the ONE test-fault schedule, not an Alloc effect.
-// FaultInjection.rs60-72/102-114: observe every scheduled allocation, inject
-// exactly the selected fail_nth, and retain injected until schedule cleanup.
-// FaultSchedule extends this same TLS owner with effect selectors; both rails
-// share failNth and injected. State56 starts [failNth,count,active,injected].
+// Observe every scheduled allocation, inject exactly the selected fail_nth, and
+// retain injected until schedule cleanup. FaultSchedule extends this same TLS
+// owner with effect selectors; both rails share failNth and injected. State56
+// starts [failNth,count,active,injected].
 fault_allocation_key := I64{0}
 
 fn rt_fault_allocation_drop_address() -> I64 {
@@ -67,8 +67,8 @@ fn fault_allocation_should_fail() -> Bool {
 }
 
 // Facts0/1 are the channel's observed count and injection flag; clear removes
-// the target altogether, exactly FaultInjection.rs34-47. Thread detach invokes
-// the same ownership destructor even when the scheduler cancels the body.
+// the target altogether, exactly as the Rust original. Thread detach invokes the same ownership
+// destructor even when the scheduler cancels the body.
 #Export(c) fn jet_rt_fault_allocation_fact(index: I64) -> I64 {
     state :: fault_allocation_state()
     if (state == I64{0}) { return I64{0} }

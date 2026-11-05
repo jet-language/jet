@@ -1,5 +1,5 @@
 // Real Jet-object client, -Wl,--wrap=jet_rt_free. No providers are mocked.
-// Golden renders: HTTPMessage.rs272-325, source ordinals65-123.
+// Golden renders: source ordinals65-123.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>

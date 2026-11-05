@@ -158,10 +158,10 @@ fn semindex_open_test_clean(root: String) -[FS]> {
     semindex_open_test_clean(root)
 }
 
-// lib.rs469–508: these assertions are deliberately unregistered until the
-// Driver-owned host snapshot fixture harness can call the real opens below.
-// They consume real checked indices from Examples/features, never synthetic
-// graph rows. Filesystem capture belongs to Driver, not to a Tools test parser.
+// These assertions are deliberately unregistered until the Driver-owned host
+// snapshot fixture harness can call the real opens below. They consume real
+// checked indices from Examples/features, never synthetic graph rows.
+// Filesystem capture belongs to Driver, not to a Tools test parser.
 fn semindex_open_test_effects_index(index: SemIndex) Never! {
     assert_eq(index.schema_version(), SEMINDEX_SCHEMA_VERSION)
     assert(index.lookup("run") != None)
@@ -176,8 +176,8 @@ fn semindex_open_test_hello_index(index: SemIndex) Never! {
     loop field in ([String]{"outputs", "definitions", "identity", "references", "calls", "effects", "members", "instances", "run"}) -> assert(json.contains("\"{field}\""))
 }
 
-// lib.rs511–561 and597–639: use the sole existing exact Config/lock fixture
-// builders and codec assertions after the actual open attaches the authority.
+// Use the sole existing exact Config/lock fixture builders and codec assertions
+// after the actual open attaches the authority.
 fn semindex_open_test_package_fixture(root: String) -[FS]> {
     sources :: semindex_package_codec_test_package_fixture()
     semindex_open_test_write(root, "package.jet", sources[0])
@@ -200,13 +200,13 @@ fn semindex_open_test_persisted_workspace_index(index: SemIndex) {
     semindex_package_codec_test_persisted_overlay(policy, index.to_json())
 }
 
-// lib.rs313–465: invoke the already ported COMPLETE typed/default/generic/
+// Invoke the already ported COMPLETE typed/default/generic/
 // foreign/metadata/stable repeated identity and JSON assertions.
 fn semindex_open_test_typed_callable_indices(index: SemIndex, repeated: SemIndex) {
     semindex_test_callable_signature_facts_keep_typed_and_unavailable_states(index.defs, index._definition_facts, repeated._definition_facts, index.to_json())
 }
-// lib.rs762–895: preserve real generic application and import/receiver target
-// tests at their sole S5/Facts oracle owners.
+// Preserve real generic application and import/receiver target tests at their
+// sole S5/Facts oracle owners.
 fn semindex_open_test_generic_index(index: SemIndex, path: String) {
     semindex_build_test_generic_instance_identity_reaches_index_and_symbol_database(index, path, index.to_json())
 }
@@ -261,10 +261,10 @@ fn semindex_open_test_structural_import(index: SemIndex, library_path: String) N
     assert(found, "structural candidate import must target the adjacent real library")
 }
 
-// tests/semindex.rs923–1032,1036–1104,1164–1189: the existing exact before/after
-// checked source builders/oracles stay with CallableFacts/Signatures/Build.
-// The open harness invokes each using actual indices/revisions; no local
-// reconstruction of ViewProvenance, derivation identity or signature digests.
+// The existing exact before/after checked source builders/oracles stay with
+// CallableFacts/Signatures/Build. The open harness invokes each using actual
+// indices/revisions; no local reconstruction of ViewProvenance, derivation
+// identity or signature digests.
 fn semindex_open_test_checked_revision_oracles(union: SemIndex, right: SemIndex, distinct_pair: SemIndex, changed_pair: SemIndex, field_before: SemIndex, field_after: SemIndex, callable_before: SemIndex, callable_after: SemIndex, ancestry_before: SemIndex, ancestry_after: SemIndex) {
     union_pick :: (union.lookup("pick") ?? panic("union pick"))[0]
     right_pick :: (right.lookup("pick") ?? panic("right pick"))[0]
@@ -281,8 +281,8 @@ fn semindex_open_test_checked_revision_oracles(union: SemIndex, right: SemIndex,
     semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape(ancestry_before, ancestry_after)
 }
 
-// tests/semindex.rs369–564 and1378–1552: original arithmetic/state/output and
-// dossier/contract/bypass assertions, with the real DB where hover is required.
+// Original arithmetic/state/output and dossier/contract/bypass assertions, with
+// the real DB where hover is required.
 fn semindex_open_test_checked_dossier_oracles(widget: SemIndex, contract: SemIndex, bypasses: SemIndex) {
     widget_dossier :: widget.dossier("Widget")
     semindex_s9_scattered_members_assertions(widget, widget_dossier.to_json())

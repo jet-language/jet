@@ -1006,8 +1006,7 @@ mode uses the shared canonical record-variant panic, not a new trap.
 Workflow take/return APIs remain held without direct AOT; this carrier does not
 establish service or workflow behavior or native parity. The existing shared
 record-variant panic's task publication repair and the canonical Prelude stop-fact
-classification fix are separate composition gates, recorded in
-`Tests/TaskOutcomeRoutes.tsv`. The getter explicitly returns its stopped zero
+classification fix are separate composition gates. The getter explicitly returns its stopped zero
 word after shared panic publication; it never clones an inactive reason after
 publication returns. TaskFailure and TaskOutcome use one shared terminal render
 tail, with TaskOutcome adding only Finished; the fixture checks the unchanged

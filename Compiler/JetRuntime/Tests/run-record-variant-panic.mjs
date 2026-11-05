@@ -96,18 +96,18 @@ for (let kind = 1; kind <= 5; ++kind) {
         result.stderr?.toString() !== 'panic in a destructor during cleanup\n') {
         throw Error(`${mode}: expected seed cleanup-panic message and SIGABRT`);
     }
-    rows.push(`${mode}\tpass\tsignal=SIGABRT\tseed=Scheduler.rs:234-244,1022-1024`);
+    rows.push(`${mode}\tpass\tsignal=SIGABRT\tseed=retired-rust-scheduler`);
 }
 // Seed-host behavior is not the registered Jet program stop contract.
-for (const [site, seed, defect] of [
-    ['bit-set-len', 'Core/Collections.rs:151', 'raw Rust add wraps or host-panics by profile'],
-    ['counter-add', 'Core/Collections.rs:3341', 'raw Rust add wraps or host-panics by profile'],
-    ['counter-set-count', 'Core/Collections.rs:3382', 'raw Rust subtraction wraps or host-panics by profile'],
-    ['counter-total', 'Core/Collections.rs:3386', 'Rust sum wraps or host-panics by profile'],
-    ['counter-elements', 'Core/Collections.rs:3393-3399', 'seed clones incrementally without checked aggregate length'],
-    ['counter-subtract', 'Core/Collections.rs:3437', 'raw Rust negation wraps or host-panics by profile'],
-    ['chain-index', 'Core/Collections.rs:3548', 'raw Vec indexing host-panics rather than a registered Jet stop'],
-]) rows.push(`${site}\tSEED-DEFECT\t${seed}\t${defect}; native E3010 root unchanged`);
+for (const [site, defect] of [
+    ['bit-set-len', 'raw Rust add wraps or host-panics by profile'],
+    ['counter-add', 'raw Rust add wraps or host-panics by profile'],
+    ['counter-set-count', 'raw Rust subtraction wraps or host-panics by profile'],
+    ['counter-total', 'Rust sum wraps or host-panics by profile'],
+    ['counter-elements', 'seed clones incrementally without checked aggregate length'],
+    ['counter-subtract', 'raw Rust negation wraps or host-panics by profile'],
+    ['chain-index', 'raw Vec indexing host-panics rather than a registered Jet stop'],
+]) rows.push(`${site}\tSEED-DEFECT\t${defect}; native E3010 root unchanged`);
 rows.push('task\tpass\tjoined=Panicked(reason)\tprocess-survived=true\troot-exit=70\troot-stderr-byte-identical=true');
 writeFileSync(join(out, 'record-variant-results.tsv'), rows.join('\n') + '\n');
 console.log('Dyn/DataEvent/checked-op roots: exit 70 and byte-identical stderr; tasks: joined Panicked(reason), process survives; double panic: SIGABRT');
