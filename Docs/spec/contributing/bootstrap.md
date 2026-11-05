@@ -24,7 +24,10 @@ Its stage-2 compiler becomes the seed of the next release.
 ## From a fresh clone
 
 A clone and a seed are enough: no Nix, no `Tools/agent/jet-env`, nothing in
-`HOME` and no environment variables. This builds the compiler of a release
+`HOME` and no Jet environment variables. Only the landing step needs more:
+the lane check runs `jet check` under `systemd-run --user`, so it needs the
+login session's `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`, which every
+desktop or SSH login sets. This builds the compiler of a release
 tag with that release's seed, gives it the seed's runtime pack, runs one row
 of the UI suite with it, runs an example, lands a patch on a scratch copy of
 the checkout and validates a ballot. `TAG` is a published release (see
