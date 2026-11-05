@@ -339,3 +339,28 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
         files.remove_all(root) ?? panic("cleanup")
     }
 }
+// tests/pkg.rs:8179-8210 registry_interrupted_artifact_stage_leaves_no_partial.
+// The Rust io::ErrorKind::InvalidData is IOError.InvalidInput here; Jet's
+// IOError has no separate InvalidData kind.
+#Test("publication registry_interrupted_artifact_stage_leaves_no_partial original") {
+    if sys.name() != "windows" {
+        root :: publication_metadata_test_root("interrupted-artifact")
+        repo :: files.join(root, "registry")
+        source :: files.join(root, "source")
+        files.create_dir_all(repo) ?? panic("registry")
+        files.create_dir_all(source) ?? panic("source")
+        files.write(files.join(source, "package.jet"), "package bytes") ?? panic("package")
+        files.symlink("package.jet", files.join(source, "linked.jet")) ?? panic("link")
+        if publication_publish_artifact(repo, source, "atomic-kit", "1.0.0", "sha256-invalid-source") == {
+            .Ok(_) -> panic("unsupported source nodes must abort the staged publication")
+            .Err(error) -> if error == {
+                .InvalidInput(_) -> {}
+                else -> panic("unsupported source nodes aborted with the wrong error kind")
+            }
+        }
+        assert(!files.exists(publication_artifact_path(repo, "atomic-kit", "1.0.0") ?? panic("artifact path")))
+        package_dir :: files.join(repo, "artifacts/atomic-kit")
+        if files.is_dir(package_dir) -> assert_eq((files.list_dir(package_dir) ?? panic("list staging")).len(), 0)
+        files.remove_all(root) ?? panic("cleanup")
+    }
+}
