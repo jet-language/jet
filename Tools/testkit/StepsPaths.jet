@@ -49,7 +49,7 @@ fn kit_steps_file_action(step: KitStep, env: KitEnv, work: String, scratch: Stri
         destination :: kit_steps_work_path(step.argv[2], env, work, scratch, built) ?? return kit_exec_failed("copy destination escapes work directory")
         info :: files.stat(source) ?? return kit_exec_failed("stat copy {source}: {err}")
         if info.is_dir {
-            kit_exec_copy_tree(source, destination, false)
+            kit_exec_copy_tree(source, destination, false, false)
             return kit_steps_action_run()
         }
         bytes :: files.read_bytes(source) ?? return kit_exec_failed("read copy {source}: {err}")

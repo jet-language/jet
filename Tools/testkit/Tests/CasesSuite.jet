@@ -56,10 +56,10 @@ fn cases_test_source(root: String, name: String, text: String) {
     // Programs are authored at runtime, never discovered as kit modules.
     kit_exec_write(files.join(directory, "tree/main.jet"), "fn run() {{ print(\"fixture\") }}\n")
     kit_exec_write(files.join(directory, "tree/state/receipt.txt"), "authored\n")
-    kit_exec_write(files.join(directory, "tree/.jet/ignored.txt"), "cache\n")
+    kit_exec_write(files.join(directory, "tree/.jet/lock"), "authored lock\n")
     kit_exec_write(files.join(directory, "answers.stdin"), "two words\n")
     kit_exec_write(files.join(directory, "answer.out"), "two words\n")
-    cases_test_source(root, "execute", "fixture: tree\nstep: jet -c 'cat > result.txt'\nstdin: answers.stdin\nfile: result.txt = answer.out\nfile: main.jet exists\nfile: .jet/receipt.txt exists\nfile: .jet/ignored.txt absent\nstdout: empty\nstderr: empty\nstep: jetpack -c 'cat result.txt'\nstdout: = answer.out\nstderr: empty\n")
+    cases_test_source(root, "execute", "fixture: tree\nstep: jet -c 'cat > result.txt'\nstdin: answers.stdin\nfile: result.txt = answer.out\nfile: main.jet exists\nfile: .jet/receipt.txt exists\nfile: .jet/lock exists\nstdout: empty\nstderr: empty\nstep: jetpack -c 'cat result.txt'\nstdout: = answer.out\nstderr: empty\n")
     scratch :: files.join(root, "scratch")
     context :: cases_test_context(root, scratch)
     outcomes :: kit_cases_run(cases_test_entry("execute"), context)

@@ -405,15 +405,18 @@ fn kit_exec_optional(path: String) -> String? {
     Val(files.read(path) ?? panic("read {path}: {err}"))
 }
 
-// Never copy compiler caches. Fixture state is authored, not build output.
-fn kit_exec_copy_tree(source: String, destination: String, fixture_state: Bool) {
+// Copy a fixture or source tree. `fixture_state` stages `state/` and
+// `fixture-state/` as `.jet`. `authored_jet` copies `.jet` itself: a case
+// fixture's `.jet` is authored test data (locks, binding caches), while golden
+// and UI source trees may hold local compiler caches, so they skip it.
+fn kit_exec_copy_tree(source: String, destination: String, fixture_state: Bool, authored_jet: Bool) {
     files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
     entries :: files.list_dir(source) ?? panic("list {source}: {err}")
     loop entry in entries {
-        if entry.name == ".jet" || entry.name == ".git" -> next
+        if entry.name == ".git" || (entry.name == ".jet" && !authored_jet) -> next
         name :: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
         target :: files.join(destination, name)
-        if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state)
+        if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet)
         else -> kit_exec_copy_file(entry.path, target)
     }
 }

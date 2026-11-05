@@ -179,7 +179,7 @@ fn kit_test_core_scratch(label: String) -> String {
     files.chmod(executable, 493) ?? panic("chmod fixture executable: {err}")
     files.chmod(state_executable, 448) ?? panic("chmod state executable: {err}")
     files.chmod(data, 416) ?? panic("chmod fixture data: {err}")
-    kit_exec_copy_tree(fixture, work, true)
+    kit_exec_copy_tree(fixture, work, true, false)
     copied :: files.join(work, "bin/tool")
     copied_state :: files.join(work, ".jet/hooks/tool")
     assert_eq((files.stat(copied) ?? panic("stat copied executable: {err}")).mode % 512, 493)
@@ -195,6 +195,23 @@ fn kit_test_core_scratch(label: String) -> String {
         assert_eq(result.stderr, "")
     }
     files.remove_all(root) ?? panic("remove fixture modes scratch")
+}
+
+#Test("case fixtures copy their authored .jet directory and source trees skip it") {
+    root :: kit_test_core_scratch("fixture-dot-jet")
+    fixture :: files.join(root, "fixture")
+    kit_exec_write(files.join(fixture, "project/.jet/lock"), "version = 1\n")
+    kit_exec_write(files.join(fixture, "project/main.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(fixture, ".git/HEAD"), "ref: refs/heads/main\n")
+    case_work :: files.join(root, "case")
+    kit_exec_copy_tree(fixture, case_work, true, true)
+    assert_eq(files.read(files.join(case_work, "project/.jet/lock")) ?? panic("read copied fixture lock: {err}"), "version = 1\n")
+    assert(!files.exists(files.join(case_work, ".git")), "a fixture's .git never reaches the work directory")
+    source_work :: files.join(root, "source")
+    kit_exec_copy_tree(fixture, source_work, true, false)
+    assert(files.exists(files.join(source_work, "project/main.jet")))
+    assert(!files.exists(files.join(source_work, "project/.jet")), "golden and UI source trees skip .jet compiler caches")
+    files.remove_all(root) ?? panic("remove fixture .jet scratch")
 }
 
 #Test("timeout options refuse invalid or out-of-range durations before discovery") {

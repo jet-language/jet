@@ -550,7 +550,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         fixture :: files.join(context.snapshots, plan.fixture)
         // A missing fixture would stop the copy, and with it the pool task, without a verdict.
         if !files.is_dir(fixture) -> return kit_steps_finish(state, kit_expect_verdict("ERROR", "fixture directory is missing: {plan.fixture}"))
-        kit_exec_copy_tree(fixture, context.work, true)
+        kit_exec_copy_tree(fixture, context.work, true, true)
     }
     port_names :: kit_steps_case_port_names(context)
     if port_names.len() > 0 {

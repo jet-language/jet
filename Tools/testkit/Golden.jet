@@ -156,7 +156,7 @@ fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: St
     if plan.fixture != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
     source :: files.join(scratch, "source")
     work :: files.join(source, entry.project)
-    kit_exec_copy_tree(files.join(env.root, entry.project), work, true)
+    kit_exec_copy_tree(files.join(env.root, entry.project), work, true, false)
     if plan.steps.len() == 0 {
         &plan.steps.push(kit_golden_default_step("build"))
         if !plan.compile_only -> &plan.steps.push(kit_golden_default_step("built"))
