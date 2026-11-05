@@ -1,0 +1,34 @@
+# Claim (#3590 c166): `jetpack hangar list` on an absent root prints the same
+# JSON as on an empty root and creates neither the root nor a lock file.
+# Claim (#3590 c167): on a populated root it changes no file content, metadata
+# projection, journal, or lock path: every entry and every byte under the
+# root is identical before and after.
+fixture: hangar_list_is_read_only.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step absent: jetpack hangar list --json --no-color
+env: JETPACK_ROOT={work}/absent-root
+exit: 0
+stdout: ~ "\"action\":\"list\"" # the list status result
+stdout: ~ "\"packages\":[]" # an absent root lists no package
+file: absent-root absent
+mkdir: empty-root
+step: jetpack hangar list --json --no-color
+env: JETPACK_ROOT={work}/empty-root
+exit: 0
+stdout: == absent
+entries: empty-root recursive = 0
+step: jetpack hangar ingest src --name hello --version 1.0.0 --no-color
+env: JETPACK_ROOT={work}/root
+exit: 0
+stderr: ~ "ingested" # the populated root's one object
+capture: before = tree-contents root recursive
+capture: before_entries = entries root recursive
+step: jetpack hangar list --json --no-color
+env: JETPACK_ROOT={work}/root
+exit: 0
+stdout: ~ "hello" # the ingested package is listed
+capture: after = tree-contents root recursive
+cap:after: = "{cap:before}"
+capture: after_entries = entries root recursive
+cap:after_entries: = "{cap:before_entries}"
