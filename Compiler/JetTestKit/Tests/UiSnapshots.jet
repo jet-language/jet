@@ -33,6 +33,9 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     lint :: kit_ui_invocation("", "tests/ui_lint/one.jet", true)
     assert_eq(lint.argv, ["check", "--verbose", "tests/ui_lint/one.jet"])
     assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n\nok: `one.jet` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n")), "Warning [jet.SameEnumGuardTable]: lint\n")
+    all :: kit_ui_invocation("// @all_diags\nfn run() {{}}", "tests/ui/example.jet", false)
+    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "Warning [jet.DivergentStatePaths]: split\n\nok: `example.jet` has no errors (1 warning)\nrun `jet explain L0152` to learn more\n")), "Warning [jet.DivergentStatePaths]: split\n")
+    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "")), "(no errors)\n")
 }
 
 #Test("UI comparison normalizes only primary location paths and retains every other mismatch") {

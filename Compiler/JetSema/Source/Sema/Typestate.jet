@@ -504,7 +504,8 @@ fn sema_state_expr_id(value: Expr) -> Int Never! {
         .MethodCall(_, _, _, _, _, _, id) -> id
         .Paren(_, _, id) -> id
         .Copy(_, _, id) -> id
-        .Place(_, _, _, id) -> id
+        // A marked receiver (`^order.confirm()`) types as the place it marks.
+        .Place(inner, _, _, _) -> sema_state_expr_id(inner)
         .Index(_, _, _, _, id) -> id
         .Deref(_, _, id) -> id
         else -> -1
@@ -573,10 +574,14 @@ fn sema_state_call(walk: &SemaStateWalk, name: String, first: Expr) Never! {
     walk.states[local] = move.to
 }
 
-// The local a receiver or first argument names, if it is a bare local.
+// The local a receiver or first argument names, if it is a bare local or a
+// marked one (`^order`, `&order`).
 fn sema_state_local(value: Expr) -> String? Never! {
-    if value == .Ident(name, _, _) -> return Val(name)
-    None
+    if value == {
+        .Ident(name, _, _) -> Val(name)
+        .Place(inner, _, _, _) -> sema_state_local(inner)
+        else -> None
+    }
 }
 
 fn sema_state_exprs(walk: &SemaStateWalk, tree: BodyTree, values: [Expr]) Never! {

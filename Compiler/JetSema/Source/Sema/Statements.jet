@@ -7316,8 +7316,12 @@ fn sema_stmt_discard_args_effectful(args: [TCallArg]) -> Bool Never! {
 }
 
 // E0433 lost-tail site: a function with no written return
-// type returns nothing, so the value of its last line is lost.
-fn sema_stmt_lost_tail_diagnostic(function: String, value_type: String, span: Span) -> Diagnostic {
+// type returns nothing, so the value of its last line is lost. A `value ??
+// fallback` tail is reported from its value's span, so a method call points
+// at its method, as a bare one does.
+fn sema_stmt_lost_tail_diagnostic(function: String, value_type: String, tail: Expr) -> Diagnostic {
+    span := expr_span(tail)
+    if tail == .OrFallback(value, _, _, _, _) -> span = Span{start: expr_span(value).start, end: span.end}
     sema_error("E0433", span, "this {value_type} value is thrown away", "`{function}` has no return type, so it returns nothing and the value of its last line is lost", "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`")
 }
 
@@ -8251,11 +8255,11 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
                                 // E0433 when its callee turns out pure.
                                 if {
                                     lost_tail -> {
-                                        if diagnostics.len() == discard_diagnostic_start -> &diagnostics.push(sema_stmt_lost_tail_diagnostic(context.function_name, type_name(checked.ty), expr_span(expr)))
-                                        // The checked statement stays in the body so the
-                                        // flow passes after it (typestate) still read it.
+                                        if diagnostics.len() == discard_diagnostic_start -> &diagnostics.push(sema_stmt_lost_tail_diagnostic(context.function_name, type_name(checked.ty), expr))
+                                        // The checked statement stays in the body, and the
+                                        // body stays complete, so the flow passes after it
+                                        // (typestate) still read it.
                                         &output.push(TStmt.ExprStmt{value: checked, span: expr_span(expr)})
-                                        complete = false
                                     }
                                     else -> {
                                         sema_stmt_mark_discarded_result(program, checked, discard_fact_start, &context)

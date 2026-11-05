@@ -193,7 +193,9 @@ fn kit_ui_actual(call: KitUICall, run: KitRun) -> String {
     if call.streams == "lint" -> return kit_ui_rendered_only(run.stderr)
     if call.streams == "both" -> return "{run.stdout}{run.stderr}"
     if call.streams == "stderr" -> return run.stderr
-    if run.code == 0 -> return "(no errors)\n"
+    // `@all_diags` snapshots every rendered diagnostic, so a check that
+    // passes with warnings shows them.
+    if run.code == 0 && !(call.streams == "rendered-both" && kit_expect_diagnostics("{run.stdout}{run.stderr}") > 0) -> return "(no errors)\n"
     if call.streams == "check" -> return "{run.stdout}{run.stderr}"
     kit_ui_rendered_only(if call.streams == "rendered-both" -> "{run.stdout}{run.stderr}" else -> run.stderr)
 }
