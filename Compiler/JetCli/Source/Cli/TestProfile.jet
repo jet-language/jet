@@ -1,7 +1,10 @@
 // `jet test --profile <name>`, and a bare `jet test` under `defaults: { test:
 // <name> }`: a test profile package.jet declares (PackageModel
 // TestProfiles.jet). The `tests` suite runs as child `jet test`s of this jet:
-// once, or once per level its `optimize:` lists. Each run's rows are compared
+// once, or once per level its `optimize:` lists. A code suite, which test.jet's
+// `fn test` declares with `t.suite("perf", perf_rows)` (D-TEST-SUITE2=A), runs
+// as a child `jet test test.jet` that runs no #Test and hands that suite a
+// TestRows writing to a rows file. Each run's rows are compared
 // with its baseline under `.jet/test/<profile>/`; a test the baseline has
 // passing that now fails or is gone fails the profile, while a failure the
 // baseline already holds does not. A run with no baseline records one and
@@ -21,6 +24,7 @@ use {
         evidence_outcome_name,
         evidence_report_read,
     ]
+    jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_STRING, lex]
     jet_pkg_model.[ComposeError, PackageFacts, TEST_SUITE_TESTS]
     jet_testkit.[kit_exec_defaults, kit_execute_suites, kit_expect_bless_error]
 }
@@ -30,8 +34,16 @@ use {
 JET_CLI_TEST_PROFILE_ENV :: "JET_TEST_PROFILE"
 // The profile's `time_limit` in milliseconds, for the child's harness.
 JET_CLI_TEST_TIME_LIMIT_ENV :: "JET_TEST_TIME_LIMIT_MS"
-// A row's state when its test passed.
+// A row's state when its test passed, and when it failed.
 JET_CLI_TEST_ROW_PASSED :: "passed"
+JET_CLI_TEST_ROW_FAILED :: "failed"
+// Set in a code suite's child to the suite it runs, and to the file its
+// TestRows appends `id<TAB>state<TAB>detail` lines to (core.testing
+// `__suite_run`).
+JET_CLI_TEST_SUITE_ENV :: "JET_TEST_SUITE"
+JET_CLI_TEST_SUITE_ROWS_ENV :: "JET_TEST_SUITE_ROWS"
+// The file whose `fn test` declares a package's code suites.
+JET_CLI_TEST_SUITES_FILE :: "test.jet"
 
 // One child `jet test` of a profile run.
 struct JetCLITestProfileRun {
@@ -41,6 +53,14 @@ struct JetCLITestProfileRun {
     rows_file: String
     // The child's words after the executable.
     args: [String]
+    // The code suite it runs, "" for a `tests` run.
+    suite: String{""}
+}
+
+// A code suite's rows and the `id: detail` line of each failing row.
+struct JetCLITestCodeRows {
+    rows: [String]
+    failures: [String]
 }
 
 // How a run's rows moved against its baseline, one line per test.
@@ -79,9 +99,13 @@ fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_def
         }
         return None
     }
+    code_suites :: jet_cli_test_code_suites(root)
+    if facts.test_suites_refusal(code_suites) == .Val(refusal) {
+        return Val(jet_cli_fail("E1215", "`package.jet` has a shape error", refusal, "declare each suite once, in `suites:` or with `t.suite` in test.jet's `fn test`, and name only declared suites in a profile", color, JET_DRIVER_EXIT_USER_ERROR))
+    }
     loop suite in profile.suites {
-        if suite == TEST_SUITE_TESTS -> next
-        stock :: facts.test_suite(suite) ?? return Val(jet_cli_not_ported("test --profile {chosen}", color))
+        if suite == TEST_SUITE_TESTS || code_suites.contains(suite) -> next
+        stock :: facts.test_suite(suite) ?? next
         corpus :: jet_cli_rooted_join(root, stock.corpus)
         if !cli_files.is_dir(corpus) {
             return Val(jet_cli_fail("E2105", "test suite `{suite}` names the corpus `{stock.corpus}`, which isn't a directory", jet_cli_why("E2105"), "create the corpus directory or correct `{stock.kind.as_str()}_corpus:` in package.jet", color, JET_DRIVER_EXIT_USER_ERROR))
@@ -130,6 +154,13 @@ fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_def
         args := words.copy()
         &args.push("--optimize={level.as_str()}")
         &runs.push(JetCLITestProfileRun{label: "{TEST_SUITE_TESTS} at optimize {level.as_str()}", rows_file: "{TEST_SUITE_TESTS}-{level.as_str()}.rows", args: ^args})
+    }
+    // Each code suite is one child running test.jet's `fn test`.
+    loop suite in profile.suites {
+        if !code_suites.contains(suite) -> next
+        args := [String]{"test", jet_cli_rooted_join(root, JET_CLI_TEST_SUITES_FILE)}
+        if color -> &args.push("--color=always")
+        &runs.push(JetCLITestProfileRun{label: suite.copy(), rows_file: "{suite}.rows", args: ^args, suite: suite.copy()})
     }
     // A filter argument after the package (`jet test Compiler --profile ui E01`) selects the corpus rows.
     filter :: if package_target && positionals.len() > 1 -> positionals[1].copy() else -> ""
@@ -245,9 +276,11 @@ fn jet_cli_test_common_dir(a: String, b: String) -> String Never! {
     if joined == "" -> "/" else -> joined
 }
 
-// Runs a profile's `tests` children together (jet_cli_test_members_run), each
-// handing its evidence report to a scratch file, then compares or records each
-// run's rows. The summary goes to stderr after every run's own output.
+// Runs a profile's `tests` and code-suite children together
+// (jet_cli_test_members_run), one pool slot each. A `tests` child hands its
+// evidence report to a scratch file, a code-suite child its rows; then each
+// run's rows are compared or recorded. The summary goes to stderr after every
+// run's own output.
 fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], update: Bool, quiet: Bool) -> JetDriverVerbOutput {
     scratch :: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     executable :: cli_sys.executable()
@@ -259,6 +292,10 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
         argv := [String]{executable.copy()}
         loop argument in run.args -> &argv.push(argument.copy())
         &argvs.push(^argv)
+        if run.suite != "" {
+            &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows")})
+            next
+        }
         env := [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin")}
         if time_limit_ms == .Val(limit) {
             &env.push(JET_CLI_TEST_TIME_LIMIT_ENV)
@@ -273,25 +310,40 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
     loop (index, run) in runs {
         child :: finished[index]
         site :: "jet test: profile `{profile}`, `{run.label}`"
-        // An exit that isn't a test verdict (an internal error) stands.
-        if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code -> exit_code = child.code
-        report_path :: jet_cli_rooted_join(scratch.path, "{index}.bin")
-        if !cli_files.exists(report_path) {
-            // The child stopped before its tests ran; its own stderr says why.
-            if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
-            summary = "{summary}{site}: no test ran\n"
-            next
+        rows := [String]{}
+        // The status a recorded run keeps.
+        status := child.code
+        if run.suite != "" {
+            // A suite that wrote no row leaves no file: it has no rows.
+            text :: cli_files.read(jet_cli_rooted_join(scratch.path, "{index}.rows")) ?? ""
+            stopped :: if child.code == JET_DRIVER_EXIT_OK -> String?{None} else -> Val(jet_cli_test_stop_reason(child.errors, child.code))
+            code :: jet_cli_test_code_rows(text, stopped)
+            rows = code.rows.copy()
+            status = if code.failures.len() > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
+            if !quiet {
+                loop line in code.failures -> summary = "{summary}{site}: failed {line}\n"
+            }
+        } else {
+            // An exit that isn't a test verdict (an internal error) stands.
+            if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code -> exit_code = child.code
+            report_path :: jet_cli_rooted_join(scratch.path, "{index}.bin")
+            if !cli_files.exists(report_path) {
+                // The child stopped before its tests ran; its own stderr says why.
+                if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                summary = "{summary}{site}: no test ran\n"
+                next
+            }
+            report :: evidence_report_read(report_path) ?? {
+                if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                summary = "{summary}{site}: couldn't read its test evidence: {err.message}\n"
+                next
+            }
+            rows = jet_cli_test_profile_rows(report.records)
         }
-        report :: evidence_report_read(report_path) ?? {
-            if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
-            summary = "{summary}{site}: couldn't read its test evidence: {err.message}\n"
-            next
-        }
-        rows :: jet_cli_test_profile_rows(report.records)
         shown :: ".jet/test/{profile}/{run.rows_file}"
         stored :: jet_cli_rooted_join(baselines, run.rows_file)
         if update || !cli_files.exists(stored) {
-            if child.code > exit_code -> exit_code = child.code
+            if status > exit_code -> exit_code = status
             cli_files.create_dir_all(baselines) ?? {
                 if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
                 summary = "{summary}{site}: couldn't create `.jet/test/{profile}`: {err}\n"
@@ -338,6 +390,81 @@ fn jet_cli_test_profile_rows(records: [EvidenceRecord]) -> [String] Never! {
     }
     &rows.sort()
     rows
+}
+
+// The code suites test.jet's `fn test` declares under `root`: the literal
+// name of each `.suite("name", …)` call, in source order. Sema refuses a
+// computed name (E0635), so the tokens hold every one without running code.
+fn jet_cli_test_code_suites(root: String) -> [String] {
+    source :: cli_files.read(jet_cli_rooted_join(root, JET_CLI_TEST_SUITES_FILE)) ?? return [String]{}
+    jet_cli_test_code_suites_in(source)
+}
+
+fn jet_cli_test_code_suites_in(source: String) -> [String] Never! {
+    lexed :: lex(source.bytes())
+    names := [String]{}
+    loop index in 1..<lexed.tokens.len() {
+        if index + 2 >= lexed.tokens.len() -> break
+        method :: lexed.tokens[index]
+        literal :: lexed.tokens[index + 2]
+        if method.kind != TOKEN_IDENT || lexed.tokens[index - 1].kind != TOKEN_DOT || lexed.tokens[index + 1].kind != TOKEN_LPAREN || literal.kind != TOKEN_STRING -> next
+        if jet_cli_repl_bytes(source, method.span.start, method.span.end) != "suite" -> next
+        name :: jet_cli_repl_bytes(source, literal.span.start + 1, literal.span.end - 1)
+        if name != "" && !names.contains(name) -> &names.push(name)
+    }
+    names
+}
+
+// Why a code-suite child stopped: the first stderr line naming a panic (the
+// suite's own message), else its exit code.
+fn jet_cli_test_stop_reason(errors: String, code: Int) -> String Never! {
+    loop line in errors.split("\n").to_list() {
+        if line.contains("panic") -> return line.copy()
+    }
+    "exit code {code}"
+}
+
+// A code suite's rows from its TestRows lines (`id<TAB>state<TAB>detail`):
+// `id<TAB>state` profile rows, sorted, and the `id: detail` line of each
+// failing row in report order. A repeated id fails as `duplicate row id`; a
+// child that `stopped` before it finished adds the failing row `stopped`.
+fn jet_cli_test_code_rows(text: String, stopped: String?) -> JetCLITestCodeRows Never! {
+    ids := [String]{}
+    states := [String]{}
+    details := [String]{}
+    loop line in text.split("\n").to_list() {
+        if line == "" -> next
+        parts :: line.split("\t").to_list()
+        id :: parts[0].copy()
+        at := -1
+        loop (seen, known) in ids {
+            if known == id {
+                at = seen
+                break
+            }
+        }
+        if at >= 0 {
+            states[at] = JET_CLI_TEST_ROW_FAILED
+            details[at] = "duplicate row id"
+            next
+        }
+        &ids.push(id.copy())
+        &states.push(if parts.len() > 1 -> parts[1].copy() else -> "")
+        &details.push(if parts.len() > 2 -> parts[2].copy() else -> "")
+    }
+    if stopped == .Val(reason) {
+        &ids.push("stopped")
+        &states.push(JET_CLI_TEST_ROW_FAILED)
+        &details.push(reason.copy())
+    }
+    rows := [String]{}
+    failures := [String]{}
+    loop (at, id) in ids {
+        &rows.push("{id}\t{states[at]}")
+        if states[at] == JET_CLI_TEST_ROW_FAILED -> &failures.push("{id}: {details[at]}")
+    }
+    &rows.sort()
+    JetCLITestCodeRows{rows: rows, failures: failures}
 }
 
 fn jet_cli_test_rows_text(rows: [String]) -> String Never! {
@@ -432,4 +559,18 @@ fn jet_cli_test_rows_report(site: String, shown: String, count: Int, diff: JetCL
     assert_eq(jet_cli_test_rows_text(rows), "a\tpassed\nb c\tfailed\n")
     assert_eq(jet_cli_test_rows_parse(jet_cli_test_rows_text(rows)), rows)
     assert_eq(jet_cli_test_rows_parse(""), [String]{})
+}
+
+#Test("code suite rows sort, a repeated id fails, and a stopped suite adds a failing row") {
+    code :: jet_cli_test_code_rows("size b\tfailed\tgrew 9%\nsize a\tpassed\t\nodd\tskipped\tno data\nsize a\tpassed\t\n", Val("panic: out of disk"))
+    assert_eq(code.rows, [String]{"odd\tskipped", "size a\tfailed", "size b\tfailed", "stopped\tfailed"})
+    assert_eq(code.failures, [String]{"size b: grew 9%", "size a: duplicate row id", "stopped: panic: out of disk"})
+    assert_eq(jet_cli_test_code_rows("", None).rows.len(), 0)
+    assert_eq(jet_cli_test_stop_reason("building\npanic: no disk\n", 101), "panic: no disk")
+    assert_eq(jet_cli_test_stop_reason("", 3), "exit code 3")
+}
+
+#Test("code suites are the literal names of `.suite(` calls") {
+    source :: "fn test(t: Test) -> Int {{\n    t.suite(\"perf\", perf_rows)\n    t.suite(\"selfhost\", rows -> rows.pass(\"x\"))\n    suite(\"no\")\n    t.run()\n}}\n"
+    assert_eq(jet_cli_test_code_suites_in(source), [String]{"perf", "selfhost"})
 }

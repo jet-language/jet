@@ -1656,13 +1656,16 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     plan :: ^inputs ?? return jet_cli_ice("the Jet compiler finished tests without their checked functions")
     selected :: jet_cli_native_test_selection(plan.tests, plan.functions, options.filter, options.shuffle_seed) ?? return jet_cli_ice("the test harness of `{file}` can't build:\n{err.message}")
     // `--docs` runs the doctest claims alone and `--measure` the measured
-    // claims alone, without the output checks.
-    documented :: if options.docs -> jet_cli_doctest_claims(selected, doctests) else -> selected
+    // claims alone, without the output checks. A code suite's child
+    // (JET_TEST_SUITE, TestProfile.jet) runs `fn test` for that suite's rows
+    // alone: no #Test and no output check.
+    code_suite :: cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None
+    documented :: if code_suite -> [JetNativeTestCase]{} else if options.docs -> jet_cli_doctest_claims(selected, doctests) else -> selected
     native_tests :: if measure == .Val(measured) -> jet_cli_measure_claims(documented, measured) else -> documented
     claims := jet_cli_test_claims(native_tests, plan.tests, doctests, file)
     check_names := [String]{}
     checks := [IROutputCheck]{}
-    if !options.docs && measure == None {
+    if !options.docs && measure == None && !code_suite {
         loop check in plan.output_checks {
             &check_names.push(check.name)
             &checks.push(IROutputCheck{name: check.name, key: check.function.key})

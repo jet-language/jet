@@ -222,20 +222,38 @@ fn pkg_test_suite_kind(key: String) -> TestSuiteKind? {
 }
 
 impl PackageFacts {
-    // Every profile names known suites, and no test profile shares a name
-    // with a build profile.
+    // No test profile shares a name with a build profile. The suites a
+    // profile names are checked by `test_suites_refusal`, which also needs
+    // the code suites `fn test` declares in test.jet.
     fn validate_test_profiles(self) PackageParseError! {
-        known := [String]{TEST_SUITE_TESTS}
-        loop suite in self.test_suites -> &known.push(suite.name)
         loop profile in self.test_profiles {
-            loop suite in profile.suites {
-                if !known.contains(suite) -> return Err(PackageParseError.Composition("test profile `{profile.name}` names unknown suite `{suite}` (known: {known.join(", ")})"))
-            }
             clash :: profile.name.copy()
             if TEST_STOCK_BUILD_PROFILES.contains(profile.name) || self.build_profiles.any(build -> build.name == clash) {
                 return Err(PackageParseError.Composition("test profile `{profile.name}` has the name of a build profile; test and build profiles share one namespace, so rename one"))
             }
         }
+    }
+
+    // Why the suites don't line up, None when they do: a code suite
+    // (`t.suite("perf", …)` in test.jet's `fn test`, listed in `code_suites`)
+    // shares a name with `tests` or a `suites:` entry, or a profile names a
+    // suite neither declares.
+    fn test_suites_refusal(self, code_suites: [String]) -> String? Never! {
+        known := [String]{TEST_SUITE_TESTS}
+        loop suite in self.test_suites -> &known.push(suite.name)
+        loop code in code_suites {
+            if known.contains(code) {
+                where :: if code == TEST_SUITE_TESTS -> "as the built-in suite of every #Test" else -> "in `suites:` of package.jet"
+                return Val("test suite `{code}` is declared twice: {where}, and by `t.suite(\"{code}\", …)` in test.jet; a suite has one name")
+            }
+        }
+        loop code in code_suites -> &known.push(code)
+        loop profile in self.test_profiles {
+            loop suite in profile.suites {
+                if !known.contains(suite) -> return Val("test profile `{profile.name}` names unknown suite `{suite}` (known: {known.join(", ")})")
+            }
+        }
+        None
     }
 
     // The test profile `name`, if this package declares one.
@@ -328,4 +346,12 @@ fn pkg_test_suites_refusal(body: String) -> String Never! {
     assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ ui_corpus: "tests/ui", cases_corpus: "tests/cases" }`), "test suite `ui` declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus")
     assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ }`), "test suite `ui` needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")
     assert_eq(pkg_test_suites_refusal(`tests: TestSuite{ golden_corpus: "t" }`), "test suite `tests` is built in: it is every #Test of the package, so `suites:` can't declare it")
+}
+
+#Test("a profile's suites are tests, stock suites or the code suites of test.jet, each named once") {
+    facts :: PackageFacts.parse("name: \"demo\"\nsuites: {{ golden: TestSuite{{ golden_corpus: \"g\" }} }}\ntest: {{ full: TestProfile{{ suites: [tests, golden, perf] }} }}\n", "package.jet") ?? panic(err.message())
+    assert(facts.test_suites_refusal([String]{"perf"}) == None)
+    assert_eq(facts.test_suites_refusal([String]{}) ?? "", "test profile `full` names unknown suite `perf` (known: tests, golden)")
+    assert_eq(facts.test_suites_refusal([String]{"golden", "perf"}) ?? "", "test suite `golden` is declared twice: in `suites:` of package.jet, and by `t.suite(\"golden\", …)` in test.jet; a suite has one name")
+    assert_eq(facts.test_suites_refusal([String]{"tests"}) ?? "", "test suite `tests` is declared twice: as the built-in suite of every #Test, and by `t.suite(\"tests\", …)` in test.jet; a suite has one name")
 }

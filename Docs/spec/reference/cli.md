@@ -737,12 +737,13 @@ NAME:` line or, with `--json`, as one JSON object line with the same fields.
 It also evaluates the claim's `.Test(name)` budgets against that record
 (D-CLAIM-BENCH1). A directory target (or none, inside a package) tests the
 package through its own `fn test(t: Test)` when it declares one, else through
-its stock entry. At a workspace root without its own `fn test`, each member
+its stock entry. At a workspace root, each member
 that can run `jet test` runs as its own child `jet test <member>` with the
 same flags, one child per core, fewer while free memory can't hold 1 GiB for
 each; each member's output is written whole, in member order, after a
 `jet test: member <name>` line on stderr (muted by `--quiet`), and the exit is
-the worst member's. `--profile <name>` naming a test profile of the package's
+the worst member's. The root's own `test.jet` holds only the code suites its
+profiles run. `--profile <name>` naming a test profile of the package's
 `package.jet` (`test: { quick: TestProfile{ suites: [tests], time_limit: 60s } }`),
 or a bare package `jet test` when `defaults: { test: <name> }` names one, runs
 that profile instead (`--show-default` runs the stock default): each run is a
@@ -757,7 +758,17 @@ rows (each test and its outcome) are compared with the baseline
 baseline has passing that now fails or is gone is lost and fails the profile
 with exit 1, while a failure the baseline already holds does not. A run with no
 baseline, or under `-u`, records its rows as the baseline and keeps its own
-exit. A corpus suite (`suites: { ui: TestSuite{ ui_corpus: "../tests/ui" } }`,
+exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows)`
+(D-TEST-SUITE2=A; the name is a string literal, E0635), runs as its own child
+`jet test <package>/test.jet` that runs no #Test and calls only that suite's
+function with a `TestRows`; each `pass(id)`, `fail(id, detail)` and
+`skip(id, reason)` is one row, kept even if the suite then panics. The rows
+are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
+failing row's detail is printed. A repeated id fails as `duplicate row id`, and
+a suite that panics or exits non-zero adds the failing row `stopped` with its
+panic message. A profile naming a suite that neither `suites:` nor `test.jet`
+declares, or a name both declare, is refused with E1215.
+A corpus suite (`suites: { ui: TestSuite{ ui_corpus: "../tests/ui" } }`,
 or `golden_corpus:` / `cases_corpus:`, a directory relative to `package.jet`)
 fails with E2105 when the directory is missing; otherwise the profile's corpus
 suites run in this `jet` through the testkit pool (`Compiler/JetTestKit`),
@@ -768,8 +779,9 @@ every corpus. The profile's `jobs:`, `memory:` (`16G`), `filter:`, `shard: 1/4`
 and `opt_in:` fields steer the pool; `time_limit:` bounds each step; the
 `baseline:` ledger (`ID<TAB>card<TAB>reason` rows) holds the accepted failures.
 `-u` blesses every selected row's snapshots, and is refused with E2104 beside
-`shard:`. `jet test Compiler --profile ui` (also `golden`, `cases`, `corpus`)
-runs the repository's corpora. A bare `--shuffle` and the other test flags are refused
+`shard:`. `jet test Compiler --profile ui` (also `golden`, `cases`, `full`)
+runs the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
+`--shuffle` and the other test flags are refused
 with E2104 until they are ported. The test-result cache, the evidence
 report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the

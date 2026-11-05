@@ -3821,9 +3821,11 @@ use `--browser=<engines>`, `--browser-retries=<n>`,
 A package names test profiles in `package.jet`, and `--profile=<name>` or
 `defaults: { test: <name> }` selects one. Test and build profiles share one
 namespace, so a test profile can't take the name of a stock or declared build
-profile. `tests` is the built-in suite, every `#Test` of the package; other
-suites are declared in `suites:`, and an unknown suite is a manifest error, as
-is a `defaults.test` that names neither a test profile nor a Check output.
+profile. `tests` is the built-in suite, every `#Test` of the package; stock
+suites are declared in `suites:`, and code suites by `t.suite("<name>", body)`
+in `test.jet`'s `fn test`. A profile naming a suite none of these declares, or
+a name declared twice, fails the profile run (E1215), as does a
+`defaults.test` that names neither a test profile nor a Check output.
 
 ```text
 test: {
@@ -3847,6 +3849,27 @@ itself, every entry of the corpus a row; `jobs:`, `memory:`, `filter:`,
 failing) shape that run, a filter argument after the package replaces
 `filter:`, and `-u` rewrites the selected rows' expected output
 (`reference/cli.md`).
+
+A code suite checks what no corpus folder describes, such as a binary-size
+budget (D-TEST-SUITE2=A). Its name is a string literal (E0635), so a profile
+run lists the suites without running code. `body` takes a `TestRows` and
+reports each row as its check ends: `rows.pass(id)`, `rows.fail(id, detail)`
+or `rows.skip(id, reason)`. A profile runs the suite in its own child, which
+runs no `#Test`; a plain `jet test` skips it. The rows are compared with the
+suite's baseline like a run's, a repeated id fails, and a suite that panics
+keeps the rows it reported and adds the failing row `stopped`.
+
+```text
+fn test(t: Test) -> Int {
+    t.suite("perf", perf_rows)
+    t.run()
+}
+
+fn perf_rows(rows: TestRows) {
+    size :: built_size("hello")
+    if size <= 24_000 -> rows.pass("size hello") else -> rows.fail("size hello", "{size} B > 24000 B")
+}
+```
 
 ### Test scope members
 

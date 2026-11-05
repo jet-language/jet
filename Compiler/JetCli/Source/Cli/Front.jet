@@ -1288,21 +1288,15 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     options.time_limit_ms = jet_cli_test_profile_time_limit()
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
     // A bare `jet test` or `jet test <dir>` tests the package: the directory's own
-    // `fn test(t: Test)` file when it declares one (also for a workspace root), otherwise
-    // its stock entry. The entry file loads the whole package, and the harness collects
-    // every #Test of every package file. A workspace root without its own `fn test`
-    // tests each member that can run `jet test`, as its own child `jet test <member>`.
+    // `fn test(t: Test)` file when it declares one, otherwise its stock entry. The
+    // entry file loads the whole package, and the harness collects every #Test of
+    // every package file. A workspace root tests each member that can run `jet test`,
+    // as its own child `jet test <member>`; its own test.jet declares only the code
+    // suites its test profiles run (TestProfile.jet), as `jet test <root>/test.jet`.
     if positionals.len() == 0 || cli_files.is_dir(positionals[0]) {
         directory :: if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0]
         if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) {
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
-        }
-        if !show_default {
-            if jet_cli_command_override(directory, "test", color) == {
-                .Entry(found) -> return jet_cli_test_file(jet_argv, found.path, color, verbose, threads, options, fresh, quiet)
-                .Refused(plan) -> return ^plan
-                .Absent -> {}
-            }
         }
         workspace_notices := [String]{}
         if jet_cli_workspace_test_members(directory, !show_default, color, &workspace_notices) == {
@@ -1311,6 +1305,13 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
             .Refused(plan) -> return jet_cli_with_notices(workspace_notices, ^plan)
             // Resolution below writes its own notices.
             .Absent -> {}
+        }
+        if !show_default {
+            if jet_cli_command_override(directory, "test", color) == {
+                .Entry(found) -> return jet_cli_test_file(jet_argv, found.path, color, verbose, threads, options, fresh, quiet)
+                .Refused(plan) -> return ^plan
+                .Absent -> {}
+            }
         }
         if positionals.len() == 0 {
             notices := [String]{}
