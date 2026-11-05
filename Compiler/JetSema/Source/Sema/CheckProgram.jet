@@ -4385,16 +4385,19 @@ struct SemaBodyClaim {
 // thread can check, in item order: not foreign (the foreign stage checks
 // those), not already checked by comptime (the body loop takes that result),
 // without generic parameters (sema_function_check_shared), and not waiting
-// for demand (sema_core_demand_deferred). `weights` gets each one's source
+// for demand (sema_core_demand_deferred); during a Core demand wave
+// (graph.core_wave_rows) only that wave's. `weights` gets each one's source
 // bytes.
 fn sema_check_parallel_jobs(graph: SemaRegistrationGraph, module_index: Int, comptime_rows: [String:Int], weights: &[Int]) -> [SemaBodyJob] Never! {
     source_module :: graph.modules[module_index]
+    core_wave :: graph.core_wave_rows.len() > 0
     jobs := [SemaBodyJob]{}
     item_index := 0
     loop item in source_module.program.items {
         if item == .Func(func) {
             key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", func.name).key
-            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None && !sema_core_demand_deferred(graph, key) {
+            waiting :: if core_wave -> graph.core_wave_rows.get(key) == None else -> sema_core_demand_deferred(graph, key)
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity}\n{key}") == None && !waiting {
                 &jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
                 &weights.push(func.span.end - func.span.start)
             }
@@ -4866,12 +4869,14 @@ fn sema_check_body_parts(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBod
 // top-level jobs are positions firsts[k]..<firsts[k + 1] and its method jobs
 // method_firsts[k]..<method_firsts[k + 1]; `prepared[k]` when the wave built
 // module k's post-summary scope. `start` is wave module 0's position in the
-// pass's selected modules.
+// pass's selected modules. `core` when the wave is a Core demand wave's
+// (sema_core_demand_waves), which appends to each module's existing result.
 struct SemaWaveLayout {
     start: Int
     firsts: [Int]
     method_firsts: [Int]
     prepared: [Bool]
+    core: Bool
 }
 
 // A body wave's threads: `tasks` tasks of sema_check_body_wave_part and the
@@ -4889,13 +4894,14 @@ fn sema_check_body_wave_parts(shared: Shared<SemaCheckShared>, plan: Shared<Sema
 }
 
 // The lead thread of a body wave: checks wave modules `done..` in module
-// order (sema_check_registration_module_lent), each once every one of its
-// jobs is done, so each module's result is the one a check after the whole
-// wave makes. While the next module's jobs are unfinished it claims wave
-// jobs itself (sema_check_body_wave_job). Once every job is claimed and the
-// next module's are still running elsewhere it stops; `done` is then the
-// first module it did not check, which the wave checks after the threads
-// join. Returns how many bodies it checked.
+// order (sema_check_registration_module_lent, or for a Core demand wave
+// sema_check_core_demand_module_lent into the module's existing result),
+// each once every one of its jobs is done, so each module's result is the
+// one a check after the whole wave makes. While the next module's jobs are
+// unfinished it claims wave jobs itself (sema_check_body_wave_job). Once
+// every job is claimed and the next module's are still running elsewhere it
+// stops; `done` is then the first module it did not check, which the wave
+// checks after the threads join. Returns how many bodies it checked.
 fn sema_check_body_wave_lead(shared: Shared<SemaCheckShared>, plan: Shared<SemaBodyPlan>, queue: Shared<SemaBodyQueue>, environment: &SemaScopeEnvironment, host_hooks: SemaHostHookAccess?, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, layout: SemaWaveLayout, phase: String, trace_sink: CompilerTraceSink?, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult], checked_functions: &Int, done: &Int) -> Int {
     inputs :: shared.guard_read()
     jobs :: plan.guard_read()
@@ -4913,6 +4919,14 @@ fn sema_check_body_wave_lead(shared: Shared<SemaCheckShared>, plan: Shared<SemaB
         }
         module_index :: jobs.value.module_indexes[done]
         bodies := sema_check_body_wave_take(jobs.value, done, layout)
+        if layout.core {
+            scopes := &bodies.scopes.pop() ?? panic("a Core demand wave module lost its post-summary scope")
+            body_values := environment.comptime_body_publication.copy()
+            sema_scope_environment_enter_module(&environment, inputs.value.programs[0], module_index, ^body_values)
+            checked_functions += sema_check_core_demand_module_lent(&environment, inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], module_index, ^scopes, ^bodies, comptime_functions, comptime_rows, pending_obligations, trace_sink, &modules[module_index])
+            done += 1
+            next
+        }
         started := &starts.pop() ?? panic("a body-wave module lost its declaration check")
         if started.position != layout.start + done -> panic("a body-wave module took another module's declaration check")
         bodies.started = Val(^started)
@@ -8202,16 +8216,18 @@ fn sema_finalize_check_modules(graph: ^SemaRegistrationGraph, values: [SemaCompt
     if !codec_wave && !single_passes -> starts = sema_check_declaration_modules(shared_state, selected, values, false, threads)
     &starts.reverse()
     start := 0
+    // A Core demand wave shares body waves too (sema_check_body_wave with
+    // `core`); codec and derive waves check module by module.
     loop start < selected.len() {
         module_index :: selected[start]
-        if codec_wave {
+        if codec_wave && (!core_wave || single_passes) {
             checked_functions += if core_wave -> sema_check_core_demand_module_in_shared(shared_state, host_hooks, module_index, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, &modules[module_index]) else -> sema_check_codec_module_in_shared(shared_state, host_hooks, module_index, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, &modules[module_index])
             start += 1
             next
         }
         if !single_passes {
             end :: sema_check_body_wave_end(shared_state, selected, start)
-            checked_functions += sema_check_body_wave(shared_state, host_hooks, selected, start, end, values, comptime_functions, comptime_rows, pending_obligations, threads, phase, trace_sink, &starts, &modules)
+            checked_functions += sema_check_body_wave(shared_state, host_hooks, selected, start, end, values, comptime_functions, comptime_rows, pending_obligations, threads, phase, trace_sink, core_wave, &starts, &modules)
             start = end
             next
         }
@@ -8317,8 +8333,11 @@ fn sema_check_body_wave_end(shared_state: Shared<SemaCheckShared>, selected: [In
 // result from the module checks, run in module order, are those of a pass
 // per module.
 // `starts` holds the modules' declaration checks, made ahead, last first.
+// A Core demand wave's (`core`, sema_core_demand_waves) has none: it checks
+// the wave's bodies of each module into the module's existing result
+// (sema_check_core_demand_module_lent).
 // Returns how many functions the modules checked.
-fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], start: Int, end: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
+fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], start: Int, end: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, core: Bool, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
     jobs := [SemaBodyJob]{}
     job_modules := [Int]{}
     order := [Int]{}
@@ -8357,11 +8376,15 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
             if slot >= 0 && starts[slot].position == start + wave_module -> found = starts[slot].view_summary_jobs.copy()
             &view_jobs.push(^found)
         }
-        return sema_check_body_wave_run(shared_state, host_hooks, start, ^module_indexes, ^firsts, ^jobs, ^job_modules, ^order, workers, values, comptime_functions, comptime_rows, pending_obligations, view_jobs, phase, trace_sink, &starts, &modules)
+        return sema_check_body_wave_run(shared_state, host_hooks, start, ^module_indexes, ^firsts, ^jobs, ^job_modules, ^order, workers, values, comptime_functions, comptime_rows, pending_obligations, view_jobs, phase, trace_sink, core, &starts, &modules)
     }
     checked_functions := 0
     loop wave_module in 0..<(end - start) {
         module_index :: selected[start + wave_module]
+        if core {
+            checked_functions += sema_check_core_demand_module_in_shared(shared_state, host_hooks, module_index, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, &modules[module_index])
+            next
+        }
         bodies := sema_check_prepared_none()
         started := &starts.pop() ?? panic("a body-wave module lost its declaration check")
         if started.position != start + wave_module -> panic("a body-wave module took another module's declaration check")
@@ -8378,7 +8401,9 @@ fn sema_check_body_wave(shared_state: Shared<SemaCheckShared>, host_hooks: SemaH
 // A body wave on `workers` threads (sema_check_body_wave): builds the wave
 // modules' post-summary scopes and the wave's plan, then runs the threads
 // and the module checks; returns how many functions the modules checked.
-fn sema_check_body_wave_run(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, start: Int, module_indexes: ^[Int], owned_firsts: ^[Int], jobs: ^[SemaBodyJob], job_modules: ^[Int], order: ^[Int], workers: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, view_jobs: [[Int]?], counter_phase: String, trace_sink: CompilerTraceSink?, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
+// Every module of a Core demand wave (`core`) has bodies the wave names, so
+// each builds its scope.
+fn sema_check_body_wave_run(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, start: Int, module_indexes: ^[Int], owned_firsts: ^[Int], jobs: ^[SemaBodyJob], job_modules: ^[Int], order: ^[Int], workers: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, view_jobs: [[Int]?], counter_phase: String, trace_sink: CompilerTraceSink?, core: Bool, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
     wave_modules := ^module_indexes
     firsts := ^owned_firsts
     module_count :: wave_modules.len()
@@ -8406,7 +8431,7 @@ fn sema_check_body_wave_run(shared_state: Shared<SemaCheckShared>, host_hooks: S
         scanned := 0
         all_method_jobs :: sema_check_registered_method_jobs(environment, program, wave_modules[wave_module], &scanned, false)
         held := [SemaScopeEnvironment]{}
-        if firsts[wave_module + 1] > firsts[wave_module] || all_method_jobs.len() > 0 {
+        if core || firsts[wave_module + 1] > firsts[wave_module] || all_method_jobs.len() > 0 {
             scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, wave_modules[wave_module], comptime_functions, comptime_rows, view_jobs[wave_module], counter_phase, trace_sink)
             entered := environment.copy()
             // Selected against the entered environment, as the module check does.
@@ -8438,7 +8463,7 @@ fn sema_check_body_wave_run(shared_state: Shared<SemaCheckShared>, host_hooks: S
     sema_check_body_plan_fill(plan, ^wave_jobs, ^wave_order, ^replay)
     sema_check_body_plan_fill_wave(plan, ^wave_job_modules, ^wave_modules, ^cells, ^outs, ^left)
     queue :: shared SemaBodyQueue{next: 0}
-    layout :: SemaWaveLayout{start: start, firsts: ^firsts, method_firsts: ^method_firsts, prepared: ^prepared}
+    layout :: SemaWaveLayout{start: start, firsts: ^firsts, method_firsts: ^method_firsts, prepared: ^prepared, core: core}
     checked_functions := 0
     done := 0
     _ := sema_check_body_wave_parts(shared_state, plan, queue, workers - 1, &environment, host_hooks, values, comptime_functions, comptime_rows, pending_obligations, layout, counter_phase, trace_sink, &starts, &modules, &checked_functions, &done)
