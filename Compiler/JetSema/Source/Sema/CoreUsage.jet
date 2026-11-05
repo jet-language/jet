@@ -6,6 +6,7 @@
 // remain Foundation-owned (RingLayer.jet).
 use jet_foundation.[
     AST_NODE_GENERATED,
+    Diagnostic,
     Expr,
     ExternFn,
     Field,
@@ -26,6 +27,7 @@ use jet_foundation.[
     TraitMethodSig,
     Type,
     TypedLitBody,
+    core_call,
     core_module_has_member,
     core_module_has_type,
     core_type_modules,
@@ -35,6 +37,7 @@ use jet_foundation.[
     jet_ring_classify_prelude_closure,
     jet_ring_closure_rows_layer,
     jet_ring_prelude_closure_layer,
+    diagnostic_registry_row,
     boundary_head_owner_module,
     symbol_id,
 ]
@@ -430,6 +433,49 @@ fn sema_core_module_and_helper(usage: String) -> [String] Never! {
         &helper_parts.push(parts[index])
     }
     [String]{parts[0], helper_parts.join("::")}
+}
+
+// E2937: every UI capability a Core row the module calls names must be
+// declared in the package's `authority.needs`. Each missing capability is
+// reported once per module, on its first located use: the module's calls
+// into Core source functions first, then its Core usage rows.
+fn sema_core_check_ui_capabilities(call_facts: [SemaCallSiteFact], graph: SemaRegistrationGraph, usage_modules: [SemaCoreModuleUsageResult], module_identity: String, needs: [String], diagnostics: &[Diagnostic]) {
+    reported := [String]{}
+    loop fact in call_facts {
+        callee :: fact.callee ?? next
+        usage :: sema_core_source_call_usage(callee.key, graph) ?? next
+        sema_core_check_ui_usage(usage, Val(fact.span), needs, &reported, &diagnostics)
+    }
+    loop index in 0..<usage_modules.len() {
+        if usage_modules[index].module_identity != module_identity -> next
+        loop row in usage_modules[index].usage_spans -> sema_core_check_ui_usage(row.usage, Val(row.span), needs, &reported, &diagnostics)
+        loop usage in usage_modules[index].used_core -> sema_core_check_ui_usage(usage, None, needs, &reported, &diagnostics)
+    }
+}
+
+// `module::member` of a call whose callee is a free function of a Core
+// source module (`function:<module identity>::<member>`), or None.
+fn sema_core_source_call_usage(key: String, graph: SemaRegistrationGraph) -> String? Never! {
+    if !key.starts_with("function:<corelib>/") -> return None
+    cut :: key.rfind(":")
+    head :: key.slice(0, cut)
+    if !head.ends_with(":") -> return None
+    module_identity :: head.slice(9, head.len() - 1)
+    index :: sema_registration_module_index(graph, module_identity) ?? return None
+    Val("{graph.modules[index].module_name}::{key.slice(cut + 1, key.len())}")
+}
+
+fn sema_core_check_ui_usage(usage: String, span: Span?, needs: [String], reported: &[String], diagnostics: &[Diagnostic]) {
+    parts :: sema_core_module_and_helper(usage)
+    if parts.len() != 2 -> return
+    row :: core_call(parts[0], parts[1]) ?? return
+    loop capability in row.ui_capabilities {
+        if sema_core_string_contains(needs, capability) || sema_core_string_contains(reported, capability) -> next
+        &reported.push(capability)
+        service :: "{parts[0]}.{parts[1]}"
+        registry :: diagnostic_registry_row("E2937") ?? panic("E2937 has no registry row")
+        &diagnostics.push(sema_error_optional("E2937", span, registry.what.replace("{{service}}", service).replace("{{capability}}", capability), registry.why, registry.fix.replace("{{capability}}", capability)))
+    }
 }
 
 // Source authority is deliberately narrower than the intrinsic closure. The

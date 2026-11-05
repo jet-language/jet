@@ -1,0 +1,18 @@
+package {
+    name: "ui_service_without_capability"
+    version: "0.1.0"
+    authority: {
+        allow: [IO, Mem.Alloc]
+        needs: [UI.IME, UI.Clipboard]
+    }
+}
+use clipboard :: core.ui.host.clipboard
+
+// The check reads every call, reached or not.
+fn paste() {
+    _read :: clipboard.read_text()
+}
+
+fn run() {
+    print("ready")
+}

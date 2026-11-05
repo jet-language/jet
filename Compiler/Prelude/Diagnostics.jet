@@ -936,6 +936,21 @@ struct UnclosedDelimiter {
     }
 }
 
+struct BidiControlInSource {
+    character: String
+
+    impl Diagnostic {
+        code :: "E0088"
+        stage :: [.Lex]
+        meaning :: "A literal bidirectional control character is in source"
+        detail :: true
+        no_fix :: .Ambiguous
+        fn what(self) -> String { "Source holds the invisible bidirectional control `{self.character}`" }
+        fn why(self) -> String { "A bidirectional control reorders how the text around it displays, so the code a reviewer reads can differ from the code Jet compiles." }
+        fn fix(self) -> String { "Delete the character; data that must carry it builds the text from its bytes with `\\x` escapes in a `[U8]` literal." }
+    }
+}
+
 struct TextOnTripleQuoteLine {
     position: String
 
@@ -952,7 +967,6 @@ struct TextOnTripleQuoteLine {
 struct RetiredForeignWhen {
     impl Diagnostic {
         code :: "E0984"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: `when` teaching)" }
@@ -975,6 +989,7 @@ struct RetiredForeignValVar {
 struct DetachedCallableMarker {
     impl Diagnostic {
         code :: "E0986"
+        stage :: [.Parse]
         meaning :: "Callable `->`, `-[Effects]>`, `::`, or `{{` split incorrectly from the declaration head (S6-R)"
         detail :: true
         no_fix :: .Ambiguous
@@ -1013,7 +1028,6 @@ struct DispatchMissingComparison {
 struct RetiredPredicateArmHead {
     impl Diagnostic {
         code :: "E0993"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "~~Retired~~ — predicate/Bool arm heads are now allowed" }
@@ -1025,6 +1039,7 @@ struct RetiredPredicateArmHead {
 struct RedundantArmComparison {
     impl Diagnostic {
         code :: "E0994"
+        stage :: [.Parse]
         fn what(self) -> String { "Teaching: a redundant `subject OP` on an arm head — the `if`'s comparison already applies it" }
         fn why(self) -> String { "The registered parse rule applies here" }
         fn fix(self) -> String { "Remove the redundant subject operation from the arm head." }
@@ -1047,7 +1062,6 @@ struct StackedRuleLines {
 struct RetiredCopyKeyword {
     impl Diagnostic {
         code :: "E0991"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: `copy` keyword teaching)" }
@@ -1070,6 +1084,7 @@ struct RetiredCopySigil {
 struct MarkersAboveAndInside {
     impl Diagnostic {
         code :: "E0942"
+        stage :: [.Parse]
         meaning :: "A declaration writes markers both above it and as `#X :: value` lines in its body"
         edit :: .SourceEdit
         no_fix :: None
@@ -1616,7 +1631,6 @@ struct PersistNotModuleLevel {
 struct RetiredConstKeyword {
     impl Diagnostic {
         code :: "E0146"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "Retired `const` keyword — write `@`" }
@@ -1628,6 +1642,7 @@ struct RetiredConstKeyword {
 struct AdjacentPatternHoles {
     impl Diagnostic {
         code :: "E0147"
+        stage :: [.Parse]
         fn what(self) -> String { "Two `{{}}` holes in a str-match pattern with no literal text between them" }
         fn why(self) -> String { "The registered parse rule applies here" }
         fn fix(self) -> String { "Put literal text between adjacent `{{}}` holes in the string pattern." }
@@ -2858,7 +2873,6 @@ struct OrPatternBindingMismatch {
 struct RetiredForeignInclusiveRange {
     impl Diagnostic {
         code :: "E0318"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: `..=` teaching)" }
@@ -2903,6 +2917,7 @@ struct RetiredImplColon {
 struct AssignmentInCondition {
     impl Diagnostic {
         code :: "E0322"
+        stage :: [.Parse]
         fn what(self) -> String { "Assignment `=` in `if` condition — did you mean `==`?" }
         fn why(self) -> String { "The registered parse rule applies here" }
         fn fix(self) -> String { "Use `==` for comparison in the `if` condition." }
@@ -2912,7 +2927,6 @@ struct AssignmentInCondition {
 struct RetiredForeignNamespaceKeyword {
     impl Diagnostic {
         code :: "E0323"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: `namespace` teaching)" }
@@ -2973,6 +2987,7 @@ struct RetiredMixedArmOperators {
 struct NestedArmWithoutSubject {
     impl Diagnostic {
         code :: "E0329"
+        stage :: [.Parse]
         fn what(self) -> String { "Direct braceless nesting in an arm table without a named subject" }
         fn why(self) -> String { "The registered parse rule applies here" }
         fn fix(self) -> String { "Give the arm table a named subject before nesting braceless arms." }
@@ -3481,7 +3496,6 @@ struct RetiredFenceSpelling {
 
     impl Diagnostic {
         code :: "E-FENCE-SPELLING"
-        stage :: [.Parse]
         status :: .Retired
         meaning :: "Retired fence digraph; fences use `<: … :>`"
         detail :: true
@@ -3499,6 +3513,7 @@ struct EffectBodyWithoutBraces {
 
     impl Diagnostic {
         code :: "E0372"
+        stage :: [.Parse]
         meaning :: "Teaching: an adjacent effect `if`, `else`, or `loop` body needs braces"
         detail :: true
         fn what(self) -> String { "This `{self.body}` body needs braces." }
@@ -3525,7 +3540,6 @@ struct ExplicitSemicolon {
 struct RetiredComptimeKeyword {
     impl Diagnostic {
         code :: "E0374"
-        stage :: [.Parse]
         status :: .Retired
         meaning :: "Teaching: retired `comptime`; use implicit folding or `@`"
         detail :: true
@@ -3595,6 +3609,7 @@ struct RetiredAliasEquals {
 struct GuardAfterComma {
     impl Diagnostic {
         code :: "E0379"
+        stage :: [.Parse]
         meaning :: "Teaching: a guard follows its source with no comma"
         detail :: true
         edit :: .Remove
@@ -3621,7 +3636,6 @@ struct LoopMissingBinding {
 struct RetiredDeclarationWord {
     impl Diagnostic {
         code :: "E0381"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: `marker`/`effect` declaration word teaching)" }
@@ -3682,6 +3696,7 @@ struct CompileTimeNumberParameter {
 struct UnsupportedCompileTimeValue {
     impl Diagnostic {
         code :: "E0391"
+        stage :: [.Parse]
         meaning :: "A `comptime {{ … }}` value other than `name :: comptime {{ value }}` is not implemented yet"
         detail :: true
         fn what(self) -> String { "`comptime {{ … }}` is used as a value in a form this compiler does not support yet." }
@@ -3832,7 +3847,6 @@ struct FallbackTypeMismatch {
 struct RetiredResultType {
     impl Diagnostic {
         code :: "E0406"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired: `Result<T, E>` is a legal type* (was: old `Result<T, E>` fallible type syntax)" }
@@ -3890,6 +3904,7 @@ struct RetiredPrefixTypeMark {
 struct UnparenthesizedErrorUnion {
     impl Diagnostic {
         code :: "E-ERR-UNION"
+        stage :: [.Parse]
         meaning :: "Unparenthesized union error contract"
         detail :: true
         edit :: .SourceEdit
@@ -3947,7 +3962,6 @@ struct ErrAfterPatternMiss {
 struct RetiredSuppressArgument {
     impl Diagnostic {
         code :: "E0410"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: `#Suppress` unknown argument)" }
@@ -3981,6 +3995,7 @@ struct RetiredForeignPrivate {
 struct PrivNotAllowed {
     impl Diagnostic {
         code :: "E0413"
+        stage :: [.Parse]
         edit :: .SourceEdit
         no_fix :: None
         fix_safety :: .NeedsReview
@@ -4019,7 +4034,6 @@ struct VisibilitySectionLabel {
 struct RetiredDuplicatePubFile {
     impl Diagnostic {
         code :: "E0416"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: duplicate `#PubFile` marker in one file)" }
@@ -4031,6 +4045,7 @@ struct RetiredDuplicatePubFile {
 struct PackagePrivField {
     impl Diagnostic {
         code :: "E0417"
+        stage :: [.Parse]
         edit :: .SourceEdit
         no_fix :: None
         fix_safety :: .NeedsReview
@@ -4138,7 +4153,6 @@ struct RetiredUninitMarker {
 
     impl Diagnostic {
         code :: "E0426"
-        stage :: [.Parse]
         status :: .Retired
         meaning :: "Teaching: retired `#Uninit name: Type` marker → `name := Type{{ uninit }}`"
         detail :: true
@@ -4187,6 +4201,7 @@ struct PreludeNameUnderNoPrelude {
 struct ShieldWithArguments {
     impl Diagnostic {
         code :: "E0430"
+        stage :: [.Parse]
         meaning :: "`#Shield` was given arguments; the cancellation shield is a bare block"
         detail :: true
         fn what(self) -> String { "`` `#Shield` takes no arguments ``." }
@@ -6373,7 +6388,6 @@ struct ReservedBindgenSegment {
 
     impl Diagnostic {
         code :: "E3206"
-        stage :: [.Parse]
         status :: .Reserved
         meaning :: "User declared reserved `__bindgen__` segment"
         detail :: true
@@ -6389,6 +6403,7 @@ struct BindgenOutsideGenerated {
 
     impl Diagnostic {
         code :: "E3207"
+        stage :: [.Parse]
         meaning :: "`#Bindgen` outside generated `.jet/bindings/c/` file"
         detail :: true
         fn what(self) -> String { "`#Bindgen` is only allowed in generated cache files." }
@@ -7515,7 +7530,6 @@ struct ImplOfUnknownTrait {
 struct RetiredDeriveStatement {
     impl Diagnostic {
         code :: "E0929"
-        stage :: [.Parse]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "Body-level `derive X;` is retired; request the derive with `#X` and reserve `derive` for provider definitions" }
@@ -7527,6 +7541,7 @@ struct RetiredDeriveStatement {
 struct MisplacedJobMarker {
     impl Diagnostic {
         code :: "E0925"
+        stage :: [.Parse]
         fn what(self) -> String { "`#Job`/`#Every(…)` written somewhere they don't belong — a method, or `#Every(…)` without `#Job`" }
         fn why(self) -> String { "The registered parse rule applies here" }
         fn fix(self) -> String { "Place `#Job` on a function and attach `#Every(...)` only to that job." }
@@ -7777,7 +7792,6 @@ struct MissingLayoutByteFact {
 struct ReservedContributionNamespace {
     impl Diagnostic {
         code :: "E0960"
-        stage :: [.Parse]
         status :: .Reserved
         meaning :: "module contribution names a non-reserved namespace (U3: `env`/`system`/`image`)"
         no_fix :: None
@@ -7790,6 +7804,7 @@ struct ReservedContributionNamespace {
 struct InvalidMemberSpread {
     impl Diagnostic {
         code :: "E0961"
+        stage :: [.Parse]
         meaning :: "Member spread `.[…]` entry is not a bare identifier"
         detail :: true
         fn what(self) -> String { "A member-spread list entry is not a bare name." }
@@ -9040,7 +9055,6 @@ struct ToolchainVersionMismatch {
 struct ReservedSectionUsed {
     impl Diagnostic {
         code :: "E1209"
-        stage :: [.Jet]
         status :: .Reserved
         no_fix :: None
         fn what(self) -> String { "Reserved section used non-empty (M12.1)" }
@@ -9074,6 +9088,7 @@ struct RetiredPackageKind {
 struct PackageModuleNotFound {
     impl Diagnostic {
         code :: "E1212"
+        stage :: [.Jet]
         no_fix :: .Behavior
         fn what(self) -> String { "Package declared in `packages:` but no `module <name>` found in source tree (U10)" }
         fn why(self) -> String { "The registered jet rule applies here" }
@@ -9244,7 +9259,6 @@ struct PackageFileOperationFailed {
 struct RetiredJetpackToml {
     impl Diagnostic {
         code :: "E1225"
-        stage :: [.Jet]
         status :: .Retired
         meaning :: "`jetpack.toml` is retired"
         detail :: true
@@ -9277,6 +9291,7 @@ struct EngineProtocolMismatch {
 
     impl Diagnostic {
         code :: "E1227"
+        stage :: [.Jet]
         meaning :: "`jet` and the `jetpack`/`jetos` engine binary disagree on protocol version"
         detail :: true
         no_fix :: .Behavior
@@ -9312,7 +9327,6 @@ struct RetiredRoleContribution {
 
     impl Diagnostic {
         code :: "E1229"
-        stage :: [.Jet]
         status :: .Retired
         meaning :: "A role-module contribution uses the retired `module name {{ ns.path: Type{{ }} }}` form"
         detail :: true
@@ -9328,6 +9342,7 @@ struct AmbiguousWorkspaceMember {
 
     impl Diagnostic {
         code :: "E1230"
+        stage :: [.Jet]
         meaning :: "A bare/path-form ref matched more than one workspace member"
         detail :: true
         no_fix :: .Ambiguous
@@ -9741,7 +9756,6 @@ struct SandboxInterfaceChanged {
 struct RetiredSandboxEffect {
     impl Diagnostic {
         code :: "E1258"
-        stage :: [.Jet]
         status :: .Retired
         no_fix :: None
         fn what(self) -> String { "*Retired* (was: a sandbox package's own code uses an effect)" }
@@ -9764,6 +9778,7 @@ struct RetiredSandboxBuild {
 struct UnsupportedExportSignature {
     impl Diagnostic {
         code :: "E1260"
+        stage :: [.Jet]
         meaning :: "An exported function has a parameter or result its export boundary can't carry: a sandbox's Component boundary or a native Library's C boundary (U3)"
         detail :: true
         no_fix :: .Behavior
@@ -9900,7 +9915,7 @@ struct PinnedSourceUpdate {
 struct UnknownPrepareFlag {
     impl Diagnostic {
         code :: "E1353"
-        stage :: [.Jetpack]
+        status :: .Retired
         meaning :: "jetpack has no `--prepare` flag"
         detail :: true
         no_fix :: None
@@ -9955,6 +9970,21 @@ struct EnvironmentPreparationFailed {
         fn what(self) -> String { "The declared project environment could not be prepared for `{self.command}`: {self.reason}." }
         fn why(self) -> String { "Jet delegates project environment resolution and realization to the matching Jetpack engine before `{self.command}` runs; this delegation failed before the program started. A `jet run` run reports this environment-delegation error." }
         fn fix(self) -> String { "Resolve the Jetpack installation or environment problem, then retry `{self.command}`." }
+    }
+}
+
+struct InvalidRef {
+    raw: String
+
+    impl Diagnostic {
+        code :: "E1358"
+        stage :: [.Jetpack]
+        meaning :: "A package ref matches none of the legal ref forms"
+        detail :: true
+        no_fix :: .Behavior
+        fn what(self) -> String { "`{self.raw}` is not a valid package ref" }
+        fn why(self) -> String { "A ref is `package@source`, optionally followed by `#version` or `#channel`, or a bare local path starting with `./`, `../`, or `/`." }
+        fn fix(self) -> String { "Write one of the legal forms: `ripgrep@jetpack`, `ripgrep@jetpack#14.1.0`, `owner/repo@github#v1.2`, or `./vendor/tool`." }
     }
 }
 
@@ -10169,7 +10199,6 @@ struct MissingNixOutput {
 struct ReservedRecipeBuildFailed {
     impl Diagnostic {
         code :: "E1273"
-        stage :: [.Jetpack]
         status :: .Reserved
         meaning :: "A recipe-backed package build failed at a logged build step (U27)"
         detail :: true
@@ -10185,6 +10214,7 @@ struct MissingStoreRecord {
 
     impl Diagnostic {
         code :: "E1274"
+        stage :: [.Jetpack]
         meaning :: "No persisted Store record or build explanation exists for the requested package/ref (U27)"
         detail :: true
         no_fix :: .Behavior
@@ -10223,7 +10253,6 @@ struct OfflineNeedsNetwork {
 struct RetiredJetosNamespace {
     impl Diagnostic {
         code :: "E1277"
-        stage :: [.Jetpack]
         status :: .Retired
         meaning :: "A jetos option key uses a retired namespace"
         detail :: true
@@ -10237,6 +10266,7 @@ struct RetiredJetosNamespace {
 struct IncompleteActivationProof {
     impl Diagnostic {
         code :: "E1278"
+        stage :: [.Jetpack]
         meaning :: "A jetos activation proof is incomplete"
         detail :: true
         no_fix :: .Behavior
@@ -10484,7 +10514,7 @@ struct ForeignFilterSelector {
 
     impl Diagnostic {
         code :: "E1296"
-        stage :: [.Jetpack]
+        status :: .Retired
         meaning :: "Pnpm-style `--filter` pattern DSL rejected — use `-p` / `--affected`"
         detail :: true
         no_fix :: .Behavior
@@ -10521,8 +10551,8 @@ struct ToolProviderUnavailable {
         no_fix :: .Behavior
         fix_next :: "Use a built-in provider or a local path until the requested provider is supported."
         fn what(self) -> String { "Tool provider `{self.source}` isn't available yet" }
-        fn why(self) -> String { "JPK-TOOL-PROVIDER: `jetpack tool` accepts external providers (`npm`, `pypi`, `cargo`, …) so the surface is discoverable, but that provider has no hangar realization path yet — Jet never silently skips. Built-ins that work today include `nixpkgs` and `github`; local paths are bare." }
-        fn fix(self) -> String { "Use a built-in ref (`name@nixpkgs`, `owner/repo@github`) or a bare local path, or wait for the `{self.source}` provider to land." }
+        fn why(self) -> String { "JPK-TOOL-PROVIDER: `jetpack tool` accepts external providers (`npm`, `pypi`, `cargo`, …) so the surface is discoverable, but that provider has no hangar realization path yet — Jet never silently skips. Built-ins that work today include `jetpack` and `github`; local paths are bare." }
+        fn fix(self) -> String { "Use a built-in ref (`name@jetpack`, `owner/repo@github`) or a bare local path, or wait for the `{self.source}` provider to land." }
     }
 }
 
@@ -10544,7 +10574,7 @@ struct ReservedStorePathComponent {
 struct UnknownProfileFlag {
     impl Diagnostic {
         code :: "E1300"
-        stage :: [.Jetpack]
+        status :: .Retired
         meaning :: "jetpack has no `--profile` flag"
         detail :: true
         no_fix :: None
@@ -10587,13 +10617,13 @@ struct AmbiguousPackageVariant {
 struct RetiredRefSpelling {
     impl Diagnostic {
         code :: "E1317"
-        stage :: [.Jetpack]
+        status :: .Retired
         meaning :: "A direct CLI ref puts the provider first, uses a `path@` prefix, or names `@nixpkgs` as its source"
         detail :: true
-        no_fix :: .Behavior
+        no_fix :: None
         fn what(self) -> String { "A Jetpack CLI ref puts the provider first, uses a path-provider prefix, or names `@nixpkgs` as its source." }
-        fn why(self) -> String { "Jet puts the package or upstream target before `@` and the source after it; Jetpack is public while retaining nixpkgs as lock and receipt provenance. A `jetpack env` run reports this provider-reference error." }
-        fn fix(self) -> String { "Write `target@provider`, a bare local path, or rewrite `package@nixpkgs` exactly as `package@jetpack`." }
+        fn why(self) -> String { "Every ref that matches no legal form now reports the generic invalid-ref error." }
+        fn fix(self) -> String { "See E1358 for the legal ref forms." }
     }
 }
 
@@ -10807,7 +10837,6 @@ struct CrashSymbolsMissing {
 struct RetiredDevPrescan {
     impl Diagnostic {
         code :: "E2201"
-        stage :: [.Interp]
         status :: .Retired
         meaning :: "*Retired* (was: `jet dev` pre-scanned AST features and refused programs before the canonical evaluator ran)"
         no_fix :: None
@@ -10820,6 +10849,7 @@ struct RetiredDevPrescan {
 struct DevStepBudgetExhausted {
     impl Diagnostic {
         code :: "E2202"
+        stage :: [.Interp]
         meaning :: "`jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4)"
         detail :: true
         no_fix :: .Behavior
@@ -11272,7 +11302,7 @@ struct UnknownEnvironmentModule {
 struct UnknownEnvProfileFlag {
     impl Diagnostic {
         code :: "E1342"
-        stage :: [.Jetpack]
+        status :: .Retired
         meaning :: "jetpack has no `--env-profile` flag"
         detail :: true
         no_fix :: None
@@ -11516,7 +11546,6 @@ struct UnknownDecodedField {
 struct RetiredCodableBounds {
     impl Diagnostic {
         code :: "E2413"
-        stage :: [.Compile]
         status :: .Retired
         detail :: true
         no_fix :: None
@@ -11529,6 +11558,7 @@ struct RetiredCodableBounds {
 struct DefaultNotConstant {
     impl Diagnostic {
         code :: "E2414"
+        stage :: [.Compile]
         detail :: true
         fn what(self) -> String { "A field's `{{…}}` default must be a compile-time constant." }
         fn why(self) -> String { "A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time. An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). During `jet check`, Jet reports this diagnostic." }
@@ -12082,7 +12112,6 @@ struct RetiredDeriveTraitSpelling {
 
     impl Diagnostic {
         code :: "E2714"
-        stage :: [.Compile]
         status :: .Retired
         detail :: true
         no_fix :: None
@@ -12099,6 +12128,7 @@ struct NetworkOperationFailed {
 
     impl Diagnostic {
         code :: "E2801"
+        stage :: [.Compile]
         detail :: true
         no_fix :: .Ambiguous
         fn what(self) -> String { "{self.operation} on `{self.address}` failed: {self.detail}." }
@@ -12602,7 +12632,6 @@ struct FreezeNotSnapshotable {
 struct RetiredSharedNew {
     impl Diagnostic {
         code :: "E1115"
-        stage :: [.Parse]
         status :: .Retired
         meaning :: "Teaching: retired `Shared.new(x)` constructor → prefix `shared x`"
         detail :: true
@@ -12630,6 +12659,7 @@ struct UnknownSharedMethod {
 struct MixedTaskBranches {
     impl Diagnostic {
         code :: "E1117"
+        stage :: [.Parse]
         meaning :: "`task.all` mixes named and positional branches"
         detail :: true
         no_fix :: .Ambiguous
@@ -12667,7 +12697,6 @@ struct InvalidMemoField {
 struct RetiredDeclarationDefault {
     impl Diagnostic {
         code :: "E0385"
-        stage :: [.Parse]
         status :: .Retired
         meaning :: "Teaching: retired declaration default `name: Type = value`; write `name: Type{{{{value}}}}`"
         detail :: true
@@ -12722,6 +12751,7 @@ struct RetiredForeignPowerOperator {
 struct LogicalNotOnNonBool {
     impl Diagnostic {
         code :: "E0398"
+        stage :: [.Parse]
         meaning :: "`!` applied to a non-Bool value"
         detail :: true
         edit :: .SourceEdit

@@ -435,7 +435,35 @@ fn lex_payload_from_facts(source: [U8], facts: [Int], events: [Int], config_surf
         index += 1
     }
     gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
+    // An interpolation's nested source is a copy of bytes the depth-0 range
+    // already covers.
+    if depth == 0 -> lexer_report_bidi_controls(source, from, to, &diagnostics)
     LexedTokens{tokens: ^tokens, diagnostics: ^diagnostics}
+}
+
+// A literal bidirectional control (U+202A-U+202E, U+2066-U+2069) starts at
+// `at`. It reorders how the text around it displays, so the code a reviewer
+// reads could differ from the code Jet compiles.
+fn lexer_bidi_control_at(source: [U8], at: Int) -> Bool Never! {
+    if byte_at(source, at) != 226 -> return false
+    second :: byte_at(source, at + 1)
+    third :: byte_at(source, at + 2)
+    (second == 128 && third >= 170 && third <= 174) || (second == 129 && third >= 166 && third <= 169)
+}
+
+// E0088: every literal bidirectional control in `source[from..<to]`, in
+// code, comments and quoted text alike.
+fn lexer_report_bidi_controls(source: [U8], from: Int, to: Int, diagnostics: &[Diagnostic]) {
+    at := from
+    loop at < to {
+        if byte_at(source, at) == 226 && lexer_bidi_control_at(source, at) {
+            row :: diagnostic_registry_row("E0088") ?? panic("E0088 has no registry row")
+            add_diagnostic(&diagnostics, row.code, at, at + 3, row.what.replace("{{character}}", codepoint_hex(scalar_codepoint(source, at, 3))), row.why, row.fix)
+            at += 3
+            next
+        }
+        at += 1
+    }
 }
 
 // An interpolation's nested source: payload only, no terminator pass.
@@ -1038,8 +1066,11 @@ fn gap_diagnostic(source: [U8], facts: [Int], start: Int, end: Int, config_surfa
             return
         }
         width :: utf8_width(source, cursor)
-        character :: printable_character(source, cursor, width)
-        add_diagnostic(&diagnostics, "E0001", cursor, cursor + width, "the character `{character}` doesn't mean anything here (yet)", "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them", "remove it, or use supported syntax")
+        // A bidirectional control has its own report (E0088).
+        if !lexer_bidi_control_at(source, cursor) {
+            character :: printable_character(source, cursor, width)
+            add_diagnostic(&diagnostics, "E0001", cursor, cursor + width, "the character `{character}` doesn't mean anything here (yet)", "unprintable characters are shown as `\\0`, `\\t`, or `U+XXXX` so you can identify them", "remove it, or use supported syntax")
+        }
         cursor += width
     }
 }
