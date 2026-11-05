@@ -513,8 +513,10 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             } else {
                 ir_store(&m, p, &b, binding.slot, owned)
             }
-            // The variable owns its new value again.
-            if binding.owned -> ir_reown(&b, binding)
+            // The variable owns its new value again, also when an earlier
+            // statement moved its old one out (`moved := f(^x); x = ^moved`)
+            // or it held none yet (`x := T{ uninit }`): its scope end drops it.
+            if binding.owned || ir_has_drop(m, b, binding.slot) -> ir_reown(&b, binding)
             ir_close_rearm(&b, binding.slot)
         }
         .ExprStmt(value, span) -> {
