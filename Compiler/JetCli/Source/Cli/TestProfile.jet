@@ -38,9 +38,12 @@ JET_CLI_TEST_ROW_PASSED :: "passed"
 JET_CLI_TEST_ROW_FAILED :: "failed"
 // Set in a code suite's child to the suite it runs, and to the file its
 // TestRows appends `id<TAB>state<TAB>detail` lines to (core.testing
-// `__suite_run`).
+// `__suite_run`). The suite's code finds the package root it belongs to in
+// JET_TEST_SUITE_ROOT, and the jet under test in JET.
 JET_CLI_TEST_SUITE_ENV :: "JET_TEST_SUITE"
 JET_CLI_TEST_SUITE_ROWS_ENV :: "JET_TEST_SUITE_ROWS"
+JET_CLI_TEST_SUITE_ROOT_ENV :: "JET_TEST_SUITE_ROOT"
+JET_CLI_TEST_SUITE_JET_ENV :: "JET"
 
 // One child `jet test` of a profile run.
 struct JetCLITestProfileRun {
@@ -290,7 +293,7 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
         loop argument in run.args -> &argv.push(argument.copy())
         &argvs.push(^argv)
         if run.suite != "" {
-            &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows")})
+            &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
             next
         }
         env := [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin")}

@@ -15,15 +15,16 @@ step: jet test --profile sizes --capture=all
 cwd: {work}/app
 exit: 0
 stderr: ~ "jet test: profile `sizes`, run `sizes`" # the suite runs as its own child
-stderr: ~ "`sizes`: 2 rows recorded as the baseline `.jet/test/sizes/sizes.rows`" # the first run records the suite's rows
+stderr: ~ "`sizes`: 3 rows recorded as the baseline `.jet/test/sizes/sizes.rows`" # the first run records the suite's rows
 stderr: ~ "`tests`: 1 rows recorded as the baseline `.jet/test/sizes/tests.rows`" # the #Tests run beside it
 file: app/.jet/test/sizes/sizes.rows ~ "size hello\tpassed" # a passing row
 file: app/.jet/test/sizes/sizes.rows ~ "slow\tskipped" # a skipped row
+file: app/.jet/test/sizes/sizes.rows ~ "suite env\tpassed" # the child gets JET and JET_TEST_SUITE_ROOT
 file: app/.jet/test/sizes/sizes.rows !~ "adds" # the suite's child runs no #Test
 step: jet test --profile sizes --capture=all
 cwd: {work}/app
 exit: 0
-stderr: ~ "`sizes`: 2 rows against `.jet/test/sizes/sizes.rows`: 0 lost, 0 changed, 0 new" # a later run compares
+stderr: ~ "`sizes`: 3 rows against `.jet/test/sizes/sizes.rows`: 0 lost, 0 changed, 0 new" # a later run compares
 copy: alt/failing.jet app/sizes.jet
 step: jet test --profile sizes --capture=all
 cwd: {work}/app

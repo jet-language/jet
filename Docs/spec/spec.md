@@ -3856,9 +3856,12 @@ budget (D-TEST-SUITE2=A). Its name is a string literal (E0635), so a profile
 run lists the suites without running code. `body` takes a `TestRows` and
 reports each row as its check ends: `rows.pass(id)`, `rows.fail(id, detail)`
 or `rows.skip(id, reason)`. A profile runs the suite in its own child, which
-runs no `#Test`; a plain `jet test` skips it. The rows are compared with the
-suite's baseline like a run's, a repeated id fails, and a suite that panics
-keeps the rows it reported and adds the failing row `stopped`.
+runs no `#Test`; a plain `jet test` skips it. The child's environment names
+the `jet` running the profile in `JET` and the package's directory in
+`JET_TEST_SUITE_ROOT`, so the suite drives the compiler under test. The rows
+are compared with the suite's baseline like a run's, a repeated id fails, and
+a suite that panics keeps the rows it reported and adds the failing row
+`stopped`.
 
 ```text
 fn test(t: Test) -> Int {

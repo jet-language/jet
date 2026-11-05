@@ -762,7 +762,9 @@ exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows)`
 (D-TEST-SUITE2=A; the name is a string literal, E0635), runs as its own child
 `jet test <package>/test.jet` that runs no #Test and calls only that suite's
 function with a `TestRows`; each `pass(id)`, `fail(id, detail)` and
-`skip(id, reason)` is one row, kept even if the suite then panics. The rows
+`skip(id, reason)` is one row, kept even if the suite then panics. The child
+gets `JET`, the path of the `jet` running the profile, and
+`JET_TEST_SUITE_ROOT`, the package directory as the profile named it. The rows
 are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
 failing row's detail is printed. A repeated id fails as `duplicate row id`, and
 a suite that panics or exits non-zero adds the failing row `stopped` with its
