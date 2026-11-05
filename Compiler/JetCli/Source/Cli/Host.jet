@@ -2915,10 +2915,10 @@ fn jet_cli_dev_launch(executable: X64Executable, binary: String, file: String, p
     JetCLIDevChild.Idle
 }
 
-// The latest modification time of any .jet source under `root`, plus the file count
-// so that an added or removed file also counts as a change.
 // A change stamp over the package's .jet sources plus every file under the `d.watch` paths
-// (relative to the package root).
+// (relative to the package root): the latest modification time in nanoseconds, plus the
+// file count so that an added or removed file also counts as a change. Two edits within
+// one second are two changes.
 fn jet_cli_dev_stamp(root: String, watch: [String]) -[FS]> String Never! {
     files := [String]{}
     loop path in jet_cli_dev_files(root) {
@@ -2932,12 +2932,12 @@ fn jet_cli_dev_stamp(root: String, watch: [String]) -[FS]> String Never! {
             &files.push(full)
         }
     }
-    latest := ""
+    latest := 0
     count := 0
     loop watched in files {
         count += 1
         info :: cli_files.stat(watched) ?? next
-        modified :: "{info.modified}"
+        modified :: info.modified.to_unix_ns() ?? next
         if modified > latest -> latest = modified
     }
     "{count}:{latest}"
