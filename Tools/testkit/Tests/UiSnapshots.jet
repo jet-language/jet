@@ -246,32 +246,37 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI bless scratch: {err}")
 }
 
-#Test("UI coverage independently derives source codes report openers allowances and repair counts") {
-    row :: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", plane: "sema", active: true, edit: false, reason: true}
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "").status, "FAIL")
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n").status, "PASS")
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n").status, "FAIL")
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "").status, "PASS")
+#Test("UI coverage independently derives source codes report openers and allowances") {
+    row :: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
+    kept := [String]{}
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "", &kept).status, "FAIL")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", &kept).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n", &kept).status, "FAIL")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "", &kept).status, "PASS")
     over := ""
     loop i in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
-    assert(kit_ui_set_coverage([row], ["E0109"], [], over).detail.contains("ceiling 152"))
+    assert(kit_ui_set_coverage([row], ["E0109"], [], over, &kept).detail.contains("ceiling 152"))
     assert_eq(kit_ui_extract_reports("Error [jet.OperatorTypeMismatch]: root\n Warning [jet.SameEnumGuardTable]: indented\n Fix: E0001\nStop [E3003]: runtime\nLint [L0302]: lint\nError [jet.Unknown]: unregistered\n", [row]), ["E0109", "E3003", "L0302"])
     assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
-    other :: KitUIRegistryRow{code: "E0001", name: "jet.StrayCharacter", plane: "jet", active: true, edit: true, reason: false}
-    baseline :: "# comment\njet 1 0 1\nsema 0 1 1\n"
-    assert_eq(kit_ui_plane_coverage([row, other], baseline).status, "PASS")
-    assert_eq(kit_ui_plane_coverage([row, other], "jet 0 1 1\nsema 0 1 1\n").status, "FAIL")
-    uncovered :: KitUIRegistryRow{code: "E9999", name: "jet.Uncovered", plane: "sema", active: true, edit: false, reason: false}
-    assert_eq(kit_ui_plane_coverage([row, other, uncovered], baseline).status, "FAIL")
-    parsed :: kit_ui_registry("// header\nstruct A {{\n    impl Diagnostic {{\n        code :: \"E0109\"\n        edit :: .CryptoMisuse\n        no_fix :: None\n        fn what(self) -> String {{ \"w\" }}\n    }}\n}}\n\nstruct B {{\n    path: String\n\n    impl Diagnostic {{\n        code :: \"E0001\"\n        stage :: [.Jet, .Parse]\n        edit :: .SourceEdit\n        no_fix :: None\n    }}\n}}\n\nstruct C {{\n    impl Diagnostic {{\n        code :: \"E0004\"\n        status :: .Retired\n        no_fix :: None\n    }}\n}}\n\nstruct D {{\n    impl Diagnostic {{\n        code :: \"E0005\"\n    }}\n}}\n")
-    assert_eq(parsed.len(), 4)
+    parsed :: kit_ui_registry("// header\nstruct A {{\n    impl Diagnostic {{\n        code :: \"E0109\"\n        edit :: .CryptoMisuse\n        no_fix :: None\n        fn what(self) -> String {{ \"w\" }}\n    }}\n}}\n\nstruct B {{\n    path: String\n\n    impl Diagnostic {{\n        code :: \"E0001\"\n        stage :: [.Jet, .Parse]\n    }}\n}}\n\nstruct C {{\n    impl Diagnostic {{\n        code :: \"E0004\"\n        status :: .Retired\n    }}\n}}\n")
+    assert_eq(parsed.len(), 3)
     assert_eq(parsed[0].code, "E0109")
     assert_eq(parsed[0].name, "jet.A")
-    assert_eq(parsed[0].plane, "sema")
-    assert(!parsed[0].edit)
-    assert(parsed[0].reason)
-    assert(parsed[1].edit && !parsed[1].reason)
-    assert_eq(parsed[1].plane, "jet/parse")
-    assert(!parsed[2].active && !parsed[2].edit && !parsed[2].reason)
-    assert(parsed[3].active && !parsed[3].edit && parsed[3].reason)
+    assert(parsed[0].active && parsed[1].active)
+    assert_eq(parsed[1].name, "jet.B")
+    assert(!parsed[2].active)
+}
+
+#Test("a blessed coverage run keeps every allowance it still needs and drops only stale ones") {
+    row :: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
+    other :: KitUIRegistryRow{code: "E0001", name: "jet.StrayCharacter", active: true}
+    allowlist :: "# code\tside\tcard\nE0109\tleft-only\tTower #2093\nE0001\tleft-only\tTower #1\n"
+    kept := [String]{}
+    verdict :: kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], allowlist, &kept)
+    assert_eq(verdict.status, "FAIL")
+    assert(verdict.detail.contains("stale coverage allowance: E0001"))
+    assert_eq(kept.join("\n"), "# code\tside\tcard\nE0109\tleft-only\tTower #2093\n")
+    again := [String]{}
+    assert_eq(kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], kept.join("\n"), &again).status, "PASS")
+    assert_eq(again.join("\n"), kept.join("\n"))
 }

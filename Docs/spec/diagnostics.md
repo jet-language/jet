@@ -220,7 +220,14 @@ constant and owning decision appear only with `--verbose`.
 3. Add or update the matching snapshot under `tests/ui/` or `tests/ui_lint/`.
    It must point at the actionable source span, preserve structured fields, and
    contain no raw backend error.
-4. Run the focused snapshot and coverage checks, then check
+4. Run `jet Tools/agent/DiagnosticRows.jet --write`. It regenerates every copy
+   of the row: the Foundation registry rows, the repair-coverage baseline
+   `tests/diagnostics_coverage_baseline.txt`, and the explain page
+   `Docs/site/dist/e/<CODE>/index.html`. Never edit those files by hand;
+   `--check` (run by the cheap gates) fails when any of them differs from the
+   rows, and the generator refuses a change that adds an active row with
+   neither a structured edit nor a `no_fix` reason.
+5. Run the focused snapshot and coverage checks, then check
    `jet explain <CODE>`. Test rendered behavior where applicable; do not add a
    persistent Markdown mirror.
    Parser parity proofs also compare byte spans, secondary labels, edits, and
@@ -239,11 +246,11 @@ From the checkout root, `JET=<compiler> jet test Tools/testkit "suite ui"` compa
 UI and lint snapshots; `TESTKIT_ARGS="--filter <repo-relative-name>"` focuses the
 selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable verdicts to
 `<dir>/ui.json`. `TESTKIT_ARGS=--coverage` checks independently derived emitted
-and rendered code sets, owned exclusions in
-`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152), and
-the exact per-plane repair counts in `tests/diagnostics_coverage_baseline.txt`.
-The transitional emission scan reads `Source/**/*.rs` and `crates/**/*.rs`;
-the native compiler cutover moves this scan to its Jet sources.
+and rendered code sets against the owned exclusions in
+`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
+Blessing that entry (`--bless tests/diagnostics_coverage_allowlist.tsv`)
+rewrites the allowlist without its stale rows; it never adds one. The emission
+scan reads the `.jet` sources under `Compiler/`, `Jetpack/` and `Core/`.
 
 Plain fixtures run `jet check` and record rendered stderr on failure, or
 exactly `(no errors)` on success, even when advisory lints exist. Lint fixtures
