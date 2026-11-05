@@ -116,4 +116,7 @@ and every remaining path has a concrete owner gate or external blocker,
 responsible party, and continuation condition in Tower. Agent-fixable failures
 are work, not external blockers. Leave unmet criteria open and say blocked,
 not done. In either outcome, account for every worker, proof, worktree, branch,
-and handoff; nothing may remain unowned or silently in flight.
+and handoff; nothing may remain unowned or silently in flight. Then delete the
+scratch of every integrated item (exports, build trees, staged patches, test
+scratch, logs and superseded compilers), as `AGENTS.md` requires, and report
+the scratch disk's free space with the closeout.

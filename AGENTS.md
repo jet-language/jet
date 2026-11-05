@@ -219,25 +219,27 @@ commits to it or merges it into `dev` or `master`. Every agent commits directly
 on `dev` in the dev worktree, in small commits that stage only its own paths.
 Never create any other branch, a worktree, or any other ref (`refs/keep`,
 `refs/salvage`, `refs/archive`, private lineages), for any purpose: experiments,
-candidates, measurements, and proofs included. To build or measure an
-uncommitted change,
-apply a scratch patch to a temporary `git archive` export outside the
-repository. Use checkout-owned external targets (see the orchestration
+candidates, measurements, and proofs included. Work happens in the dev
+worktree; no agent keeps its own copy of the repository. A `git archive` export
+outside the repository is allowed only for one build or measurement that can
+use neither the worktree nor a published compiler (a release gate, or an A/B
+base whose compiler is not published), and the job that made it deletes it
+when it ends. Use checkout-owned external targets (see the orchestration
 resource reference). Never overwrite another
 task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
 `git restore .`, `git reset --hard`, or any equivalent broad operation. Never
 hand-edit `Tools/tower/.tower/`.
 
-Never delete work. Work means any file an agent or the owner made: patches,
-notes, held rows, briefs, ballots, research, scripts, logs and evidence,
-worktrees, and lane or scratch directories. Never `rm -rf`, `git clean`,
-remove a worktree or overwrite such a file. To retire something or free space,
-first save any commits and uncommitted changes it holds. Then move it under
-`$JET_SCRATCH_ROOT/held/<date>/<original path>`, and add one line to
-`$JET_SCRATCH_ROOT/held/LOG.tsv` with the date, path, size, owner, reason and
-the card or decision that allows it. Before you replace a file, copy it to
-`<name>.prev-<date>`. Only the owner empties `held/`. The one exemption is a
-temporary file a step created and removes itself.
+Scratch feeds work into `dev`; it is not an archive. Before removing anything,
+save the work it holds: commit it on `dev`, or record on its Tower card exactly
+what remains unlanded and why. Once the work is on `dev`, delete everything
+that fed it: exports, build trees, staged patches, test scratch and logs. Each
+agent deletes its own scratch when its commit lands. The orchestrator removes
+leftovers at every milestone and whenever the scratch disk passes 75% full.
+Keep only the compilers in use: the admitted seed, a candidate under test, and
+the compilers a running job names. Never retire files by moving them elsewhere
+on disk; git history and Tower are the record. Audits and final reports under
+`Docs/` stay owner-only deletions (see Documentation).
 
 Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
