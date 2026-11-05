@@ -4151,7 +4151,7 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
         if kind == SymbolKind.Function && sema_expr_marked_function_value(name, scopes.bindings[index].symbol.id, span, environment, program, &diagnostics) -> return None
-        value_ty :: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_name) else -> ty
+        value_ty :: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_name, expected) else -> ty
         value :: sema_node(&context, value_ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
@@ -4171,10 +4171,22 @@ fn sema_expr_marked_function_value(name: String, id: SymbolID, span: Span, envir
 // A function's symbol type spells its parameter and result types as its
 // declaration writes them. The function value carries them resolved, as in
 // the function's own checked signature: a written trait name is a trait
-// value, and a nominal type is its declared identity.
-fn sema_function_value_type(program: SemaProgramTables, ty: Type, module_name: String) -> Type Never! {
-    if program.registration_graph == .Val(graph) -> return sema_type_resolve_declared(graph, ty, module_name)
-    ty.copy()
+// value, and a nominal type is its declared identity. A value filling a slot
+// with a closed effect bound (`fn(T) -[]> U`) takes that bound: a body's row is
+// known only once every body is solved, so the effect phase holds the
+// function to it then (E0747), not the type check.
+fn sema_function_value_type(program: SemaProgramTables, ty: Type, module_name: String, expected: Type?) -> Type Never! {
+    resolved :: if program.registration_graph == .Val(graph) -> sema_type_resolve_declared(graph, ty, module_name) else -> ty.copy()
+    if expected == .Val(required) && required == .Fn(_, _, bound, _, _, _) && bound == .Val(row) {
+        open :: loop entry in row {
+            if entry.name.starts_with("..") -> break true
+        } ?? false
+        if !open && resolved == .Fn(params, ret, _, contract, metadata, provenance) {
+            // copy: the adopted type is a new owned Type built from `resolved`'s payloads and the slot's row.
+            return Type.Fn{params: params.copy(), ret: ret.copy(), effect_bound: Val(row.copy()), param_contract: contract.copy(), call_metadata: metadata.copy(), return_view_provenance: provenance.copy()}
+        }
+    }
+    resolved
 }
 
 fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

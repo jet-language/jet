@@ -194,6 +194,15 @@ fn sema_effect_source_display(path: String) -> String Never! {
     if parts.len() == 0 -> path else -> parts[parts.len() - 1]
 }
 
+// A named function value in a slot with a closed effect bound: the value took
+// the slot's bound (sema_function_value_type), so `callee`'s own row is held
+// to `bound` once every row is solved (E0747 at `span`).
+struct SemaEffectCallbackBound {
+    callee: String
+    bound: [String]
+    span: Span
+}
+
 struct SemaEffectNode {
     key: String
     name: String
@@ -244,6 +253,8 @@ struct SemaEffectNode {
     prohibition_span: Span?{None}
     // The `#FX(…)` caps of the inline modules enclosing this function.
     module_caps: [ModuleCap]{[ModuleCap]{}}
+    // The bounded callback slots this body fills with named functions.
+    callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
 }
 
 fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -1527,6 +1538,39 @@ fn sema_effect_record_function_arguments(nodes: &[SemaEffectNode], node_by_key: 
     }
 }
 
+// A named function read whose value type carries a closed effect row records
+// that row against the function's node. A function read under its own
+// declared row passes trivially; one that took a callback slot's bound is
+// the obligation sema_effect_check_callback_bounds settles.
+fn sema_effect_record_callback_bound(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, callee: String, ty: Type, span: Span) {
+    if ty == .Fn(_, _, bound, _, _, _) {
+        row :: bound ?? return
+        if sema_effect_node_index(node_by_key, callee) == None -> return
+        names := [String]{}
+        loop entry in row {
+            if entry.name.starts_with("..") -> return
+            if entry.name.starts_with("!") -> next
+            // An unknown or positive `Panic` entry is already its own error;
+            // the bound it spoils holds no callback to account.
+            effect_name :: sema_effect_parse_name(entry.name) ?? return
+            if sema_effect_root(effect_name) == "Panic" -> return
+            _ := sema_effect_set_add(&names, effect_name)
+        }
+        &nodes[node_index].callback_bounds.push(SemaEffectCallbackBound{callee: callee, bound: names, span: span})
+    }
+}
+
+// E0747: a function's contract is its declared row (or `-[]>`); an
+// undeclared function is judged by its solved row.
+fn sema_effect_check_callback_bounds(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], node_index: Int, diagnostics: &[Diagnostic]) {
+    loop obligation in nodes[node_index].callback_bounds {
+        target :: sema_effect_node_index(node_by_key, obligation.callee) ?? next
+        row :: if nodes[target].has_declared_row || nodes[target].is_pure -> nodes[target].declared else -> solved[target]
+        over :: sema_effect_uncovered(row, obligation.bound)
+        if over.len() > 0 -> &diagnostics.push(sema_effect_callback_diagnostic(over, obligation.bound, obligation.span))
+    }
+}
+
 fn sema_effect_symbol_leaf(key: String) -> String Never! {
     parts :: key.split(":").to_list()
     if parts.len() == 0 -> key else -> parts[parts.len() - 1]
@@ -1702,6 +1746,7 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         .List(values, _) | .ListLit(values) -> {
             if values.len() > 0 && !sema_effect_is_fixed_list(body_type(tree, expression)) -> sema_effect_push_memory_event(&nodes, node_index, node.span, "list construction allocates backing storage", "alloc", None)
         }
+        .ConstRef(symbol) -> sema_effect_record_callback_bound(&nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
         // A `[U8]{"…"}` byte value (one checked byte constant) builds the same
         // backing storage its per-element list spelling would.
         .CtLit(value) -> {
@@ -2693,6 +2738,12 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             &pure_rows.push(pure_reached)
         }
         sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^function_diagnostics)
+    }
+    loop node_index in 0..<nodes.len() {
+        if nodes[node_index].callback_bounds.len() == 0 -> next
+        callback_diagnostics := [Diagnostic]{}
+        sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, &callback_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^callback_diagnostics)
     }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
