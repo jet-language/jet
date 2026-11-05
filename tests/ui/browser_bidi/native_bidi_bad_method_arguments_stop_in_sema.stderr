@@ -228,8 +228,8 @@ Error [jet.MoveMarkerNotAllowed]: A value was passed with the move marker `^` to
     |
  39 |     session.subscribe(^event_name) ?? return
     |                        ^^^^^^^^^^
- Why: Standard library functions in M10 read their ordinary arguments unless documented otherwise
- Fix: Remove the move marker `^` here
+ Why: Only parameters declared with the move marker `^` accept a moved value at the call site
+ Fix: Remove the move marker `^`, or declare the parameter with that marker to take ownership
 More: jet-lang.dev/e/E0203
 
 Error [jet.ArgumentCountMismatch]: `close` expects 0 arguments, got 1
@@ -237,6 +237,6 @@ Error [jet.ArgumentCountMismatch]: `close` expects 0 arguments, got 1
     |
  40 |     session.close(1) ?? return
     |             ^^^^^
- Why: Every argument must match a standard library function parameter
- Fix: Check the call to `close`
+ Why: Every argument must match a parameter
+ Fix: Check the definition of `close`
 More: jet-lang.dev/e/E0104

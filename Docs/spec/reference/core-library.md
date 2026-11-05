@@ -1152,17 +1152,21 @@ or substitute an unknown profile name.
 `connect_profile(endpoint, profile, timeout)` sequences the handshake in Jet:
 raw WebSocket connection and timeout setup, `session.status` ready/message
 validation, then `session.new` with ordered empty `alwaysMatch` capabilities.
-The session-started carrier fact is recorded before validating the session ID
-and capabilities. CDP requires the first `goog:cdp` field to be exactly true.
-Socket/command operations and the three native carrier tails remain registered
-raw leaves; there is no whole-handshake adapter.
+The session-started fact is recorded before validating the session ID and
+capabilities. CDP requires the first `goog:cdp` field to be exactly true.
+The whole runtime is Jet source in `Core/Web/Browser.jet`: commands, event
+capture, trace bounds, locators, reports, and the test server run over
+`core.net.ws`, `core.process`, and `core.files`. Wire operations carry `Net`
+and `Time`, because each command measures its own deadline. A `Browser` and its
+contexts, pages, frames, locators, intercepts, and protocol handles stay on the
+thread that opened them (**E1102**).
 
 | API | Result | Description |
 | --- | --- | --- |
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
 | `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
-| `connect()` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect through the default or named profile. |
+| `connect(endpoint)` / `connect_profile(endpoint, profile, timeout)` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect to an endpoint with the default or a named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
 | `context.page()` / `context.tab()` | `BrowserPage` | Open a page or tab in a context. |
 | `page.goto(url)` | `BrowserPage !BrowserError` | Navigate a page under its timeout and protocol policy. |
@@ -1170,14 +1174,14 @@ raw leaves; there is no whole-handshake adapter.
 | `page.close()` / `context.close()` / `browser.close()` | `!BrowserError` | Explicitly close page, context, or browser resources. |
 | `page.get_by_role(role, name)` / `get_by_text(text)` | `BrowserLocator` | Locate an element through semantic role or visible text. |
 | `page.get_by_label(label)` / `get_by_placeholder(text)` / `get_by_test_id(id)` | `BrowserLocator` | Locate labeled, placeholder, or test-id controls. |
-| `page.get_by_css(selector)` / `selected(page, selector)` | `BrowserLocator` | Use an explicit CSS locator when semantic selection is not suitable. |
+| `page.get_by_css(selector)` | `BrowserLocator` | Use an explicit CSS locator when semantic selection is not suitable. |
 | `locator.wait(timeout)` / `locator.wait_gone(timeout)` | `!BrowserError` | Wait for a locator to appear or disappear. |
 | `locator.click()` / `locator.hover()` | `!BrowserError` | Perform checked pointer actions. |
 | `locator.fill(text)` / `locator.press(key)` | `!BrowserError` | Fill a control or send a key. |
-| `browser.subscribe(kind)` / `browser.next_event(timeout)` | `BrowserEvent` | Subscribe to and receive bounded, redacted browser events. |
+| `browser.subscribe(kind)` / `browser.next_event(timeout)` | `!BrowserError` / `BrowserEvent !BrowserError` | Subscribe to and receive bounded, redacted browser events. |
 | `browser.add_intercept(pattern)` / `add_intercept_url(pattern, url)` | `BrowserIntercept` | Install a network interception rule. |
 | `browser.continue_request(id)` / `fail_request(id)` / `fulfill_request(id, status, body)` | `!BrowserError` | Continue, fail, or fulfill an intercepted request. |
-| `page.set_cookie(name, value, options)` / `page.cookie(name)` | cookie value | Set or read a page-partition cookie. |
+| `page.set_cookie(name, value, domain)` / `page.cookie(name)` | `!BrowserError` / `String? !BrowserError` | Set or read a page-partition cookie. |
 | `page.clear_cookies()` | `!BrowserError` | Clear cookies in the page partition. |
 | `page.storage_get(kind, key)` / `storage_set(kind, key, value)` | `String` / `!BrowserError` | Read or write local or session storage. |
 | `page.storage_clear(kind)` | `!BrowserError` | Clear a local or session storage partition. |
@@ -1186,13 +1190,14 @@ raw leaves; there is no whole-handshake adapter.
 | `browser.protocol("bidi" \| "cdp")` / `protocol.send(method, params)` | `BrowserProtocol` / response | Access the selected protocol; CDP requires the advertised capability. |
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
-| `begin_named(...)` / `fixture_context(browser)` / `fixture_page(context, url)` | fixture values | Build named test fixtures and their contexts/pages. |
+| `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture !BrowserError` / `BrowserContext` / `BrowserPage` | Open a named test fixture (locked engine, isolated context, page, event subscriptions) and read its context and page. |
 | `fixture_source(name, body)` / `generate_source(name, body, base_url)` | `String !BrowserError` | Generate bounded fixture source with escaped base-URL data. |
-| `report_new(title)` / `report_add_case(report, name, ok)` | `BrowserReport` | Build an ordered browser report. |
-| `report_text(report)` / `report_json(report)` / `report_html(report)` | `String` | Render the report in text, JSON, or HTML. |
-| `report_exit_code(report)` / `write_report(report, path)` | `Int` / `!IOError` | Produce the test exit code or write the text report. |
-| `server_start(root)` / `server_stop(server)` | `BrowserServer` | Start or stop a provider-backed test server. |
-| `watch_changed(path)` | `Bool !BrowserError` | Ask the provider whether the watched path changed. |
+| `selected(config, name)` | `Bool` | Apply the configured test filter to a test name. |
+| `report_new(config)` / `report_add_case(report, case)` | `BrowserTestReport` | Build an ordered browser test report. |
+| `report_text(report)` / `report_json(report)` / `report_html(report)` | `String` | Render the report in text, JSON, or the self-contained HTML viewer. |
+| `report_exit_code(report)` / `write_report(report, path)` | `Int` / `!BrowserError` | Produce the test exit code or write the configured report (plus the HTML viewer for `ui` runs). |
+| `server_start(config)` / `server_stop(server)` / `server_url(server)` / `server_logs(server)` | `BrowserTestServer !BrowserError` / – / `String` / `String` | Start the configured test server and wait until it accepts connections; stop it and keep its bounded logs. |
+| `watch_changed(path, last_modified_ms)` | `Bool !BrowserError` | Report whether the watched path changed since the given modification time. |
 
 The source generator rejects empty names and values over its fixed source
 limits; HTML/JSON report renderers escape their output contexts. Provider

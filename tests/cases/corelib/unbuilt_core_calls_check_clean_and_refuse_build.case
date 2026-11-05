@@ -13,29 +13,6 @@ exit: 1
 stderr: ~ "Error [jet.InvalidCommandInput]: `mod.load` is not built yet" # build still refuses the unported module loader runtime
 stderr: ~ "card #4599" # the refusal names the card that ports it
 
-# The browser automation runtime (sessions and test reports) is unbuilt too:
-# a Core browser function and a `Browser` session method are each refused at
-# their own site, never reaching the backend as a compiler fault.
-step: jet check browser_connect.jet
-exit: 0
-stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
-
-step: jet build browser_connect.jet
-exit: 1
-stderr: ~ "Error [jet.InvalidCommandInput]: `browser.connect` is not built yet" # the Core function's runtime route is unbuilt
-stderr: ~ "card #4954" # the refusal names the card that ports it
-stderr: !~ "internal compiler error" # sema refuses before codegen
-
-step: jet check browser_session.jet
-exit: 0
-stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
-
-step: jet build browser_session.jet
-exit: 1
-stderr: ~ "Error [jet.InvalidCommandInput]: `Browser.subscribe` is not built yet" # the session method's runtime route is unbuilt
-stderr: ~ "card #4954" # the refusal names the card that ports it
-stderr: !~ "internal compiler error" # sema refuses before codegen
-
 # The configured HTTP client runtime is unbuilt: `http.Client.new()` lowers
 # to a runtime route no runtime carries, and the client's methods have no IR
 # builder. The constructor is refused at its site, so no client value (and

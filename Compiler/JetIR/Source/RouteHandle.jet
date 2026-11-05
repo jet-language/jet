@@ -586,17 +586,6 @@ fn ir_handle_civil_time_route(kind: String, method: String) -> IRHandleRoute? {
 
 fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
     if operation == {
-        .HTTPServerMethod(kind, method) -> {
-            route :: ir_browser_handle_route(kind, method, argument_count, true)
-            if route != None -> return route
-        }
-        .HTTPClientMethod(kind, method) -> {
-            route :: ir_browser_handle_route(kind, method, argument_count, false)
-            if route != None -> return route
-        }
-        else -> {}
-    }
-    if operation == {
         .ReactiveGet -> return ir_handle_reactive_route(receiver, "get")
         .ReactiveSet -> return ir_handle_reactive_route(receiver, "set")
         .TaskJoin -> return Val(ir_handle_task_route(receiver, carrier))

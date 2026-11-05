@@ -6,7 +6,7 @@ fn run() {
     timeout :: browser.timeout(500) ?? panic("timeout")
     session :: browser.connect_profile("ws://127.0.0.1:{free-port:response}/session?token=RESPONSE_SECRET", profile, timeout) ?? panic("connect")
     session.subscribe("network.responseCompleted") ?? panic("subscribe")
-    event :: &session.next_event(timeout) ?? panic("next_event")
+    event :: session.next_event(timeout) ?? panic("next_event")
     print(event.kind())
     print(event.request_method())
     print(event.status_code())

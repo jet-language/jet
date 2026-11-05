@@ -8,7 +8,7 @@ fn run() {
     session.subscribe("network.beforeRequestSent") ?? panic("subscribe")
 
     intercept :: session.add_intercept("beforeRequestSent") ?? panic("add_intercept")
-    event :: &session.next_event(timeout) ?? panic("next_event")
+    event :: session.next_event(timeout) ?? panic("next_event")
     print(event.kind())
     print(event.request_id())
     print(event.request_method())
