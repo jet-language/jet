@@ -3810,10 +3810,11 @@ fn sema_check_foreign_handle_adapter_key(module_row: SemaRegistrationModule, pro
 // expanded statements in `items`, as the Rust checker does. A script body is
 // not one of them: finalization rejects it with E0620/E0621. `#HTML(page)`
 // (html_path) is not one either: it names the web output's companion page
-// (D-HTMLPAIR1), which a native build has no use for.
+// (D-HTMLPAIR1), which a native build has no use for. Nor is a web ceiling
+// (`#Target(Wasm|JS)`, D-MARK-TARGET1): the web partition (WebPartition.jet)
+// and the OS-axis check (OSTarget.jet) read it.
 fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     forms := [String]{}
-    if program.web_target_ceiling != None -> &forms.push("web target ceiling")
     if sema_function_memory_has_unsupported_policies(program.policy_declarations) -> &forms.push("memory policy")
     if sema_policy_has_unsupported_applications(program) -> &forms.push("applied rules")
     forms
@@ -9008,6 +9009,8 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if !effects.complete -> complete = false
     // The web partition reads the solved effect rows and call edges.
     sema_web_partition_check(&modules, final_graph, &diagnostics)
+    // `#Target(OS.…)` impls: the axis conflict and ungated signature uses.
+    sema_os_target_check(final_graph, &diagnostics)
     // Typestate flow reads each body's checked receiver types.
     sema_typestate_check(modules, final_graph, &diagnostics)
     outputs := sema_output_publish_solved_effects(&final_graph, &modules)

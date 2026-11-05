@@ -1010,6 +1010,9 @@ fn parser_marked_module_binding_ahead(state: &JetParserState) -> Bool Never! {
 
 // File rules bare
 // `#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]` list of them.
+// D-MARK-TARGET1/D-OSTARGET1: `#Target(Wasm|JS)` attaches only to the `fn` or
+// `module` it heads (the Target row's sites); before any other item it is the
+// file ceiling. `#Target(OS.X)` attaches to the `impl` it heads.
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(&state)
@@ -1017,7 +1020,15 @@ fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if name.kind != TOKEN_IDENT -> return false
     rule :: parser_value(state, name)
     if rule == "NoPrelude" || rule == "HTML" -> return true
-    rule == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
+    if rule != "Target" -> return false
+    if parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state) -> return true
+    !parser_target_names_os_at(&state, 1) && !parser_hash_leads_to_function_or_module(&state)
+}
+
+// `#Target(OS.…)`: an OS gate, never a web ceiling. `name_offset` is the
+// offset of the `Target` name.
+fn parser_target_names_os_at(state: &JetParserState, name_offset: Int) -> Bool Never! {
+    parser_kind_at(&state, name_offset + 1) == TOKEN_LPAREN && parser_kind_at(&state, name_offset + 2) == TOKEN_IDENT && parser_value_at(&state, name_offset + 2) == "OS"
 }
 
 fn parser_is_file_rule(name: String) -> Bool Never! {
@@ -1299,10 +1310,29 @@ fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never!
 // markers and before the item are skipped, so `#[A, B]` on its own line still
 // attaches to the item below.
 fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
+    offset :: parser_hash_item_offset(&state)
+    if offset < 0 -> return false
+    kind :: parser_kind_at(&state, offset)
+    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_type_alias_ahead_at(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
+}
+
+// The marker run ahead heads a function (`fn`, `pub fn`, `comptime fn`) or a
+// `module`.
+fn parser_hash_leads_to_function_or_module(state: &JetParserState) -> Bool Never! {
+    offset := parser_hash_item_offset(&state)
+    if offset < 0 -> return false
+    if parser_kind_at(&state, offset) == TOKEN_KW_PUB || parser_kind_at(&state, offset) == TOKEN_KW_PRIV -> offset += 1
+    kind :: parser_kind_at(&state, offset)
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_MODULE || parser_prep_verb_ahead(&state, offset, TOKEN_KW_FN)
+}
+
+// The offset of the item after the marker run at the cursor (newline
+// terminators skipped), or -1 when a marker in the run is malformed.
+fn parser_hash_item_offset(state: &JetParserState) -> Int Never! {
     offset := 0
     loop {
         loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
-        if parser_item_declaration_ahead_at(&state, offset) -> return true
+        if parser_item_declaration_ahead_at(&state, offset) -> return offset
         if parser_kind_at(&state, offset) != TOKEN_HASH -> break
         offset += 1
         if parser_kind_at(&state, offset) == TOKEN_LBRACKET {
@@ -1320,7 +1350,7 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
             next
         }
         if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
-        if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
+        if parser_kind_at(&state, offset) != TOKEN_IDENT -> return -1
         offset += 1
         loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
         if parser_kind_at(&state, offset) == TOKEN_LPAREN {
@@ -1338,6 +1368,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
         }
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
-    kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_type_alias_ahead_at(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
+    offset
 }
