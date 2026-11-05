@@ -1,0 +1,346 @@
+#!/usr/bin/env jet
+// Every public Core module must pass `jet check` when a program imports it
+// alone. A whole-program build only checks the Core items its callers reach, so
+// a module whose own source no longer checks stays hidden until some program
+// imports it. This sweep checks each `module … exports` row of
+// Compiler/Prelude/Core.jet in its own one-import probe and reports every
+// failing module, not the first one.
+//
+// JET=/path/to/jet jet Tools/agent/CoreModuleCheck.jet [--check|--write] [--jobs N] [--only a,b] [--scratch DIR]
+// --check fails when a module outside the ratchet fails, or a ratcheted module
+// reports more errors than its ceiling. A ratcheted module that now checks
+// cleanly or with fewer errors also fails --check until --write lowers it.
+// --write initializes or lowers the committed ceilings; it never raises one.
+// --only checks the named modules and gates only them.
+use {
+    files :: core.files
+    json :: core.encoding.json
+    process :: core.process
+    regex :: core.regex
+    sys :: core.sys
+    term :: core.term
+    time :: core.time
+}
+
+TOOL :: "/Tools/agent/CoreModuleCheck.jet"
+RATCHET :: "Tools/agent/core-module-check-ratchet.json"
+MAX_JOBS :: 8
+CHECK_TIMEOUT_MS :: 300000
+
+#Error
+struct CheckError {
+    message: String
+    impl Display { fn display(self) -> String { self.message.copy() } }
+    impl Debug { fn debug(self) -> String { self.message.copy() } }
+}
+
+fn problem(message: String) -> CheckError Never! { CheckError{message: message} }
+
+struct Summary {
+    name: String
+    errors: Int
+    first: String
+}
+
+struct Ceiling {
+    name: String
+    errors: Int
+}
+
+struct Lowered {
+    kept: [Ceiling]
+    rises: [String]
+}
+
+fn run() {
+    code :: main(process.args()) ?? {
+        term.eprint("core-module-check: {err.message}")
+        process.exit(2)
+        return
+    }
+    process.exit(code)
+}
+
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The checkout holding this script, or else the one around the working directory.
+fn repo_root() -[Env, FS]> String CheckError! {
+    script :: sys.executable()
+    if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
+    dir := files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
+    loop {
+        if files.exists("{dir}{TOOL}") -> return dir
+        if dir == "/" || dir == "" -> return Err(problem("run from inside the Jet checkout"))
+        dir = files.dirname(dir)
+    }
+}
+
+fn option(args: [String], name: String) -> String? Never! {
+    loop at in 0..<args.len() {
+        if args[at] == name -> return if at + 1 < args.len() -> Val(args[at + 1].copy()) else -> None
+    }
+    None
+}
+
+// `module <name> exports { … }` rows name the importable Core modules.
+fn core_modules(core_jet: String) -[Exec, IO]> [String] Never! {
+    row :: regex.compile("^module\\s+([a-z_][a-z0-9_.]*)\\s+exports\\b") ?? panic("module row pattern: {err}")
+    modules := [String]{}
+    loop line in core_jet.split("\n") {
+        loop found in row.matches(line) {
+            name :: found.group(1) ?? ""
+            if !modules.contains(name) -> &modules.push(name)
+        }
+    }
+    modules
+}
+
+fn probe_source(name: String) -> String Never! {
+    "use {name}\n\nfn main() {{\n    print(\"ok\")\n}}\n"
+}
+
+// `^Error\b`: the header word, then the end of the line or a non-word byte.
+fn is_error_header(line: String) -> Bool Never! {
+    if !line.starts_with("Error") -> return false
+    if line.count_bytes() == 5 -> return true
+    b :: line.bytes()[5]
+    !((b >= (U8{48}) && b <= (U8{57})) || (b >= (U8{65}) && b <= (U8{90})) || (b >= (U8{97}) && b <= (U8{122})) || b == (U8{95}))
+}
+
+// Errors are the `Error` headers of a keep-going check; the first header with
+// its location names the module's leading failure.
+fn check_summary(name: String, output: String, status: Int) -> Summary Never! {
+    lines :: output.split("\n").to_list()
+    errors := 0
+    first := ""
+    loop index in 0..<lines.len() {
+        line :: lines[index]
+        if !is_error_header(line) -> next
+        errors += 1
+        if first == "" {
+            at := ""
+            stop :: if index + 4 < lines.len() -> index + 4 else -> lines.len()
+            loop look in (index + 1)..<stop {
+                if lines[look].trim_start().starts_with("--> ") {
+                    at = lines[look].trim()
+                    break
+                }
+            }
+            first = if at != "" -> "{line} {at}" else -> line.copy()
+        }
+    }
+    if status != 0 && errors == 0 {
+        errors = 1
+        shown := ""
+        loop line in lines {
+            if line.trim() != "" {
+                shown = line.copy()
+                break
+            }
+        }
+        first = "jet check exited {status} without an Error header: {shown}"
+    }
+    Summary{name: name.copy(), errors: errors, first: first}
+}
+
+fn ceiling_of(ceilings: [Ceiling], name: String) -> Int Never! {
+    loop row in ceilings {
+        if row.name == name -> return row.errors
+    }
+    0
+}
+
+// Compares measured error counts with the committed ceilings for the modules
+// that ran. Returns every problem; an empty list means the gate holds.
+fn ratchet_problems(ceilings: [Ceiling], results: [Summary]) -> [String] Never! {
+    problems := [String]{}
+    loop result in results {
+        ceiling :: ceiling_of(ceilings, result.name)
+        if result.errors > ceiling {
+            &problems.push("{result.name}: {result.errors} errors (ceiling {ceiling}); {result.first}")
+        } else if result.errors < ceiling {
+            &problems.push("{result.name}: {result.errors} errors, below its ceiling {ceiling}; lower it with --write")
+        }
+    }
+    problems
+}
+
+// --write keeps ceilings that did not run, lowers those that improved and
+// drops modules that now check cleanly. A rise is a failure, never a write.
+// With no committed ratchet yet (None), --write records today's failing counts.
+fn lowered_ceilings(committed: [Ceiling]?, results: [Summary]) -> Lowered Never! {
+    initialize :: committed == None
+    ceilings :: committed ?? [Ceiling]{}
+    out := ceilings.copy()
+    rises := [String]{}
+    loop result in results {
+        ceiling :: ceiling_of(ceilings, result.name)
+        if result.errors > ceiling && !initialize {
+            &rises.push("{result.name}: {result.errors} errors exceed ceiling {ceiling}")
+            next
+        }
+        dropped :: result.name.copy()
+        kept := out.filter(row -> row.name != dropped)
+        if result.errors != 0 -> &kept.push(Ceiling{name: result.name.copy(), errors: result.errors})
+        out = kept
+    }
+    &out.sort_by((a: Ceiling, b: Ceiling) -> a.name <=> b.name)
+    Lowered{kept: out, rises: rises}
+}
+
+fn read_ceilings(path: String) -[FS]> [Ceiling] CheckError! {
+    text :: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
+    tree :: json.parse(text) ?? return Err(problem("`{path}` is not JSON: {err}"))
+    ceilings := [Ceiling]{}
+    if tree == .Object(entries) {
+        loop entry in entries {
+            count :: if entry.value == {
+                .Int(number) -> number
+                .Number(lexeme) -> Int.parse(lexeme) ?? -1
+                else -> -1
+            }
+            if count < 0 -> return Err(problem("`{path}`: {entry.key} is not an error count"))
+            &ceilings.push(Ceiling{name: entry.key.copy(), errors: count})
+        }
+        return ceilings
+    }
+    Err(problem("`{path}` must hold one JSON object"))
+}
+
+fn ceilings_text(ceilings: [Ceiling]) -> String Never! {
+    if ceilings.len() == 0 -> return "{{}}\n"
+    rows :: ceilings.map(row -> "  {json.dumps(Dyn.Text(row.name.copy())) ?? "\"\""}: {row.errors}")
+    "{{\n{rows.join(",\n")}\n}}\n"
+}
+
+fn sweep(jet: String, root: String, modules: [String], jobs: Int, scratch: String) -[Env, Exec, FS, Time.Wait]> [Summary] CheckError! {
+    specs := [ProcessSpec]{}
+    loop name in modules {
+        file :: "{scratch}/{name.replace(".", "_")}.jet"
+        files.write(file, probe_source(name)) ?? return Err(problem("`{file}` cannot be written: {err}"))
+        &specs.push(process.cmd([String]{jet, "check", file}).cwd(scratch).env("NO_COLOR", "1").env("JET_TOOLCHAIN_ROOT", root)
+            .timeout(time.duration_ms(CHECK_TIMEOUT_MS)).output_limit(4194304))
+    }
+    ran :: process.run_all(specs, jobs) ?? return Err(problem("the probes cannot run: {err}"))
+    results := [Summary]{}
+    loop at in 0..<modules.len() {
+        &results.push(if ran[at] == {
+            .Ok(receipt) -> check_summary(modules[at], "{receipt.output}{receipt.errors}", if receipt.signal != None || receipt.timed_out -> 128 else -> receipt.code)
+            .Err(failure) -> check_summary(modules[at], "spawn failed: {failure}", 127)
+        })
+    }
+    results
+}
+
+fn main(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! {
+    write :: args.contains("--write")
+    jet :: env_or("JET", "")
+    if jet == "" || !files.exists(jet) -> return Err(problem("JET must name the admitted native jet compiler"))
+    jobs_text :: option(args, "--jobs") ?? "4"
+    jobs :: Int.parse(jobs_text) ?? 0
+    if jobs < 1 || jobs > MAX_JOBS || "{jobs}" != jobs_text -> return Err(problem("--jobs takes 1..{MAX_JOBS}"))
+    root :: repo_root() ?? return Err(err)
+    core_jet :: files.read("{root}/Compiler/Prelude/Core.jet") ?? return Err(problem("Compiler/Prelude/Core.jet cannot be read: {err}"))
+    known :: core_modules(core_jet)
+    modules :: if option(args, "--only") == .Val(only) -> only.split(",").to_list().filter(name -> name != "") else -> known.copy()
+    unknown :: modules.filter(name -> !known.contains(name))
+    if unknown.len() > 0 -> return Err(problem("not a Core module: {unknown.join(", ")}"))
+    ratchet_path :: "{root}/{RATCHET}"
+    committed :: if files.exists(ratchet_path) -> Val(read_ceilings(ratchet_path) ?? return Err(err)) else -> None
+    ceilings :: committed ?? [Ceiling]{}
+    base :: option(args, "--scratch") ?? "{env_or("JET_SCRATCH_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev")}"
+    scratch :: "{base}/core-module-check-{sys.pid()}-{time.unix_ns()}"
+    files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
+    results := [Summary]{}
+    failure := ""
+    if sweep(jet, root, modules, jobs, scratch) == {
+        .Ok(found) -> { results = found }
+        .Err(problem_found) -> { failure = problem_found.message.copy() }
+    }
+    files.remove_all(scratch) ?? return Err(problem("`{scratch}` cannot be removed: {err}"))
+    if failure != "" -> return Err(problem(failure))
+    failing :: results.filter(result -> result.errors > 0)
+    loop result in failing -> print("{result.name}: {result.errors} errors; {result.first}")
+    print("core modules: {results.len()} checked, {results.len() - failing.len()} clean, {failing.len()} failing")
+    if write {
+        lowered :: lowered_ceilings(committed, results)
+        if lowered.rises.len() > 0 {
+            loop rise in lowered.rises -> term.eprint("core-module-check: {rise}")
+            return 1
+        }
+        files.write(ratchet_path, ceilings_text(lowered.kept)) ?? return Err(problem("`{ratchet_path}` cannot be written: {err}"))
+        print("wrote {RATCHET}")
+        return 0
+    }
+    problems :: ratchet_problems(ceilings, results)
+    loop line in problems -> term.eprint("core-module-check: {line}")
+    if problems.len() > 0 -> 1 else -> 0
+}
+
+#Test("core modules come from the module export rows, once each") {
+    text :: [String]{
+        "module core exports {{ print }} types {{ }}",
+        "source_module core.text path Core/Text/Text.jet alias core_text owns {{ trim }}",
+        "module core.text exports {{ trim }}",
+        "module core.text exports {{ trim }}",
+        "// module core.ghost exports {{ x }}",
+    }.join("\n")
+    assert_eq(core_modules(text), [String]{"core", "core.text"})
+}
+
+#Test("the probe imports exactly one module") {
+    assert_eq(probe_source("core.web.virtual"), "use core.web.virtual\n\nfn main() {{\n    print(\"ok\")\n}}\n")
+}
+
+#Test("a check counts every error header and names the first") {
+    output :: [String]{
+        "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here",
+        "  --> <corelib>/Core/Service/Service.jet:920:98",
+        "    |",
+        "Warning [jet.UnusedImport]: Import `service` is never used.",
+        "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here",
+        "  --> <corelib>/Core/Service/Service.jet:964:98",
+    }.join("\n")
+    found :: check_summary("core.service", output, 1)
+    assert_eq(found.errors, 2)
+    assert_eq(found.first, "Error [jet.UseWhileWriteActive]: `tree` is being changed in this call, so it can't be used again here --> <corelib>/Core/Service/Service.jet:920:98")
+    clean :: check_summary("core.x", "ok: `x.jet` has no errors\n", 0)
+    assert_eq(clean.errors, 0)
+    assert_eq(clean.first, "")
+    assert_eq(check_summary("core.x", "thread panicked\n", 134).errors, 1)
+}
+
+fn summary_row(name: String, errors: Int, first: String) -> Summary Never! { Summary{name: name, errors: errors, first: first} }
+
+fn ceiling_row(name: String, errors: Int) -> Ceiling Never! { Ceiling{name: name, errors: errors} }
+
+#Test("the ratchet fails on new or worse modules and on stale ceilings") {
+    results :: [Summary]{summary_row("core.a", 0, ""), summary_row("core.b", 3, "Error [E1] b"), summary_row("core.c", 2, "Error [E2] c"), summary_row("core.d", 1, "Error [E3] d")}
+    ceilings :: [Ceiling]{ceiling_row("core.b", 3), ceiling_row("core.c", 1), ceiling_row("core.d", 4)}
+    assert_eq(ratchet_problems(ceilings, results), [String]{
+        "core.c: 2 errors (ceiling 1); Error [E2] c",
+        "core.d: 1 errors, below its ceiling 4; lower it with --write",
+    })
+    assert_eq(ratchet_problems([Ceiling]{ceiling_row("core.b", 3)}, [Summary]{summary_row("core.b", 3, "")}).len(), 0)
+    assert_eq(ratchet_problems([Ceiling]{}, [Summary]{summary_row("core.a", 1, "Error [E9] a")}), [String]{"core.a: 1 errors (ceiling 0); Error [E9] a"})
+}
+
+#Test("--write lowers and drops ceilings but never raises one") {
+    ceilings :: [Ceiling]{ceiling_row("core.b", 3), ceiling_row("core.d", 4), ceiling_row("core.e", 2)}
+    lowered :: lowered_ceilings(Val(ceilings.copy()), [Summary]{summary_row("core.b", 0, ""), summary_row("core.d", 1, "")})
+    assert_eq(ceilings_text(lowered.kept), "{{\n  \"core.d\": 1,\n  \"core.e\": 2\n}}\n")
+    assert_eq(lowered.rises.len(), 0)
+    raised :: lowered_ceilings(Val(ceilings.copy()), [Summary]{summary_row("core.f", 1, "")})
+    assert_eq(raised.rises, [String]{"core.f: 1 errors exceed ceiling 0"})
+}
+
+#Test("--write with no committed ratchet records today's failing counts") {
+    first :: lowered_ceilings(None, [Summary]{summary_row("core.a", 0, ""), summary_row("core.b", 5, "")})
+    assert_eq(ceilings_text(first.kept), "{{\n  \"core.b\": 5\n}}\n")
+    assert_eq(first.rises.len(), 0)
+    assert_eq(ceilings_text([Ceiling]{}), "{{}}\n")
+}
