@@ -256,8 +256,10 @@ fn sema_already_defined(name: String, span: Span) -> Diagnostic {
     )
 }
 
+// D-DIAG-CORE-NAME1: a lifted inline-module member is named as written
+// (`__jet_pricing_dtotal` -> `total`), as its body's own diagnostics are.
 fn sema_defined_twice(name: String, why: String, span: Span) -> Diagnostic {
-    sema_error("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
+    sema_error("E0105", span, "`{sema_inline_member_source_name(name)}` is defined twice", why, "rename or remove one of the definitions")
 }
 
 fn sema_field_defined_twice(name: String, owner: String, span: Span) -> Diagnostic {

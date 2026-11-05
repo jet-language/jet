@@ -56,6 +56,9 @@ fn ir_build_tests(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef]
     loop test in harness.tests {
         id :: ir_function_id(&m, p, test.key, [Type]{}) ?? -1
         if id < 0 -> &failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        // D-DIAG-CORE-NAME1: a stop in the body names the test as its source
+        // does, not by its checked key (`<module>::test::<name>@<span>`).
+        if id >= 0 -> m.functions[id].name = "test \"{test.name}\""
         &bodies.push(id)
     }
     check_ids := [Int]{}
