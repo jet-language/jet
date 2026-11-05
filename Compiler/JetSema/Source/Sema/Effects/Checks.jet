@@ -352,15 +352,24 @@ fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode,
     }
     if api == "" -> return None
     row :: fact.facts.effect_bound ?? return None
-    loop span in node.assume_det_spans {
-        if sema_effect_span_contains(span, expression.span) -> return None
-    }
+    if sema_effect_in_assume_det(node, expression.span) -> return None
     loop entry in row {
         if entry.name.starts_with("!") -> next
         root :: sema_effect_root(entry.name)
         if root == "Time" || root == "Rand" -> return Val(api)
     }
     None
+}
+
+// Rust D-DET1 `assume_deterministic { … }` (CheckerCore/statements.rs
+// Stmt::AssumeDet, det_suppress): inside a pure body the block suspends the
+// determinism rejections, E3403 and E3401 alike.
+fn sema_effect_in_assume_det(node: SemaEffectNode, span: Span) -> Bool Never! {
+    if !node.is_pure -> return false
+    loop region in node.assume_det_spans {
+        if sema_effect_span_contains(region, span) -> return true
+    }
+    false
 }
 
 // A compile-time value's call site `fact` whose callee reads ambient time or
@@ -1588,6 +1597,8 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTr
 // false when its children aren't walked.
 fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
     if {
+        // The suspended determinism checks record nothing for the call.
+        sema_effect_in_assume_det(nodes[node_index], node.span) -> {}
         sema_effect_is_call(node.kind) -> {
             found :: sema_effect_find_fact(facts, caller, node.span)
             if found == {
