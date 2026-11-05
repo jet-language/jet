@@ -258,12 +258,13 @@ new diagnostic or change compiler semantics.
 
 ### Running and blessing snapshots
 
-From the checkout root, `JET=<compiler> jet test Tools/testkit "suite ui"` compares
-UI and lint snapshots; `TESTKIT_ARGS="--filter <repo-relative-name>"` focuses the
-selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable verdicts to
-`<dir>/ui.json`. `TESTKIT_ARGS=--coverage` checks independently derived emitted
-and rendered code sets against the owned exclusions in
-`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
+From the checkout root, `jet test Compiler --profile ui` compares UI and lint
+snapshots; a positional filter (`jet test Compiler --profile ui <repo-relative-name>`)
+focuses the selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable
+verdicts to `<dir>/ui.json`. The kit CLI's coverage mode (`jet build Tools/testkit`,
+then `Tools/testkit/.jet/build/run ui --coverage --jet <compiler>`) checks
+independently derived emitted and rendered code sets against the owned
+exclusions in `tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
 Blessing that entry (`--bless tests/diagnostics_coverage_allowlist.tsv`)
 rewrites the allowlist without its stale rows; it never adds one. The emission
 scan reads the `.jet` sources under `Compiler/`, `Jetpack/` and `Core/`.
@@ -283,13 +284,12 @@ capability are `REFUSED`, never silently converted to ordinary checks.
 After reviewing a compiler change, bless only the affected fixture:
 
 ```sh
-TESTKIT_ARGS="--bless tests/ui/example.jet" JET=<compiler> jet test Tools/testkit "suite ui"
+jet test Compiler --profile ui tests/ui/example.jet -u
 ```
 
 Blessing creates or updates that fixture's snapshot from actual tool output.
-A lower diagnostic count is refused unless the reviewed invocation also names
-`--allow-shrink tests/ui/example.jet`. Broad blessing requires
-`--bless-all --reason "<compiler change>"`; blessing with `--shard` is refused.
+A lower diagnostic count is refused unless the reviewed kit CLI invocation
+names `--allow-shrink tests/ui/example.jet`. A sharded profile refuses `-u`.
 Expected files are read-only in ordinary runs.
 
 

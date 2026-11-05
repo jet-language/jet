@@ -33,7 +33,7 @@ if (process.env.JET_CENSUS_SCOPED !== '1') {
     if (scoped.error) throw scoped.error;
     process.exit(scoped.status ?? 2);
 }
-// Scratch as the testkit's (Tools/testkit/run.jet kit_scratch_root): JET_SCRATCH_ROOT, else Jet's user cache.
+// Scratch as the testkit's (Compiler/JetTestKit/Source/Kit.jet kit_scratch_root): JET_SCRATCH_ROOT, else Jet's user cache.
 const defaultBase = process.env.JET_SCRATCH_ROOT ? join(process.env.JET_SCRATCH_ROOT, 'goldens-census') : join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'jet/goldens-census');
 const base = resolve(options.scratch ?? defaultBase);
 mkdirSync(base, { recursive: true });

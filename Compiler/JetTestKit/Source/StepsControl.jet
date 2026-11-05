@@ -106,14 +106,11 @@ fn kit_steps_loop_restore(frame: KitLoopFrame, state: KitStepState) -> KitStepSt
     restored := frame.captures
     loop capture in state.captures {
         if !capture.aggregate -> next
-        found := false
+        found := -1
         loop index in 0..<restored.len() {
-            if restored[index].name == capture.name {
-                restored[index] = capture
-                found = true
-            }
+            if restored[index].name == capture.name -> found = index
         }
-        if !found -> &restored.push(capture)
+        if found >= 0 -> restored[found] = capture else -> &restored.push(capture)
     }
     result.captures = restored
     result.bindings = frame.bindings

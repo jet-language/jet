@@ -39,7 +39,7 @@ mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed && S
 "$SEED/jet" build Compiler                     # writes Compiler/JetCli/.jet/build/jet
 "$SEED/jet" run Tools/packaging/ReuseSeedRuntime.jet -- "$SEED" Compiler/JetCli/.jet/build/jet
 export PATH=$PWD/Compiler/JetCli/.jet/build:$PATH
-TESTKIT_ARGS="--filter tests/ui/list_expected_type_mismatch.jet" JET=$(command -v jet) jet test Tools/testkit "suite ui"
+jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet
 jet run Examples/features/basics/hello.jet
 ```
 

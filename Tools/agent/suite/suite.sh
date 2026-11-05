@@ -48,7 +48,8 @@ fi
 # `jet` finds its engine beside itself before PATH: give a snapshot without one the jetpack this run passes,
 # or engine-dispatch cases reach a stale PATH jetpack and fail E1227 (wave 11, 2026-10-31).
 if [ "${#jetpack[@]}" -gt 0 ] && [ ! -e "$sg/jet-$tag/jetpack" ]; then ln -s "${jetpack[1]}" "$sg/jet-$tag/jetpack"; fi
-# The testkit is built from TREE itself with the base compiler (cached by a hash of Tools/testkit), so a stale
+# The testkit is built from TREE itself with the base compiler (cached by a hash of Tools/testkit and
+# Compiler/JetTestKit), so a stale
 # prebuilt testkit never misreads a newer tree. TESTKIT=path still overrides.
 bdir=$B/$sha; [ -x "$bdir/jet" ] || bdir=$B/latest
 if [ -z "${TESTKIT:-}" ]; then

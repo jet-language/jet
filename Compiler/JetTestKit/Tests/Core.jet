@@ -8,6 +8,19 @@ fn kit_test_unblessed() -> KitBless {
     KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
 }
 
+// The self-tests' checkout layout: the corpora and ledger a test root holds,
+// as Compiler/package.jet's profiles name them relative to the checkout.
+fn kit_test_ledger(root: String) -> String { files.join(root, "known-failing.tsv") }
+
+fn kit_test_checkout_options(root: String) -> KitOptions {
+    options := kit_exec_defaults()
+    options.golden_corpora = ["Examples/features", "tests/run"]
+    options.ui_corpora = ["tests/ui", "tests/ui_lint"]
+    options.cases_corpora = ["tests/cases"]
+    options.ledger = kit_test_ledger(root)
+    options
+}
+
 #Test("report statuses have distinct exit codes") {
     passed :: KitCaseResult{suite: "golden", case: "a", tier: "o0", status: "PASS", detail: "", exit: 0}
     failed :: KitCaseResult{suite: "golden", case: "b", tier: "o0", status: "FAIL", detail: "", exit: 1}
@@ -248,29 +261,14 @@ fn kit_test_pool_report(env: KitEnv, root: String, index: Int, done: Sender<Int>
     files.remove_all(root) ?? panic("remove fixture .jet scratch")
 }
 
-#Test("the step timeout is a minute unless set, and options refuse invalid or out-of-range durations before discovery") {
-    assert_eq(kit_parse_options(["golden"]).timeout, 60)
-    assert(kit_parse_options(["golden", "--timeout", "invalid"]).error != "")
-    assert(kit_parse_options(["golden", "--timeout", "0"]).error != "")
-    assert(kit_parse_options(["golden", "--timeout", "-1"]).error != "")
-    options :: kit_parse_options(["golden", "--timeout", "9223372036854775807"])
-    assert_eq(options.error, "")
+#Test("the step timeout is a minute unless set, and an out-of-range duration is refused before discovery") {
+    assert_eq(kit_exec_defaults().timeout, 60)
+    options := kit_exec_defaults()
+    options.timeout = 9223372036854775807
     assert_eq(kit_execute_suites(options, "", ["golden"], None).code, 2)
 }
 
-#Test("jobs and memory options refuse non-positive values and the pool takes every core and all the room") {
-    assert(kit_parse_options(["golden", "--jobs", "0"]).error != "")
-    assert(kit_parse_options(["golden", "--jobs", "x"]).error != "")
-    assert_eq(kit_parse_options(["golden", "--jobs", "3"]).jobs, 3)
-    assert_eq(kit_parse_options(["golden"]).jobs, 0)
-    assert(kit_parse_options(["golden", "--memory", "0"]).error != "")
-    assert(kit_parse_options(["golden", "--memory", "G"]).error != "")
-    assert(kit_parse_options(["golden", "--memory", "-2G"]).error != "")
-    assert_eq(kit_parse_options(["golden", "--memory", "12G"]).memory, 12 * 1073741824)
-    assert_eq(kit_parse_options(["golden", "--memory", "512M"]).memory, 512 * 1048576)
-    assert_eq(kit_parse_options(["golden", "--memory", "64K"]).memory, 65536)
-    assert_eq(kit_parse_options(["golden", "--memory", "4096"]).memory, 4096)
-    assert_eq(kit_parse_options(["golden"]).memory, 0)
+#Test("the pool takes every core and all the room") {
     assert_eq(kit_execute_jobs(3, 100, 16), 3)
     assert_eq(kit_execute_jobs(8, 2, 16), 2)
     // Half the workers by default: each running entry holds two.
@@ -358,15 +356,9 @@ fn kit_test_selected(suite: String, path: String) -> KitSelected {
     files.remove_all(root) ?? panic("remove pool order scratch")
 }
 
-#Test("a gate filter selects only the suites whose test names contain it") {
-    assert_eq(kit_gate_selected(None), ["golden", "ui", "cases"])
-    assert_eq(kit_gate_selected(Val("suite ui")), ["ui"])
-    assert_eq(kit_gate_selected(Val("suite")), ["golden", "ui", "cases"])
-    assert_eq(kit_gate_selected(Val("cases")), ["cases"])
-    assert_eq(kit_gate_selected(Val("pool")).len(), 0)
-    assert_eq(kit_named_suites("all"), ["golden", "ui", "cases"])
-    assert_eq(kit_named_suites("ui"), ["ui"])
-    assert_eq(kit_execute_suites(kit_parse_options(["golden"]), "", ["golden", "nope"], None).code, 2)
+#Test("a run naming a suite that isn't installed is refused") {
+    assert_eq(kit_execute_suites(kit_exec_defaults(), "", ["golden", "nope"], None).code, 2)
+    assert_eq(kit_execute_suites(kit_exec_defaults(), "", [], None).code, 2)
 }
 
 #Test("each suite finishes its own report and rows, and a filtered run writes only its own") {
@@ -388,30 +380,7 @@ fn kit_test_selected(suite: String, path: String) -> KitSelected {
     cases_text :: files.read(cases_report) ?? panic("read cases report: {err}")
     assert(ui_text.contains("tests/ui/b.jet") && !ui_text.contains("tests/cases/a.case"))
     assert(cases_text.contains("tests/cases/a.case") && !cases_text.contains("tests/ui/b.jet"))
-    assert_eq(kit_gate_rows(both, ["cases", "ui"], "cases"), "")
-    assert_eq(kit_gate_rows(both, ["cases", "ui"], "ui"), "FAIL\ttests/ui/b.jet\t-\tsnapshot")
-    // A selection or cleanup row fails every suite of the run.
-    whole :: KitExecution{code: 2, failures: [KitFailure{suite: "", row: "ERROR\tselection\t\tx"}, KitFailure{suite: "kit", row: "ERROR\tcleanup\t-\ty"}]}
-    assert_eq(kit_gate_rows(whole, ["ui"], "ui"), "ERROR\tselection\t\tx\nERROR\tcleanup\t-\ty")
     files.remove_all(root) ?? panic("remove suite report scratch")
-}
-
-#Test("suite tests take the rows the shared pool left them, and the last removes the handoff") {
-    root :: cases_test_root("gate-handoff")
-    handoff :: kit_gate_handoff(root)
-    assert(kit_gate_take(handoff, "ui") == None, "before the pool runs there is nothing to take")
-    kit_exec_write(files.join(handoff, "ui.rows"), "FAIL\ttests/ui/b.jet\t-\tsnapshot")
-    kit_exec_write(files.join(handoff, "cases.rows"), "")
-    kit_exec_write("{handoff}.lock", "")
-    assert_eq(kit_gate_take(handoff, "ui") ?? "<none>", "FAIL\ttests/ui/b.jet\t-\tsnapshot")
-    assert(files.is_dir(handoff), "another suite's rows still wait")
-    assert_eq(kit_gate_take(handoff, "cases") ?? "<none>", "")
-    assert(!files.exists(handoff))
-    assert(!files.exists("{handoff}.lock"))
-    // A pool that left nothing for a suite is an error row, never a second run.
-    files.create_dir_all(handoff) ?? panic("handoff scratch: {err}")
-    assert((kit_gate_take(handoff, "golden") ?? "<none>").starts_with("ERROR\tselection\t\tthe shared suite pool left no rows for suite golden"))
-    files.remove_all(root) ?? panic("remove handoff scratch")
 }
 
 #Test("the pool's memory is the room under the cgroup caps, not the whole host") {

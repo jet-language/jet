@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # tk-build.sh TREE JETDIR
-# Print the path of a testkit binary built from TREE/Tools/testkit by JETDIR/jet,
-# so a suite run uses the testkit of the tree under test, not a stale prebuilt one.
+# Print the path of a testkit binary built from TREE/Tools/testkit (the kit CLI over the
+# TREE/Compiler/JetTestKit engine) by JETDIR/jet, so a suite run uses the testkit of the tree
+# under test, not a stale prebuilt one.
 # Cache: $JET_STATE_ROOT/scratch/TestGreen/tk/<key>/testkit, where <key> hashes every
-# file under TREE/Tools/testkit (outside .jet/) plus the jet binary; a hit returns at once.
+# file under TREE/Tools/testkit and TREE/Compiler/JetTestKit (outside .jet/) plus the jet
+# binary; a hit returns at once.
 # Builds take one lock (tk/.build.lock): a build writes TREE/Tools/testkit/.jet/build/run,
 # so two callers on the same tree must not build at once, and a caller that waited on the
 # lock reuses the binary the first caller published. The compiler identity is
@@ -20,7 +22,7 @@ cache=$JET_STATE_ROOT/scratch/TestGreen/tk
 mkdir -p "$cache"
 key=$(
   cd "$tree"
-  { find Tools/testkit -name .jet -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+  { find Tools/testkit Compiler/JetTestKit -name .jet -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
     sha256sum "$jet" | awk '{print $1 "  <jet>"}'
   } | sha256sum | cut -c1-20
 )

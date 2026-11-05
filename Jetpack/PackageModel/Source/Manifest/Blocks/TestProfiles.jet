@@ -1,9 +1,12 @@
 // `test: { … }` named test profiles and `suites: { … }` stock test suites:
 // `quick: TestProfile{ suites: [tests], time_limit: 60s }`
 // and `golden: TestSuite{ golden_corpus: "tests/golden" }`. `tests`, every
-// #Test of the package, is the built-in suite. Test and build profile names
-// share one namespace, and `defaults: { test: <profile> }` picks the profile a
-// bare `jet test` runs.
+// #Test of the package, is the built-in suite; a stock suite is a golden, ui
+// or cases corpus (`golden_corpus`, `ui_corpus`, `cases_corpus`). A profile
+// also carries how its corpus suites run: `jobs`, `memory`, `filter`,
+// `shard: I/N`, `opt_in` and `baseline`, the `ID<TAB>card<TAB>reason` ledger of
+// rows accepted as failing. Test and build profile names share one namespace,
+// and `defaults: { test: <profile> }` picks the profile a bare `jet test` runs.
 use {
     jetpack_foundation.[BUILD_OPTIMIZE_BASIC, BUILD_OPTIMIZE_FULL, BUILD_OPTIMIZE_NONE]
 }
@@ -22,16 +25,50 @@ struct TestProfileDef {
     suites: [String]
     // The wall time each test may take, if bounded.
     time_limit_ms: Int?
-    // The optimize levels the `tests` suite runs at, in order; empty runs it
-    // once at the command's stock level.
+    // The optimize levels the `tests` suite runs at, in order, and the golden
+    // tiers (none o0, basic o1, full o2); empty runs `tests` once at the
+    // command's stock level and the goldens on every tier.
     optimize: [BuildOptimize]
+    // Corpus entries run at once; 0 sizes the pool from the scheduler.
+    jobs: Int{0}
+    // Bytes the running corpus entries may claim together; 0 is the room
+    // the host and its cgroup leave.
+    memory: Int{0}
+    // Only the corpus entries whose IDs contain it; "" is every entry.
+    filter: String{""}
+    // Run shard `shard_index` of `shard_count` (both 1 when unsharded).
+    shard_index: Int{1}
+    shard_count: Int{1}
+    // Run the corpus entries that are opt-in only.
+    opt_in: Bool{false}
+    // The accepted-failing ledger, relative to package.jet; None is none.
+    baseline: String?{None}
+}
+
+// What a stock suite's corpus holds.
+enum TestSuiteKind {
+    Golden
+    UI
+    Cases
+}
+
+impl TestSuiteKind {
+    // The suite's name in its rows: golden, ui or cases.
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Golden -> "golden"
+            .UI -> "ui"
+            .Cases -> "cases"
+        }
+    }
 }
 
 // One stock suite declared in `suites: { … }`: a corpus directory, relative
-// to package.jet.
+// to package.jet, and what it holds.
 struct TestSuiteDef {
     name: String
-    golden_corpus: String
+    kind: TestSuiteKind
+    corpus: String
 }
 
 // The `{ … }` body of `Ctor{ … }` or of a bare `{ … }`.
@@ -73,7 +110,42 @@ fn pkg_parse_test_profile(name: String, value: String) -> TestProfileDef Package
                     }
                 }
             }
-            else -> return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: suites, time_limit, optimize)"))
+            "jobs" -> {
+                jobs :: pkg_parse_u64(field.value.trim()) ?? 0
+                if jobs == 0 || jobs > 4096 -> return Err(PackageParseError.Composition("{site} needs `jobs:` as a count from 1 to 4096"))
+                profile.jobs = jobs
+            }
+            "memory" -> {
+                profile.memory = pkg_parse_dev_record_bytes(field.value) ?? return Err(PackageParseError.Composition("{site} needs `memory:` as a positive size such as `8gib` or `512mib`"))
+            }
+            "filter" -> {
+                filter :: pkg_unquote(field.value)
+                if filter == "" -> return Err(PackageParseError.Composition("{site} needs `filter:` as a nonempty quoted ID substring"))
+                profile.filter = filter
+            }
+            "shard" -> {
+                parts :: field.value.trim().split("/").to_list()
+                refusal :: PackageParseError.Composition("{site} needs `shard:` as I/N with 1 <= I <= N, such as `2/4`")
+                if parts.len() != 2 -> return Err(refusal)
+                index :: pkg_parse_u64(parts[0].trim()) ?? return Err(refusal)
+                count :: pkg_parse_u64(parts[1].trim()) ?? return Err(refusal)
+                if index == 0 || index > count || count > 4096 -> return Err(refusal)
+                profile.shard_index = index
+                profile.shard_count = count
+            }
+            "opt_in" -> {
+                if field.value.trim() == {
+                    "true" -> profile.opt_in = true
+                    "false" -> profile.opt_in = false
+                    else -> return Err(PackageParseError.Composition("{site} needs `opt_in:` as true or false"))
+                }
+            }
+            "baseline" -> {
+                path :: pkg_unquote(field.value)
+                if path == "" -> return Err(PackageParseError.Composition("{site} needs `baseline:` as a quoted ledger path"))
+                profile.baseline = Val(path)
+            }
+            else -> return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: suites, time_limit, optimize, jobs, memory, filter, shard, opt_in, baseline)"))
         }
     }
     if profile.suites.len() == 0 -> return Err(PackageParseError.Composition("{site} needs `suites: [ … ]` naming at least one suite"))
@@ -126,17 +198,27 @@ fn pkg_parse_test_suites(body: String) -> [TestSuiteDef] PackageParseError! {
         if entry.key == TEST_SUITE_TESTS -> return Err(PackageParseError.Composition("{site} is built in: it is every #Test of the package, so `suites:` can't declare it"))
         repeated :: entry.key.copy()
         if suites.any(suite -> suite.name == repeated) -> return Err(PackageParseError.Composition("{site} is declared more than once"))
-        corpus := String?{None}
+        found := TestSuiteDef?{None}
         loop field in pkg_key_value_entries(pkg_test_record(entry.value, TEST_SUITE_CTOR, site)) {
-            if field.key != "golden_corpus" -> return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: golden_corpus)"))
-            if corpus != None -> return Err(PackageParseError.Composition("{site} declares `golden_corpus` more than once"))
+            kind :: pkg_test_suite_kind(field.key) ?? return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: golden_corpus, ui_corpus, cases_corpus)"))
+            if found != None -> return Err(PackageParseError.Composition("{site} declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus"))
             path :: pkg_unquote(field.value)
-            if path == "" -> return Err(PackageParseError.Composition("{site} needs `golden_corpus:` as a directory path"))
-            corpus = Val(path)
+            if path == "" -> return Err(PackageParseError.Composition("{site} needs `{field.key}:` as a directory path"))
+            found = Val(TestSuiteDef{name: entry.key.copy(), kind: kind, corpus: path})
         }
-        &suites.push(TestSuiteDef{name: entry.key, golden_corpus: corpus ?? return Err(PackageParseError.Composition("{site} needs `golden_corpus: \"<directory>\"`"))})
+        &suites.push(found ?? return Err(PackageParseError.Composition("{site} needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")))
     }
     Ok(suites)
+}
+
+// The suite kind a corpus field names: `golden_corpus`, `ui_corpus` or `cases_corpus`.
+fn pkg_test_suite_kind(key: String) -> TestSuiteKind? {
+    if key == {
+        "golden_corpus" -> Val(TestSuiteKind.Golden)
+        "ui_corpus" -> Val(TestSuiteKind.UI)
+        "cases_corpus" -> Val(TestSuiteKind.Cases)
+        else -> None
+    }
 }
 
 impl PackageFacts {
@@ -204,7 +286,11 @@ fn pkg_test_suites_refusal(body: String) -> String Never! {
 }
 
 #Test("test profile fields refuse unknown fields, bad levels, bad limits and empty suites") {
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], jobs: 4 }`), "test profile `quick` has an unknown field `jobs` (allowed: suites, time_limit, optimize)")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], workers: 4 }`), "test profile `quick` has an unknown field `workers` (allowed: suites, time_limit, optimize, jobs, memory, filter, shard, opt_in, baseline)")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], jobs: 0 }`), "test profile `quick` needs `jobs:` as a count from 1 to 4096")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], memory: lots }`), "test profile `quick` needs `memory:` as a positive size such as `8gib` or `512mib`")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], shard: 3/2 }`), "test profile `quick` needs `shard:` as I/N with 1 <= I <= N, such as `2/4`")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], opt_in: yes }`), "test profile `quick` needs `opt_in:` as true or false")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], optimize: [fast] }`), "test profile `quick` has an unknown `optimize:` level `fast` — use none, basic or full")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], time_limit: 0s }`), "test profile `quick` needs `time_limit:` as a positive duration such as `60s`, `1500ms` or `2m`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ time_limit: 60s }`), "test profile `quick` needs `suites: [ … ]` naming at least one suite")
@@ -213,11 +299,33 @@ fn pkg_test_suites_refusal(body: String) -> String Never! {
     assert_eq(pkg_parse_test_time_limit("2m", "t") ?? 0, 120000)
 }
 
-#Test("stock suites name a golden corpus, and tests is built in") {
-    suites :: pkg_parse_test_suites(`golden: TestSuite{ golden_corpus: "tests/golden" }`) ?? panic(err.message())
-    assert_eq(suites.len(), 1)
+#Test("test profiles carry the corpus run: jobs, memory, filter, shard, opt-in and baseline") {
+    profiles :: pkg_parse_test_profiles(`ui: TestProfile{ suites: [ui], jobs: 8, memory: 12gib, filter: "tests/ui/E01", shard: 2/4, opt_in: true, baseline: "baseline.tsv" }`) ?? panic(err.message())
+    profile :: profiles[0]
+    assert_eq(profile.jobs, 8)
+    assert_eq(profile.memory, 12 * 1073741824)
+    assert_eq(profile.filter, "tests/ui/E01")
+    assert_eq(profile.shard_index, 2)
+    assert_eq(profile.shard_count, 4)
+    assert(profile.opt_in)
+    assert_eq(profile.baseline ?? "", "baseline.tsv")
+    plain :: (pkg_parse_test_profiles(`quick: TestProfile{ suites: [tests] }`) ?? panic(err.message()))[0]
+    assert_eq(plain.jobs, 0)
+    assert_eq(plain.shard_count, 1)
+    assert(plain.baseline == None)
+}
+
+#Test("stock suites name a golden, ui or cases corpus, and tests is built in") {
+    suites :: pkg_parse_test_suites(`golden: TestSuite{ golden_corpus: "tests/golden" }, ui: TestSuite{ ui_corpus: "tests/ui" }, cases: TestSuite{ cases_corpus: "tests/cases" }`) ?? panic(err.message())
+    assert_eq(suites.len(), 3)
     assert_eq(suites[0].name, "golden")
-    assert_eq(suites[0].golden_corpus, "tests/golden")
-    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ ui_corpus: "tests/ui" }`), "test suite `ui` has an unknown field `ui_corpus` (allowed: golden_corpus)")
+    assert_eq(suites[0].corpus, "tests/golden")
+    assert_eq(suites[0].kind.as_str(), "golden")
+    assert_eq(suites[1].kind.as_str(), "ui")
+    assert_eq(suites[2].kind.as_str(), "cases")
+    assert_eq(suites[2].corpus, "tests/cases")
+    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ lint_corpus: "tests/ui" }`), "test suite `ui` has an unknown field `lint_corpus` (allowed: golden_corpus, ui_corpus, cases_corpus)")
+    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ ui_corpus: "tests/ui", cases_corpus: "tests/cases" }`), "test suite `ui` declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus")
+    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ }`), "test suite `ui` needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")
     assert_eq(pkg_test_suites_refusal(`tests: TestSuite{ golden_corpus: "t" }`), "test suite `tests` is built in: it is every #Test of the package, so `suites:` can't declare it")
 }

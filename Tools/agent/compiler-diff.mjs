@@ -195,7 +195,7 @@ export function goldenFailureExit(stem, stderr) {
   }
   // #1474: this source disables logging before log.fatal exits 1.
   if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
-  // Source-proved entry returns, matching kit_golden_failure_exit in Tools/testkit/Golden.jet;
+  // Source-proved entry returns, matching kit_golden_failure_exit in Compiler/JetTestKit/Source/Golden.jet;
   // fatal_exit explicitly calls process.exit(1), and an E1803 authority refusal
   // exits 1 before anything runs. An arbitrary Error prefix is not an exit oracle.
   switch (stem) {
@@ -219,7 +219,7 @@ export function goldenFailureExit(stem, stderr) {
   }
 }
 
-// Mirrors kit_golden_collect (Tools/testkit/Golden.jet): project roots own their descendants.
+// Mirrors kit_golden_collect (Compiler/JetTestKit/Source/Golden.jet): project roots own their descendants.
 export function collectGoldenEntries(exDir = FEATURES) {
   const entries = [];
   const push = (path, stem, shown) => entries.push({ path, stem, shown });

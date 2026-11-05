@@ -178,7 +178,7 @@ jet run Examples/features/basics/hello.jet
 jet check Examples/features/basics/functions.jet
 
 # Check one example against its golden output
-TESTKIT_ARGS="--filter Examples/features/basics/hello.jet" JET=$(command -v jet) jet test Tools/testkit "suite golden"
+jet test Compiler --profile golden Examples/features/basics/hello.jet
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and

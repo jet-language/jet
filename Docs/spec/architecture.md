@@ -1544,7 +1544,7 @@ target, generated sources, and schema.
 Generated wrappers keep ownership, errors, layout, callbacks, and task crossings
 explicit. Safe Jet cannot acquire an ungated unsafe operation through a bridge.
 Executable bridge proof is in `tests/cases/cffi/`, the scoped C++ system proof,
-and the feature goldens run by `Tools/testkit/Golden.jet`.
+and the feature goldens run by `Compiler/JetTestKit/Source/Golden.jet`.
 
 ### Jet as guest: embedding contract
 
@@ -1686,7 +1686,7 @@ not advertise speculative features.
 ### Compiler-speed evidence boundary (#666)
 
 Compiler-speed evidence stays on the production compiler path. The differential
-gate (the golden suite, Tools/testkit/Golden.jet) runs the same checked example
+gate (the golden suite, Compiler/JetTestKit/Source/Golden.jet) runs the same checked example
 at three tiers: o0 is the default `jet run` (O0 image run from memory,
 D-EXEC2=A), o1 is the `jet build` executable, and o2 is the
 `jet build --release` executable. It compares each tier's exit status, stdout
@@ -2157,19 +2157,19 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 
 ## Testing strategy
 
-The canonical [Jet testkit](../../Tools/testkit/run.jet) owns diagnostic
+The [Jet testkit](../../Compiler/JetTestKit/Source/Kit.jet) owns diagnostic
 snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
-scenarios (`cases`). Its package test entry is the fixture gate:
-`JET=/absolute/path/to/jet jet test Tools/testkit` runs each suite as one test
-(`suite golden`, `suite ui`, `suite cases`; a positional filter selects them).
-The selected suites share one pool sized by cores and free memory, so a
-filtered run (`"suite ui"`) runs and reports only its own suite. Rows print as
-cases finish; each suite's report and failure list keep suite-then-path
-order, whatever the pool's size, and a failing test names every failing case
-of its suite. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
-`--tier`; scratch stays disk-backed outside the checkout. O0, O1 and O2 compare the real exit
-and exact streams; diagnostic text remains a product surface, not a blessable
-implementation accident.
+scenarios (`cases`). `Compiler/package.jet` names the corpora as `suites:` and
+runs them through `test:` profiles: `jet test Compiler --profile
+golden|ui|cases|corpus [FILTER]` runs them in process with the running `jet` as
+the compiler under test, and `-u` blesses the selected rows. The selected
+suites share one pool sized by cores and free memory. Rows print as cases
+finish; each suite's report and failure list keep suite-then-path order,
+whatever the pool's size. Census and release tooling that shards or lists the
+corpus across processes uses the kit CLI, `Tools/testkit/run.jet`, over the
+same engine. Scratch stays disk-backed outside the checkout. O0, O1 and O2
+compare the real exit and exact streams; diagnostic text remains a product
+surface, not a blessable implementation accident.
 
 `JET=/absolute/path/to/jet jet Tools/agent/VerifyFull.jet` runs the complete
 native suite inventory and source-pinned compiler registries, collecting

@@ -111,7 +111,7 @@ Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the testkit golden suite (`Tools/testkit/Golden.jet`) and the
+These rules apply to the testkit golden suite (`Compiler/JetTestKit/Source/Golden.jet`) and the
 native feature runner (`Tools/agent/run-feature-examples.mjs`). Native parity additionally
 requires an executed reference with the same exit and both output streams;
 an emit-only reference does not establish runtime parity.
@@ -180,6 +180,6 @@ files are the evidence; this manifest does not duplicate the collection API.
   checker.
 - [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
-- [`Tools/testkit/Golden.jet`](../Tools/testkit/Golden.jet) and
+- [`Compiler/JetTestKit/Source/Golden.jet`](../Compiler/JetTestKit/Source/Golden.jet) and
   [`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
   are the source of truth for the two golden layouts.

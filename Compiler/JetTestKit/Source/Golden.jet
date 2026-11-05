@@ -27,9 +27,11 @@ fn kit_golden_collect(root: String, directory: String, expected_root: String, pr
             nested :: kit_golden_collect(root, shown, expected_root, prefix)
             loop entry in nested -> &entries.push(entry)
         } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
-            // Examples' nested folders contain support modules, not flat entries.
-            // Runtime-test group folders may contain flat generated test cases.
-            if prefix == "Examples/features/" && directory.split("/").len() != 3 -> next
+            // A corpus with an `expected/` folder (Examples/features) keeps
+            // support modules in its nested folders, not flat entries; a
+            // corpus that holds its expectations beside its sources
+            // (tests/run) may keep flat generated cases in group folders.
+            if expected_root != prefix.removesuffix("/") && directory.split("/").len() != prefix.split("/").len() -> next
             stem :: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes() - 4)
             &entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
         }
@@ -37,11 +39,16 @@ fn kit_golden_collect(root: String, directory: String, expected_root: String, pr
     entries
 }
 
-fn kit_golden_discover(root: String) -> [KitEntry] {
-    entries :: kit_golden_collect(root, "Examples/features", "Examples/features/expected", "Examples/features/")
-    additional :: kit_golden_collect(root, "tests/run", "tests/run", "tests/run/")
-    all := entries
-    loop entry in additional -> &all.push(entry)
+// Every entry of the golden corpora (checkout-relative directories). A corpus
+// with an `expected/` folder keeps its expectations there, else beside its
+// sources.
+fn kit_golden_discover(root: String, corpora: [String]) -> [KitEntry] {
+    all := [KitEntry]{}
+    loop corpus in corpora {
+        separate :: files.join(corpus, "expected")
+        expected_root :: if kit_golden_exists(files.join(root, separate)) -> separate else -> corpus.copy()
+        loop entry in kit_golden_collect(root, corpus, expected_root, "{corpus}/") -> &all.push(entry)
+    }
     &all.sort_by(entry -> entry.path)
     all
 }
@@ -329,7 +336,7 @@ fn kit_golden_mark_tier_splits(results: &[KitCaseResult]) {
     }
 }
 
-fn kit_golden_discover_suite(context: KitCtx) -> [KitEntry] { kit_golden_discover(context.root) }
+fn kit_golden_discover_suite(context: KitCtx) -> [KitEntry] { kit_golden_discover(context.root, context.options.golden_corpora) }
 
 fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     source :: kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? ""

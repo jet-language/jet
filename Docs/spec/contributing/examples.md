@@ -42,24 +42,29 @@ Use [`agent-engineering.md`](agent-engineering.md) for fixture and generated-
 artifact traps. Preserve the example's meaning; do not rewrite a snapshot only
 to hide a compiler or runtime regression.
 
-## Cargo-free golden kit
+## Corpus test profiles
 
-The testkit package's own `fn test` is the fixture gate. Run it from the
-repository root with the compiler under test in `JET`:
+`Compiler/package.jet` names the corpora as `suites:` and runs them through
+`test:` profiles; `jet test Compiler --profile <name> [FILTER]` runs the
+selected corpora in process through the `Compiler/JetTestKit` pool, with the
+running `jet` as the compiler under test:
 
 ```sh
-JET=/path/to/jet jet test Tools/testkit                    # every suite
-JET=/path/to/jet jet test Tools/testkit "suite golden"     # one suite
-TESTKIT_ARGS="--filter basics/fizzbuzz --tier o0" JET=/path/to/jet jet test Tools/testkit "suite golden"
-JET_CI_EVIDENCE_DIR=/disk/scratch JET=/path/to/jet jet test Tools/testkit "suite golden"  # writes golden.json
+jet test Compiler --profile golden                          # Examples/features and tests/run
+jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
+jet test Compiler --profile cases                           # tests/cases
+jet test Compiler --profile corpus                          # all three
+jet test Compiler --profile golden basics/fizzbuzz          # rows whose ID contains the filter
+JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json
 ```
 
-Each suite (`suite golden`, `suite ui`, `suite cases`) is one test. The suites
-a run selects share one pool sized by cores and free memory, so a filtered run
-runs and reports only its own suite. Rows print as cases finish; the reports
-and each failing test's list of case rows keep suite-then-path order.
-`TESTKIT_ARGS` carries the kit flags below, split like
-`.case` step words.
+The selected suites share one pool sized by cores and free memory. Rows print
+as cases finish; the reports and the failing rows keep suite-then-path order.
+A profile's `jobs:`, `memory:`, `filter:`, `shard:`, `opt_in:`, `optimize:`
+(none is o0, basic o1, full o2) and `baseline:` (the known-failing ledger)
+shape the run. Census and release tooling that shards, lists or reports
+across processes builds the kit CLI, `Tools/testkit/run.jet`, over the same
+engine; its flags are the ones named below.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
 builds with `--release`. Every tier compares against the same expected bytes,
@@ -178,20 +183,20 @@ UI comparison uses the corpus-relative source ID for the primary diagnostic
 location header, whether the compiler printed that ID or just its basename.
 This same normalization applies to expected and actual text; imported-source
 headers, line/column positions, diagnostic codes, and message bodies remain
-exact. `Tools/testkit/Ui.jet` owns the rule.
+exact. `Compiler/JetTestKit/Source/Ui.jet` owns the rule.
 
-Expected files are read-only unless explicitly selected for blessing:
+Expected files are read-only unless explicitly selected for blessing. `-u`
+blesses every row the profile and filter select:
 
 ```sh
-TESTKIT_ARGS="--bless Examples/features/basics/fizzbuzz.jet" JET=/path/to/jet jet test Tools/testkit "suite golden"
-TESTKIT_ARGS='--filter basics/ --bless-all --reason "compiler output change"' JET=/path/to/jet jet test Tools/testkit "suite golden"
+jet test Compiler --profile golden Examples/features/basics/fizzbuzz.jet -u
 ```
 
-`--bless ID` selects only named cases. `--bless-all` requires a nonempty reason;
-neither blessing mode accepts `--shard`. Only the first selected tier writes.
-UI/lint blessings also refuse fewer rendered diagnostics without an explicit
-`--allow-shrink ID`. The kit prints selected IDs and the reason for the commit
-message. Blessing never weakens a `one-of` contract.
+A sharded profile refuses `-u`. Only the first selected tier writes. The kit
+CLI's `--bless ID` selects only named cases, and `--bless-all` requires a
+nonempty `--reason`. UI/lint blessings also refuse fewer rendered diagnostics
+without an explicit `--allow-shrink ID`. The kit prints selected IDs and the
+reason for the commit message. Blessing never weakens a `one-of` contract.
 
 Crypto UI fixtures inherit the standard library's declared `CryptoError -> Err`
 and `FileCryptoError -> Err` conversions (D-FAIL-CONV2=A, D-CRYPTO-ERRFAM1=A).

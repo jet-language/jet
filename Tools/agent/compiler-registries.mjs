@@ -134,11 +134,14 @@ function registryRows(census) {
         return [{ ...row, id, mode }, ...(row.names.length && row.entry ? [{ ...row, id: `${id}.run`, mode: 'run' }] : [])];
     });
 }
+// The testkit binary's sources: Tools/testkit (run.jet and its manifest) and the
+// Compiler/JetTestKit engine package it depends on, assembled under their
+// repository-relative paths so the path dependency still resolves.
 function testkitInventory() {
-    const sources = readdirSync(join(repo, 'Tools/testkit')).filter(name => name.endsWith('.jet')).sort()
-        .map(name => `Tools/testkit/${name}`);
+    const sources = [...['Tools/testkit/run.jet', 'Tools/testkit/package.jet', 'Compiler/JetTestKit/package.jet'],
+        ...filesUnder(join(repo, 'Compiler/JetTestKit'), '.jet').map(path => relative(repo, path)).filter(path => !path.endsWith('/package.jet')).sort()];
     const retirementPath = 'Tools/testkit/retired-with-rust.tsv';
-    sources.push('Tools/testkit/package.jet', retirementPath);
+    sources.push(retirementPath);
     const table = retirements();
     const retiredCases = table.filter(row => row.path.startsWith('tests/cases/') && row.reason.startsWith('Retired with Rust:'));
     const pendingProductInterop = table.filter(row => row.path.startsWith('tests/cases/') && row.reason.startsWith('PRODUCT INTEROP RED:')).map(row => ({ ...row, status: 'RED' }));
@@ -223,9 +226,13 @@ function generate() {
     }
     const kit = testkitInventory(), kitDir = join(out, 'testkit');
     mkdirSync(kitDir, { recursive: true });
-    for (const source of kit.sources) writeFileSync(join(kitDir, source.path.split('/').at(-1)), readFileSync(join(repo, source.path)));
+    for (const source of kit.sources) {
+        mkdirSync(dirname(join(kitDir, source.path)), { recursive: true });
+        writeFileSync(join(kitDir, source.path), readFileSync(join(repo, source.path)));
+    }
+    const kitEntry = join(kitDir, 'Tools/testkit/run.jet');
     entries.push({ id: 'testkit/cases', package: 'testkit', mode: 'run', kind: 'testkit',
-        path: join(kitDir, 'run.jet'), cwd: repo, sha256: hash(readFileSync(join(kitDir, 'run.jet'))),
+        path: kitEntry, cwd: repo, sha256: hash(readFileSync(kitEntry)),
         stdout: JSON.stringify({ PASS: kit.cases.length, FAIL: 0, 'KNOWN-FAILING': 0, 'UNEXPECTED-PASS': 0,
             UNSUPPORTED: 0, 'SKIP-HOST': 0, 'OPT-IN': 0, REFUSED: 0, ERROR: 0, TIMEOUT: 0, suites: ['cases'] }) + '\n',
         testCount: kit.cases.length, sources: kit.sources.map(source => source.path), caseNames: kit.cases.map(source => source.path),
@@ -282,7 +289,7 @@ async function run() {
                 const started = Date.now();
                 if (entry.kind === 'testkit') {
                     for (const source of manifest.testkit.sources) {
-                        const assembled = join(dirname(entry.path), source.path.split('/').at(-1));
+                        const assembled = join(dirname(entry.path), '../..', source.path);
                         if (hash(readFileSync(assembled)) !== source.sha256) throw Error(`assembled testkit source changed: ${source.path}`);
                     }
                     const build = spawnSync(options.jet, ['build', entry.path], { cwd: dirname(entry.path), env: environment(),

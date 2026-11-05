@@ -96,9 +96,11 @@ enum JetCLIPlan {
     // member order (Host.jet `jet_cli_test_workspace`).
     TestWorkspace(names: [String], member_args: [[String]], quiet: Bool)
     // `jet test` under the test profile `profile` of the package at `root`:
-    // each of `runs` is a child `jet test`, compared with its baseline
-    // (TestProfile.jet `jet_cli_test_profile`); `update` rewrites them.
-    TestProfile(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], update: Bool, quiet: Bool)
+    // each of `runs` is a child `jet test`, compared with its baseline, and
+    // the corpus suites run in process with `filter` (a `jet test` filter
+    // argument, else "") (TestProfile.jet `jet_cli_test_profile`); `update`
+    // rewrites the baselines and blesses the corpus rows.
+    TestProfile(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], filter: String, update: Bool, quiet: Bool)
     // `jet new <name>`: write the project folder; `template` is "" for the
     // print-only starter. `json` prints the created files as one `new` status
     // line instead of the human recap.

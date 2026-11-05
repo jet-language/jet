@@ -12,9 +12,9 @@ fn cases_test_root(label: String) -> String {
 }
 
 fn cases_test_context(root: String, scratch: String) -> KitCtx {
-    options :: kit_exec_defaults()
+    options :: kit_test_checkout_options(root)
     env :: KitEnv{root: root, scratch: scratch, jet: "/bin/sh", jetpack: "/bin/sh", timeout: 5s, memory_limit: 0}
-    KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless, known: kit_known_load(root)}
+    KitCtx{env: env, root: root, scratch: scratch, bless: options.bless, known: kit_known_load(options.ledger), options: options}
 }
 
 fn cases_test_entry(name: String) -> KitEntry {
@@ -137,7 +137,7 @@ fn cases_test_source(root: String, name: String, text: String) {
     root :: cases_test_root("known-failing")
     cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 7'\n")
     cases_test_source(root, "ledger", "step: jet -c 'exit 8'\n")
-    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "{cases_test_entry("ledger").path}\t#4866\towned case failure\n")
+    kit_exec_write(kit_test_ledger(root), "{cases_test_entry("ledger").path}\t#4866\towned case failure\n")
     context :: cases_test_context(root, files.join(root, "scratch"))
     header :: kit_cases_run(cases_test_entry("header"), context)[0]
     assert_eq(header.verdict.status, "KNOWN-FAILING")

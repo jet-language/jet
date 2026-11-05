@@ -40,7 +40,7 @@ fn kit_test_steps_env() -> KitEnv {
 
 #Test("one-of compares exact alternatives and refuses blessing before writes") {
     root :: sys.current_dir() ?? panic("step fixture checkout root: {err}")
-    directory :: files.join(root, "Tools/testkit/Fixtures/steps")
+    directory :: files.join(root, "Compiler/JetTestKit/Tests/Fixtures/steps")
     accepted :: "vulkan:accepted\nwebgpu:rejected\n"
     rejected :: "vulkan:rejected\nwebgpu:rejected\n"
     alternatives :: "accepted.out rejected.out"
@@ -89,7 +89,7 @@ fn kit_test_steps_env() -> KitEnv {
     env :: kit_test_steps_env()
     run :: KitRun{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
     plan :: kit_steps_parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
-    directory :: files.join(env.root, "Tools/testkit/Fixtures/steps")
+    directory :: files.join(env.root, "Compiler/JetTestKit/Tests/Fixtures/steps")
     context :: kit_steps_context(plan, "case", env, env.root, env.scratch, directory, kit_test_steps_bless())
     assert_eq(kit_steps_check(plan.steps[0], context, KitStepState{last: run, built: "", built_once: false}, "").status, "PASS")
     bad :: KitRun{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}

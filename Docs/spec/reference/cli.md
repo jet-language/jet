@@ -757,10 +757,19 @@ rows (each test and its outcome) are compared with the baseline
 baseline has passing that now fails or is gone is lost and fails the profile
 with exit 1, while a failure the baseline already holds does not. A run with no
 baseline, or under `-u`, records its rows as the baseline and keeps its own
-exit. A profile naming a corpus suite (`suites: { golden: TestSuite{
-golden_corpus: "tests/golden" } }`) fails with E2105 when the corpus directory
-is missing and is otherwise refused with E2104 until the golden runner is
-ported. A bare `--shuffle` and the other test flags are refused
+exit. A corpus suite (`suites: { ui: TestSuite{ ui_corpus: "../tests/ui" } }`,
+or `golden_corpus:` / `cases_corpus:`, a directory relative to `package.jet`)
+fails with E2105 when the directory is missing; otherwise the profile's corpus
+suites run in this `jet` through the testkit pool (`Compiler/JetTestKit`),
+which prints one row per case and tier (PASS, FAIL, KNOWN-FAILING,
+UNEXPECTED-PASS, UNSUPPORTED, SKIP-HOST, OPT-IN, REFUSED, ERROR, TIMEOUT) and a
+summary. Row IDs are relative to the deepest directory holding the package and
+every corpus. The profile's `jobs:`, `memory:` (`16G`), `filter:`, `shard: 1/4`
+and `opt_in:` fields steer the pool; `time_limit:` bounds each step; the
+`baseline:` ledger (`ID<TAB>card<TAB>reason` rows) holds the accepted failures.
+`-u` blesses every selected row's snapshots, and is refused with E2104 beside
+`shard:`. `jet test Compiler --profile ui` (also `golden`, `cases`, `corpus`)
+runs the repository's corpora. A bare `--shuffle` and the other test flags are refused
 with E2104 until they are ported. The test-result cache, the evidence
 report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
@@ -783,12 +792,7 @@ named after the directory (`app` when it has no name) and pinned with
 and is never overwritten. With a script, each inline `use pkg#version` ref in it
 is added to the new manifest's `deps` block, and `lifted N inline
 dependencies into package.jet` precedes `created package.jet (pinned jet
-<channel>)` on stderr (muted by `--quiet` and `--json`). `jet init --check`
-with no migration-era role files (`pkg.jet`, `env.jet`, `workspace.jet`,
-`config.jet`) beside it reports that no files changed. The role-file
-transition itself (`--restore-role-files`, `--check` beside role files, and a
-bare `jet init` beside them without `package.jet`) is refused with E2104 until
-it is ported.
+<channel>)` on stderr (muted by `--quiet` and `--json`).
 
 `jet update jet [<channel>]` re-resolves the project's toolchain pin, moved to
 `channel` when given (else the manifest's `jet:` channel, else the running

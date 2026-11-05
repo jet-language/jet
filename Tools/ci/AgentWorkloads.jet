@@ -353,7 +353,7 @@ fn gate_usage() -[IO, Time.Wait]> Int Never! {
     64
 }
 
-// Runs the corpus through the testkit with the JET binary. No per-task
+// Runs the corpus through `jet test Compiler --profile cases` with the JET binary. No per-task
 // report mapping exists for its results yet, so the run ends UNCOVERED and the
 // committed report is preserved.
 fn gate_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
@@ -390,15 +390,13 @@ fn gate_corpus(root: String, scratch: String, run_dir: String, report: String) -
     if jet == "" -> return uncovered("JET must name an executable jet binary")
     executable :: process.cmd([String]{"test", "-x", jet.copy()}).run() ?? return uncovered("JET must name an executable jet binary")
     if executable.code != 0 -> return uncovered("JET must name an executable jet binary")
-    receipt :: process.cmd([String]{jet.copy(), "test", "{root}/Tools/testkit", "suite cases", "--capture=all", "--color=never"})
-        .env("JET", jet)
-        .env("TESTKIT_ARGS", "--filter agent_workloads")
+    receipt :: process.cmd([String]{jet.copy(), "test", "{root}/Compiler", "--profile", "cases", "agent_workloads", "--color=never"})
         .env("JET_TEST_SCRATCH_DIR", scratch)
         .env("JET_CI_EVIDENCE_DIR", run_dir)
         .stdout(.Inherit)
         .stderr(.Inherit)
-        .run() ?? return uncovered("jet test Tools/testkit (suite cases, agent_workloads) could not start")
-    if receipt.code != 0 -> return uncovered("jet test Tools/testkit (suite cases, agent_workloads) exited {receipt.code}")
+        .run() ?? return uncovered("jet test Compiler --profile cases agent_workloads could not start")
+    if receipt.code != 0 -> return uncovered("jet test Compiler --profile cases agent_workloads exited {receipt.code}")
     uncovered("testkit results have no mapping to the per-task agent workload report; {report} preserved")
 }
 

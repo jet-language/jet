@@ -24,7 +24,7 @@ fn kit_ui_directives() -> [KitUIDirective] {
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         {name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
+    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
         &rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -140,10 +140,16 @@ fn kit_ui_collect(root: String, directory: String, lint: Bool) -> [KitEntry] {
     entries
 }
 
+// A ui corpus whose directory name ends in `_lint` (tests/ui_lint) holds lint
+// entries, snapshotted as `.warn`; every other one holds `.stderr` snapshots.
+fn kit_ui_lint_corpus(directory: String) -> Bool { directory.removesuffix("/").ends_with("_lint") }
+
 fn kit_ui_discover(ctx: KitCtx) -> [KitEntry] {
     if ctx.options.coverage -> return [KitEntry{path: KIT_UI_ALLOWLIST, expected: KIT_UI_ALLOWLIST, project: "", suite: "ui", mode: "coverage"}]
-    entries := kit_ui_collect(ctx.root, "tests/ui", false)
-    loop entry in kit_ui_collect(ctx.root, "tests/ui_lint", true) -> &entries.push(entry)
+    entries := [KitEntry]{}
+    loop corpus in ctx.options.ui_corpora {
+        loop entry in kit_ui_collect(ctx.root, corpus, kit_ui_lint_corpus(corpus)) -> &entries.push(entry)
+    }
     &entries.sort_by(entry -> entry.path)
     entries
 }
@@ -244,8 +250,8 @@ fn kit_ui_fixed_path(path: String) -> String {
 // every `.jet` file under it, so each loose entry is staged alone
 // (kit_ui_stage_entry) on top of its directory's support, kept here in
 // `ui-support`.
-fn kit_ui_stage(root: String, scratch: String, projects: Bool) {
-    loop directory in ["tests/ui", "tests/ui_lint"] {
+fn kit_ui_stage(root: String, scratch: String, projects: Bool, corpora: [String]) {
+    loop directory in corpora {
         original :: files.join(root, directory)
         if !files.exists(original) -> next
         if projects -> kit_exec_copy_tree(original, files.join(files.join(scratch, "ui-source"), directory), true, false)
