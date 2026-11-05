@@ -143,6 +143,8 @@ struct JetDriverBuildQueryResult {
     complete: Bool
     internal_problem: String?
     nodes: [BuildGraphNode]{[BuildGraphNode]{}}
+    // The entry package's authority, the policy its build actions run under.
+    authority_policy: JetDriverAuthorityPolicy?{None}
 }
 struct JetDriverBuildQueryResponse {
     request: JetDriverCompileRequest
@@ -264,7 +266,7 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     // below. These are two independent owners of the same node identities.
     jet_driver_build_install_nodes(plan, nodes.copy())
     graph :: build_plan_graph(plan)
-    return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None}}
+    return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None, authority_policy: ^compiled.authority_policy}}
 }
 // Whether the entry package declares a `fn build`, the build entry
 // jet_driver_query_build_plan evaluates, read from the loaded sources alone.

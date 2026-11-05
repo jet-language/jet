@@ -5,8 +5,9 @@
 // stages in the native sandbox against the local action cache (`JET_STORE_DIR`).
 use {
     jet_build_session.[BuildPlanExecution, BuildSessionAction, BuildSessionTarget, BuildSessionToolchain]
-    jet_driver.[JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverAuthorityPolicy, JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
+    jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
         ActionKind, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProvenance, BuildResourcePool,
         HermeticActionHandle, HermeticBuildContext, HermeticBuildError, HermeticBuildPlan, LinkerIdentity, ProbeHandle,
@@ -31,28 +32,67 @@ fn jet_cli_declares_build_entry(source: String) -> Bool Never! {
 }
 
 // Run the selected actions of `graph` under the project root `root`, granted
-// what this invocation grants. None when every action ran or was restored.
-fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput? {
+// what the package `policy`, the enclosing workspace's build policy and this
+// invocation grant. None when every action ran or was restored.
+fn jet_cli_build_execute(graph: BuildPlanExecution, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput? {
     if graph.actions.len() == 0 && graph.probes.len() == 0 -> return None
+    workspace := OverlayPolicy.empty()
+    // copy: `refused` is a payload view of the policy read's result.
+    if jet_cli_build_workspace_policy(&workspace, root) == .Val(refused) -> return Val(jet_cli_build_policy_refused(refused.copy(), color))
     plan :: jet_cli_build_hermetic_plan(graph) ?? return Val(jet_cli_ice("the checked build plan does not lower to the executor's graph: {err.debug_text()}"))
     store :: BuildArtifactStoreHandle.open() ?? return Val(jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
-    if build_execute_build_plan(plan, root, store, jet_cli_build_grants(invocation)) == {
+    if build_execute_build_plan(plan, root, store, jet_cli_build_grants(policy, workspace, invocation)) == {
         .Ok(_) -> None
         .Err(error) -> Val(jet_cli_build_execution_error(error, color))
     }
 }
 
-// The build effects this invocation grants: the ambient basics, then `-A` and
-// `--allow`, with `--deny` winning.
-fn jet_cli_build_grants(invocation: JetCLIInvocationAuthority?) -> [BuildEffect] Never! {
-    authority := jet_cli_policy_authority([String]{}, None)
+// The build policy of the nearest workspace enclosing `root` into `policy`;
+// none leaves it empty. The why of the refusal when that workspace's
+// authority or its policy does not read: a build never runs under a policy it
+// could not read.
+fn jet_cli_build_workspace_policy(policy: &OverlayPolicy, root: String) -[FS, Env]> String? Never! {
+    cache := WorkspaceDeclarationCache.new()
+    found :: if jet_cli_find_workspace_root_checked(&cache, root) == {
+        .Ok(nearest) -> nearest
+        .Err(error) -> { return Val("Workspace build policy above `{root}` is present but unavailable: {error.diagnostic.what}") }
+    }
+    workspace :: found ?? return None
+    resolved :: if pkg_resolve_workspace_source(&cache, workspace) == {
+        .Ok(read) -> read
+        .Err(error) -> { return Val("Workspace build policy in `{workspace}` is present but unavailable: {error.diagnostic.what}") }
+    }
+    source :: resolved ?? return None
+    parsed :: pkg_parse_workspace_policy(source.source) ?? return Val("Workspace build policy in `{source.path}`: {err.message()}")
+    policy.build_deny = parsed.build_deny
+    policy.build_grants = parsed.build_grants
+    None
+}
+
+// The build effects granted: the ambient basics and the package's
+// `authority.allow`, the workspace's grant to this package, then `-A` and
+// `--allow`. The package's and the invocation's `deny` and the workspace's
+// `policy.deny` win over every grant.
+fn jet_cli_build_grants(policy: JetDriverAuthorityPolicy?, workspace: OverlayPolicy, invocation: JetCLIInvocationAuthority?) -> [BuildEffect] Never! {
+    authority := jet_cli_policy_authority([String]{}, policy)
+    subject :: if policy == .Val(package) -> package.subject.copy() else -> ""
+    granted := authority.granted.copy()
+    loop grant in workspace.build_grants {
+        if subject != "" && grant.subject == subject {
+            loop right in jet_cli_policy_effects(grant.effects) -> &granted.push(right)
+        }
+    }
+    authority.granted = jet_cli_sorted_set(granted)
     jet_cli_with_invocation(&authority, invocation)
-    granted := [BuildEffect]{}
+    denied := authority.denied.copy()
+    loop right in jet_cli_policy_effects(workspace.build_deny) -> &denied.push(right)
+    authority.denied = jet_cli_sorted_set(denied)
+    allowed := [BuildEffect]{}
     effects :: [BuildEffect]{BuildEffect.Net, BuildEffect.FS, BuildEffect.IO, BuildEffect.DB, BuildEffect.Time, BuildEffect.Rand, BuildEffect.Env, BuildEffect.Exec, BuildEffect.Log, BuildEffect.GPU}
     loop right in effects {
-        if jet_cli_answer(authority, right.name()) == JetCLIVerdict.Allowed -> &granted.push(right)
+        if jet_cli_answer(authority, right.name()) == JetCLIVerdict.Allowed -> &allowed.push(right)
     }
-    granted
+    allowed
 }
 
 fn jet_cli_build_execution_error(error: BuildExecutionError, color: Bool) -> JetDriverVerbOutput Never! {
@@ -73,6 +113,16 @@ fn jet_cli_build_execution_error(error: BuildExecutionError, color: Bool) -> Jet
 // `detail` (an action's stderr) printed as written.
 fn jet_cli_build_execution_failed(code: String, what: String, detail: String?, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     why :: (diagnostic_registry_row(code) ?? panic("build execution code `{code}` has no registry row")).why
+    jet_cli_build_refusal(code, what, why, detail, fix, color)
+}
+
+// The E3503 of a workspace build policy that does not read, `why` naming it.
+fn jet_cli_build_policy_refused(why: String, color: Bool) -> JetDriverVerbOutput Never! {
+    what :: (diagnostic_registry_row("E3503") ?? panic("E3503 has no registry row")).what
+    jet_cli_build_refusal("E3503", what, why, None, "Fix the workspace build policy: `policy: {{ deny: #(…) }}` caps every package's build, and `policy: {{ grants: {{ \"package\": #(…) }} }}` grants one package", color)
+}
+
+fn jet_cli_build_refusal(code: String, what: String, why: String, detail: String?, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
     report := diagnostic_from_registry(code, None, what, why, fix)
     report.detail = detail
     reports :: [Diagnostic]{report}

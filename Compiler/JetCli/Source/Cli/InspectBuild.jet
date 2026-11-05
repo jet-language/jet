@@ -2,7 +2,7 @@
 use {
     jet_driver.[
         JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
+        JetDriverAuthorityPolicy, JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
         JetDriverFailure, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
         jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
         jet_driver_report_problems, JET_DRIVER_EXIT_OK,
@@ -80,6 +80,7 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
 fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     selection := BuildPlanSelection?{None}
     execution := BuildPlanExecution?{None}
+    policy := JetDriverAuthorityPolicy?{None}
     generated := [BuildSessionGeneratedModule]{}
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     if ^prepared == {
@@ -99,6 +100,7 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
             }
             selection = Val(build_plan_selection(plan))
             execution = Val(build_plan_execution(plan))
+            policy = query.authority_policy
             generated = build_plan_generated(plan)
         }
     }
@@ -136,7 +138,7 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
     }
     graph :: execution ?? return jet_cli_ice("the completed build query has no plan")
     // copy: `failed` is a payload view of the execution's result.
-    if jet_cli_build_execute(graph, root, invocation, color) == .Val(failed) -> return failed.copy()
+    if jet_cli_build_execute(graph, root, policy, invocation, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
         source_path :: jet_cli_entry_join(root, executable.source)
         source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
