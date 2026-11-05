@@ -2011,6 +2011,32 @@ fn sema_checked_member_type_names(graph: SemaRegistrationGraph, module_row: Sema
     sema_type_unknown_written_names(graph, module_index, ty, span, generic_names, &diagnostics)
 }
 
+// Whether a struct field or enum payload type of module row `module_index`
+// names nothing (sema_checked_member_type_names). Such a declaration is
+// unusable: each body that meets the type would report follow-on errors of
+// its own, so the module's bodies are not checked
+// (sema_check_registration_module_start).
+fn sema_checked_member_types_name_nothing(graph: SemaRegistrationGraph, module_index: Int) -> Bool {
+    unknown := [Diagnostic]{}
+    loop nominal in graph.modules[module_index].nominals {
+        generic_names :: loop param in nominal.generic_params -> param.name
+        item :: sema_registration_nominal_source_item(nominal.source) ?? next
+        if item == {
+            .Struct(definition) -> loop field in definition.fields -> sema_type_unknown_written_names(graph, module_index, field.ty, field.ty_span, generic_names, &unknown)
+            .Enum(definition) -> loop variant in definition.variants {
+                if variant.payload == {
+                    .Single(ty, span) -> sema_type_unknown_written_names(graph, module_index, ty, span, generic_names, &unknown)
+                    .Named(fields) -> loop field in fields -> sema_type_unknown_written_names(graph, module_index, field.ty, field.ty_span, generic_names, &unknown)
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+        if unknown.len() > 0 -> return true
+    }
+    false
+}
+
 fn sema_checked_struct_fields(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: StructDef, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> [TField] {
     fields := [TField]{}
     loop source_index in 0..<definition.fields.len() {

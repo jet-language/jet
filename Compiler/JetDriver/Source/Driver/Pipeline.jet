@@ -3533,6 +3533,11 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
             registration_graph.internal_problem ?? "canonical effect fact registration failed",
         )
     }
+    // A registration error can leave a name unregistered, so it stops the
+    // check here, as does a module the declaration pass left incomplete. Any
+    // other declaration error goes on with the stage's diagnostics, and the
+    // bodies are checked too (sema_check_registration_module_start).
+    registration_errors :: jet_driver_has_errors(registration_graph.diagnostics)
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
     comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())
@@ -3546,7 +3551,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         jet_driver_keep_going_incomplete_modules(&kg, "sema.check", comptime_stage.modules)
         jet_driver_keep_going_flush(&kg, request.trace_sink)
     }
-    if (!kg.enabled && (!comptime_stage.complete || jet_driver_has_errors(comptime_stage.diagnostics))) || comptime_stage.modules.len() != registration_module_count {
+    if (!kg.enabled && (!comptime_stage.complete || registration_errors)) || comptime_stage.modules.len() != registration_module_count {
         if !kg.enabled {
             loop diagnostic in comptime_stage.diagnostics -> &load.diagnostics.push(diagnostic)
         }
@@ -3588,6 +3593,9 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     jet_driver_trace_lookup_counters(request.trace_sink, "comptime", comptime_lookups, check_lookups)
     load.diagnostics = stage_diagnostics
     trace = comptime_run.trace
+    // The stage's reports reach the result through finalization; a run that
+    // stops first carries them itself, so a declaration's error is never lost.
+    if !kg.enabled && (comptime_run.soft_stop || !comptime_run.complete) -> jet_driver_comptime_diagnostics_add(&load.diagnostics, comptime_stage.diagnostics)
     if comptime_run.soft_stop {
         return jet_driver_compile_result(load, load.diagnostics, None, false, trace)
     }

@@ -3164,6 +3164,13 @@ fn sema_check_registered_method_stub(job: SemaBodyJob, module_index: Int, memory
 // Registration/header checks borrow the graph inside the existing program tables.
 // The result owns precisely the same module metadata as the old checker; no
 // registration module or Program temporary escapes this read-only phase.
+// A declaration check's error that leaves its declaration well-formed (a
+// rule it breaks, such as E0217 guard storage) or drops its fact row (a
+// constant without a checked value: a skipped item) keeps the module
+// complete, so its bodies are checked and their errors are reported with
+// the declaration's (collect-all). A member type that names nothing leaves
+// its declaration unusable: the module's bodies are not checked, and its
+// misspelled signature types report beside the member's (#6294).
 fn sema_check_registration_module_start(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], scopes: &SemaScopeTable) -> SemaGraphModuleResult {
     if program.registration_graph == .Val(graph) {
         diagnostics := [Diagnostic]{}
@@ -3176,9 +3183,9 @@ fn sema_check_registration_module_start(environment: SemaScopeEnvironment, progr
         }
         declarations_diagnostic_count := diagnostics.len()
         declarations := sema_registration_check_declarations_with_values(graph, module_index, &diagnostics, values, program.boxed_edges)
-        if sema_has_error_since(diagnostics, declarations_diagnostic_count) {
+        if sema_has_error_since(diagnostics, declarations_diagnostic_count) && sema_checked_member_types_name_nothing(graph, module_index) {
             complete = false
-            &incomplete_reasons.push("declaration checking reported errors")
+            &incomplete_reasons.push("a declared member type names nothing")
             sema_type_signature_unknown_names(graph, module_index, &diagnostics)
         }
         return SemaGraphModuleResult{
